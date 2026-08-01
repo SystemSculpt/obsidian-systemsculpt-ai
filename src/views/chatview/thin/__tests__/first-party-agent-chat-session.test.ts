@@ -257,6 +257,7 @@ function createHarness(input: Readonly<{
   executeLocalTool?: ExecuteLocalTool;
   request?: jest.Mock<Promise<Response>, [PlatformRequestInput]>;
   connectionDegradedGraceMs?: number;
+  runStallGraceMs?: number;
 }> = {}) {
   const sockets: FakeWebSocket[] = [];
   const request = input.request ?? jest.fn(async (_input: PlatformRequestInput): Promise<Response> =>
@@ -286,6 +287,9 @@ function createHarness(input: Readonly<{
     snapshotTimeoutMs: 5_000,
     ...(input.connectionDegradedGraceMs
       ? { connectionDegradedGraceMs: input.connectionDegradedGraceMs }
+      : {}),
+    ...(input.runStallGraceMs
+      ? { runStallGraceMs: input.runStallGraceMs }
       : {}),
     now: () => 10_000,
     createWebSocket: () => {
@@ -764,6 +768,96 @@ describe("FirstPartyAgentChatSession", () => {
     recovered.serverMessage(succeededTerminal(turnId, turnId));
     await expect(run).resolves.toMatchObject({ kind: "completed" });
     expect(harness.agent.getSnapshot().statusLabel).toBeUndefined();
+  });
+
+  it("stops claiming progress when a healthy connection produces no server activity", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const socket = await harness.open([]);
+
+    const turnId = "user_stalled_run";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Do a long job"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(runState(active(1, turnId, turnId)));
+    await waitFor(() => harness.agent.getSnapshot().statusLabel === "Thinking");
+
+    // The socket never closes; only the server goes quiet. The connection
+    // watchdog cannot see this, which is exactly the eternal-spinner case.
+    await waitFor(() =>
+      harness.agent.getSnapshot().statusLabel === "Still waiting on the server");
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "running",
+      phase: "retrying",
+    });
+    // A silent stall must leave a trace; the whole failure was invisibility.
+    expect(harness.reportError).toHaveBeenCalled();
+    expect(harness.onLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "run_stalled" }),
+    );
+
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("clears a stall as soon as the server produces new content", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const socket = await harness.open([]);
+
+    const turnId = "user_recovering_run";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Recover from a quiet patch"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    socket.serverMessage(runState(active(1, turnId, turnId)));
+    await waitFor(() =>
+      harness.agent.getSnapshot().statusLabel === "Still waiting on the server");
+
+    socket.serverMessage(sessionSnapshot(
+      [
+        wireUser(turnId, "Recover from a quiet patch"),
+        wireAssistant("assistant_recovered", "Back with you"),
+      ],
+      active(2, turnId, turnId),
+    ));
+    await waitFor(() =>
+      harness.agent.getSnapshot().statusLabel !== "Still waiting on the server");
+
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("does not call a run stalled while the client owes the server a tool result", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const socket = await harness.open([]);
+
+    const turnId = "user_waiting_client";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Wait on me"),
+    });
+    await waitFor(() => harness.commands(socket).some((command) =>
+      command.kind === "submit"));
+    // waiting_for_client is the client's turn, not the server's: the user (or
+    // a local tool) bounds it, so the server-liveness bound must stay disarmed.
+    socket.serverMessage(runState(active(1, turnId, turnId, "waiting_for_client")));
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(harness.agent.getSnapshot().statusLabel)
+      .not.toBe("Still waiting on the server");
+    expect(harness.onLifecycle).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "run_stalled" }),
+    );
+
+    socket.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
   });
 
   it("regenerates an exact authoritative root without sending client history", async () => {

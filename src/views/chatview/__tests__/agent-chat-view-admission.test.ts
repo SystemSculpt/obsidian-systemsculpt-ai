@@ -179,6 +179,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     workspace,
     transcript,
     agent,
+    createAgentSession: () => agent,
     builtBodies,
     attachmentStore: {
       hydrateMessage: jest.fn(async (message: ChatMessage) => {
@@ -209,6 +210,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
 
   return {
     agent,
+    createAgentSession: () => agent,
     builtBodies,
     composer,
     durableMessages,
@@ -304,6 +306,7 @@ function createHistoricalResubmitHarness(
     workspace,
     transcript,
     agent,
+    createAgentSession: () => agent,
     attachmentStore: {
       hydrateMessage: jest.fn(async (message: ChatMessage) => message),
     },
@@ -336,6 +339,7 @@ function createHistoricalResubmitHarness(
 
   return {
     agent,
+    createAgentSession: () => agent,
     get durableMessages() { return durableMessages; },
     logger,
     oldConversationId,
@@ -478,6 +482,7 @@ async function createPersistentHistoricalResubmitHarness(
     workspace,
     transcript,
     agent,
+    createAgentSession: () => agent,
     attachmentStore: {
       hydrateMessage: jest.fn(async (message: ChatMessage) => message),
     },
@@ -513,6 +518,7 @@ async function createPersistentHistoricalResubmitHarness(
 
   return {
     agent,
+    createAgentSession: () => agent,
     app,
     chatId,
     initialMessages,
@@ -610,6 +616,7 @@ function createSavedChatLoadHarness(
     plugin: { getLogger: () => logger },
     workspace,
     agent,
+    createAgentSession: () => agent,
     transcript,
     contextManager: {
       setPinnedFiles: jest.fn(async () => undefined),
@@ -1770,13 +1777,18 @@ describe("AgentChatView controls", () => {
       expect((view as any).thinBootstrapRequest).toBeNull();
     });
     const disconnect = jest.fn();
+    const detach = jest.fn(async () => undefined);
+    const subscribe = jest.fn(() => () => undefined);
     const recordLifecycle = jest.fn();
     const clearPinnedFiles = jest.fn();
     const saveQueue = jest.fn(async () => undefined);
     Object.assign(view, {
       app,
       workspace,
-      agent: { cancel, disconnect, recordLifecycle },
+      agent: { cancel, disconnect, recordLifecycle, detach, subscribe },
+      createAgentSession: () => ({
+        cancel, disconnect, recordLifecycle, detach, subscribe,
+      }),
       thinBootstrapRequest: { contract_version: "thin-agent-v1" },
       pendingThinConversationId: "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       conversationOriginToken: "old-origin",
@@ -1856,8 +1868,7 @@ describe("AgentChatView controls", () => {
     expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')?.value).toBe("ask");
     expect(document.activeElement).toBe(parent.querySelector("textarea"));
     expect(clearPinnedFiles).toHaveBeenCalledTimes(1);
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(detach).toHaveBeenCalledTimes(1);
     expect(recordLifecycle).toHaveBeenCalledWith({
       code: "conversation_reset",
       phase: "session",
@@ -1929,12 +1940,15 @@ describe("AgentChatView controls", () => {
     }];
     const cancel = jest.fn(async () => undefined);
     const disconnect = jest.fn();
+    const detach = jest.fn(async () => undefined);
+    const subscribe = jest.fn(() => () => undefined);
     const save = jest.fn(async () => undefined);
     const move = jest.fn(async () => undefined);
     Object.assign(view, {
       app,
       workspace,
-      agent: { cancel, disconnect },
+      agent: { cancel, disconnect, detach, subscribe },
+      createAgentSession: () => ({ cancel, disconnect, detach, subscribe }),
       thinBootstrapRequest: { contract_version: "thin-agent-v1" },
       pendingThinConversationId: "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       conversationOriginToken: "old-origin",
@@ -1989,8 +2003,7 @@ describe("AgentChatView controls", () => {
     expect(save).toHaveBeenNthCalledWith(1, "old-unsaved-draft", oldQueue);
     expect(save).toHaveBeenNthCalledWith(2, expect.stringMatching(/^draft-/), []);
     expect(move).not.toHaveBeenCalled();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(detach).toHaveBeenCalledTimes(1);
     expect(retiredOperation.controller.signal.aborted).toBe(true);
     expect(retiredOperation.settled).toBe(true);
     workspace.unload();

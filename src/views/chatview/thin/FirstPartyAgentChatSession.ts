@@ -151,6 +151,7 @@ export type FirstPartyAgentLifecycleCode =
   | "historical_resubmit_failed"
   | "conversation_reset"
   | "run_started"
+  | "run_stalled"
   | "request_dispatch_started"
   | "request_dispatch_returned"
   | "request_dispatch_failed"
@@ -236,6 +237,7 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
   reconnectDelayMs?: (attempt: number) => number;
   snapshotTimeoutMs?: number;
   connectionDegradedGraceMs?: number;
+  runStallGraceMs?: number;
   now?: () => number;
 }>;
 
@@ -246,6 +248,18 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
  * presenting as routine progress.
  */
 const CONNECTION_DEGRADED_GRACE_MS = 10_000;
+
+/**
+ * How long a live run may wait on the server with a healthy connection and no
+ * new authoritative content before the presentation stops claiming progress.
+ *
+ * Connection health is the wrong signal for this: a run can die server-side
+ * while the socket keeps reconnecting perfectly, which reads as an eternal
+ * "Thinking". Generous on purpose, because a reasoning model legitimately
+ * goes quiet for a long time; this only replaces a false progress claim with
+ * an honest one and never terminates the run, which the server still owns.
+ */
+const RUN_STALL_GRACE_MS = 240_000;
 
 type ActiveRun = {
   readonly token: object;
@@ -698,11 +712,31 @@ function freezeSnapshot(snapshot: AgentConversationSnapshot): AgentConversationS
   });
 }
 
+/**
+ * Cheap "did the server produce anything new" fingerprint.
+ *
+ * Counts alone would miss a long single text stream, whose deltas only grow
+ * the trailing part in place, so the trailing part's text length is included.
+ */
+function runProgressKey(
+  snapshot: FirstPartyThinAgentSessionSnapshot<WireMessage>,
+): string {
+  const messages = snapshot.messages;
+  const last = messages[messages.length - 1];
+  const parts = last?.parts ?? [];
+  const trailingText: unknown = parts[parts.length - 1]?.text;
+  const text = typeof trailingText === "string" ? trailingText.length : 0;
+  const runState = snapshot.runState;
+  const runId = "run_id" in runState ? runState.run_id : "";
+  return `${runState.state}:${runId}:${messages.length}:${parts.length}:${text}`;
+}
+
 function projectRun(
   active: ActiveRun,
   messages: readonly WireMessage[],
   connectionState: FirstPartyThinAgentConnectionState,
   connectionDegraded: boolean,
+  runStalled = false,
 ): AgentConversationSnapshot {
   const turnMessages = currentTurnMessages(messages, active.turnId);
   const targets = collectClientToolTargets(turnMessages);
@@ -823,6 +857,12 @@ function projectRun(
     phase = "waiting";
     label = "Waiting for approval";
     waitingReason = "approval";
+  } else if (runStalled) {
+    // The socket is healthy but the server has sent nothing for a long time.
+    // Keep the run open (only the server may end it) and stop implying work
+    // is happening.
+    phase = "retrying";
+    label = "Still waiting on the server";
   } else if (active.executingToolIds.size > 0) {
     status = "waiting";
     phase = "waiting";
@@ -1212,6 +1252,10 @@ export class FirstPartyAgentChatSession {
   private connectionState: FirstPartyThinAgentConnectionState = "idle";
   private connectionDegraded = false;
   private connectionDegradedTimer: number | null = null;
+  private runStalled = false;
+  private runStallTimer: number | null = null;
+  private runProgressKey = "";
+  private awaitingClientWork = false;
   private currentSnapshot: AgentConversationSnapshot = initialSnapshot();
   private active: ActiveRun | null = null;
   private pendingCancelRequestId: string | null = null;
@@ -1658,6 +1702,8 @@ export class FirstPartyAgentChatSession {
   public disconnect(): void {
     this.generation += 1;
     this.clearConnectionDegradation();
+    this.clearRunStallTimer();
+    this.runStalled = false;
     this.detachSession?.();
     this.detachConnectionState?.();
     this.detachSession = null;
@@ -1736,6 +1782,15 @@ export class FirstPartyAgentChatSession {
   }
 
   private handleSessionSnapshot(snapshot: FirstPartyThinAgentSessionSnapshot<WireMessage>): void {
+    // The server itself reports whose turn it is. A projected phase cannot
+    // stand in for that: between the run entering waiting_for_client and the
+    // tool part rendering, the projection still reads as "thinking".
+    this.awaitingClientWork = snapshot.runState.state === "waiting_for_client";
+    const progressKey = runProgressKey(snapshot);
+    if (progressKey !== this.runProgressKey) {
+      this.runProgressKey = progressKey;
+      this.noteServerProgress();
+    }
     this.authoritativeMessages = snapshot.messages;
     this.presentationMessages = this.messagesWithOptimisticUser(snapshot);
     const runState = snapshot.runState;
@@ -1913,6 +1968,71 @@ export class FirstPartyAgentChatSession {
       this.connectionDegradedTimer = null;
     }
     this.connectionDegraded = false;
+  }
+
+  /**
+   * Arms the run-liveness bound whenever the presentation claims the server is
+   * working. Deliberately keyed on the projected phase: "waiting" covers
+   * approval and local tool execution, which the user bounds, and "retrying"
+   * covers connection trouble, which the connection watchdog already owns.
+   */
+  private syncRunStallWatchdog(snapshot: AgentConversationSnapshot): void {
+    const awaitingServer = !this.runStalled
+      && !this.awaitingClientWork
+      && (snapshot.phase === "thinking" || snapshot.phase === "working");
+    if (!awaitingServer) {
+      this.clearRunStallTimer();
+      return;
+    }
+    if (this.runStallTimer !== null) return;
+    const generation = this.generation;
+    this.runStallTimer = window.setTimeout(() => {
+      this.runStallTimer = null;
+      if (this.generation !== generation) return;
+      const current = this.active;
+      if (!current || current.terminal) return;
+      this.runStalled = true;
+      this.reportLocalIssue(new Error(
+        "The agent run produced no server activity for "
+          + `${this.runStallGraceMs()}ms while the connection was healthy `
+          + `(conversation ${this.conversationId ?? "unknown"}, `
+          + `request ${current.requestId}, run ${current.serverRunId ?? "unassigned"}).`,
+      ));
+      this.recordLifecycle({
+        code: "run_stalled",
+        phase: "response",
+        ...(this.conversationId ? { conversationId: this.conversationId } : {}),
+        requestId: current.requestId,
+        ...(current.serverRunId ? { serverRunId: current.serverRunId } : {}),
+        retryable: true,
+      });
+      this.publishActive(current, true);
+    }, this.runStallGraceMs());
+  }
+
+  private runStallGraceMs(): number {
+    return this.options.runStallGraceMs ?? RUN_STALL_GRACE_MS;
+  }
+
+  private clearRunStallTimer(): void {
+    if (this.runStallTimer === null) return;
+    window.clearTimeout(this.runStallTimer);
+    this.runStallTimer = null;
+  }
+
+  /**
+   * Authoritative content moved, so the run is demonstrably alive. Reconnects
+   * alone must not count: during a server-side stall the transport can keep
+   * reconnecting cleanly forever, which would reset the bound and hide exactly
+   * the failure it exists to catch.
+   */
+  private noteServerProgress(): void {
+    const wasStalled = this.runStalled;
+    this.runStalled = false;
+    this.clearRunStallTimer();
+    if (!wasStalled) return;
+    const active = this.active;
+    if (active && !active.terminal) this.publishActive(active, true);
   }
 
   private handleTransportIssue(
@@ -2490,6 +2610,8 @@ export class FirstPartyAgentChatSession {
 
   private completeActive(active: ActiveRun, result: FirstPartyAgentRunResult): void {
     if (this.active?.token !== active.token) return;
+    this.clearRunStallTimer();
+    this.runStalled = false;
     this.pendingDeliveries.clear();
     this.pendingApprovalDeliveries.clear();
     this.pendingCancelRequestId = null;
@@ -2562,7 +2684,9 @@ export class FirstPartyAgentChatSession {
       this.presentationMessages,
       this.connectionState,
       this.connectionDegraded,
+      this.runStalled,
     );
+    this.syncRunStallWatchdog(snapshot);
     if (immediate) this.commitSnapshot(snapshot);
     else this.scheduleSnapshot(snapshot);
   }

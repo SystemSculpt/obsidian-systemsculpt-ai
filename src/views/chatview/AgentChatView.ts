@@ -365,7 +365,11 @@ export class AgentChatView extends ItemView {
   public creditsBalance: CreditsBalanceSnapshot | null = null;
 
   private readonly transcript: AgentTranscriptRepository;
-  private readonly agent: FirstPartyAgentChatSession;
+  private agent: FirstPartyAgentChatSession;
+  private readonly agentBaseUrl: string;
+  // One journal per view, not per conversation: it owns a single file, so a
+  // second instance on the same path would race the first.
+  private readonly agentMutationJournal: ThinAgentMutationJournal;
   private readonly documentAttachmentProcessor: ManagedChatDocumentAttachmentProcessor;
   private readonly attachmentStore: ChatAttachmentVaultStore;
   private readonly queueRepository: AgentQueueStateRepository;
@@ -449,25 +453,43 @@ export class AgentChatView extends ItemView {
     });
     this.documentAttachmentProcessor = new ManagedChatDocumentAttachmentProcessor(plugin.app, plugin);
 
-    this.agent = new FirstPartyAgentChatSession({
-      baseUrl: new URL(this.aiService.baseUrl).origin,
-      pluginVersion: plugin.manifest.version,
-      licenseKey: () => plugin.settings.licenseKey,
+    this.agentBaseUrl = new URL(this.aiService.baseUrl).origin;
+    this.agentMutationJournal = new ThinAgentMutationJournal(
+      plugin.app.vault.adapter,
+      normalizePath([
+        plugin.app.vault.configDir,
+        "plugins",
+        plugin.manifest.id,
+        "thin-agent-mutations.json",
+      ].join("/")),
+    );
+    this.agent = this.createAgentSession();
+  }
+
+  /**
+   * Builds a session for exactly one conversation.
+   *
+   * A session owns a conversation's connection, its active run, and every
+   * derived flag such as "is a run in progress". Reusing one instance across
+   * conversations means each switch has to remember to reset all of that, and
+   * anything missed leaks into the next chat: a brand-new conversation could
+   * report a previous chat's run as still working, refuse a tool-access
+   * change, and queue its first message behind a run that no longer exists.
+   * Building a fresh session per conversation makes that unrepresentable, and
+   * lets independent conversations run at the same time.
+   */
+  private createAgentSession(): FirstPartyAgentChatSession {
+    return new FirstPartyAgentChatSession({
+      baseUrl: this.agentBaseUrl,
+      pluginVersion: this.plugin.manifest.version,
+      licenseKey: () => this.plugin.settings.licenseKey,
       bootstrapRequest: () => {
         if (!this.thinBootstrapRequest) {
           throw new Error("SystemSculpt started before this message was ready.");
         }
         return this.thinBootstrapRequest;
       },
-      mutationJournal: new ThinAgentMutationJournal(
-        plugin.app.vault.adapter,
-        normalizePath([
-          plugin.app.vault.configDir,
-          "plugins",
-          plugin.manifest.id,
-          "thin-agent-mutations.json",
-        ].join("/")),
-      ),
+      mutationJournal: this.agentMutationJournal,
       executeLocalTool: (call, signal) => this.aiService.executeLocalVaultToolCall({
           toolCall: {
             id: call.callId,
@@ -491,9 +513,39 @@ export class AgentChatView extends ItemView {
       },
       refreshCredits: () => this.refreshCreditsBalance(),
       reportError: (error) => this.logAgentError(error, "agentSession"),
-      onLifecycle: (record) => plugin.getLogger().lifecycle({ ...record }),
+      onLifecycle: (record) => this.plugin.getLogger().lifecycle({ ...record }),
     });
   }
+
+  private bindAgentSession(): void {
+    this.agentUnsubscribe = this.agent.subscribe((snapshot) => {
+      this.renderAgentSnapshot(snapshot);
+      if (this.automationApprovalMode === "deny") {
+        for (const part of snapshot.parts) {
+          if (part.kind === "tool" && part.state === "approval-required" && part.approvalId) {
+            this.agent.respondToApproval(part.approvalId, false);
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Hands the next conversation its own session instead of recycling this
+   * one. The outgoing session is detached independently, so a run it still
+   * owns settles on its own timeline and can never report itself as active to
+   * the conversation that replaced it.
+   */
+  private replaceAgentSession(): void {
+    const previous = this.agent;
+    this.agentUnsubscribe?.();
+    this.agentUnsubscribe = null;
+    this.agent = this.createAgentSession();
+    this.bindAgentSession();
+    void previous.detach().catch((error) =>
+      this.reportAgentError(error, "retireAgentSession"));
+  }
+
 
   public get messages(): ChatMessage[] {
     return this.transcript.snapshot().messages.map((message) => ({ ...message })) as ChatMessage[];
@@ -542,16 +594,7 @@ export class AgentChatView extends ItemView {
       },
     });
     this.addChild(this.workspace);
-    this.agentUnsubscribe = this.agent.subscribe((snapshot) => {
-      this.renderAgentSnapshot(snapshot);
-      if (this.automationApprovalMode === "deny") {
-        for (const part of snapshot.parts) {
-          if (part.kind === "tool" && part.state === "approval-required" && part.approvalId) {
-            this.agent.respondToApproval(part.approvalId, false);
-          }
-        }
-      }
-    });
+    this.bindAgentSession();
     this.register(() => this.agentUnsubscribe?.());
     this.installRecorderBindings();
     this.installWorkspaceBindings();
@@ -2228,10 +2271,7 @@ export class AgentChatView extends ItemView {
       // The old draft no longer owns preparation errors once New chat wins.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
-      const releaseQueueDrainSuppression = this.beginQueueDrainSuppression();
-      try { await this.agent.cancel(); }
-      finally { releaseQueueDrainSuppression(); }
-      this.agent.disconnect();
+      this.replaceAgentSession();
       this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");
       this.pendingThinConversationId = newConversationId;
@@ -2253,10 +2293,6 @@ export class AgentChatView extends ItemView {
       this.applyTranscriptIdentity(snapshot);
       this.workspace?.setTitle(this.chatTitle);
       this.workspace?.setBanner(null);
-      // Invariant: a new conversation owns no run. Clear pending state before
-      // rendering so an empty transcript cannot inherit the previous chat's
-      // pending indicator.
-      this.workspace?.setRunPending(false);
       await this.workspace?.setHistory([]);
       await this.workspace?.setAgentSnapshot(null);
       this.syncAttachments();
