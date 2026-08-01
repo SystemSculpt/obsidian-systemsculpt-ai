@@ -817,7 +817,7 @@ export class AgentChatView extends ItemView {
   public async setApprovalMode(mode: ChatApprovalMode): Promise<void> {
     const nextMode = mode === "full-access" ? "full-access" : "ask";
     if (nextMode === this.approvalMode) return;
-    if (this.isSubmissionActive()) {
+    if (this.isRunActive()) {
       throw new Error("Tool access cannot change while SystemSculpt is working.");
     }
     const previousMode = this.approvalMode;
@@ -1037,6 +1037,22 @@ export class AgentChatView extends ItemView {
   private isSubmissionActive(): boolean {
     const sessionStatus = this.agent?.getSnapshot?.()?.status;
     return this.activeSubmissionOperation != null
+      || sessionStatus === "running"
+      || sessionStatus === "waiting";
+  }
+
+  /**
+   * Whether a run is actually executing, as opposed to the view merely being
+   * between conversations.
+   *
+   * Local policy like tool access has to be protected from changing underneath
+   * a live run, but not from a conversation switch: opening a chat runs no
+   * model step, so refusing the change there only produces an error the user
+   * cannot act on.
+   */
+  private isRunActive(): boolean {
+    const sessionStatus = this.agent?.getSnapshot?.()?.status;
+    return this.activeSubmissionOperation?.kind === "submission"
       || sessionStatus === "running"
       || sessionStatus === "waiting";
   }
