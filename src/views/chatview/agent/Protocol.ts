@@ -149,6 +149,8 @@ export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   kind: "session_snapshot";
   messages: readonly Readonly<Record<string, unknown>>[];
   run_state: AgentRunState;
+  queued_request_ids: readonly string[];
+  cancelled_queued_request_ids: readonly string[];
 }>;
 
 export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
@@ -820,7 +822,25 @@ export function parseAgentServerEvent(
   }
   const base = serverBase(value, expectedConversationId);
   if (value.kind === "session_snapshot") {
-    if (!Array.isArray(value.messages)) {
+    const queuedRequestIds = value.queued_request_ids === undefined
+      ? []
+      : value.queued_request_ids;
+    const cancelledQueuedRequestIds =
+      value.cancelled_queued_request_ids === undefined
+        ? []
+        : value.cancelled_queued_request_ids;
+    if (
+      !Array.isArray(value.messages)
+      || !Array.isArray(queuedRequestIds)
+      || queuedRequestIds.length > MAX_QUEUED_TURNS
+      || !queuedRequestIds.every(safeId)
+      || new Set(queuedRequestIds).size !== queuedRequestIds.length
+      || !Array.isArray(cancelledQueuedRequestIds)
+      || cancelledQueuedRequestIds.length > MAX_QUEUED_TURNS
+      || !cancelledQueuedRequestIds.every(safeId)
+      || new Set(cancelledQueuedRequestIds).size
+        !== cancelledQueuedRequestIds.length
+    ) {
       return fail("invalid_server_event", "The session snapshot is invalid.");
     }
     return Object.freeze({
@@ -828,6 +848,9 @@ export function parseAgentServerEvent(
       kind: "session_snapshot",
       messages: Object.freeze(value.messages.map((message) => parseServerMessage(message))),
       run_state: parseAgentRunState(value.run_state),
+      queued_request_ids: Object.freeze([...queuedRequestIds]),
+      cancelled_queued_request_ids:
+        Object.freeze([...cancelledQueuedRequestIds]),
     });
   }
   if (value.kind === "assistant_snapshot") {

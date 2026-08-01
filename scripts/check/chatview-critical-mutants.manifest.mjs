@@ -3,7 +3,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "authoritative_user_collision_not_failed_closed",
     category: "authoritative-message-reconciliation",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 696,
+    anchorLine: 724,
     anchorText: `this.protocolError(
         "The authoritative user message conflicts with the pending submission.",
       );`,
@@ -16,7 +16,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "run_state_conflict_not_failed_closed",
     category: "server-authority",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 619,
+    anchorLine: 647,
     anchorText: `this.protocolError(
           "SystemSculpt returned conflicting state for one session cursor.",
           "run_state_conflict",
@@ -30,7 +30,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "command_ack_callback_removed",
     category: "delivery-recovery",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 473,
+    anchorLine: 498,
     anchorText: "this.options.onCommandAck?.(parsed);",
     replacement: "void parsed;",
     testPaths: Object.freeze([

@@ -11,7 +11,7 @@ The fixture exists at both paths:
 - Website: `src/lib/plugin/contracts/fixtures/thin-agent-v1/thin-agent-v1.json`
 - Plugin: `testing/fixtures/managed/thin-agent-v1/thin-agent-v1.json`
 
-The files have identical bytes with SHA-256 `d07636678261e6b9012aade13a2d2683c0e0a0dc681141596f88ef7d98ccba22`.
+The files have identical bytes with SHA-256 `50b8cf158c4a8b3de6a5353abb49e22bbe5c9db91290c233a136564b6932e0ce`.
 
 A fixture change is a protocol change. It requires compatibility review against released plugin builds.
 
@@ -104,6 +104,8 @@ GET /api/plugin/agent/connect/get-messages?access_token=<access token>
 
 The response body is one `session_snapshot` event. It contains the complete authoritative UI history and run state. Its encoded size cannot exceed 64 MiB. There is no rolling message-count cap. Server-side model compaction does not truncate this UI history.
 
+The snapshot can include up to 256 `queued_request_ids`. It contains no queued message content. It also includes up to 256 recent `cancelled_queued_request_ids`. These receipts let a disconnected client settle a queued cancellation after restart. The server retains every cancellation identity for direct idempotent replay, even when it leaves this bounded snapshot projection.
+
 The response also carries the bounded `x-systemsculpt-agent-run-state` header. This header lets compatible clients compare state by cursor.
 
 A session does not send commands before it accepts a valid snapshot.
@@ -118,7 +120,7 @@ POST /api/plugin/agent/turn?access_token=<access token>
 
 The request body is one `systemsculpt.agent.command.v1` JSON object. The response is `text/event-stream`. Each event contains one `systemsculpt.agent.event.v1` JSON object. One command or event frame cannot exceed 64 MiB.
 
-The stream closes when the command segment ends. A segment ends at terminal state or when the server parks for client work. Concurrent commands remain queued with their own response open. Each response receives only events for its request. A scoped `queue_snapshot` never exposes another request's queued user message.
+The stream closes when the command segment ends. A segment ends at terminal state or when the server parks for client work. Concurrent commands remain queued with their own response open. Each response receives only events for its request. A scoped `queue_snapshot` never exposes another request's queued user message. An admission `session_snapshot` goes only to its request stream.
 
 ### Commands
 
@@ -182,7 +184,7 @@ After uncertain delivery, the client must:
 
 Submit, regenerate, approval, result, and cancel admission are idempotent for their stable IDs.
 
-A cancel request does not create terminal state before server authority. The client shows `Stopping` until an authoritative terminal event, snapshot, or durable queued-cancel acknowledgement confirms cancellation. It reconciles and replays an uncertain cancel like every other command. The server retains queued-cancel identities so a replay receives the same acknowledgement.
+A cancel request does not create terminal state before server authority. The client shows `Stopping` until an authoritative terminal event or snapshot confirms cancellation. A request-scoped snapshot precedes the cancel `command_ack`; the acknowledgement alone confirms delivery, not the final outcome. The client reconciles and replays an uncertain cancel like every other command. The server retains cancellation identities so a replay receives the same snapshot receipt. If no matching work remains, the server acknowledges cancellation as an authoritative idempotent no-op. The no-op durably fences that request ID so delayed delivery cannot start it.
 
 The client never repeats a local vault mutation to recover command delivery. It reuses the durable mutation receipt and replays only the recorded result.
 

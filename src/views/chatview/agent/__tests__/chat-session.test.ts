@@ -84,10 +84,16 @@ function event<TFields extends Record<string, unknown>>(
 function sessionSnapshot(
   messages: readonly WireMessage[],
   runState: ReturnType<typeof idle> | ReturnType<typeof active>,
+  queue: Readonly<{
+    queued?: readonly string[];
+    cancelled?: readonly string[];
+  }> = {},
 ) {
   return event("session_snapshot", {
     messages,
     run_state: runState,
+    queued_request_ids: queue.queued ?? [],
+    cancelled_queued_request_ids: queue.cancelled ?? [],
   });
 }
 
@@ -212,6 +218,8 @@ class FakeAgentServer {
   ) {}
   public snapshotMessages: readonly WireMessage[] = [];
   public snapshotRunState: unknown = idle(0);
+  public snapshotQueuedRequestIds: readonly string[] = [];
+  public snapshotCancelledQueuedRequestIds: readonly string[] = [];
   public turnStatus = 200;
   /**
    * Lets a test decide one command's delivery outcome. Call deliver() to let
@@ -240,6 +248,10 @@ class FakeAgentServer {
           ...sessionSnapshot(
             this.snapshotMessages,
             this.snapshotRunState as never,
+            {
+              queued: this.snapshotQueuedRequestIds,
+              cancelled: this.snapshotCancelledQueuedRequestIds,
+            },
           ),
           conversation_id: this.conversationId,
         });
@@ -590,7 +602,7 @@ describe("AgentChatSession", () => {
     await expect(run).resolves.toMatchObject({ kind: "cancelled" });
   });
 
-  it("accepts a durable queued-cancel acknowledgement as terminal authority", async () => {
+  it("waits for a durable queued-cancel snapshot after acknowledgement", async () => {
     const harness = trackedHarness();
     const server = await harness.open();
     const turnId = "user_queued_cancel";
@@ -622,6 +634,14 @@ describe("AgentChatSession", () => {
       command_kind: "cancel",
       status: "accepted",
     }));
+    await tick();
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "running",
+      statusLabel: "Stopping",
+    });
+    server.serverMessage(sessionSnapshot([], idle(2), {
+      cancelled: [turnId],
+    }));
     server.endTurn();
 
     await cancellation;
@@ -630,6 +650,105 @@ describe("AgentChatSession", () => {
       status: "cancelled",
       statusLabel: "Stopped",
     });
+  });
+
+  it("restores and cancels a queued turn after its response disconnects", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_restarted_queue";
+    const otherRequestId = "request_other_active";
+    server.commandBehavior = (command, deliver) => {
+      deliver();
+      if (command.kind !== "submit") return;
+      server.commandBehavior = null;
+      server.snapshotRunState = active(
+        2,
+        otherRequestId,
+        "user_other_active",
+      );
+      server.snapshotQueuedRequestIds = [turnId];
+      throw new Error("The queued response disconnected after admission.");
+    };
+
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep this queued across restart"),
+    });
+
+    await waitFor(() => harness.agent.getSnapshot().statusLabel === "Queued");
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "running",
+      statusLabel: "Queued",
+    });
+
+    const cancellation = harness.agent.cancel();
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "cancel"));
+    server.snapshotQueuedRequestIds = [];
+    server.snapshotCancelledQueuedRequestIds = [turnId];
+    server.snapshotRunState = idle(3);
+    server.endTurn();
+
+    await cancellation;
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "idle",
+      turnId: null,
+    });
+  });
+
+  it("accepts a persisted terminal before a cancellation receipt or another request", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_terminal_before_mismatch";
+    const assistant = wireAssistant("assistant_terminal_before_mismatch", [{
+      type: "text",
+      text: "Completed before the response disconnected.",
+      state: "done",
+    }, {
+      type: "data-systemsculpt-run-terminal",
+      data: {
+        version: 1,
+        run_id: RUN_ID,
+        root_message_id: turnId,
+        outcome: "succeeded",
+        code: "completed",
+      },
+    }]);
+    server.commandBehavior = (command, deliver) => {
+      deliver();
+      if (command.kind !== "submit") return;
+      server.commandBehavior = null;
+      server.snapshotMessages = [
+        wireUser(turnId, "Finish before another request starts"),
+        assistant,
+      ];
+      server.snapshotCancelledQueuedRequestIds = [turnId];
+      server.snapshotRunState = active(
+        3,
+        "request_later_active",
+        "user_later_active",
+      );
+      throw new Error("The completed response disconnected.");
+    };
+
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Finish before another request starts"),
+    });
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.persistAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message_id: assistant.id,
+        content: "Completed before the response disconnected.",
+      }),
+    );
+    expect(harness.reportError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "response_state_mismatch" }),
+    );
   });
 
   it("cancels locally before any server admission is possible", async () => {

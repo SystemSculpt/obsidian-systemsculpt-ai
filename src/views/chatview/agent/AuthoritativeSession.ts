@@ -109,6 +109,8 @@ export type AgentSessionSnapshot<
     request_id: string;
     value: AgentTerminal;
   }> | null;
+  queuedRequestIds: readonly string[];
+  cancelledQueuedRequestIds: readonly string[];
   optimisticUser: AgentOptimisticUser | null;
 }>;
 
@@ -288,6 +290,8 @@ export class AgentSession<
   );
   private authoritativeRunState: AgentAuthoritativeRunState | null = null;
   private terminal: AgentSessionSnapshot<TMessage>["terminal"] = null;
+  private queuedRequestIds: readonly string[] = Object.freeze([]);
+  private cancelledQueuedRequestIds: readonly string[] = Object.freeze([]);
   private pendingSubmit: PendingSubmit | null = null;
   private revision = 0;
   private disposed = false;
@@ -511,6 +515,10 @@ export class AgentSession<
     }
     this.hasSessionSnapshot = true;
     this.messages = frozenMessages(incomingMessages);
+    this.queuedRequestIds = Object.freeze([...frame.queued_request_ids]);
+    this.cancelledQueuedRequestIds = Object.freeze([
+      ...frame.cancelled_queued_request_ids,
+    ]);
     this.terminal = null;
     this.awaitingTerminalRun = null;
     if (!this.reconcileOptimisticUser()) return;
@@ -908,6 +916,8 @@ export class AgentSession<
       messages: this.messages,
       runState: this.runState,
       terminal: this.terminal,
+      queuedRequestIds: this.queuedRequestIds,
+      cancelledQueuedRequestIds: this.cancelledQueuedRequestIds,
       optimisticUser: pending
         ? Object.freeze({
             kind: "optimistic_pending_user" as const,

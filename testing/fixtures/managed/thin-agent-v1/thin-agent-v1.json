@@ -237,7 +237,12 @@
     "max_turn_frame_bytes": 67108864,
     "max_event_frame_bytes": 67108864,
     "custom_live_session_commands": false,
-    "custom_turn_rpc": false
+    "custom_turn_rpc": false,
+    "session_snapshot_queue_projection": "bounded_request_ids_without_queued_message_content",
+    "session_snapshot_recent_cancel_receipt_limit": 256,
+    "queue_snapshot_stream_projection": "request_scoped_command_only",
+    "cancel_command_ack": "delivery_only_after_request_scoped_snapshot",
+    "unknown_cancel_target": "authoritative_idempotent_no_op_acknowledgement_with_late_delivery_fence"
   },
   "event_semantics": {
     "unknown_data_part_types": "ignore",

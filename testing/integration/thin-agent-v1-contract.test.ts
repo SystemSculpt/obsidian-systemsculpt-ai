@@ -29,7 +29,7 @@ const fixture = JSON.parse(fixtureBytes.toString("utf8"));
 describe("thin-agent-v1 application contract", () => {
   it("keeps the canonical cross-repository fixture byte-identical", () => {
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("d07636678261e6b9012aade13a2d2683c0e0a0dc681141596f88ef7d98ccba22");
+      .toBe("50b8cf158c4a8b3de6a5353abb49e22bbe5c9db91290c233a136564b6932e0ce");
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
     expect(fixture.endpoints).toMatchObject({
@@ -41,6 +41,12 @@ describe("thin-agent-v1 application contract", () => {
       turn_submission: "streaming_http_post",
       per_request_response_scope: true,
       queued_cancel_replay: "durable_acknowledgement",
+      session_snapshot_queue_projection:
+        "bounded_request_ids_without_queued_message_content",
+      session_snapshot_recent_cancel_receipt_limit: 256,
+      cancel_command_ack: "delivery_only_after_request_scoped_snapshot",
+      unknown_cancel_target:
+        "authoritative_idempotent_no_op_acknowledgement_with_late_delivery_fence",
     });
   });
 

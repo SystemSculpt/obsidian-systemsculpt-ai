@@ -233,6 +233,71 @@ describe("AgentSession server authority", () => {
     session.dispose();
   });
 
+  it("projects bounded queued and cancelled request receipts from snapshots", () => {
+    const { connection, session } = createSession();
+
+    connection.emit(event("session_snapshot", {
+      messages: [],
+      run_state: idle(1),
+      queued_request_ids: ["request_queued"],
+      cancelled_queued_request_ids: ["request_cancelled"],
+    }));
+
+    expect(session.current.queuedRequestIds).toEqual(["request_queued"]);
+    expect(session.current.cancelledQueuedRequestIds)
+      .toEqual(["request_cancelled"]);
+    expect(Object.isFrozen(session.current.queuedRequestIds)).toBe(true);
+    expect(Object.isFrozen(session.current.cancelledQueuedRequestIds))
+      .toBe(true);
+    session.dispose();
+  });
+
+  it("rejects duplicate snapshot message identities", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const duplicate = message("message_duplicate", "user", "Duplicate");
+
+    connection.emit(event("session_snapshot", {
+      messages: [duplicate, duplicate],
+      run_state: idle(1),
+    }));
+
+    expect(protocolErrors).toHaveLength(1);
+    expect(protocolErrors[0]?.message)
+      .toContain("invalid authoritative messages");
+    session.dispose();
+  });
+
+  it("rejects an assistant snapshot that reuses a user identity", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const user = message("message_collision", "user", "Original user");
+
+    connection.emit(event("session_snapshot", {
+      messages: [user],
+      run_state: active(
+        1,
+        "running",
+        "request_collision",
+        RUN_A,
+        user.id,
+      ),
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_collision",
+      message: message(user.id, "assistant", "Conflicting assistant"),
+    }));
+
+    expect(protocolErrors).toHaveLength(1);
+    expect(protocolErrors[0]?.message)
+      .toContain("reuses a non-assistant message identity");
+    session.dispose();
+  });
+
   it("keeps one optimistic user separate and releases it only on authoritative idle", async () => {
     const { connection, session } = createSession();
     const pendingUser = message("user_queued", "user", "Queue this next turn");

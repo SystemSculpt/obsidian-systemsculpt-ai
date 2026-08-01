@@ -1683,6 +1683,53 @@ export class AgentChatSession {
     this.presentationMessages = this.messagesWithOptimisticUser(snapshot);
     const runState = snapshot.runState;
     let active = this.active;
+    if (snapshot.terminal && active
+      && snapshot.terminal.request_id === active.requestId) {
+      this.acceptTerminal(active, snapshot.terminal.value);
+      return;
+    }
+    if (active && !active.terminal) {
+      const baseMessageIds = active.baseMessageIds;
+      const terminalMessages = active.serverRunId
+        ? snapshot.messages
+        : snapshot.messages.filter((message) =>
+          !baseMessageIds.has(message.id));
+      const persistedTerminal = terminalFromMessages(
+        terminalMessages,
+        active.turnId,
+        active.serverRunId,
+      );
+      if (persistedTerminal) {
+        this.acceptTerminal(active, persistedTerminal);
+        return;
+      }
+    }
+    if (
+      active
+      && snapshot.cancelledQueuedRequestIds.includes(active.requestId)
+    ) {
+      if (this.pendingCancelRequestId === active.requestId) {
+        this.pendingCancelRequestId = null;
+      }
+      void this.reconcileMessages(this.presentationMessages)
+        .catch(() => undefined);
+      this.finishLocalCancellation(active);
+      return;
+    }
+    if (
+      active
+      && active.serverRunId === null
+      && (
+        snapshot.queuedRequestIds.includes(active.requestId)
+        || this.pendingCancelRequestId === active.requestId
+      )
+    ) {
+      active.serverQueued = true;
+      active.phase = "submitted";
+      active.label = this.pendingCancelRequestId === active.requestId
+        ? "Stopping"
+        : "Queued";
+    }
     if (runState.state === "running" || runState.state === "waiting_for_client") {
       if (!active) {
         active = this.createActiveRun({
@@ -1727,26 +1774,6 @@ export class AgentChatSession {
       void this.trySendPendingCancel();
       this.scheduleResynchronization(active);
       return;
-    }
-    if (snapshot.terminal && active
-      && snapshot.terminal.request_id === active.requestId) {
-      this.acceptTerminal(active, snapshot.terminal.value);
-      return;
-    }
-    if (active && !active.terminal) {
-      const terminalMessages = active.serverRunId
-        ? snapshot.messages
-        : snapshot.messages.filter((message) =>
-          !active.baseMessageIds.has(message.id));
-      const persistedTerminal = terminalFromMessages(
-        terminalMessages,
-        active.turnId,
-        active.serverRunId,
-      );
-      if (persistedTerminal) {
-        this.acceptTerminal(active, persistedTerminal);
-        return;
-      }
     }
     this.reconcileAuthoritativePrefix(active);
     if (active && !active.terminal) {
@@ -1799,17 +1826,9 @@ export class AgentChatSession {
     const active = this.active;
     if (!session || !active || active.terminal || active.requestId !== ack.request_id) return;
     if (ack.command_kind === "cancel") {
-      if (active.serverQueued) {
-        if (this.pendingCancelRequestId === ack.request_id) {
-          this.pendingCancelRequestId = null;
-        }
-        active.serverQueued = false;
-        this.finishLocalCancellation(active);
-        return;
-      }
-      if (this.pendingCancelRequestId === ack.request_id) {
-        this.pendingCancelRequestId = null;
-      }
+      // The acknowledgement confirms delivery, not the final outcome. A stale
+      // queued projection can race with an already persisted terminal. Wait
+      // for the preceding snapshot, a later resynchronization, or a terminal.
       return;
     }
 

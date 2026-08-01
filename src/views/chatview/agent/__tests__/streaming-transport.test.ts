@@ -156,6 +156,24 @@ describe("AgentStreamingTransport", () => {
       run_state: { version: 1, cursor: 0, state: "idle" },
     },
     { invalid: true },
+    {
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "session_snapshot",
+      conversation_id: CONVERSATION_ID,
+      messages: [],
+      run_state: { version: 1, cursor: 0, state: "idle" },
+      queued_request_ids: ["request_duplicate", "request_duplicate"],
+    },
+    {
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "session_snapshot",
+      conversation_id: CONVERSATION_ID,
+      messages: [],
+      run_state: { version: 1, cursor: 0, state: "idle" },
+      cancelled_queued_request_ids: null,
+    },
   ])("requires a valid authoritative session snapshot before opening", async (
     initialSnapshot,
   ) => {
