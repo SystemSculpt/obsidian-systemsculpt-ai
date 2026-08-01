@@ -6,12 +6,10 @@ import {
   type FirstPartyThinAgentCancelCommand,
   type FirstPartyThinAgentCommandAckEvent,
   type FirstPartyThinAgentConnectionPort,
+  type FirstPartyThinAgentConnectionState,
   type FirstPartyThinAgentSubmitCommand,
   type FirstPartyThinAgentToolResultCommand,
 } from "../FirstPartyThinAgentSession";
-import type {
-  FirstPartyThinAgentConnectionState,
-} from "../FirstPartyThinAgentSessionTransport";
 
 type Message = Readonly<{
   id: string;
@@ -467,13 +465,13 @@ describe("FirstPartyThinAgentSession server authority", () => {
     session.dispose();
   });
 
-  it("keeps a queued submit through reconnect and waits for both snapshot and open", async () => {
+  it("keeps a queued submit through a closed transport and waits for both snapshot and open", async () => {
     const { connection, session } = createSession();
     connection.emit(event("session_snapshot", {
       messages: [],
       run_state: idle(0),
     }));
-    connection.setState("reconnecting");
+    connection.setState("closed");
 
     await expect(session.submit({
       request_id: "request_reconnect",
@@ -486,7 +484,7 @@ describe("FirstPartyThinAgentSession server authority", () => {
     });
     expect(connection.sendSubmit).not.toHaveBeenCalled();
 
-    connection.setState("synchronizing");
+    connection.setState("connecting");
     connection.emit(event("session_snapshot", {
       messages: [],
       run_state: idle(0),
@@ -521,8 +519,8 @@ describe("FirstPartyThinAgentSession server authority", () => {
     expect(session.current.optimisticUser?.delivery).toBe("queued");
     expect(connection.sendSubmit).toHaveBeenCalledTimes(1);
 
-    connection.setState("reconnecting");
-    connection.setState("synchronizing");
+    connection.setState("closed");
+    connection.setState("connecting");
     connection.emit(event("session_snapshot", {
       messages: [],
       run_state: idle(0),
@@ -557,8 +555,8 @@ describe("FirstPartyThinAgentSession server authority", () => {
     expect(connection.sendSubmit).toHaveBeenCalledTimes(1);
     expect(session.current.optimisticUser?.delivery).toBe("sending");
 
-    connection.setState("reconnecting");
-    connection.setState("synchronizing");
+    connection.setState("closed");
+    connection.setState("connecting");
     connection.emit(event("session_snapshot", {
       messages: [],
       run_state: idle(0),
