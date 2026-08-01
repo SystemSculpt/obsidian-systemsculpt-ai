@@ -12,11 +12,11 @@ const criticalRiskTests = [
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/live-markdown-renderer.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/first-party-agent-chat-session.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/first-party-thin-agent-session.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/first-party-thin-agent-session-transport.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-mutation-journal.test.ts",
-	"<rootDir>/src/views/chatview/thin/__tests__/thin-agent-message-adapter.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/first-party-agent-chat-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/first-party-thin-agent-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/first-party-thin-agent-session-transport.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/thin-agent-mutation-journal.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/thin-agent-message-adapter.test.ts",
 ];
 
 const criticalRiskCoverage = [
@@ -29,12 +29,12 @@ const criticalRiskCoverage = [
 	"src/views/chatview/ChatStorageService.ts",
 	"src/views/chatview/storage/ChatFrontmatterIdentity.ts",
 	"src/views/chatview/storage/ChatMarkdownSerializer.ts",
-	"src/views/chatview/thin/FirstPartyAgentChatSession.ts",
-	"src/views/chatview/thin/FirstPartyThinAgentProtocol.ts",
-	"src/views/chatview/thin/FirstPartyThinAgentSession.ts",
-	"src/views/chatview/thin/FirstPartyThinAgentSessionTransport.ts",
-	"src/views/chatview/thin/ThinAgentMutationJournal.ts",
-	"src/views/chatview/thin/ThinAgentMessageAdapter.ts",
+	"src/views/chatview/agent/FirstPartyAgentChatSession.ts",
+	"src/views/chatview/agent/FirstPartyThinAgentProtocol.ts",
+	"src/views/chatview/agent/FirstPartyThinAgentSession.ts",
+	"src/views/chatview/agent/FirstPartyThinAgentSessionTransport.ts",
+	"src/views/chatview/agent/ThinAgentMutationJournal.ts",
+	"src/views/chatview/agent/ThinAgentMessageAdapter.ts",
 ];
 
 module.exports = {
@@ -102,37 +102,37 @@ module.exports = {
 			functions: -5,
 			lines: -20,
 		},
-		"./src/views/chatview/thin/FirstPartyAgentChatSession.ts": {
+		"./src/views/chatview/agent/FirstPartyAgentChatSession.ts": {
 			statements: -232,
 			branches: -420,
 			functions: -21,
 			lines: -181,
 		},
-		"./src/views/chatview/thin/FirstPartyThinAgentProtocol.ts": {
+		"./src/views/chatview/agent/FirstPartyThinAgentProtocol.ts": {
 			statements: -96,
 			branches: -120,
 			functions: -6,
 			lines: -87,
 		},
-		"./src/views/chatview/thin/FirstPartyThinAgentSession.ts": {
+		"./src/views/chatview/agent/FirstPartyThinAgentSession.ts": {
 			statements: -55,
 			branches: -67,
 			functions: -2,
 			lines: -42,
 		},
-		"./src/views/chatview/thin/FirstPartyThinAgentSessionTransport.ts": {
+		"./src/views/chatview/agent/FirstPartyThinAgentSessionTransport.ts": {
 			statements: -52,
 			branches: -62,
 			functions: -7,
 			lines: -39,
 		},
-		"./src/views/chatview/thin/ThinAgentMutationJournal.ts": {
+		"./src/views/chatview/agent/ThinAgentMutationJournal.ts": {
 			statements: -25,
 			branches: -39,
 			functions: -5,
 			lines: -19,
 		},
-		"./src/views/chatview/thin/ThinAgentMessageAdapter.ts": {
+		"./src/views/chatview/agent/ThinAgentMessageAdapter.ts": {
 			statements: -10,
 			branches: -23,
 			functions: -2,

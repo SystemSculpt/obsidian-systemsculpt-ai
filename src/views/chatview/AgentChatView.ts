@@ -43,16 +43,16 @@ import {
   type AgentUserCommitInput,
 } from "./AgentTranscriptRepository";
 import {
-  FirstPartyAgentChatSession,
-  type FirstPartyAgentLifecycleCode,
-  type FirstPartyAgentLifecyclePhase,
-  type FirstPartyAgentRunResult,
-} from "./thin/FirstPartyAgentChatSession";
-import { ThinAgentMutationJournal } from "./thin/ThinAgentMutationJournal";
+  AgentChatSession,
+  type AgentLifecycleCode,
+  type AgentLifecyclePhase,
+  type AgentRunResult,
+} from "./agent/ChatSession";
+import { AgentMutationJournal } from "./agent/MutationJournal";
 import {
   thinAgentDataUrl,
   toThinAgentUserMessage,
-} from "./thin/ThinAgentMessageAdapter";
+} from "./agent/MessageAdapter";
 import {
   THIN_AGENT_CAPABILITIES,
   THIN_AGENT_CAPABILITY_CONTRACT_VERSION,
@@ -128,7 +128,7 @@ type ActiveSubmissionOperation = {
   readonly finished: Promise<void>;
   readonly resolveFinished: () => void;
   preparedSubmission: AgentComposerSubmit | null;
-  runPromise: Promise<FirstPartyAgentRunResult> | null;
+  runPromise: Promise<AgentRunResult> | null;
   includeContextFiles: boolean;
   draftRestored: boolean;
   draftRestorable: boolean;
@@ -365,11 +365,11 @@ export class AgentChatView extends ItemView {
   public creditsBalance: CreditsBalanceSnapshot | null = null;
 
   private readonly transcript: AgentTranscriptRepository;
-  private agent: FirstPartyAgentChatSession;
+  private agent: AgentChatSession;
   private readonly agentBaseUrl: string;
   // One journal per view, not per conversation: it owns a single file, so a
   // second instance on the same path would race the first.
-  private readonly agentMutationJournal: ThinAgentMutationJournal;
+  private readonly agentMutationJournal: AgentMutationJournal;
   private readonly documentAttachmentProcessor: ManagedChatDocumentAttachmentProcessor;
   private readonly attachmentStore: ChatAttachmentVaultStore;
   private readonly queueRepository: AgentQueueStateRepository;
@@ -454,7 +454,7 @@ export class AgentChatView extends ItemView {
     this.documentAttachmentProcessor = new ManagedChatDocumentAttachmentProcessor(plugin.app, plugin);
 
     this.agentBaseUrl = new URL(this.aiService.baseUrl).origin;
-    this.agentMutationJournal = new ThinAgentMutationJournal(
+    this.agentMutationJournal = new AgentMutationJournal(
       plugin.app.vault.adapter,
       normalizePath([
         plugin.app.vault.configDir,
@@ -478,8 +478,8 @@ export class AgentChatView extends ItemView {
    * Building a fresh session per conversation makes that unrepresentable, and
    * lets independent conversations run at the same time.
    */
-  private createAgentSession(): FirstPartyAgentChatSession {
-    return new FirstPartyAgentChatSession({
+  private createAgentSession(): AgentChatSession {
+    return new AgentChatSession({
       baseUrl: this.agentBaseUrl,
       pluginVersion: this.plugin.manifest.version,
       licenseKey: () => this.plugin.settings.licenseKey,
@@ -1058,8 +1058,8 @@ export class AgentChatView extends ItemView {
   }
 
   private recordUiLifecycle(
-    code: FirstPartyAgentLifecycleCode,
-    phase: FirstPartyAgentLifecyclePhase = "response",
+    code: AgentLifecycleCode,
+    phase: AgentLifecyclePhase = "response",
     conversationId?: string,
   ): void {
     this.agent?.recordLifecycle?.({
@@ -1461,8 +1461,8 @@ export class AgentChatView extends ItemView {
     operation.includeContextFiles = options.includeContextFiles !== false;
 
     let userMessage: ChatMessage | null = null;
-    let run: Promise<FirstPartyAgentRunResult> | null = null;
-    let result: FirstPartyAgentRunResult | undefined;
+    let run: Promise<AgentRunResult> | null = null;
+    let result: AgentRunResult | undefined;
     let queuedPromotion: Readonly<{
       operation: ActiveSubmissionOperation;
       item: AgentQueuedFollowUp;

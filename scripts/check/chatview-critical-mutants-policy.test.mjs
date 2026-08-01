@@ -18,12 +18,12 @@ const expectedIds = [
   "conversation_scope_removed_from_receipts",
 ];
 const allowedSourceFiles = new Set([
-  "src/views/chatview/thin/FirstPartyThinAgentSession.ts",
-  "src/views/chatview/thin/ThinAgentMutationJournal.ts",
+  "src/views/chatview/agent/FirstPartyThinAgentSession.ts",
+  "src/views/chatview/agent/ThinAgentMutationJournal.ts",
 ]);
 const allowedTestPaths = new Set([
-  "src/views/chatview/thin/__tests__/first-party-thin-agent-session.test.ts",
-  "src/views/chatview/thin/__tests__/thin-agent-mutation-journal.test.ts",
+  "src/views/chatview/agent/__tests__/first-party-thin-agent-session.test.ts",
+  "src/views/chatview/agent/__tests__/thin-agent-mutation-journal.test.ts",
 ]);
 
 test("the curated ChatView mutation manifest targets the thin harness", () => {

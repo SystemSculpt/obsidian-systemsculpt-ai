@@ -13,9 +13,9 @@ import { AgentWorkspace } from "../AgentWorkspace";
 import { ChatStorageService } from "../ChatStorageService";
 import type { ChatMessageAttachment } from "../attachments/ChatMessageAttachments";
 import type {
-  FirstPartyAgentRunInput,
-  FirstPartyAgentRunResult,
-} from "../thin/FirstPartyAgentChatSession";
+  AgentRunInput,
+  AgentRunResult,
+} from "../agent/ChatSession";
 import type { ChatMessage } from "../../../types";
 
 jest.mock("obsidian", () => {
@@ -85,7 +85,7 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-function failedRun(code: string, message: string): FirstPartyAgentRunResult {
+function failedRun(code: string, message: string): AgentRunResult {
   return {
     kind: "failed",
     snapshot: {
@@ -104,7 +104,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
   const parent = document.body.createDiv();
   const builtBodies: Array<Record<string, unknown> | undefined> = [];
   const runGate = deferred();
-  const runStarted = deferred<FirstPartyAgentRunInput>();
+  const runStarted = deferred<AgentRunInput>();
   const runFinished = deferred();
   const durableMessages: ChatMessage[] = [];
   const snapshot = () => ({
@@ -157,7 +157,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     resetMessageEditor: jest.fn(),
   };
   const agent = {
-    start: jest.fn((input: FirstPartyAgentRunInput) => {
+    start: jest.fn((input: AgentRunInput) => {
       runStarted.resolve(input);
       return runGate.promise.then(async () => {
         builtBodies.push(await input.buildBody?.(new AbortController().signal));
@@ -282,7 +282,7 @@ function createHistoricalResubmitHarness(
   const agent = {
     disconnect: jest.fn(),
     recordLifecycle,
-    start: jest.fn((input: FirstPartyAgentRunInput) => (async (): Promise<FirstPartyAgentRunResult> => {
+    start: jest.fn((input: AgentRunInput) => (async (): Promise<AgentRunResult> => {
       const bootstrapPrefix = initialMessages.slice(0, targetIndex);
       await (view as any).reconcileAgentHistory(bootstrapPrefix);
       if (failBeforeCommit) {
@@ -443,7 +443,7 @@ async function createPersistentHistoricalResubmitHarness(
     stageContext: jest.fn(async () => ({
       context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     })),
-    start: jest.fn((input: FirstPartyAgentRunInput) => (async (): Promise<FirstPartyAgentRunResult> => {
+    start: jest.fn((input: AgentRunInput) => (async (): Promise<AgentRunResult> => {
       // This is the exact fork bootstrap that produced the screenshot failure:
       // editing the first user turn means the validated server prefix is empty.
       await (view as any).reconcileAgentHistory([]);
@@ -1202,8 +1202,8 @@ describe("AgentChatView composer admission", () => {
   });
 
   it("retires an ordinary run when New chat wins without mutating the replacement chat", async () => {
-    const runStarted = deferred<FirstPartyAgentRunInput>();
-    const runFinished = deferred<FirstPartyAgentRunResult>();
+    const runStarted = deferred<AgentRunInput>();
+    const runFinished = deferred<AgentRunResult>();
     const durableMessages: ChatMessage[] = [];
     const snapshot = () => ({
       chatId: "",
@@ -1233,7 +1233,7 @@ describe("AgentChatView composer admission", () => {
       workspace,
       transcript,
       agent: {
-        start: jest.fn((input: FirstPartyAgentRunInput) => {
+        start: jest.fn((input: AgentRunInput) => {
           runStarted.resolve(input);
           return runFinished.promise;
         }),
@@ -1361,7 +1361,7 @@ describe("AgentChatView composer admission", () => {
       workspace,
       transcript,
       agent: {
-        start: jest.fn(async (input: FirstPartyAgentRunInput): Promise<FirstPartyAgentRunResult> => {
+        start: jest.fn(async (input: AgentRunInput): Promise<AgentRunResult> => {
           await input.beforeSend?.();
           const assistant: ChatMessage = {
             role: "assistant",
@@ -1464,7 +1464,7 @@ describe("AgentChatView composer admission", () => {
       workspace,
       transcript,
       agent: {
-        start: jest.fn(async (input: FirstPartyAgentRunInput): Promise<FirstPartyAgentRunResult> => {
+        start: jest.fn(async (input: AgentRunInput): Promise<AgentRunResult> => {
           await input.beforeSend?.();
           return {
             kind: "completed",
@@ -1562,9 +1562,9 @@ describe("AgentChatView composer admission", () => {
 
   it("Stop during session preparation guards context staging and durable admission", async () => {
     const harness = createHarness("before-commit");
-    const started = deferred<FirstPartyAgentRunInput>();
-    const terminal = deferred<FirstPartyAgentRunResult>();
-    harness.agent.start.mockImplementation((input: FirstPartyAgentRunInput) => {
+    const started = deferred<AgentRunInput>();
+    const terminal = deferred<AgentRunResult>();
+    harness.agent.start.mockImplementation((input: AgentRunInput) => {
       started.resolve(input);
       return terminal.promise;
     });

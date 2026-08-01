@@ -1,5 +1,5 @@
 import { webcrypto } from "node:crypto";
-import { ThinAgentMutationJournal } from "../ThinAgentMutationJournal";
+import { AgentMutationJournal } from "../MutationJournal";
 
 function adapterHarness(initial?: string) {
   let content = initial;
@@ -15,7 +15,7 @@ function adapterHarness(initial?: string) {
   return { adapter, read: () => content };
 }
 
-describe("ThinAgentMutationJournal", () => {
+describe("AgentMutationJournal", () => {
   beforeAll(() => {
     if (!globalThis.crypto?.subtle) {
       Object.defineProperty(globalThis, "crypto", { value: webcrypto });
@@ -24,7 +24,7 @@ describe("ThinAgentMutationJournal", () => {
 
   it("records started actions as outcome unknown and completed actions as replayable", async () => {
     const harness = adapterHarness();
-    const journal = new ThinAgentMutationJournal(
+    const journal = new AgentMutationJournal(
       harness.adapter as any,
       ".systemsculpt/mutations.json",
       () => 10,
@@ -58,7 +58,7 @@ describe("ThinAgentMutationJournal", () => {
 
   it("fails closed for corrupt state and for any receipt write failure", async () => {
     const corrupt = adapterHarness("{not json");
-    const corruptJournal = new ThinAgentMutationJournal(
+    const corruptJournal = new AgentMutationJournal(
       corrupt.adapter as any,
       ".systemsculpt/mutations.json",
     );
@@ -67,7 +67,7 @@ describe("ThinAgentMutationJournal", () => {
 
     const failed = adapterHarness();
     failed.adapter.write.mockRejectedValueOnce(new Error("disk full"));
-    const failedJournal = new ThinAgentMutationJournal(
+    const failedJournal = new AgentMutationJournal(
       failed.adapter as any,
       ".systemsculpt/mutations.json",
     );
@@ -79,7 +79,7 @@ describe("ThinAgentMutationJournal", () => {
 
   it("keeps unbounded conversation-scoped receipts until deliberate deletion", async () => {
     const harness = adapterHarness();
-    const journal = new ThinAgentMutationJournal(
+    const journal = new AgentMutationJournal(
       harness.adapter as any,
       ".systemsculpt/mutations.json",
     );

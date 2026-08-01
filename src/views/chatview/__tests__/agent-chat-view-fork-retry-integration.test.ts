@@ -2,16 +2,16 @@ import type { ChatMessage } from "../../../types";
 import type { AgentConversationSnapshot } from "../AgentConversation";
 import { AgentChatView } from "../AgentChatView";
 import {
-  FirstPartyAgentChatSession,
-} from "../thin/FirstPartyAgentChatSession";
+  AgentChatSession,
+} from "../agent/ChatSession";
 import {
   FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
   FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
-  type FirstPartyThinAgentSubmitCommand,
-} from "../thin/FirstPartyThinAgentProtocol";
+  type AgentSubmitCommand,
+} from "../agent/Protocol";
 import type {
-  FirstPartyThinAgentWebSocket,
-} from "../thin/FirstPartyThinAgentSessionTransport";
+  AgentWebSocket,
+} from "../agent/AgentSessionTransport";
 
 const SOURCE_CONVERSATION_ID = `conversation_${"1".repeat(32)}`;
 const CLIENT_ID = `client_${"2".repeat(32)}`;
@@ -102,7 +102,7 @@ async function eventually(assertion: () => void): Promise<void> {
   throw lastError;
 }
 
-class FakeWebSocket implements FirstPartyThinAgentWebSocket {
+class FakeWebSocket implements AgentWebSocket {
   public readyState = 0;
   public readonly sent: unknown[] = [];
   private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
@@ -146,8 +146,8 @@ class FakeWebSocket implements FirstPartyThinAgentWebSocket {
   }
 }
 
-function submitCommands(socket: FakeWebSocket): FirstPartyThinAgentSubmitCommand[] {
-  return socket.sent.filter((value): value is FirstPartyThinAgentSubmitCommand => {
+function submitCommands(socket: FakeWebSocket): AgentSubmitCommand[] {
+  return socket.sent.filter((value): value is AgentSubmitCommand => {
     if (value === null || typeof value !== "object") return false;
     const frame = value as Record<string, unknown>;
     return frame.type === FIRST_PARTY_THIN_AGENT_COMMAND_TYPE
@@ -276,7 +276,7 @@ describe("AgentChatView historical Retry integration", () => {
       complete: jest.fn(async () => undefined),
       idle: jest.fn(async () => undefined),
     };
-    const agent = new FirstPartyAgentChatSession({
+    const agent = new AgentChatSession({
       baseUrl: "https://example.com",
       pluginVersion: "6.2.7",
       licenseKey: () => "private-license",

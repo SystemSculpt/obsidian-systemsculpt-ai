@@ -4,9 +4,9 @@ import {
   parseImageDataUrl,
 } from "../attachments/ChatAttachmentContent";
 import type {
-  FirstPartyThinAgentUserMessage,
-  FirstPartyThinAgentUserMessagePart,
-} from "./FirstPartyThinAgentProtocol";
+  AgentUserMessage,
+  AgentUserMessagePart,
+} from "./Protocol";
 
 function imageMediaTypeFromDataUrl(url: string): string {
   const parsed = parseImageDataUrl(url);
@@ -34,11 +34,11 @@ export function thinAgentDataUrl(mimeType: string, bytes: Uint8Array): string {
 
 export function toThinAgentUserMessage(
   message: Readonly<ChatMessage>,
-): FirstPartyThinAgentUserMessage {
+): AgentUserMessage {
   if (message.role !== "user") {
     throw new Error("Only a newly admitted user message can start a response.");
   }
-  const parts: FirstPartyThinAgentUserMessagePart[] = [];
+  const parts: AgentUserMessagePart[] = [];
   const attachmentsByIndex = new Map(
     (message.attachmentMetadata ?? []).map((attachment) => [
       attachment.contentPartIndex,

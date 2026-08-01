@@ -1,15 +1,15 @@
 import {
-  FirstPartyThinAgentSession,
-  FirstPartyThinAgentSessionError,
-  type FirstPartyThinAgentApprovalCommand,
-  type FirstPartyThinAgentAuthoritativeEvent,
-  type FirstPartyThinAgentCancelCommand,
-  type FirstPartyThinAgentCommandAckEvent,
-  type FirstPartyThinAgentConnectionPort,
-  type FirstPartyThinAgentConnectionState,
-  type FirstPartyThinAgentSubmitCommand,
-  type FirstPartyThinAgentToolResultCommand,
-} from "../FirstPartyThinAgentSession";
+  AgentSession,
+  AgentSessionError,
+  type AgentApprovalCommand,
+  type AgentAuthoritativeEvent,
+  type AgentCancelCommand,
+  type AgentCommandAckEvent,
+  type AgentConnectionPort,
+  type AgentConnectionState,
+  type AgentSubmitCommand,
+  type AgentToolResultCommand,
+} from "../AuthoritativeSession";
 
 type Message = Readonly<{
   id: string;
@@ -89,33 +89,33 @@ function event<T extends Record<string, unknown>>(
   };
 }
 
-class FakeConnection implements FirstPartyThinAgentConnectionPort {
-  public state: FirstPartyThinAgentConnectionState = "open";
-  private listener: ((frame: FirstPartyThinAgentAuthoritativeEvent) => void) | null = null;
-  private stateListener: ((state: FirstPartyThinAgentConnectionState) => void) | null = null;
+class FakeConnection implements AgentConnectionPort {
+  public state: AgentConnectionState = "open";
+  private listener: ((frame: AgentAuthoritativeEvent) => void) | null = null;
+  private stateListener: ((state: AgentConnectionState) => void) | null = null;
 
   public readonly sendSubmit = jest.fn<
     Promise<void>,
-    [FirstPartyThinAgentSubmitCommand]
+    [AgentSubmitCommand]
   >(async () => undefined);
 
   public readonly sendToolResult = jest.fn<
     Promise<void>,
-    [FirstPartyThinAgentToolResultCommand]
+    [AgentToolResultCommand]
   >(async () => undefined);
 
   public readonly sendApproval = jest.fn<
     Promise<void>,
-    [FirstPartyThinAgentApprovalCommand]
+    [AgentApprovalCommand]
   >(async () => undefined);
 
   public readonly sendCancel = jest.fn<
     Promise<void>,
-    [FirstPartyThinAgentCancelCommand]
+    [AgentCancelCommand]
   >(async () => undefined);
 
   public addAuthoritativeFrameListener(
-    listener: (frame: FirstPartyThinAgentAuthoritativeEvent) => void,
+    listener: (frame: AgentAuthoritativeEvent) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -124,7 +124,7 @@ class FakeConnection implements FirstPartyThinAgentConnectionPort {
   }
 
   public addConnectionStateListener(
-    listener: (state: FirstPartyThinAgentConnectionState) => void,
+    listener: (state: AgentConnectionState) => void,
   ): () => void {
     this.stateListener = listener;
     return () => {
@@ -133,10 +133,10 @@ class FakeConnection implements FirstPartyThinAgentConnectionPort {
   }
 
   public emit(frame: unknown): void {
-    this.listener?.(frame as FirstPartyThinAgentAuthoritativeEvent);
+    this.listener?.(frame as AgentAuthoritativeEvent);
   }
 
-  public setState(state: FirstPartyThinAgentConnectionState): void {
+  public setState(state: AgentConnectionState): void {
     this.state = state;
     this.stateListener?.(state);
   }
@@ -146,10 +146,10 @@ function createSession(input: Readonly<{
   connection?: FakeConnection;
   onProtocolError?: (error: Error) => void;
   onCommandError?: (error: Error) => void;
-  onCommandAck?: (ack: FirstPartyThinAgentCommandAckEvent) => void;
+  onCommandAck?: (ack: AgentCommandAckEvent) => void;
 }> = {}) {
   const connection = input.connection ?? new FakeConnection();
-  const session = new FirstPartyThinAgentSession<Message>({
+  const session = new AgentSession<Message>({
     conversationId: CONVERSATION_ID,
     connection,
     isAuthoritativeMessage: isMessage,
@@ -175,9 +175,9 @@ function deferred<TValue>() {
   return { promise, resolve, reject };
 }
 
-describe("FirstPartyThinAgentSession server authority", () => {
+describe("AgentSession server authority", () => {
   it("delivers only validated command acknowledgements after session authority", () => {
-    const acknowledgements: FirstPartyThinAgentCommandAckEvent[] = [];
+    const acknowledgements: AgentCommandAckEvent[] = [];
     const protocolErrors: Error[] = [];
     const { connection, session } = createSession({
       onCommandAck: (ack) => acknowledgements.push(ack),
@@ -749,9 +749,9 @@ describe("FirstPartyThinAgentSession server authority", () => {
       state: "output-error",
       error_text: "Read failed.",
     })).rejects.toMatchObject({
-      name: "FirstPartyThinAgentSessionError",
+      name: "AgentSessionError",
       code: "run_identity_mismatch",
-    } satisfies Partial<FirstPartyThinAgentSessionError>);
+    } satisfies Partial<AgentSessionError>);
     expect(connection.sendToolResult).not.toHaveBeenCalled();
     session.dispose();
   });
@@ -786,7 +786,7 @@ describe("FirstPartyThinAgentSession server authority", () => {
       user_message: message("user_context", "user", "Use context"),
       context_ref: "ctx1_not-a-real-reference",
     })).rejects.toMatchObject({
-      name: "FirstPartyThinAgentSessionError",
+      name: "AgentSessionError",
       code: "invalid_command",
     });
     expect(session.current.optimisticUser).toBeNull();

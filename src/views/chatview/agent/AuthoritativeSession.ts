@@ -1,27 +1,27 @@
 import {
   FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
-  parseFirstPartyThinAgentCommand,
-  parseFirstPartyThinAgentServerEvent,
-  type FirstPartyThinAgentApprovalCommand as ProtocolApprovalCommand,
-  type FirstPartyThinAgentCancelCommand as ProtocolCancelCommand,
-  type FirstPartyThinAgentCommandAckEvent as ProtocolCommandAckEvent,
-  type FirstPartyThinAgentCommand as ProtocolCommand,
-  type FirstPartyThinAgentJsonValue,
-  type FirstPartyThinAgentKnownRunState,
-  type FirstPartyThinAgentRegenerateCommand,
-  type FirstPartyThinAgentServerEvent,
-  type FirstPartyThinAgentSubmitCommand as ProtocolSubmitCommand,
-  type FirstPartyThinAgentTerminalEvent,
-  type FirstPartyThinAgentToolResultCommand as ProtocolToolResultCommand,
-  type FirstPartyThinAgentUserMessage,
-} from "./FirstPartyThinAgentProtocol";
+  parseAgentCommand,
+  parseAgentServerEvent,
+  type AgentApprovalCommand as ProtocolApprovalCommand,
+  type AgentCancelCommand as ProtocolCancelCommand,
+  type AgentCommandAckEvent as ProtocolCommandAckEvent,
+  type AgentCommand as ProtocolCommand,
+  type AgentJsonValue,
+  type AgentKnownRunState,
+  type AgentRegenerateCommand,
+  type AgentServerEvent,
+  type AgentSubmitCommand as ProtocolSubmitCommand,
+  type AgentTerminalEvent,
+  type AgentToolResultCommand as ProtocolToolResultCommand,
+  type AgentUserMessage,
+} from "./Protocol";
 /**
  * The states a connection to the authoritative session can be in.
  *
  * A turn is one request, so there is no connection to lose between turns and
  * therefore no reconnect or resynchronize state to model.
  */
-export type FirstPartyThinAgentConnectionState =
+export type AgentConnectionState =
   | "idle"
   | "connecting"
   | "open"
@@ -30,15 +30,15 @@ export type FirstPartyThinAgentConnectionState =
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const RUN_ID = /^run_[a-f0-9]{32}$/u;
 
-type FirstPartyThinAgentMessageBase = Readonly<{
+type AgentMessageBase = Readonly<{
   id: string;
   role: string;
 }>;
 
-export type FirstPartyThinAgentAuthoritativeRunState =
-  FirstPartyThinAgentKnownRunState;
+export type AgentAuthoritativeRunState =
+  AgentKnownRunState;
 
-export type FirstPartyThinAgentUnknownRunState = Readonly<{
+export type AgentUnknownRunState = Readonly<{
   version: 1;
   cursor: number | null;
   state: "unknown";
@@ -52,91 +52,91 @@ export type FirstPartyThinAgentUnknownRunState = Readonly<{
     | "protocol_error";
 }>;
 
-export type FirstPartyThinAgentVisibleRunState =
-  | FirstPartyThinAgentAuthoritativeRunState
-  | FirstPartyThinAgentUnknownRunState;
+export type AgentVisibleRunState =
+  | AgentAuthoritativeRunState
+  | AgentUnknownRunState;
 
-export type FirstPartyThinAgentTerminal =
-  FirstPartyThinAgentTerminalEvent["terminal"];
-export type FirstPartyThinAgentAuthoritativeEvent =
-  FirstPartyThinAgentServerEvent;
-export type FirstPartyThinAgentSubmitCommand =
+export type AgentTerminal =
+  AgentTerminalEvent["terminal"];
+export type AgentAuthoritativeEvent =
+  AgentServerEvent;
+export type AgentSubmitCommand =
   | ProtocolSubmitCommand
-  | FirstPartyThinAgentRegenerateCommand;
-export type FirstPartyThinAgentToolResultCommand =
+  | AgentRegenerateCommand;
+export type AgentToolResultCommand =
   ProtocolToolResultCommand;
-export type FirstPartyThinAgentApprovalCommand = ProtocolApprovalCommand;
-export type FirstPartyThinAgentCancelCommand = ProtocolCancelCommand;
-export type FirstPartyThinAgentCommandAckEvent = ProtocolCommandAckEvent;
+export type AgentApprovalCommand = ProtocolApprovalCommand;
+export type AgentCancelCommand = ProtocolCancelCommand;
+export type AgentCommandAckEvent = ProtocolCommandAckEvent;
 
-export type FirstPartyThinAgentConnectionPort = Readonly<{
-  state: FirstPartyThinAgentConnectionState;
+export type AgentConnectionPort = Readonly<{
+  state: AgentConnectionState;
   addAuthoritativeFrameListener: (
-    listener: (frame: FirstPartyThinAgentServerEvent) => void,
+    listener: (frame: AgentServerEvent) => void,
   ) => () => void;
   addConnectionStateListener: (
-    listener: (state: FirstPartyThinAgentConnectionState) => void,
+    listener: (state: AgentConnectionState) => void,
   ) => () => void;
   sendSubmit: (
-    command: FirstPartyThinAgentSubmitCommand,
+    command: AgentSubmitCommand,
   ) => void | Promise<void>;
   sendToolResult: (
-    command: FirstPartyThinAgentToolResultCommand,
+    command: AgentToolResultCommand,
   ) => void | Promise<void>;
   sendApproval: (
-    command: FirstPartyThinAgentApprovalCommand,
+    command: AgentApprovalCommand,
   ) => void | Promise<void>;
   sendCancel: (
-    command: FirstPartyThinAgentCancelCommand,
+    command: AgentCancelCommand,
   ) => void | Promise<void>;
 }>;
 
-export type FirstPartyThinAgentOptimisticUser = Readonly<{
+export type AgentOptimisticUser = Readonly<{
   kind: "optimistic_pending_user";
   request_id: string;
-  message: FirstPartyThinAgentUserMessage;
+  message: AgentUserMessage;
   delivery: "queued" | "sending" | "sent";
 }>;
 
-export type FirstPartyThinAgentSessionSnapshot<
-  TMessage extends FirstPartyThinAgentMessageBase,
+export type AgentSessionSnapshot<
+  TMessage extends AgentMessageBase,
 > = Readonly<{
   revision: number;
   messages: readonly TMessage[];
-  runState: FirstPartyThinAgentVisibleRunState;
+  runState: AgentVisibleRunState;
   terminal: Readonly<{
     request_id: string;
-    value: FirstPartyThinAgentTerminal;
+    value: AgentTerminal;
   }> | null;
-  optimisticUser: FirstPartyThinAgentOptimisticUser | null;
+  optimisticUser: AgentOptimisticUser | null;
 }>;
 
-export type FirstPartyThinAgentSessionErrorCode =
+export type AgentSessionErrorCode =
   | "invalid_command"
   | "pending_user_exists"
   | "run_state_busy"
   | "run_identity_mismatch"
   | "session_disposed";
 
-export class FirstPartyThinAgentSessionError extends Error {
+export class AgentSessionError extends Error {
   constructor(
-    public readonly code: FirstPartyThinAgentSessionErrorCode,
+    public readonly code: AgentSessionErrorCode,
     message: string,
   ) {
     super(message);
-    this.name = "FirstPartyThinAgentSessionError";
+    this.name = "AgentSessionError";
   }
 }
 
-export type FirstPartyThinAgentSessionOptions<
-  TMessage extends FirstPartyThinAgentMessageBase,
+export type AgentSessionOptions<
+  TMessage extends AgentMessageBase,
 > = Readonly<{
   conversationId: string;
-  connection: FirstPartyThinAgentConnectionPort;
+  connection: AgentConnectionPort;
   isAuthoritativeMessage: (value: unknown) => value is TMessage;
   onProtocolError?: (error: Error) => void;
   onCommandError?: (error: Error) => void;
-  onCommandAck?: (ack: FirstPartyThinAgentCommandAckEvent) => void;
+  onCommandAck?: (ack: AgentCommandAckEvent) => void;
 }>;
 
 type PendingSubmit = {
@@ -146,7 +146,7 @@ type PendingSubmit = {
 
 type RunStateResult = "applied" | "idempotent" | "stale" | "conflict";
 type ActiveRunState = Extract<
-  FirstPartyThinAgentAuthoritativeRunState,
+  AgentAuthoritativeRunState,
   { state: "running" | "waiting_for_client" }
 >;
 
@@ -159,12 +159,12 @@ function safeRunId(value: unknown): value is string {
 }
 
 function knownRunState(
-  value: FirstPartyThinAgentKnownRunState | Readonly<{
+  value: AgentKnownRunState | Readonly<{
     version: 1 | null;
     cursor: number | null;
     state: "unknown";
   }>,
-): FirstPartyThinAgentAuthoritativeRunState | null {
+): AgentAuthoritativeRunState | null {
   if (value.state === "idle") return value;
   if (
     (value.state === "running" || value.state === "waiting_for_client")
@@ -176,8 +176,8 @@ function knownRunState(
 }
 
 function sameRunState(
-  left: FirstPartyThinAgentAuthoritativeRunState,
-  right: FirstPartyThinAgentAuthoritativeRunState,
+  left: AgentAuthoritativeRunState,
+  right: AgentAuthoritativeRunState,
 ): boolean {
   if (left.version !== right.version
     || left.cursor !== right.cursor
@@ -195,11 +195,11 @@ function command<TKind extends ProtocolCommand["kind"]>(
   expectedKind: TKind,
 ): Extract<ProtocolCommand, { kind: TKind }> {
   try {
-    const parsed = parseFirstPartyThinAgentCommand(value);
+    const parsed = parseAgentCommand(value);
     if (parsed.kind !== expectedKind) throw new TypeError("Command kind changed.");
     return parsed as Extract<ProtocolCommand, { kind: TKind }>;
   } catch (error) {
-    throw new FirstPartyThinAgentSessionError(
+    throw new AgentSessionError(
       "invalid_command",
       error instanceof Error ? error.message : "The client command is invalid.",
     );
@@ -207,9 +207,9 @@ function command<TKind extends ProtocolCommand["kind"]>(
 }
 
 function unknownRunState(
-  reason: FirstPartyThinAgentUnknownRunState["reason"],
+  reason: AgentUnknownRunState["reason"],
   cursor: number | null,
-): FirstPartyThinAgentUnknownRunState {
+): AgentUnknownRunState {
   return Object.freeze({ version: 1, cursor, state: "unknown", busy: true, reason });
 }
 
@@ -244,7 +244,7 @@ function currentDelivery(pending: PendingSubmit): PendingSubmit["delivery"] {
 
 function sameAuthoritativeUserMessage(
   value: unknown,
-  expected: FirstPartyThinAgentUserMessage,
+  expected: AgentUserMessage,
 ): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
@@ -271,21 +271,21 @@ function sameAuthoritativeUserMessage(
   });
 }
 
-export class FirstPartyThinAgentSession<
-  TMessage extends FirstPartyThinAgentMessageBase,
+export class AgentSession<
+  TMessage extends AgentMessageBase,
 > {
   private readonly listeners = new Set<(
-    snapshot: FirstPartyThinAgentSessionSnapshot<TMessage>,
+    snapshot: AgentSessionSnapshot<TMessage>,
   ) => void>();
   private readonly detachFrameListener: () => void;
   private readonly detachConnectionStateListener: () => void;
   private messages: readonly TMessage[] = Object.freeze([]);
-  private runState: FirstPartyThinAgentVisibleRunState = unknownRunState(
+  private runState: AgentVisibleRunState = unknownRunState(
     "awaiting_session_snapshot",
     null,
   );
-  private authoritativeRunState: FirstPartyThinAgentAuthoritativeRunState | null = null;
-  private terminal: FirstPartyThinAgentSessionSnapshot<TMessage>["terminal"] = null;
+  private authoritativeRunState: AgentAuthoritativeRunState | null = null;
+  private terminal: AgentSessionSnapshot<TMessage>["terminal"] = null;
   private pendingSubmit: PendingSubmit | null = null;
   private revision = 0;
   private disposed = false;
@@ -295,9 +295,9 @@ export class FirstPartyThinAgentSession<
   private queuedDispatch: Promise<"sent" | "queued"> | null = null;
   private queuedPromotionRequested = false;
 
-  constructor(private readonly options: FirstPartyThinAgentSessionOptions<TMessage>) {
+  constructor(private readonly options: AgentSessionOptions<TMessage>) {
     if (!safeId(options.conversationId)) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "invalid_command",
         "The conversation identity is invalid.",
       );
@@ -311,12 +311,12 @@ export class FirstPartyThinAgentSession<
       );
   }
 
-  public get current(): FirstPartyThinAgentSessionSnapshot<TMessage> {
+  public get current(): AgentSessionSnapshot<TMessage> {
     return this.snapshot();
   }
 
   public subscribe(
-    listener: (snapshot: FirstPartyThinAgentSessionSnapshot<TMessage>) => void,
+    listener: (snapshot: AgentSessionSnapshot<TMessage>) => void,
   ): () => void {
     this.assertAvailable();
     this.listeners.add(listener);
@@ -334,12 +334,12 @@ export class FirstPartyThinAgentSession<
 
   public async submit(input: Readonly<{
     request_id: string;
-    user_message: FirstPartyThinAgentUserMessage;
+    user_message: AgentUserMessage;
     context_ref?: string;
   }>): Promise<"sent" | "queued"> {
     this.assertAvailable();
     if (this.pendingSubmit) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "pending_user_exists",
         "One user message is already pending server authority.",
       );
@@ -381,7 +381,7 @@ export class FirstPartyThinAgentSession<
         tool_call_id: string;
         tool_name: string;
         state: "output-available";
-        output: FirstPartyThinAgentJsonValue;
+        output: AgentJsonValue;
       }>
     | Readonly<{
         request_id: string;
@@ -443,9 +443,9 @@ export class FirstPartyThinAgentSession<
 
   private handleAuthoritativeFrame(frame: unknown): void {
     if (this.disposed) return;
-    let parsed: FirstPartyThinAgentServerEvent;
+    let parsed: AgentServerEvent;
     try {
-      parsed = parseFirstPartyThinAgentServerEvent(
+      parsed = parseAgentServerEvent(
         frame,
         this.options.conversationId,
       );
@@ -478,7 +478,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private handleSessionSnapshot(
-    frame: Extract<FirstPartyThinAgentServerEvent, { kind: "session_snapshot" }>,
+    frame: Extract<AgentServerEvent, { kind: "session_snapshot" }>,
   ): void {
     const incomingMessages = frame.messages;
     if (!Array.isArray(incomingMessages)
@@ -509,7 +509,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private handleAssistantSnapshot(
-    frame: Extract<FirstPartyThinAgentServerEvent, { kind: "assistant_snapshot" }>,
+    frame: Extract<AgentServerEvent, { kind: "assistant_snapshot" }>,
   ): void {
     if (!this.options.isAuthoritativeMessage(frame.message)
       || frame.message.role !== "assistant") {
@@ -534,7 +534,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private handleRunState(
-    value: Extract<FirstPartyThinAgentServerEvent, { kind: "run_state" }>["run_state"],
+    value: Extract<AgentServerEvent, { kind: "run_state" }>["run_state"],
   ): void {
     const parsed = knownRunState(value);
     if (!parsed) {
@@ -554,7 +554,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private handleTerminal(
-    frame: Extract<FirstPartyThinAgentServerEvent, { kind: "terminal" }>,
+    frame: Extract<AgentServerEvent, { kind: "terminal" }>,
   ): void {
     const terminal = frame.terminal;
     const authoritative = this.authoritativeRunState;
@@ -582,7 +582,7 @@ export class FirstPartyThinAgentSession<
     this.publish();
   }
 
-  private handleConnectionState(state: FirstPartyThinAgentConnectionState): void {
+  private handleConnectionState(state: AgentConnectionState): void {
     if (this.disposed) return;
     if (state !== "open") {
       this.hasSessionSnapshot = false;
@@ -608,7 +608,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private applyRunState(
-    incoming: FirstPartyThinAgentAuthoritativeRunState,
+    incoming: AgentAuthoritativeRunState,
   ): RunStateResult {
     const current = this.authoritativeRunState;
     if (current && incoming.cursor < current.cursor) return "stale";
@@ -656,7 +656,7 @@ export class FirstPartyThinAgentSession<
   }
 
   private setUnknownRunState(
-    reason: FirstPartyThinAgentUnknownRunState["reason"],
+    reason: AgentUnknownRunState["reason"],
   ): void {
     this.runState = unknownRunState(
       reason,
@@ -667,7 +667,7 @@ export class FirstPartyThinAgentSession<
 
   private protocolError(
     message: string,
-    reason: FirstPartyThinAgentUnknownRunState["reason"] = "protocol_error",
+    reason: AgentUnknownRunState["reason"] = "protocol_error",
   ): void {
     this.runState = unknownRunState(
       reason,
@@ -806,19 +806,19 @@ export class FirstPartyThinAgentSession<
   private assertIdleCommand(requestId: string): void {
     this.assertAvailable();
     if (!safeId(requestId)) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "invalid_command",
         "The request identity is invalid.",
       );
     }
     if (this.runState.state !== "idle") {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "run_state_busy",
         "The authoritative session is not idle.",
       );
     }
     if (this.pendingSubmit) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "pending_user_exists",
         "One user message is already pending server authority.",
       );
@@ -829,19 +829,19 @@ export class FirstPartyThinAgentSession<
     this.assertAvailable();
     const active = this.authoritativeRunState;
     if (!safeId(requestId)) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "invalid_command",
         "The request identity is invalid.",
       );
     }
     if (!active || active.state === "idle" || this.runState.state === "unknown") {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "run_state_busy",
         "The authoritative active run is unavailable.",
       );
     }
     if (active.request_id !== requestId) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "run_identity_mismatch",
         "The command does not match the authoritative active run.",
       );
@@ -851,7 +851,7 @@ export class FirstPartyThinAgentSession<
   private assertWaitingCommand(requestId: string): void {
     this.assertActiveCommand(requestId);
     if (this.runState.state !== "waiting_for_client") {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "run_state_busy",
         "The authoritative run is not waiting for a client tool action.",
       );
@@ -860,7 +860,7 @@ export class FirstPartyThinAgentSession<
 
   private assertAvailable(): void {
     if (this.disposed) {
-      throw new FirstPartyThinAgentSessionError(
+      throw new AgentSessionError(
         "session_disposed",
         "This SystemSculpt session is closed.",
       );
@@ -880,7 +880,7 @@ export class FirstPartyThinAgentSession<
     }
   }
 
-  private snapshot(): FirstPartyThinAgentSessionSnapshot<TMessage> {
+  private snapshot(): AgentSessionSnapshot<TMessage> {
     const pending = this.pendingSubmit;
     return Object.freeze({
       revision: this.revision,

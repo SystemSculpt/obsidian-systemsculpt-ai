@@ -274,14 +274,14 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(view.agent.hydrate).toBe(originalAgentHydrate);
   expect(jest.isMockFunction(view.agent.start)).toBe(false);
   expect(jest.isMockFunction(view.agent.hydrate)).toBe(false);
-  expect(view.agent.constructor.name).toBe("FirstPartyAgentChatSession");
+  expect(view.agent.constructor.name).toBe("AgentChatSession");
   expect(view.agent.getSnapshot()).toEqual(expect.objectContaining({
     status: "completed",
   }));
   expect(view.agent.getSnapshot()).not.toHaveProperty("terminalError");
   expect(view.agent.transport?.constructor.name)
-    .toBe("FirstPartyThinAgentSessionTransport");
-  expect(view.agent.session?.constructor.name).toBe("FirstPartyThinAgentSession");
+    .toBe("AgentSessionTransport");
+  expect(view.agent.session?.constructor.name).toBe("AgentSession");
   expect(createdSocket).not.toBeNull();
   expect(createdSockets).toHaveLength(1);
 

@@ -88,7 +88,7 @@ export type ThinAgentMutationClaim =
  * ceiling: they live for the bound server conversation and can be removed only
  * through deleteConversation() when that conversation is deliberately deleted.
  */
-export class ThinAgentMutationJournal {
+export class AgentMutationJournal {
   private loaded: Promise<void> | null = null;
   private records = new Map<string, JournalRecord>();
   private writes: Promise<void> = Promise.resolve();

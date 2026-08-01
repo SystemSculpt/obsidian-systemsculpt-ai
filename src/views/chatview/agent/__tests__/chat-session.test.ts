@@ -6,14 +6,14 @@ import {
 import type { ToolCallResult } from "../../../../types/toolCalls";
 import {
   FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
-  type FirstPartyThinAgentUserMessage,
-} from "../FirstPartyThinAgentProtocol";
+  type AgentUserMessage,
+} from "../Protocol";
 import {
-  FirstPartyAgentChatSession,
-  type FirstPartyAgentRunResult,
-} from "../FirstPartyAgentChatSession";
-import type { FirstPartyThinAgentWebSocket } from "../FirstPartyThinAgentSessionTransport";
-import { ThinAgentMutationJournal } from "../ThinAgentMutationJournal";
+  AgentChatSession,
+  type AgentRunResult,
+} from "../ChatSession";
+import type { AgentWebSocket } from "../AgentSessionTransport";
+import { AgentMutationJournal } from "../MutationJournal";
 
 const CONVERSATION_ID = `conversation_${"a".repeat(32)}`;
 const CLIENT_ID = `client_${"b".repeat(32)}`;
@@ -28,7 +28,7 @@ type WireMessage = Readonly<{
   parts: readonly Readonly<Record<string, unknown> & { type: string }>[];
 }>;
 
-function userMessage(id: string, text: string): FirstPartyThinAgentUserMessage {
+function userMessage(id: string, text: string): AgentUserMessage {
   return { id, role: "user", parts: [{ type: "text", text }] };
 }
 
@@ -177,7 +177,7 @@ function jsonResponse(value: unknown): Response {
   });
 }
 
-class FakeWebSocket implements FirstPartyThinAgentWebSocket {
+class FakeWebSocket implements AgentWebSocket {
   public readyState = 0;
   public readonly sent: string[] = [];
   public sendBehavior: ((data: string, commit: () => void) => void) | null = null;
@@ -240,7 +240,7 @@ function journalHarness() {
   };
   return {
     adapter,
-    journal: new ThinAgentMutationJournal(
+    journal: new AgentMutationJournal(
       adapter,
       ".systemsculpt/mutations.json",
       () => 1_000,
@@ -271,7 +271,7 @@ function createHarness(input: Readonly<{
   const reconcileHistory = jest.fn(async () => undefined);
   const reportError = jest.fn();
   const onLifecycle = jest.fn();
-  const agent = new FirstPartyAgentChatSession({
+  const agent = new AgentChatSession({
     baseUrl: "https://systemsculpt.test",
     pluginVersion: "6.2.7",
     licenseKey: () => "license_test",
@@ -333,8 +333,8 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 async function waitForResult(
-  pending: Promise<FirstPartyAgentRunResult>,
-): Promise<FirstPartyAgentRunResult> {
+  pending: Promise<AgentRunResult>,
+): Promise<AgentRunResult> {
   return await pending;
 }
 
@@ -363,7 +363,7 @@ function writeApprovalParts(
   ] as const;
 }
 
-const sessions: FirstPartyAgentChatSession[] = [];
+const sessions: AgentChatSession[] = [];
 
 function trackedHarness(input: Parameters<typeof createHarness>[0] = {}) {
   const harness = createHarness(input);
@@ -377,7 +377,7 @@ afterEach(async () => {
   jest.restoreAllMocks();
 });
 
-describe("FirstPartyAgentChatSession", () => {
+describe("AgentChatSession", () => {
   it("orders the optimistic user before full assistant replacements and coalesces presentation", async () => {
     const harness = trackedHarness();
     const baseUser = wireUser("user_base", "Earlier question");
@@ -396,7 +396,7 @@ describe("FirstPartyAgentChatSession", () => {
     socket.serverMessage(runState(active(1, turnId, turnId)));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    const presented: ReturnType<FirstPartyAgentChatSession["getSnapshot"]>[] = [];
+    const presented: ReturnType<AgentChatSession["getSnapshot"]>[] = [];
     harness.agent.subscribe((snapshot) => presented.push(snapshot));
     socket.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_new", [{
       type: "reasoning",

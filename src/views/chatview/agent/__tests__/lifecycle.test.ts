@@ -1,13 +1,13 @@
 import {
-  ThinAgentLifecycle,
-  type ThinAgentLifecycleInput,
-} from "../ThinAgentLifecycle";
+  AgentLifecycle,
+  type AgentLifecycleInput,
+} from "../Lifecycle";
 
-describe("ThinAgentLifecycle privacy-safe chronology", () => {
+describe("AgentLifecycle privacy-safe chronology", () => {
   it("records one ordered, bounded, exact diagnostic chronology", () => {
     const persisted: unknown[] = [];
     let now = 1_000;
-    const lifecycle = new ThinAgentLifecycle(
+    const lifecycle = new AgentLifecycle(
       (record) => persisted.push(record),
       () => now++,
     );
@@ -67,16 +67,16 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
 
   it("rejects unknown codes and phases without advancing sequence", () => {
     const persisted: unknown[] = [];
-    const lifecycle = new ThinAgentLifecycle((record) => persisted.push(record), () => 10);
+    const lifecycle = new AgentLifecycle((record) => persisted.push(record), () => 10);
 
     expect(lifecycle.record({
       code: "prompt_captured",
       phase: "response",
-    } as unknown as ThinAgentLifecycleInput)).toBeNull();
+    } as unknown as AgentLifecycleInput)).toBeNull();
     expect(lifecycle.record({
       code: "run_started",
       phase: "context",
-    } as unknown as ThinAgentLifecycleInput)).toBeNull();
+    } as unknown as AgentLifecycleInput)).toBeNull();
     expect(lifecycle.record({
       code: "run_started",
       phase: "response",
@@ -86,7 +86,7 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
 
   it("drops content fields and invalid identifiers rather than serializing caller objects", () => {
     const persisted: any[] = [];
-    const lifecycle = new ThinAgentLifecycle((record) => persisted.push(record), () => 100);
+    const lifecycle = new AgentLifecycle((record) => persisted.push(record), () => 100);
     const hostile = {
       code: "context_prepare_failed",
       phase: "start",
@@ -114,7 +114,7 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
       reason: "socket reason",
       incidentId: "incident_not-safe",
       nested: { private: true },
-    } as unknown as ThinAgentLifecycleInput;
+    } as unknown as AgentLifecycleInput;
 
     const record = lifecycle.record(hostile);
     expect(record).toEqual({
@@ -164,7 +164,7 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
     "mutation_call_conflict",
     "diagnostics_truncated",
   ] as const)("accepts the bounded observability code %s", (code) => {
-    const lifecycle = new ThinAgentLifecycle(() => undefined, () => 200);
+    const lifecycle = new AgentLifecycle(() => undefined, () => 200);
 
     expect(lifecycle.record({
       code,
@@ -177,7 +177,7 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
     "request_dispatch_returned",
     "request_dispatch_failed",
   ] as const)("accepts the privacy-safe request boundary code %s", (code) => {
-    const lifecycle = new ThinAgentLifecycle(() => undefined, () => 201);
+    const lifecycle = new AgentLifecycle(() => undefined, () => 201);
 
     expect(lifecycle.record({
       code,
@@ -191,7 +191,7 @@ describe("ThinAgentLifecycle privacy-safe chronology", () => {
   });
 
   it("keeps lifecycle persistence failures observational only", () => {
-    const lifecycle = new ThinAgentLifecycle(() => {
+    const lifecycle = new AgentLifecycle(() => {
       throw new Error("diagnostics unavailable");
     }, () => 200);
 

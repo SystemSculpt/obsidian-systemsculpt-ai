@@ -44,19 +44,19 @@ import {
   parseAttachedTextContent,
 } from "../attachments/ChatAttachmentContent";
 import {
-  FirstPartyThinAgentSession,
-  type FirstPartyThinAgentCommandAckEvent,
-  type FirstPartyThinAgentConnectionState,
-  type FirstPartyThinAgentSessionSnapshot,
-} from "./FirstPartyThinAgentSession";
+  AgentSession,
+  type AgentCommandAckEvent,
+  type AgentConnectionState,
+  type AgentSessionSnapshot,
+} from "./AuthoritativeSession";
 import {
-  FirstPartyThinAgentStreamingTransport,
-} from "./FirstPartyThinAgentStreamingTransport";
+  AgentStreamingTransport,
+} from "./StreamingTransport";
 import type {
-  FirstPartyThinAgentJsonValue,
-  FirstPartyThinAgentUserMessage,
-} from "./FirstPartyThinAgentProtocol";
-import { ThinAgentMutationJournal } from "./ThinAgentMutationJournal";
+  AgentJsonValue,
+  AgentUserMessage,
+} from "./Protocol";
+import { AgentMutationJournal } from "./MutationJournal";
 
 type WirePart = Readonly<Record<string, unknown> & { type: string }>;
 
@@ -69,12 +69,12 @@ type WireMessage = Readonly<{
 type LocalToolCall = Readonly<{
   callId: string;
   name: string;
-  input: FirstPartyThinAgentJsonValue;
+  input: AgentJsonValue;
 }>;
 
 type ToolTarget = Readonly<{
   name: string;
-  input: FirstPartyThinAgentJsonValue;
+  input: AgentJsonValue;
 }>;
 
 type ToolTargetMap = ReadonlyMap<string, ToolTarget>;
@@ -82,12 +82,12 @@ type ToolTargetMap = ReadonlyMap<string, ToolTarget>;
 type ProjectedTool = Readonly<{
   callId: string;
   name: string;
-  input: FirstPartyThinAgentJsonValue;
+  input: AgentJsonValue;
   location: "server" | "vault";
   part: WirePart;
 }>;
 
-export type FirstPartyAgentRunResult =
+export type AgentRunResult =
   | Readonly<{
       kind: "completed";
       snapshot: AgentConversationSnapshot;
@@ -103,10 +103,10 @@ export type FirstPartyAgentRunResult =
       error: ManagedAgentError;
     }>;
 
-export type FirstPartyAgentRunInput = Readonly<{
+export type AgentRunInput = Readonly<{
   conversationId: string;
   turnId: string;
-  message: FirstPartyThinAgentUserMessage;
+  message: AgentUserMessage;
   buildBody?: (
     signal: AbortSignal,
   ) => Promise<Readonly<{ context_ref?: string }> | undefined>;
@@ -114,7 +114,7 @@ export type FirstPartyAgentRunInput = Readonly<{
   beforeSend?: () => Promise<void>;
 }>;
 
-export type FirstPartyAgentLifecyclePhase =
+export type AgentLifecyclePhase =
   | "start"
   | "session"
   | "response"
@@ -125,7 +125,7 @@ export type FirstPartyAgentLifecyclePhase =
   | "render"
   | "unknown";
 
-export type FirstPartyAgentLifecycleCode =
+export type AgentLifecycleCode =
   | "session_opened"
   | "session_closed"
   | "session_interrupted"
@@ -190,9 +190,9 @@ export type FirstPartyAgentLifecycleCode =
   | "run_finished_failed"
   | "diagnostics_truncated";
 
-export type FirstPartyAgentLifecycleInput = Readonly<{
-  code: FirstPartyAgentLifecycleCode;
-  phase: FirstPartyAgentLifecyclePhase;
+export type AgentLifecycleInput = Readonly<{
+  code: AgentLifecycleCode;
+  phase: AgentLifecyclePhase;
   conversationId?: string;
   requestId?: string;
   clientInstanceId?: string;
@@ -206,19 +206,19 @@ export type FirstPartyAgentLifecycleInput = Readonly<{
   incidentId?: string;
 }>;
 
-export type FirstPartyAgentLifecycleRecord = FirstPartyAgentLifecycleInput & Readonly<{
+export type AgentLifecycleRecord = AgentLifecycleInput & Readonly<{
   sequence: number;
   timestamp: number;
 }>;
 
 type RequestClient = Pick<PlatformRequestClient, "request">;
 
-export type FirstPartyAgentChatSessionOptions = Readonly<{
+export type AgentChatSessionOptions = Readonly<{
   baseUrl: string;
   pluginVersion: string;
   licenseKey: () => string;
   bootstrapRequest: () => ThinAgentBootstrapRequest;
-  mutationJournal: ThinAgentMutationJournal;
+  mutationJournal: AgentMutationJournal;
   executeLocalTool: (
     call: LocalToolCall,
     signal: AbortSignal,
@@ -228,7 +228,7 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
   updateInputLimits?: (limits: ThinAgentInputLimits) => void;
   refreshCredits?: () => Promise<void>;
   reportError?: (error: unknown) => void;
-  onLifecycle?: (record: FirstPartyAgentLifecycleRecord) => void;
+  onLifecycle?: (record: AgentLifecycleRecord) => void;
   requestClient?: RequestClient;
   runStallGraceMs?: number;
   now?: () => number;
@@ -261,8 +261,8 @@ type ActiveRun = {
   readonly turnId: string;
   readonly approvalPolicy: ToolApprovalPolicy;
   readonly abort: AbortController;
-  readonly completion: Promise<FirstPartyAgentRunResult>;
-  readonly resolve: (result: FirstPartyAgentRunResult) => void;
+  readonly completion: Promise<AgentRunResult>;
+  readonly resolve: (result: AgentRunResult) => void;
   readonly executingToolIds: Set<string>;
   readonly settledToolIds: Set<string>;
   readonly approvalDecisions: Map<string, boolean>;
@@ -281,7 +281,7 @@ type PendingToolDelivery = {
   readonly requestId: string;
   readonly call: LocalToolCall;
   readonly state: "output-available" | "output-error";
-  readonly output?: FirstPartyThinAgentJsonValue;
+  readonly output?: AgentJsonValue;
   readonly errorText?: string;
   attemptedOpenEpoch: number | null;
   inFlight: boolean;
@@ -418,7 +418,7 @@ function toolName(part: WirePart): string | null {
     : null;
 }
 
-function toolInput(part: WirePart): FirstPartyThinAgentJsonValue {
+function toolInput(part: WirePart): AgentJsonValue {
   return toJsonValue(part.input ?? null);
 }
 
@@ -711,7 +711,7 @@ function freezeSnapshot(snapshot: AgentConversationSnapshot): AgentConversationS
  * the trailing part in place, so the trailing part's text length is included.
  */
 function runProgressKey(
-  snapshot: FirstPartyThinAgentSessionSnapshot<WireMessage>,
+  snapshot: AgentSessionSnapshot<WireMessage>,
 ): string {
   const messages = snapshot.messages;
   const last = messages[messages.length - 1];
@@ -726,7 +726,7 @@ function runProgressKey(
 function projectRun(
   active: ActiveRun,
   messages: readonly WireMessage[],
-  connectionState: FirstPartyThinAgentConnectionState,
+  connectionState: AgentConnectionState,
   runStalled = false,
 ): AgentConversationSnapshot {
   const turnMessages = currentTurnMessages(messages, active.turnId);
@@ -903,7 +903,7 @@ const OMITTED_JSON_VALUE = Symbol("systemsculpt-omitted-json-value");
  * records and become null in arrays; non-finite numbers become null; toJSON
  * is honored.
  */
-function toJsonValue(value: unknown): FirstPartyThinAgentJsonValue {
+function toJsonValue(value: unknown): AgentJsonValue {
   const cloned = jsonSafeClone(value, new WeakSet(), 0, false);
   return cloned === OMITTED_JSON_VALUE ? null : cloned;
 }
@@ -913,7 +913,7 @@ function jsonSafeClone(
   ancestors: WeakSet<object>,
   depth: number,
   skipToJson: boolean,
-): FirstPartyThinAgentJsonValue | typeof OMITTED_JSON_VALUE {
+): AgentJsonValue | typeof OMITTED_JSON_VALUE {
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return null;
@@ -939,7 +939,7 @@ function jsonSafeClone(
         return cloned === OMITTED_JSON_VALUE ? null : cloned;
       }));
     }
-    const output: Record<string, FirstPartyThinAgentJsonValue> = {};
+    const output: Record<string, AgentJsonValue> = {};
     for (const [key, entry] of Object.entries(value)) {
       const cloned = jsonSafeClone(entry, ancestors, depth + 1, false);
       if (cloned !== OMITTED_JSON_VALUE) output[key] = cloned;
@@ -1225,18 +1225,18 @@ function boundedErrorPayload(text: string): Readonly<{
   }
 }
 
-export class FirstPartyAgentChatSession {
+export class AgentChatSession {
   private readonly requestClient: RequestClient;
   private readonly now: () => number;
   private readonly listeners = new Set<(snapshot: AgentConversationSnapshot) => void>();
-  private transport: FirstPartyThinAgentStreamingTransport | null = null;
-  private session: FirstPartyThinAgentSession<WireMessage> | null = null;
+  private transport: AgentStreamingTransport | null = null;
+  private session: AgentSession<WireMessage> | null = null;
   private detachSession: (() => void) | null = null;
   private detachConnectionState: (() => void) | null = null;
   private conversationId: string | null = null;
   private authoritativeMessages: readonly WireMessage[] = Object.freeze([]);
   private presentationMessages: readonly WireMessage[] = Object.freeze([]);
-  private connectionState: FirstPartyThinAgentConnectionState = "idle";
+  private connectionState: AgentConnectionState = "idle";
   private runStalled = false;
   private runStallTimer: number | null = null;
   private runProgressKey = "";
@@ -1255,7 +1255,7 @@ export class FirstPartyAgentChatSession {
   private generation = 0;
   private openEpoch = 0;
 
-  public constructor(private readonly options: FirstPartyAgentChatSessionOptions) {
+  public constructor(private readonly options: AgentChatSessionOptions) {
     this.requestClient = options.requestClient ?? new PlatformRequestClient();
     this.now = options.now ?? Date.now;
   }
@@ -1269,8 +1269,8 @@ export class FirstPartyAgentChatSession {
     return () => this.listeners.delete(listener);
   }
 
-  public recordLifecycle(input: FirstPartyAgentLifecycleInput): void {
-    const record: FirstPartyAgentLifecycleRecord = Object.freeze({
+  public recordLifecycle(input: AgentLifecycleInput): void {
+    const record: AgentLifecycleRecord = Object.freeze({
       ...input,
       sequence: ++this.lifecycleSequence,
       timestamp: this.now(),
@@ -1292,7 +1292,7 @@ export class FirstPartyAgentChatSession {
     }
     this.disconnect();
     const generation = ++this.generation;
-    const transport = new FirstPartyThinAgentStreamingTransport({
+    const transport = new AgentStreamingTransport({
       baseUrl: this.options.baseUrl,
       pluginVersion: this.options.pluginVersion,
       licenseKey: this.options.licenseKey,
@@ -1305,7 +1305,7 @@ export class FirstPartyAgentChatSession {
       },
       requestClient: this.requestClient,
     });
-    const session = new FirstPartyThinAgentSession<WireMessage>({
+    const session = new AgentSession<WireMessage>({
       conversationId,
       connection: transport,
       isAuthoritativeMessage: isWireMessage,
@@ -1349,7 +1349,7 @@ export class FirstPartyAgentChatSession {
     }
   }
 
-  public async start(input: FirstPartyAgentRunInput): Promise<FirstPartyAgentRunResult> {
+  public async start(input: AgentRunInput): Promise<AgentRunResult> {
     if (this.active && !this.active.terminal) {
       return this.failedResult(
         input.turnId,
@@ -1456,7 +1456,7 @@ export class FirstPartyAgentChatSession {
     conversationId: string;
     requestId: string;
     rootMessageId: string;
-  }>): Promise<FirstPartyAgentRunResult> {
+  }>): Promise<AgentRunResult> {
     await this.hydrate(input.conversationId);
     const session = this.session;
     if (!session || session.current.runState.state !== "idle") {
@@ -1686,8 +1686,8 @@ export class FirstPartyAgentChatSession {
     turnId: string;
     approvalPolicy: ToolApprovalPolicy;
   }>): ActiveRun {
-    let resolve!: (result: FirstPartyAgentRunResult) => void;
-    const completion = new Promise<FirstPartyAgentRunResult>((settle) => {
+    let resolve!: (result: AgentRunResult) => void;
+    const completion = new Promise<AgentRunResult>((settle) => {
       resolve = settle;
     });
     return {
@@ -1712,7 +1712,7 @@ export class FirstPartyAgentChatSession {
   }
 
   private messagesWithOptimisticUser(
-    snapshot: FirstPartyThinAgentSessionSnapshot<WireMessage>,
+    snapshot: AgentSessionSnapshot<WireMessage>,
   ): readonly WireMessage[] {
     const optimistic = snapshot.optimisticUser;
     if (!optimistic) return snapshot.messages;
@@ -1739,7 +1739,7 @@ export class FirstPartyAgentChatSession {
     ]);
   }
 
-  private handleSessionSnapshot(snapshot: FirstPartyThinAgentSessionSnapshot<WireMessage>): void {
+  private handleSessionSnapshot(snapshot: AgentSessionSnapshot<WireMessage>): void {
     // The server itself reports whose turn it is. A projected phase cannot
     // stand in for that: between the run entering waiting_for_client and the
     // tool part rendering, the projection still reads as "thinking".
@@ -1814,7 +1814,7 @@ export class FirstPartyAgentChatSession {
   }
 
   private handleCommandAck(
-    ack: FirstPartyThinAgentCommandAckEvent,
+    ack: AgentCommandAckEvent,
     generation: number,
   ): void {
     if (
@@ -1868,7 +1868,7 @@ export class FirstPartyAgentChatSession {
     }
   }
 
-  private handleConnectionState(state: FirstPartyThinAgentConnectionState): void {
+  private handleConnectionState(state: AgentConnectionState): void {
     const active = this.active;
     if (state === "open") {
       this.openEpoch += 1;
@@ -2483,7 +2483,7 @@ export class FirstPartyAgentChatSession {
       this.connectionState,
     );
     this.commitSnapshot(snapshot);
-    const result: FirstPartyAgentRunResult = terminal.outcome === "succeeded"
+    const result: AgentRunResult = terminal.outcome === "succeeded"
       ? {
           kind: "completed",
           snapshot,
@@ -2498,7 +2498,7 @@ export class FirstPartyAgentChatSession {
     }
   }
 
-  private completeActive(active: ActiveRun, result: FirstPartyAgentRunResult): void {
+  private completeActive(active: ActiveRun, result: AgentRunResult): void {
     if (this.active?.token !== active.token) return;
     this.clearRunStallTimer();
     this.runStalled = false;
@@ -2545,7 +2545,7 @@ export class FirstPartyAgentChatSession {
     this.completeActive(active, { kind: "failed", snapshot, error });
   }
 
-  private failedResult(turnId: string, error: ManagedAgentError): FirstPartyAgentRunResult {
+  private failedResult(turnId: string, error: ManagedAgentError): AgentRunResult {
     const snapshot = freezeSnapshot({
       runId: null,
       turnId,

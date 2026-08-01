@@ -1,6 +1,6 @@
 import {
-  FirstPartyThinAgentStreamingTransport,
-} from "../FirstPartyThinAgentStreamingTransport";
+  AgentStreamingTransport,
+} from "../StreamingTransport";
 
 const CONVERSATION_ID = `conversation_${"a".repeat(32)}`;
 const CLIENT_ID = `client_${"b".repeat(32)}`;
@@ -27,6 +27,17 @@ function bootstrapResponse() {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
+function snapshotResponse(): Response {
+  return new Response(JSON.stringify({
+    type: "systemsculpt.agent.event.v1",
+    version: 1,
+    kind: "session_snapshot",
+    conversation_id: CONVERSATION_ID,
+    messages: [],
+    run_state: { version: 1, cursor: 0, state: "idle" },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 function sseResponse(frames: readonly unknown[]): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -47,11 +58,12 @@ function harness(frames: readonly unknown[]) {
   const calls: Array<Record<string, unknown>> = [];
   const request = jest.fn(async (input: Record<string, unknown>) => {
     calls.push(input);
-    return String(input.url).includes("/agent/bootstrap")
-      ? bootstrapResponse()
-      : sseResponse(frames);
+    const url = String(input.url);
+    if (url.includes("/agent/bootstrap")) return bootstrapResponse();
+    if (url.includes("/get-messages")) return snapshotResponse();
+    return sseResponse(frames);
   });
-  const transport = new FirstPartyThinAgentStreamingTransport({
+  const transport = new AgentStreamingTransport({
     baseUrl: "https://systemsculpt.test",
     licenseKey: () => "license_test",
     pluginVersion: "6.2.7",
@@ -71,7 +83,7 @@ function submit(id: string) {
   } as never;
 }
 
-describe("FirstPartyThinAgentStreamingTransport", () => {
+describe("AgentStreamingTransport", () => {
   it("streams a turn's authoritative frames and settles when the stream ends", async () => {
     const turnId = "user_stream_ok";
     const { transport, calls } = harness([
@@ -88,7 +100,8 @@ describe("FirstPartyThinAgentStreamingTransport", () => {
 
     // The promise resolving is the turn boundary: the server closed the
     // stream, so there is nothing left to wait on.
-    expect(seen).toEqual(["run_state", "terminal"]);
+    // connect() synchronizes first, so the snapshot leads the turn's frames.
+    expect(seen).toEqual(["session_snapshot", "run_state", "terminal"]);
     expect(transport.state).toBe("open");
     const turnCall = calls.find((call) => String(call.url).includes("/agent/turn"));
     expect(turnCall?.method).toBe("POST");
@@ -113,10 +126,11 @@ describe("FirstPartyThinAgentStreamingTransport", () => {
 
   it("ignores a frame it cannot parse rather than surfacing partial state", async () => {
     const { transport } = harness([]);
+    await transport.connect();
+    // Listen after synchronizing so only the malformed chunk could appear.
     const seen: unknown[] = [];
     transport.addAuthoritativeFrameListener((frame) => seen.push(frame));
 
-    await transport.connect();
     // Reach the private emitter the way a truncated stream chunk would.
     (transport as unknown as { emit: (chunk: string) => void })
       .emit("data: {not json");

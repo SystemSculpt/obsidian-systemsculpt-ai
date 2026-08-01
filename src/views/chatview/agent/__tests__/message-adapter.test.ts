@@ -3,7 +3,7 @@ import {
   parseAttachedTextContent,
 } from "../../attachments/ChatAttachmentContent";
 import type { ChatMessage } from "../../../../types";
-import { toThinAgentUserMessage } from "../ThinAgentMessageAdapter";
+import { toThinAgentUserMessage } from "../MessageAdapter";
 
 function decodeDataUrl(url: string): string {
   const encoded = url.slice(url.indexOf(",") + 1);

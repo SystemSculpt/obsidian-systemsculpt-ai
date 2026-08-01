@@ -362,7 +362,7 @@ function networkViolations(file) {
 }
 
 test("first-party client import policy rejects every vendor SDK import form", () => {
-  const relative = "src/views/chatview/thin/FutureFirstPartyRuntime.ts";
+  const relative = "src/views/chatview/agent/FutureFirstPartyRuntime.ts";
   const mutations = [
     {
       label: "extra named symbol",

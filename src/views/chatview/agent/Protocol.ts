@@ -43,15 +43,15 @@ const MAX_SESSION_MESSAGES = 256;
 const INVALID_JSON_VALUE = Symbol("invalid-json-value");
 const runStateCanonicals = new WeakMap<object, string>();
 
-export type FirstPartyThinAgentJsonValue =
+export type AgentJsonValue =
   | null
   | boolean
   | number
   | string
-  | readonly FirstPartyThinAgentJsonValue[]
-  | Readonly<{ [key: string]: FirstPartyThinAgentJsonValue }>;
+  | readonly AgentJsonValue[]
+  | Readonly<{ [key: string]: AgentJsonValue }>;
 
-export type FirstPartyThinAgentUserMessagePart =
+export type AgentUserMessagePart =
   | Readonly<{
       type: "text";
       text: string;
@@ -63,10 +63,10 @@ export type FirstPartyThinAgentUserMessagePart =
       filename?: string;
     }>;
 
-export type FirstPartyThinAgentUserMessage = Readonly<{
+export type AgentUserMessage = Readonly<{
   id: string;
   role: "user";
-  parts: readonly FirstPartyThinAgentUserMessagePart[];
+  parts: readonly AgentUserMessagePart[];
 }>;
 
 type CommandBase = Readonly<{
@@ -75,24 +75,24 @@ type CommandBase = Readonly<{
   request_id: string;
 }>;
 
-export type FirstPartyThinAgentSubmitCommand = CommandBase & Readonly<{
+export type AgentSubmitCommand = CommandBase & Readonly<{
   kind: "submit";
-  user_message: FirstPartyThinAgentUserMessage;
+  user_message: AgentUserMessage;
   context_ref?: string;
 }>;
 
-export type FirstPartyThinAgentRegenerateCommand = CommandBase & Readonly<{
+export type AgentRegenerateCommand = CommandBase & Readonly<{
   kind: "regenerate";
   root_message_id: string;
 }>;
 
-export type FirstPartyThinAgentToolResultCommand = CommandBase & (
+export type AgentToolResultCommand = CommandBase & (
   | Readonly<{
       kind: "client_tool_result";
       tool_call_id: string;
       tool_name: string;
       state: "output-available";
-      output: FirstPartyThinAgentJsonValue;
+      output: AgentJsonValue;
     }>
   | Readonly<{
       kind: "client_tool_result";
@@ -103,24 +103,24 @@ export type FirstPartyThinAgentToolResultCommand = CommandBase & (
     }>
 );
 
-export type FirstPartyThinAgentApprovalCommand = CommandBase & Readonly<{
+export type AgentApprovalCommand = CommandBase & Readonly<{
   kind: "client_tool_approval";
   tool_call_id: string;
   approved: boolean;
 }>;
 
-export type FirstPartyThinAgentCancelCommand = CommandBase & Readonly<{
+export type AgentCancelCommand = CommandBase & Readonly<{
   kind: "cancel";
 }>;
 
-export type FirstPartyThinAgentCommand =
-  | FirstPartyThinAgentSubmitCommand
-  | FirstPartyThinAgentRegenerateCommand
-  | FirstPartyThinAgentToolResultCommand
-  | FirstPartyThinAgentApprovalCommand
-  | FirstPartyThinAgentCancelCommand;
+export type AgentCommand =
+  | AgentSubmitCommand
+  | AgentRegenerateCommand
+  | AgentToolResultCommand
+  | AgentApprovalCommand
+  | AgentCancelCommand;
 
-export type FirstPartyThinAgentDiagnosticPayload = Readonly<{
+export type AgentDiagnosticPayload = Readonly<{
   version: 1;
   severity: "info" | "warn" | "error";
   code: string;
@@ -149,12 +149,12 @@ export type FirstPartyThinAgentDiagnosticPayload = Readonly<{
   retryable?: boolean;
 }>;
 
-export type FirstPartyThinAgentDiagnosticFrame = Readonly<{
+export type AgentDiagnosticFrame = Readonly<{
   type: typeof FIRST_PARTY_THIN_AGENT_DIAGNOSTIC_TYPE;
-  payload: FirstPartyThinAgentDiagnosticPayload;
+  payload: AgentDiagnosticPayload;
 }>;
 
-export type FirstPartyThinAgentKnownRunState =
+export type AgentKnownRunState =
   | Readonly<{
       version: 1;
       cursor: number;
@@ -169,15 +169,15 @@ export type FirstPartyThinAgentKnownRunState =
       root_message_id: string;
     }>;
 
-export type FirstPartyThinAgentUnknownRunState = Readonly<{
+export type AgentUnknownRunState = Readonly<{
   version: 1 | null;
   cursor: number | null;
   state: "unknown";
 }>;
 
-export type FirstPartyThinAgentRunState =
-  | FirstPartyThinAgentKnownRunState
-  | FirstPartyThinAgentUnknownRunState;
+export type AgentRunState =
+  | AgentKnownRunState
+  | AgentUnknownRunState;
 
 type ServerEventBase = Readonly<{
   type: typeof FIRST_PARTY_THIN_AGENT_EVENT_TYPE;
@@ -185,30 +185,30 @@ type ServerEventBase = Readonly<{
   conversation_id: string;
 }>;
 
-export type FirstPartyThinAgentSessionSnapshotEvent = ServerEventBase & Readonly<{
+export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   kind: "session_snapshot";
   messages: readonly Readonly<Record<string, unknown>>[];
-  run_state: FirstPartyThinAgentRunState;
+  run_state: AgentRunState;
 }>;
 
-export type FirstPartyThinAgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
+export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
   kind: "assistant_snapshot";
   request_id: string;
   message: Readonly<Record<string, unknown>>;
 }>;
 
-export type FirstPartyThinAgentRunStateEvent = ServerEventBase & Readonly<{
+export type AgentRunStateEvent = ServerEventBase & Readonly<{
   kind: "run_state";
-  run_state: FirstPartyThinAgentRunState;
+  run_state: AgentRunState;
 }>;
 
-export type FirstPartyThinAgentTerminalEvent = ServerEventBase & Readonly<{
+export type AgentTerminalEvent = ServerEventBase & Readonly<{
   kind: "terminal";
   request_id: string;
   terminal: ThinAgentRunTerminalData;
 }>;
 
-export type FirstPartyThinAgentCommandAckEvent = ServerEventBase & (
+export type AgentCommandAckEvent = ServerEventBase & (
   | Readonly<{
       kind: "command_ack";
       request_id: string;
@@ -224,32 +224,32 @@ export type FirstPartyThinAgentCommandAckEvent = ServerEventBase & (
     }>
 );
 
-export type FirstPartyThinAgentUnknownEvent = ServerEventBase & Readonly<{
+export type AgentUnknownEvent = ServerEventBase & Readonly<{
   kind: "unknown";
   raw_kind: string;
   raw: Readonly<Record<string, unknown>>;
 }>;
 
-export type FirstPartyThinAgentServerEvent =
-  | FirstPartyThinAgentSessionSnapshotEvent
-  | FirstPartyThinAgentAssistantSnapshotEvent
-  | FirstPartyThinAgentRunStateEvent
-  | FirstPartyThinAgentTerminalEvent
-  | FirstPartyThinAgentCommandAckEvent
-  | FirstPartyThinAgentUnknownEvent;
+export type AgentServerEvent =
+  | AgentSessionSnapshotEvent
+  | AgentAssistantSnapshotEvent
+  | AgentRunStateEvent
+  | AgentTerminalEvent
+  | AgentCommandAckEvent
+  | AgentUnknownEvent;
 
-export class FirstPartyThinAgentProtocolError extends Error {
+export class AgentProtocolError extends Error {
   public constructor(
     public readonly code: string,
     message: string,
   ) {
     super(message);
-    this.name = "FirstPartyThinAgentProtocolError";
+    this.name = "AgentProtocolError";
   }
 }
 
 function fail(code: string, message: string): never {
-  throw new FirstPartyThinAgentProtocolError(code, message);
+  throw new AgentProtocolError(code, message);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -350,13 +350,13 @@ function validAttachmentName(value: unknown): boolean {
 function sanitizeJsonValue(
   value: unknown,
   stripEncryptedReasoning: boolean,
-): FirstPartyThinAgentJsonValue | typeof INVALID_JSON_VALUE {
+): AgentJsonValue | typeof INVALID_JSON_VALUE {
   const seen = new WeakSet<object>();
   let collections = 0;
   const visit = (
     current: unknown,
     depth: number,
-  ): FirstPartyThinAgentJsonValue | typeof INVALID_JSON_VALUE => {
+  ): AgentJsonValue | typeof INVALID_JSON_VALUE => {
     if (
       current === null
       || typeof current === "boolean"
@@ -381,7 +381,7 @@ function sanitizeJsonValue(
         seen.delete(current);
         return INVALID_JSON_VALUE;
       }
-      const output: FirstPartyThinAgentJsonValue[] = [];
+      const output: AgentJsonValue[] = [];
       for (const entry of current) {
         const parsed = visit(entry, depth + 1);
         if (parsed === INVALID_JSON_VALUE) {
@@ -402,7 +402,7 @@ function sanitizeJsonValue(
       seen.delete(current);
       return INVALID_JSON_VALUE;
     }
-    const output: Record<string, FirstPartyThinAgentJsonValue> = {};
+    const output: Record<string, AgentJsonValue> = {};
     for (const key of keys) {
       if (stripEncryptedReasoning && ENCRYPTED_REASONING_KEYS.has(key)) continue;
       const parsed = visit(current[key], depth + 1);
@@ -422,7 +422,7 @@ function sanitizeJsonValue(
   }
 }
 
-function parseJsonValue(value: unknown): FirstPartyThinAgentJsonValue {
+function parseJsonValue(value: unknown): AgentJsonValue {
   const parsed = sanitizeJsonValue(value, false);
   if (parsed === INVALID_JSON_VALUE) {
     return fail("command_too_complex", "The client command contains invalid JSON data.");
@@ -540,7 +540,7 @@ function canonicalJson(value: unknown): string {
   return visit(value, 0);
 }
 
-function rememberRunState<T extends FirstPartyThinAgentRunState>(
+function rememberRunState<T extends AgentRunState>(
   state: T,
   raw: unknown,
 ): T {
@@ -548,7 +548,7 @@ function rememberRunState<T extends FirstPartyThinAgentRunState>(
   return state;
 }
 
-function parseUserMessage(value: unknown): FirstPartyThinAgentUserMessage {
+function parseUserMessage(value: unknown): AgentUserMessage {
   if (
     !isRecord(value)
     || !hasExactKeys(value, ["id", "role", "parts"])
@@ -561,7 +561,7 @@ function parseUserMessage(value: unknown): FirstPartyThinAgentUserMessage {
   let textBytes = 0;
   let imageBytes = 0;
   let imageCount = 0;
-  const parts = value.parts.map((part): FirstPartyThinAgentUserMessagePart => {
+  const parts = value.parts.map((part): AgentUserMessagePart => {
     if (!isRecord(part) || typeof part.type !== "string") {
       return fail("invalid_command", "The submitted user message contains an invalid part.");
     }
@@ -636,9 +636,9 @@ function commandBase(value: Record<string, unknown>): void {
   ) return fail("invalid_command", "The client command identity is invalid.");
 }
 
-export function parseFirstPartyThinAgentCommand(
+export function parseAgentCommand(
   value: unknown,
-): FirstPartyThinAgentCommand {
+): AgentCommand {
   if (!isRecord(value) || typeof value.kind !== "string") {
     return fail("invalid_command", "The client command is invalid.");
   }
@@ -753,9 +753,9 @@ export function parseFirstPartyThinAgentCommand(
   return fail("unsupported_command", "The client command kind is unsupported.");
 }
 
-export function parseFirstPartyThinAgentDiagnosticPayload(
+export function parseAgentDiagnosticPayload(
   value: unknown,
-): FirstPartyThinAgentDiagnosticPayload {
+): AgentDiagnosticPayload {
   const required = ["version", "severity", "code", "phase"] as const;
   const optional = [
     "sequence", "timestamp", "conversation_id", "request_id",
@@ -816,12 +816,12 @@ export function parseFirstPartyThinAgentDiagnosticPayload(
       return fail("invalid_diagnostic", "The client diagnostic identity is invalid.");
     }
   }
-  return Object.freeze({ ...value }) as FirstPartyThinAgentDiagnosticPayload;
+  return Object.freeze({ ...value }) as AgentDiagnosticPayload;
 }
 
-export function parseFirstPartyThinAgentRunState(
+export function parseAgentRunState(
   value: unknown,
-): FirstPartyThinAgentRunState {
+): AgentRunState {
   if (!isRecord(value)) {
     return rememberRunState(
       Object.freeze({ version: null, cursor: null, state: "unknown" }),
@@ -896,10 +896,10 @@ function serverBase(
   };
 }
 
-export function parseFirstPartyThinAgentServerEvent(
+export function parseAgentServerEvent(
   value: unknown,
   expectedConversationId: string,
-): FirstPartyThinAgentServerEvent {
+): AgentServerEvent {
   if (
     !isRecord(value)
     || typeof value.kind !== "string"
@@ -918,7 +918,7 @@ export function parseFirstPartyThinAgentServerEvent(
       ...base,
       kind: "session_snapshot",
       messages: Object.freeze(value.messages.map((message) => parseServerMessage(message))),
-      run_state: parseFirstPartyThinAgentRunState(value.run_state),
+      run_state: parseAgentRunState(value.run_state),
     });
   }
   if (value.kind === "assistant_snapshot") {
@@ -936,7 +936,7 @@ export function parseFirstPartyThinAgentServerEvent(
     return Object.freeze({
       ...base,
       kind: "run_state",
-      run_state: parseFirstPartyThinAgentRunState(value.run_state),
+      run_state: parseAgentRunState(value.run_state),
     });
   }
   if (value.kind === "terminal") {
@@ -1018,8 +1018,8 @@ export function parseFirstPartyThinAgentServerEvent(
   });
 }
 
-export function canonicalFirstPartyThinAgentRunState(
-  value: FirstPartyThinAgentRunState,
+export function canonicalAgentRunState(
+  value: AgentRunState,
 ): string {
   const remembered = runStateCanonicals.get(value);
   if (remembered !== undefined) return remembered;

@@ -3,7 +3,7 @@
  */
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
-import { THIN_AGENT_LIFECYCLE_CODES } from "../../views/chatview/thin/ThinAgentLifecycle";
+import { THIN_AGENT_LIFECYCLE_CODES } from "../../views/chatview/agent/Lifecycle";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -191,7 +191,7 @@ describe("PluginLogger", () => {
           level: "info",
           message: "thin-agent:lifecycle",
           context: {
-            source: "ThinAgentLifecycle",
+            source: "AgentLifecycle",
             metadata: {
               sequence: 7,
               timestamp: 123,
@@ -239,7 +239,7 @@ describe("PluginLogger", () => {
         expect.objectContaining({
           message: "thin-agent:lifecycle",
           context: {
-            source: "ThinAgentLifecycle",
+            source: "AgentLifecycle",
             metadata: { code: "run_started", phase },
           },
         }),

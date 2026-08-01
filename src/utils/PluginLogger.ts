@@ -140,7 +140,7 @@ const THIN_AGENT_FAILURE_CAUSES = new Set([
   "type_error",
   "view_detached",
 ]);
-// Keep this synchronized with the strict ThinAgentLifecycle contract. The
+// Keep this synchronized with the strict AgentLifecycle contract. The
 // logger cannot import from the ChatView layer without inverting dependencies.
 const THIN_AGENT_LIFECYCLE_CODES = new Set([
   "session_opened",
@@ -254,7 +254,7 @@ export class PluginLogger {
     const sanitized = sanitizeLifecycleMetadata(metadata);
     if (!sanitized) return;
     this.write("info", "thin-agent:lifecycle", undefined, {
-      source: "ThinAgentLifecycle",
+      source: "AgentLifecycle",
       metadata: sanitized,
     });
   }
@@ -328,7 +328,7 @@ export class PluginLogger {
 
     this.pendingFlush.push(entry);
     this.ensureFlushScheduled();
-    if (thinAgentFailure || entry.context?.source === "ThinAgentLifecycle") {
+    if (thinAgentFailure || entry.context?.source === "AgentLifecycle") {
       // Thin-agent diagnostics are already durably persisted here and, when
       // connected, emitted through the strict client-diagnostic contract.
       // Sending them through patched console and ErrorCollector would create
@@ -369,7 +369,7 @@ export class PluginLogger {
       }
       // info/debug entries fall through to standard level gating
     }
-    if (context?.source === "ThinAgentLifecycle" && level === "info") {
+    if (context?.source === "AgentLifecycle" && level === "info") {
       return true;
     }
 
@@ -636,7 +636,7 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
 
   const isLifecycle = entry.level === "info"
     && entry.message === "thin-agent:lifecycle"
-    && entry.context?.source === "ThinAgentLifecycle";
+    && entry.context?.source === "AgentLifecycle";
   const isFailure = entry.level === "error"
     && entry.message === THIN_AGENT_FAILURE_LOG_MESSAGE
     && entry.context?.source === "ThinAgentClient";

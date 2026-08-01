@@ -67,9 +67,9 @@ export const THIN_AGENT_LIFECYCLE_CODES = [
   "diagnostics_truncated",
 ] as const;
 
-export type ThinAgentLifecycleCode = typeof THIN_AGENT_LIFECYCLE_CODES[number];
+export type AgentLifecycleCode = typeof THIN_AGENT_LIFECYCLE_CODES[number];
 
-export type ThinAgentLifecyclePhase =
+export type AgentLifecyclePhase =
   | "start"
   | "session"
   | "response"
@@ -80,9 +80,9 @@ export type ThinAgentLifecyclePhase =
   | "render"
   | "unknown";
 
-export type ThinAgentLifecycleInput = Readonly<{
-  code: ThinAgentLifecycleCode;
-  phase: ThinAgentLifecyclePhase;
+export type AgentLifecycleInput = Readonly<{
+  code: AgentLifecycleCode;
+  phase: AgentLifecyclePhase;
   conversationId?: string;
   requestId?: string;
   clientInstanceId?: string;
@@ -96,11 +96,11 @@ export type ThinAgentLifecycleInput = Readonly<{
   incidentId?: string;
 }>;
 
-export type ThinAgentLifecycleRecord = Readonly<{
+export type AgentLifecycleRecord = Readonly<{
   sequence: number;
   timestamp: number;
-  code: ThinAgentLifecycleCode;
-  phase: ThinAgentLifecyclePhase;
+  code: AgentLifecycleCode;
+  phase: AgentLifecyclePhase;
   conversationId?: string;
   requestId?: string;
   clientInstanceId?: string;
@@ -114,15 +114,15 @@ export type ThinAgentLifecycleRecord = Readonly<{
   incidentId?: string;
 }>;
 
-export type ThinAgentLifecycleDiagnosticFrame = Readonly<{
+export type AgentLifecycleDiagnosticFrame = Readonly<{
   type: "systemsculpt.client_diagnostic.v1";
   payload: Readonly<{
     version: 1;
     severity: "info";
     sequence: number;
     timestamp: number;
-    code: ThinAgentLifecycleCode;
-    phase: ThinAgentLifecyclePhase;
+    code: AgentLifecycleCode;
+    phase: AgentLifecyclePhase;
     conversation_id?: string;
     request_id?: string;
     client_instance_id?: string;
@@ -171,15 +171,15 @@ function boundedIdentifier(value: unknown, maximum: number): string | undefined 
  * Strict, content-free client lifecycle recorder. It copies only explicitly
  * allowlisted scalar fields and never serializes caller-owned objects.
  */
-export class ThinAgentLifecycle {
+export class AgentLifecycle {
   private sequence = 0;
 
   constructor(
-    private readonly persist: (record: ThinAgentLifecycleRecord) => void,
+    private readonly persist: (record: AgentLifecycleRecord) => void,
     private readonly now: () => number = Date.now,
   ) {}
 
-  public record(input: ThinAgentLifecycleInput): ThinAgentLifecycleRecord | null {
+  public record(input: AgentLifecycleInput): AgentLifecycleRecord | null {
     if (!CODE_SET.has(input.code) || !PHASE_SET.has(input.phase)) return null;
     const conversationId = typeof input.conversationId === "string"
       && CONVERSATION_ID.test(input.conversationId)
@@ -209,7 +209,7 @@ export class ThinAgentLifecycle {
       && INCIDENT_ID.test(input.incidentId)
       ? input.incidentId
       : undefined;
-    const record: ThinAgentLifecycleRecord = Object.freeze({
+    const record: AgentLifecycleRecord = Object.freeze({
       sequence: ++this.sequence,
       timestamp: this.now(),
       code: input.code,
@@ -235,8 +235,8 @@ export class ThinAgentLifecycle {
   }
 
   public diagnosticFrame(
-    record: ThinAgentLifecycleRecord,
-  ): ThinAgentLifecycleDiagnosticFrame {
+    record: AgentLifecycleRecord,
+  ): AgentLifecycleDiagnosticFrame {
     return Object.freeze({
       type: "systemsculpt.client_diagnostic.v1",
       payload: Object.freeze({

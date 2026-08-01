@@ -11,18 +11,18 @@ import type { ToolCallResult } from "../../src/types/toolCalls";
 import {
   FIRST_PARTY_THIN_AGENT_COMMAND_TYPE,
   FIRST_PARTY_THIN_AGENT_EVENT_TYPE,
-  type FirstPartyThinAgentJsonValue,
-  type FirstPartyThinAgentUserMessage,
-} from "../../src/views/chatview/thin/FirstPartyThinAgentProtocol";
+  type AgentJsonValue,
+  type AgentUserMessage,
+} from "../../src/views/chatview/agent/Protocol";
 import {
-  FirstPartyAgentChatSession,
-  type FirstPartyAgentLifecycleRecord,
-  type FirstPartyAgentRunResult,
-} from "../../src/views/chatview/thin/FirstPartyAgentChatSession";
+  AgentChatSession,
+  type AgentLifecycleRecord,
+  type AgentRunResult,
+} from "../../src/views/chatview/agent/ChatSession";
 import type {
-  FirstPartyThinAgentWebSocket,
-} from "../../src/views/chatview/thin/FirstPartyThinAgentSessionTransport";
-import { ThinAgentMutationJournal } from "../../src/views/chatview/thin/ThinAgentMutationJournal";
+  AgentWebSocket,
+} from "../../src/views/chatview/agent/AgentSessionTransport";
+import { AgentMutationJournal } from "../../src/views/chatview/agent/MutationJournal";
 
 type ToolCall = Readonly<{
   id: string;
@@ -105,7 +105,7 @@ type ExecuteLocalTool = (
   call: Readonly<{
     callId: string;
     name: string;
-    input: FirstPartyThinAgentJsonValue;
+    input: AgentJsonValue;
   }>,
   signal: AbortSignal,
 ) => Promise<ToolCallResult>;
@@ -191,7 +191,7 @@ function deterministicResult(call: ToolCall): ToolCallResult {
   };
 }
 
-function userMessage(id: string, text: string): FirstPartyThinAgentUserMessage {
+function userMessage(id: string, text: string): AgentUserMessage {
   return { id, role: "user", parts: [{ type: "text", text }] };
 }
 
@@ -375,7 +375,7 @@ function matchesFailure(frame: Frame, failure: CommandFailure): boolean {
     );
 }
 
-class FakeWebSocket implements FirstPartyThinAgentWebSocket {
+class FakeWebSocket implements AgentWebSocket {
   public readyState = 0;
   public readonly attempted: Frame[] = [];
   public readonly sent: Frame[] = [];
@@ -474,7 +474,7 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   throw new Error("Timed out waiting for " + label + ".");
 }
 
-const trackedSessions: FirstPartyAgentChatSession[] = [];
+const trackedSessions: AgentChatSession[] = [];
 
 function createHarness(options: Readonly<{
   adapter?: MemoryDataAdapter;
@@ -483,7 +483,7 @@ function createHarness(options: Readonly<{
   const sockets: FakeWebSocket[] = [];
   const urls: string[] = [];
   const adapter = options.adapter ?? new MemoryDataAdapter();
-  const journal = new ThinAgentMutationJournal(
+  const journal = new AgentMutationJournal(
     adapter,
     MUTATION_PATH,
     () => 1_000,
@@ -505,8 +505,8 @@ function createHarness(options: Readonly<{
   const persistAssistant = jest.fn(async () => undefined);
   const reconcileHistory = jest.fn(async () => undefined);
   const reportError = jest.fn();
-  const lifecycle: FirstPartyAgentLifecycleRecord[] = [];
-  const agent = new FirstPartyAgentChatSession({
+  const lifecycle: AgentLifecycleRecord[] = [];
+  const agent = new AgentChatSession({
     baseUrl: "https://systemsculpt.test",
     pluginVersion: "6.2.7",
     licenseKey: () => "license_endurance",
@@ -591,8 +591,8 @@ function currentMessages(
 
 async function completeServerRun(
   socket: FakeWebSocket,
-  pending: Promise<FirstPartyAgentRunResult>,
-): Promise<FirstPartyAgentRunResult> {
+  pending: Promise<AgentRunResult>,
+): Promise<AgentRunResult> {
   socket.serverMessage(runState(idle(2)));
   socket.serverMessage(succeededTerminal());
   return pending;
@@ -1019,7 +1019,7 @@ describe("thin-agent-v1 first-party native endurance", () => {
     }));
 
     if (fixture.mutation_replay.different_input_is_conflict) {
-      const conflictJournal = new ThinAgentMutationJournal(
+      const conflictJournal = new AgentMutationJournal(
         adapter,
         MUTATION_PATH,
         () => 2_000,

@@ -1,18 +1,18 @@
 import type { PlatformRequestClient } from "../../../services/PlatformRequestClient";
 import type { ThinAgentBootstrapRequest } from "../../../services/managed/ThinAgentV1Contract";
 import {
-  parseFirstPartyThinAgentCommand,
-  type FirstPartyThinAgentApprovalCommand,
-  type FirstPartyThinAgentCancelCommand,
-  type FirstPartyThinAgentRegenerateCommand,
-  type FirstPartyThinAgentServerEvent,
-  type FirstPartyThinAgentSubmitCommand,
-  type FirstPartyThinAgentToolResultCommand,
-} from "./FirstPartyThinAgentProtocol";
+  parseAgentCommand,
+  type AgentApprovalCommand,
+  type AgentCancelCommand,
+  type AgentRegenerateCommand,
+  type AgentServerEvent,
+  type AgentSubmitCommand,
+  type AgentToolResultCommand,
+} from "./Protocol";
 import type {
-  FirstPartyThinAgentConnectionPort,
-  FirstPartyThinAgentConnectionState,
-} from "./FirstPartyThinAgentSession";
+  AgentConnectionPort,
+  AgentConnectionState,
+} from "./AuthoritativeSession";
 
 /**
  * Streaming-HTTP implementation of the session's connection port.
@@ -30,7 +30,7 @@ import type {
  * turn fails its own request and the next command starts a fresh one.
  */
 
-export type FirstPartyThinAgentStreamingTransportOptions = Readonly<{
+export type AgentStreamingTransportOptions = Readonly<{
   baseUrl: string;
   licenseKey: () => string;
   pluginVersion: string;
@@ -43,34 +43,34 @@ type BootstrapAccess = Readonly<{ token: string; expiresAt: number }>;
 
 const ACCESS_REFRESH_MARGIN_MS = 5_000;
 
-export class FirstPartyThinAgentStreamingTransport
-implements FirstPartyThinAgentConnectionPort {
-  private connectionState: FirstPartyThinAgentConnectionState = "idle";
+export class AgentStreamingTransport
+implements AgentConnectionPort {
+  private connectionState: AgentConnectionState = "idle";
   private readonly frameListeners =
-    new Set<(frame: FirstPartyThinAgentServerEvent) => void>();
+    new Set<(frame: AgentServerEvent) => void>();
   private readonly stateListeners =
-    new Set<(state: FirstPartyThinAgentConnectionState) => void>();
+    new Set<(state: AgentConnectionState) => void>();
   private access: BootstrapAccess | null = null;
   private inFlight: AbortController | null = null;
   private disposed = false;
 
   public constructor(
-    private readonly options: FirstPartyThinAgentStreamingTransportOptions,
+    private readonly options: AgentStreamingTransportOptions,
   ) {}
 
-  public get state(): FirstPartyThinAgentConnectionState {
+  public get state(): AgentConnectionState {
     return this.connectionState;
   }
 
   public addAuthoritativeFrameListener(
-    listener: (frame: FirstPartyThinAgentServerEvent) => void,
+    listener: (frame: AgentServerEvent) => void,
   ): () => void {
     this.frameListeners.add(listener);
     return () => { this.frameListeners.delete(listener); };
   }
 
   public addConnectionStateListener(
-    listener: (state: FirstPartyThinAgentConnectionState) => void,
+    listener: (state: AgentConnectionState) => void,
   ): () => void {
     this.stateListeners.add(listener);
     return () => { this.stateListeners.delete(listener); };
@@ -115,9 +115,9 @@ implements FirstPartyThinAgentConnectionPort {
   }
 
   public async sendSubmit(
-    command: FirstPartyThinAgentSubmitCommand | FirstPartyThinAgentRegenerateCommand,
+    command: AgentSubmitCommand | AgentRegenerateCommand,
   ): Promise<void> {
-    const parsed = parseFirstPartyThinAgentCommand(command);
+    const parsed = parseAgentCommand(command);
     if (parsed.kind !== "submit" && parsed.kind !== "regenerate") {
       throw new TypeError("sendSubmit accepts only submit and regenerate commands.");
     }
@@ -125,9 +125,9 @@ implements FirstPartyThinAgentConnectionPort {
   }
 
   public async sendToolResult(
-    command: FirstPartyThinAgentToolResultCommand,
+    command: AgentToolResultCommand,
   ): Promise<void> {
-    const parsed = parseFirstPartyThinAgentCommand(command);
+    const parsed = parseAgentCommand(command);
     if (parsed.kind !== "client_tool_result") {
       throw new TypeError("sendToolResult accepts only client tool results.");
     }
@@ -135,9 +135,9 @@ implements FirstPartyThinAgentConnectionPort {
   }
 
   public async sendApproval(
-    command: FirstPartyThinAgentApprovalCommand,
+    command: AgentApprovalCommand,
   ): Promise<void> {
-    const parsed = parseFirstPartyThinAgentCommand(command);
+    const parsed = parseAgentCommand(command);
     if (parsed.kind !== "client_tool_approval") {
       throw new TypeError("sendApproval accepts only client tool approvals.");
     }
@@ -145,9 +145,9 @@ implements FirstPartyThinAgentConnectionPort {
   }
 
   public async sendCancel(
-    command: FirstPartyThinAgentCancelCommand,
+    command: AgentCancelCommand,
   ): Promise<void> {
-    const parsed = parseFirstPartyThinAgentCommand(command);
+    const parsed = parseAgentCommand(command);
     if (parsed.kind !== "cancel") {
       throw new TypeError("sendCancel accepts only cancellation commands.");
     }
@@ -165,7 +165,7 @@ implements FirstPartyThinAgentConnectionPort {
     this.setState("closed");
   }
 
-  private setState(next: FirstPartyThinAgentConnectionState): void {
+  private setState(next: AgentConnectionState): void {
     if (this.connectionState === next) return;
     this.connectionState = next;
     for (const listener of this.stateListeners) listener(next);
@@ -281,7 +281,7 @@ implements FirstPartyThinAgentConnectionPort {
     if (this.options.isAuthoritativeFrame
       && !this.options.isAuthoritativeFrame(frame)) return false;
     for (const listener of this.frameListeners) {
-      listener(frame as FirstPartyThinAgentServerEvent);
+      listener(frame as AgentServerEvent);
     }
     return true;
   }
