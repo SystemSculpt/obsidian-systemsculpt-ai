@@ -102,47 +102,75 @@ async function eventually(assertion: () => void): Promise<void> {
   throw lastError;
 }
 
-class FakeWebSocket implements AgentWebSocket {
-  public readyState = 0;
+/**
+ * One conversation's agent server, as the streaming client sees it.
+ *
+ * Keeps serverMessage so the fork/retry sequences read unchanged, but delivers
+ * frames on the turn request that provoked them.
+ */
+class FakeWebSocket {
   public readonly sent: unknown[] = [];
-  private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
+  /** Hydration blocks on the first snapshot the test provides. */
+  private resolveSnapshot: ((value: unknown) => void) | null = null;
+  public readonly snapshot: Promise<unknown> = new Promise((resolve) => {
+    this.resolveSnapshot = resolve;
+  });
+  private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private readonly buffered: string[] = [];
+  private readonly encoder = new TextEncoder();
 
   public constructor(
     public readonly conversationId: string,
     private readonly onSend: (value: unknown) => void,
   ) {}
 
-  public addEventListener(type: string, listener: (event: unknown) => void): void {
-    const listeners = this.listeners.get(type) ?? new Set();
-    listeners.add(listener);
-    this.listeners.set(type, listeners);
-  }
-
-  public send(data: string): void {
-    if (this.readyState !== 1) throw new Error("Fake socket is not open.");
-    const value = JSON.parse(data) as unknown;
+  public observe(body: unknown): void {
+    const value = typeof body === "string" ? JSON.parse(body) as unknown : body;
     this.sent.push(value);
     this.onSend(value);
   }
 
-  public close(code = 1000, reason = ""): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.emit("close", { code, reason });
+  public openTurn(): Response {
+    this.endTurn();
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        this.controller = controller;
+        for (const frame of this.buffered.splice(0)) this.write(frame);
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
   }
 
-  public open(): void {
-    this.readyState = 1;
-    this.emit("open", {});
+  private write(frame: string): void {
+    this.controller?.enqueue(this.encoder.encode(`data: ${frame}\n\n`));
+    try {
+      if ((JSON.parse(frame) as { kind?: string }).kind === "terminal") {
+        this.endTurn();
+      }
+    } catch { /* a malformed frame ends nothing */ }
   }
+
+  public endTurn(): void {
+    const controller = this.controller;
+    this.controller = null;
+    try { controller?.close(); } catch { /* already closed */ }
+  }
+
+  public open(): void { /* hydration answers the snapshot instead */ }
 
   public serverMessage(value: unknown): void {
-    if (this.readyState !== 1) throw new Error("Fake socket is not open.");
-    this.emit("message", { data: JSON.stringify(value) });
-  }
-
-  private emit(type: string, event: unknown): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
+    const resolve = this.resolveSnapshot;
+    if (resolve) {
+      this.resolveSnapshot = null;
+      resolve(value);
+      return;
+    }
+    const frame = JSON.stringify(value);
+    if (this.controller) this.write(frame);
+    else this.buffered.push(frame);
   }
 }
 
@@ -227,6 +255,18 @@ describe("AgentChatView historical Retry integration", () => {
       hideMessageEditor: jest.fn(async () => undefined),
     };
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    function onCommand(value: unknown): void {
+      if (
+        value !== null
+        && typeof value === "object"
+        && (value as Record<string, unknown>).kind === "submit"
+      ) {
+        order.push("send");
+        replacementProjectionWasCleanAtSend = destinationSynchronized
+          && !JSON.stringify(projectedSnapshot).includes(SOURCE_RUN_ID)
+          && !JSON.stringify(projectedSnapshot).includes(ORIGINAL_USER_ID);
+      }
+    }
     const requestClient = {
       request: jest.fn(async (request: Record<string, any>) => {
         const url = new URL(request.url as string);
@@ -268,6 +308,27 @@ describe("AgentChatView historical Retry integration", () => {
             sha256: `sha256:${"7".repeat(64)}`,
           }), { status: 201 });
         }
+        if (url.pathname.endsWith("/connect/get-messages")) {
+          const token = url.searchParams.get("access_token") ?? "";
+          const bootstrap = accessRequests.get(token);
+          if (!bootstrap) throw new Error("Hydration used an unknown access token.");
+          const socket = new FakeWebSocket(
+            bootstrap.conversation_id as string,
+            onCommand,
+          );
+          sockets.push(socket);
+          return new Response(JSON.stringify(await socket.snapshot), { status: 200 });
+        }
+        if (url.pathname.endsWith("/agent/turn")) {
+          const token = url.searchParams.get("access_token") ?? "";
+          const bootstrap = accessRequests.get(token);
+          const socket = sockets.find((candidate) =>
+            candidate.conversationId === bootstrap?.conversation_id);
+          socket?.observe(request.body);
+          return socket
+            ? socket.openTurn()
+            : new Response("", { status: 200 });
+        }
         throw new Error(`Unexpected request: ${request.method} ${url.pathname}`);
       }),
     };
@@ -293,31 +354,7 @@ describe("AgentChatView historical Retry integration", () => {
       reconcileHistory: (messages) => (view as any).reconcileAgentHistory(messages),
       reportError: (error) => reportedErrors.push(error),
       requestClient: requestClient as any,
-      reconnectDelayMs: () => 0,
-      snapshotTimeoutMs: 5_000,
       now: () => 1_000,
-      createWebSocket: (url) => {
-        const token = new URL(url).searchParams.get("access_token") ?? "";
-        const bootstrap = accessRequests.get(token);
-        if (!bootstrap) throw new Error("Socket used an unknown access token.");
-        const socket = new FakeWebSocket(
-          bootstrap.conversation_id as string,
-          (value) => {
-            if (
-              value !== null
-              && typeof value === "object"
-              && (value as Record<string, unknown>).kind === "submit"
-            ) {
-              order.push("send");
-              replacementProjectionWasCleanAtSend = destinationSynchronized
-                && !JSON.stringify(projectedSnapshot).includes(SOURCE_RUN_ID)
-                && !JSON.stringify(projectedSnapshot).includes(ORIGINAL_USER_ID);
-            }
-          },
-        );
-        sockets.push(socket);
-        return socket;
-      },
     });
 
     Object.assign(view, {
@@ -372,7 +409,6 @@ describe("AgentChatView historical Retry integration", () => {
     try {
       const sourceHydration = agent.hydrate(SOURCE_CONVERSATION_ID);
       await eventually(() => expect(sockets).toHaveLength(1));
-      sockets[0].open();
       sockets[0].serverMessage(sessionSnapshot(
         SOURCE_CONVERSATION_ID,
         1,
@@ -398,7 +434,6 @@ describe("AgentChatView historical Retry integration", () => {
       expect(submitCommands(sockets[1])).toHaveLength(0);
       expect(workspace.setAgentSnapshot).toHaveBeenCalledWith(null);
 
-      sockets[1].open();
       destinationSynchronized = true;
       order.push("fork-snapshot");
       sockets[1].serverMessage(sessionSnapshot(sockets[1].conversationId, 1, []));
@@ -479,9 +514,11 @@ describe("AgentChatView historical Retry integration", () => {
         conversation_id: forkBootstraps[0].conversation_id,
         fork: forkBootstraps[0].fork,
       });
-      expect(requestClient.request.mock.calls.some(([request]) =>
+      // Hydration is a request now, so the point is that each conversation
+      // hydrates once and the fork never re-reads history on top of that.
+      expect(requestClient.request.mock.calls.filter(([request]) =>
         new URL(request.url as string).pathname.endsWith("/get-messages")))
-        .toBe(false);
+        .toHaveLength(2);
       expect(sockets.flatMap(submitCommands)).toHaveLength(1);
 
       expect(order.indexOf("fork-snapshot")).toBeLessThan(order.indexOf("context"));
