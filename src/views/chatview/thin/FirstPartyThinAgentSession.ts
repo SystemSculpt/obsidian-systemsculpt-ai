@@ -15,9 +15,17 @@ import {
   type FirstPartyThinAgentToolResultCommand as ProtocolToolResultCommand,
   type FirstPartyThinAgentUserMessage,
 } from "./FirstPartyThinAgentProtocol";
-import type {
-  FirstPartyThinAgentConnectionState,
-} from "./FirstPartyThinAgentSessionTransport";
+/**
+ * The states a connection to the authoritative session can be in.
+ *
+ * A turn is one request, so there is no connection to lose between turns and
+ * therefore no reconnect or resynchronize state to model.
+ */
+export type FirstPartyThinAgentConnectionState =
+  | "idle"
+  | "connecting"
+  | "open"
+  | "closed";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const RUN_ID = /^run_[a-f0-9]{32}$/u;

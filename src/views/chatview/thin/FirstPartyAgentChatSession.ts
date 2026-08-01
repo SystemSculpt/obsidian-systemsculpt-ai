@@ -46,16 +46,13 @@ import {
 import {
   FirstPartyThinAgentSession,
   type FirstPartyThinAgentCommandAckEvent,
+  type FirstPartyThinAgentConnectionState,
   type FirstPartyThinAgentSessionSnapshot,
 } from "./FirstPartyThinAgentSession";
 import {
-  FirstPartyThinAgentSessionTransport,
-  type FirstPartyThinAgentConnectionState,
-  type FirstPartyThinAgentTransportIssue,
-  type FirstPartyThinAgentWebSocket,
-} from "./FirstPartyThinAgentSessionTransport";
+  FirstPartyThinAgentStreamingTransport,
+} from "./FirstPartyThinAgentStreamingTransport";
 import type {
-  FirstPartyThinAgentDiagnosticPayload,
   FirstPartyThinAgentJsonValue,
   FirstPartyThinAgentUserMessage,
 } from "./FirstPartyThinAgentProtocol";
@@ -233,10 +230,6 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
   reportError?: (error: unknown) => void;
   onLifecycle?: (record: FirstPartyAgentLifecycleRecord) => void;
   requestClient?: RequestClient;
-  createWebSocket?: (url: string) => FirstPartyThinAgentWebSocket;
-  reconnectDelayMs?: (attempt: number) => number;
-  snapshotTimeoutMs?: number;
-  connectionDegradedGraceMs?: number;
   runStallGraceMs?: number;
   now?: () => number;
 }>;
@@ -247,7 +240,6 @@ export type FirstPartyAgentChatSessionOptions = Readonly<{
  * status. Short blips recover silently; a sustained outage must not keep
  * presenting as routine progress.
  */
-const CONNECTION_DEGRADED_GRACE_MS = 10_000;
 
 /**
  * How long a live run may wait on the server with a healthy connection and no
@@ -735,7 +727,6 @@ function projectRun(
   active: ActiveRun,
   messages: readonly WireMessage[],
   connectionState: FirstPartyThinAgentConnectionState,
-  connectionDegraded: boolean,
   runStalled = false,
 ): AgentConversationSnapshot {
   const turnMessages = currentTurnMessages(messages, active.turnId);
@@ -846,11 +837,7 @@ function projectRun(
     label = "Stopping";
   } else if (connectionState !== "open") {
     phase = "retrying";
-    label = connectionDegraded
-      ? "Connection interrupted"
-      : connectionState === "connecting" || connectionState === "synchronizing"
-        ? "Starting"
-        : "Reconnecting";
+    label = connectionState === "connecting" ? "Starting" : "Reconnecting";
   } else if (parts.some((part) =>
     part.kind === "tool" && part.state === "approval-required")) {
     status = "waiting";
@@ -1242,7 +1229,7 @@ export class FirstPartyAgentChatSession {
   private readonly requestClient: RequestClient;
   private readonly now: () => number;
   private readonly listeners = new Set<(snapshot: AgentConversationSnapshot) => void>();
-  private transport: FirstPartyThinAgentSessionTransport | null = null;
+  private transport: FirstPartyThinAgentStreamingTransport | null = null;
   private session: FirstPartyThinAgentSession<WireMessage> | null = null;
   private detachSession: (() => void) | null = null;
   private detachConnectionState: (() => void) | null = null;
@@ -1250,8 +1237,6 @@ export class FirstPartyAgentChatSession {
   private authoritativeMessages: readonly WireMessage[] = Object.freeze([]);
   private presentationMessages: readonly WireMessage[] = Object.freeze([]);
   private connectionState: FirstPartyThinAgentConnectionState = "idle";
-  private connectionDegraded = false;
-  private connectionDegradedTimer: number | null = null;
   private runStalled = false;
   private runStallTimer: number | null = null;
   private runProgressKey = "";
@@ -1290,31 +1275,11 @@ export class FirstPartyAgentChatSession {
       sequence: ++this.lifecycleSequence,
       timestamp: this.now(),
     });
+    // Lifecycle records stay local. Pushing them to the server was a socket
+    // side channel, and the server treated them as non-authoritative log
+    // enrichment that never affected a run.
     try { this.options.onLifecycle?.(record); }
     catch { /* Diagnostics never alter product behavior. */ }
-    const payload: FirstPartyThinAgentDiagnosticPayload = {
-      version: 1,
-      severity: "info",
-      code: input.code,
-      phase: input.phase,
-      sequence: record.sequence,
-      timestamp: record.timestamp,
-      ...(input.conversationId ? { conversation_id: input.conversationId } : {}),
-      ...(input.requestId ? { request_id: input.requestId } : {}),
-      ...(input.clientInstanceId ? { client_instance_id: input.clientInstanceId } : {}),
-      ...(input.pluginBuildId ? { plugin_build_id: input.pluginBuildId } : {}),
-      ...(input.runId ? { run_id: input.runId } : {}),
-      ...(input.serverRunId ? { server_run_id: input.serverRunId } : {}),
-      ...(input.toolName && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(input.toolName)
-        ? { tool_name: input.toolName }
-        : {}),
-      ...(input.toolCallId ? { tool_call_id: input.toolCallId } : {}),
-      ...(input.status === undefined ? {} : { status: input.status }),
-      ...(input.retryable === undefined ? {} : { retryable: input.retryable }),
-      ...(input.incidentId ? { incident_id: input.incidentId } : {}),
-    };
-    try { this.transport?.sendDiagnostic(payload); }
-    catch { /* A disconnected diagnostics sink is expected. */ }
   }
 
   public async hydrate(conversationId: string): Promise<void> {
@@ -1327,7 +1292,7 @@ export class FirstPartyAgentChatSession {
     }
     this.disconnect();
     const generation = ++this.generation;
-    const transport = new FirstPartyThinAgentSessionTransport({
+    const transport = new FirstPartyThinAgentStreamingTransport({
       baseUrl: this.options.baseUrl,
       pluginVersion: this.options.pluginVersion,
       licenseKey: this.options.licenseKey,
@@ -1339,10 +1304,6 @@ export class FirstPartyAgentChatSession {
         return request;
       },
       requestClient: this.requestClient,
-      ...(this.options.createWebSocket ? { createWebSocket: this.options.createWebSocket } : {}),
-      ...(this.options.reconnectDelayMs ? { reconnectDelayMs: this.options.reconnectDelayMs } : {}),
-      ...(this.options.snapshotTimeoutMs ? { snapshotTimeoutMs: this.options.snapshotTimeoutMs } : {}),
-      onIssue: (issue) => this.handleTransportIssue(issue, generation),
     });
     const session = new FirstPartyThinAgentSession<WireMessage>({
       conversationId,
@@ -1670,7 +1631,6 @@ export class FirstPartyAgentChatSession {
       active,
       this.authoritativeMessages,
       this.connectionState,
-      this.connectionDegraded,
     ) });
   }
 
@@ -1689,7 +1649,6 @@ export class FirstPartyAgentChatSession {
         active,
         this.authoritativeMessages,
         this.connectionState,
-        this.connectionDegraded,
       );
       active.resolve({ kind: "cancelled", snapshot });
       this.active = null;
@@ -1701,7 +1660,6 @@ export class FirstPartyAgentChatSession {
 
   public disconnect(): void {
     this.generation += 1;
-    this.clearConnectionDegradation();
     this.clearRunStallTimer();
     this.runStalled = false;
     this.detachSession?.();
@@ -1913,7 +1871,6 @@ export class FirstPartyAgentChatSession {
   private handleConnectionState(state: FirstPartyThinAgentConnectionState): void {
     const active = this.active;
     if (state === "open") {
-      this.clearConnectionDegradation();
       this.openEpoch += 1;
       this.recordLifecycle({
         code: "session_opened",
@@ -1929,15 +1886,7 @@ export class FirstPartyAgentChatSession {
           this.session?.current.runState.state === "waiting_for_client",
         );
       }
-    } else if (state === "reconnecting") {
-      this.recordLifecycle({
-        code: "session_interrupted",
-        phase: "session",
-        ...(this.conversationId ? { conversationId: this.conversationId } : {}),
-      });
-      this.scheduleConnectionDegradation();
     } else if (state === "closed") {
-      this.clearConnectionDegradation();
       this.recordLifecycle({
         code: "session_closed",
         phase: "session",
@@ -1945,29 +1894,6 @@ export class FirstPartyAgentChatSession {
       });
     }
     if (active && !active.terminal) this.publishActive(active, true);
-  }
-
-  private scheduleConnectionDegradation(): void {
-    const active = this.active;
-    if (!active || active.terminal) return;
-    if (this.connectionDegraded || this.connectionDegradedTimer !== null) return;
-    const generation = this.generation;
-    this.connectionDegradedTimer = window.setTimeout(() => {
-      this.connectionDegradedTimer = null;
-      if (this.generation !== generation || this.connectionState === "open") return;
-      const current = this.active;
-      if (!current || current.terminal) return;
-      this.connectionDegraded = true;
-      this.publishActive(current, true);
-    }, this.options.connectionDegradedGraceMs ?? CONNECTION_DEGRADED_GRACE_MS);
-  }
-
-  private clearConnectionDegradation(): void {
-    if (this.connectionDegradedTimer !== null) {
-      window.clearTimeout(this.connectionDegradedTimer);
-      this.connectionDegradedTimer = null;
-    }
-    this.connectionDegraded = false;
   }
 
   /**
@@ -2033,41 +1959,6 @@ export class FirstPartyAgentChatSession {
     if (!wasStalled) return;
     const active = this.active;
     if (active && !active.terminal) this.publishActive(active, true);
-  }
-
-  private handleTransportIssue(
-    issue: FirstPartyThinAgentTransportIssue,
-    generation: number,
-  ): void {
-    if (generation !== this.generation) return;
-    if (issue.code === "invalid_server_event") {
-      this.reportLocalIssue(new Error(
-        `Ignored an invalid server event: ${issue.detail ?? issue.message}`,
-      ));
-    } else if (issue.recoverable && this.active && !this.active.terminal) {
-      // A recoverable fault during a live run is otherwise invisible: the
-      // transport reconnects on its own, the run keeps rendering as active,
-      // and nothing reaches the log. If the server never resumes the run, the
-      // user is left with a spinner and no explanation. Report it so a stalled
-      // run is diagnosable without changing who owns run termination.
-      this.reportLocalIssue(new Error(
-        `Agent session interrupted during an active run (${issue.code}): `
-          + `${issue.message}`,
-      ));
-    }
-    this.recordLifecycle({
-      code: issue.recoverable ? "session_interrupted" : "session_failed",
-      phase: "session",
-      ...(this.conversationId ? { conversationId: this.conversationId } : {}),
-      retryable: issue.recoverable,
-    });
-    if (!issue.recoverable && this.active && !this.active.terminal) {
-      this.finishLocalFailure(this.active, {
-        code: "session_unavailable",
-        message: "SystemSculpt could not continue this response.",
-        retryable: false,
-      });
-    }
   }
 
   private processClientTools(active: ActiveRun, canSend: boolean): void {
@@ -2590,7 +2481,6 @@ export class FirstPartyAgentChatSession {
       active,
       this.presentationMessages,
       this.connectionState,
-      this.connectionDegraded,
     );
     this.commitSnapshot(snapshot);
     const result: FirstPartyAgentRunResult = terminal.outcome === "succeeded"
@@ -2649,7 +2539,6 @@ export class FirstPartyAgentChatSession {
       active,
       this.presentationMessages,
       this.connectionState,
-      this.connectionDegraded,
     );
     this.commitSnapshot(snapshot);
     this.reportLocalIssue(error);
@@ -2683,7 +2572,6 @@ export class FirstPartyAgentChatSession {
       active,
       this.presentationMessages,
       this.connectionState,
-      this.connectionDegraded,
       this.runStalled,
     );
     this.syncRunStallWatchdog(snapshot);

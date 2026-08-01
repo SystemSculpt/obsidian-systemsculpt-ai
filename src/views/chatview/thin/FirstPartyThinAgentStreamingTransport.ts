@@ -11,10 +11,8 @@ import {
 } from "./FirstPartyThinAgentProtocol";
 import type {
   FirstPartyThinAgentConnectionPort,
-} from "./FirstPartyThinAgentSession";
-import type {
   FirstPartyThinAgentConnectionState,
-} from "./FirstPartyThinAgentSessionTransport";
+} from "./FirstPartyThinAgentSession";
 
 /**
  * Streaming-HTTP implementation of the session's connection port.
@@ -37,7 +35,7 @@ export type FirstPartyThinAgentStreamingTransportOptions = Readonly<{
   licenseKey: () => string;
   pluginVersion: string;
   bootstrapRequest: () => ThinAgentBootstrapRequest;
-  requestClient: PlatformRequestClient;
+  requestClient: Pick<PlatformRequestClient, "request">;
   isAuthoritativeFrame?: (value: unknown) => boolean;
 }>;
 
@@ -79,14 +77,41 @@ implements FirstPartyThinAgentConnectionPort {
   }
 
   /**
-   * Establishes identity only. There is no socket to hold, so a successful
-   * bootstrap is the whole of "connected".
+   * Establishes identity, then synchronizes on the authoritative snapshot
+   * before reporting open.
+   *
+   * The snapshot is not optional. A session treats it as the beginning of
+   * authority: until one arrives it holds an unknown run state and refuses to
+   * dispatch, and it rejects every other frame as arriving out of order. The
+   * socket received that frame from the server on open; with no connection to
+   * open, the transport asks for the same frame over HTTP.
    */
   public async connect(): Promise<void> {
     this.disposed = false;
     this.setState("connecting");
-    await this.ensureAccess();
+    const token = await this.ensureAccess();
+    await this.synchronize(token);
     this.setState("open");
+  }
+
+  /**
+   * Delivers the authoritative session snapshot while the transport is still
+   * connecting, so the state it publishes on open is already synchronized.
+   */
+  private async synchronize(token: string): Promise<void> {
+    const response = await this.options.requestClient.request({
+      url: `${this.options.baseUrl}/api/plugin/agent/connect/get-messages`
+        + `?access_token=${encodeURIComponent(token)}`,
+      method: "GET",
+    });
+    if (!response.ok) {
+      throw new Error(
+        `SystemSculpt could not restore this chat (${response.status}).`,
+      );
+    }
+    if (!this.emit(await response.text())) {
+      throw new Error("SystemSculpt returned an unusable chat snapshot.");
+    }
   }
 
   public async sendSubmit(
@@ -159,7 +184,8 @@ implements FirstPartyThinAgentConnectionPort {
         "x-license-key": this.options.licenseKey(),
         "x-plugin-version": this.options.pluginVersion,
       },
-      body: JSON.stringify(this.options.bootstrapRequest()),
+      // The request client serializes the body itself.
+      body: this.options.bootstrapRequest(),
     });
     if (!response.ok) {
       throw new Error(
@@ -195,8 +221,12 @@ implements FirstPartyThinAgentConnectionPort {
         url: `${this.options.baseUrl}/api/plugin/agent/turn`
           + `?access_token=${encodeURIComponent(token)}`,
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(command),
+        // stream selects the direct-fetch transport, which is the only one
+        // that delivers frames as they are produced rather than buffering the
+        // whole turn. The request client serializes the body itself; handing
+        // it an already-encoded string would send a JSON string literal.
+        stream: true,
+        body: command,
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -232,21 +262,27 @@ implements FirstPartyThinAgentConnectionPort {
     }
   }
 
-  private emit(chunk: string): void {
+  /**
+   * Returns whether the chunk was delivered as an authoritative frame. A
+   * dropped frame is tolerable mid-stream but fatal for the snapshot, so the
+   * outcome has to be observable rather than silent.
+   */
+  private emit(chunk: string): boolean {
     const payload = chunk.startsWith("data: ") ? chunk.slice(6) : chunk;
-    if (!payload.trim()) return;
+    if (!payload.trim()) return false;
     let frame: unknown;
     try {
       frame = JSON.parse(payload);
     } catch {
       // A frame the transport cannot parse is not authoritative; dropping it
       // is safer than surfacing a partial event as conversation state.
-      return;
+      return false;
     }
     if (this.options.isAuthoritativeFrame
-      && !this.options.isAuthoritativeFrame(frame)) return;
+      && !this.options.isAuthoritativeFrame(frame)) return false;
     for (const listener of this.frameListeners) {
       listener(frame as FirstPartyThinAgentServerEvent);
     }
+    return true;
   }
 }
