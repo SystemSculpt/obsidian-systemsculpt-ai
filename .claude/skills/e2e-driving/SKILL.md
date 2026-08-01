@@ -54,6 +54,7 @@ npm run e2e -- read <target>          # element summary incl. value/disabled
 npm run e2e -- query "css:.systemsculpt-agent-turn" [--limit N]
 npm run e2e -- snapshot chat|settings # structured GUI state
 npm run e2e -- wait <target> exists|gone|visible|hidden|enabled|disabled|textContains [--text T] [--timeout MS]
+npm run e2e -- wait-run [--timeout MS] [--stall MS]   # wait for a chat run to finish
 npm run e2e -- command <obsidian-command-id>
 npm run e2e -- settings [--tab Chat] / settings-close
 npm run e2e -- script <file.mjs|json> [--evidence out.json]
@@ -61,6 +62,39 @@ npm run e2e -- script <file.mjs|json> [--evidence out.json]
 
 Multi-vault: `--vault <name>` or `--plugin-dir <path>` (default comes from
 systemsculpt-sync.config.json).
+
+## Waiting on an agent run
+
+Use `wait-run` (`waitForRun`), never a bare `wait` on the stop button:
+
+- It waits for the run to **start** first. Submitting is asynchronous, so a
+  plain check right after submit sees an idle composer and reports success for
+  a turn that never ran.
+- It **approves automatically**, clicking `chat.approval.allow-for-chat` the
+  way a user would. Do not rely on setting `chat.composer.approval-mode` — a
+  run parked on approval is indistinguishable from a stalled one, so a driven
+  run would hang by design. Pass `approve: false` to test the approval UI
+  itself.
+- It distinguishes **stalled** from **slow**: no chat activity for `stallMs`
+  fails with a stall message naming the idle time, instead of a generic
+  timeout. That difference is the whole point — a wedged run and a slow model
+  used to look identical.
+
+## Gotchas that have cost real time
+
+- `gone` means *absent from the DOM*. `chat.composer.stop` and
+  `.systemsculpt-agent-banner` are always present and toggled by visibility —
+  assert `hidden`, not `gone`.
+- The stop button is **not** a completion signal on its own; it can flip in
+  ~100 ms while the run never started. Assert transcript content too.
+- Approval mode is **per chat and resets on New chat**. Set it after the new
+  chat exists, and only while no run is live — the composer refuses the change
+  mid-run.
+- A driver change needs `npm run build:local-agent && npm run sync:local:agent`
+  (plain `sync:local` refuses a loopback API base by design).
+- On failure the report now carries a `diagnostics` block (recent warn/error
+  logs, notices, chat snapshot) captured at the moment of failure — read that
+  before re-running anything.
 
 ## Scenarios
 

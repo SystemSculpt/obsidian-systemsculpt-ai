@@ -183,9 +183,32 @@ export class DriverSession {
   }
 }
 
+/**
+ * Captures what the app can still say about a failure, at the moment it fails.
+ *
+ * Without this, a failed step reports only its own timeout text, and
+ * diagnosing it means re-running separate log and notice commands against an
+ * app whose state has already moved on. Best-effort by design: a diagnostics
+ * failure must never replace the original error.
+ */
+async function captureFailureDiagnostics(session) {
+  const diagnostics = {};
+  const collect = async (key, action, params) => {
+    try { diagnostics[key] = await session.run(action, params); }
+    catch (error) {
+      diagnostics[`${key}Error`] = error instanceof Error ? error.message : String(error);
+    }
+  };
+  await collect("logs", "logs", { level: "warn", limit: 40 });
+  await collect("notices", "notices", { limit: 20 });
+  await collect("chat", "snapshot", { scope: "chat" });
+  return diagnostics;
+}
+
 export async function runSteps(session, steps) {
   const results = [];
   let failed = false;
+  let diagnostics = null;
   for (const [index, step] of steps.entries()) {
     const label = step.label ?? `${index + 1}. ${step.action}`;
     if (failed) {
@@ -205,7 +228,8 @@ export async function runSteps(session, steps) {
         ms: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error),
       });
+      diagnostics = await captureFailureDiagnostics(session);
     }
   }
-  return { ok: !failed, steps: results };
+  return { ok: !failed, steps: results, ...(diagnostics ? { diagnostics } : {}) };
 }

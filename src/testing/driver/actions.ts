@@ -199,6 +199,124 @@ function settingsSnapshot(): Record<string, unknown> {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * Everything the chat surface can show that indicates the run moved.
+ *
+ * Deliberately content-derived rather than "is the stop button visible": a
+ * wedged run keeps the stop button up forever, which is exactly why a plain
+ * waitFor cannot tell a dead run from a slow one.
+ */
+function runProgressFingerprint(snapshot: Record<string, unknown>): string {
+  const composer = asRecord(snapshot.composer);
+  const turns = Array.isArray(snapshot.turns) ? snapshot.turns : [];
+  const last = asRecord(turns[turns.length - 1]);
+  const parts = Array.isArray(last.parts) ? last.parts : [];
+  return [
+    turns.length,
+    parts.length,
+    typeof last.text === "string" ? last.text.length : 0,
+    String(composer.stopVisible),
+    Array.isArray(snapshot.banners) ? snapshot.banners.join("|") : "",
+  ].join(":");
+}
+
+/**
+ * Waits for a chat run to finish, but fails fast and *specifically* when the
+ * run stops producing anything.
+ *
+ * A flat timeout reports "waitFor timed out" for both a wedged run and a slow
+ * model, which is how a hung run stayed invisible for nineteen minutes. This
+ * reports which one happened, and returns the transcript either way.
+ */
+async function waitForRun(
+  ctx: ActionContext,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : 180000;
+  const stallMs = typeof params.stallMs === "number" ? params.stallMs : 45000;
+  const startMs = typeof params.startMs === "number" ? params.startMs : 20000;
+  const approve = params.approve !== false;
+  const startedAt = Date.now();
+
+  // Submitting is asynchronous, so the run has not necessarily begun when this
+  // action starts. Without waiting for it to appear, the very first poll sees
+  // an idle composer and reports success for a turn that never ran.
+  let running = false;
+  while (Date.now() - startedAt < startMs) {
+    if (asRecord(chatSnapshot(ctx).composer).stopVisible === true) {
+      running = true;
+      break;
+    }
+    await sleep(50);
+  }
+  if (!running) {
+    throw new DriverActionError(
+      `No run started within ${startMs}ms of submitting.`,
+    );
+  }
+
+  let fingerprint = "";
+  let lastProgressAt = Date.now();
+  let approvals = 0;
+  for (;;) {
+    // Approve exactly as a user would, rather than relying on the composer's
+    // approval mode. A run that parks on approval is otherwise indisputably
+    // "not progressing", so a driven run would stall by design.
+    if (approve) {
+      const button = resolveTarget({ app: ctx.app }, "chat.approval.allow-for-chat")
+        ?? resolveTarget({ app: ctx.app }, "chat.approval.allow-once");
+      if (button && isVisible(button)) {
+        button.click();
+        approvals += 1;
+        lastProgressAt = Date.now();
+        await sleep(120);
+        continue;
+      }
+    }
+    const snapshot = chatSnapshot(ctx);
+    const composer = asRecord(snapshot.composer);
+    const current = runProgressFingerprint(snapshot);
+    if (current !== fingerprint) {
+      fingerprint = current;
+      lastProgressAt = Date.now();
+    }
+    if (composer.stopVisible === false) {
+      return {
+        finished: true,
+        waitedMs: Date.now() - startedAt,
+        approvals,
+        snapshot,
+      };
+    }
+    const idleMs = Date.now() - lastProgressAt;
+    if (idleMs >= stallMs) {
+      throw new DriverActionError(
+        `The run stalled: no chat activity for ${idleMs}ms `
+          + `(waited ${Date.now() - startedAt}ms total). The run is still `
+          + "presented as active. Check server logs for the matching run id.",
+      );
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new DriverActionError(
+        `The run did not finish within ${timeoutMs}ms, but it was still `
+          + `producing output ${idleMs}ms ago. Raise timeoutMs if this is `
+          + "simply a long job.",
+      );
+    }
+    await sleep(100);
+  }
+}
+
 async function waitForCondition(
   ctx: ActionContext,
   params: Record<string, unknown>,
@@ -394,6 +512,9 @@ export async function runDriverAction(
     }
     case "waitFor": {
       return waitForCondition(ctx, params);
+    }
+    case "waitForRun": {
+      return waitForRun(ctx, params);
     }
     case "command": {
       const id = typeof params.id === "string" ? params.id : "";

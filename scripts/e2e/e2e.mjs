@@ -60,6 +60,7 @@ function parseArgs(argv) {
     const valueFlags = new Set([
       "plugin-dir", "vault", "target", "text", "mime", "name", "via",
       "timeout", "connect-timeout", "tab", "evidence", "mode", "limit",
+      "stall",
       "pattern", "level", "since",
     ]);
     if (valueFlags.has(key)) {
@@ -157,6 +158,15 @@ function stepsForVerb(positional, flags) {
         },
       }];
     }
+    case "wait-run": {
+      return [{
+        action: "waitForRun",
+        params: {
+          timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
+          stallMs: flags.stall ? Number(flags.stall) : undefined,
+        },
+      }];
+    }
     case "command": {
       if (!rest[0]) throw new Error("command requires an Obsidian command id.");
       return [{ action: "command", params: { id: rest[0] } }];
@@ -188,8 +198,8 @@ function stepsForVerb(positional, flags) {
     default:
       throw new Error(
         `Unknown verb "${verb ?? ""}". Verbs: status, open-chat, click, type, press, attach, ` +
-          "scroll, select, read, query, logs, notices, snapshot, wait, command, settings, " +
-          "settings-close, targets, script.",
+          "scroll, select, read, query, logs, notices, snapshot, wait, wait-run, command, " +
+          "settings, settings-close, targets, script.",
       );
   }
 }
@@ -218,7 +228,7 @@ async function main() {
   if (positional.length === 0 || flags.help) {
     console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--json]");
     console.log("Verbs: status, open-chat, click, type, press, attach, scroll, select, read,");
-    console.log("       query, logs, notices, snapshot, wait, command, settings,");
+    console.log("       query, logs, notices, snapshot, wait, wait-run, command, settings,");
     console.log("       settings-close, targets [--live], script <file>");
     console.log("Targets are data-testid values (npm run e2e -- targets), plus css:, chat:,");
     console.log("label:, setting:, and settings.tab: prefixes.");
