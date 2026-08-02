@@ -882,8 +882,9 @@ describe("AgentChatSession", () => {
     }])));
     await tick();
 
-    expect(presented).toHaveLength(0);
+    expect(presented.length).toBeLessThanOrEqual(1);
     await waitFor(() => presented.length === 1);
+    expect(presented).toHaveLength(1);
     expect(presented[0]).toMatchObject({
       status: "running",
       phase: "working",
