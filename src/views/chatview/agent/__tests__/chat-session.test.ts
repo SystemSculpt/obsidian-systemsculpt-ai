@@ -940,6 +940,49 @@ describe("AgentChatSession", () => {
     ]);
   });
 
+  it("labels a failed server web search without calling it a vault action", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_failed_web_search";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Search the web"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_failed_search", [{
+      type: "tool-web_search",
+      toolCallId: "call_failed_web_search",
+      state: "output-available",
+      input: { query: "current release" },
+      output: { success: false },
+    }, {
+      type: "text",
+      text: "I could not verify this result.",
+      state: "done",
+    }])));
+
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.callId === "call_failed_web_search"));
+    const tool = harness.agent.getSnapshot().parts.find((part) =>
+      part.kind === "tool" && part.callId === "call_failed_web_search");
+    expect(tool).toMatchObject({
+      kind: "tool",
+      location: "server",
+      state: "failed",
+      output: { summary: "Web search failed." },
+      error: {
+        code: "TOOL_EXECUTION_FAILED",
+        message: "Web search failed.",
+      },
+    });
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(waitForResult(run)).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("never lets an empty authoritative snapshot erase cache and keeps cache failures nonterminal", async () => {
     const harness = trackedHarness();
     const server = await harness.open([

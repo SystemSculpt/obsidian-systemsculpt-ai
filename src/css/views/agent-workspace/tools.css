@@ -63,6 +63,35 @@
   cursor: default;
 }
 
+.systemsculpt-agent-tool.is-disclosure > .systemsculpt-agent-tool-header {
+  cursor: pointer;
+  list-style: none;
+}
+
+.systemsculpt-agent-tool.is-disclosure > .systemsculpt-agent-tool-header::-webkit-details-marker {
+  display: none;
+}
+
+.systemsculpt-agent-tool.is-disclosure > .systemsculpt-agent-tool-header:hover {
+  background: var(--ss-surface-1);
+}
+
+.systemsculpt-agent-tool.is-disclosure > .systemsculpt-agent-tool-header:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-tool-disclosure {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-ink-faint);
+  transition: var(--ss-transition-transform);
+}
+
+.systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure {
+  transform: rotate(90deg);
+}
+
 .systemsculpt-agent-tool-icon {
   display: inline-flex;
   flex: 0 0 auto;
@@ -117,6 +146,46 @@
 
 .systemsculpt-agent-tool-support[hidden] {
   display: none;
+}
+
+.systemsculpt-agent-web-search {
+  max-height: var(--ss-agent-tool-details-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-agent-web-search-label {
+  margin-bottom: var(--ss-space-1);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--ss-tracking-wide);
+}
+
+.systemsculpt-agent-web-search-queries {
+  display: grid;
+  gap: var(--ss-space-1);
+  margin: 0;
+  padding-left: var(--ss-space-4);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+
+.systemsculpt-agent-web-search-queries > li {
+  padding-left: var(--ss-space-1);
+  overflow-wrap: anywhere;
+}
+
+.systemsculpt-agent-web-search-queries > li::marker {
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-web-search-queries > li.is-placeholder {
+  color: var(--ss-ink-faint);
+  font-style: italic;
 }
 
 .systemsculpt-agent-tool-error {

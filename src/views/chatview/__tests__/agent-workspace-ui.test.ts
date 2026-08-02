@@ -483,8 +483,13 @@ describe("AgentWorkspace", () => {
       input: { query: "Obsidian agents" },
       state: "running",
     });
-    expect(node.textContent).toContain("Search web");
+    expect(node.textContent).toContain("Search the web");
+    expect(node.textContent).not.toContain("Obsidian agents");
     expect(node.textContent).not.toContain("web_search");
+    expect(node.querySelector(":scope > .systemsculpt-agent-tool")?.tagName)
+      .toBe("DETAILS");
+    expect(node.querySelector(":scope > .systemsculpt-agent-tool > summary"))
+      .not.toBeNull();
 
     node.empty();
     await (renderer as any).renderTool(node, {
@@ -522,6 +527,52 @@ describe("AgentWorkspace", () => {
     expect(node.textContent).not.toMatch(/needs approval|allow once|allow for chat/i);
     expect(node.querySelector(".systemsculpt-agent-approval")).toBeNull();
     expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it("renders an adjacent web-search batch as one clickable query disclosure", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    const node = host.createDiv();
+    const queries = [
+      "Blaxel funding",
+      "site:blaxel.ai seed round",
+      '"Blaxel" "First Round"',
+    ];
+
+    await (renderer as any).renderTool(node, queries.map((query, index) => ({
+      id: `server-search-${index}`,
+      order: index,
+      kind: "tool",
+      messageId: "assistant-search-batch",
+      callId: `call-search-${index}`,
+      name: "web_search",
+      location: "server",
+      input: {},
+      state: "succeeded",
+      output: { data: { query } },
+    })));
+
+    const details = node.querySelector<HTMLDetailsElement>(
+      ":scope > details.systemsculpt-agent-tool",
+    )!;
+    const summary = details.querySelector<HTMLElement>(":scope > summary")!;
+    expect(node.classList.contains("is-grouped")).toBe(true);
+    expect(node.dataset.toolCount).toBe("3");
+    expect(summary.textContent).toContain("Search the web (3)");
+    expect(summary.getAttribute("aria-label")).toBe("Search the web (3), Done");
+    expect([...details.querySelectorAll(".systemsculpt-agent-web-search-queries > li")]
+      .map((item) => item.textContent)).toEqual(queries);
+    expect(details.open).toBe(false);
+    summary.click();
+    expect(details.open).toBe(true);
+    summary.click();
+    expect(details.open).toBe(false);
   });
 
   it("omits inert path actions and reports artifact copy success or failure in place", async () => {
@@ -658,9 +709,9 @@ describe("AgentWorkspace", () => {
       },
     });
     expect(host.querySelector(".systemsculpt-agent-tool")).not.toBeNull();
-    expect(host.textContent).toContain("Search web");
+    expect(host.textContent).toContain("Search the web");
     expect(host.textContent).toContain("Legacy search answer");
-    expect(host.textContent).not.toContain("legacy release");
+    expect(host.textContent).toContain("legacy release");
   });
 
   it("mounts the canonical view surface and shared action grammar", () => {
@@ -2601,7 +2652,7 @@ describe("AgentWorkspace", () => {
     expect(toolNode.firstElementChild).toBe(shell);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(icon);
     expect(icon.firstElementChild).toBe(svg);
-    expect(toolNode.textContent).toContain("Search web");
+    expect(toolNode.textContent).toContain("Search the web");
     expect(toolNode.textContent).not.toContain("cloudflare official documentation");
     workspace.unload();
   });

@@ -957,17 +957,21 @@ export class AgentConversationRenderer extends Component {
     const parts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
     const part = parts[0];
     if (!part) return;
-    node.className = `systemsculpt-agent-part is-tool is-${part.state}`;
+    const presentation = presentAgentToolGroup(parts);
+    node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
     node.classList.toggle("is-grouped", parts.length > 1);
     if (parts.length > 1) {
       node.dataset.toolCount = String(parts.length);
     } else {
       delete node.dataset.toolCount;
     }
-    const presentation = presentAgentToolGroup(parts);
+    const webSearchDisclosure = presentation.canonicalName === "web_search";
     let shell = node.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
     let header = shell?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-header",
+    ) ?? null;
+    let disclosureIcon = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-disclosure",
     ) ?? null;
     let icon = header?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-icon",
@@ -984,10 +988,36 @@ export class AgentConversationRenderer extends Component {
     let support = shell?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-support",
     ) ?? null;
-    if (!shell || !header || !icon || !label || !summary || !state || !support) {
+    const wrongShellType = shell
+      ? (shell.tagName === "DETAILS") !== webSearchDisclosure
+      : false;
+    if (
+      !shell
+      || wrongShellType
+      || !header
+      || (webSearchDisclosure && !disclosureIcon)
+      || !icon
+      || !label
+      || !summary
+      || !state
+      || !support
+    ) {
       node.empty();
-      shell = node.createDiv({ cls: "systemsculpt-agent-tool" });
-      header = shell.createDiv({ cls: "systemsculpt-agent-tool-header" });
+      shell = webSearchDisclosure
+        ? node.createEl("details", { cls: "systemsculpt-agent-tool is-disclosure" })
+        : node.createDiv({ cls: "systemsculpt-agent-tool" });
+      header = webSearchDisclosure
+        ? shell.createEl("summary", { cls: "systemsculpt-agent-tool-header" })
+        : shell.createDiv({ cls: "systemsculpt-agent-tool-header" });
+      if (webSearchDisclosure) {
+        disclosureIcon = header.createSpan({
+          cls: "systemsculpt-agent-tool-disclosure",
+        });
+        setIcon(disclosureIcon, "chevron-right");
+        header.dataset.focusKey = "web-search-summary";
+      } else {
+        disclosureIcon = null;
+      }
       icon = header.createSpan({ cls: "systemsculpt-agent-tool-icon" });
       label = header.createEl("strong", {
         cls: "systemsculpt-agent-tool-label",
@@ -1023,6 +1053,33 @@ export class AgentConversationRenderer extends Component {
     if (state.textContent !== presentation.stateLabel) state.setText(presentation.stateLabel);
 
     support.empty();
+    if (webSearchDisclosure) {
+      const queryPanel = support.createDiv({
+        cls: "systemsculpt-agent-web-search",
+        attr: {
+          role: "group",
+          "aria-label": presentation.queries.length === 1
+            ? "Web search query"
+            : "Web search queries",
+        },
+      });
+      queryPanel.createDiv({
+        cls: "systemsculpt-agent-web-search-label",
+        text: presentation.queries.length === 1 ? "Query" : "Queries",
+      });
+      const queryList = queryPanel.createEl("ol", {
+        cls: "systemsculpt-agent-web-search-queries",
+      });
+      for (const query of presentation.queries) {
+        const item = queryList.createEl("li");
+        item.setText(query ?? (
+          presentation.animated
+            ? "Query details will appear when this search finishes."
+            : "Query details unavailable."
+        ));
+        item.classList.toggle("is-placeholder", query === null);
+      }
+    }
     node.querySelectorAll(":scope > .systemsculpt-agent-approval")
       .forEach((approval) => approval.remove());
     if (parts.length === 1 && part.error && !suppressToolError) {

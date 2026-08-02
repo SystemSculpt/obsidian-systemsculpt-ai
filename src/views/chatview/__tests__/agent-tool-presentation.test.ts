@@ -80,20 +80,70 @@ describe("presentAgentTool", () => {
     });
   });
 
-  it("uses a fixed product label for visible web search activity", () => {
+  it("shows only a completed, privacy-approved web search query", () => {
     expect(presentAgentTool(part({
       name: "web_search",
       location: "server",
-      input: { query: "Obsidian agent plugins" },
+      input: {},
+      state: "succeeded",
       output: {
+        data: { query: "Obsidian agent plugins" },
         title: "Cloudflare search",
         summary: "OpenRouter web search completed",
       },
     }))).toMatchObject({
       canonicalName: "web_search",
-      label: "Search web",
+      label: "Search the web",
       summary: null,
       itemCount: null,
+      queries: ["Obsidian agent plugins"],
+    });
+    expect(presentAgentTool(part({
+      name: "web_search",
+      location: "server",
+      input: { query: "Private model-authored query" },
+      state: "running",
+    })).queries).toEqual([null]);
+  });
+
+  it("groups an adjacent web-search batch and preserves every query in order", () => {
+    const search = (
+      id: string,
+      query: string,
+      state: AgentToolPart["state"] = "succeeded",
+    ): AgentToolPart => part({
+      id,
+      callId: id,
+      name: "web_search",
+      location: "server",
+      input: {},
+      state,
+      ...(state === "succeeded" ? { output: { data: { query } } } : {}),
+    });
+    const activities = [
+      search("search-1", "Blaxel funding"),
+      search("search-2", "site:blaxel.ai seed round"),
+      search("search-3", "Blaxel First Round", "running"),
+    ];
+    const [entry] = groupConsecutiveToolActivity(
+      activities,
+      (tool) => tool,
+      false,
+    );
+
+    expect(entry.kind).toBe("tools");
+    if (entry.kind !== "tools") throw new Error("Expected a web-search group.");
+    expect(entry.tools).toHaveLength(3);
+    expect(presentAgentToolGroup(entry.tools)).toMatchObject({
+      label: "Search the web (3)",
+      displayState: "running",
+      stateLabel: "Working",
+      itemCount: 3,
+      queries: [
+        "Blaxel funding",
+        "site:blaxel.ai seed round",
+        null,
+      ],
     });
   });
 

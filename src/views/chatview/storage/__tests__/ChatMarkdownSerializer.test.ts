@@ -1020,6 +1020,7 @@ ${serialized}`;
       expect(JSON.parse(restoredToolCall?.request?.function?.arguments ?? "{}")).toEqual({
         query: "systemsculpt pricing",
       });
+      expect(restoredToolCall?.result?.data?.query).toBe("systemsculpt pricing");
     });
 
     it("reloads legacy web search history into a valid managed follow-up request", () => {

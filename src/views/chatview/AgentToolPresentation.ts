@@ -4,11 +4,13 @@ import type { AgentToolPart } from "./AgentConversation";
 export type AgentToolPresentation = Readonly<{
   canonicalName: string;
   label: string;
+  displayState: AgentToolPart["state"];
   stateLabel: string;
   icon: string;
   animated: boolean;
   summary: string | null;
   itemCount: number | null;
+  queries: readonly (string | null)[];
 }>;
 
 export type AgentToolActivityEntry<T> =
@@ -31,7 +33,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
 };
 
 const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
-  web_search: "Search web",
+  web_search: "Search the web",
 };
 
 const UNKNOWN_SERVER_TOOL_LABEL = "SystemSculpt action";
@@ -180,6 +182,55 @@ function toolScope(part: AgentToolPart): CountedTool | null {
   return countedTool(canonicalName, record(part.input));
 }
 
+function isWebSearchTool(part: AgentToolPart): boolean {
+  return part.location === "server"
+    && splitToolName(part.name).canonicalName === "web_search";
+}
+
+function webSearchQuery(part: AgentToolPart): string | null {
+  if (!isWebSearchTool(part)) return null;
+  const publicResultQuery = firstString(record(part.output?.data).query);
+  if (publicResultQuery) return publicResultQuery;
+  return part.state === "succeeded"
+    ? firstString(record(part.input).query)
+    : null;
+}
+
+function displayedToolState(part: AgentToolPart): AgentToolPart["state"] {
+  return part.location === "server" && (
+    part.state === "input-ready"
+    || part.state === "approval-required"
+    || part.state === "approved"
+  )
+    ? "running"
+    : part.state;
+}
+
+function webSearchGroupState(
+  parts: readonly AgentToolPart[],
+): AgentToolPart["state"] {
+  const states = parts.map(displayedToolState);
+  if (states.some((state) => ANIMATED_STATES.has(state))) return "running";
+  for (const state of [
+    "failed",
+    "outcome-unknown",
+    "denied",
+    "cancelled",
+  ] as const) {
+    if (states.includes(state)) return state;
+  }
+  return states.every((state) => state === "succeeded")
+    ? "succeeded"
+    : states[states.length - 1] ?? "running";
+}
+
+function canAppendWebSearch(
+  group: readonly AgentToolPart[],
+  candidate: AgentToolPart,
+): boolean {
+  return isWebSearchTool(candidate) && group.every(isWebSearchTool);
+}
+
 function normalizedScopeItem(value: string): string {
   return value.replace(/\\/g, "/").replace(/\/+/g, "/").trim().toLocaleLowerCase();
 }
@@ -247,13 +298,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     : undefined;
   const unknownServerTool = part.location === "server" && !serverLabel;
   const serverTool = part.location === "server";
-  const displayState = serverTool && (
-    part.state === "input-ready"
-    || part.state === "approval-required"
-    || part.state === "approved"
-  )
-    ? "running"
-    : part.state;
+  const displayState = displayedToolState(part);
   const counted = part.location === "vault"
     ? countedTool(canonicalName, input)
     : null;
@@ -266,6 +311,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const summary = serverTool
     ? null
     : partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
+  const query = webSearchQuery(part);
   return {
     canonicalName: unknownServerTool ? "server_action" : canonicalName,
     label: part.location === "server"
@@ -277,11 +323,13 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
           : TOOL_LABELS[canonicalName] || canonicalName
           .replace(/[_-]+/g, " ")
           .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    displayState,
     stateLabel: STATE_LABELS[displayState],
     icon: STATE_ICONS[displayState],
     animated: ANIMATED_STATES.has(displayState),
     summary,
     itemCount: counted?.items.length ?? null,
+    queries: canonicalName === "web_search" && serverTool ? [query] : [],
   };
 }
 
@@ -293,7 +341,22 @@ export function presentAgentToolGroup(
     throw new Error("A tool presentation group must contain at least one tool.");
   }
   const base = presentAgentTool(first);
-  if (parts.length === 1 || first.location === "server") return base;
+  if (parts.length === 1) return base;
+  if (base.canonicalName === "web_search") {
+    const displayState = webSearchGroupState(parts);
+    return {
+      ...base,
+      label: `Search the web (${parts.length})`,
+      displayState,
+      stateLabel: STATE_LABELS[displayState],
+      icon: STATE_ICONS[displayState],
+      animated: ANIMATED_STATES.has(displayState),
+      summary: null,
+      itemCount: parts.length,
+      queries: parts.map(webSearchQuery),
+    };
+  }
+  if (first.location === "server") return base;
   const scopes = parts.map(toolScope);
   if (scopes.some((scope) => !scope)) return base;
   const items = scopes.flatMap((scope) => scope!.items);
@@ -307,8 +370,9 @@ export function presentAgentToolGroup(
 }
 
 /**
- * Groups only adjacent, terminal, read-only activity with explicit and
- * non-overlapping scope. Any non-tool item remains a chronology boundary.
+ * Groups adjacent web searches from one uninterrupted batch. It also groups
+ * terminal read-only vault activity with explicit, non-overlapping scope.
+ * Any non-tool item remains a chronology boundary.
  */
 export function groupConsecutiveToolActivity<T>(
   items: readonly T[],
@@ -323,7 +387,13 @@ export function groupConsecutiveToolActivity<T>(
       continue;
     }
     const previous = result[result.length - 1];
-    if (enabled && previous?.kind === "tools" && canAppendTool(previous.tools, tool)) {
+    if (
+      previous?.kind === "tools"
+      && (
+        canAppendWebSearch(previous.tools, tool)
+        || (enabled && canAppendTool(previous.tools, tool))
+      )
+    ) {
       result[result.length - 1] = {
         kind: "tools",
         items: [...previous.items, item],

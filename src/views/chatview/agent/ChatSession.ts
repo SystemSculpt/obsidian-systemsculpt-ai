@@ -495,6 +495,15 @@ function toolResultArtifacts(
     : undefined;
 }
 
+function defaultToolFailureMessage(
+  tool: Pick<ProjectedTool, "name" | "location">,
+): string {
+  if (tool.location === "vault") return "The vault action failed.";
+  return tool.name === "web_search"
+    ? "Web search failed."
+    : "The server action failed.";
+}
+
 function toolResultSummary(
   result: ToolCallResult,
   tool: Pick<ProjectedTool, "callId" | "name" | "location" | "input">,
@@ -506,7 +515,7 @@ function toolResultSummary(
         ...(artifacts ? { artifacts } : {}),
       }
     : {
-        summary: result.error?.message ?? "The vault action failed.",
+        summary: result.error?.message ?? defaultToolFailureMessage(tool),
         data: result.data,
         ...(artifacts ? { artifacts } : {}),
       };
@@ -550,13 +559,14 @@ function projectedToolState(
   }
 }
 
-function toolFailure(part: WirePart): ManagedAgentError | undefined {
+function toolFailure(tool: ProjectedTool): ManagedAgentError | undefined {
+  const part = tool.part;
   if (part.state === "output-error") {
     return {
       code: "TOOL_EXECUTION_FAILED",
       message: typeof part.errorText === "string"
         ? part.errorText
-        : "The vault action failed.",
+        : defaultToolFailureMessage(tool),
     };
   }
   if (part.state === "output-available" && part.preliminary !== true) {
@@ -564,7 +574,7 @@ function toolFailure(part: WirePart): ManagedAgentError | undefined {
     if (!result.success) {
       return {
         code: result.error?.code ?? "TOOL_EXECUTION_FAILED",
-        message: result.error?.message ?? "The vault action failed.",
+        message: result.error?.message ?? defaultToolFailureMessage(tool),
       };
     }
   }
@@ -704,6 +714,7 @@ function projectRun(
         : undefined;
       const approval = toolApproval(tool.part);
       const syntheticApprovalId = active.approvalIds.get(callId);
+      const failure = toolFailure(tool);
       partIds.push(id);
       parts.push({
         id,
@@ -718,7 +729,7 @@ function projectRun(
           ? { approvalId: approval?.id ?? syntheticApprovalId }
           : {}),
         ...(result ? { output: toolResultSummary(result, tool) } : {}),
-        ...(toolFailure(tool.part) ? { error: toolFailure(tool.part) } : {}),
+        ...(failure ? { error: failure } : {}),
         order: order++,
       });
     });
