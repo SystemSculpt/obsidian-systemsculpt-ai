@@ -87,5 +87,5 @@
     "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag"
   },
   "type": "module",
-  "version": "6.2.7"
+  "version": "6.3.0"
 }
