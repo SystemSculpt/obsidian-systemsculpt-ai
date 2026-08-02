@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { toRepositoryPath } from "../platform-portability.mjs";
 
 /**
  * Testid coverage ratchet.
@@ -36,7 +37,7 @@ function listSourceFiles(dir, files = []) {
 export function scanUntaggedInteractiveCreations() {
   const counts = {};
   for (const file of listSourceFiles(path.join(ROOT, "src"))) {
-    const relative = path.relative(ROOT, file);
+    const relative = toRepositoryPath(path.relative(ROOT, file));
     if (FACTORY_FILES.has(relative)) continue;
     const text = fs.readFileSync(file, "utf8");
     let untagged = 0;
