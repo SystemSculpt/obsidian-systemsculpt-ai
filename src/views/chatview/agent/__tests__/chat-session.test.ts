@@ -1167,8 +1167,12 @@ describe("AgentChatSession", () => {
     server.serverMessage(runState(active(2, turnId, turnId, "waiting_for_client")));
     await tick();
 
+    // The synthetic approval id binds on the waiting_for_client pass, one
+    // frame after the tool first projects as approval-required. Wait for the
+    // actionable frame; polling can otherwise catch the id-less one.
     await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
-      part.kind === "tool" && part.state === "approval-required"));
+      part.kind === "tool" && part.state === "approval-required"
+      && typeof (part as { approvalId?: string }).approvalId === "string"));
     const tool = harness.agent.getSnapshot().parts.find((part) =>
       part.kind === "tool");
     expect(tool).toMatchObject({
