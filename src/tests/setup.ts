@@ -3,6 +3,14 @@
 // Provide a minimal window with timer APIs that delegate to global timers
 // so Jest's fake timers control both global and window timers consistently.
 const g: any = globalThis as any;
+
+// Build defines are injected by esbuild in real bundles. Test hosts load
+// source modules directly, so supply the canonical release API identity here;
+// src/constants/api.ts fails closed without it.
+if (typeof g.__SYSTEMSCULPT_API_BASE_URL__ === "undefined") {
+  g.__SYSTEMSCULPT_API_BASE_URL__ = "https://systemsculpt.com/api/plugin";
+}
+
 if (typeof g.fetch !== "function") {
   g.fetch = async () => {
     throw new Error("Unexpected network request in a unit test.");

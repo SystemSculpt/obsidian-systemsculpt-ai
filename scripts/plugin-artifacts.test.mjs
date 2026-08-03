@@ -731,3 +731,37 @@ test("release artifacts must exclude the E2E test driver; development artifacts 
   );
   assert.equal(assertStagingPluginArtifacts({ root: stagingRoot }).mainBundle.hasTestDriver, true);
 });
+
+test("non-production routes compile the real API module to exactly one route base", async () => {
+  // Regression guard for the local-agent/staging route-purity failure: a live
+  // (non-constant-foldable) reference to the production literal in
+  // src/constants/api.ts survives into every route's bundle, because esbuild
+  // keeps dead ternary branches in unminified output. Bundle the real module
+  // per route and require exactly the route's own API base.
+  const esbuild = (await import("esbuild")).default;
+  const { createPluginBuildOptions, resolvePluginBuildArguments } =
+    await import("./plugin-build-options.mjs");
+  const basePattern = /https?:\/\/(?:\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::\d+)?\/api\/plugin\b/gi;
+
+  for (const targetName of ["staging", "local-agent"]) {
+    const route = resolvePluginBuildArguments([targetName]);
+    const options = createPluginBuildOptions({
+      entryPoint: "src/constants/api.ts",
+      write: false,
+      production: route.production,
+      releaseBuild: route.releaseBuild,
+      apiBaseUrl: route.apiBaseUrl,
+      buildStamp: route.buildStamp ?? "route-purity-test",
+      testDriver: route.testDriver,
+    });
+    const result = await esbuild.build({ ...options, logLevel: "silent" });
+    const text = result.outputFiles.find((file) => file.path.endsWith("main.js"))?.text
+      ?? result.outputFiles[0].text;
+    const bases = [...new Set((text.match(basePattern) ?? []).map((base) => base.toLowerCase()))];
+    assert.deepEqual(
+      bases,
+      [route.apiBaseUrl],
+      `${targetName} route must compile src/constants/api.ts to exactly its own API base`,
+    );
+  }
+});
