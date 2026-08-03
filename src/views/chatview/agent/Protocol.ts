@@ -330,11 +330,13 @@ function sanitizeJsonValue(
   stripEncryptedReasoning: boolean,
 ): AgentJsonValue | typeof INVALID_JSON_VALUE {
   const seen = new WeakSet<object>();
-  let collections = 0;
+  let nodes = 0;
   const visit = (
     current: unknown,
     depth: number,
   ): AgentJsonValue | typeof INVALID_JSON_VALUE => {
+    nodes += 1;
+    if (nodes > MAX_JSON_NODES) return INVALID_JSON_VALUE;
     if (
       current === null
       || typeof current === "boolean"
@@ -349,11 +351,6 @@ function sanitizeJsonValue(
       || seen.has(current)
     ) return INVALID_JSON_VALUE;
     seen.add(current);
-    collections += 1;
-    if (collections > MAX_JSON_NODES) {
-      seen.delete(current);
-      return INVALID_JSON_VALUE;
-    }
     if (Array.isArray(current)) {
       if (current.length > MAX_JSON_COLLECTION_ENTRIES) {
         seen.delete(current);
@@ -380,7 +377,7 @@ function sanitizeJsonValue(
       seen.delete(current);
       return INVALID_JSON_VALUE;
     }
-    const output: Record<string, AgentJsonValue> = {};
+    const output: Record<string, AgentJsonValue> = Object.create(null);
     for (const key of keys) {
       if (stripEncryptedReasoning && ENCRYPTED_REASONING_KEYS.has(key)) continue;
       const parsed = visit(current[key], depth + 1);
@@ -433,6 +430,9 @@ function parseServerMessage(
     || !Array.isArray(value.parts)
     || value.parts.length > MAX_SERVER_MESSAGE_PARTS
   ) return fail("invalid_server_event", "The authoritative message is invalid.");
+  if (value.role === "user") {
+    return parseAuthoritativeUserMessage(value) as unknown as Readonly<Record<string, unknown>>;
+  }
   return Object.freeze({
     id: value.id,
     role: value.role,
@@ -526,7 +526,9 @@ function rememberRunState<T extends AgentRunState>(
   return state;
 }
 
-function parseUserMessage(value: unknown): AgentUserMessage {
+function parseUserMessage(
+  value: unknown,
+): AgentUserMessage {
   if (
     !isRecord(value)
     || !hasExactKeys(value, ["id", "role", "parts"])
@@ -567,11 +569,13 @@ function parseUserMessage(value: unknown): AgentUserMessage {
         || part.url.length > MAX_FILE_URL_CHARS
         || !validAttachmentName(part.filename)
       ) return fail("invalid_command", "The submitted file part is invalid.");
+      const isImage = DEFAULT_THIN_AGENT_INPUT_LIMITS.imageMimeTypes
+        .includes(part.mediaType);
       const bytes = parseBase64DataUrl(part.url, part.mediaType);
       if (!bytes || bytes.byteLength < 1) {
         return fail("invalid_command", "The submitted file data is invalid.");
       }
-      if (DEFAULT_THIN_AGENT_INPUT_LIMITS.imageMimeTypes.includes(part.mediaType)) {
+      if (isImage) {
         if (bytes.byteLength > DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes) {
           return fail("invalid_command", "The submitted image is too large.");
         }
@@ -606,6 +610,17 @@ function parseUserMessage(value: unknown): AgentUserMessage {
   return Object.freeze({ id: value.id, role: "user", parts: Object.freeze(parts) });
 }
 
+function parseAuthoritativeUserMessage(value: unknown): AgentUserMessage {
+  try {
+    return parseUserMessage(value);
+  } catch {
+    return fail(
+      "invalid_server_event",
+      "The authoritative user message is invalid.",
+    );
+  }
+}
+
 function commandBase(value: Record<string, unknown>): void {
   if (
     value.type !== THIN_AGENT_COMMAND_TYPE
@@ -630,12 +645,16 @@ export function parseAgentCommand(
     if (value.context_ref !== undefined && (
       typeof value.context_ref !== "string" || !CONTEXT_REF.test(value.context_ref)
     )) return fail("invalid_command", "The submit context reference is invalid.");
+    const userMessage = parseUserMessage(value.user_message);
+    if (value.request_id !== userMessage.id) {
+      return fail("invalid_command", "The submit request and user message identities must match.");
+    }
     return Object.freeze({
       type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "submit",
       request_id: value.request_id as string,
-      user_message: parseUserMessage(value.user_message),
+      user_message: userMessage,
       ...(value.context_ref === undefined ? {} : { context_ref: value.context_ref }),
     });
   }
@@ -907,10 +926,14 @@ export function parseAgentServerEvent(
         "request_id",
         "user_message",
       ])) {
+        const userMessage = parseAuthoritativeUserMessage(item.user_message);
+        if (item.request_id !== userMessage.id) {
+          return fail("invalid_server_event", "The queued submit identity is invalid.");
+        }
         return Object.freeze({
           kind: "submit",
           request_id: item.request_id,
-          user_message: parseUserMessage(item.user_message),
+          user_message: userMessage,
         });
       }
       if (

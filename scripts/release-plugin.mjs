@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
+  assertProductionPluginArtifacts,
   buildProductionPlugin,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
@@ -83,7 +84,10 @@ export function validateReleasePackage({
   }
   if (problems.length > 0) throw new Error(problems.join("\n"));
 
-  const artifacts = buildImpl({ root: resolvedRoot, stdio: "inherit" });
+  buildImpl({ root: resolvedRoot, stdio: "inherit" });
+  // Never trust a builder result as proof. Inspect the exact post-build bytes
+  // again before recording or packaging release provenance.
+  const artifacts = assertProductionPluginArtifacts({ root: resolvedRoot });
   const provenance = provenanceImpl({
     root: resolvedRoot,
     version,

@@ -96,8 +96,12 @@ test("assertProductionPluginArtifacts accepts production-style bundles", () => {
   assert.equal(inspection.mainBundle.hasInlineSourceMap, false);
   assert.equal(inspection.mainBundle.hasCanonicalApiBase, true);
   assert.equal(inspection.mainBundle.hasRetiredApiHost, false);
+  assert.deepEqual(inspection.mainBundle.pluginApiBases, [CANONICAL_API_BASE_URL]);
+  assert.deepEqual(inspection.mainBundle.unexpectedPluginApiBases, []);
   assert.deepEqual(inspection.mainBundle.loopbackApiBases, []);
   assert.deepEqual(inspection.mainBundle.forbiddenClientFragments, []);
+  assert.deepEqual(inspection.mainBundle.upstreamRuntimeIdentities, []);
+  assert.deepEqual(inspection.mainBundle.forbiddenSecrets, []);
   assert.deepEqual(inspection.mainBundle.mobileUnsafeNodeRequires, []);
   assert.equal(inspection.stylesBundle.hasBuildFailureSentinel, false);
   assert.equal(inspection.stylesBundle.isEffectivelyEmpty, false);
@@ -422,7 +426,56 @@ test("assertProductionPluginArtifacts rejects loopback QA API bases", () => {
 
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
-    /loopback QA API base/i,
+    /loopback service URL/i,
+  );
+});
+
+test("assertProductionPluginArtifacts rejects any loopback service URL", () => {
+  const root = createTempPluginDir();
+  writeRequiredArtifacts(
+    root,
+    productionBundle('const LOCAL_HEALTH = "http://localhost:3002/health";\n'),
+  );
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /loopback service URL/,
+  );
+});
+
+test("assertProductionPluginArtifacts rejects arbitrary plugin API overrides", () => {
+  const root = createTempPluginDir();
+  const override = "https://preview.example.com/api/plugin";
+  writeRequiredArtifacts(
+    root,
+    productionBundle(`const OVERRIDE_API = ${JSON.stringify(override)};\n`),
+  );
+
+  const inspection = inspectPluginArtifacts({ root });
+  assert.deepEqual(inspection.mainBundle.pluginApiBases, [
+    CANONICAL_API_BASE_URL,
+    override,
+  ]);
+  assert.deepEqual(inspection.mainBundle.unexpectedPluginApiBases, [override]);
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /plugin API bases outside the selected build route/,
+  );
+});
+
+test("production artifact options cannot allow a local endpoint", () => {
+  const root = createTempPluginDir();
+  const local = "http://127.0.0.1:8787/api/plugin";
+  writeRequiredArtifacts(root, productionBundle(`const LOCAL_API = ${JSON.stringify(local)};\n`));
+
+  assert.throws(
+    () => assertProductionPluginArtifacts({
+      root,
+      expectedApiBaseUrl: local,
+      allowedLoopbackApiBaseUrls: [local],
+      expectTestDriver: true,
+    }),
+    /outside the selected build route|forbidden for this build target|loopback service URL/,
   );
 });
 
@@ -449,6 +502,76 @@ test("assertProductionPluginArtifacts rejects retired client runtimes and provid
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
     /still bundles a provider SDK/i,
+  );
+});
+
+test("artifact inspection rejects upstream service and provider identities", async (t) => {
+  for (const [fragment, identity] of [
+    ["OpenRouter", "OpenRouter"],
+    ["@ai-sdk/provider", "AI SDK"],
+    ["@cloudflare/think", "Think runtime"],
+    ["Pi", "Pi runtime"],
+    ["https://api.openai.com/v1", "OpenAI"],
+    ["openAiApiKey", "OpenAI"],
+    ["openAIClient", "OpenAI"],
+    ["openaiProvider", "OpenAI"],
+    ["Anthropic", "Anthropic"],
+    ["gemini", "Google Gemini"],
+  ]) {
+    await t.test(identity, () => {
+      const root = createTempPluginDir();
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      writeRequiredArtifacts(root, productionBundle(`const identity = ${JSON.stringify(fragment)};\n`));
+
+      const inspection = inspectPluginArtifacts({ root });
+      assert.ok(inspection.mainBundle.upstreamRuntimeIdentities.includes(identity));
+      assert.throws(
+        () => assertProductionPluginArtifacts({ root }),
+        /upstream service or provider identities/,
+      );
+    });
+  }
+});
+
+test("artifact inspection reports likely secrets without echoing their values", async (t) => {
+  for (const [secret, kind] of [
+    [`sk-proj-${"A".repeat(32)}`, "OpenAI-compatible API key"],
+    [`AKIA${"B".repeat(16)}`, "AWS access key"],
+    ["-----BEGIN PRIVATE KEY-----", "private key"],
+    ["https://build-user:super-secret-value@example.com/api", "credential-bearing URL"],
+  ]) {
+    await t.test(kind, () => {
+      const root = createTempPluginDir();
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      writeRequiredArtifacts(root, productionBundle(`const secret = ${JSON.stringify(secret)};\n`));
+
+      const inspection = inspectPluginArtifacts({ root });
+      assert.ok(inspection.mainBundle.forbiddenSecrets.includes(kind));
+      assert.throws(
+        () => assertProductionPluginArtifacts({ root }),
+        (error) => error instanceof Error
+          && error.message.includes(`embedded secrets: ${kind}`)
+          && !error.message.includes(secret),
+      );
+    });
+  }
+});
+
+test("artifact inspection rejects a long literal credential assignment", () => {
+  const root = createTempPluginDir();
+  const credential = "C".repeat(32);
+  writeRequiredArtifacts(
+    root,
+    productionBundle(`const apiKey = ${JSON.stringify(credential)};\n`),
+  );
+
+  const inspection = inspectPluginArtifacts({ root });
+  assert.deepEqual(inspection.mainBundle.forbiddenSecrets, ["literal credential assignment"]);
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    (error) => error instanceof Error
+      && error.message.includes("literal credential assignment")
+      && !error.message.includes(credential),
   );
 });
 
@@ -484,13 +607,19 @@ test("buildProductionPlugin revalidates the post-build artifact set", () => {
     root,
     stdio: "pipe",
     env: {
+      PATH: "/safe-bin",
       SYSTEMSCULPT_API_BASE_URL: "http://127.0.0.1:3001/api/plugin",
+      SYSTEMSCULPT_BUILD_STAMP: "unsafe",
+      SYSTEMSCULPT_TEST_DRIVER: "1",
     },
     spawnSyncImpl(command, args, options) {
       assert.equal(command, process.execPath);
       assert.deepEqual(args, [path.join(root, "esbuild.config.mjs"), "production"]);
       assert.equal(options.cwd, root);
-      assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, CANONICAL_API_BASE_URL);
+      assert.equal("SYSTEMSCULPT_API_BASE_URL" in options.env, false);
+      assert.equal("SYSTEMSCULPT_BUILD_STAMP" in options.env, false);
+      assert.equal("SYSTEMSCULPT_TEST_DRIVER" in options.env, false);
+      assert.equal(options.env.PATH, "/safe-bin");
       assert.equal(options.shell, undefined);
       writeRequiredArtifacts(root, productionBundle("console.log('rebuilt bundle');\n"));
       return {
@@ -519,12 +648,12 @@ test("buildStagingPlugin forces the staging URL and revalidates the target artif
     },
     spawnSyncImpl(command, args, options) {
       assert.equal(command, process.execPath);
-      assert.deepEqual(args, [path.join(root, "esbuild.config.mjs"), "production"]);
+      assert.deepEqual(args, [path.join(root, "esbuild.config.mjs"), "staging"]);
       assert.equal(options.cwd, root);
-      assert.equal(options.env.SYSTEMSCULPT_API_BASE_URL, STAGING_API_BASE_URL);
-      assert.equal(options.env.SYSTEMSCULPT_BUILD_STAMP, "staging");
+      assert.equal("SYSTEMSCULPT_API_BASE_URL" in options.env, false);
+      assert.equal("SYSTEMSCULPT_BUILD_STAMP" in options.env, false);
+      assert.equal("SYSTEMSCULPT_TEST_DRIVER" in options.env, false);
       assert.equal(options.shell, undefined);
-      assert.equal(options.env.SYSTEMSCULPT_TEST_DRIVER, "1");
       writeRequiredArtifacts(
         root,
         stagingBundle(`console.log('staging bundle');\nconst driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),

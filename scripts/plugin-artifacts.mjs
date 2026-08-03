@@ -8,6 +8,7 @@ import process from "node:process";
 import {
   CANONICAL_API_BASE_URL,
   LOCAL_AGENT_API_BASE_URL,
+  RETIRED_BUILD_OVERRIDE_ENVIRONMENT_KEYS,
   STAGING_API_BASE_URL,
   normalizeApiBaseUrl,
 } from "./plugin-build-options.mjs";
@@ -16,7 +17,40 @@ export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.cs
 
 const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const CSS_BUILD_FAILURE_PATTERN = /\/\*\s*CSS build failed\s*\*\//i;
+const PLUGIN_API_BASE_PATTERN = /https?:\/\/(?:\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::\d+)?\/api\/plugin\b/gi;
 const RETIRED_SYSTEMSCULPT_API_HOST = "https://api.systemsculpt.com";
+
+const FORBIDDEN_SERVICE_IDENTITY_RULES = [
+  { identity: "OpenRouter", pattern: /\bopenrouter\b|openrouter\.ai|@openrouter\//i },
+  { identity: "AI SDK", pattern: /\bai[ _-]?sdk\b|@ai-sdk\//i },
+  { identity: "Think runtime", pattern: /@cloudflare\/think\b|\bthink(?:agent|client|runtime|sdk)\b/i },
+  {
+    identity: "Pi runtime",
+    pattern: /@(?:earendil-works|mariozechner)\/pi-(?:agent-core|ai|coding-agent)\b|\bpi-client-v\d+\b|["'`]pi["'`]/i,
+  },
+  {
+    identity: "OpenAI",
+    pattern: /\bopenai\b|openai(?:api|client|credential|key|model|provider|secret)|api\.openai\.com/i,
+  },
+  { identity: "Anthropic", pattern: /\banthropic\b|api\.anthropic\.com/i },
+  { identity: "Google Gemini", pattern: /\bgemini\b|generativelanguage\.googleapis\.com/i },
+];
+
+const FORBIDDEN_SECRET_RULES = [
+  { kind: "private key", pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
+  { kind: "OpenAI-compatible API key", pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/ },
+  { kind: "Stripe live secret", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/ },
+  { kind: "GitHub access token", pattern: /\b(?:gh[oprsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
+  { kind: "npm access token", pattern: /\bnpm_[A-Za-z0-9]{30,}\b/ },
+  { kind: "Google API key", pattern: /\bAIza[0-9A-Za-z_-]{30,}\b/ },
+  { kind: "AWS access key", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/ },
+  { kind: "Slack token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/ },
+  {
+    kind: "literal credential assignment",
+    pattern: /\b(?:apiKey|api_key|accessToken|access_token|clientSecret|client_secret|password)\b\s*[:=]\s*["'`][^\s"'`]{20,}["'`]/i,
+  },
+  { kind: "credential-bearing URL", pattern: /https?:\/\/[^\s/"'`:@]+:[^\s/"'`@]+@/i },
+];
 function bundleFragmentRules(message, fragments) {
   return fragments.map((fragment) => ({ fragment, message }));
 }
@@ -104,8 +138,8 @@ const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
   ...THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 ];
 
-const LOOPBACK_API_BASE_PATTERN =
-  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?\/api\/(?:v1|plugin)\b/gi;
+const LOOPBACK_SERVICE_URL_PATTERN =
+  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s"'`\\)<>\]]*)?/gi;
 const REQUIRE_CALL_PATTERN = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 const NODE_BUILTINS = new Set(
   builtinModules.flatMap((name) => [name, name.replace(/^node:/, "")]),
@@ -247,10 +281,14 @@ export function inspectPluginArtifacts({
     hasCanonicalApiBase: false,
     expectedApiBaseUrl: normalizedExpectedApiBaseUrl,
     hasExpectedApiBase: false,
+    pluginApiBases: [],
+    unexpectedPluginApiBases: [],
     forbiddenApiBases: [],
     hasRetiredApiHost: false,
     loopbackApiBases: [],
     forbiddenClientFragments: [],
+    upstreamRuntimeIdentities: [],
+    forbiddenSecrets: [],
     nodeBuiltinRequires: [],
     mobileUnsafeNodeRequires: [],
     hasTestDriver: false,
@@ -266,7 +304,10 @@ export function inspectPluginArtifacts({
     }
 
     mainBundle.hasCanonicalApiBase = bundleText.includes(CANONICAL_API_BASE_URL);
-    mainBundle.hasExpectedApiBase = bundleText.includes(normalizedExpectedApiBaseUrl);
+    mainBundle.pluginApiBases = Array.from(
+      new Set((bundleText.match(PLUGIN_API_BASE_PATTERN) || []).map(normalizeApiBaseUrl)),
+    );
+    mainBundle.hasExpectedApiBase = mainBundle.pluginApiBases.includes(normalizedExpectedApiBaseUrl);
     if (!mainBundle.hasExpectedApiBase) {
       const qualifier = normalizedExpectedApiBaseUrl === CANONICAL_API_BASE_URL
         ? "canonical"
@@ -275,8 +316,16 @@ export function inspectPluginArtifacts({
         `main.js does not contain the ${qualifier} SystemSculpt API base ${normalizedExpectedApiBaseUrl}.`,
       );
     }
+    mainBundle.unexpectedPluginApiBases = mainBundle.pluginApiBases.filter(
+      (value) => value !== normalizedExpectedApiBaseUrl,
+    );
+    if (mainBundle.unexpectedPluginApiBases.length > 0) {
+      problems.push(
+        `main.js contains plugin API bases outside the selected build route: ${mainBundle.unexpectedPluginApiBases.join(", ")}.`,
+      );
+    }
     mainBundle.forbiddenApiBases = normalizedForbiddenApiBaseUrls.filter((value) =>
-      bundleText.includes(value)
+      mainBundle.pluginApiBases.includes(value)
     );
     if (mainBundle.forbiddenApiBases.length > 0) {
       problems.push(
@@ -290,14 +339,16 @@ export function inspectPluginArtifacts({
     }
 
     mainBundle.loopbackApiBases = Array.from(
-      new Set(bundleText.match(LOOPBACK_API_BASE_PATTERN) || []),
+      new Set(bundleText.match(LOOPBACK_SERVICE_URL_PATTERN) || []),
     );
     const unexpectedLoopbackApiBases = mainBundle.loopbackApiBases.filter(
-      (value) => !normalizedAllowedLoopbackApiBaseUrls.has(normalizeApiBaseUrl(value)),
+      (value) => !Array.from(normalizedAllowedLoopbackApiBaseUrls).some(
+        (allowed) => value === allowed || value.startsWith(`${allowed}/`),
+      ),
     );
     if (unexpectedLoopbackApiBases.length > 0) {
       problems.push(
-        `main.js contains a loopback QA API base: ${unexpectedLoopbackApiBases.join(", ")}.`,
+        `main.js contains a loopback service URL: ${unexpectedLoopbackApiBases.join(", ")}.`,
       );
     }
 
@@ -310,6 +361,24 @@ export function inspectPluginArtifacts({
 
     for (const match of mainBundle.forbiddenClientFragments) {
       problems.push(`${match.message} (${mainBundle.formattedSize})`);
+    }
+
+    mainBundle.upstreamRuntimeIdentities = FORBIDDEN_SERVICE_IDENTITY_RULES
+      .filter(({ pattern }) => pattern.test(bundleText))
+      .map(({ identity }) => identity);
+    if (mainBundle.upstreamRuntimeIdentities.length > 0) {
+      problems.push(
+        `main.js exposes upstream service or provider identities: ${mainBundle.upstreamRuntimeIdentities.join(", ")}.`,
+      );
+    }
+
+    mainBundle.forbiddenSecrets = FORBIDDEN_SECRET_RULES
+      .filter(({ pattern }) => pattern.test(bundleText))
+      .map(({ kind }) => kind);
+    if (mainBundle.forbiddenSecrets.length > 0) {
+      problems.push(
+        `main.js appears to contain embedded secrets: ${mainBundle.forbiddenSecrets.join(", ")}.`,
+      );
     }
 
     mainBundle.nodeBuiltinRequires = Array.from(bundleText.matchAll(REQUIRE_CALL_PATTERN))
@@ -387,7 +456,8 @@ export function assertProductionPluginArtifacts(options = {}) {
   const inspection = inspectPluginArtifacts({
     ...options,
     expectedApiBaseUrl: CANONICAL_API_BASE_URL,
-    forbiddenApiBaseUrls: [STAGING_API_BASE_URL],
+    forbiddenApiBaseUrls: [STAGING_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [],
     expectTestDriver: false,
   });
   if (!inspection.ok) {
@@ -400,7 +470,8 @@ export function assertStagingPluginArtifacts(options = {}) {
   const inspection = inspectPluginArtifacts({
     ...options,
     expectedApiBaseUrl: STAGING_API_BASE_URL,
-    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL],
+    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [],
     expectTestDriver: true,
   });
   if (!inspection.ok) {
@@ -423,40 +494,59 @@ export function assertLocalAgentPluginArtifacts(options = {}) {
   return inspection;
 }
 
+function sanitizedBuildEnvironment(environment) {
+  const sanitized = { ...environment };
+  for (const key of RETIRED_BUILD_OVERRIDE_ENVIRONMENT_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
+}
+
+function buildPluginTarget({
+  root,
+  stdio,
+  env,
+  spawnSyncImpl,
+  target,
+  label,
+  assertArtifacts,
+}) {
+  const resolvedRoot = path.resolve(root);
+  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
+  const result = spawnSyncImpl(
+    process.execPath,
+    [path.join(resolvedRoot, "esbuild.config.mjs"), target],
+    {
+      cwd: resolvedRoot,
+      env: sanitizedBuildEnvironment(env),
+      stdio,
+      encoding: "utf8",
+    },
+  );
+
+  if (result?.error) throw result.error;
+  if ((result?.status ?? 1) !== 0) {
+    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`${label} plugin build failed.${output ? `\n${output}` : ""}`);
+  }
+  return assertArtifacts({ root: resolvedRoot });
+}
+
 export function buildProductionPlugin({
   root = process.cwd(),
   stdio = "inherit",
   env = process.env,
   spawnSyncImpl = spawnSync,
 } = {}) {
-  const resolvedRoot = path.resolve(root);
-  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
-  const releaseEnv = {
-    ...env,
-    SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
-    SYSTEMSCULPT_TEST_DRIVER: "0",
-  };
-  const result = spawnSyncImpl(
-    process.execPath,
-    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
-    {
-      cwd: resolvedRoot,
-      env: releaseEnv,
-      stdio,
-      encoding: "utf8",
-    },
-  );
-
-  if (result?.error) {
-    throw result.error;
-  }
-
-  if ((result?.status ?? 1) !== 0) {
-    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(`Production plugin build failed.${output ? `\n${output}` : ""}`);
-  }
-
-  return assertProductionPluginArtifacts({ root: resolvedRoot });
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "production",
+    label: "Production",
+    assertArtifacts: assertProductionPluginArtifacts,
+  });
 }
 
 export function buildStagingPlugin({
@@ -465,35 +555,15 @@ export function buildStagingPlugin({
   env = process.env,
   spawnSyncImpl = spawnSync,
 } = {}) {
-  const resolvedRoot = path.resolve(root);
-  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
-  const stagingEnv = {
-    ...env,
-    SYSTEMSCULPT_API_BASE_URL: STAGING_API_BASE_URL,
-    SYSTEMSCULPT_BUILD_STAMP: "staging",
-    SYSTEMSCULPT_TEST_DRIVER: "1",
-  };
-  const result = spawnSyncImpl(
-    process.execPath,
-    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
-    {
-      cwd: resolvedRoot,
-      env: stagingEnv,
-      stdio,
-      encoding: "utf8",
-    },
-  );
-
-  if (result?.error) {
-    throw result.error;
-  }
-
-  if ((result?.status ?? 1) !== 0) {
-    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(`Staging plugin build failed.${output ? `\n${output}` : ""}`);
-  }
-
-  return assertStagingPluginArtifacts({ root: resolvedRoot });
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "staging",
+    label: "Staging",
+    assertArtifacts: assertStagingPluginArtifacts,
+  });
 }
 
 export function buildLocalAgentPlugin({
@@ -502,33 +572,13 @@ export function buildLocalAgentPlugin({
   env = process.env,
   spawnSyncImpl = spawnSync,
 } = {}) {
-  const resolvedRoot = path.resolve(root);
-  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
-  const localEnv = {
-    ...env,
-    SYSTEMSCULPT_API_BASE_URL: LOCAL_AGENT_API_BASE_URL,
-    SYSTEMSCULPT_BUILD_STAMP: "local-agent",
-    SYSTEMSCULPT_TEST_DRIVER: "1",
-  };
-  const result = spawnSyncImpl(
-    process.execPath,
-    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
-    {
-      cwd: resolvedRoot,
-      env: localEnv,
-      stdio,
-      encoding: "utf8",
-    },
-  );
-
-  if (result?.error) {
-    throw result.error;
-  }
-
-  if ((result?.status ?? 1) !== 0) {
-    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(`Local agent plugin build failed.${output ? `\n${output}` : ""}`);
-  }
-
-  return assertLocalAgentPluginArtifacts({ root: resolvedRoot });
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "local-agent",
+    label: "Local agent",
+    assertArtifacts: assertLocalAgentPluginArtifacts,
+  });
 }

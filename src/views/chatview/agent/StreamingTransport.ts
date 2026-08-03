@@ -102,12 +102,25 @@ function isInitialSessionSnapshot(
   }
 }
 
-function nextEventBoundary(buffer: string): Readonly<{
-  index: number;
-  length: number;
-}> | null {
-  const match = /\r?\n\r?\n/u.exec(buffer);
-  return match ? { index: match.index, length: match[0].length } : null;
+const SSE_FRAGMENT_FLUSH_COUNT = 1_024;
+const SSE_BOUNDARY_PREFIXES = ["\r\n\r", "\r\n", "\n\r", "\r", "\n"] as const;
+
+function trailingBoundaryPrefixLength(value: string): number {
+  for (const prefix of SSE_BOUNDARY_PREFIXES) {
+    if (value.endsWith(prefix)) return prefix.length;
+  }
+  return 0;
+}
+
+async function cancelReaderSafely(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    // Closing a stale stream is best effort. The generation gate still blocks
+    // every callback after detach.
+  }
 }
 
 export class AgentStreamingTransport
@@ -155,7 +168,9 @@ implements AgentConnectionPort {
    * transport reads that snapshot over HTTP.
    */
   public async connect(): Promise<void> {
-    this.disposed = false;
+    if (this.disposed) {
+      throw new Error("This chat connection is closed.");
+    }
     const generation = ++this.connectGeneration;
     this.setState("connecting");
     try {
@@ -196,9 +211,9 @@ implements AgentConnectionPort {
     generation: number,
   ): Promise<void> {
     const response = await this.options.requestClient.request({
-      url: `${this.options.baseUrl}${THIN_AGENT_MESSAGES_PATH}`
-        + `?access_token=${encodeURIComponent(token)}`,
+      url: `${this.options.baseUrl}${THIN_AGENT_MESSAGES_PATH}`,
       method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (this.disposed || generation !== this.connectGeneration) return;
     if (!response.ok) {
@@ -222,7 +237,7 @@ implements AgentConnectionPort {
     }
     if (this.disposed || generation !== this.connectGeneration) return;
     if (!isInitialSessionSnapshot(value, conversationId)
-      || !this.emitValue(value)) {
+      || !this.emitValue(value, generation)) {
       throw new Error("SystemSculpt returned an unusable chat snapshot.");
     }
   }
@@ -340,15 +355,16 @@ implements AgentConnectionPort {
    */
   private async runTurn(command: unknown): Promise<void> {
     if (this.disposed) return;
+    const generation = this.connectGeneration;
     const token = (await this.ensureBootstrap()).response.access.token;
-    if (this.disposed) return;
+    if (!this.isCurrentDelivery(generation)) return;
     const controller = new AbortController();
     this.inFlight.add(controller);
     try {
       const response = await this.options.requestClient.request({
-        url: `${this.options.baseUrl}${THIN_AGENT_TURN_PATH}`
-          + `?access_token=${encodeURIComponent(token)}`,
+        url: `${this.options.baseUrl}${THIN_AGENT_TURN_PATH}`,
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         // stream selects the direct-fetch transport, which is the only one
         // that delivers frames as they are produced rather than buffering the
         // whole turn. The request client serializes the body itself; handing
@@ -374,7 +390,7 @@ implements AgentConnectionPort {
           serverAdmissionPossible,
         });
       }
-      await this.consume(response.body);
+      await this.consume(response.body, generation, controller.signal);
     } catch (error) {
       const definitelyRejected = error !== null
         && typeof error === "object"
@@ -390,52 +406,100 @@ implements AgentConnectionPort {
     }
   }
 
-  private async consume(body: ReadableStream<Uint8Array>): Promise<void> {
+  private async consume(
+    body: ReadableStream<Uint8Array>,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const reader = body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     const encoder = new TextEncoder();
-    let buffer = "";
-    let bufferBytes = 0;
+    const eventBoundary = /\r?\n\r?\n/gu;
+    let boundaryPrefix = "";
+    let eventBytes = 0;
+    let fragments: string[] = [];
+    let fragmentBatch: string[] = [];
+
+    const appendEventText = (text: string): void => {
+      if (!text) return;
+      eventBytes += encoder.encode(text).byteLength;
+      if (eventBytes > MAX_EVENT_BYTES) {
+        throw new Error("SystemSculpt returned an oversized session event.");
+      }
+      fragmentBatch.push(text);
+      if (fragmentBatch.length >= SSE_FRAGMENT_FLUSH_COUNT) {
+        fragments.push(fragmentBatch.join(""));
+        fragmentBatch = [];
+      }
+    };
+    const takeEventText = (): string => {
+      if (fragmentBatch.length > 0) fragments.push(fragmentBatch.join(""));
+      const event = fragments.join("");
+      fragments = [];
+      fragmentBatch = [];
+      eventBytes = 0;
+      return event;
+    };
+    const consumeDecodedText = (text: string): void => {
+      const input = boundaryPrefix + text;
+      boundaryPrefix = "";
+      eventBoundary.lastIndex = 0;
+      let start = 0;
+      for (let match = eventBoundary.exec(input);
+        match;
+        match = eventBoundary.exec(input)) {
+        appendEventText(input.slice(start, match.index));
+        if (!this.emit(takeEventText(), generation, signal)) {
+          throw new Error("SystemSculpt returned an invalid session event.");
+        }
+        start = match.index + match[0].length;
+      }
+      const remainder = input.slice(start);
+      const retainedLength = trailingBoundaryPrefixLength(remainder);
+      const appendThrough = remainder.length - retainedLength;
+      appendEventText(remainder.slice(0, appendThrough));
+      boundaryPrefix = remainder.slice(appendThrough);
+    };
+
+    const cancelReader = (): void => {
+      void cancelReaderSafely(reader);
+    };
+    signal.addEventListener("abort", cancelReader, { once: true });
+    if (signal.aborted) cancelReader();
     try {
       for (;;) {
         const { done, value } = await reader.read();
+        if (!this.isCurrentDelivery(generation, signal)) {
+          await cancelReaderSafely(reader);
+          return;
+        }
         if (done) break;
-        bufferBytes += value.byteLength;
-        buffer += decoder.decode(value, { stream: true });
-        let boundary = nextEventBoundary(buffer);
-        while (boundary) {
-          const chunk = buffer.slice(0, boundary.index);
-          if (encoder.encode(chunk).byteLength > MAX_EVENT_BYTES) {
-            throw new Error("SystemSculpt returned an oversized session event.");
-          }
-          const consumedCharacters = boundary.index + boundary.length;
-          bufferBytes -= encoder.encode(
-            buffer.slice(0, consumedCharacters),
-          ).byteLength;
-          buffer = buffer.slice(consumedCharacters);
-          if (!this.emit(chunk)) {
-            throw new Error("SystemSculpt returned an invalid session event.");
-          }
-          boundary = nextEventBoundary(buffer);
-        }
-        if (bufferBytes > MAX_EVENT_BYTES) {
-          throw new Error("SystemSculpt returned an oversized session event.");
-        }
+        consumeDecodedText(decoder.decode(value, { stream: true }));
       }
-      buffer += decoder.decode();
-      if (bufferBytes > MAX_EVENT_BYTES) {
-        throw new Error("SystemSculpt returned an oversized session event.");
-      }
-      if (buffer.trim() && !this.emit(buffer)) {
-        throw new Error("SystemSculpt returned an invalid session event.");
+      if (!this.isCurrentDelivery(generation, signal)) return;
+      consumeDecodedText(decoder.decode());
+      appendEventText(boundaryPrefix);
+      boundaryPrefix = "";
+      if (eventBytes > 0) {
+        const finalEvent = takeEventText();
+        if (finalEvent.trim()
+          && !this.emit(finalEvent, generation, signal)) {
+          throw new Error("SystemSculpt returned an invalid session event.");
+        }
       }
     } finally {
+      signal.removeEventListener("abort", cancelReader);
       reader.releaseLock();
     }
   }
 
   /** Returns whether a complete SSE event became an authoritative frame. */
-  private emit(chunk: string): boolean {
+  private emit(
+    chunk: string,
+    generation = this.connectGeneration,
+    signal?: AbortSignal,
+  ): boolean {
+    if (!this.isCurrentDelivery(generation, signal)) return true;
     const lines = chunk.split(/\r?\n/u);
     const data = lines
       .filter((line) => line.startsWith("data:"))
@@ -458,15 +522,30 @@ implements AgentConnectionPort {
       // is safer than surfacing a partial event as conversation state.
       return false;
     }
-    return this.emitValue(frame);
+    return this.emitValue(frame, generation, signal);
   }
 
-  private emitValue(frame: unknown): boolean {
+  private emitValue(
+    frame: unknown,
+    generation = this.connectGeneration,
+    signal?: AbortSignal,
+  ): boolean {
+    if (!this.isCurrentDelivery(generation, signal)) return true;
     if (this.options.isAuthoritativeFrame
       && !this.options.isAuthoritativeFrame(frame)) return false;
     for (const listener of this.frameListeners) {
+      if (!this.isCurrentDelivery(generation, signal)) return true;
       listener(frame as AgentServerEvent);
     }
     return true;
+  }
+
+  private isCurrentDelivery(
+    generation: number,
+    signal?: AbortSignal,
+  ): boolean {
+    return !this.disposed
+      && generation === this.connectGeneration
+      && signal?.aborted !== true;
   }
 }

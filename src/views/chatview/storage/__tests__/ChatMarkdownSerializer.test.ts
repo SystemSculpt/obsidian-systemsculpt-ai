@@ -801,49 +801,104 @@ Valid message
   });
 
   describe("round-trip serialization", () => {
-    it("round-trips exact framing sentinels in user, assistant, reasoning, and tool content", () => {
-      const sentinel = "<!-- SYSTEMSCULPT-MESSAGE-END -->";
-      const messages: ChatMessage[] = [
-        { role: "user", content: `User quoted ${sentinel}`, message_id: "user-sentinel" },
-        { role: "assistant", content: `Assistant quoted ${sentinel}`, message_id: "assistant-sentinel" },
-        {
-          role: "assistant",
-          content: "",
-          message_id: "reasoning-sentinel",
-          messageParts: [
-            { id: "reasoning", type: "reasoning", data: `Reasoning quoted ${sentinel}`, timestamp: 1 },
-            { id: "content", type: "content", data: "Done", timestamp: 2 },
+    it.each(["-->", "--!>"])(
+      "round-trips reserved %s framing in user, assistant, reasoning, and nested tool output",
+      (sentinel) => {
+        const messages: ChatMessage[] = [
+          { role: "user", content: `User quoted ${sentinel}`, message_id: "user-sentinel" },
+          { role: "assistant", content: `Assistant quoted ${sentinel}`, message_id: "assistant-sentinel" },
+          {
+            role: "assistant",
+            content: "",
+            message_id: "reasoning-sentinel",
+            messageParts: [
+              { id: "reasoning", type: "reasoning", data: `Reasoning quoted ${sentinel}`, timestamp: 1 },
+              { id: "content", type: "content", data: "Done", timestamp: 2 },
+            ],
+          },
+          {
+            role: "assistant",
+            content: "",
+            message_id: "tool-sentinel",
+            messageParts: [{
+              id: "tool",
+              type: "tool_call",
+              timestamp: 1,
+              data: {
+                id: "call-sentinel",
+                state: "completed",
+                result: {
+                  success: true,
+                  data: { nested: [{ summary: `Tool quoted ${sentinel}` }] },
+                },
+              } as any,
+            }],
+          },
+        ];
+
+        const serialized = ChatMarkdownSerializer.serializeMessages(messages);
+        const markdown = `---\nid: sentinel-chat\n---\n\n${serialized}`;
+        const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+        expect(serialized.match(/payload-format="base64-json-v1"/g)).toHaveLength(4);
+        expect(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)).toHaveLength(4);
+        expect(parsed?.messages).toHaveLength(4);
+        expect(parsed?.messages[0].content).toBe(`User quoted ${sentinel}`);
+        expect(parsed?.messages[1].content).toBe(`Assistant quoted ${sentinel}`);
+        expect(parsed?.messages[2].reasoning).toContain(`Reasoning quoted ${sentinel}`);
+        const restoredTool = parsed?.messages[3].messageParts?.find((part) => part.type === "tool_call");
+        expect((restoredTool?.data as any)?.result?.data?.nested?.[0]?.summary)
+          .toBe(`Tool quoted ${sentinel}`);
+      },
+    );
+
+    it("stores and restores the exact framed JSON payload through base64", () => {
+      const exactContent = "Unicode 🗿 café\nNUL:\u0000\nReserved: --!>\nTrailing spaces:  ";
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "user",
+        content: exactContent,
+        message_id: "user-exact-base64",
+      }]);
+      const match = serialized.match(
+        /payload-format="base64-json-v1" -->\n([A-Za-z0-9+/=]+)\n<!-- SYSTEMSCULPT-MESSAGE-END -->/,
+      );
+      expect(match).not.toBeNull();
+      const binary = atob(match?.[1] ?? "");
+      const decoded = JSON.parse(new TextDecoder().decode(
+        Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+      ));
+
+      expect(decoded).toEqual({
+        version: 1,
+        kind: "content",
+        content: exactContent,
+      });
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: exact-base64\n---\n\n${serialized}`,
+      )?.messages[0].content).toBe(exactContent);
+    });
+
+    it("round-trips data images without creating a DOM image element", () => {
+      const createElement = jest.spyOn(document, "createElement");
+      try {
+        const message: ChatMessage = {
+          role: "user",
+          message_id: "user-no-dom-image",
+          content: [
+            { type: "text", text: "Inspect this image." },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } },
           ],
-        },
-        {
-          role: "assistant",
-          content: "",
-          message_id: "tool-sentinel",
-          messageParts: [{
-            id: "tool",
-            type: "tool_call",
-            timestamp: 1,
-            data: {
-              id: "call-sentinel",
-              state: "completed",
-              result: { success: true, data: { summary: `Tool quoted ${sentinel}` } },
-            } as any,
-          }],
-        },
-      ];
+        };
+        const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+        const parsed = ChatMarkdownSerializer.parseMarkdown(
+          `---\nid: no-dom-image\n---\n\n${serialized}`,
+        );
 
-      const serialized = ChatMarkdownSerializer.serializeMessages(messages);
-      const markdown = `---\nid: sentinel-chat\n---\n\n${serialized}`;
-      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
-
-      expect(serialized.match(/payload-format="base64-json-v1"/g)).toHaveLength(4);
-      expect(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)).toHaveLength(4);
-      expect(parsed?.messages).toHaveLength(4);
-      expect(parsed?.messages[0].content).toBe(`User quoted ${sentinel}`);
-      expect(parsed?.messages[1].content).toBe(`Assistant quoted ${sentinel}`);
-      expect(parsed?.messages[2].reasoning).toContain(`Reasoning quoted ${sentinel}`);
-      const restoredTool = parsed?.messages[3].messageParts?.find((part) => part.type === "tool_call");
-      expect((restoredTool?.data as any)?.result?.data?.summary).toBe(`Tool quoted ${sentinel}`);
+        expect(parsed?.messages[0].content).toEqual(message.content);
+        expect(createElement).not.toHaveBeenCalled();
+      } finally {
+        createElement.mockRestore();
+      }
     });
 
     it("round-trips old unencoded chat history without changing its meaning", () => {

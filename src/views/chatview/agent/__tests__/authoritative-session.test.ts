@@ -313,7 +313,7 @@ describe("AgentSession server authority", () => {
     });
 
     await expect(session.submit({
-      request_id: "request_queued",
+      request_id: "user_queued",
       user_message: pendingUser,
       context_ref: CONTEXT_REF,
     })).resolves.toBe("queued");
@@ -321,7 +321,7 @@ describe("AgentSession server authority", () => {
     expect(session.current.messages).toEqual([]);
     expect(session.current.optimisticUser).toEqual({
       kind: "optimistic_pending_user",
-      request_id: "request_queued",
+      request_id: "user_queued",
       message: pendingUser,
       delivery: "queued",
     });
@@ -354,7 +354,7 @@ describe("AgentSession server authority", () => {
       type: "systemsculpt.agent.command.v1",
       version: 1,
       kind: "submit",
-      request_id: "request_queued",
+      request_id: "user_queued",
       user_message: pendingUser,
       context_ref: CONTEXT_REF,
     });
@@ -371,7 +371,7 @@ describe("AgentSession server authority", () => {
       run_state: active(
         3,
         "running",
-        "request_queued",
+        "user_queued",
         RUN_B,
         "user_queued",
       ),
@@ -397,7 +397,7 @@ describe("AgentSession server authority", () => {
       "Preserve the exact submitted content",
     );
     await expect(session.submit({
-      request_id: "request_collision",
+      request_id: "user_collision",
       user_message: submitted,
     })).resolves.toBe("sent");
 
@@ -411,7 +411,7 @@ describe("AgentSession server authority", () => {
       run_state: active(
         1,
         "running",
-        "request_collision",
+        "user_collision",
         RUN_A,
         "user_collision",
       ),
@@ -431,7 +431,7 @@ describe("AgentSession server authority", () => {
       run_state: active(
         1,
         "running",
-        "request_collision",
+        "user_collision",
         RUN_A,
         "user_collision",
       ),
@@ -439,6 +439,54 @@ describe("AgentSession server authority", () => {
     expect(session.current.optimisticUser).toBeNull();
     expect(session.current.messages).toEqual([submitted]);
     expect(session.current.runState.state).toBe("running");
+    session.dispose();
+  });
+
+  it("rejects malformed snapshots before optimistic-user reconciliation", async () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    connection.emit(event("session_snapshot", {
+      messages: [],
+      run_state: idle(0),
+    }));
+    const pending = message(
+      "user_malformed_snapshot",
+      "user",
+      "Keep this optimistic message",
+    );
+    await session.submit({
+      request_id: pending.id,
+      user_message: pending,
+    });
+
+    connection.emit(event("session_snapshot", {
+      messages: [{
+        id: pending.id,
+        role: "user",
+        parts: [{
+          type: "file",
+          mediaType: "image/png",
+          url: "https://example.com/untrusted.png",
+        }],
+      }],
+      run_state: active(
+        1,
+        "running",
+        pending.id,
+        RUN_A,
+        pending.id,
+      ),
+    }));
+
+    expect(protocolErrors).toHaveLength(1);
+    expect(session.current.messages).toEqual([]);
+    expect(session.current.optimisticUser?.message).toEqual(pending);
+    expect(session.current.runState).toMatchObject({
+      state: "unknown",
+      reason: "protocol_error",
+    });
     session.dispose();
   });
 
@@ -497,7 +545,7 @@ describe("AgentSession server authority", () => {
     });
     const queued = message("user_waiting", "user", "Wait for real idle");
     await session.submit({
-      request_id: "request_waiting",
+      request_id: "user_waiting",
       user_message: queued,
     });
 
@@ -539,7 +587,7 @@ describe("AgentSession server authority", () => {
     connection.setState("closed");
 
     await expect(session.submit({
-      request_id: "request_reconnect",
+      request_id: "user_reconnect",
       user_message: message("user_reconnect", "user", "Send after reconnect"),
     })).resolves.toBe("queued");
     expect(session.current.runState).toMatchObject({
@@ -578,7 +626,7 @@ describe("AgentSession server authority", () => {
     }));
 
     await expect(session.submit({
-      request_id: "request_race",
+      request_id: "user_race",
       user_message: message("user_race", "user", "Retry after readiness"),
     })).resolves.toBe("queued");
     expect(session.current.optimisticUser?.delivery).toBe("queued");
@@ -609,7 +657,7 @@ describe("AgentSession server authority", () => {
     }));
 
     const result = session.submit({
-      request_id: "request_delayed_disconnect",
+      request_id: "user_delayed_disconnect",
       user_message: message(
         "user_delayed_disconnect",
         "user",
@@ -831,7 +879,7 @@ describe("AgentSession server authority", () => {
     }));
 
     await expect(session.submit({
-      request_id: "request_direct",
+      request_id: "user_direct",
       user_message: message("user_direct", "user", "Send now"),
     })).rejects.toThrow("send failed");
     expect(connection.sendSubmit).toHaveBeenCalledTimes(1);
@@ -847,7 +895,7 @@ describe("AgentSession server authority", () => {
     }));
 
     await expect(session.submit({
-      request_id: "request_context",
+      request_id: "user_context",
       user_message: message("user_context", "user", "Use context"),
       context_ref: "ctx1_not-a-real-reference",
     })).rejects.toMatchObject({

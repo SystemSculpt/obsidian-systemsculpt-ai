@@ -22,6 +22,8 @@ function reloadSavedMessages(messages: ChatMessage[]): ChatMessage[] {
   return parsed.messages;
 }
 
+const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
+
 describe("AgentComposer", () => {
   it("sends while idle, queues while running, and preserves line breaks", async () => {
     const parent = document.body.createDiv();
@@ -3176,7 +3178,7 @@ describe("AgentWorkspace", () => {
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
       expect(tailStatus.isConnected).toBe(false);
       expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
-      expect(parent.textContent?.match(/Could not finish the requested changes\./g))
+      expect(parent.textContent?.match(/SystemSculpt could not complete the response\./g))
         .toHaveLength(1);
       expect(parent.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
         .toBe("Completed text before failure");
@@ -4604,7 +4606,8 @@ describe("AgentWorkspace", () => {
     expect(turns[1].classList.contains("is-active")).toBe(true);
     expect(parent.querySelectorAll('[aria-label="SystemSculpt response"]')).toHaveLength(1);
     expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
-    expect(parent.textContent).toContain(error.message);
+    expect(parent.textContent).toContain(GENERIC_AGENT_FAILURE);
+    expect(parent.textContent).not.toContain(error.message);
     expect(parent.textContent).not.toMatch(/provider|openrouter|harness|connection|transport/iu);
     parent.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
     expect(onRetryFailedTurn).toHaveBeenCalledWith(turnId);
@@ -4612,7 +4615,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("shows an exact tool and terminal failure once after removing the live tail status", async () => {
+  it("shows one generic terminal failure after removing the live tail status", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -4664,7 +4667,7 @@ describe("AgentWorkspace", () => {
     const tailStatus = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
     const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     expect(toolNode.querySelector(".systemsculpt-agent-tool-error")?.textContent)
-      .toBe(repeatedError.message);
+      .toBe(GENERIC_AGENT_FAILURE);
 
     await workspace.setAgentSnapshot({
       ...running,
@@ -4700,7 +4703,9 @@ describe("AgentWorkspace", () => {
     expect(toolNode.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Failed");
     expect(toolNode.querySelector(".systemsculpt-agent-tool-error")).toBeNull();
     expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
-    expect(parent.textContent?.match(/Could not update Plan\.md\./g)).toHaveLength(1);
+    expect(parent.textContent?.match(/SystemSculpt could not complete the response\./g))
+      .toHaveLength(1);
+    expect(parent.textContent).not.toContain(repeatedError.message);
     workspace.unload();
   });
 
@@ -4870,7 +4875,8 @@ describe("AgentWorkspace", () => {
     await workspace.setHistory(reloadSavedMessages(savedHistory));
 
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)
-      .toContain("One file changed; one conflicted.");
+      .toContain(GENERIC_AGENT_FAILURE);
+    expect(parent.textContent).toContain("One file changed; one conflicted.");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("results");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).toBeNull();
     const artifacts = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-artifact")];

@@ -6,8 +6,6 @@ import type {
   AgentToolPart,
 } from "./AgentConversation";
 
-const INTERNAL_UI_WORDING =
-  /\b(?:connection|websocket|web socket|socket|stream|ticket|bootstrap|transport|protocol|provider|cloudflare|openrouter|think|pi|ai sdk|cf_agent)\b/i;
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;
 const INTERRUPTED_UI_WORDING =
@@ -21,20 +19,14 @@ export type PresentedAgentError = Readonly<{
 }>;
 
 export function presentAgentErrorMessage(
-  message: string,
+  _message: string,
   interrupted: boolean,
 ): string {
-  const normalized = message.trim();
-  if (
-    !normalized
-    || normalized.length > 512
-    || INTERNAL_UI_WORDING.test(normalized)
-  ) {
-    return interrupted
-      ? "Retry this message to continue."
-      : "SystemSculpt could not complete the response.";
-  }
-  return normalized;
+  // Service messages are not a product copy contract. Keep implementation,
+  // transport, and upstream identities behind the first-party boundary.
+  return interrupted
+    ? "Retry this message to continue."
+    : "SystemSculpt could not complete the response.";
 }
 
 /** Final defense before service failures become visible product copy. */

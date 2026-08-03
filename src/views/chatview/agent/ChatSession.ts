@@ -57,7 +57,10 @@ import type {
   AgentQueueSnapshotEvent,
   AgentUserMessage,
 } from "./Protocol";
-import { AgentMutationJournal } from "./MutationJournal";
+import {
+  AgentMutationJournal,
+  canonicalAgentToolInput,
+} from "./MutationJournal";
 import {
   AgentLifecycle,
   type AgentLifecycleInput,
@@ -164,6 +167,23 @@ export type AgentChatSessionOptions = Readonly<{
 const RUN_STALL_GRACE_MS = 240_000;
 const MAX_RESYNCHRONIZATION_DELAY_MS = 5_000;
 
+type ToolIdentity = Readonly<{
+  toolName: string;
+  canonicalInput: string;
+}>;
+
+type LocalApprovalDecision = Readonly<{
+  approvalId: string;
+  approved: boolean;
+  source: "manual" | "policy";
+  identity: ToolIdentity;
+}>;
+
+type ApprovalBinding = Readonly<{
+  callId: string;
+  identity: ToolIdentity;
+}>;
+
 type ActiveRun = {
   readonly token: object;
   readonly origin: "submitted" | "recovered";
@@ -176,8 +196,11 @@ type ActiveRun = {
   readonly resolve: (result: AgentRunResult) => void;
   readonly executingToolIds: Set<string>;
   readonly settledToolIds: Set<string>;
-  readonly approvalDecisions: Map<string, boolean>;
+  readonly toolIdentities: Map<string, ToolIdentity>;
+  readonly approvalDecisions: Map<string, LocalApprovalDecision>;
   readonly approvalIds: Map<string, string>;
+  readonly approvalCallIds: Map<string, string>;
+  readonly approvalBindings: Map<string, ApprovalBinding>;
   readonly toolTasks: Map<string, Promise<void>>;
   readonly baseMessageIds: ReadonlySet<string>;
   phase: AgentRunPhase;
@@ -207,10 +230,9 @@ type PendingToolDelivery = {
   inFlight: boolean;
 };
 
-type PendingApprovalDecision = Readonly<{
+type PendingApprovalDecision = LocalApprovalDecision & Readonly<{
   requestId: string;
   callId: string;
-  approved: boolean;
 }>;
 
 type PendingApprovalDelivery = {
@@ -220,8 +242,6 @@ type PendingApprovalDelivery = {
 };
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
-const INTERNAL_SERVICE_WORDING =
-  /\b(?:agent connection|connection ticket|websocket|socket|stream|transport|bootstrap|protocol|provider|openrouter|cloudflare|think|pi|ai sdk)\b/iu;
 const INTERNAL_SERVER_TOOL_NAMES = new Set(["set_context"]);
 const MAX_SOURCE_URLS = 16;
 const MAX_SOURCE_URL_LENGTH = 2_048;
@@ -252,13 +272,10 @@ function isWireMessage(value: unknown): value is WireMessage {
     && value.parts.every(isWirePart);
 }
 
-function safeServiceMessage(value: string | undefined, fallback: string): string {
-  const normalized = value?.trim();
-  return normalized
-    && normalized.length <= 512
-    && !INTERNAL_SERVICE_WORDING.test(normalized)
-    ? normalized
-    : fallback;
+function safeServiceMessage(_value: string | undefined, fallback: string): string {
+  // Remote service text is not a stable client copy contract. Use only local,
+  // first-party wording so upstream implementation details cannot reach UI.
+  return fallback;
 }
 
 function managedError(
@@ -267,11 +284,6 @@ function managedError(
   fallbackMessage: string,
 ): ManagedAgentError {
   if (isRecord(error)) {
-    const code = typeof error.code === "string"
-      && /^[a-z][a-z0-9_]{0,79}$/u.test(error.code)
-      && !INTERNAL_SERVICE_WORDING.test(error.code.replace(/[_-]+/g, " "))
-      ? error.code
-      : fallbackCode;
     const status = typeof error.status === "number" && Number.isInteger(error.status)
       ? error.status
       : undefined;
@@ -279,7 +291,7 @@ function managedError(
       ? error.retryable
       : status === undefined || status === 401 || status === 429 || status >= 500;
     return {
-      code,
+      code: fallbackCode,
       message: safeServiceMessage(
         typeof error.message === "string" ? error.message : undefined,
         fallbackMessage,
@@ -300,7 +312,7 @@ function managedError(
 
 function terminalError(terminal: Extract<ThinAgentRunTerminalData, { outcome: "failed" }>): ManagedAgentError {
   return {
-    code: terminal.code,
+    code: "agent_turn_failed",
     message: safeServiceMessage(
       terminal.message,
       "SystemSculpt could not complete the response.",
@@ -387,7 +399,8 @@ function collectClientToolTargets(messages: readonly WireMessage[]): ToolTargetM
         || !isFirstPartyToolName(name)
         || (existing && (
           existing.name !== name
-          || JSON.stringify(existing.input) !== JSON.stringify(parsed.data.input)
+          || canonicalAgentToolInput(existing.input)
+            !== canonicalAgentToolInput(parsed.data.input)
         ))
       ) {
         requested.delete(callId);
@@ -504,6 +517,60 @@ function defaultToolFailureMessage(
     : "The server action failed.";
 }
 
+function sanitizeVaultResultData(
+  value: AgentJsonValue,
+  key = "",
+): AgentJsonValue {
+  if (
+    typeof value === "string"
+    && /^(?:cause|error|errorText|message|reason|stack)$/i.test(key)
+  ) return "The vault action failed.";
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeVaultResultData(entry));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [
+      entryKey,
+      sanitizeVaultResultData(entry as AgentJsonValue, entryKey),
+    ]));
+  }
+  return value;
+}
+
+function safeOutboundVaultToolResult(result: ToolCallResult): ToolCallResult {
+  const data = result.data === undefined
+    ? undefined
+    : sanitizeVaultResultData(toJsonValue(result.data));
+  if (result.success) {
+    return {
+      success: true,
+      ...(data !== undefined ? { data } : {}),
+    };
+  }
+  return {
+    success: false,
+    error: {
+      code: "TOOL_EXECUTION_FAILED",
+      message: "The vault action failed.",
+    },
+    ...(data !== undefined ? { data } : {}),
+  };
+}
+
+function safeToolResult(
+  result: ToolCallResult,
+  tool: Pick<ProjectedTool, "name" | "location">,
+): ToolCallResult {
+  if (tool.location !== "server" || result.success) return result;
+  return {
+    success: false,
+    error: {
+      code: "TOOL_EXECUTION_FAILED",
+      message: defaultToolFailureMessage(tool),
+    },
+  };
+}
+
 function toolResultSummary(
   result: ToolCallResult,
   tool: Pick<ProjectedTool, "callId" | "name" | "location" | "input">,
@@ -521,12 +588,26 @@ function toolResultSummary(
       };
 }
 
+function toolIdentity(tool: Pick<ProjectedTool, "name" | "input">): ToolIdentity {
+  return Object.freeze({
+    toolName: tool.name,
+    canonicalInput: canonicalAgentToolInput(tool.input),
+  });
+}
+
+function sameToolIdentity(left: ToolIdentity, right: ToolIdentity): boolean {
+  return left.toolName === right.toolName
+    && left.canonicalInput === right.canonicalInput;
+}
+
 function projectedToolState(
   tool: ProjectedTool,
   active: ActiveRun,
 ): AgentToolPart["state"] {
   if (active.executingToolIds.has(tool.callId)) return "running";
   const decision = active.approvalDecisions.get(tool.callId);
+  const locallyApproved = decision?.approved === true
+    && sameToolIdentity(decision.identity, toolIdentity(tool));
   if (tool.location === "server") {
     switch (tool.part.state) {
       case "input-streaming": return "input-streaming";
@@ -542,13 +623,24 @@ function projectedToolState(
   switch (tool.part.state) {
     case "input-streaming": return "input-streaming";
     case "input-available":
-      return isMutatingTool(tool.name) && requiresUserApproval(tool.name, active.approvalPolicy)
-        ? decision === undefined ? "approval-required" : decision ? "approved" : "denied"
+      return requiresUserApproval(tool.name, active.approvalPolicy)
+        ? decision === undefined
+          ? "approval-required"
+          : locallyApproved
+            ? "approved"
+            : "denied"
         : "input-ready";
     case "approval-requested":
-      return decision === undefined ? "approval-required" : decision ? "approved" : "denied";
+      return decision === undefined
+        ? "approval-required"
+        : locallyApproved
+          ? "approved"
+          : "denied";
     case "approval-responded":
-      return toolApproval(tool.part)?.approved === false ? "denied" : "approved";
+      if (toolApproval(tool.part)?.approved === false) return "denied";
+      return requiresUserApproval(tool.name, active.approvalPolicy)
+        ? locallyApproved ? "approved" : "approval-required"
+        : "approved";
     case "output-available":
       return tool.part.preliminary === true
         ? "running"
@@ -564,13 +656,15 @@ function toolFailure(tool: ProjectedTool): ManagedAgentError | undefined {
   if (part.state === "output-error") {
     return {
       code: "TOOL_EXECUTION_FAILED",
-      message: typeof part.errorText === "string"
-        ? part.errorText
-        : defaultToolFailureMessage(tool),
+      message: tool.location === "server"
+        ? defaultToolFailureMessage(tool)
+        : typeof part.errorText === "string"
+          ? part.errorText
+          : defaultToolFailureMessage(tool),
     };
   }
   if (part.state === "output-available" && part.preliminary !== true) {
-    const result = outputAsToolResult(toolOutput(part));
+    const result = safeToolResult(outputAsToolResult(toolOutput(part)), tool);
     if (!result.success) {
       return {
         code: result.error?.code ?? "TOOL_EXECUTION_FAILED",
@@ -710,7 +804,7 @@ function projectRun(
       const id = `tool:${callId}`;
       const state = projectedToolState(tool, active);
       const result = tool.part.state === "output-available" && tool.part.preliminary !== true
-        ? outputAsToolResult(toolOutput(tool.part))
+        ? safeToolResult(outputAsToolResult(toolOutput(tool.part)), tool)
         : undefined;
       const approval = toolApproval(tool.part);
       const syntheticApprovalId = active.approvalIds.get(callId);
@@ -949,7 +1043,10 @@ function durableTool(
 ): ToolCall | null {
   const state = tool.part.state;
   if (state === "output-available" && tool.part.preliminary !== true) {
-    const result = outputAsToolResult(toolOutput(tool.part));
+    const result = safeToolResult(
+      outputAsToolResult(toolOutput(tool.part)),
+      tool,
+    );
     return {
       id: tool.callId,
       messageId: "",
@@ -981,9 +1078,11 @@ function durableTool(
           ? { code: "USER_DENIED", message: "The user denied this vault action." }
           : {
               code: "TOOL_EXECUTION_FAILED",
-              message: typeof tool.part.errorText === "string"
-                ? tool.part.errorText
-                : "The vault action failed.",
+              message: tool.location === "server"
+                ? defaultToolFailureMessage(tool)
+                : typeof tool.part.errorText === "string"
+                  ? tool.part.errorText
+                  : "The vault action failed.",
             },
       },
       ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
@@ -1190,6 +1289,7 @@ export class AgentChatSession {
   private renderTimer: number | null = null;
   private pendingSnapshot: AgentConversationSnapshot | null = null;
   private pendingReconcile: Promise<void> = Promise.resolve();
+  private pendingFinalization: Promise<void> = Promise.resolve();
   private reconciledKey: string | null = null;
   private generation = 0;
   private openEpoch = 0;
@@ -1444,7 +1544,6 @@ export class AgentChatSession {
     try {
       const bootstrap = await this.issueBootstrap();
       const url = new URL(THIN_AGENT_CONTEXT_PATH, this.options.baseUrl);
-      url.searchParams.set("access_token", bootstrap.access.token);
       const request = parseThinAgentContextRequest({
         contract_version: THIN_AGENT_CONTRACT_VERSION,
         root_message_id: rootMessageId,
@@ -1453,7 +1552,10 @@ export class AgentChatSession {
       const response = await this.requestClient.request({
         url: url.toString(),
         method: "POST",
-        headers: { "x-plugin-version": this.options.pluginVersion },
+        headers: {
+          Authorization: `Bearer ${bootstrap.access.token}`,
+          "x-plugin-version": this.options.pluginVersion,
+        },
         body: request,
         signal,
         preserveResponseHeaders: true,
@@ -1472,7 +1574,10 @@ export class AgentChatSession {
         throw Object.assign(new Error(safeServiceMessage(payload.message, fallback)), {
           code: response.status === 413 ? "context_too_large" : "context_prepare_failed",
           status: response.status,
-          retryable: response.status === 401 || response.status >= 500,
+          retryable:
+            response.status === 401 ||
+            response.status === 429 ||
+            response.status >= 500,
           ...(payload.incidentId ? { requestId: payload.incidentId } : {}),
         });
       }
@@ -1504,6 +1609,144 @@ export class AgentChatSession {
     }
   }
 
+  private failToolAuthorization(
+    active: ActiveRun,
+    code: "client_tool_identity_mismatch" | "approval_identity_mismatch",
+    message: string,
+  ): void {
+    if (active.terminal) return;
+    this.finishLocalFailure(active, { code, message, retryable: false });
+  }
+
+  private ensureIdentity(
+    active: ActiveRun,
+    callId: string,
+    candidate: ToolIdentity,
+  ): ToolIdentity | null {
+    const existing = active.toolIdentities.get(callId);
+    if (existing && !sameToolIdentity(existing, candidate)) {
+      this.failToolAuthorization(
+        active,
+        "client_tool_identity_mismatch",
+        "A vault action changed after it was presented.",
+      );
+      return null;
+    }
+    if (!existing) active.toolIdentities.set(callId, candidate);
+    return existing ?? candidate;
+  }
+
+  private ensureToolIdentity(
+    active: ActiveRun,
+    tool: ProjectedTool,
+  ): ToolIdentity | null {
+    return this.ensureIdentity(active, tool.callId, toolIdentity(tool));
+  }
+
+  private registerApprovalId(
+    active: ActiveRun,
+    callId: string,
+    approvalId: string,
+  ): boolean {
+    const identity = active.toolIdentities.get(callId);
+    const existingId = active.approvalIds.get(callId);
+    const existingCall = active.approvalCallIds.get(approvalId);
+    const existingBinding = active.approvalBindings.get(approvalId);
+    if (
+      !identity
+      || approvalId.length === 0
+      || (existingId !== undefined && existingId !== approvalId)
+      || (existingCall !== undefined && existingCall !== callId)
+      || (existingBinding !== undefined && (
+        existingBinding.callId !== callId
+        || !sameToolIdentity(existingBinding.identity, identity)
+      ))
+    ) {
+      this.failToolAuthorization(
+        active,
+        "approval_identity_mismatch",
+        "A vault approval identity changed before execution.",
+      );
+      return false;
+    }
+    active.approvalIds.set(callId, approvalId);
+    active.approvalCallIds.set(approvalId, callId);
+    if (!existingBinding) {
+      active.approvalBindings.set(approvalId, Object.freeze({
+        callId,
+        identity,
+      }));
+    }
+    return true;
+  }
+
+  private validateCurrentToolBindings(
+    active: ActiveRun,
+    messages: readonly WireMessage[],
+  ): boolean {
+    const requested = new Map<string, ToolIdentity>();
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts) {
+        const parsed = parseThinAgentDataPart(part);
+        if (
+          parsed?.kind !== "known"
+          || parsed.type !== "data-systemsculpt-client-tool-request"
+        ) continue;
+        const callId = parsed.data.tool_call_id;
+        const identity = Object.freeze({
+          toolName: parsed.data.tool_name,
+          canonicalInput: canonicalAgentToolInput(parsed.data.input),
+        });
+        const current = requested.get(callId);
+        if (
+          (current && !sameToolIdentity(current, identity))
+          || !this.ensureIdentity(active, callId, identity)
+        ) return false;
+        requested.set(callId, identity);
+      }
+    }
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts) {
+        if (parseThinAgentDataPart(part)?.kind === "known") continue;
+        const callId = toolCallId(part);
+        const name = toolName(part);
+        if (!callId || !name) continue;
+        const identity = requested.get(callId);
+        if (!identity) continue;
+        if (
+          name !== identity.toolName
+          || (part.state !== "input-streaming"
+            && canonicalAgentToolInput(toolInput(part)) !== identity.canonicalInput)
+        ) {
+          this.failToolAuthorization(
+            active,
+            "client_tool_identity_mismatch",
+            "A vault action changed after it was presented.",
+          );
+          return false;
+        }
+        const approval = toolApproval(part);
+        if (approval && !this.registerApprovalId(active, callId, approval.id)) return false;
+      }
+    }
+    return true;
+  }
+
+  private hasMatchingLocalApproval(
+    active: ActiveRun,
+    callId: string,
+    identity: ToolIdentity,
+  ): boolean {
+    if (!isMutatingTool(identity.toolName)) return true;
+    const decision = active.approvalDecisions.get(callId);
+    return decision?.approved === true
+      && sameToolIdentity(decision.identity, identity)
+      && active.approvalIds.get(callId) === decision.approvalId
+      && active.approvalCallIds.get(decision.approvalId) === callId;
+  }
+
   public respondToApproval(
     approvalId: string,
     approved: boolean,
@@ -1512,13 +1755,22 @@ export class AgentChatSession {
     const active = this.active;
     const session = this.session;
     if (!active || !session || active.terminal) return false;
-    const callId = [...active.approvalIds.entries()]
-      .find(([, candidate]) => candidate === approvalId)?.[0];
+    const callId = active.approvalCallIds.get(approvalId);
     if (!callId || active.approvalDecisions.has(callId)) return false;
     const tool = this.findCurrentTool(active, callId);
     if (!tool || (tool.part.state !== "approval-requested"
-      && tool.part.state !== "input-available")) return false;
-    active.approvalDecisions.set(callId, approved);
+      && tool.part.state !== "input-available"
+      && !(tool.part.state === "approval-responded"
+        && toolApproval(tool.part)?.approved === true))) return false;
+    const identity = this.ensureToolIdentity(active, tool);
+    if (!identity) return false;
+    const decision: LocalApprovalDecision = Object.freeze({
+      approvalId,
+      approved,
+      source,
+      identity,
+    });
+    active.approvalDecisions.set(callId, decision);
     this.recordLifecycle({
       code: approved
         ? source === "policy"
@@ -1535,9 +1787,9 @@ export class AgentChatSession {
     if (serverRequested) {
       const delivery: PendingApprovalDelivery = {
         decision: Object.freeze({
+          ...decision,
           requestId: active.requestId,
           callId,
-          approved,
         }),
         attemptedOpenEpoch: null,
         inFlight: false,
@@ -1571,6 +1823,7 @@ export class AgentChatSession {
 
   public async detach(): Promise<void> {
     const active = this.active;
+    const toolTasks = active ? [...active.toolTasks.values()] : [];
     if (active && !active.terminal) {
       active.abort.abort();
       active.terminal = {
@@ -1589,6 +1842,11 @@ export class AgentChatSession {
       this.active = null;
     }
     this.disconnect();
+    // Detach is the conversation-switch barrier. Do not confirm it while an
+    // outgoing tool, terminal persistence, or history callback can still
+    // reach shared view state after the next conversation attaches.
+    await Promise.allSettled(toolTasks);
+    await this.pendingFinalization.catch(() => undefined);
     await this.options.mutationJournal.idle();
     await this.pendingReconcile.catch(() => undefined);
   }
@@ -1637,8 +1895,11 @@ export class AgentChatSession {
       resolve,
       executingToolIds: new Set(),
       settledToolIds: new Set(),
+      toolIdentities: new Map(),
       approvalDecisions: new Map(),
       approvalIds: new Map(),
+      approvalCallIds: new Map(),
+      approvalBindings: new Map(),
       toolTasks: new Map(),
       baseMessageIds: new Set(this.authoritativeMessages.map((message) => message.id)),
       phase: input.origin === "recovered" ? "retrying" : "submitted",
@@ -1937,8 +2198,13 @@ export class AgentChatSession {
     ) return;
 
     const attempt = this.resynchronizationAttempt++;
-    const configuredDelay = this.options.resynchronizationDelayMs?.(attempt)
-      ?? Math.min(250 * (2 ** attempt), MAX_RESYNCHRONIZATION_DELAY_MS);
+    const exponentialDelay = Math.min(
+      250 * (2 ** attempt),
+      MAX_RESYNCHRONIZATION_DELAY_MS,
+    );
+    const configuredDelay = this.options.resynchronizationDelayMs
+      ? this.options.resynchronizationDelayMs(attempt)
+      : exponentialDelay * (0.5 + Math.random() * 0.5);
     const delay = Number.isFinite(configuredDelay)
       ? Math.max(0, Math.min(configuredDelay, MAX_RESYNCHRONIZATION_DELAY_MS))
       : MAX_RESYNCHRONIZATION_DELAY_MS;
@@ -2041,13 +2307,16 @@ export class AgentChatSession {
   private processClientTools(active: ActiveRun, canSend: boolean): void {
     if (!canSend || active.terminal || active.cancelRequested) return;
     const turnMessages = currentTurnMessages(this.presentationMessages, active.turnId);
+    if (!this.validateCurrentToolBindings(active, turnMessages)) return;
     const targets = collectClientToolTargets(turnMessages);
     const tools = canonicalTools(turnMessages, targets);
     for (const [callId, target] of targets) {
       const tool = tools.get(callId);
       if (!tool || tool.location !== "vault" || tool.name !== target.name) continue;
-      if (!this.reconcilePendingApproval(active, tool)) return;
       const state = tool.part.state;
+      if (state === "input-streaming") continue;
+      if (!this.ensureToolIdentity(active, tool)) return;
+      if (!this.reconcilePendingApproval(active, tool)) return;
       if (
         (state === "output-available" && tool.part.preliminary !== true)
         || state === "output-error"
@@ -2063,11 +2332,10 @@ export class AgentChatSession {
         || this.pendingDeliveries.has(callId)
       ) continue;
       const approval = toolApproval(tool.part);
-      if (approval?.id) active.approvalIds.set(callId, approval.id);
+      if (approval?.id && !this.registerApprovalId(active, callId, approval.id)) return;
       if (state === "approval-requested") {
-        if (!active.approvalIds.has(callId)) {
-          active.approvalIds.set(callId, `approval:${callId}`);
-        }
+        if (!active.approvalIds.has(callId)
+          && !this.registerApprovalId(active, callId, `approval:${callId}`)) return;
         if (!active.approvalDecisions.has(callId)) {
           this.recordLifecycle({
             code: "approval_presented",
@@ -2090,17 +2358,56 @@ export class AgentChatSession {
           continue;
         }
         if (approval?.approved !== true) continue;
-        active.approvalDecisions.set(callId, true);
+        const identity = toolIdentity(tool);
+        if (isMutatingTool(tool.name) && !active.approvalDecisions.has(callId)) {
+          if (active.origin === "recovered") {
+            // A completed local journal receipt can safely replay its result
+            // after reload. startLocalTool uses an inspect-only path here and
+            // fails closed before any new mutation when no receipt exists.
+            this.startLocalTool(active, tool);
+            continue;
+          }
+          if (requiresUserApproval(tool.name, active.approvalPolicy)) {
+            this.failToolAuthorization(
+              active,
+              "approval_identity_mismatch",
+              "This vault action has no matching local approval.",
+            );
+            return;
+          }
+          if (!this.respondToApproval(active.approvalIds.get(callId)!, true, "policy")) return;
+          continue;
+        }
+        if (!this.hasMatchingLocalApproval(active, callId, identity)) {
+          this.failToolAuthorization(
+            active,
+            "approval_identity_mismatch",
+            "This vault action has no matching local approval.",
+          );
+          return;
+        }
         this.startLocalTool(active, tool);
         continue;
       }
       if (state === "input-available") {
-        if (isMutatingTool(tool.name)
-          && requiresUserApproval(tool.name, active.approvalPolicy)) {
+        if (isMutatingTool(tool.name)) {
           const approvalId = active.approvalIds.get(callId) ?? `approval:${callId}`;
-          active.approvalIds.set(callId, approvalId);
-          if (!active.approvalDecisions.has(callId)) continue;
-          if (active.approvalDecisions.get(callId) !== true) continue;
+          if (!this.registerApprovalId(active, callId, approvalId)) return;
+          const decision = active.approvalDecisions.get(callId);
+          if (!decision && !requiresUserApproval(tool.name, active.approvalPolicy)) {
+            if (!this.respondToApproval(approvalId, true, "policy")) return;
+            continue;
+          }
+          if (!decision) continue;
+          if (!decision.approved) continue;
+          if (!this.hasMatchingLocalApproval(active, callId, toolIdentity(tool))) {
+            this.failToolAuthorization(
+              active,
+              "approval_identity_mismatch",
+              "This vault action changed after local approval.",
+            );
+            return;
+          }
         }
         this.startLocalTool(active, tool);
       }
@@ -2113,6 +2420,19 @@ export class AgentChatSession {
     const pending = candidate?.decision.requestId === active.requestId
       ? candidate
       : undefined;
+    const currentIdentity = toolIdentity(tool);
+    const local = active.approvalDecisions.get(tool.callId);
+    if (
+      (local && !sameToolIdentity(local.identity, currentIdentity))
+      || (pending && !sameToolIdentity(pending.decision.identity, currentIdentity))
+    ) {
+      this.failToolAuthorization(
+        active,
+        "approval_identity_mismatch",
+        "This vault action changed after local approval.",
+      );
+      return false;
+    }
     const approval = toolApproval(tool.part);
     const acknowledged = typeof approval?.approved === "boolean"
       ? approval.approved
@@ -2122,13 +2442,20 @@ export class AgentChatSession {
           ? true
           : undefined;
     if (acknowledged === undefined) return true;
-    const localDecision = pending?.decision.approved
-      ?? active.approvalDecisions.get(tool.callId);
-    if (localDecision !== undefined && acknowledged !== localDecision) {
+    const localDecision = pending?.decision.approved ?? local?.approved;
+    if (
+      (localDecision !== undefined && acknowledged !== localDecision)
+      || (
+        acknowledged
+        && localDecision === undefined
+        && active.origin !== "recovered"
+        && requiresUserApproval(tool.name, active.approvalPolicy)
+      )
+    ) {
       this.finishLocalFailure(active, {
         code: "approval_state_mismatch",
         message: "SystemSculpt returned a mismatched approval state.",
-        retryable: true,
+        retryable: false,
       });
       return false;
     }
@@ -2217,6 +2544,17 @@ export class AgentChatSession {
       || active.settledToolIds.has(tool.callId)
       || this.pendingDeliveries.has(tool.callId)
     ) return;
+    const identity = this.ensureToolIdentity(active, tool);
+    if (!identity) return;
+    const replayOnly = !this.hasMatchingLocalApproval(active, tool.callId, identity);
+    if (replayOnly && !isMutatingTool(identity.toolName)) {
+      this.failToolAuthorization(
+        active,
+        "approval_identity_mismatch",
+        "This vault action has no matching local approval.",
+      );
+      return;
+    }
     const call: LocalToolCall = {
       callId: tool.callId,
       name: tool.name,
@@ -2232,8 +2570,8 @@ export class AgentChatSession {
       toolCallId: call.callId,
     });
     this.publishActive(active, true);
-    const task = this.executeLocalTool(active, call)
-      .catch((error) => this.reportLocalIssue(error))
+    const task = this.executeLocalTool(active, call, replayOnly)
+      .catch(this.reportLocalIssue.bind(this))
       .finally(() => {
         active.executingToolIds.delete(call.callId);
         active.toolTasks.delete(call.callId);
@@ -2244,17 +2582,63 @@ export class AgentChatSession {
     active.toolTasks.set(call.callId, task);
   }
 
-  private async executeLocalTool(active: ActiveRun, call: LocalToolCall): Promise<void> {
+  private isCallAuthorizedImmediatelyBeforeExecution(
+    active: ActiveRun,
+    call: LocalToolCall,
+  ): boolean {
+    if (this.active?.token !== active.token || active.terminal || active.abort.signal.aborted) {
+      return false;
+    }
+    const current = this.findCurrentTool(active, call.callId);
+    const expected = toolIdentity({ name: call.name, input: call.input });
+    if (
+      !current
+      || current.location !== "vault"
+      || !sameToolIdentity(toolIdentity(current), expected)
+      || !this.ensureIdentity(active, call.callId, expected)
+      || !this.hasMatchingLocalApproval(active, call.callId, expected)
+    ) {
+      this.failToolAuthorization(
+        active,
+        "approval_identity_mismatch",
+        "This vault action changed before execution.",
+      );
+      return false;
+    }
+    return true;
+  }
+
+  private async executeLocalTool(
+    active: ActiveRun,
+    call: LocalToolCall,
+    replayOnly = false,
+  ): Promise<void> {
     let result: ToolCallResult;
     let delivery: PendingToolDelivery;
     try {
       if (isMutatingTool(call.name)) {
-        const claim = await this.options.mutationJournal.claim(
-          active.conversationId,
-          call.callId,
-          call.name,
-          call.input,
-        );
+        const claim = replayOnly
+          ? await this.options.mutationJournal.inspect(
+            active.conversationId,
+            call.callId,
+            call.name,
+            call.input,
+          )
+          : await this.options.mutationJournal.claim(
+            active.conversationId,
+            call.callId,
+            call.name,
+            call.input,
+          );
+        if (claim.kind === "absent"
+          || (replayOnly && claim.kind === "journal-unavailable")) {
+          this.failToolAuthorization(
+            active,
+            "approval_identity_mismatch",
+            "This vault action has no matching local approval.",
+          );
+          return;
+        }
         if (claim.kind === "replay") {
           this.recordLifecycle({
             code: "mutation_replay_served",
@@ -2314,6 +2698,7 @@ export class AgentChatSession {
             toolName: call.name,
             toolCallId: call.callId,
           });
+          if (!this.isCallAuthorizedImmediatelyBeforeExecution(active, call)) return;
           result = outputAsToolResult(
             toJsonValue(await this.options.executeLocalTool(call, active.abort.signal)),
           );
@@ -2349,6 +2734,7 @@ export class AgentChatSession {
           toJsonValue(await this.options.executeLocalTool(call, active.abort.signal)),
         );
       }
+      result = safeOutboundVaultToolResult(result);
       this.recordLifecycle({
         code: result.success
           ? "local_tool_completed_succeeded"
@@ -2381,8 +2767,7 @@ export class AgentChatSession {
         requestId: active.requestId,
         call,
         state: "output-error",
-        errorText: (error instanceof Error ? error.message : "The vault action failed.")
-          .slice(0, 4_096),
+        errorText: "The vault action failed.",
         attemptedOpenEpoch: null,
         inFlight: false,
       };
@@ -2503,7 +2888,12 @@ export class AgentChatSession {
         : {}),
     });
     this.publishActive(active, true);
-    void this.finalizeTerminal(active);
+    const finalization = this.finalizeTerminal(active);
+    this.pendingFinalization = finalization.then(
+      () => undefined,
+      () => undefined,
+    );
+    void finalization;
   }
 
   private async finalizeTerminal(active: ActiveRun): Promise<void> {

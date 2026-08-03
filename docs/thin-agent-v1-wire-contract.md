@@ -11,7 +11,7 @@ The fixture exists at both paths:
 - Website: `src/lib/plugin/contracts/fixtures/thin-agent-v1/thin-agent-v1.json`
 - Plugin: `testing/fixtures/managed/thin-agent-v1/thin-agent-v1.json`
 
-The files have identical bytes with SHA-256 `50b8cf158c4a8b3de6a5353abb49e22bbe5c9db91290c233a136564b6932e0ce`.
+The files have identical bytes with SHA-256 `9d58aaf6d2ccf7db67d5b4e77435ddc4b3911bb7ae7e91b4b0016521ba26ef1b`.
 
 A fixture change is a protocol change. It requires compatibility review against released plugin builds.
 
@@ -74,7 +74,7 @@ The server derives session identity from the authenticated account and conversat
 
 The token binds the account, session, conversation, client, contract, and capability hash. The raw license never appears in an agent URL.
 
-The plugin can reuse one valid bootstrap for snapshot reads, context staging, and turns. It bootstraps again after token expiry or a `401` response.
+The plugin sends the token only as `Authorization: Bearer <access token>`. It can reuse one valid bootstrap for snapshot reads, context staging, and turns. It bootstraps again after token expiry or a `401` response.
 
 ## Run state
 
@@ -99,12 +99,13 @@ The cursor increases with durable run-state changes. A client ignores lower curs
 Before command delivery, the plugin reads:
 
 ```text
-GET /api/plugin/agent/connect/get-messages?access_token=<access token>
+GET /api/plugin/agent/connect/get-messages
+Authorization: Bearer <access token>
 ```
 
-The response body is one `session_snapshot` event. It contains the complete authoritative UI history and run state. Its encoded size cannot exceed 64 MiB. There is no rolling message-count cap. Server-side model compaction does not truncate this UI history.
+The response body is one `session_snapshot` event. It contains the complete authoritative UI history and run state. Its encoded size cannot exceed 64 MiB. Before accepting a new user root, the server limits the encoded authoritative prefix plus that root to 24 MiB. One assistant message is limited to 4 MiB, with reserved room for its terminal. This keeps every accepted conversation recoverable without history truncation. When the limit is reached, the server returns a non-retryable `conversation_capacity_reached` command error and the user starts a new chat. Server-side model compaction does not truncate this UI history.
 
-The snapshot can include up to 256 `queued_request_ids`. It contains no queued message content. It also includes up to 256 recent `cancelled_queued_request_ids`. These receipts let a disconnected client settle a queued cancellation after restart. The server retains every cancellation identity for direct idempotent replay, even when it leaves this bounded snapshot projection.
+The snapshot can include up to 256 `queued_request_ids`. It contains no queued message content. It also includes up to 256 recent `cancelled_queued_request_ids`. These receipts let a disconnected client settle a queued cancellation after restart. The server retains the newest 1,024 cancellation identities as a bounded direct-replay window.
 
 The response also carries the bounded `x-systemsculpt-agent-run-state` header. This header lets compatible clients compare state by cursor.
 
@@ -115,7 +116,8 @@ A session does not send commands before it accepts a valid snapshot.
 The plugin sends commands to:
 
 ```text
-POST /api/plugin/agent/turn?access_token=<access token>
+POST /api/plugin/agent/turn
+Authorization: Bearer <access token>
 ```
 
 The request body is one `systemsculpt.agent.command.v1` JSON object. The response is `text/event-stream`. Each event contains one `systemsculpt.agent.event.v1` JSON object. One command or event frame cannot exceed 64 MiB.
@@ -184,7 +186,7 @@ After uncertain delivery, the client must:
 
 Submit, regenerate, approval, result, and cancel admission are idempotent for their stable IDs.
 
-A cancel request does not create terminal state before server authority. The client shows `Stopping` until an authoritative terminal event or snapshot confirms cancellation. A request-scoped snapshot precedes the cancel `command_ack`; the acknowledgement alone confirms delivery, not the final outcome. The client reconciles and replays an uncertain cancel like every other command. The server retains cancellation identities so a replay receives the same snapshot receipt. If no matching work remains, the server acknowledges cancellation as an authoritative idempotent no-op. The no-op durably fences that request ID so delayed delivery cannot start it.
+A cancel request does not create terminal state before server authority. The client shows `Stopping` until an authoritative terminal event or snapshot confirms cancellation. A request-scoped snapshot precedes the cancel `command_ack`; the acknowledgement alone confirms delivery, not the final outcome. The client reconciles and replays an uncertain cancel like every other command. The server retains the newest 1,024 cancellation identities so normal replays receive the same snapshot receipt without unbounded durable growth. If no matching work remains, the server acknowledges cancellation as an authoritative idempotent no-op. The no-op fences that request ID within this bounded replay window so delayed delivery cannot start it.
 
 The client never repeats a local vault mutation to recover command delivery. It reuses the durable mutation receipt and replays only the recorded result.
 
@@ -193,7 +195,8 @@ The client never repeats a local vault mutation to recover command delivery. It 
 After bootstrap, the plugin can send:
 
 ```text
-POST /api/plugin/agent/context?access_token=<access token>
+POST /api/plugin/agent/context
+Authorization: Bearer <access token>
 ```
 
 ```json

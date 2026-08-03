@@ -29,7 +29,7 @@ const fixture = JSON.parse(fixtureBytes.toString("utf8"));
 describe("thin-agent-v1 application contract", () => {
   it("keeps the canonical cross-repository fixture byte-identical", () => {
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("50b8cf158c4a8b3de6a5353abb49e22bbe5c9db91290c233a136564b6932e0ce");
+      .toBe("9d58aaf6d2ccf7db67d5b4e77435ddc4b3911bb7ae7e91b4b0016521ba26ef1b");
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
     expect(fixture.endpoints).toMatchObject({

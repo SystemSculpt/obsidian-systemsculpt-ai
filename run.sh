@@ -166,9 +166,9 @@ if [[ $SYNC_ENABLED -eq 1 ]]; then
   fi
 fi
 
-CMD=(node esbuild.config.mjs)
+CMD=(node esbuild.config.mjs development)
 if [[ ${#DEV_ARGS[@]} -gt 0 ]]; then
-  CMD+=("${DEV_ARGS[@]}")
+  CMD=(node esbuild.config.mjs "${DEV_ARGS[@]}")
 fi
 
 CMD_ENV=(

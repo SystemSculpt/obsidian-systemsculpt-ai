@@ -627,7 +627,7 @@ export class ChatMarkdownSerializer {
       return value.includes("<!-- SYSTEMSCULPT-")
         || value.includes("<!-- REASONING")
         || value.includes("<!-- TOOL-CALLS")
-        || /(?:^|\r?\n)-->/.test(value);
+        || /--!?>/u.test(value);
     }
     if (!value || typeof value !== "object") return false;
     if (seen.has(value)) return false;

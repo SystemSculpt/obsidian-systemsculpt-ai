@@ -79,13 +79,13 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     );
   });
 
-  it("uses natural terminal headings while preserving safe actionable copy", () => {
+  it("uses natural terminal headings with fixed first-party copy", () => {
     expect(presentAgentError({
       code: "vault_failed",
       message: "The selected vault file is no longer available.",
     }, false)).toEqual({
       heading: "Could not finish",
-      message: "The selected vault file is no longer available.",
+      message: "SystemSculpt could not complete the response.",
     });
   });
 
@@ -105,7 +105,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     expect(presentAgentErrorMessage(
       "The selected vault file is no longer available.",
       false,
-    )).toBe("The selected vault file is no longer available.");
+    )).toBe("SystemSculpt could not complete the response.");
   });
 
   it("projects no duplicate status part beside the single activity header", () => {

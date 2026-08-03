@@ -198,9 +198,7 @@ export function syncConfiguredTargets(options = {}) {
   const logger = options.logger || console;
   const loaded = loadConfiguredTargets({ root, configPath: options.configPath });
   const expectedApiBaseUrl = normalizeApiBaseUrl(
-    options.apiBaseUrl
-      || process.env.SYSTEMSCULPT_API_BASE_URL
-      || CANONICAL_API_BASE_URL,
+    options.apiBaseUrl || CANONICAL_API_BASE_URL,
   );
   const inspection = inspectPluginArtifacts({
     root,
@@ -305,6 +303,7 @@ export function createBuildSyncController(options = {}) {
   const configPath = resolveSyncConfigPath(options.configPath);
   const logger = options.logger || console;
   const reloadTargets = options.reloadTargets || reloadConfiguredTargets;
+  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl || CANONICAL_API_BASE_URL);
   let inFlight = false;
   let rerunRequested = false;
 
@@ -316,7 +315,7 @@ export function createBuildSyncController(options = {}) {
         configPath,
         failWhenNoTargets: false,
         logger,
-        apiBaseUrl: env.SYSTEMSCULPT_API_BASE_URL,
+        apiBaseUrl,
       });
       reloadTargets({ root, targets: result.succeeded, env, logger });
     } catch (error) {

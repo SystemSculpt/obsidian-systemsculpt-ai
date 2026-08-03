@@ -17,6 +17,7 @@ import type {
   AgentRunResult,
 } from "../agent/ChatSession";
 import type { ChatMessage } from "../../../types";
+import { requiresUserApproval } from "../../../utils/toolPolicy";
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -592,6 +593,7 @@ function createSavedChatLoadHarness(
   };
   const logger = { error: jest.fn() };
   const prepareThinConversation = jest.fn(async () => undefined);
+  const createAgentSession = jest.fn(() => agent);
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
   Object.assign(view, {
     app,
@@ -619,7 +621,8 @@ function createSavedChatLoadHarness(
     workspace,
     agent,
     agentUnsubscribe: null,
-    createAgentSession: () => agent,
+    agentSessionBinding: null,
+    createAgentSession,
     transcript,
     contextManager: {
       setPinnedFiles: jest.fn(async () => undefined),
@@ -636,7 +639,16 @@ function createSavedChatLoadHarness(
     getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     prepareThinConversation,
   });
-  return { agent, loaded, logger, transcript, view, prepareThinConversation, workspace };
+  return {
+    agent,
+    createAgentSession,
+    loaded,
+    logger,
+    transcript,
+    view,
+    prepareThinConversation,
+    workspace,
+  };
 }
 
 function cachedExecutingToolHistory(): ChatMessage[] {
@@ -2101,7 +2113,7 @@ describe("AgentChatView controls", () => {
     expect(handleError).toHaveBeenCalledTimes(1);
     expect(parent.querySelectorAll(".systemsculpt-agent-banner[role='alert']")).toHaveLength(1);
     expect(parent.querySelector(".systemsculpt-agent-banner")?.textContent)
-      .toContain("Attachment preparation failed.");
+      .toContain("SystemSculpt could not complete the response.");
     expect(parent.querySelectorAll(".systemsculpt-agent-error")).toHaveLength(0);
     workspace.unload();
   });
@@ -3051,6 +3063,71 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect(harness.prepareThinConversation).not.toHaveBeenCalled();
   });
 
+  it("does not attach a saved chat session before the outgoing detach barrier", async () => {
+    const releaseDetach = deferred();
+    const harness = createSavedChatLoadHarness([]);
+    harness.agent.detach.mockImplementationOnce(() => releaseDetach.promise);
+
+    const loading = harness.view.loadChatById("legacy-chat");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.agent.detach).toHaveBeenCalledTimes(1);
+    expect(harness.createAgentSession).not.toHaveBeenCalled();
+    expect(harness.transcript.load).not.toHaveBeenCalled();
+
+    releaseDetach.resolve(undefined);
+    await loading;
+
+    expect(harness.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(harness.transcript.load).toHaveBeenCalledWith("legacy-chat");
+  });
+
+  it("serializes rapid saved-chat switches and lets only the latest load attach", async () => {
+    const firstDetachStarted = deferred();
+    const releaseFirstDetach = deferred();
+    const secondDetachStarted = deferred();
+    const releaseSecondDetach = deferred();
+    const harness = createSavedChatLoadHarness([]);
+    harness.agent.detach.mockImplementationOnce(async () => {
+      firstDetachStarted.resolve(undefined);
+      await releaseFirstDetach.promise;
+    });
+    const secondAgent = {
+      ...harness.agent,
+      detach: jest.fn(async () => {
+        secondDetachStarted.resolve(undefined);
+        await releaseSecondDetach.promise;
+      }),
+      subscribe: jest.fn(() => jest.fn()),
+    };
+    const finalAgent = {
+      ...harness.agent,
+      detach: jest.fn(async () => undefined),
+      subscribe: jest.fn(() => jest.fn()),
+    };
+    harness.createAgentSession
+      .mockReturnValueOnce(secondAgent)
+      .mockReturnValueOnce(finalAgent);
+
+    const firstLoad = harness.view.loadChatById("first-chat");
+    await firstDetachStarted.promise;
+    const finalLoad = harness.view.loadChatById("final-chat");
+    releaseFirstDetach.resolve(undefined);
+    await secondDetachStarted.promise;
+
+    expect(harness.transcript.load).not.toHaveBeenCalled();
+    expect(finalAgent.subscribe).not.toHaveBeenCalled();
+
+    releaseSecondDetach.resolve(undefined);
+    await Promise.all([firstLoad, finalLoad]);
+
+    expect(harness.transcript.load).toHaveBeenCalledTimes(1);
+    expect(harness.transcript.load).toHaveBeenCalledWith("final-chat");
+    expect(finalAgent.subscribe).toHaveBeenCalledTimes(1);
+    expect((harness.view as any).agent).toBe(finalAgent);
+  });
+
   it("keeps an empty saved chat without a server conversation writable", async () => {
     const harness = createSavedChatLoadHarness([]);
 
@@ -3715,7 +3792,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect((view as any).activeSubmissionOperation).toBeNull();
   });
 
-  it("remembers Allow for chat as trust for every non-trash vault mutation", () => {
+  it("remembers Allow for chat only for the approved vault action", () => {
     const sessionTrustedToolNames = new Set<string>();
     const respondToApproval = jest.fn(() => true);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -3736,7 +3813,16 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     (view as any).respondToToolApproval("approval-create-folders", true, true);
 
-    expect(sessionTrustedToolNames).toEqual(new Set(["*"]));
+    expect(sessionTrustedToolNames).toEqual(new Set(["create_folders"]));
+    expect(requiresUserApproval("create_folders", {
+      trustedToolNames: sessionTrustedToolNames,
+    })).toBe(false);
+    expect(requiresUserApproval("edit", {
+      trustedToolNames: sessionTrustedToolNames,
+    })).toBe(true);
+    expect(requiresUserApproval("move", {
+      trustedToolNames: sessionTrustedToolNames,
+    })).toBe(true);
     expect(respondToApproval).toHaveBeenCalledWith("approval-create-folders", true);
   });
 
@@ -3764,7 +3850,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
   });
 
   it("preserves pre-existing chat trust when a later approval submission fails", () => {
-    const sessionTrustedToolNames = new Set<string>(["*"]);
+    const sessionTrustedToolNames = new Set<string>(["write"]);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       sessionTrustedToolNames,
@@ -3783,6 +3869,6 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     (view as any).respondToToolApproval("approval-write", true, true);
 
-    expect(sessionTrustedToolNames).toEqual(new Set(["*"]));
+    expect(sessionTrustedToolNames).toEqual(new Set(["write"]));
   });
 });

@@ -41,9 +41,19 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "mutation_receipts_truncated",
     category: "vault-mutation-safety",
     file: "src/views/chatview/agent/MutationJournal.ts",
-    anchorLine: 223,
-    anchorText: "records: [...this.state.records.values()]",
-    replacement: "records: [...this.state.records.values()].slice(-256)",
+    anchorLine: 256,
+    anchorText: `try {
+        await this.writeRecord(storagePath, record);
+      } catch (error) {
+        this.state.unavailable = true;
+        throw error;
+      }`,
+    replacement: `try {
+        void record;
+      } catch (error) {
+        this.state.unavailable = true;
+        throw error;
+      }`,
     testPaths: Object.freeze([
       "src/views/chatview/agent/__tests__/mutation-journal.test.ts",
     ]),
@@ -52,9 +62,9 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "conversation_scope_removed_from_receipts",
     category: "vault-mutation-safety",
     file: "src/views/chatview/agent/MutationJournal.ts",
-    anchorLine: 35,
-    anchorText: "return `${conversationId}\\0${toolCallId}`;",
-    replacement: "return toolCallId;",
+    anchorLine: 51,
+    anchorText: "return JSON.stringify([conversationId, toolCallId]);",
+    replacement: "return JSON.stringify(toolCallId);",
     testPaths: Object.freeze([
       "src/views/chatview/agent/__tests__/mutation-journal.test.ts",
     ]),

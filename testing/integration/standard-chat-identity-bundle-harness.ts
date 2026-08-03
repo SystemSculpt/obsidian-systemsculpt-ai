@@ -268,9 +268,9 @@ export async function exerciseBuiltStandardChatIdentity(
   }));
   for (const request of [snapshotRequest, contextRequest, turnRequest]) {
     const requestUrl = new URL(request!.url);
-    expect([...requestUrl.searchParams.keys()]).toEqual(["access_token"]);
-    expect(requestUrl.searchParams.get("access_token")).toBe(
-      "fixture.access.signature",
+    expect([...requestUrl.searchParams.keys()]).toEqual([]);
+    expect(new Headers(request!.headers).get("Authorization")).toBe(
+      "Bearer fixture.access.signature",
     );
   }
   expect(contextRequest?.body).toEqual(expect.objectContaining({

@@ -384,6 +384,7 @@ class FakeSynchronization {
   public constructor(
     private readonly server: FakeStreamingServer,
     public readonly url: string,
+    public readonly authorization: string | null,
   ) {
     this.snapshotResponse = new Promise((resolve) => {
       this.resolveSnapshot = resolve;
@@ -450,7 +451,11 @@ class FakeStreamingServer {
       return jsonResponse(bootstrapResponse(this.bootstrapIndex));
     }
     if (url.includes("/get-messages")) {
-      const synchronization = new FakeSynchronization(this, url);
+      const synchronization = new FakeSynchronization(
+        this,
+        url,
+        new Headers(input.headers).get("Authorization"),
+      );
       this.synchronizations.push(synchronization);
       this.activeSynchronization = synchronization;
       return synchronization.response();
@@ -555,7 +560,7 @@ function createHarness(options: Readonly<{
   const lifecycle: AgentLifecycleRecord[] = [];
   const agent = new AgentChatSession({
     baseUrl: "https://systemsculpt.test",
-    pluginVersion: "6.2.7",
+    pluginVersion: "6.3.0",
     licenseKey: () => "license_endurance",
     bootstrapRequest,
     mutationJournal: journal,
@@ -935,8 +940,12 @@ describe("thin-agent-v1 streaming HTTP endurance", () => {
       const first = candidate.serverFrames[0] as Frame | undefined;
       return first?.kind === "session_snapshot";
     })).toBe(fixture.recovery.expect_snapshot_first_per_synchronization);
-    const accessTokens = harness.synchronizations.map((candidate) =>
-      new URL(candidate.url).searchParams.get("access_token"));
+    expect(harness.requestUrls.every((url) =>
+      [...new URL(url).searchParams.keys()].length === 0)).toBe(true);
+    const accessTokens = harness.synchronizations.map((candidate) => {
+      expect(candidate.authorization).toMatch(/^Bearer [A-Za-z0-9._-]+$/u);
+      return candidate.authorization?.slice("Bearer ".length) ?? null;
+    });
     expect(new Set(accessTokens).size).toBe(
       fixture.recovery.expect_reused_bootstrap_during_validity
         ? 1
@@ -1159,8 +1168,10 @@ describe("thin-agent-v1 streaming HTTP endurance", () => {
       call.id,
     )).toEqual([expect.objectContaining({
       state: "output-error",
-      error_text: "deterministic vault read failure",
+      error_text: "The vault action failed.",
     })]);
+    expect(JSON.stringify(harness.successfulCommands()))
+      .not.toContain("deterministic vault read failure");
     expect(harness.agent.getSnapshot().status).not.toBe("failed");
     expect(commandsFor(harness.successfulCommands(), "cancel")).toHaveLength(0);
 

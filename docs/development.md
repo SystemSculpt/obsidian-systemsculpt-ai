@@ -120,16 +120,17 @@ manual alternatives are supplemental evidence, not release requirements.
 
 ## Local API
 
-The sibling API repository is ~/gits/systemsculpt/website and its development
-server listens on port 3002. Compile that address into a local plugin build:
+Use the fixed local-agent build route for local protocol QA:
 
 ~~~bash
-SYSTEMSCULPT_API_BASE_URL=http://127.0.0.1:3002/api/plugin npm run build
+npm run build:local-agent
+npm run sync:local:agent
 ~~~
 
-SYSTEMSCULPT_API_BASE_URL is an esbuild-time QA seam. It is never read from
-Obsidian settings or runtime environment. Release validation forces
-https://systemsculpt.com/api/plugin and rejects loopback URLs.
+The route compiles http://127.0.0.1:8787/api/plugin into development bytes.
+Use `npm run build:staging` and `npm run sync:local:staging` for staging.
+Production builds reject environment overrides and compile only
+https://systemsculpt.com/api/plugin.
 
 ## Local Obsidian
 
@@ -244,23 +245,14 @@ revision recorded in release provenance. It always rebuilds the artifacts;
 there is no release CLI path that can bind stale pre-existing bytes to a newer
 source revision.
 
+Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with a controlled QA vault:
+
 ~~~bash
-npm run smoke:chat:live
+cd ../website
+SYSTEMSCULPT_E2E_VAULT=/absolute/path/to/qa-vault npm run test:plugin-agent:live
 ~~~
 
-Before releasing a change that touches managed chat, run the live smoke. It
-drives the real controller, runtime adapter, capability client, and transport
-against production with server-side web search enabled, then sends a
-follow-up turn over the settled transcript. Unit fixtures have historically
-mismodeled those two flows (6.2.4's empty continuation and 6.2.5's rejected
-follow-up). It needs a license key (`SYSTEMSCULPT_LICENSE_KEY` or a local QA
-vault), spends a few real chat turns, and is deliberately not part of CI.
-
-The live smoke serializes and reloads the settled search turn, removes the
-newer server-execution marker to emulate legacy saved history, and then sends
-the follow-up over a new controller/runtime instance. It complements the
-deterministic critical-risk replay contract, including the byte-pinned fixture
-validated by the website API repository.
+Then install the exact production-built candidate in real Obsidian. Verify one server web-search turn, a follow-up over the settled transcript, reconnect, and any changed approval or vault-tool flow. Record the Obsidian version and SHA-256 values for `main.js`, `manifest.json`, and `styles.css`. The credentialed production check is manual and cannot replace the deterministic critical-risk, endurance, integration, and byte-pinned cross-repository fixture gates.
 
 ## Canonical source references
 

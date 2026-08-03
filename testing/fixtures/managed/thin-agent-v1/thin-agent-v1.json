@@ -125,7 +125,7 @@
       "context_ref": "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "semantics": {
-      "authentication": "bootstrap_access_token_query_parameter",
+      "authentication": "authorization_bearer_header",
       "access_token_consumed": false,
       "automatic_retry": false,
       "raw_context_allowed_in_turn_body": false,

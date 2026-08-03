@@ -59,14 +59,15 @@ Use npm run test:related with the source files being changed. Run
 npm run check:plugin for a larger local checkpoint and npm run check:full for
 the exhaustive local gate.
 
-To build against the sibling website API:
+Select each non-production API through its named development command:
 
 ~~~bash
-SYSTEMSCULPT_API_BASE_URL=http://127.0.0.1:3002/api/plugin npm run build
+npm run build:local-agent
+npm run build:staging
 ~~~
 
-The override is compiled into the local artifact. Release validation always
-rebuilds against https://systemsculpt.com/api/plugin.
+The local-agent route is fixed at http://127.0.0.1:8787/api/plugin. Production
+builds reject endpoint overrides and use https://systemsculpt.com/api/plugin.
 
 The local SystemSculpt workspace is:
 

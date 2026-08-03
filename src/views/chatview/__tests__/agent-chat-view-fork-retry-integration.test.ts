@@ -306,7 +306,10 @@ describe("AgentChatView historical Retry integration", () => {
           }), { status: 201 });
         }
         if (url.pathname.endsWith("/connect/get-messages")) {
-          const token = url.searchParams.get("access_token") ?? "";
+          const authorization = new Headers(request.headers).get("Authorization") ?? "";
+          const token = authorization.startsWith("Bearer ")
+            ? authorization.slice("Bearer ".length)
+            : "";
           const bootstrap = accessRequests.get(token);
           if (!bootstrap) throw new Error("Hydration used an unknown access token.");
           const server = new FakeStreamingServer(
@@ -317,7 +320,10 @@ describe("AgentChatView historical Retry integration", () => {
           return new Response(JSON.stringify(await server.snapshot), { status: 200 });
         }
         if (url.pathname.endsWith("/agent/turn")) {
-          const token = url.searchParams.get("access_token") ?? "";
+          const authorization = new Headers(request.headers).get("Authorization") ?? "";
+          const token = authorization.startsWith("Bearer ")
+            ? authorization.slice("Bearer ".length)
+            : "";
           const bootstrap = accessRequests.get(token);
           const server = servers.find((candidate) =>
             candidate.conversationId === bootstrap?.conversation_id);
@@ -416,7 +422,7 @@ describe("AgentChatView historical Retry integration", () => {
       expect(agent.getSnapshot()).toMatchObject({
         status: "failed",
         turnId: ORIGINAL_USER_ID,
-        terminalError: { code: "response_capacity_unavailable" },
+        terminalError: { code: "agent_turn_failed" },
       });
       expect(JSON.stringify(projectedSnapshot)).toContain(SOURCE_RUN_ID);
       expect(durableMessages).toEqual([

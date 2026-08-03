@@ -10,7 +10,6 @@ import {
   inspectDevWatcherService,
   uninstallDevWatcherService,
 } from "./dev-watcher-service.mjs";
-import { STAGING_API_BASE_URL } from "./plugin-build-options.mjs";
 
 function tempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-dev-watcher-"));
@@ -38,17 +37,17 @@ test("launch agent plist keeps the watcher alive and preserves escaped paths", (
   );
 });
 
-test("launch agent can pin the canonical watcher to staging without embedding other environment data", (t) => {
+test("launch agent selects staging through an explicit watcher target", (t) => {
   const root = tempRoot(t);
   const plist = createDevWatcherLaunchAgentPlist({
     root: path.join(root, "plugin"),
     configPath: path.join(root, "sync.json"),
     home: path.join(root, "home"),
-    apiBaseUrl: STAGING_API_BASE_URL,
+    target: "staging",
   });
 
-  assert.match(plist, /<key>SYSTEMSCULPT_API_BASE_URL<\/key>/);
-  assert.match(plist, /https:\/\/staging\.systemsculpt\.com\/api\/plugin/);
+  assert.match(plist, /<string>staging-watch<\/string>/);
+  assert.doesNotMatch(plist, /SYSTEMSCULPT_API_BASE_URL|SYSTEMSCULPT_TEST_DRIVER/);
   assert.doesNotMatch(plist, /MASTER_LICENSE_KEY|OPENROUTER|DATABASE_URL/);
 });
 

@@ -3,6 +3,7 @@ import {
   parseThinAgentDataPart,
   type ThinAgentBootstrapRequest,
 } from "../../../../services/managed/ThinAgentV1Contract";
+import type { ChatMessage } from "../../../../types";
 import type { ToolCallResult } from "../../../../types/toolCalls";
 import {
   THIN_AGENT_EVENT_TYPE,
@@ -337,15 +338,30 @@ function endsTurn(frame: string): boolean {
 }
 
 function journalHarness() {
-  let content: string | undefined;
+  const files = new Map<string, string>();
+  const directories = new Set<string>();
   const adapter = {
     exists: jest.fn(async (path: string) =>
-      path === ".systemsculpt/mutations.json" ? content !== undefined : true),
-    read: jest.fn(async () => content ?? ""),
-    write: jest.fn(async (_path: string, value: string) => {
-      content = value;
+      files.has(path) || directories.has(path)),
+    read: jest.fn(async (path: string) => {
+      const content = files.get(path);
+      if (content === undefined) throw new Error(`Missing ${path}`);
+      return content;
     }),
-    mkdir: jest.fn(async () => undefined),
+    write: jest.fn(async (path: string, value: string) => {
+      files.set(path, value);
+    }),
+    mkdir: jest.fn(async (path: string) => {
+      directories.add(path);
+    }),
+    list: jest.fn(async (path: string) => ({
+      files: [...files.keys()].filter((candidate) =>
+        candidate.startsWith(`${path}/`)),
+      folders: [],
+    })),
+    remove: jest.fn(async (path: string) => {
+      files.delete(path);
+    }),
   };
   return {
     adapter,
@@ -364,6 +380,7 @@ type ExecuteLocalTool = (
 
 function createHarness(input: Readonly<{
   executeLocalTool?: ExecuteLocalTool;
+  persistAssistant?: (message: ChatMessage) => Promise<void>;
   request?: jest.Mock<Promise<Response>, [PlatformRequestInput]>;
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
@@ -382,7 +399,9 @@ function createHarness(input: Readonly<{
     success: true,
     data: { ok: true },
   })));
-  const persistAssistant = jest.fn(async () => undefined);
+  const persistAssistant = jest.fn(
+    input.persistAssistant ?? (async () => undefined),
+  );
   const reconcileHistory = jest.fn(async () => undefined);
   const reportError = jest.fn();
   const onLifecycle = jest.fn();
@@ -426,6 +445,16 @@ function createHarness(input: Readonly<{
       return target.sent.map((value) => JSON.parse(value) as Record<string, unknown>);
     },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 /** Lets streamed frames reach the client before a synchronous assertion. */
@@ -558,6 +587,45 @@ describe("AgentChatSession", () => {
     );
     expect(JSON.stringify(first.agent.getSnapshot()))
       .not.toContain("Second answer");
+  });
+
+  it("does not confirm detach while terminal persistence can still call the outgoing view", async () => {
+    const releasePersistence = deferred<void>();
+    const persistenceStarted = deferred<void>();
+    const harness = trackedHarness({
+      persistAssistant: async () => {
+        persistenceStarted.resolve();
+        await releasePersistence.promise;
+      },
+    });
+    const server = await harness.open();
+    const turnId = "user_detach_persistence_barrier";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Wait for the outgoing persistence callback"),
+    });
+    await waitFor(() => harness.commands().some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_detach_persistence_barrier", "Saved answer"),
+    ));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await persistenceStarted.promise;
+
+    let detached = false;
+    const detaching = harness.agent.detach().then(() => { detached = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(detached).toBe(false);
+
+    releasePersistence.resolve();
+    await detaching;
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.persistAssistant).toHaveBeenCalledTimes(1);
   });
 
   it("reconciles and replays an uncertain cancel until the server confirms it", async () => {
@@ -958,7 +1026,14 @@ describe("AgentChatSession", () => {
       toolCallId: "call_failed_web_search",
       state: "output-available",
       input: { query: "current release" },
-      output: { success: false },
+      output: {
+        success: false,
+        data: { provider: "upstream-provider-sentinel" },
+        error: {
+          code: "UPSTREAM_PROVIDER_SENTINEL",
+          message: "The upstream provider rejected this search.",
+        },
+      },
     }, {
       type: "text",
       text: "I could not verify this result.",
@@ -982,6 +1057,23 @@ describe("AgentChatSession", () => {
 
     server.serverMessage(succeededTerminal(turnId, turnId));
     await expect(waitForResult(run)).resolves.toMatchObject({ kind: "completed" });
+    const persisted = harness.persistAssistant.mock.calls.at(-1)?.[0];
+    expect(persisted).toMatchObject({
+      tool_calls: [expect.objectContaining({
+        id: "call_failed_web_search",
+        executedOn: "server",
+        result: {
+          success: false,
+          error: {
+            code: "TOOL_EXECUTION_FAILED",
+            message: "Web search failed.",
+          },
+        },
+      })],
+    });
+    expect(JSON.stringify(persisted)).not.toMatch(
+      /upstream-provider-sentinel|UPSTREAM_PROVIDER_SENTINEL|upstream provider rejected/i,
+    );
   });
 
   it("never lets an empty authoritative snapshot erase cache and keeps cache failures nonterminal", async () => {
@@ -1188,6 +1280,73 @@ describe("AgentChatSession", () => {
     await expect(run).resolves.toMatchObject({ kind: "completed" });
   });
 
+
+  it.each([
+    [
+      "returned failure details",
+      async () => ({
+        success: false as const,
+        data: {
+          results: [{
+            path: "Notes/failure.md",
+            success: false,
+            error: "/Users/alice/SecretVault private credential sentinel",
+          }],
+        },
+        error: {
+          code: "RAW_ADAPTER_FAILURE",
+          message: "/Users/alice/SecretVault private credential sentinel",
+        },
+      }),
+    ],
+    [
+      "thrown failure details",
+      async () => {
+        throw new Error("/Users/alice/SecretVault private credential sentinel");
+      },
+    ],
+  ])("keeps %s out of the tool-result wire command", async (_case, executeLocalTool) => {
+    const harness = trackedHarness({ executeLocalTool });
+    const server = await harness.open();
+    const turnId = `user_redacted_vault_failure_${_case.replaceAll(" ", "_")}`;
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read the note"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Read the note")],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    await tick();
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(
+      `assistant_${turnId}`,
+      [
+        clientToolRequest(`call_${turnId}`, "read", { paths: ["Notes"] }),
+        {
+          type: "tool-read",
+          toolCallId: `call_${turnId}`,
+          state: "input-available",
+          input: { paths: ["Notes"] },
+        },
+      ],
+    )));
+
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result"));
+    const command = harness.commands(server).find((candidate) =>
+      candidate.kind === "client_tool_result");
+    expect(JSON.stringify(command)).not.toMatch(
+      /\/Users\/alice\/SecretVault|private credential sentinel|RAW_ADAPTER_FAILURE/,
+    );
+    expect(JSON.stringify(command)).toContain("The vault action failed.");
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await tick();
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
 
   it("stops claiming progress when a healthy connection produces no server activity", async () => {
     const harness = trackedHarness({ runStallGraceMs: 25 });
@@ -1679,7 +1838,17 @@ describe("AgentChatSession", () => {
           decision: Readonly<{ requestId: string; callId: string; approved: boolean }>;
         }>;
       }).pendingApprovalDeliveries.get(callId);
-      expect(pendingBeforeReconnect?.decision).toEqual({ requestId, callId, approved });
+      expect(pendingBeforeReconnect?.decision).toMatchObject({
+        requestId,
+        callId,
+        approved,
+        approvalId: `approval_${callId}`,
+        source: "manual",
+        identity: {
+          toolName: "write",
+          canonicalInput: "{\"content\":\"Approved once\",\"path\":\"Recovered approval.md\"}",
+        },
+      });
       expect(Object.isFrozen(pendingBeforeReconnect?.decision)).toBe(true);
       const deliveredBeforeRecovery = boundary === "before" ? 0 : 1;
 
@@ -1987,6 +2156,440 @@ describe("AgentChatSession", () => {
     });
     expect(harness.executeLocalTool.mock.calls.some(([call]) =>
       call.callId === callId)).toBe(false);
+  });
+
+  it("binds approval to canonical tool input and executes the exact call once", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_canonical_approval_identity";
+    const assistantId = "assistant_canonical_approval_identity";
+    const callId = "call_canonical_approval_identity";
+    const approvalId = "approval_canonical_identity";
+    const user = wireUser(turnId, "Apply the exact approved write once");
+    const requestedInput = { path: "Canonical.md", content: "approved" };
+    const reorderedInput = { content: "approved", path: "Canonical.md" };
+    const parts = (input: Readonly<Record<string, unknown>>, state: string) => [
+      clientToolRequest(callId, "write", input),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state,
+        input,
+        approval: {
+          id: approvalId,
+          ...(state === "approval-responded" ? { approved: true } : {}),
+        },
+      },
+    ] as const;
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Apply the exact approved write once"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) => command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, parts(requestedInput, "approval-requested")),
+    ));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.callId === callId && part.state === "approval-required"));
+
+    expect(harness.agent.respondToApproval(approvalId, true)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId));
+    const approved = assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, parts(reorderedInput, "approval-responded")),
+    );
+    server.serverMessage(approved);
+    server.serverMessage(approved);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool).toHaveBeenCalledWith(
+      expect.objectContaining({ input: reorderedInput }),
+      expect.any(AbortSignal),
+    );
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", reorderedInput),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "output-available",
+        input: reorderedInput,
+        approval: { id: approvalId, approved: true },
+        output: { success: true, data: { path: "Canonical.md" } },
+      },
+    ])));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+  });
+
+  it.each(["input", "name"] as const)(
+    "does not let a stale decision grant a tool call with changed $change identity",
+    async (change) => {
+      const harness = trackedHarness();
+      const server = await harness.open();
+      const turnId = `user_changed_approval_${change}`;
+      const assistantId = `assistant_changed_approval_${change}`;
+      const callId = `call_changed_approval_${change}`;
+      const approvalId = `approval_changed_${change}`;
+      const user = wireUser(turnId, "Approve one stable write");
+      const original = { path: "Original.md", content: "approved" };
+      const changed = change === "input"
+        ? { path: "Changed.md", content: "not approved" }
+        : original;
+      const changedName = change === "name" ? "edit" : "write";
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Approve one stable write"),
+        approvalPolicy: { requireDestructiveApproval: true },
+      });
+      await waitFor(() => harness.commands(server).some((command) => command.kind === "submit"));
+      server.serverMessage(sessionSnapshot(
+        [user],
+        active(1, turnId, turnId, "waiting_for_client"),
+      ));
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+        clientToolRequest(callId, "write", original),
+        {
+          type: "tool-write",
+          toolCallId: callId,
+          state: "approval-requested",
+          input: original,
+          approval: { id: approvalId },
+        },
+      ])));
+      await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+        part.kind === "tool" && part.callId === callId));
+      expect(harness.agent.respondToApproval(approvalId, true)).toBe(true);
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "client_tool_approval" && command.tool_call_id === callId));
+
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+        clientToolRequest(callId, changedName, changed),
+        {
+          type: `tool-${changedName}`,
+          toolCallId: callId,
+          state: "approval-responded",
+          input: changed,
+          approval: { id: approvalId, approved: true },
+        },
+      ])));
+
+      await expect(run).resolves.toMatchObject({
+        kind: "failed",
+        error: { code: "client_tool_identity_mismatch", retryable: false },
+      });
+      expect(harness.executeLocalTool).not.toHaveBeenCalled();
+      expect(harness.agent.respondToApproval(approvalId, true)).toBe(false);
+    },
+  );
+
+  it("fails closed when an approval ID changes", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_changed_approval_id";
+    const assistantId = "assistant_changed_approval_id";
+    const callId = "call_changed_approval_id";
+    const input = { path: "Stable.md", content: "stable" };
+    const originalApprovalId = "approval_changed_original";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Reject a changed approval identity"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) => command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Reject a changed approval identity")],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", input),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "approval-requested",
+        input,
+        approval: { id: originalApprovalId },
+      },
+    ])));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.callId === callId));
+    expect(harness.agent.respondToApproval(originalApprovalId, true)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId));
+
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", input),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "approval-responded",
+        input,
+        approval: { id: "approval_changed_replacement", approved: true },
+      },
+    ])));
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "approval_identity_mismatch", retryable: false },
+    });
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+    expect(harness.agent.respondToApproval(originalApprovalId, true)).toBe(false);
+  });
+
+  it("fails closed when two calls duplicate one approval ID", async () => {
+    const harness = trackedHarness();
+    const turnId = "user_duplicate_approval_id";
+    const firstCallId = "call_duplicate_approval_first";
+    const secondCallId = "call_duplicate_approval_second";
+    const firstInput = { path: "First.md", content: "first" };
+    const secondInput = { path: "Second.md", content: "second" };
+    const approvalId = "approval_duplicate_shared";
+    harness.server.snapshotMessages = [
+      wireUser(turnId, "Reject a duplicate approval identity"),
+      wireAssistant("assistant_duplicate_approval_id", [
+        clientToolRequest(firstCallId, "write", firstInput),
+        {
+          type: "tool-write",
+          toolCallId: firstCallId,
+          state: "approval-requested",
+          input: firstInput,
+          approval: { id: approvalId },
+        },
+        clientToolRequest(secondCallId, "write", secondInput),
+        {
+          type: "tool-write",
+          toolCallId: secondCallId,
+          state: "approval-requested",
+          input: secondInput,
+          approval: { id: approvalId },
+        },
+      ]),
+    ];
+    harness.server.snapshotRunState = active(1, turnId, turnId, "waiting_for_client");
+
+    await harness.agent.hydrate(CONVERSATION_ID);
+    await waitFor(() => harness.agent.getSnapshot().status === "failed");
+
+    expect(harness.reportError).toHaveBeenCalledWith(expect.objectContaining({
+      code: "approval_identity_mismatch",
+      retryable: false,
+    }));
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+    expect(harness.agent.respondToApproval(approvalId, true)).toBe(false);
+  });
+
+  it("does not accept recovered server approval in Ask Approval mode", async () => {
+    const harness = trackedHarness();
+    const turnId = "user_recovered_server_approval";
+    const callId = "call_recovered_server_approval";
+    harness.server.snapshotMessages = [
+      wireUser(turnId, "Do not recover remote approval as local approval"),
+      wireAssistant(
+        "assistant_recovered_server_approval",
+        writeApprovalParts(callId, "approval-responded", true),
+      ),
+    ];
+    harness.server.snapshotRunState = active(1, turnId, turnId, "waiting_for_client");
+
+    await harness.agent.hydrate(CONVERSATION_ID);
+    await waitFor(() => harness.agent.getSnapshot().status === "failed");
+
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "failed",
+      terminalError: { code: "agent_turn_failed", retryable: false },
+    });
+    expect(harness.reportError).toHaveBeenCalledWith(expect.objectContaining({
+      code: "approval_identity_mismatch",
+      retryable: false,
+    }));
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+    expect(harness.mutationAdapter.write).not.toHaveBeenCalled();
+    expect(harness.commands().some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId)).toBe(false);
+  });
+
+  it("replays a completed local mutation receipt after recovery without new consent", async () => {
+    const harness = trackedHarness();
+    const turnId = "user_recovered_completed_receipt";
+    const callId = "call_recovered_completed_receipt";
+    const input = { path: "Recovered approval.md", content: "Approved once" };
+    const result = { success: true, data: { path: input.path } };
+    const receiptJournal = new AgentMutationJournal(
+      harness.mutationAdapter,
+      ".systemsculpt/mutations.json",
+      () => 1_000,
+    );
+    await expect(receiptJournal.claim(
+      CONVERSATION_ID,
+      callId,
+      "write",
+      input,
+    )).resolves.toEqual({ kind: "execute" });
+    await receiptJournal.complete(CONVERSATION_ID, callId, "write", input, result);
+
+    harness.server.snapshotMessages = [
+      wireUser(turnId, "Recover the completed mutation result"),
+      wireAssistant(
+        "assistant_recovered_completed_receipt",
+        writeApprovalParts(callId, "approval-responded", true),
+      ),
+    ];
+    harness.server.snapshotRunState = active(1, turnId, turnId, "waiting_for_client");
+
+    await harness.agent.hydrate(CONVERSATION_ID);
+    await waitFor(() => harness.commands().some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "mutation_replay_served",
+      toolCallId: callId,
+    }));
+    expect(harness.commands()).toContainEqual(expect.objectContaining({
+      kind: "client_tool_result",
+      tool_call_id: callId,
+      output: result,
+    }));
+  });
+
+  it("keeps Always Allow local and executes its bound call once", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_always_allow_bound_call";
+    const assistantId = "assistant_always_allow_bound_call";
+    const callId = "call_always_allow_bound_call";
+    const user = wireUser(turnId, "Apply the trusted write");
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Apply the trusted write"),
+      approvalPolicy: {
+        requireDestructiveApproval: true,
+        trustedToolNames: new Set(["write"]),
+      },
+    });
+    await waitFor(() => harness.commands(server).some((command) => command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, writeApprovalParts(callId, "approval-requested")),
+    ));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === true));
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "approval_submitted_approved_policy",
+      toolCallId: callId,
+    }));
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+
+    const responded = assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, writeApprovalParts(callId, "approval-responded", true)),
+    );
+    server.serverMessage(responded);
+    server.serverMessage(responded);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, writeApprovalParts(callId, "output-available", true)),
+    ));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("rechecks local approval after the mutation claim and before execution", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_immediate_approval_recheck";
+    const assistantId = "assistant_immediate_approval_recheck";
+    const callId = "call_immediate_approval_recheck";
+    const approvalId = "approval_immediate_recheck";
+    const user = wireUser(turnId, "Apply only the approved identity");
+    const original = { path: "Approved.md", content: "approved" };
+    const changed = { path: "Changed.md", content: "changed" };
+    let releaseClaim!: () => void;
+    const claimBlocked = new Promise<void>((resolve) => { releaseClaim = resolve; });
+    harness.mutationAdapter.write.mockImplementationOnce(async () => {
+      await claimBlocked;
+    });
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Apply only the approved identity"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) => command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", original),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "approval-requested",
+        input: original,
+        approval: { id: approvalId },
+      },
+    ])));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.callId === callId));
+    expect(harness.agent.respondToApproval(approvalId, true)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", original),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "approval-responded",
+        input: original,
+        approval: { id: approvalId, approved: true },
+      },
+    ])));
+    await waitFor(() => harness.mutationAdapter.write.mock.calls.length === 1);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "write", changed),
+      {
+        type: "tool-write",
+        toolCallId: callId,
+        state: "approval-responded",
+        input: changed,
+        approval: { id: approvalId, approved: true },
+      },
+    ])));
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "client_tool_identity_mismatch", retryable: false },
+    });
+    releaseClaim();
+    await tick();
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
   });
 
   it("does not replay an approval already acknowledged by the recovery snapshot", async () => {

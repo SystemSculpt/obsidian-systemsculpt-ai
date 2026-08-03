@@ -23,6 +23,7 @@ import type { ChatExportResult } from "./export/ChatExportTypes";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
 import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
+import { AgentConversationSessionBinding } from "./AgentConversationSessionBinding";
 import type { AgentComposerSubmit } from "./AgentComposer";
 import { presentAgentErrorMessage } from "./AgentConversationPresentation";
 import {
@@ -67,6 +68,7 @@ import {
 } from "../../services/managed/ThinAgentInputLimits";
 import { isVaultImageContextFileExtension } from "../../constants/fileTypes";
 import { showConfirm } from "../../core/ui/notifications";
+import { normalizeFirstPartyToolName } from "../../tools/toolNames";
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -377,6 +379,10 @@ export class AgentChatView extends ItemView {
   private exportService: ChatExportService | null = null;
   private creditsPromise: Promise<void> | null = null;
   private agentUnsubscribe: (() => void) | null = null;
+  private agentSessionBinding: AgentConversationSessionBinding<
+    AgentConversationSnapshot,
+    AgentChatSession
+  > | null = null;
   private transcriptCommitUnsubscribe: (() => void) | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
   private recorderTranscriptUnsubscribe: (() => void) | null = null;
@@ -518,32 +524,38 @@ export class AgentChatView extends ItemView {
   }
 
   private bindAgentSession(): void {
-    this.agentUnsubscribe = this.agent.subscribe((snapshot) => {
-      this.renderAgentSnapshot(snapshot);
-      if (this.automationApprovalMode === "deny") {
-        for (const part of snapshot.parts) {
-          if (part.kind === "tool" && part.state === "approval-required" && part.approvalId) {
-            this.agent.respondToApproval(part.approvalId, false);
+    if (this.agentSessionBinding) return;
+    const binding = new AgentConversationSessionBinding<
+      AgentConversationSnapshot,
+      AgentChatSession
+    >(
+      this.agent,
+      (session, snapshot) => {
+        this.renderAgentSnapshot(snapshot);
+        if (this.automationApprovalMode === "deny") {
+          for (const part of snapshot.parts) {
+            if (part.kind === "tool" && part.state === "approval-required" && part.approvalId) {
+              session.respondToApproval(part.approvalId, false);
+            }
           }
         }
-      }
-    });
+      },
+    );
+    this.agentSessionBinding = binding;
+    this.agentUnsubscribe = () => binding.unsubscribe();
   }
 
   /**
    * Hands the next conversation its own session instead of recycling this
-   * one. Detaching stops only the outgoing local renderer and transport. Its
-   * server run remains resumable and cannot report itself as active to the
-   * conversation that replaced it.
+   * one. The exact outgoing binding must finish detaching before the next
+   * session can subscribe or connect. Rapid switches serialize through the
+   * same barrier, and a failed detach leaves the replacement unattached.
    */
-  private replaceAgentSession(): void {
-    const previous = this.agent;
-    this.agentUnsubscribe?.();
-    this.agentUnsubscribe = null;
-    this.agent = this.createAgentSession();
+  private async replaceAgentSession(): Promise<void> {
     this.bindAgentSession();
-    void previous.detach().catch((error) =>
-      this.reportAgentError(error, "retireAgentSession"));
+    const binding = this.agentSessionBinding;
+    if (!binding) throw new Error("The chat session binding is unavailable.");
+    this.agent = await binding.replace(() => this.createAgentSession());
   }
 
 
@@ -666,7 +678,8 @@ export class AgentChatView extends ItemView {
       if (this.queueHydrated) await this.persistQueueState();
       // Each loaded conversation gets its own local session object. Retiring
       // the old object must not cancel server work that another view can resume.
-      this.replaceAgentSession();
+      await this.replaceAgentSession();
+      if (this.conversationOriginToken !== loadOriginToken) return;
       this.sessionTrustedToolNames.clear();
       this.isFullyLoaded = false;
       this.pendingForkHistory = null;
@@ -997,7 +1010,11 @@ export class AgentChatView extends ItemView {
     this.pendingThinConversationId = null;
     this.thinBootstrapRequest = null;
     try {
-      await this.agent.detach();
+      if (this.agentSessionBinding) {
+        await this.agentSessionBinding.detach();
+      } else {
+        await this.agent.detach();
+      }
       await this.transcript.idle();
       if (closingSubmission && !closingSubmission.userCommitted) {
         const submission = closingSubmission.preparedSubmission
@@ -2252,22 +2269,25 @@ export class AgentChatView extends ItemView {
   private respondToToolApproval(approvalId: string, approved: boolean, rememberForChat = false): void {
     const tool = this.agent.getSnapshot().parts.find((part) =>
       part.kind === "tool" && part.approvalId === approvalId);
-    const rememberAllMutations = approved
+    const trustedToolName = tool?.kind === "tool"
+      ? normalizeFirstPartyToolName(tool.name)
+      : "";
+    const rememberToolForChat = approved
       && rememberForChat
       && tool?.kind === "tool"
       && tool.location === "vault"
-      && isMutatingTool(tool.name)
-      && tool.name !== "trash";
-    const introducedChatTrust = rememberAllMutations
-      && !this.sessionTrustedToolNames.has("*");
-    if (rememberAllMutations) this.sessionTrustedToolNames.add("*");
+      && isMutatingTool(trustedToolName)
+      && trustedToolName !== "trash";
+    const introducedChatTrust = rememberToolForChat
+      && !this.sessionTrustedToolNames.has(trustedToolName);
+    if (rememberToolForChat) this.sessionTrustedToolNames.add(trustedToolName);
     try {
       const settled = this.agent.respondToApproval(approvalId, approved);
       if (!settled && introducedChatTrust) {
-        this.sessionTrustedToolNames.delete("*");
+        this.sessionTrustedToolNames.delete(trustedToolName);
       }
     } catch (error) {
-      if (introducedChatTrust) this.sessionTrustedToolNames.delete("*");
+      if (introducedChatTrust) this.sessionTrustedToolNames.delete(trustedToolName);
       throw error;
     }
   }
@@ -2287,7 +2307,8 @@ export class AgentChatView extends ItemView {
       // The old draft no longer owns preparation errors once New chat wins.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
-      this.replaceAgentSession();
+      await this.replaceAgentSession();
+      if (this.conversationOriginToken !== newChatOriginToken) return;
       this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");
       this.pendingThinConversationId = newConversationId;
