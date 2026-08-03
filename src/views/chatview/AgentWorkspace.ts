@@ -454,9 +454,27 @@ export class AgentWorkspace extends Component {
 
   /** Atomically replaces the live run with its newly committed transcript. */
   public settleCompletedRun(messages: readonly ChatMessage[]): Promise<void> {
-    this.history = messages;
     this.snapshot = null;
     this.pendingSnapshotRender = undefined;
+    return this.settleRun(messages, null);
+  }
+
+  /**
+   * Settles a failed or cancelled run against its reconciled transcript.
+   * History becomes the durable copy of everything the run produced; the
+   * live turn is then re-projected so it keeps only what history cannot
+   * carry — the terminal error with its Retry affordance, or the Stopped
+   * status — instead of repeating the committed content beneath it.
+   */
+  public settleUnfinishedRun(messages: readonly ChatMessage[]): Promise<void> {
+    return this.settleRun(messages, this.snapshot);
+  }
+
+  private settleRun(
+    messages: readonly ChatMessage[],
+    retainedSnapshot: AgentConversationSnapshot | null,
+  ): Promise<void> {
+    this.history = messages;
     const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
@@ -473,13 +491,30 @@ export class AgentWorkspace extends Component {
         throw error;
       } finally {
         if (this.isLifecycleCurrent(generation)) {
-          if (renderedHistory) this.renderer.clearActive();
+          if (renderedHistory) {
+            if (retainedSnapshot) {
+              // Re-projecting after the history render lets the renderer
+              // drop every live part the transcript now shows. A failed
+              // re-projection keeps the previous live frame, which is never
+              // worse than replacing settled content with a fallback.
+              await this.renderer.renderActive(
+                retainedSnapshot,
+                presentAgentConversation(retainedSnapshot, false),
+              ).catch(() => undefined);
+            } else {
+              this.renderer.clearActive();
+            }
+          }
+        }
+        if (this.isLifecycleCurrent(generation)) {
           this.syncRows();
           this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
           this.scroller.notifyContentChanged({ streaming: false });
           this.syncEmpty();
           this.followedTurnId = null;
-          for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+          if (!retainedSnapshot) {
+            for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+          }
         }
       }
     });

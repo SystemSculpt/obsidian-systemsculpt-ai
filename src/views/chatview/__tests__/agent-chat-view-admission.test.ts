@@ -154,6 +154,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     }),
     setBanner: jest.fn(),
     settleCompletedRun: jest.fn(async () => undefined),
+    settleUnfinishedRun: jest.fn(async () => undefined),
     restoreRejectedSubmission,
     resetMessageEditor: jest.fn(),
   };
@@ -276,6 +277,7 @@ function createHistoricalResubmitHarness(
     setBanner: jest.fn(),
     setComposerReadOnly: jest.fn(),
     settleCompletedRun: jest.fn(async () => undefined),
+    settleUnfinishedRun: jest.fn(async () => undefined),
     restoreRejectedSubmission: jest.fn(),
     resetMessageEditor: jest.fn(),
   };
@@ -426,6 +428,7 @@ async function createPersistentHistoricalResubmitHarness(
     setTitle: jest.fn(),
     setComposerReadOnly: jest.fn(),
     settleCompletedRun: jest.fn(async () => undefined),
+    settleUnfinishedRun: jest.fn(async () => undefined),
     restoreRejectedSubmission: jest.fn(),
     resetMessageEditor: jest.fn(),
     showMessageEditor: jest.fn(async () => undefined),
@@ -760,6 +763,13 @@ describe("AgentChatView composer admission", () => {
     expect(harness.restoreRejectedSubmission).not.toHaveBeenCalled();
     expect(harness.composer.getValue()).toBe("Newer draft");
     expect(harness.composer.getMessageAttachments()).toEqual([NEWER_ATTACHMENT]);
+    // A failed run whose user turn is durable settles the live turn against
+    // the reconciled transcript instead of leaving its snapshot mounted to
+    // repeat the committed content.
+    expect(harness.workspace.settleUnfinishedRun).toHaveBeenCalledWith(
+      harness.durableMessages,
+    );
+    expect(harness.workspace.settleCompletedRun).not.toHaveBeenCalled();
     harness.composer.unload();
   });
 
@@ -1241,6 +1251,7 @@ describe("AgentChatView composer admission", () => {
       setRunPending: jest.fn(),
       setBanner: jest.fn(),
       settleCompletedRun: jest.fn(async () => undefined),
+      settleUnfinishedRun: jest.fn(async () => undefined),
       restoreRejectedSubmission: jest.fn(),
     };
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -1466,6 +1477,7 @@ describe("AgentChatView composer admission", () => {
       setRunPending: jest.fn(),
       setBanner: jest.fn(),
       settleCompletedRun: jest.fn(async () => undefined),
+      settleUnfinishedRun: jest.fn(async () => undefined),
       restoreRejectedSubmission: jest.fn(),
       resetMessageEditor: jest.fn(),
     };

@@ -242,6 +242,7 @@ export class AgentConversationRenderer extends Component {
     fingerprint: string;
     node: HTMLElement;
   }>>();
+  private historyMessageIds: ReadonlySet<string> = new Set<string>();
   private inlineMessageEdit: AgentInlineMessageEdit | null = null;
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
@@ -313,6 +314,7 @@ export class AgentConversationRenderer extends Component {
       fingerprint: string;
       node: HTMLElement;
     }>>();
+    const nextMessageIds = new Set<string>();
     const desiredRows: HTMLElement[] = [];
     let hasInlineEdit = false;
     for (let index = 0; index < messages.length;) {
@@ -351,6 +353,7 @@ export class AgentConversationRenderer extends Component {
         copyText,
       };
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
+      for (const entry of turnMessages) nextMessageIds.add(entry.message_id);
       const anchorMessage = turnMessages[0];
       const inlineEdit = message.role === "user"
         && this.inlineMessageEdit?.messageId === anchorMessage.message_id
@@ -423,6 +426,7 @@ export class AgentConversationRenderer extends Component {
     if (!isCurrent()) return;
     this.reconcileChildren(this.historyRoot, desiredRows);
     this.historyRows = nextRows;
+    this.historyMessageIds = nextMessageIds;
     if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
   }
 
@@ -508,7 +512,13 @@ export class AgentConversationRenderer extends Component {
       .map((part, index) => ({ part, index }))
       .sort((left, right) =>
         left.part.order - right.part.order || left.index - right.index)
-      .map(({ part }) => part);
+      .map(({ part }) => part)
+      // History and the live run are sibling containers. Once a part's
+      // message is rendered in the committed transcript above, its live copy
+      // would show the same content twice; only parts history cannot carry
+      // (the terminal error and its Retry affordance) may stay.
+      .filter((part) =>
+        part.kind === "error" || !this.historyMessageIds.has(part.messageId));
     const terminalErrors = orderedParts.filter(
       (part): part is Extract<AgentPart, { kind: "error" }> => part.kind === "error",
     );
@@ -877,6 +887,7 @@ export class AgentConversationRenderer extends Component {
     for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
     this.copyFeedbackTimers.clear();
     this.historyRows.clear();
+    this.historyMessageIds = new Set<string>();
     this.clearInlineEditorShortcutGuard();
     this.clearSuppressedEditorKeyup();
   }

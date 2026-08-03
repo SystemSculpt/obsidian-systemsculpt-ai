@@ -3601,6 +3601,95 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("settles a failed run without repeating the committed turn beneath its Retry", async () => {
+    const parent = document.body.createDiv();
+    const onRetryFailedTurn = jest.fn();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onRetryFailedTurn,
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const user = {
+      role: "user" as const,
+      message_id: "user-failed-settle",
+      content: "Finish this",
+    };
+    await workspace.setHistory([user]);
+
+    const error = {
+      code: "run_failed",
+      message: "The provider request failed.",
+      retryable: true,
+      requestId: "incident_dddddddddddddddddddddddddddddddd",
+    };
+    const failed: AgentConversationSnapshot = {
+      runId: "run-failed-settle",
+      turnId: user.message_id,
+      status: "failed",
+      phase: "complete",
+      terminalError: error,
+      messages: [{
+        id: "assistant-failed-settle",
+        role: "assistant",
+        partIds: ["text-failed-settle"],
+      }],
+      parts: [{
+        id: "text-failed-settle",
+        kind: "text",
+        messageId: "assistant-failed-settle",
+        state: "complete",
+        markdown: "Partial final answer",
+        order: 0,
+      }, {
+        id: `error:${user.message_id}`,
+        kind: "error",
+        error,
+        retryable: true,
+        retryMessageId: user.message_id,
+        order: 1,
+      }],
+    };
+    await workspace.setAgentSnapshot(failed);
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.textContent)
+      .toContain("Partial final answer");
+
+    // The terminal reconcile committed the same turn into the transcript.
+    await workspace.settleUnfinishedRun([
+      user,
+      {
+        role: "assistant",
+        message_id: "assistant-failed-settle",
+        content: "Partial final answer",
+      },
+    ]);
+
+    expect(parent.querySelectorAll(".systemsculpt-agent-history .systemsculpt-agent-turn"))
+      .toHaveLength(2);
+    expect(parent.textContent?.match(/Partial final answer/g)).toHaveLength(1);
+    const active = parent.querySelector(".systemsculpt-agent-active-run")!;
+    expect(active.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    active.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
+    expect(onRetryFailedTurn).toHaveBeenCalledWith(user.message_id);
+
+    // A late re-publish of the same failed snapshot must not resurrect the
+    // duplicated content either.
+    await workspace.setAgentSnapshot(failed);
+    expect(parent.textContent?.match(/Partial final answer/g)).toHaveLength(1);
+    expect(active.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    workspace.unload();
+  });
+
   it("keeps the completed response and a safe fallback when durable history rendering rejects", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {

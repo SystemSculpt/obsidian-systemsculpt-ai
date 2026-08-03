@@ -1697,6 +1697,18 @@ export class AgentChatView extends ItemView {
         } catch (error) {
           this.logAgentError(error, "completedRunSettlement");
         }
+      } else if (userWasCommitted) {
+        // Failed and cancelled runs reconcile their finalized turn into the
+        // transcript too, so the committed history and the still-mounted live
+        // turn would otherwise repeat the same content. Settle the live turn
+        // down to what history cannot carry: the error and its Retry.
+        try {
+          await this.workspace?.settleUnfinishedRun(
+            this.transcript.snapshot().messages as readonly ChatMessage[],
+          );
+        } catch (error) {
+          this.logAgentError(error, "unfinishedRunSettlement");
+        }
       }
     } catch (error) {
       if (
