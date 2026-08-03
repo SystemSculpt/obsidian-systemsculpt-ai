@@ -91,12 +91,13 @@ export class AudioProcessorModal extends StandardModal {
       "Turn audio or a YouTube video into a detailed note, meeting brief, or clean transcript.",
     );
     this.processButton = this.addActionButton(
+      "audio.modal.process",
       this.activeTab === "youtube" ? "Process video" : "Process audio",
       () => void this.processAudio(),
       true,
       "sparkles",
     );
-    this.addActionButton("Cancel", () => this.close(), false, "x");
+    this.addActionButton("audio.modal.cancel", "Cancel", () => this.close(), false, "x");
     this.render();
     this.refreshAudioFiles();
     this.syncProcessButton();
@@ -132,8 +133,8 @@ export class AudioProcessorModal extends StandardModal {
       cls: "ss-audio-processor__tabs",
       attr: { "aria-label": "Audio Processor source" },
     });
-    const audioButton = createUiAction(tablist, { label: "Audio", icon: "audio-lines" });
-    const youtubeButton = createUiAction(tablist, { label: "YouTube", icon: "youtube" });
+    const audioButton = createUiAction(tablist, { label: "Audio", testId: "audio.modal.tab.audio", icon: "audio-lines" });
+    const youtubeButton = createUiAction(tablist, { label: "YouTube", testId: "audio.modal.tab.youtube", icon: "youtube" });
     audioButton.addClass("ss-audio-processor__tab");
     youtubeButton.addClass("ss-audio-processor__tab");
 
@@ -178,8 +179,8 @@ export class AudioProcessorModal extends StandardModal {
       cls: "ss-audio-processor__subtabs",
       attr: { "aria-label": "Audio location" },
     });
-    const vaultButton = createUiAction(tablist, { label: "Vault", icon: "folder" });
-    const deviceButton = createUiAction(tablist, { label: "Device", icon: "upload" });
+    const vaultButton = createUiAction(tablist, { label: "Vault", testId: "audio.modal.tab.vault", icon: "folder" });
+    const deviceButton = createUiAction(tablist, { label: "Device", testId: "audio.modal.tab.device", icon: "upload" });
     vaultButton.addClass("ss-audio-processor__subtab");
     deviceButton.addClass("ss-audio-processor__subtab");
 
@@ -218,6 +219,7 @@ export class AudioProcessorModal extends StandardModal {
 
   private renderVaultPicker(container: HTMLElement): void {
     this.search = createUiSearch(container, {
+      testId: "audio.modal.search",
       label: "Search vault audio",
       placeholder: "Search by name or path",
       value: this.searchQuery,
@@ -382,18 +384,21 @@ export class AudioProcessorModal extends StandardModal {
     });
     const detailedButton = this.createOutputPresetOption(
       choices,
+      "audio.modal.output.detailed",
       "Detailed note",
       "Summary, decisions, action items, and a linked timestamped transcript.",
       "file-text",
     );
     const meetingBriefButton = this.createOutputPresetOption(
       choices,
+      "audio.modal.output.meeting-brief",
       "Meeting brief",
       "Outcome, decisions, action items, and open questions, plus a linked transcript.",
       "list-checks",
     );
     const cleanTranscriptButton = this.createOutputPresetOption(
       choices,
+      "audio.modal.output.clean-transcript",
       "Clean transcript",
       "Readable paragraphs without timestamps in the main note, plus a linked transcript.",
       "align-left",
@@ -417,11 +422,12 @@ export class AudioProcessorModal extends StandardModal {
 
   private createOutputPresetOption(
     container: HTMLElement,
+    testId: string,
     label: string,
     detail: string,
     icon: string,
   ): HTMLButtonElement {
-    const button = createUiAction(container, { label, icon });
+    const button = createUiAction(container, { label, testId, icon });
     button.addClass("ss-audio-processor__output-option");
     button.createSpan({
       cls: "ss-audio-processor__output-detail",

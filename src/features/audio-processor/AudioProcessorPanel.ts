@@ -117,6 +117,7 @@ export class AudioProcessorPanel {
       this.panel.setTimelineState("summarizing", "error");
       this.panel.setActions([{
         label: "Open transcript",
+        testId: "audio.progress.open-transcript",
         variant: "primary",
         disabled: this.artifactBusy,
         onClick: () => void this.openArtifact(note, "transcript"),
@@ -134,12 +135,14 @@ export class AudioProcessorPanel {
     this.panel.setActions([
       {
         label: "Open note",
+        testId: "audio.progress.open-note",
         variant: "primary",
         disabled: this.artifactBusy,
         onClick: () => void note.open(),
       },
       {
         label: "Open transcript",
+        testId: "audio.progress.open-transcript",
         disabled: this.artifactBusy,
         onClick: () => void this.openArtifact(note, "transcript"),
       },
@@ -199,7 +202,7 @@ export class AudioProcessorPanel {
       state: stoppedWatching ? "warning" : "error",
     });
     if (!stoppedWatching) this.panel.setTimelineState(this.currentStep, "error");
-    this.panel.setActions([{ label: "Close", variant: "primary", onClick: () => this.close() }]);
+    this.panel.setActions([{ label: "Close", testId: "audio.progress.close", variant: "primary", onClick: () => this.close() }]);
   }
 
   close(): void {
@@ -219,12 +222,13 @@ export class AudioProcessorPanel {
     this.panel?.setActions([
       ...(this.availableTranscript ? [{
         label: "Open transcript",
+        testId: "audio.progress.open-transcript",
         variant: "primary" as const,
         disabled: this.artifactBusy,
         onClick: () => void this.openAvailableTranscript(),
       }] : []),
-      { label: "Hide", onClick: () => this.hide() },
-      { label: cancelLabel, onClick: this.onCancel },
+      { label: "Hide", testId: "audio.progress.hide", onClick: () => this.hide() },
+      { label: cancelLabel, testId: "audio.progress.cancel", onClick: this.onCancel },
     ]);
   }
 
@@ -232,17 +236,19 @@ export class AudioProcessorPanel {
     this.panel?.setActions([
       ...(this.availableTranscript ? [{
         label: "Open transcript",
+        testId: "audio.progress.open-transcript",
         variant: "primary" as const,
         disabled: this.artifactBusy,
         onClick: () => void this.openAvailableTranscript(),
       }] : []),
       {
         label: "Credits & usage",
+        testId: "audio.progress.credits",
         variant: this.availableTranscript ? undefined : "primary",
         onClick: () => void this.plugin.openCreditsBalanceModal(),
       },
-      { label: "Hide", onClick: () => this.hide() },
-      { label: "Stop watching", onClick: this.onCancel },
+      { label: "Hide", testId: "audio.progress.hide", onClick: () => this.hide() },
+      { label: "Stop watching", testId: "audio.progress.cancel", onClick: this.onCancel },
     ]);
   }
 

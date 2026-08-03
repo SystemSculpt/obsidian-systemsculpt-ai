@@ -5,6 +5,12 @@ export type UiActionSize = "default" | "small" | "icon";
 
 export interface UiActionOptions {
   label: string;
+  /**
+   * Canonical stable identity stamped as `data-testid` (dot-namespaced,
+   * product-shaped, e.g. "chat.header.new"). Required so every action the
+   * product renders is addressable by the E2E driver and test tooling.
+   */
+  testId: string;
   icon?: string;
   tone?: UiActionTone;
   size?: UiActionSize;
@@ -28,6 +34,8 @@ export interface UiActionState {
 export interface UiSearchOptions {
   label?: string;
   placeholder: string;
+  /** Stable `data-testid` identity for the search input. */
+  testId: string;
   value?: string;
   onQuery: (query: string) => void;
 }
@@ -66,6 +74,7 @@ export function createUiAction(
   button.type = "button";
   button.classList.add("ss-button");
   button.dataset.ssAction = options.size ?? "default";
+  button.dataset.testid = options.testId;
 
   const toneClass = ACTION_TONE_CLASS[options.tone ?? "default"];
   if (toneClass) {
@@ -160,6 +169,7 @@ export function createUiSearch(
     .setPlaceholder(options.placeholder)
     .setValue(options.value ?? "");
   const input = search.inputEl;
+  input.dataset.testid = options.testId;
   input.setAttribute("aria-label", options.label ?? options.placeholder);
   let destroyed = false;
 

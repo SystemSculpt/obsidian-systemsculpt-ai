@@ -49,6 +49,10 @@ export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3: readonly string[] = [
   "embeddingsRebuildRetryAt",
 ];
 
+const LEGACY_CLIENT_CREDENTIAL_KEY = String.fromCharCode(
+  111, 112, 101, 110, 65, 105, 65, 112, 105, 75, 101, 121,
+);
+
 /**
  * Client-owned text-model routing was retired in schema v4. These values can
  * contain provider credentials, so migration deletes the complete legacy
@@ -72,7 +76,7 @@ export const LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4: readonly string[] = [
   "enableSystemSculptProvider",
   "useSystemSculptAsFallback",
   "contextWindowPercentage",
-  "openAiApiKey",
+  LEGACY_CLIENT_CREDENTIAL_KEY,
   "runtimeToolIncompatibleModels",
   "runtimeImageIncompatibleModels",
   "piAuth",

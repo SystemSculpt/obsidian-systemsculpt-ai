@@ -189,6 +189,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   const rawModeButtonEl = createStudioAction(modeToggleEl, {
     className: "ss-studio-node-text-display-mode-button",
     label: "Raw",
+    testId: "studio.text.mode.raw",
     ariaLabel: "Show raw Markdown source",
     size: "small",
     selected: false,
@@ -198,6 +199,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   const renderedModeButtonEl = createStudioAction(modeToggleEl, {
     className: "ss-studio-node-text-display-mode-button",
     label: "Rendered",
+    testId: "studio.text.mode.rendered",
     ariaLabel: "Show rendered Markdown preview",
     size: "small",
     selected: false,

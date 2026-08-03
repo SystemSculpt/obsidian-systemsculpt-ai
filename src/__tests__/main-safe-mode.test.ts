@@ -3,6 +3,7 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
+import { FreezeMonitor } from "../services/FreezeMonitor";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -16,6 +17,8 @@ const createLogger = () => ({
   error: jest.fn(),
   debug: jest.fn(),
   setLogFileName: jest.fn(),
+  flushBeforeUnload: jest.fn(async () => undefined),
+  dispose: jest.fn(),
 });
 
 function makePlugin(): any {
@@ -102,6 +105,39 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
     expect(order).toEqual(["recorder", "settings"]);
     expect((plugin as any).recorderService).toBeNull();
+  });
+
+  it("flushes and disposes diagnostics before the unload guard flips", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    jest.spyOn(FreezeMonitor, "stop").mockImplementation(() => {
+      order.push("freeze-monitor");
+      throw new Error("simulated monitor stop failure");
+    });
+    const logger = createLogger();
+    logger.flushBeforeUnload.mockImplementation(async () => {
+      expect(plugin.isPluginUnloading()).toBe(false);
+      order.push("flush");
+    });
+    logger.dispose.mockImplementation(() => {
+      expect(plugin.isPluginUnloading()).toBe(false);
+      order.push("dispose");
+    });
+    (plugin as any).pluginLogger = logger;
+    jest.spyOn(plugin, "getLogger").mockReturnValue(logger as any);
+    (plugin as any).recorderService = {
+      unload: jest.fn(() => {
+        expect(plugin.isPluginUnloading()).toBe(false);
+        order.push("recorder");
+      }),
+    };
+
+    await expect(plugin.onunload()).resolves.toBeUndefined();
+
+    expect(logger.flushBeforeUnload).toHaveBeenCalledTimes(1);
+    expect(logger.dispose).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["recorder", "freeze-monitor", "flush", "dispose"]);
+    expect(plugin.isPluginUnloading()).toBe(true);
   });
 
   it("disposes owned transcription panels before transcription service unload", async () => {

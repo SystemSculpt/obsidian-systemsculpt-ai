@@ -74,18 +74,19 @@ export class StudioImageEditorInspector {
       text: describeSelection(state, selection),
     });
     const toolButtons = tools.createDiv({ cls: "ss-studio-caption-board__button-grid" });
-    this.createButton(toolButtons, "Add Text", this.actions.addLabel);
-    this.createButton(toolButtons, "Red Box", () => this.actions.addAnnotation("highlight_rect"));
-    this.createButton(toolButtons, "Red Circle", () => this.actions.addAnnotation("highlight_circle"));
-    this.createButton(toolButtons, "Blur Box", () => this.actions.addAnnotation("blur_rect"));
+    this.createButton(toolButtons, "studio.image.add-text", "Add Text", this.actions.addLabel);
+    this.createButton(toolButtons, "studio.image.add-box", "Red Box", () => this.actions.addAnnotation("highlight_rect"));
+    this.createButton(toolButtons, "studio.image.add-circle", "Red Circle", () => this.actions.addAnnotation("highlight_circle"));
+    this.createButton(toolButtons, "studio.image.add-blur", "Blur Box", () => this.actions.addAnnotation("blur_rect"));
     const cropSelected = selection?.kind === "crop" && state.crop !== null;
     this.createButton(
       toolButtons,
+      "studio.image.crop-toggle",
       cropSelected ? "Deselect Crop" : state.crop ? "Select Crop" : "Add Crop",
       this.actions.toggleCropSelection
     );
     if (selection && selection.kind !== "crop") {
-      this.createButton(toolButtons, "Deselect Layer", () => this.actions.select(null));
+      this.createButton(toolButtons, "studio.image.deselect-layer", "Deselect Layer", () => this.actions.select(null));
     }
 
     const label = resolveSelectedLabel(state, selection);
@@ -134,6 +135,7 @@ export class StudioImageEditorInspector {
     (["left", "center", "right"] as const).forEach((textAlign) => {
       this.createToggle(
         alignButtons,
+        `studio.image.align.${textAlign}`,
         capitalize(textAlign),
         label.textAlign === textAlign,
         () => this.actions.patchLabel({ textAlign })
@@ -147,6 +149,7 @@ export class StudioImageEditorInspector {
       (styleVariant) => {
         this.createToggle(
           styleButtons,
+          `studio.image.style.${styleVariant}`,
           capitalize(styleVariant),
           label.styleVariant === styleVariant,
           () => this.actions.patchLabel({ styleVariant })
@@ -167,7 +170,7 @@ export class StudioImageEditorInspector {
       ["Blur", "blur_rect"],
     ];
     kinds.forEach(([label, kind]) => {
-      this.createToggle(kindButtons, label, annotation.kind === kind, () => {
+      this.createToggle(kindButtons, `studio.image.kind.${kind}`, label, annotation.kind === kind, () => {
         this.actions.patchAnnotation({ kind });
       });
     });
@@ -216,17 +219,17 @@ export class StudioImageEditorInspector {
     const buttons = this.createField(section, "Actions").createDiv({
       cls: "ss-studio-caption-board__button-row",
     });
-    this.createButton(buttons, "Remove Crop", this.actions.clearCrop);
+    this.createButton(buttons, "studio.image.remove-crop", "Remove Crop", this.actions.clearCrop);
   }
 
   private renderLayerActions(section: HTMLElement): void {
     const buttons = this.createField(section, "Actions").createDiv({
       cls: "ss-studio-caption-board__button-grid",
     });
-    this.createButton(buttons, "Duplicate", this.actions.duplicateSelected);
-    this.createButton(buttons, "Delete", this.actions.deleteSelected);
-    this.createButton(buttons, "Bring Forward", () => this.actions.bumpSelected(1));
-    this.createButton(buttons, "Send Back", () => this.actions.bumpSelected(-1));
+    this.createButton(buttons, "studio.image.duplicate", "Duplicate", this.actions.duplicateSelected);
+    this.createButton(buttons, "studio.image.delete", "Delete", this.actions.deleteSelected);
+    this.createButton(buttons, "studio.image.bring-forward", "Bring Forward", () => this.actions.bumpSelected(1));
+    this.createButton(buttons, "studio.image.send-back", "Send Back", () => this.actions.bumpSelected(-1));
   }
 
   private createSection(title: string): HTMLElement {
@@ -250,6 +253,7 @@ export class StudioImageEditorInspector {
 
   private createToggle(
     parent: HTMLElement,
+    testId: string,
     label: string,
     selected: boolean,
     onSelect: () => void
@@ -257,16 +261,18 @@ export class StudioImageEditorInspector {
     createStudioAction(parent, {
       className: "ss-studio-caption-board__toggle",
       label,
+      testId,
       size: "small",
       selected,
       onSelect,
     });
   }
 
-  private createButton(parent: HTMLElement, label: string, onSelect: () => void): void {
+  private createButton(parent: HTMLElement, testId: string, label: string, onSelect: () => void): void {
     createStudioAction(parent, {
       className: "ss-studio-caption-board__secondary-button",
       label,
+      testId,
       size: "small",
       onSelect,
     });

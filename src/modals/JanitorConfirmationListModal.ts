@@ -67,8 +67,9 @@ export class JanitorConfirmationListModal extends StandardModal {
     super.onOpen();
     this.addTitle(this.options.title, this.options.description);
     this.renderPreview();
-    this.addActionButton("Cancel", () => this.settle(false));
+    this.addActionButton("janitor.confirm.cancel", "Cancel", () => this.settle(false));
     this.addActionButton(
+      "janitor.confirm.accept",
       this.options.confirmLabel ?? "Move to Trash",
       () => this.settle(true),
       false,

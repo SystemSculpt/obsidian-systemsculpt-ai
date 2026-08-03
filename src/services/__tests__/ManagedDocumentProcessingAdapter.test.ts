@@ -108,6 +108,38 @@ describe("managed document processing adapter contract", () => {
     expect([...storage.files.values()].join("\n")).not.toMatch(/managed document|https:\/\//);
   });
 
+  it("does not stop a valid document at the historical 180-poll boundary", async () => {
+    const { adapter, jobs } = managedHarness();
+    let polls = 0;
+    jobs.status.mockImplementation(async () => {
+      polls += 1;
+      return {
+        document: {
+          id: documentId,
+          status: polls <= 180 ? "processing" : "completed",
+          error: null,
+          progress: polls <= 180 ? 0.5 : 1,
+        },
+        poll_after_ms: 0,
+      };
+    });
+
+    await expect(adapter.process({
+      identity: "vault:documents/long-report.pdf",
+      fingerprint: () => `sha256:${"9".repeat(64)}`,
+      load: async () => ({
+        filename: "long-report.pdf",
+        contentType: "application/pdf",
+        bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer,
+      }),
+    })).resolves.toEqual({
+      operationId: "document-op-1",
+      documentId,
+      result: downloaded,
+    });
+    expect(polls).toBe(181);
+  });
+
   it("blocks before fingerprinting, recovery, or vault reads when admission is denied", async () => {
     const { adapter, admission, events, storage } = managedHarness();
     admission.acquireLease.mockResolvedValueOnce({ outcome: "license_required" } as any);

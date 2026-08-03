@@ -209,6 +209,7 @@ export class StudioGraphGroupController {
       const nameButtonEl = createStudioAction(nameSlotEl, {
         className: "ss-studio-group-tag-button",
         label: normalizeGroupName(group.name) || nextDefaultGroupName(project),
+        testId: "studio.group.rename",
         stopPointerDown: true,
         onSelect: () => {
           this.startGroupNameEdit(group.id, { selectText: true });
@@ -223,6 +224,7 @@ export class StudioGraphGroupController {
       createStudioAction(tagRowEl, {
         className: "ss-studio-group-tag-action ss-studio-group-align-button",
         label: "Align",
+        testId: "studio.group.align",
         ariaLabel: "Auto-align group nodes",
         title: "Auto-align group nodes",
         stopPointerDown: true,
@@ -234,6 +236,7 @@ export class StudioGraphGroupController {
       const colorButtonEl = createStudioAction(tagRowEl, {
         className: "ss-studio-group-tag-action ss-studio-group-color-button",
         label: "Choose group color",
+        testId: "studio.group.color",
         size: "icon",
         stopPointerDown: true,
         onSelect: () => {

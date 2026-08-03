@@ -14,7 +14,7 @@ import {
   splitChatFrontmatter,
 } from "./ChatFrontmatterIdentity";
 import {
-  parseManagedChatSessionBinding,
+  parseAgentConversationId,
   type ChatMetadata,
   type ParsedChatMarkdown,
 } from "./ChatPersistenceTypes";
@@ -539,7 +539,7 @@ export class ChatMarkdownSerializer {
       context_files: processedContextFiles,
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
       approvalMode: parsed.approvalMode === "full-access" ? "full-access" : "ask",
-      managedSession: parseManagedChatSessionBinding(parsed.managedSession, id),
+      agentConversationId: parseAgentConversationId(parsed.agentConversationId),
     };
   }
 
@@ -627,7 +627,7 @@ export class ChatMarkdownSerializer {
       return value.includes("<!-- SYSTEMSCULPT-")
         || value.includes("<!-- REASONING")
         || value.includes("<!-- TOOL-CALLS")
-        || /(?:^|\r?\n)-->/.test(value);
+        || /--!?>/u.test(value);
     }
     if (!value || typeof value !== "object") return false;
     if (seen.has(value)) return false;

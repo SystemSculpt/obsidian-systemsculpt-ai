@@ -155,7 +155,7 @@ describe("SimilarNotesPresentation", () => {
 
     presentation.render({ state: "results", sourceName: "Agent chat", results: [result], chatContext: true });
     const addButton = root.querySelector<HTMLButtonElement>(".ss-similar-note__context-action");
-    expect(addButton?.getAttribute("aria-label")).toBe("Add SystemSculpt to chat context");
+    expect(addButton?.getAttribute("aria-label")).toBe("Pin SystemSculpt for every message");
 
     addButton?.click();
     await Promise.resolve();
@@ -164,7 +164,7 @@ describe("SimilarNotesPresentation", () => {
     expect(actions.onAddToContext).toHaveBeenCalledWith("Projects/SystemSculpt.md");
     expect(root.querySelector(".ss-similar-note")?.classList.contains("is-in-context")).toBe(true);
     expect(addButton?.disabled).toBe(true);
-    expect(addButton?.getAttribute("aria-label")).toBe("SystemSculpt is in chat context");
+    expect(addButton?.getAttribute("aria-label")).toBe("SystemSculpt is pinned for every message");
   });
 
   it("preserves the first-party drag payload and releases drag state", () => {

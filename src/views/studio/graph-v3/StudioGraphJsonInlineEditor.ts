@@ -443,6 +443,7 @@ function renderJsonOutputPreview(options: {
   const toggleEl = createStudioAction(outputWrapEl, {
     className: "ss-studio-node-json-output-toggle",
     label: `Latest Output (${summary})`,
+    testId: "studio.json.output-toggle",
     selected: false,
     onSelect: () => {
       expanded = !expanded;
@@ -509,6 +510,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
   const composerButtonEl = createStudioAction(modeToggleEl, {
     className: "ss-studio-node-text-display-mode-button",
     label: "Composer",
+    testId: "studio.json.mode.composer",
     ariaLabel: "Show JSON composer rows",
     size: "small",
     selected: false,
@@ -518,6 +520,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
   const rawButtonEl = createStudioAction(modeToggleEl, {
     className: "ss-studio-node-text-display-mode-button",
     label: "Raw",
+    testId: "studio.json.mode.raw",
     ariaLabel: "Show raw JSON editor",
     size: "small",
     selected: false,
@@ -623,6 +626,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
       createStudioAction(unsupportedEl, {
         className: "ss-studio-node-json-row-button",
         label: "Reset to {}",
+        testId: "studio.json.reset-empty",
         size: "small",
         disabled: interactionLocked,
         onSelect: () => {
@@ -758,6 +762,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
         createStudioAction(keyControlsEl, {
           className: "ss-studio-node-json-row-button ss-studio-node-json-row-remove",
           label: "Remove JSON row",
+          testId: "studio.json.row.remove",
           ariaLabel: "Remove JSON row",
           title: "Remove row",
           icon: "x",
@@ -784,6 +789,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           const sourceModeEl = createStudioAction(htmlModeEl, {
             className: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
             label: "Source",
+            testId: "studio.json.row.html-source",
             size: "small",
             selected: false,
             disabled: interactionLocked,
@@ -791,6 +797,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           const previewModeEl = createStudioAction(htmlModeEl, {
             className: "ss-studio-node-json-row-button ss-studio-node-json-row-html-mode-button",
             label: "Preview",
+            testId: "studio.json.row.html-preview",
             size: "small",
             selected: false,
             disabled: interactionLocked,
@@ -908,6 +915,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
           createStudioAction(valueWrapEl, {
             className: "ss-studio-node-json-row-button ss-studio-node-json-row-mode",
             label: row.useTextarea ? "Line" : "Area",
+            testId: "studio.json.row.mode-toggle",
             ariaLabel: toggleLabel,
             title: toggleLabel,
             size: "small",
@@ -949,6 +957,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     createStudioAction(footerActionsEl, {
       className: "ss-studio-node-json-row-button",
       label: "Add field",
+      testId: "studio.json.add-field",
       ariaLabel: "Add JSON field",
       size: "small",
       disabled: interactionLocked,
@@ -966,6 +975,7 @@ export function renderJsonNodeEditor(options: RenderStudioJsonNodeEditorOptions)
     createStudioAction(footerActionsEl, {
       className: "ss-studio-node-json-row-button",
       label: "Email preset",
+      testId: "studio.json.email-preset",
       ariaLabel: "Insert email payload fields",
       size: "small",
       disabled: interactionLocked,

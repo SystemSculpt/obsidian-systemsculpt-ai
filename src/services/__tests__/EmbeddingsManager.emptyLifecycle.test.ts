@@ -1,4 +1,11 @@
 import type { EmbeddingVector } from "../embeddings/types";
+import type {
+  ManagedEmbeddingsIndexAdapter,
+  ManagedEmbeddingsIndexGeneration,
+  ManagedEmbeddingsIndexMetadata,
+  ManagedEmbeddingsIndexOperation,
+  ManagedEmbeddingsIndexResult,
+} from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 
 const mockVectors = new Map<string, EmbeddingVector>();
 const mockStorage = {
@@ -9,12 +16,32 @@ const mockStorage = {
     for (const id of ids) mockVectors.delete(id);
   }),
   peekCurrentManagedNamespace: jest.fn(() => (
-    [...mockVectors.values()].find((vector) => vector.metadata.namespace.startsWith("systemsculpt:managed:semantic-v1:v2:"))?.metadata.namespace ?? null
+    [...mockVectors.values()].find((vector) => vector.metadata.namespace.startsWith("systemsculpt:managed:"))?.metadata.namespace ?? null
   )),
   purgeCorruptedVectors: jest.fn(async () => ({ removedCount: 0, correctedCount: 0, removedPaths: [], correctedPaths: [] })),
   getVectorsByPath: jest.fn(async (path: string) => [...mockVectors.values()].filter((vector) => vector.path === path)),
   getVectorSync: jest.fn((id: string) => mockVectors.get(id) ?? null),
   storeVectors: jest.fn(async (vectors: EmbeddingVector[]) => {
+    for (const vector of vectors) mockVectors.set(vector.id, vector);
+  }),
+  publishPath: jest.fn(async (path: string, namespace: string, vectors: EmbeddingVector[]) => {
+    for (const [id, vector] of mockVectors) {
+      if (
+        vector.path === path
+        && (
+          vector.metadata.namespace === namespace
+          || vector.metadata.namespace === "systemsculpt:local-empty:v1:1"
+        )
+      ) {
+        mockVectors.delete(id);
+      }
+    }
+    for (const vector of vectors) mockVectors.set(vector.id, vector);
+  }),
+  replacePath: jest.fn(async (path: string, vectors: EmbeddingVector[]) => {
+    for (const [id, vector] of mockVectors) {
+      if (vector.path === path) mockVectors.delete(id);
+    }
     for (const vector of vectors) mockVectors.set(vector.id, vector);
   }),
   removeByPathExceptIds: jest.fn(async (path: string, namespace: string, keepIds: Set<string>) => {
@@ -47,22 +74,61 @@ jest.mock("../embeddings/storage/EmbeddingsPortableIndex", () => ({
 
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
-import { ManagedEmbeddingsError } from "../embeddings/gateway/ManagedEmbeddingsAdapter";
+import {
+  MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+  MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+  ManagedEmbeddingsError,
+} from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { buildManagedNamespace } from "../embeddings/utils/namespace";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
-const managedCatalog = {
-  capabilities: [{
-    alias: "systemsculpt/embeddings",
-    availability: "available",
-    limits: { max_texts: 128, max_chars_per_text: 8000, max_total_chars: 200000 },
+const managedMetadata: ManagedEmbeddingsIndexMetadata = {
+  contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+  vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+  generation: {
+    id: "semantic-v1",
+    indexSchemaVersion: 3,
+    indexNamespaceTemplate: "systemsculpt:managed:semantic-v1:v3:<dimensions>",
+  },
+  limits: {
+    maxSourceBytes: 8 * 1024 * 1024,
+    maxResultBytes: 16 * 1024 * 1024,
+  },
+};
+
+function nonEmptyIndexResult(markdown: string): ManagedEmbeddingsIndexResult {
+  return {
+    contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+    source: { contentSha256: `source:${markdown.length}` },
+    empty: false,
+    vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
     generation: {
       id: "semantic-v1",
-      index_schema_version: 2,
-      index_namespace: "systemsculpt:managed:semantic-v1:v2:<dimensions>",
+      indexSchemaVersion: 3,
+      indexNamespace: buildManagedNamespace(3),
+      dimensions: 3,
     },
-  }],
-};
+    chunks: [{
+      ordinal: 0,
+      textHash: `chunk:${markdown.length}`,
+      headingPath: [],
+      excerpt: markdown.replace(/\s+/g, " ").trim().slice(0, 120) || "Note",
+      length: markdown.length,
+      vector: new Float32Array([1, 0, 0]),
+    }],
+  };
+}
+
+function emptyIndexResult(markdown: string): ManagedEmbeddingsIndexResult {
+  return {
+    contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+    source: { contentSha256: `source:${markdown.length}` },
+    empty: true,
+    vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+    generation: null,
+    chunks: [],
+  };
+}
 
 function harness(initialContent: string) {
   let content = initialContent;
@@ -72,30 +138,20 @@ function harness(initialContent: string) {
     extension: "md",
     stat: { mtime: 1, size: initialContent.length },
   });
-  const request = jest.fn(async (operation: { body: () => unknown }) => {
-    operation.body();
-    return {
-      response: new Response(JSON.stringify({
-        embeddings: [[0.1, 0.2, 0.3]],
-        dimensions: 3,
-        generation: {
-          id: "semantic-v1",
-          indexSchemaVersion: 2,
-          indexNamespace: "systemsculpt:managed:semantic-v1:v2:3",
-        },
-      }), { status: 200, headers: { "content-type": "application/json" } }),
-      diagnostics: {
-        status: 200,
-        requestId: "request-1",
-        contentType: "application/json",
-        rateLimitLimit: null,
-        rateLimitRemaining: null,
-        rateLimitReset: null,
-        retryAfter: null,
-        errorText: "",
-      },
-    };
-  });
+  const indexAdapter = {
+    activeGeneration: undefined as ManagedEmbeddingsIndexGeneration | undefined,
+    metadata: undefined as ManagedEmbeddingsIndexMetadata | undefined,
+    getMetadata: jest.fn(async () => {
+      indexAdapter.metadata = managedMetadata;
+      return managedMetadata;
+    }),
+    index: jest.fn(async (operation: ManagedEmbeddingsIndexOperation) => {
+      const result = nonEmptyIndexResult(operation.prepare().markdown);
+      indexAdapter.activeGeneration = result.generation ?? undefined;
+      return result;
+    }),
+    query: jest.fn(),
+  } as unknown as ManagedEmbeddingsIndexAdapter;
   const settings = {
     vaultInstanceId: "vault",
     embeddingsVectorFormatVersion: 5,
@@ -107,7 +163,6 @@ function harness(initialContent: string) {
     savedChatsDirectory: "Saved Chats",
   };
   const updateSettings = jest.fn(async (patch: Partial<typeof settings>) => Object.assign(settings, patch));
-  const getCatalog = jest.fn(async () => managedCatalog);
   const watchers = new Map<string, (...args: any[]) => void>();
   const vault = {
     adapter: null,
@@ -123,16 +178,19 @@ function harness(initialContent: string) {
   const plugin = {
     settings,
     emitter: { emit: jest.fn() },
-    getManagedCapabilityClient: jest.fn(() => ({ request, getCatalog })),
+    getManagedCapabilityClient: jest.fn(() => ({
+      getEmbeddingsIndex: () => indexAdapter,
+    })),
     getSettingsManager: jest.fn(() => ({ updateSettings })),
   };
   const manager = new EmbeddingsManager({ vault } as never, plugin as never);
   return {
     file,
+    getMetadata: indexAdapter.getMetadata as jest.Mock,
+    index: indexAdapter.index as jest.Mock,
+    indexAdapter,
     manager,
-    getCatalog,
     plugin,
-    request,
     updateSettings,
     vault,
     watchers,
@@ -158,6 +216,9 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     jest.clearAllMocks();
     mockVectors.clear();
   });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   it("completes an all-empty vault without remote work and processes the note after content appears", async () => {
     const state = harness("");
@@ -165,7 +226,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
 
     expect(state.manager.getStats()).toEqual({ total: 1, processed: 1, present: 0, needsProcessing: 0, failed: 0 });
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
-    expect(state.request).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
     expect(state.plugin.settings.embeddingsRebuildPending).toBe(false);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({
       phase: "idle",
@@ -189,9 +250,9 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toMatchObject({ processed: 0, needsProcessing: 1 });
     releaseLock();
     await heldLock;
-    await waitFor(() => state.request.mock.calls.length > 0 && !state.manager.isCurrentlyProcessing());
+    await waitFor(() => state.index.mock.calls.length > 0 && !state.manager.isCurrentlyProcessing());
 
-    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getStats()).toMatchObject({ processed: 1, present: 1, needsProcessing: 0 });
   });
 
@@ -206,18 +267,55 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(result).toMatchObject({ status: "complete", processed: 0, partialSuccess: true });
     expect(state.plugin.settings.embeddingsRebuildPending).toBe(true);
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
-    expect(state.request).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      "[SystemSculpt][WARN] Failed to prepare file for embeddings processing",
+      "[SystemSculpt][WARN] Failed to index note with managed embeddings",
       {
         source: "EmbeddingsProcessor",
         method: "processFiles",
         metadata: {
           path: "Note.md",
-          message: "disk read failed",
+          code: "local_preparation_failed",
+          status: 0,
         },
       },
     );
+  });
+
+  it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
+    const state = harness("A note whose corrupted stored vector must be rebuilt.");
+    (mockStorage.purgeCorruptedVectors as jest.Mock).mockResolvedValueOnce({
+      removedCount: 1,
+      correctedCount: 0,
+      removedPaths: [state.file.path],
+      correctedPaths: [],
+    });
+
+    await state.manager.initialize();
+
+    expect(state.manager.getStats()).toMatchObject({
+      failed: 1,
+      needsProcessing: 1,
+    });
+    expect((state.manager as any).workQueue.get(state.file.path)).toMatchObject({
+      path: state.file.path,
+      reason: "reconcile",
+      failure: {
+        code: "invalid_response",
+        message: "Stored vector was invalid.",
+      },
+    });
+
+    await expect(state.manager.retryFailedFiles()).resolves.toMatchObject({
+      status: "complete",
+      processed: 1,
+    });
+    expect(state.index).toHaveBeenCalledTimes(1);
+    expect(state.manager.getStats()).toMatchObject({
+      processed: 1,
+      needsProcessing: 0,
+      failed: 0,
+    });
   });
 
   it("keeps edits durable while processing is paused", async () => {
@@ -239,34 +337,15 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "paused", pending: 1 });
   });
 
-  it("keeps a newer queued edit pending and stamps only the source revision sent for inference", async () => {
+  it("keeps a newer queued edit pending and never publishes the stale response", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("Original note content sent for managed inference.");
     await state.manager.initialize();
     let releaseResponse: (() => void) | undefined;
-    state.request.mockImplementationOnce(async (operation: { body: () => unknown }) => {
-      operation.body();
+    state.index.mockImplementationOnce(async (operation: ManagedEmbeddingsIndexOperation) => {
+      const markdown = operation.prepare().markdown;
       await new Promise<void>((resolve) => { releaseResponse = resolve; });
-      return {
-        response: new Response(JSON.stringify({
-          embeddings: [[0.1, 0.2, 0.3]],
-          dimensions: 3,
-          generation: {
-            id: "semantic-v1",
-            indexSchemaVersion: 2,
-            indexNamespace: buildManagedNamespace(3),
-          },
-        }), { status: 200, headers: { "content-type": "application/json" } }),
-        diagnostics: {
-          status: 200,
-          requestId: "request-race",
-          contentType: "application/json",
-          rateLimitLimit: null,
-          rateLimitRemaining: null,
-          rateLimitReset: null,
-          retryAfter: null,
-          errorText: "",
-        },
-      };
+      return nonEmptyIndexResult(markdown);
     });
 
     const processing = state.manager.processVault();
@@ -287,7 +366,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     await processing;
 
     const storedRoot = mockVectors.get(buildVectorId(buildManagedNamespace(3), state.file.path, 0));
-    expect(storedRoot?.metadata.mtime).toBe(1);
+    expect(storedRoot).toBeUndefined();
     expect(queue.get(state.file.path)).toMatchObject({
       revision: newer.revision,
       sourceMtime: state.file.stat.mtime,
@@ -297,6 +376,15 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
       state: "pending",
       ready: false,
     });
+    expect(warn).toHaveBeenCalledWith(
+      "[SystemSculpt][WARN] Failed to index note with managed embeddings",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          path: "Note.md",
+          code: "source_changed",
+        }),
+      }),
+    );
   });
 
   it("automatically indexes whenever semantic indexing is enabled", async () => {
@@ -304,11 +392,11 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     state.plugin.settings.embeddingsEnabled = true;
 
     await state.manager.initialize();
-    for (let attempt = 0; attempt < 30 && (state.request.mock.calls.length === 0 || state.manager.isCurrentlyProcessing()); attempt += 1) {
+    for (let attempt = 0; attempt < 30 && (state.index.mock.calls.length === 0 || state.manager.isCurrentlyProcessing()); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getStats()).toMatchObject({ processed: 1, needsProcessing: 0 });
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", completed: 1, pending: 0 });
   });
@@ -319,7 +407,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
   ] as const)("surfaces startup %s failures and recovers on the next automatic run", async (code, status) => {
     const state = harness("Enabled semantic indexing must never report a false-ready state.");
     state.plugin.settings.embeddingsEnabled = true;
-    state.getCatalog.mockRejectedValueOnce(new ManagedEmbeddingsError(code, "Managed catalog unavailable.", status));
+    state.getMetadata.mockRejectedValueOnce(new ManagedEmbeddingsError(code, "Managed catalog unavailable.", status));
 
     await state.manager.initialize();
     for (let attempt = 0; attempt < 30 && state.manager.getLifecycleSnapshot().phase !== "error"; attempt += 1) {
@@ -330,14 +418,14 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
       phase: "error",
       lastError: { code, message: "Managed catalog unavailable." },
     });
-    expect(state.request).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
 
     state.manager.syncFromSettings();
     for (let attempt = 0; attempt < 30 && state.manager.getLifecycleSnapshot().phase !== "idle"; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });
   });
 
@@ -348,7 +436,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const result = await state.manager.processVault();
 
     expect(result).toMatchObject({ status: "complete", processed: 1 });
-    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getStats()).toEqual({
       total: 1,
       processed: 1,
@@ -361,12 +449,15 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
 
   it("persists normalized-empty notes as complete without polluting the managed namespace", async () => {
     const state = harness("---\ntags: [image]\n---\n![[cover.png]]");
+    state.index.mockImplementationOnce(async (operation: ManagedEmbeddingsIndexOperation) => (
+      emptyIndexResult(operation.prepare().markdown)
+    ));
     await state.manager.initialize();
 
     const first = await state.manager.processVault();
 
     expect(first).toMatchObject({ status: "complete", processed: 1 });
-    expect(state.request).not.toHaveBeenCalled();
+    expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getStats()).toEqual({
       total: 1,
       processed: 1,
@@ -386,11 +477,11 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     ]);
 
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
-    expect(state.request).not.toHaveBeenCalled();
+    expect(state.index).toHaveBeenCalledTimes(1);
 
     state.setContent("Tiny but meaningful");
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
-    expect(state.request).toHaveBeenCalledTimes(1);
+    expect(state.index).toHaveBeenCalledTimes(2);
     expect(state.manager.getStats()).toMatchObject({ processed: 1, present: 1, needsProcessing: 0 });
   });
 

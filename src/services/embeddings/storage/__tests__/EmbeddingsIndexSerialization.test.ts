@@ -12,9 +12,9 @@ function makeVector(
   values: number[],
   overrides: Partial<EmbeddingVector["metadata"]> = {},
 ): EmbeddingVector {
-  const namespace = values.length > 0
-    ? `systemsculpt:managed:semantic-v1:v2:${values.length}`
-    : "systemsculpt:local-empty:v1:1";
+  const namespace = overrides.namespace ?? (values.length > 0
+    ? `systemsculpt:managed:semantic-v1:v3:${values.length}`
+    : "systemsculpt:local-empty:v1:1");
   return {
     id: buildVectorId(namespace, path, 0),
     path,
@@ -104,10 +104,30 @@ describe("EmbeddingsIndexSerialization", () => {
     expect(deserializeEmbeddingsIndex(unrelated)).toEqual([]);
   });
 
+  it("accepts dynamic namespaces only when generation metadata matches exactly", () => {
+    const dynamic = makeVector("future.md", [1, 0], {
+      namespace: "systemsculpt:managed:semantic-v2.1:v17:2",
+      generation: "semantic-v2.1",
+    });
+    const serialized = serializeEmbeddingsIndex([dynamic]);
+
+    expect(deserializeEmbeddingsIndex(serialized)).toHaveLength(1);
+
+    serialized.vectors[0].metadata.generation = "semantic-v2";
+    expect(deserializeEmbeddingsIndex(serialized)).toEqual([]);
+  });
+
+  it("rejects a valid legacy format-2 envelope", () => {
+    const legacy = serializeEmbeddingsIndex([makeVector("legacy.md", [1, 0])]);
+    legacy.format = 2;
+
+    expect(deserializeEmbeddingsIndex(legacy)).toEqual([]);
+  });
+
   it("fails safe (empty array) on unknown format or junk envelopes", () => {
     expect(deserializeEmbeddingsIndex({ format: 999, vectors: [] } as never)).toEqual([]);
     expect(deserializeEmbeddingsIndex(null as never)).toEqual([]);
     expect(deserializeEmbeddingsIndex({} as never)).toEqual([]);
-    expect(deserializeEmbeddingsIndex({ format: 2, vectors: "nope" } as never)).toEqual([]);
+    expect(deserializeEmbeddingsIndex({ format: 3, vectors: "nope" } as never)).toEqual([]);
   });
 });

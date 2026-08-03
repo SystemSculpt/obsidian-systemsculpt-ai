@@ -93,7 +93,7 @@ export function requiresUserApproval(
   if (canonicalName === "trash") return true;
 
   const trusted = normalizedNames(policy.trustedToolNames);
-  if (trusted.has(canonicalName)) return false;
+  if (trusted.has("*") || trusted.has(canonicalName)) return false;
   return !isToolAllowlisted(canonicalName, policy.autoApproveAllowlist ?? []);
 }
 

@@ -10,6 +10,7 @@ import {
   countConfiguredTargets,
   resolveSyncConfigPath,
 } from "./plugin-sync.mjs";
+import { resolvePluginBuildTarget } from "./plugin-build-options.mjs";
 
 export const DEV_WATCHER_SERVICE_LABEL = "com.systemsculpt.obsidian-plugin-dev";
 
@@ -49,6 +50,8 @@ export function createDevWatcherLaunchAgentPlist(options) {
     "/usr/sbin",
     "/sbin",
   ].filter((value, index, values) => values.indexOf(value) === index).join(":");
+  const watcherTarget = `${String(options.target || "production")}-watch`;
+  resolvePluginBuildTarget(watcherTarget);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,6 +66,8 @@ export function createDevWatcherLaunchAgentPlist(options) {
     <string>--headless</string>
     <string>--sync-config</string>
     <string>${xml(configPath)}</string>
+    <string>--</string>
+    <string>${xml(watcherTarget)}</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${xml(root)}</string>
@@ -70,6 +75,7 @@ export function createDevWatcherLaunchAgentPlist(options) {
   <dict>
     <key>PATH</key>
     <string>${xml(executablePath)}</string>
+
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -162,6 +168,7 @@ export function installDevWatcherService(options = {}) {
     root,
     configPath,
     home,
+    target: options.target,
   }));
 
   const domain = `gui/${uid}`;
@@ -179,7 +186,13 @@ export function installDevWatcherService(options = {}) {
   });
   checked("launchctl", ["bootstrap", domain, paths.plistPath], runCommand);
   checked("launchctl", ["kickstart", "-k", serviceTarget], runCommand);
-  return { ...paths, root, configPath, domain };
+  return {
+    ...paths,
+    root,
+    configPath,
+    domain,
+    target: options.target || "production",
+  };
 }
 
 export function uninstallDevWatcherService(options = {}) {
@@ -218,25 +231,38 @@ export function inspectDevWatcherService(options = {}) {
 function parseArgs(argv) {
   const command = argv[0];
   let configPath;
+  let target = "production";
   for (let index = 1; index < argv.length; index += 1) {
     if (argv[index] === "--config" && argv[index + 1]) {
       configPath = argv[index + 1];
       index += 1;
       continue;
     }
+    if (argv[index] === "--target" && argv[index + 1]) {
+      target = argv[index + 1];
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${argv[index]}`);
   }
-  if (!["install", "uninstall", "status"].includes(command)) {
-    throw new Error("Usage: node scripts/dev-watcher-service.mjs <install|uninstall|status> [--config <path>]");
+  if (!["production", "staging", "local-agent"].includes(target)) {
+    throw new Error(`Unknown plugin watcher target: ${target}`);
   }
-  return { command, configPath };
+  if (!["install", "uninstall", "status"].includes(command)) {
+    throw new Error("Usage: node scripts/dev-watcher-service.mjs <install|uninstall|status> [--config <path>] [--target production|staging|local-agent]");
+  }
+  return { command, configPath, target };
 }
 
 async function main() {
-  const { command, configPath } = parseArgs(process.argv.slice(2));
+  const { command, configPath, target } = parseArgs(process.argv.slice(2));
   if (command === "install") {
-    const result = installDevWatcherService({ configPath });
+    const result = installDevWatcherService({
+      configPath,
+      target,
+    });
     console.log(`[dev] Persistent watcher installed from ${result.root}.`);
+    console.log(`[dev] API target: ${target}.`);
     console.log(`[dev] Sync config: ${result.configPath}`);
     console.log(`[dev] Log: ${result.stdoutPath}`);
     return;
@@ -248,7 +274,6 @@ async function main() {
   }
   const status = inspectDevWatcherService();
   console.log(status.running ? "[dev] Persistent watcher is running." : "[dev] Persistent watcher is not running.");
-  if (status.detail) console.log(status.detail);
   if (!status.running) process.exitCode = 1;
 }
 

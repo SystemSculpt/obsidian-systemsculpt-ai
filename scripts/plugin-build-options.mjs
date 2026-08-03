@@ -5,12 +5,87 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 export const CANONICAL_API_BASE_URL = 'https://systemsculpt.com/api/plugin';
+export const STAGING_API_BASE_URL = 'https://staging.systemsculpt.com/api/plugin';
+export const LOCAL_AGENT_API_BASE_URL = 'http://127.0.0.1:8787/api/plugin';
 
 export const builtinExternals = [
   'node:*',
   'child_process', 'crypto', 'fs', 'fs/promises', 'http', 'https',
   'os', 'path', 'process', 'stream', 'stream/web', 'url', 'util',
 ];
+
+const BUILD_TARGETS = Object.freeze({
+  development: Object.freeze({
+    name: 'development',
+    production: false,
+    releaseBuild: false,
+    watch: true,
+    apiBaseUrl: CANONICAL_API_BASE_URL,
+    buildStamp: 'dev',
+    testDriver: true,
+  }),
+  production: Object.freeze({
+    name: 'production',
+    production: true,
+    releaseBuild: true,
+    watch: false,
+    apiBaseUrl: CANONICAL_API_BASE_URL,
+    buildStamp: null,
+    testDriver: false,
+  }),
+  'production-watch': Object.freeze({
+    name: 'production-watch',
+    production: true,
+    releaseBuild: false,
+    watch: true,
+    apiBaseUrl: CANONICAL_API_BASE_URL,
+    buildStamp: 'dev',
+    testDriver: true,
+  }),
+  staging: Object.freeze({
+    name: 'staging',
+    production: true,
+    releaseBuild: false,
+    watch: false,
+    apiBaseUrl: STAGING_API_BASE_URL,
+    buildStamp: 'staging',
+    testDriver: true,
+  }),
+  'staging-watch': Object.freeze({
+    name: 'staging-watch',
+    production: true,
+    releaseBuild: false,
+    watch: true,
+    apiBaseUrl: STAGING_API_BASE_URL,
+    buildStamp: 'staging',
+    testDriver: true,
+  }),
+  'local-agent': Object.freeze({
+    name: 'local-agent',
+    production: true,
+    releaseBuild: false,
+    watch: false,
+    apiBaseUrl: LOCAL_AGENT_API_BASE_URL,
+    buildStamp: 'local-agent',
+    testDriver: true,
+  }),
+  'local-agent-watch': Object.freeze({
+    name: 'local-agent-watch',
+    production: true,
+    releaseBuild: false,
+    watch: true,
+    apiBaseUrl: LOCAL_AGENT_API_BASE_URL,
+    buildStamp: 'local-agent',
+    testDriver: true,
+  }),
+});
+
+export const PLUGIN_BUILD_TARGET_NAMES = Object.freeze(Object.keys(BUILD_TARGETS));
+export const RETIRED_BUILD_OVERRIDE_ENVIRONMENT_KEYS = Object.freeze([
+  'SYSTEMSCULPT_API_BASE_URL',
+  'SYSTEMSCULPT_BUILD_STAMP',
+  'SYSTEMSCULPT_TEST_DRIVER',
+]);
 
 export function normalizeApiBaseUrl(value = CANONICAL_API_BASE_URL) {
   const raw = String(value || '').trim().replace(/\/+$/, '');
@@ -37,12 +112,46 @@ export function normalizeApiBaseUrl(value = CANONICAL_API_BASE_URL) {
   return raw;
 }
 
+/** Resolve only named build routes. Unknown or absent routes never become development builds. */
+export function resolvePluginBuildTarget(value) {
+  const name = typeof value === 'string' ? value : '';
+  const target = Object.hasOwn(BUILD_TARGETS, name) ? BUILD_TARGETS[name] : null;
+  if (!target) {
+    throw new Error(
+      `Unknown plugin build target ${JSON.stringify(name || '(missing)')}. Expected one of: ${PLUGIN_BUILD_TARGET_NAMES.join(', ')}.`,
+    );
+  }
+  return target;
+}
+
+export function resolvePluginBuildArguments(args) {
+  if (!Array.isArray(args) || args.length !== 1) {
+    throw new Error('Plugin builds require exactly one named build target.');
+  }
+  return resolvePluginBuildTarget(args[0]);
+}
+
+/** Environment variables cannot silently change a named build route. */
+export function assertNoRetiredBuildOverrides(environment = {}) {
+  const configured = ['SYSTEMSCULPT_API_BASE_URL'].filter(
+    (key) => String(environment?.[key] ?? '').trim().length > 0,
+  );
+  if (configured.length > 0) {
+    throw new Error(
+      `${configured.join(', ')} cannot override plugin build routing. Use an explicit npm build or watcher target.`,
+    );
+  }
+}
+
 export function resolvePluginBuildStamp({
   version,
   override,
   production = true,
 } = {}) {
   const explicit = String(override || '').trim();
+  if (production && explicit) {
+    throw new Error('Production plugin build stamps cannot be overridden');
+  }
   if (explicit) return explicit;
   if (!production) return 'dev';
 
@@ -58,22 +167,44 @@ export function createPluginBuildOptions({
   outfile = 'main.js',
   write = true,
   production = true,
+  releaseBuild = production,
   overrides = {},
   plugins = [],
   buildStamp = 'dev',
   apiBaseUrl = CANONICAL_API_BASE_URL,
+  testDriver = !production,
 } = {}) {
   const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl);
+  if (releaseBuild && !production) {
+    throw new Error('Release plugin builds must use production build settings');
+  }
+  if (releaseBuild && normalizedApiBaseUrl !== CANONICAL_API_BASE_URL) {
+    throw new Error(`Release plugin builds require ${CANONICAL_API_BASE_URL}`);
+  }
+  if (releaseBuild && testDriver === true) {
+    throw new Error('Release plugin builds cannot include the E2E test driver');
+  }
+
+  const overrideDefines = overrides?.define;
+  for (const key of [
+    '__SS_BUILD_STAMP__',
+    '__SS_RELEASE_BUILD__',
+    '__SYSTEMSCULPT_API_BASE_URL__',
+    '__SS_TEST_DRIVER__',
+  ]) {
+    if (overrideDefines && Object.hasOwn(overrideDefines, key)) {
+      throw new Error(`Plugin build override cannot replace reserved define ${key}`);
+    }
+  }
+  const safeOverrides = { ...overrides };
+  delete safeOverrides.define;
+
   return {
     banner: { js: pluginBanner },
     entryPoints: [entryPoint],
     bundle: true,
     alias: {
       'onnxruntime-node': 'onnxruntime-web',
-    },
-    define: {
-      '__SS_BUILD_STAMP__': JSON.stringify(buildStamp),
-      '__SYSTEMSCULPT_API_BASE_URL__': JSON.stringify(normalizedApiBaseUrl),
     },
     external: [
       'obsidian', 'electron', 'proper-lockfile', 'graceful-fs',
@@ -85,12 +216,20 @@ export function createPluginBuildOptions({
     format: 'cjs',
     target: 'es2018',
     logLevel: 'error',
-    sourcemap: production ? false : 'inline',
     treeShaking: true,
     outfile,
     write,
     loader: { '.wasm': 'file' },
     plugins,
-    ...overrides,
+    ...safeOverrides,
+    // Keep release-sensitive options after generic esbuild overrides.
+    sourcemap: production ? false : (safeOverrides.sourcemap ?? 'inline'),
+    define: {
+      ...(overrideDefines || {}),
+      '__SS_BUILD_STAMP__': JSON.stringify(buildStamp),
+      '__SS_RELEASE_BUILD__': releaseBuild === true ? 'true' : 'false',
+      '__SYSTEMSCULPT_API_BASE_URL__': JSON.stringify(normalizedApiBaseUrl),
+      '__SS_TEST_DRIVER__': testDriver === true ? 'true' : 'false',
+    },
   };
 }

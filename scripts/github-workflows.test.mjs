@@ -38,7 +38,7 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
   assert.match(ci, /^\s{2}merge_group:$/m);
   assert.match(ci, /os: macos-latest/);
   assert.match(ci, /os: windows-latest/);
-  assert.match(ci, /node: "20\.10\.0"/);
+  assert.match(ci, /node: "22\.18\.0"/);
   assert.match(ci, /node: "24\.x"/);
   assert.match(ci, /fail-fast: false/);
   assert.doesNotMatch(ci, /continue-on-error:\s*true/);
@@ -161,7 +161,8 @@ test("the hosted gate is the exact exhaustive local CI contract", () => {
   assert.equal(
     packageJson.scripts["check:ci"],
     "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
-      + "&& npm run test:chatview:mutants && npm run test:unit:ci && npm run test:embeddings:ci "
+      + "&& npm run test:thin-agent:endurance && npm run test:chatview:mutants "
+      + "&& npm run test:unit:ci && npm run test:embeddings:ci "
       + "&& npm run test:integration:ci && npm run test:release-script",
   );
   assert.equal(

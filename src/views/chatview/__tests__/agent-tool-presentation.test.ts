@@ -55,6 +55,165 @@ describe("presentAgentTool", () => {
       .toMatchObject({ canonicalName: "write", label: "Write file", summary: "Note.md" });
   });
 
+  it("names context-tool rows by the actual pinning action", () => {
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { action: "add", paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Pin files",
+      summary: "Project.md",
+    });
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { action: "remove", paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Unpin files",
+    });
+    expect(presentAgentTool(part({
+      name: "context",
+      input: { paths: ["Project.md"] },
+    }))).toMatchObject({
+      canonicalName: "context",
+      label: "Manage pinned files",
+    });
+  });
+
+  it("shows only a completed, privacy-approved web search query", () => {
+    expect(presentAgentTool(part({
+      name: "web_search",
+      location: "server",
+      input: {},
+      state: "succeeded",
+      output: {
+        data: { query: "Obsidian agent plugins" },
+        title: "Cloudflare search",
+        summary: "OpenRouter web search completed",
+      },
+    }))).toMatchObject({
+      canonicalName: "web_search",
+      label: "Search the web",
+      summary: null,
+      itemCount: null,
+      queries: ["Obsidian agent plugins"],
+    });
+    expect(presentAgentTool(part({
+      name: "web_search",
+      location: "server",
+      input: { query: "Private model-authored query" },
+      state: "running",
+    })).queries).toEqual([null]);
+  });
+
+  it("groups an adjacent web-search batch and preserves every query in order", () => {
+    const search = (
+      id: string,
+      query: string,
+      state: AgentToolPart["state"] = "succeeded",
+    ): AgentToolPart => part({
+      id,
+      callId: id,
+      name: "web_search",
+      location: "server",
+      input: {},
+      state,
+      ...(state === "succeeded" ? { output: { data: { query } } } : {}),
+    });
+    const activities = [
+      search("search-1", "Blaxel funding"),
+      search("search-2", "site:blaxel.ai seed round"),
+      search("search-3", "Blaxel First Round", "running"),
+    ];
+    const [entry] = groupConsecutiveToolActivity(
+      activities,
+      (tool) => tool,
+      false,
+    );
+
+    expect(entry.kind).toBe("tools");
+    if (entry.kind !== "tools") throw new Error("Expected a web-search group.");
+    expect(entry.tools).toHaveLength(3);
+    expect(presentAgentToolGroup(entry.tools)).toMatchObject({
+      label: "Search the web (3)",
+      displayState: "running",
+      stateLabel: "Working",
+      itemCount: 3,
+      queries: [
+        "Blaxel funding",
+        "site:blaxel.ai seed round",
+        null,
+      ],
+    });
+  });
+
+  it("never derives visible copy from an additive server tool name or payload", () => {
+    const presentation = presentAgentTool(part({
+      name: "cf_agent_provider_retry",
+      location: "server",
+      input: { patterns: ["provider-internal"] },
+      output: {
+        title: "Cloudflare provider action",
+        summary: "cf_agent_provider_retry completed",
+      },
+    }));
+
+    expect(presentation).toMatchObject({
+      canonicalName: "server_action",
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(
+      /cf_agent|provider|cloudflare|retry/i,
+    );
+    expect(presentAgentTool(part({
+      name: "read",
+      location: "server",
+      input: { paths: ["Private provider path"] },
+    }))).toMatchObject({
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+    expect(presentAgentToolGroup([
+      part({
+        id: "server-read-1",
+        callId: "server-read-1",
+        name: "read",
+        location: "server",
+        input: { paths: ["Private provider path 1"] },
+        state: "succeeded",
+      }),
+      part({
+        id: "server-read-2",
+        callId: "server-read-2",
+        name: "read",
+        location: "server",
+        input: { paths: ["Private provider path 2"] },
+        state: "succeeded",
+      }),
+    ])).toMatchObject({
+      label: "SystemSculpt action",
+      summary: null,
+      itemCount: null,
+    });
+  });
+
+  it("never presents a server-owned tool as requiring vault approval", () => {
+    expect(presentAgentTool(part({
+      name: "write",
+      location: "server",
+      state: "approval-required",
+      approvalId: "server-approval",
+    }))).toMatchObject({
+      canonicalName: "server_action",
+      label: "SystemSculpt action",
+      stateLabel: "Working",
+      animated: true,
+    });
+  });
+
   it("summarizes canonical find, search, and open inputs", () => {
     expect(presentAgentTool(part({ name: "find", input: { patterns: ["meeting", "notes"] } })).summary)
       .toBe("meeting");

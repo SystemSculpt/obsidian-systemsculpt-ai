@@ -3,6 +3,10 @@ import type { ManagedAdmissionOutcome, ManagedLease, ManagedTransportResult } fr
 import type { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 
 export type ManagedTextGenerationPurpose = "transcript_postprocess" | "workflow_automation";
+export const MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER =
+  "x-systemsculpt-transcript-postprocessing-contract" as const;
+export const MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT =
+  "managed-transcript-postprocessing-v1" as const;
 export type ManagedTextGenerationMessage = Readonly<{
   role: "system" | "user";
   content: string;
@@ -408,11 +412,17 @@ export class ManagedTextGenerationAdapter {
     try {
       const pending = this.dependencies.transport.request({
         path: ROUTE_PATH,
-        method: ROUTE_METHOD,
-        capability: "text_generation",
-        idempotencyKey: operation.operationId,
-        body,
-        signal: operation.signal,
+      method: ROUTE_METHOD,
+      capability: "text_generation",
+      idempotencyKey: operation.operationId,
+      ...(operation.purpose === "transcript_postprocess"
+        ? { headers: {
+            [MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER]:
+              MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
+          } }
+        : {}),
+      body,
+      signal: operation.signal,
       });
       result = await pending;
     } catch (error) {

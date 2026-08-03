@@ -30,7 +30,6 @@ type QueueRecord = Readonly<{
 type StoredQueueItem = Readonly<{
   id: string;
   text: string;
-  webSearch: boolean;
   includeContextFiles: boolean;
   attachments?: readonly PersistedReadyAttachment[];
 }>;
@@ -56,11 +55,11 @@ function isAttachment(value: unknown): value is ChatMessageAttachment {
 function isStoredQueueItem(value: unknown): value is StoredQueueItem {
   if (!isRecord(value)) return false;
   if (!Object.keys(value).every((key) => [
-    "id", "text", "webSearch", "includeContextFiles", "attachments",
+    "id", "text", "includeContextFiles", "attachments",
   ].includes(key))) return false;
   if (typeof value.id !== "string" || !value.id.trim()) return false;
   if (typeof value.text !== "string") return false;
-  if (typeof value.webSearch !== "boolean" || typeof value.includeContextFiles !== "boolean") return false;
+  if (typeof value.includeContextFiles !== "boolean") return false;
   if (typeof value.attachments === "undefined") return value.text.trim().length > 0;
   return Array.isArray(value.attachments)
     && value.attachments.length > 0
@@ -70,11 +69,11 @@ function isStoredQueueItem(value: unknown): value is StoredQueueItem {
 function isQueueItem(value: unknown): value is AgentQueuedFollowUp {
   if (!isRecord(value)) return false;
   if (!Object.keys(value).every((key) => [
-    "id", "text", "webSearch", "includeContextFiles", "attachments",
+    "id", "text", "includeContextFiles", "attachments",
   ].includes(key))) return false;
   if (typeof value.id !== "string" || !value.id.trim()) return false;
   if (typeof value.text !== "string") return false;
-  if (typeof value.webSearch !== "boolean" || typeof value.includeContextFiles !== "boolean") return false;
+  if (typeof value.includeContextFiles !== "boolean") return false;
   if (typeof value.attachments === "undefined") return value.text.trim().length > 0;
   return Array.isArray(value.attachments)
     && value.attachments.length > 0
@@ -110,7 +109,6 @@ export class AgentQueueStateRepository {
     return Object.freeze(parsed.items.map((item) => ({
       id: item.id,
       text: item.text,
-      webSearch: item.webSearch,
       includeContextFiles: item.includeContextFiles,
       ...(item.attachments?.length ? {
         attachments: Object.freeze(item.attachments.map((attachment) =>
@@ -137,7 +135,6 @@ export class AgentQueueStateRepository {
       items: await Promise.all(items.map(async (item) => ({
         id: item.id,
         text: item.text,
-        webSearch: item.webSearch,
         includeContextFiles: item.includeContextFiles,
         ...(item.attachments?.length ? {
           attachments: Object.freeze(await Promise.all(item.attachments.map(async (attachment) => {

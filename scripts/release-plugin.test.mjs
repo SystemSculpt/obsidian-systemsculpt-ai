@@ -8,7 +8,10 @@ import {
   resolveReleaseTagRevision,
   validateReleasePackage,
 } from "./release-plugin.mjs";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  STAGING_API_BASE_URL,
+} from "./plugin-build-options.mjs";
 import { assertProductionPluginArtifacts } from "./plugin-artifacts.mjs";
 import { writeBuildProvenance } from "./build-provenance.mjs";
 
@@ -74,6 +77,30 @@ test("runs the production builder before validating artifacts", (t) => {
     },
   });
   assert.equal(called, true);
+});
+
+test("release validation independently rejects a builder that returns non-production bytes", (t) => {
+  const root = fixture(t);
+  let provenanceCalled = false;
+
+  assert.throws(
+    () => validateFixtureRelease({
+      root,
+      buildImpl() {
+        fs.writeFileSync(
+          path.join(root, "main.js"),
+          `const SYSTEMSCULPT_API = ${JSON.stringify(STAGING_API_BASE_URL)};\n`,
+        );
+        return { ok: true };
+      },
+      provenanceImpl() {
+        provenanceCalled = true;
+        return {};
+      },
+    }),
+    /canonical SystemSculpt API base|outside the selected build route/,
+  );
+  assert.equal(provenanceCalled, false);
 });
 
 test("records provenance only after artifact validation succeeds", (t) => {

@@ -335,6 +335,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       cls: "ss-settings-search-shell",
     });
     this.searchHandle = createUiSearch(this.searchShellEl, {
+      testId: "settings.search",
       label: "Search SystemSculpt settings",
       placeholder: "Search settings",
       onQuery: () => this.handleSearchInput(),
@@ -400,6 +401,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     for (const cfg of visibleTabs) {
       const button = createUiAction(tabBar, {
         label: cfg.label,
+        testId: `settings.tab.${cfg.id}`,
         size: "small",
       });
       button.addClass("ss-tab-button");

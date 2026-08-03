@@ -1220,7 +1220,7 @@ describe("AudioProcessorService", () => {
     expect(app.vault.create).toHaveBeenCalledTimes(2);
   });
 
-  it("polls an awaiting-funds job read-only with exponential backoff until the server requeues it", async () => {
+  it("follows the server poll cadence while awaiting funds until the server requeues it", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
     const awaitingFunds: AudioProcessorJob = {
@@ -1229,6 +1229,7 @@ describe("AudioProcessorService", () => {
       chargedCredits: 1_100,
       resumeRequired: true,
       error: "Add credits to continue.",
+      pollAfterMs: 5_000,
     };
     api.createYouTubeJob.mockResolvedValue({ job: awaitingFunds, upload: null });
     api.getJob.mockReset()
@@ -1245,7 +1246,6 @@ describe("AudioProcessorService", () => {
     const service = new AudioProcessorService(plugin, {
       apiClient: api as unknown as AudioProcessorApiClient,
       pollIntervalMs: 2_000,
-      resumeAttemptIntervalMs: 5_000,
       sleep,
     });
 
@@ -1262,10 +1262,41 @@ describe("AudioProcessorService", () => {
     }));
 
     expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
-      5_000, 10_000, 20_000, 2_000,
+      5_000, 5_000, 5_000, 2_000,
     ]);
     expect(api.resumeJob).not.toHaveBeenCalled();
     expect(progress).toContain("awaiting_funds");
+    nowSpy.mockRestore();
+  });
+
+  it("does not stop a valid audio job after the historical twelve-hour client limit", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    const processing = job("processing", "transcribing", 0.5);
+    api.createYouTubeJob.mockResolvedValue({ job: processing, upload: null });
+    api.getJob.mockReset().mockResolvedValue(job("succeeded", "complete", 1));
+    let now = 0;
+    const nowSpy = jest.spyOn(Date, "now").mockImplementation(() => now);
+    const sleep = jest.fn(async () => {
+      now += 13 * 60 * 60 * 1_000;
+    });
+    const service = new AudioProcessorService(plugin, {
+      apiClient: api as unknown as AudioProcessorApiClient,
+      pollIntervalMs: 0,
+      sleep,
+    });
+
+    await expect(service.process({
+      type: "youtube",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }, {
+      signal: new AbortController().signal,
+    })).resolves.toEqual(expect.objectContaining({
+      primaryNoteAvailable: true,
+    }));
+
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(api.getJob).toHaveBeenCalledTimes(1);
     nowSpy.mockRestore();
   });
 

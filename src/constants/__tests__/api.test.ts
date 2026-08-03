@@ -1,15 +1,18 @@
 /** @jest-environment node */
 import {
   API_BASE_URL,
-  PRODUCTION_API_BASE_URL,
   IS_DEVELOPMENT_BUILD,
   SYSTEMSCULPT_API_ENDPOINTS,
   SYSTEMSCULPT_API_HEADERS,
 } from "../api";
 
 describe("managed API constants", () => {
-  it("defaults tests to the production compiled base", () => {
-    expect(API_BASE_URL).toBe(PRODUCTION_API_BASE_URL);
+  it("defaults define-less test hosts to the canonical production base", () => {
+    // Real bundles always carry the __SYSTEMSCULPT_API_BASE_URL__ define; the
+    // per-route lock (release => canonical, non-release => anything else) is
+    // enforced by scripts/plugin-build-options.mjs and the artifact gate in
+    // scripts/plugin-artifacts.mjs, both covered by test:release-script.
+    expect(API_BASE_URL).toBe("https://systemsculpt.com/api/plugin");
     expect(IS_DEVELOPMENT_BUILD).toBe(false);
   });
 

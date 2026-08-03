@@ -12,13 +12,68 @@ The SystemSculpt workspace has three sibling repositories:
 - ~/gits/systemsculpt/systemsculpt-os — growth and operator automation.
 
 The plugin is a thin, vault-native client. It owns Obsidian integration,
-presentation, local vault tools, approvals, durable local state, and portable
-Studio behavior. It does not own provider SDKs, provider credentials, model
-catalogs, marketing operations, server sessions, or a local AI runtime.
+presentation, local vault tool implementations, approval UX and enforcement,
+a reconnecting server-protocol client, user-visible local cache/export state,
+and portable Studio behavior. It does not own an agent loop, continuation
+policy, provider retry, compaction, prompt caching, authoritative chat
+sessions, provider SDKs, provider credentials, model catalogs, marketing
+operations, or a local AI runtime.
 
 All AI traffic uses the first-party SystemSculpt API at
 https://systemsculpt.com/api/plugin. OpenRouter and server agent
 implementation details stay behind that interface.
+
+## Server-upgrade independence
+
+This is a release requirement, not an implementation preference:
+
+- The boundary applies to ChatView, Audio Processor, transcription, document
+  processing, images, embeddings, Studio AI, and future managed AI features.
+  The client may capture or select local input bytes, upload them, render
+  progress, obtain local approval, and save or apply a returned result.
+  Provider calls, models, prompts, chunking, polling, retry, transforms, job
+  orchestration, caching, billing, and durable execution state stay
+  server-side.
+- Harness, model, provider, retry, caching, compaction, memory, session, and
+  orchestration changes must be deployable server-side without a plugin
+  release.
+- The plugin wire contract is harness-agnostic. Production client code,
+  headers, persisted data, UI labels, and tool results must not contain Pi,
+  Think, OpenRouter, AI SDK, or another harness/provider identity.
+- The plugin never decides whether the agent should continue. It receives a
+  typed client-tool request, applies local approval policy, executes the
+  Obsidian operation, and returns one typed result. The server decides every
+  subsequent model step.
+- The server owns the authoritative conversation session and ordered event
+  history. Local chat persistence is a cache or user export and must never
+  become execution authority after reconnect.
+- Client capability negotiation is additive. The plugin advertises supported
+  local tool names and contract versions; the server adapts its tool catalog
+  to that manifest. Unknown additive event fields and unknown server-only
+  tools must not crash or stop the client.
+- One migration release may replace the legacy client continuation loop with
+  this thin protocol bridge. The first released thin-client artifact then
+  becomes a permanent compatibility fixture. Every later server agent change
+  must connect, render, execute its supported local tools, reconnect, and
+  finish a long turn against that unchanged artifact.
+- A plugin update is justified only by a new or changed local Obsidian
+  capability, a client security correction, or an intentionally new UI
+  feature. A server harness replacement is never sufficient justification.
+
+Do not add a harness package, model SDK, agent state machine, continuation
+counter, context compactor, or provider retry loop to the production plugin
+bundle. A client protocol SDK is acceptable only when it remains a transport
+and event/tool bridge and does not take ownership of the agent loop.
+
+The pre-migration released plugin may use a legacy compatibility endpoint
+during a bounded support window. It cannot define the new architecture
+because its compiled code still owns continuation. Do not copy that behavior
+into the new protocol.
+
+Freeze `managed-capabilities-v2` and its existing strict client behavior for
+that legacy path. The migration release negotiates a new additive thin-client
+contract. Do not mutate v2 and mistake a breaking parser change for additive
+protocol evolution.
 
 ## Architecture
 
@@ -109,7 +164,7 @@ npm run check:full
   controller/runtime/transport, storage, and restored-history UI suites with
   strict console, randomized order, open-handle detection, seeded generative
   histories, and per-file uncovered-code budgets.
-- test:chatview:mutants creates an isolated source mirror, applies 14 curated
+- test:chatview:mutants creates an isolated source mirror, applies 5 curated
   compatibility, projection, session, durability, controller, replay, and
   restored-history regressions, and requires focused tests to kill every one.
 - check:ci is the exact exhaustive PR gate. It adds strict-console randomized
@@ -118,7 +173,7 @@ npm run check:full
   open-handle detection, and release-script contracts. Focused mobile and
   ChatView paths are excluded from the unit remainder so they are not run a
   third time. check:full is its local alias.
-- check:compat is the smaller compatibility contract used on Node 20.10,
+- check:compat is the smaller compatibility contract used on Node 22.18,
   Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
   the same critical ChatView suites without repeating coverage instrumentation.
 - CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
@@ -150,8 +205,8 @@ npm run dev:watch:install
 On the normal macOS development machine, install the persistent watcher once.
 It stays running across logins, rebuilds on source changes, atomically replaces
 each artifact before reload, and hot reloads configured vaults.
-Re-running the install from another
-worktree intentionally transfers watcher ownership to that worktree. Synced
+Re-running the install from the canonical checkout transfers watcher ownership
+back to that checkout. Never install or run the watcher from a git worktree. Synced
 development manifests include a visible local-only build identity without
 changing the release version used by server contracts. Use the official
 Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and
@@ -171,6 +226,10 @@ manual mobile exploration is performed.
 - Approval modes are Ask Approval and Full Access.
 - Read-only vault tools may run immediately; mutating tools follow the selected
   approval policy.
+- The client executes local vault tools but never orchestrates the agent that
+  requested them.
+- The server conversation session and event journal are authoritative. Local
+  transcript data is a cache/export surface only.
 - File and folder paths are vault-relative unless a desktop-only Studio node
   explicitly accepts an external path.
 - The API base is a build-time value. Settings never expose routing,

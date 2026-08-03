@@ -10,17 +10,14 @@ import type {
   ManagedJobRecoveryRecord,
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
+import {
+  isRetryableManagedJobObservationError,
+  observeManagedJob,
+  waitForManagedJob,
+} from "../managed/ManagedJobObservation";
 import { sha256HexFromBytesPortable } from "../../studio/hash";
 
 const CAPABILITY = "image_generation" as const;
-const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_MAX_POLLS = 900;
-// A generation can run for minutes; one dropped poll must not kill the whole
-// run. Consecutive transient status failures (rate limits, 5xx, transport
-// loss) retry with exponential backoff up to this bound before surfacing.
-const MAX_CONSECUTIVE_TRANSIENT_STATUS_FAILURES = 5;
-const TRANSIENT_STATUS_BACKOFF_BASE_MS = 2_000;
-const TRANSIENT_STATUS_BACKOFF_MAX_MS = 30_000;
 
 export type ManagedImageGenerationInput = Readonly<{
   mimeType: "image/png" | "image/jpeg" | "image/webp";
@@ -103,7 +100,6 @@ export type ManagedImageGenerationDependencies = Readonly<{
   createRequestId?: () => string;
   now?: () => string;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  maxPolls?: number;
 }>;
 
 function abortError(): DOMException {
@@ -112,25 +108,6 @@ function abortError(): DOMException {
 
 function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw abortError();
-}
-
-async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<void> {
-  throwIfAborted(signal);
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      resolve();
-    }, milliseconds);
-    const onAbort = () => {
-      window.clearTimeout(timeout);
-      cleanup();
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-  throwIfAborted(signal);
 }
 
 function defaultRequestId(): string {
@@ -186,27 +163,15 @@ function terminalStatusFromError(error: unknown): "failed" | "expired" | null {
   return null;
 }
 
-function isTransientStatusError(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === "AbortError") return false;
-  const candidate = error as Partial<ManagedJobError> | null;
-  if (candidate?.name === "ManagedJobError") return candidate.retryable === true;
-  // Anything else thrown by the status call is transport-level (connection
-  // reset, DNS blip); protocol violations arrive as non-retryable
-  // ManagedJobErrors and are excluded above.
-  return true;
-}
-
 export class ManagedImageGenerationAdapter {
   private readonly createRequestId: () => string;
   private readonly now: () => string;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  private readonly maxPolls: number;
 
   constructor(private readonly dependencies: ManagedImageGenerationDependencies) {
     this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.wait = dependencies.wait ?? defaultWait;
-    this.maxPolls = dependencies.maxPolls ?? DEFAULT_MAX_POLLS;
+    this.wait = dependencies.wait ?? waitForManagedJob;
   }
 
   async generate(operation: ManagedImageGenerationOperation): Promise<ManagedImageGenerationResult> {
@@ -301,58 +266,40 @@ export class ManagedImageGenerationAdapter {
     const jobId = record.jobId;
     if (!jobId) throw new Error("Managed image generation recovery record is missing its job ID.");
 
-    let consecutiveTransientFailures = 0;
-    for (let poll = 0; poll < this.maxPolls; poll += 1) {
-      throwIfAborted(signal);
-      let status: ImageStatusResponse;
-      try {
-        status = await this.dependencies.jobs.status(jobId, signal);
-        consecutiveTransientFailures = 0;
-      } catch (error) {
-        const terminal = terminalStatusFromError(error);
-        if (terminal) {
-          await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, terminal);
-          throw error;
+    try {
+      for await (const status of observeManagedJob<ImageStatusResponse>({
+        read: () => this.dependencies.jobs.status(jobId, signal),
+        signal,
+        pollAfterMs: value => value.poll_after_ms,
+        isRetryableError: isRetryableManagedJobObservationError,
+        retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+        wait: this.wait,
+      })) {
+        if (status.job.id !== jobId) throw new Error("Managed image generation status identity changed.");
+        if (status.job.status === "queued" || status.job.status === "processing") continue;
+        if (status.job.status !== "succeeded" || status.outputs.length < 1) {
+          throw new Error("Managed image generation completed without verified outputs.");
         }
-        if (
-          isTransientStatusError(error) &&
-          consecutiveTransientFailures < MAX_CONSECUTIVE_TRANSIENT_STATUS_FAILURES
-        ) {
-          consecutiveTransientFailures += 1;
-          const backoff = Math.min(
-            TRANSIENT_STATUS_BACKOFF_MAX_MS,
-            TRANSIENT_STATUS_BACKOFF_BASE_MS * 2 ** (consecutiveTransientFailures - 1),
-          );
-          await this.wait(backoff, signal);
-          continue;
+        record = await this.dependencies.recovery.applyReconciliation(
+          CAPABILITY,
+          record.operationId,
+          record.revision,
+          "succeeded",
+        );
+        const outputs: ManagedImageOutputBytes[] = [];
+        for (const metadata of status.outputs) {
+          throwIfAborted(signal);
+          outputs.push(await this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal));
         }
-        throw error;
+        return Object.freeze({ operationId: record.operationId, jobId, outputs: Object.freeze(outputs) });
       }
-      throwIfAborted(signal);
-      if (status.job.id !== jobId) throw new Error("Managed image generation status identity changed.");
-      if (status.job.status === "queued" || status.job.status === "processing") {
-        const delay = Number.isInteger(status.poll_after_ms) && Number(status.poll_after_ms) >= 0
-          ? Number(status.poll_after_ms)
-          : DEFAULT_POLL_INTERVAL_MS;
-        await this.wait(delay, signal);
-        continue;
+    } catch (error) {
+      const terminal = terminalStatusFromError(error);
+      if (terminal) {
+        await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, terminal);
       }
-      if (status.job.status !== "succeeded" || status.outputs.length < 1) {
-        throw new Error("Managed image generation completed without verified outputs.");
-      }
-      record = await this.dependencies.recovery.applyReconciliation(
-        CAPABILITY,
-        record.operationId,
-        record.revision,
-        "succeeded",
-      );
-      const outputs: ManagedImageOutputBytes[] = [];
-      for (const metadata of status.outputs) {
-        throwIfAborted(signal);
-        outputs.push(await this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal));
-      }
-      return Object.freeze({ operationId: record.operationId, jobId, outputs: Object.freeze(outputs) });
+      throw error;
     }
-    throw new Error("Managed image generation did not complete before the polling limit.");
+    throw new Error("Managed image generation observation ended without a terminal status.");
   }
 }

@@ -13,24 +13,6 @@ jest.mock("obsidian", () => ({
 // Mock the plugin
 jest.mock("../../../main", () => ({}));
 
-// Mock toolDefinitions
-jest.mock("../toolDefinitions", () => ({
-  toolDefinitions: [
-    { name: "read", description: "Read files" },
-    { name: "write", description: "Write file" },
-    { name: "edit", description: "Edit file" },
-    { name: "multi_edit", description: "Edit multiple files" },
-    { name: "create_folders", description: "Create folders" },
-    { name: "list_items", description: "List items" },
-    { name: "move", description: "Move items" },
-    { name: "trash", description: "Trash files" },
-    { name: "find", description: "Find files" },
-    { name: "search", description: "Search files" },
-    { name: "open", description: "Open files" },
-    { name: "context", description: "Manage context" },
-  ],
-}));
-
 // Mock operation classes
 const mockReadFiles = jest.fn();
 const mockWriteFile = jest.fn();
@@ -122,28 +104,6 @@ describe("VaultToolModule", () => {
     });
   });
 
-  describe("getTools", () => {
-    it("returns all tool definitions", async () => {
-      const tools = await server.getTools();
-
-      expect(tools).toHaveLength(12);
-      expect(tools.map((t) => t.name)).toEqual([
-        "read",
-        "write",
-        "edit",
-        "multi_edit",
-        "create_folders",
-        "list_items",
-        "move",
-        "trash",
-        "find",
-        "search",
-        "open",
-        "context",
-      ]);
-    });
-  });
-
   describe("executeTool", () => {
     describe("read tool", () => {
       it("calls readFiles with correct params", async () => {
@@ -154,6 +114,34 @@ describe("VaultToolModule", () => {
 
         expect(mockReadFiles).toHaveBeenCalledWith(params);
         expect(result).toEqual({ content: "test content" });
+      });
+
+      it("returns read evidence without mutating the originating chat pins", async () => {
+        const params = { paths: ["Notes/Evidence.md"] };
+        const contextManager = {
+          pinFile: jest.fn(),
+          unpinFile: jest.fn(),
+        };
+        const chatView = { contextManager } as any;
+        mockReadFiles.mockResolvedValue({
+          files: [{
+            path: "Notes/Evidence.md",
+            content: "# Evidence",
+          }],
+        });
+
+        const result = await server.executeTool("read", params, chatView);
+
+        expect(result).toEqual({
+          files: [{
+            path: "Notes/Evidence.md",
+            content: "# Evidence",
+          }],
+        });
+        expect(mockReadFiles).toHaveBeenCalledWith(params);
+        expect(mockManageContext).not.toHaveBeenCalled();
+        expect(contextManager.pinFile).not.toHaveBeenCalled();
+        expect(contextManager.unpinFile).not.toHaveBeenCalled();
       });
     });
 

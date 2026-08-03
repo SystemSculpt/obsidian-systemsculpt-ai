@@ -1,7 +1,7 @@
 import { Mutex } from "async-mutex";
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../EmbeddingsManager";
-import { ManagedEmbeddingsError } from "../gateway/ManagedEmbeddingsAdapter";
+import { ManagedEmbeddingsError } from "../gateway/ManagedEmbeddingsIndexAdapter";
 import { createLocalEmptyEmbeddingMarker } from "../LocalEmptyEmbeddingMarker";
 import { SemanticIndexLifecycle } from "../SemanticIndexLifecycle";
 import { SemanticWorkQueue } from "../SemanticWorkQueue";
@@ -69,13 +69,12 @@ async function harness(fileCount: number) {
   manager.workQueue = queue;
   manager.config = { exclusions: settings.embeddingsExclusions };
   manager.gateway = {
-    initializeContract: jest.fn(async () => undefined),
+    getMetadata: jest.fn(async () => undefined),
     activeGeneration: {
       id: "semantic-v1",
-      indexSchemaVersion: 2,
+      indexSchemaVersion: 3,
       indexNamespace: namespace,
       dimensions: 2,
-      limits: { maxTexts: 128, maxCharsPerText: 8_000, maxTotalChars: 200_000 },
     },
   };
   manager.storage = {

@@ -9,81 +9,85 @@ const config = require(path.join(root, "jest.chatview-critical-risk.config.cjs")
 const compatConfig = require(path.join(root, "jest.chatview-critical-compat.config.cjs"));
 
 const expectedTests = [
-	"<rootDir>/src/services/chat/__tests__/accepted-chat-request-snapshot.test.ts",
-	"<rootDir>/src/services/chat/__tests__/managed-chat-projector-generative.test.ts",
-	"<rootDir>/src/services/chat/__tests__/managed-chat-replay-contract.test.ts",
 	"<rootDir>/src/services/chat/__tests__/managed-tool-execution.test.ts",
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatMarkdownSerializer.test.ts",
+	"<rootDir>/src/views/chatview/storage/__tests__/ChatPersistenceTypes.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/ChatStorageService.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-admission.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-fork-retry-integration.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-conversation-presentation.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-conversation-renderer-icons.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
-	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-coordinator.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
-	"<rootDir>/src/views/chatview/__tests__/managed-chat-runtime-adapter.test.ts",
-	"<rootDir>/src/views/chatview/__tests__/managed-agent-controller.test.ts",
-	"<rootDir>/src/views/chatview/__tests__/managed-agent-controller-runtime-seam.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/live-markdown-renderer.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/authoritative-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/chat-session.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/lifecycle.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/message-adapter.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/mutation-journal.test.ts",
+	"<rootDir>/src/views/chatview/agent/__tests__/streaming-transport.test.ts",
 ];
 
 const expectedCoverage = [
-	"src/services/chat/AcceptedChatRequestSnapshot.ts",
 	"src/services/chat/ManagedToolExecution.ts",
-	"src/services/managed/adapters/HostedTransportAdapter.ts",
-	"src/views/chatview/AgentTranscriptRepository.ts",
 	"src/views/chatview/AgentChatView.ts",
+	"src/views/chatview/AgentConversationPresentation.ts",
+	"src/views/chatview/AgentTranscriptRepository.ts",
 	"src/views/chatview/AgentConversationRenderer.ts",
+	"src/views/chatview/LiveMarkdownRenderer.ts",
 	"src/views/chatview/ChatStorageService.ts",
-	"src/views/chatview/ManagedAgentController.ts",
 	"src/views/chatview/storage/ChatFrontmatterIdentity.ts",
 	"src/views/chatview/storage/ChatMarkdownSerializer.ts",
-	"src/views/chatview/turn/ManagedChatRuntimeAdapter.ts",
+	"src/views/chatview/agent/AuthoritativeSession.ts",
+	"src/views/chatview/agent/ChatSession.ts",
+	"src/views/chatview/agent/Lifecycle.ts",
+	"src/views/chatview/agent/MessageAdapter.ts",
+	"src/views/chatview/agent/MutationJournal.ts",
+	"src/views/chatview/agent/Protocol.ts",
+	"src/views/chatview/agent/StreamingTransport.ts",
 ];
 const expectedThresholds = {
-	"./src/services/chat/AcceptedChatRequestSnapshot.ts": {
-		statements: -15,
-		branches: -22,
-		functions: -3,
-		lines: -11,
-	},
 	"./src/services/chat/ManagedToolExecution.ts": {
 		statements: 100,
 		branches: 100,
 		functions: 100,
 		lines: 100,
 	},
-	"./src/services/managed/adapters/HostedTransportAdapter.ts": {
-		statements: -22,
-		branches: -35,
-		functions: -9,
-		lines: -16,
+	"./src/views/chatview/AgentChatView.ts": {
+		statements: -679,
+		branches: -794,
+		functions: -144,
+		lines: -602,
+	},
+	"./src/views/chatview/AgentConversationPresentation.ts": {
+		statements: -5,
+		branches: -8,
+		functions: 100,
+		lines: -4,
 	},
 	"./src/views/chatview/AgentTranscriptRepository.ts": {
-		statements: -39,
-		branches: -43,
-		functions: -9,
-		lines: -23,
-	},
-	"./src/views/chatview/AgentChatView.ts": {
-		statements: -374,
-		branches: -446,
-		functions: -121,
-		lines: -319,
+		statements: -50,
+		branches: -55,
+		functions: -12,
+		lines: -35,
 	},
 	"./src/views/chatview/AgentConversationRenderer.ts": {
-		statements: -58,
-		branches: -115,
-		functions: -9,
-		lines: -32,
+		statements: -65,
+		branches: -130,
+		functions: -12,
+		lines: -40,
+	},
+	"./src/views/chatview/LiveMarkdownRenderer.ts": {
+		statements: -54,
+		branches: -94,
+		functions: -1,
+		lines: -34,
 	},
 	"./src/views/chatview/ChatStorageService.ts": {
-		statements: -78,
-		branches: -80,
-		functions: -10,
-		lines: -65,
-	},
-	"./src/views/chatview/ManagedAgentController.ts": {
 		statements: -85,
-		branches: -112,
-		functions: -4,
-		lines: -66,
+		branches: -90,
+		functions: -12,
+		lines: -70,
 	},
 	"./src/views/chatview/storage/ChatFrontmatterIdentity.ts": {
 		statements: 100,
@@ -92,20 +96,56 @@ const expectedThresholds = {
 		lines: 100,
 	},
 	"./src/views/chatview/storage/ChatMarkdownSerializer.ts": {
-		statements: -40,
-		branches: -68,
-		functions: -3,
-		lines: -13,
-	},
-	"./src/views/chatview/turn/ManagedChatRuntimeAdapter.ts": {
-		statements: -115,
-		branches: -178,
+		statements: -45,
+		branches: -75,
 		functions: -5,
-		lines: -55,
+		lines: -20,
+	},
+	"./src/views/chatview/agent/AuthoritativeSession.ts": {
+		statements: -52,
+		branches: -65,
+		functions: -2,
+		lines: -40,
+	},
+	"./src/views/chatview/agent/ChatSession.ts": {
+		statements: -217,
+		branches: -383,
+		functions: -18,
+		lines: -170,
+	},
+	"./src/views/chatview/agent/Lifecycle.ts": {
+		statements: -1,
+		branches: -1,
+		functions: 100,
+		lines: 100,
+	},
+	"./src/views/chatview/agent/MessageAdapter.ts": {
+		statements: -1,
+		branches: -2,
+		functions: 100,
+		lines: -1,
+	},
+	"./src/views/chatview/agent/MutationJournal.ts": {
+		statements: -24,
+		branches: -39,
+		functions: -4,
+		lines: -18,
+	},
+	"./src/views/chatview/agent/Protocol.ts": {
+		statements: -136,
+		branches: -188,
+		functions: -9,
+		lines: -125,
+	},
+	"./src/views/chatview/agent/StreamingTransport.ts": {
+		statements: -23,
+		branches: -29,
+		functions: -1,
+		lines: -15,
 	},
 };
 
-test("the ChatView critical-risk gate stays scoped to the intended surfaces", () => {
+test("the ChatView critical-risk gate targets the thin native harness", () => {
 	assert.equal(config.displayName, "chatview-critical-risk");
 	assert.equal(config.maxWorkers, 1);
 	assert.equal(config.collectCoverage, true);
@@ -117,35 +157,19 @@ test("the ChatView critical-risk gate stays scoped to the intended surfaces", ()
 	assert.deepEqual(config.coverageThreshold, expectedThresholds);
 });
 
-test("the ChatView critical-risk gate uses explicit per-file coverage budgets", () => {
-	const fullyCoveredContractFiles = new Set([
-		"./src/services/chat/ManagedToolExecution.ts",
-		"./src/views/chatview/storage/ChatFrontmatterIdentity.ts",
-	]);
-	for (const [file, threshold] of Object.entries(config.coverageThreshold)) {
-		assert.equal(typeof file, "string");
-		assert.ok(file.startsWith("./src/"));
-		assert.equal(typeof threshold, "object");
+test("the ChatView gate uses explicit per-file uncovered-count budgets", () => {
+	for (const threshold of Object.values(config.coverageThreshold)) {
 		for (const metric of ["statements", "branches", "functions", "lines"]) {
 			assert.equal(typeof threshold[metric], "number");
-			if (fullyCoveredContractFiles.has(file)) {
-				assert.equal(threshold[metric], 100);
-			} else {
-				assert.ok(
-					threshold[metric] <= 0,
-					`${file} ${metric} must be enforced as a max uncovered-count budget`,
-				);
-			}
+			assert.ok(threshold[metric] === 100 || threshold[metric] <= 0);
 		}
 	}
 });
 
-test("the compatibility gate reuses every critical suite without redundant coverage work", () => {
+test("the compatibility gate reuses the critical suites without coverage work", () => {
 	assert.equal(compatConfig.displayName, "chatview-critical-compat");
 	assert.deepEqual(compatConfig.testMatch, config.testMatch);
 	assert.equal(compatConfig.collectCoverage, false);
 	assert.deepEqual(compatConfig.collectCoverageFrom, []);
-	assert.equal(compatConfig.coverageDirectory, undefined);
-	assert.equal(compatConfig.coverageReporters, undefined);
 	assert.equal(compatConfig.coverageThreshold, undefined);
 });

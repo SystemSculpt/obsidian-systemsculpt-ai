@@ -9,11 +9,14 @@ import type {
   ManagedMultipartUploadDescriptor,
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
+import {
+  isRetryableManagedJobObservationError,
+  observeManagedJob,
+  waitForManagedJob,
+} from "../managed/ManagedJobObservation";
 
 const CAPABILITY = "transcription" as const;
 const MAX_AUDIO_BYTES = 128 * 1024 * 1024;
-const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_MAX_POLLS = 900;
 
 export type ManagedTranscriptionContext = Readonly<{
   operationId?: string;
@@ -71,7 +74,6 @@ export type ManagedTranscriptionDependencies = Readonly<{
   createRequestId?: () => string;
   now?: () => string;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  maxPolls?: number;
 }>;
 
 function defaultOperationId(): string {
@@ -151,25 +153,6 @@ export class TranscriptionResumeRequiredError extends Error {
   }
 }
 
-async function defaultWait(milliseconds: number, signal: AbortSignal): Promise<void> {
-  throwIfAborted(signal);
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      resolve();
-    }, milliseconds);
-    const onAbort = () => {
-      window.clearTimeout(timeout);
-      cleanup();
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-  throwIfAborted(signal);
-}
-
 function readJobId(value: unknown): string {
   const jobId = (value as { job?: { id?: unknown } })?.job?.id;
   if (typeof jobId !== "string" || !jobId) throw new Error("Managed transcription create response did not include a job ID.");
@@ -192,15 +175,13 @@ export class ManagedTranscriptionAdapter {
   private readonly createRequestId: () => string;
   private readonly now: () => string;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  private readonly maxPolls: number;
   private initialization: Promise<void> | null = null;
 
   constructor(private readonly dependencies: ManagedTranscriptionDependencies) {
     this.createOperationId = dependencies.createOperationId ?? defaultOperationId;
     this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.wait = dependencies.wait ?? defaultWait;
-    this.maxPolls = dependencies.maxPolls ?? DEFAULT_MAX_POLLS;
+    this.wait = dependencies.wait ?? waitForManagedJob;
   }
 
   async transcribe(source: ManagedTranscriptionSource, context: ManagedTranscriptionContext = {}): Promise<ManagedTranscriptionResult> {
@@ -576,82 +557,89 @@ export class ManagedTranscriptionAdapter {
     const jobId = record.jobId;
     if (!jobId) throw new Error("Managed transcription recovery record has no acknowledged job ID.");
 
-    for (let poll = 0; poll < this.maxPolls; poll += 1) {
-      throwIfAborted(signal);
-      let status: { job: { id: string; status: ManagedJobStatus }; transcript: string | null; progress: number };
-      try {
-        status = await this.dependencies.jobs.status(jobId, signal) as typeof status;
-        throwIfAborted(signal);
-      } catch (error) {
-        if (error instanceof ManagedJobError && (error.code === "transcription_failed" || error.code === "job_expired")) {
+    type TranscriptionStatus = {
+      job: { id: string; status: ManagedJobStatus };
+      transcript: string | null;
+      progress: number;
+      poll_after_ms?: number;
+    };
+
+    try {
+      for await (const status of observeManagedJob<TranscriptionStatus>({
+        read: async () => await this.dependencies.jobs.status(jobId, signal) as TranscriptionStatus,
+        signal,
+        pollAfterMs: value => value.poll_after_ms,
+        isRetryableError: isRetryableManagedJobObservationError,
+        retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+        wait: this.wait,
+      })) {
+        if (status.job.id !== jobId) throw new Error("Managed transcription status returned a different job ID.");
+        if (["complete_dispatching", "start_dispatching", "processing"].includes(record.phase)) {
+          record = await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, status.job.status);
           throwIfAborted(signal);
-          const terminal = error.code === "job_expired" ? "expired" : "failed";
-          if (record.phase === "local_commit_pending") {
+          if (record.phase === "blocked_ambiguous") {
+            throw new Error("Managed transcription status could not be reconciled safely.");
+          }
+        }
+        context.onProgress?.(75 + Math.floor(Math.min(1, status.progress) * 23), "Transcribing audio…");
+        if (status.job.status === "succeeded") {
+          if (!["result_ready", "local_commit_pending"].includes(record.phase) || typeof status.transcript !== "string" || !status.transcript.trim()) {
+            throw new Error("Managed transcription completed without a transcript.");
+          }
+          if (record.phase === "completed" && record.localCommitReceipt) {
+            return {
+              kind: "local_receipt",
+              operationId: record.operationId,
+              recoveryPhase: "completed",
+              receipt: record.localCommitReceipt,
+            };
+          }
+          return { kind: "transcript", operationId: record.operationId, text: status.transcript };
+        }
+        if (record.phase === "result_ready") {
+          throw new Error("Managed transcription reached a terminal state without a result.");
+        }
+      }
+    } catch (error) {
+      if (error instanceof ManagedJobError && (error.code === "transcription_failed" || error.code === "job_expired")) {
+        const terminal = error.code === "job_expired" ? "expired" : "failed";
+        if (record.phase === "local_commit_pending") {
+          try {
+            const completed = await this.dependencies.recovery.completeLocalCommit(
+              CAPABILITY,
+              record.operationId,
+              record.revision,
+            );
             try {
-              const completed = await this.dependencies.recovery.completeLocalCommit(
+              await this.dependencies.recovery.delete(
                 CAPABILITY,
                 record.operationId,
-                record.revision,
+                completed.revision,
               );
-              try {
-                await this.dependencies.recovery.delete(
-                  CAPABILITY,
-                  record.operationId,
-                  completed.revision,
-                );
-              } catch {
-                // A completed record without a usable receipt is ignored by
-                // exact-source recovery and pruned on initialization.
-              }
-              throw new ManagedTranscriptionRetryError(
-                record.operationId,
-                "restart",
-                "local_commit_pending",
-                error,
-              );
-            } catch (retirementError) {
-              if (retirementError instanceof ManagedTranscriptionRetryError) {
-                throw retirementError;
-              }
-              // If durable retirement itself failed, preserve the old handle
-              // and let normal recovery classification require a resume.
+            } catch {
+              // Exact-source recovery ignores this retired record and startup
+              // pruning can remove it later.
+            }
+            throw new ManagedTranscriptionRetryError(
+              record.operationId,
+              "restart",
+              "local_commit_pending",
+              error,
+            );
+          } catch (retirementError) {
+            if (retirementError instanceof ManagedTranscriptionRetryError) {
+              throw retirementError;
             }
           }
-          if (["complete_dispatching", "start_dispatching", "processing"].includes(record.phase)) {
-            await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, terminal);
-            throwIfAborted(signal);
-          }
         }
-        throw error;
-      }
-      if (status.job.id !== jobId) throw new Error("Managed transcription status returned a different job ID.");
-      if (["complete_dispatching", "start_dispatching", "processing"].includes(record.phase)) {
-        record = await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, status.job.status);
-        throwIfAborted(signal);
-        if (record.phase === "blocked_ambiguous") {
-          throw new Error("Managed transcription status could not be reconciled safely.");
+        if (["complete_dispatching", "start_dispatching", "processing"].includes(record.phase)) {
+          await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, terminal);
         }
       }
-      context.onProgress?.(75 + Math.floor(Math.min(1, status.progress) * 23), "Transcribing audio…");
-      if (status.job.status === "succeeded") {
-        if (!["result_ready", "local_commit_pending"].includes(record.phase) || typeof status.transcript !== "string" || !status.transcript.trim()) {
-          throw new Error("Managed transcription completed without a transcript.");
-        }
-        if (record.phase === "completed" && record.localCommitReceipt) {
-          return {
-            kind: "local_receipt",
-            operationId: record.operationId,
-            recoveryPhase: "completed",
-            receipt: record.localCommitReceipt,
-          };
-        }
-        return { kind: "transcript", operationId: record.operationId, text: status.transcript };
-      }
-      await this.wait(DEFAULT_POLL_INTERVAL_MS, signal);
       throwIfAborted(signal);
-      if (record.phase === "result_ready") throw new Error("Managed transcription reached a terminal state without a result.");
+      throw error;
     }
-    throw new Error("Managed transcription did not complete before the polling limit.");
+    throw new Error("Managed transcription observation ended without a terminal status.");
   }
 
   private async ensureInitialized(): Promise<void> {

@@ -6,9 +6,9 @@ import type {
 } from "../../../types";
 import { sha256HexFromBytesPortable } from "../../../studio/hash";
 import {
-  DEFAULT_MANAGED_CHAT_INPUT_LIMITS,
-  type ManagedChatInputLimits,
-} from "../../../services/managed/ManagedChatInputLimits";
+  DEFAULT_THIN_AGENT_INPUT_LIMITS,
+  type ThinAgentInputLimits,
+} from "../../../services/managed/ThinAgentInputLimits";
 import {
   createImageAttachmentPart,
   createTextAttachmentPart,
@@ -96,7 +96,6 @@ export type ChatAttachmentIssueCode =
   | "image_limit"
   | "read_failed"
   | "processing_failed"
-  | "request_limit"
   | "text_limit"
   | "too_large"
   | "total_limit"
@@ -174,17 +173,17 @@ async function readBrowserFile(file: File): Promise<ArrayBuffer> {
 export class ChatMessageAttachmentCollection {
   private readonly entries = new Map<string, ChatAttachmentDisplay>();
   private readonly retryDocuments = new Map<string, Readonly<{ file: File; bytes: ArrayBuffer; fingerprint: `sha256:${string}` }>>();
-  private limits: ManagedChatInputLimits;
+  private limits: ThinAgentInputLimits;
 
   public constructor(
     private readonly read: BrowserFileReader = readBrowserFile,
     private readonly documentProcessor?: ChatDocumentAttachmentProcessor,
-    limits: ManagedChatInputLimits = DEFAULT_MANAGED_CHAT_INPUT_LIMITS,
+    limits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS,
   ) {
     this.limits = limits;
   }
 
-  public setLimits(limits: ManagedChatInputLimits): void {
+  public setLimits(limits: ThinAgentInputLimits): void {
     this.limits = limits;
   }
 
@@ -333,16 +332,6 @@ export class ChatMessageAttachmentCollection {
       ));
     }
 
-    const content = composeUserMessageContent(text, attachments);
-    const contentBytes = utf8Bytes(JSON.stringify(content));
-    const outerEnvelopeReserve = 64 * 1024;
-    if (contentBytes > Math.max(0, this.limits.maxDeltaRequestBytes - outerEnvelopeReserve)) {
-      issues.push(issue(
-        "request_limit",
-        label,
-        `This mixed attachment message is too large to send reliably. Reduce the images or text.`,
-      ));
-    }
     return Object.freeze(issues);
   }
 
@@ -472,7 +461,7 @@ export class ChatMessageAttachmentCollection {
       fingerprint,
     });
     const markdownBytes = new TextEncoder().encode(prepared.markdown);
-    const contentPart = createTextAttachmentPart(name, "application/pdf", markdownBytes);
+    const contentPart = createTextAttachmentPart(name, "text/markdown", markdownBytes);
     const contentBytes = contentPart.type === "text" ? utf8Bytes(contentPart.text) : 0;
     if (markdownBytes.byteLength < 1 || contentBytes > this.limits.maxTextBytesPerBlock) {
       await this.documentProcessor.discard(prepared.operationId);

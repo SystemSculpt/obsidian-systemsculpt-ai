@@ -184,6 +184,7 @@ function renderInlineConfigSelectField(options: {
       const buttonEl = createStudioAction(rowEl, {
         className: "ss-studio-node-inline-config-select-button",
         label: option.label || option.value,
+        testId: `studio.config.option.${option.value}`,
         size: "small",
         selected: false,
         disabled: interactionLocked,
@@ -612,6 +613,7 @@ function renderInlineConfigNoteSelectorField(options: {
   const addButton = createStudioAction(toolbarEl, {
     className: "ss-studio-note-selector-add-button",
     label: "Add note",
+    testId: "studio.notes.add",
     ariaLabel: "Add note entry",
     size: "small",
     disabled: interactionLocked,
@@ -716,6 +718,7 @@ function renderInlineConfigNoteSelectorField(options: {
       const moveUpButton = createStudioAction(actionsEl, {
         className: "ss-studio-note-selector-action-button",
         label: "Up",
+        testId: "studio.notes.move-up",
         ariaLabel: `Move note ${i + 1} up`,
         title: "Move note up",
         size: "small",
@@ -735,6 +738,7 @@ function renderInlineConfigNoteSelectorField(options: {
       const moveDownButton = createStudioAction(actionsEl, {
         className: "ss-studio-note-selector-action-button",
         label: "Down",
+        testId: "studio.notes.move-down",
         ariaLabel: `Move note ${i + 1} down`,
         title: "Move note down",
         size: "small",
@@ -754,6 +758,7 @@ function renderInlineConfigNoteSelectorField(options: {
       const removeButton = createStudioAction(actionsEl, {
         className: "ss-studio-note-selector-remove-button",
         label: "Remove",
+        testId: "studio.notes.remove",
         ariaLabel: `Remove note ${i + 1}`,
         title: "Remove note",
         size: "small",
@@ -813,6 +818,7 @@ function renderInlineConfigNoteSelectorField(options: {
       const browseButtonEl = createStudioAction(pathRow, {
         className: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
         label: "Browse",
+        testId: "studio.config.browse",
         ariaLabel: "Browse files",
         title: "Browse files",
         size: "small",
@@ -913,6 +919,7 @@ function renderInlineConfigPathField(options: {
   const browseButtonEl = createStudioAction(rowEl, {
     className: "ss-studio-node-inline-config-path-button ss-studio-path-browse-button",
     label: browseLabel,
+    testId: "studio.config.browse",
     ariaLabel: browseAriaLabel,
     title: browseAriaLabel,
     size: "small",

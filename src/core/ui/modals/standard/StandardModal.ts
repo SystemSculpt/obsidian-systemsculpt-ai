@@ -205,6 +205,7 @@ export class StandardModal extends Modal {
    * @param icon Optional icon name to show before text
    */
   addActionButton(
+    testId: string,
     text: string,
     callback: () => void,
     primary: boolean = false,
@@ -213,6 +214,7 @@ export class StandardModal extends Modal {
   ) {
     const button = createUiAction(this.footerEl, {
       label: text,
+      testId,
       icon,
       tone: tone ?? (primary ? "primary" : "default"),
     });
@@ -225,9 +227,10 @@ export class StandardModal extends Modal {
    * @param placeholder Placeholder text
    * @param callback Function called when search input changes
    */
-  addSearchBar(placeholder: string, callback: (query: string) => void) {
+  addSearchBar(testId: string, placeholder: string, callback: (query: string) => void) {
     const search = createUiSearch(this.contentEl, {
       placeholder,
+      testId,
       onQuery: callback,
     });
     search.root.addClass("ss-modal__search");
@@ -241,6 +244,7 @@ export class StandardModal extends Modal {
   ): HTMLButtonElement {
     const closeButton = createUiAction(parent, {
       label: "Close",
+      testId: "modal.close",
       icon: "x",
       size: "icon",
     });

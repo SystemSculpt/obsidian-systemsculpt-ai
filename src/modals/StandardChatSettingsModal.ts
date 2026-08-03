@@ -96,7 +96,7 @@ export class StandardChatSettingsModal extends StandardModal {
       },
     });
 
-    this.addActionButton("Done", () => this.close(), true);
+    this.addActionButton("chat-settings.done", "Done", () => this.close(), true);
   }
 
   onClose(): void {

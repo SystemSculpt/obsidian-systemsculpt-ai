@@ -477,6 +477,18 @@ describe("vault tool types", () => {
         expect(params.searchIn).toBe(s);
       });
     });
+
+    it("can scope content search to vault-relative files and folders", () => {
+      const params: GrepVaultParams = {
+        patterns: ["https://"],
+        paths: ["Research", "Projects/Architecture.md"],
+      };
+
+      expect(params.paths).toEqual([
+        "Research",
+        "Projects/Architecture.md",
+      ]);
+    });
   });
 
   describe("ManageContextParams", () => {

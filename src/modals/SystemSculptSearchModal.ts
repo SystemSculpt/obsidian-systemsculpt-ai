@@ -95,6 +95,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     const clear = createUiAction(wrapper, {
       label: "Clear search",
+      testId: "search.clear",
       icon: "x",
       size: "icon",
     });
@@ -411,6 +412,7 @@ export class SystemSculptSearchModal extends StandardModal {
         detail,
         action: {
           label: "Retry",
+          testId: "search.retry",
           onSelect: () => {
             const query = this.currentQuery.trim();
             if (query) {

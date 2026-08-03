@@ -7,8 +7,8 @@ import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from '../../constants/api';
 export class SystemSculptEnvironment {
   /**
    * Resolve the canonical base URL for the SystemSculpt API.
-   * Development builds may normalize configured overrides, but production
-   * builds always pin hosted traffic to the compiled production API.
+   * Development builds use a named compiled target. Production builds always
+   * pin hosted traffic to the canonical first-party API.
    */
   static resolveBaseUrl(): string {
     return API_BASE_URL;

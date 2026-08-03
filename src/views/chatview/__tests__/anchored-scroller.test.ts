@@ -78,7 +78,6 @@ function createHarness(options: {
     id: string,
     top: number,
     height = 100,
-    options: { turnAnchor?: boolean } = {},
   ): HTMLElement => {
     const row = document.createElement("article");
     row.textContent = id;
@@ -95,7 +94,7 @@ function createHarness(options: {
         get: () => rowLayouts.get(row)?.height ?? 0,
       },
     });
-    scroller.registerRow(id, row, options);
+    scroller.registerRow(id, row);
     return row;
   };
 
@@ -185,20 +184,23 @@ describe("AnchoredScroller", () => {
     harness.cleanup();
   });
 
-  it("anchors a new turn with the configured previous-row peek", () => {
-    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_600 });
-    harness.addRow("previous", 300, 300);
-    harness.addRow("user-turn", 700, 80, { turnAnchor: true });
+  it("does not yank a manual reader when a new turn starts", () => {
+    const harness = createHarness({ scrollTop: 120, scrollHeight: 1_600 });
+    harness.manualScroll(120);
+    expect(harness.scroller.getMode()).toBe("manual");
 
-    harness.scroller.notifyTurnStarted("user-turn");
-    expect(harness.scroller.getMode()).toBe("turn");
-    expect(harness.state.scrollTop).toBe(636);
-    expect(harness.calls.at(-1)).toEqual({ top: 636, behavior: "smooth" });
+    harness.scroller.notifyTurnStarted();
+    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.state.scrollTop).toBe(120);
 
     harness.state.scrollHeight = 2_000;
     harness.scroller.notifyContentChanged({ streaming: true });
-    expect(harness.state.scrollTop).toBe(636);
-    expect(harness.calls.at(-1)).toEqual({ top: 636, behavior: "auto" });
+    expect(harness.state.scrollTop).toBe(120);
+
+    harness.manualScroll(1_600);
+    harness.scroller.notifyTurnStarted();
+    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.state.scrollTop).toBe(1_600);
     harness.cleanup();
   });
 
@@ -215,7 +217,6 @@ describe("AnchoredScroller", () => {
       rowId: "first",
       offsetFromViewportTop: -50,
       mode: "manual",
-      turnAnchorRowId: null,
     });
 
     harness.state.scrollHeight = 1_300;
@@ -251,11 +252,11 @@ describe("AnchoredScroller", () => {
     harness.cleanup();
   });
 
-  it("uses auto behavior for reduced motion across anchoring, jumping, and end scrolling", () => {
+  it("uses auto behavior for reduced motion across turn following, jumping, and end scrolling", () => {
     const harness = createHarness({ scrollTop: 0, scrollHeight: 1_500, reducedMotion: true });
-    harness.addRow("turn", 500, 100, { turnAnchor: true });
+    harness.addRow("turn", 500, 100);
 
-    harness.scroller.notifyTurnStarted("turn");
+    harness.scroller.notifyTurnStarted();
     expect(harness.calls.at(-1)?.behavior).toBe("auto");
     harness.scroller.jumpTo("turn", { align: "center" });
     expect(harness.calls.at(-1)?.behavior).toBe("auto");
@@ -298,6 +299,95 @@ describe("AnchoredScroller", () => {
     harness.cleanup();
   });
 
+  it("preserves follow ownership across owned viewport geometry changes only", () => {
+    const harness = createHarness();
+    expect(harness.scroller.getMode()).toBe("end");
+
+    harness.state.clientHeight = 260;
+    harness.scroller.notifyViewportGeometryChanged();
+
+    expect(harness.state.scrollTop).toBe(740);
+    expect(harness.calls.at(-1)).toEqual({ top: 740, behavior: "auto" });
+    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scrollButton.dataset.active).toBe("false");
+
+    harness.manualScroll(200);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.state.clientHeight = 320;
+    harness.scroller.notifyViewportGeometryChanged();
+
+    expect(harness.state.scrollTop).toBe(200);
+    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scrollButton.dataset.active).toBe("true");
+    harness.cleanup();
+  });
+
+  it("coalesces content and viewport geometry changes while respecting manual reading", () => {
+    const originalResizeObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+    let resizeCallback: ResizeObserverCallback | null = null;
+    const observe = jest.fn();
+    const disconnect = jest.fn();
+    class TestResizeObserver {
+      public constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      public observe = observe;
+      public unobserve = jest.fn();
+      public disconnect = disconnect;
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: TestResizeObserver,
+    });
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = jest.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    const cancelFrame = jest.spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness();
+      expect(observe).toHaveBeenNthCalledWith(1, harness.viewport);
+      expect(observe).toHaveBeenNthCalledWith(2, harness.content);
+
+      harness.state.scrollHeight = 1_100;
+      harness.state.clientHeight = 300;
+      resizeCallback?.([], {} as ResizeObserver);
+      resizeCallback?.([], {} as ResizeObserver);
+      expect(requestFrame).toHaveBeenCalledTimes(1);
+      frames.shift()?.(0);
+      expect(harness.state.scrollTop).toBe(800);
+      expect(harness.calls.at(-1)).toEqual({ top: 800, behavior: "auto" });
+
+      harness.manualScroll(100);
+      harness.state.scrollHeight = 1_300;
+      resizeCallback?.([], {} as ResizeObserver);
+      frames.shift()?.(0);
+      expect(harness.state.scrollTop).toBe(100);
+      expect(harness.scrollButton.dataset.active).toBe("true");
+
+      resizeCallback?.([], {} as ResizeObserver);
+      harness.cleanup();
+      harness = null;
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(cancelFrame).toHaveBeenCalledTimes(1);
+    } finally {
+      harness?.cleanup();
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+      if (originalResizeObserver) {
+        Object.defineProperty(window, "ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(window, "ResizeObserver");
+      }
+    }
+  });
+
   it("fails fast for unstable registration, missing rows, and use after destroy", () => {
     const harness = createHarness();
     const row = harness.addRow("row", 100);
@@ -319,27 +409,24 @@ describe("AnchoredScroller", () => {
     harness.scrollButton.remove();
   });
 
-  it("preserves turn ownership through a prepend restoration", () => {
-    const harness = createHarness({ scrollTop: 0, scrollHeight: 1_400 });
-    const turn = harness.addRow("turn", 400, 100, { turnAnchor: true });
-    harness.scroller.notifyTurnStarted("turn");
+  it("restores end ownership to the latest content after history replacement", () => {
+    const harness = createHarness({ scrollTop: 1_000, scrollHeight: 1_400 });
+    const turn = harness.addRow("turn", 900, 200);
     const anchor: AnchoredScrollerPrependAnchor = {
       rowId: "turn",
       offsetFromViewportTop: turn.offsetTop - harness.state.scrollTop,
-      mode: "turn",
-      turnAnchorRowId: "turn",
+      mode: "end",
     };
     harness.state.scrollHeight = 1_700;
-    harness.setRowLayout(turn, { top: 700 });
+    harness.setRowLayout(turn, { top: 1_200 });
     harness.scroller.restorePrependAnchor(anchor);
-    expect(harness.scroller.getMode()).toBe("turn");
-    expect(harness.state.scrollTop).toBe(636);
+    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.state.scrollTop).toBe(1_300);
     harness.cleanup();
   });
 
   it("keeps programmatic ownership through intermediate smooth-scroll frames", () => {
     const harness = createHarness({ scrollTop: 0, scrollHeight: 1_600 });
-    harness.addRow("turn", 700, 80, { turnAnchor: true });
     harness.viewport.scrollTo = ((options: ScrollToOptions) => {
       harness.calls.push({
         top: Number(options.top ?? harness.state.scrollTop),
@@ -347,28 +434,56 @@ describe("AnchoredScroller", () => {
       });
     }) as typeof harness.viewport.scrollTo;
 
-    harness.scroller.notifyTurnStarted("turn");
+    harness.scroller.scrollToEnd();
     harness.state.scrollTop = 300;
     harness.viewport.dispatchEvent(new Event("scroll"));
 
-    expect(harness.scroller.getMode()).toBe("turn");
+    expect(harness.scroller.getMode()).toBe("end");
     harness.state.scrollHeight = 1_900;
     harness.scroller.notifyContentChanged({ streaming: true });
-    expect(harness.calls.at(-1)).toEqual({ top: 636, behavior: "auto" });
+    expect(harness.calls.at(-1)).toEqual({ top: 1_500, behavior: "auto" });
+    harness.cleanup();
+  });
+
+  it("does not disable end following for no-op wheel, touch tap, or interactive keyboard input", () => {
+    const harness = createHarness();
+    const button = document.createElement("button");
+    harness.content.appendChild(button);
+
+    harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: 120,
+    }));
+    button.dispatchEvent(new Event("touchstart", { bubbles: true }));
+    button.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: " ",
+    }));
+    expect(harness.scroller.getMode()).toBe("end");
+
+    harness.state.scrollHeight = 1_200;
+    harness.scroller.notifyContentChanged({ streaming: true });
+    expect(harness.state.scrollTop).toBe(800);
+    expect(harness.scroller.getMode()).toBe("end");
     harness.cleanup();
   });
 
   it.each([
-    ["wheel", () => new WheelEvent("wheel", { bubbles: true })],
-    ["touch", () => new Event("touchstart", { bubbles: true })],
+    ["wheel", () => new WheelEvent("wheel", { bubbles: true, deltaY: -120 })],
+    ["touch", () => new Event("touchmove", { bubbles: true })],
     ["keyboard", () => new KeyboardEvent("keydown", { key: "PageUp", bubbles: true })],
-  ])("releases programmatic ownership on %s input", (_name, createEvent) => {
-    const harness = createHarness({ scrollTop: 0, scrollHeight: 1_600 });
-    harness.addRow("turn", 700, 80, { turnAnchor: true });
-    harness.scroller.notifyTurnStarted("turn");
+  ])("uses the resulting scroll position after %s input", (_name, createEvent) => {
+    const harness = createHarness();
+    harness.viewport.dispatchEvent(createEvent());
+    harness.manualScroll(100);
+    expect(harness.scroller.getMode()).toBe("manual");
 
     harness.viewport.dispatchEvent(createEvent());
-    expect(harness.scroller.getMode()).toBe("manual");
+    harness.manualScroll(600);
+    expect(harness.scroller.getMode()).toBe("end");
+    harness.state.scrollHeight = 1_200;
+    harness.scroller.notifyContentChanged({ streaming: true });
+    expect(harness.state.scrollTop).toBe(800);
     harness.cleanup();
   });
 });

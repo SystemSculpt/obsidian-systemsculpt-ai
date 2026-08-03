@@ -3,6 +3,12 @@
  * TS: src/context-menu / FileContextManager.
  */
 
+.ss-context-description {
+  margin: 0 var(--ss-space-5) var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
 .ss-context-filter-container {
   display: flex;
   flex-wrap: wrap;
@@ -59,11 +65,11 @@
   border-color: var(--ss-line-accent);
 }
 
-.ss-context-file-item.is-attached {
+.ss-context-file-item.is-pinned {
   border-left: 2px solid var(--ss-success);
 }
 
-.ss-context-file-item.is-attached .ss-context-file-label {
+.ss-context-file-item.is-pinned .ss-context-file-label {
   cursor: default;
 }
 

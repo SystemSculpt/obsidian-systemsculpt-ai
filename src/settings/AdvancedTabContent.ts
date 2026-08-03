@@ -86,7 +86,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     new Setting(containerEl)
         .setName("Copy diagnostics snapshot")
-        .setDesc("Copies recent logs and resource metrics for support tickets.")
+        .setDesc("Copies a content-free runtime and resource summary for support.")
         .addButton((button) => {
             button.setButtonText("Copy snapshot").onClick(async () => {
                 const { text, path } = await plugin.exportDiagnosticsSnapshot();

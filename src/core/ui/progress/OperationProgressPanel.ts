@@ -10,6 +10,8 @@ export type OperationProgressState = "running" | "complete" | "error" | "warning
 
 export interface OperationProgressButton {
   label: string;
+  /** Stable `data-testid` identity, e.g. "audio.progress.cancel". */
+  testId: string;
   onClick: () => void;
   variant?: "primary" | "danger" | "default";
   disabled?: boolean;
@@ -133,6 +135,7 @@ export class OperationProgressPanel {
 
     const dismissButton = createUiAction(header, {
       label: options.dismissLabel ?? (options.collapsible ? "Minimize" : "Hide"),
+      testId: "progress.dismiss",
       icon: options.collapsible ? "minus" : "x",
       size: "icon",
     });
@@ -261,6 +264,7 @@ export class OperationProgressPanel {
     actions.forEach((action) => {
       const button = createUiAction(this.actionsEl, {
         label: action.label,
+        testId: action.testId,
         tone: action.variant === "primary"
           ? "primary"
           : action.variant === "danger"

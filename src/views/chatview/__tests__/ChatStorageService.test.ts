@@ -143,8 +143,8 @@ describe("ChatStorageService", () => {
       expect(mockVault.getAbstractFileByPath).toHaveBeenCalled();
     });
 
-    it("includes context files when provided", async () => {
-      const contextFiles = new Set(["path/to/file.md", "path/to/Extractions/doc.md"]);
+    it("serializes the exact pinned-file set through the compatible context_files key", async () => {
+      const contextFiles = new Set(["[[path/to/file.md]]", "[[path/to/Extractions/doc.md]]"]);
 
       await service.saveChat(
         "test-chat",
@@ -152,7 +152,10 @@ describe("ChatStorageService", () => {
         { contextFiles }
       );
 
-      expect(mockVault.create).toHaveBeenCalled();
+      const createdContent = mockVault.create.mock.calls[0][1] as string;
+      expect(createdContent).toContain(
+        'context_files: [{"path":"[[path/to/file.md]]","type":"source"},{"path":"[[path/to/Extractions/doc.md]]","type":"extraction"}]',
+      );
     });
 
     it("writes the current managed chat metadata schema", async () => {
@@ -164,32 +167,19 @@ describe("ChatStorageService", () => {
       expect(createdContent).toContain('approvalMode: "ask"');
     });
 
-    it("persists only a chat-bound managed session checkpoint", async () => {
+    it("persists only the server conversation routing pointer", async () => {
       await service.saveChat("session-chat", testMessages, {
-        managedSession: {
-          id: "mchat_0123456789abcdef0123456789abcdef",
-          revision: 2,
-          boundChatId: "session-chat",
-          checkpointMessageId: "assistant-2",
-          toolsetFingerprint: "2:741638a5:5967d5",
-          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
-        },
+        agentConversationId: "conversation_0123456789abcdef0123456789abcdef",
       });
-      expect(mockVault.create.mock.calls[0][1]).toContain("managedSession:");
+      expect(mockVault.create.mock.calls[0][1])
+        .toContain('agentConversationId: "conversation_0123456789abcdef0123456789abcdef"');
 
       jest.clearAllMocks();
       mockVault.getAbstractFileByPath.mockReturnValue(null);
       await service.saveChat("other-chat", testMessages, {
-        managedSession: {
-          id: "mchat_0123456789abcdef0123456789abcdef",
-          revision: 2,
-          boundChatId: "session-chat",
-          checkpointMessageId: "assistant-2",
-          toolsetFingerprint: "2:741638a5:5967d5",
-          budget: { messageCount: 2, imageCount: 0, attachmentBytes: 0, storedJsonBytes: 256 },
-        },
+        agentConversationId: "invalid",
       });
-      expect(mockVault.create.mock.calls[0][1]).not.toContain("managedSession:");
+      expect(mockVault.create.mock.calls[0][1]).not.toContain("agentConversationId:");
     });
 
     it("adds default chat tag to new history files", async () => {
@@ -387,6 +377,34 @@ Hello
 
       expect(result).not.toBeNull();
       expect(result?.id).toBe("test-chat");
+    });
+
+    it("restores the exact pinned-file set from context_files metadata", async () => {
+      const serializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      serializer.parseMarkdown.mockReturnValueOnce({
+        metadata: {
+          id: "pinned-chat",
+          title: "Pinned chat",
+          created: "2024-01-01T00:00:00.000Z",
+          lastModified: "2024-01-01T00:00:00.000Z",
+          version: 4,
+          context_files: [
+            { path: "[[Projects/Plan.md]]", type: "source" },
+            { path: "[[Images/Diagram.png]]", type: "source" },
+          ],
+        },
+        messages: [],
+      });
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/pinned-chat.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue("---\nid: pinned-chat\n---");
+
+      const result = await service.loadChat("pinned-chat");
+
+      expect(result?.context_files).toEqual([
+        "[[Projects/Plan.md]]",
+        "[[Images/Diagram.png]]",
+      ]);
     });
 
     it.each([
@@ -730,7 +748,7 @@ version: 1
       expect(mockVault.create).not.toHaveBeenCalled();
     });
 
-    it("throws error when trying to save empty messages over existing content", async () => {
+    it("rejects ordinary empty saves over existing content", async () => {
       const mockFile = new TFile({ path: "SystemSculpt/Chats/nonempty.md" });
       mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
       mockVault.read.mockResolvedValue(`---
@@ -747,7 +765,41 @@ Hello
 
       await expect(
         service.saveChat("nonempty", [])
-      ).rejects.toThrow();
+      ).rejects.toThrow("Cannot save empty messages over existing chat content");
+      await expect(
+        service.saveChat("nonempty", [], {
+          authoritativeServerHistoryReconciliation: true,
+        })
+      ).rejects.toThrow("Cannot save empty messages over existing chat content");
+      expect(mockVault.modify).not.toHaveBeenCalled();
+    });
+
+    it("allows only identified authoritative server history to clear existing content", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/nonempty.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue(`---
+id: nonempty
+title: Non Empty
+created: 2024-01-01T00:00:00.000Z
+lastModified: 2024-01-01T00:00:00.000Z
+version: 1
+---
+
+<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="1" -->
+Hello
+<!-- SYSTEMSCULPT-MESSAGE-END -->`);
+
+      await service.saveChat("nonempty", [], {
+        agentConversationId: "conversation_0123456789abcdef0123456789abcdef",
+        authoritativeServerHistoryReconciliation: true,
+      });
+
+      expect(mockVault.modify).toHaveBeenCalledTimes(1);
+      expect(mockVault.modify.mock.calls[0]?.[1]).toContain(
+        'agentConversationId: "conversation_0123456789abcdef0123456789abcdef"',
+      );
+      expect(mockVault.modify.mock.calls[0]?.[1])
+        .not.toContain("SYSTEMSCULPT-MESSAGE-START");
     });
 
     it("includes title in save", async () => {

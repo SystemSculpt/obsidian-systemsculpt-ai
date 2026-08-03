@@ -51,7 +51,10 @@ describe("ContextSelectionModal", () => {
 
     expect(modal.modalEl.classList.contains("ss-modal")).toBe(true);
     expect(modal.modalEl.getAttribute("role")).toBe("dialog");
-    expect(modal.modalEl.textContent).toContain("Add context files");
+    expect(modal.modalEl.textContent).toContain("Pin files for every message");
+    expect(modal.modalEl.textContent).toContain(
+      "Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+    );
     expect(modal.modalEl.textContent).not.toContain("legacy");
     expect(modal.modalEl.textContent).not.toContain("vector");
     expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(8);
@@ -74,7 +77,7 @@ describe("ContextSelectionModal", () => {
     expect(selectedFilter?.textContent).toContain("Documents");
     expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(1);
     expect(modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')?.checked).toBe(true);
-    expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
   });
 
   it("filters by type and search through semantic controls", () => {
@@ -152,7 +155,7 @@ describe("ContextSelectionModal", () => {
     thumbnail.click();
 
     expect(checkbox.checked).toBe(true);
-    expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
     expect(checkbox.closest("li")?.classList.contains("is-selected")).toBe(true);
   });
 
@@ -162,26 +165,30 @@ describe("ContextSelectionModal", () => {
     const label = checkbox.closest("label");
 
     expect(label).not.toBeNull();
-    expect(checkbox.getAttribute("aria-label")).toBe("Add studio/architecture.systemsculpt");
+    expect(checkbox.getAttribute("aria-label")).toBe("Pin studio/architecture.systemsculpt");
     checkbox.focus();
     expect(document.activeElement).toBe(checkbox);
     checkbox.click();
     expect(checkbox.checked).toBe(true);
-    expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
     expect(checkbox.closest("li")?.classList.contains("is-selected")).toBe(true);
   });
 
   it("marks existing context as checked and immutable", () => {
     const { modal } = harness({
       autoFocusSearch: false,
-      isFileAlreadyInContext: (file) => file.path === "notes/meeting.md",
+      isFileAlreadyPinned: (file) => file.path === "notes/meeting.md",
     });
     const checkbox = Array.from(modal.modalEl.querySelectorAll<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]'))
       .find((input) => input.getAttribute("aria-label")?.includes("meeting"))!;
 
     expect(checkbox.checked).toBe(true);
     expect(checkbox.disabled).toBe(true);
-    expect(checkbox.closest("li")?.classList.contains("is-attached")).toBe(true);
+    expect(checkbox.getAttribute("aria-label")).toBe(
+      "notes/meeting.md, pinned for every message",
+    );
+    expect(checkbox.closest("li")?.classList.contains("is-pinned")).toBe(true);
+    expect(checkbox.closest("li")?.textContent).toContain("Pinned");
   });
 
   it("submits the selected files and closes", async () => {
@@ -189,7 +196,7 @@ describe("ContextSelectionModal", () => {
     const checkbox = modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')!;
     checkbox.click();
     const add = Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Add 1 file")!;
+      .find((button) => button.textContent === "Pin 1 file")!;
     add.click();
     await Promise.resolve();
 
@@ -202,15 +209,15 @@ describe("ContextSelectionModal", () => {
     onSelect.mockRejectedValueOnce(new Error("Processing failed"));
     modal.modalEl.querySelector<HTMLInputElement>('.ss-context-file-item input[type="checkbox"]')!.click();
     Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Add 1 file")!
+      .find((button) => button.textContent === "Pin 1 file")!
       .click();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(document.body.contains(modal.modalEl)).toBe(true);
-    expect(modal.modalEl.textContent).toContain("Add 1 file");
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
     expect(mockedNotice).toHaveBeenCalledWith(
-      "Couldn't add context files. Processing failed",
+      "Couldn't pin files for every message. Processing failed",
       5000,
     );
   });

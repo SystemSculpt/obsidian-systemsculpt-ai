@@ -45,9 +45,10 @@ type StatePaneOptions = Readonly<{
 
 const DRAG_RELEASE_TIMEOUT_MS = 5_000;
 
-function createIconButton(parent: HTMLElement, label: string, icon: string): HTMLButtonElement {
+function createIconButton(parent: HTMLElement, testId: string, label: string, icon: string): HTMLButtonElement {
   const button = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: "icon",
   });
@@ -118,9 +119,9 @@ export class SimilarNotesPresentation extends Component {
     });
 
     const toolbar = header.createDiv({ cls: "ss-embeddings-view__actions" });
-    this.refreshButton = createIconButton(toolbar, "Refresh similar notes", "refresh-cw");
-    const pendingButton = createIconButton(toolbar, "Remaining embeddings", "list-checks");
-    const settingsButton = createIconButton(toolbar, "Embeddings settings", "settings-2");
+    this.refreshButton = createIconButton(toolbar, "embeddings.refresh", "Refresh similar notes", "refresh-cw");
+    const pendingButton = createIconButton(toolbar, "embeddings.pending-files", "Remaining embeddings", "list-checks");
+    const settingsButton = createIconButton(toolbar, "embeddings.settings", "Embeddings settings", "settings-2");
 
     this.registerDomEvent(this.refreshButton, "click", () => void this.actions.onRefresh());
     this.registerDomEvent(pendingButton, "click", () => this.actions.onOpenPendingFiles());
@@ -253,6 +254,7 @@ export class SimilarNotesPresentation extends Component {
     if (showPendingAction) {
       const action = createUiAction(this.indexStatusEl, {
         label: "Review",
+        testId: "embeddings.index.review-pending",
         size: "small",
       });
       action.dataset.indexAction = "pending";
@@ -282,7 +284,7 @@ export class SimilarNotesPresentation extends Component {
           title: "Embeddings are off",
           description: "Enable them to find related notes.",
         });
-        this.addStateAction("Enable embeddings", () => this.actions.onOpenSettings(), true);
+        this.addStateAction("embeddings.state.enable", "Enable embeddings", () => this.actions.onOpenSettings(), true);
         break;
       case "empty-content":
         this.renderStatePane({
@@ -302,7 +304,7 @@ export class SimilarNotesPresentation extends Component {
             "Similar notes are unavailable. Try again.",
           ),
         });
-        this.addStateAction("Try again", () => this.actions.onRefresh(), true);
+        this.addStateAction("embeddings.state.retry", "Try again", () => this.actions.onRefresh(), true);
         break;
       case "index-required":
         this.renderStatePane({
@@ -311,8 +313,8 @@ export class SimilarNotesPresentation extends Component {
           title: "Build your vault index",
           description: "Create embeddings to find related notes.",
         });
-        this.addStateAction("Start", () => this.actions.onStartProcessing(), true);
-        this.addStateAction("Settings", () => this.actions.onOpenSettings(), false);
+        this.addStateAction("embeddings.state.start", "Start", () => this.actions.onStartProcessing(), true);
+        this.addStateAction("embeddings.state.settings", "Settings", () => this.actions.onOpenSettings(), false);
         break;
       case "processing":
         this.renderProcessing();
@@ -422,7 +424,7 @@ export class SimilarNotesPresentation extends Component {
     return state;
   }
 
-  private addStateAction(label: string, action: () => void | Promise<void>, primary: boolean): void {
+  private addStateAction(testId: string, label: string, action: () => void | Promise<void>, primary: boolean): void {
     let actions = this.resultsEl.querySelector<HTMLElement>(".ss-embeddings-view__state-actions");
     if (!actions) {
       const state = this.resultsEl.querySelector<HTMLElement>(".ss-embeddings-view__state");
@@ -432,6 +434,7 @@ export class SimilarNotesPresentation extends Component {
 
     createUiAction(actions, {
       label,
+      testId,
       tone: primary ? "primary" : "default",
       size: "small",
       onSelect: () => void action(),
@@ -454,7 +457,7 @@ export class SimilarNotesPresentation extends Component {
     });
     progress.max = 100;
     progress.value = 0;
-    this.addStateAction("Remaining files", () => this.actions.onOpenPendingFiles(), false);
+    this.addStateAction("embeddings.state.pending-files", "Remaining files", () => this.actions.onOpenPendingFiles(), false);
   }
 
   private renderResults(results: readonly SearchResult[], chatContext: boolean): void {
@@ -509,7 +512,7 @@ export class SimilarNotesPresentation extends Component {
     });
 
     if (chatContext) {
-      const contextAction = createIconButton(accessories, `Add ${title} to chat context`, "plus");
+      const contextAction = createIconButton(accessories, "embeddings.result.pin", `Pin ${title} for every message`, "plus");
       contextAction.addClass("ss-similar-note__context-action");
       contextAction.addEventListener("click", async (event) => {
         event.preventDefault();
@@ -602,8 +605,10 @@ export class SimilarNotesPresentation extends Component {
     );
     updateUiAction(action, {
       disabled: inContext,
-      label: inContext ? `${title} is in chat context` : `Add ${title} to chat context`,
-      title: inContext ? "In chat context" : "Add to chat context",
+      label: inContext
+        ? `${title} is pinned for every message`
+        : `Pin ${title} for every message`,
+      title: inContext ? "Pinned for every message" : "Pin for every message",
       icon: inContext ? "check" : "plus",
     });
   }

@@ -1,0 +1,73 @@
+{
+  "fixture_version": "thin-agent-v1-endurance-3",
+  "conversation_id": "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "request_id": "user_endurance_root",
+  "run_id": "run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "round_count": 40,
+  "readonly_cycle": [
+    "read",
+    "find",
+    "list_items",
+    "search",
+    "context",
+    "open"
+  ],
+  "parallel_batches": [
+    {
+      "round": 9,
+      "tool_names": [
+        "read",
+        "find",
+        "list_items"
+      ]
+    },
+    {
+      "round": 27,
+      "tool_names": [
+        "search",
+        "read",
+        "context"
+      ]
+    }
+  ],
+  "web_search_rounds": [
+    5,
+    20,
+    35
+  ],
+  "approved_mutation": {
+    "round": 14,
+    "tool_call_id": "tool_round_14_01",
+    "tool_name": "write",
+    "approval_id": "approval_round_14",
+    "approved": true,
+    "input": {
+      "path": "Endurance/generated.md",
+      "content": "# Endurance proof\n",
+      "ifExists": "overwrite"
+    }
+  },
+  "recovery": {
+    "drop_approval_round": 14,
+    "drop_result_round": 23,
+    "expect_reused_bootstrap_during_validity": true,
+    "expect_snapshot_first_per_synchronization": true
+  },
+  "mutation_replay": {
+    "tool_call_id": "tool_round_14_01",
+    "expected_execution_count": 1,
+    "expected_replayed_result_count": 1,
+    "different_input_is_conflict": true
+  },
+  "expected": {
+    "vault_tool_calls": 44,
+    "server_web_search_calls": 3,
+    "successful_tool_result_commands": 44,
+    "tool_result_send_attempts": 45,
+    "successful_tool_approval_commands": 1,
+    "tool_approval_send_attempts": 2,
+    "mutation_executions": 1,
+    "hard_client_continuation_limit": null,
+    "synchronization_count": 3
+  }
+}

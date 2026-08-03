@@ -22,10 +22,16 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
+  ManagedAgentError,
 } from "./AgentConversation";
-import type { AgentConversationPresentation } from "./AgentConversationPresentation";
+import {
+  presentAgentError,
+  presentAgentErrorMessage,
+  type AgentConversationPresentation,
+} from "./AgentConversationPresentation";
 import {
   groupConsecutiveToolActivity,
+  presentAgentTool,
   presentAgentToolGroup,
 } from "./AgentToolPresentation";
 import {
@@ -34,6 +40,7 @@ import {
   type PresentedMessageAttachment,
   type PresentedMessageContent,
 } from "./ChatMessagePresentation";
+import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
 
 export type AgentConversationRendererOptions = Readonly<{
   app: App;
@@ -41,7 +48,8 @@ export type AgentConversationRendererOptions = Readonly<{
   labelledBy?: string;
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
-  onCopyArtifactPath: (artifact: AgentArtifact) => void | Promise<void>;
+  onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
+  onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -57,9 +65,10 @@ export type AgentInlineMessageEdit = Readonly<{
   requiresReplayConfirmation: boolean;
 }>;
 
-function button(parent: HTMLElement, label: string, icon?: string): HTMLButtonElement {
+function button(parent: HTMLElement, testId: string, label: string, icon?: string): HTMLButtonElement {
   const element = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: icon ? "icon" : "small",
     tooltip: false,
@@ -135,6 +144,90 @@ function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["s
   }
 }
 
+function visibleToolError(error: ManagedAgentError | undefined): string | null {
+  return error
+    ? presentAgentErrorMessage(error.message, error.retryable === true)
+    : null;
+}
+
+function toolDisplayFingerprint(part: AgentToolPart): string {
+  const presentation = presentAgentTool(part);
+  const approvalInput = part.location === "vault"
+    && part.state === "approval-required"
+    && part.approvalId
+    ? part.input
+    : undefined;
+  const artifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
+    ? part.output?.artifacts
+    : undefined;
+  return JSON.stringify({
+    location: part.location,
+    state: part.state,
+    presentation,
+    error: visibleToolError(part.error),
+    approvalId: approvalInput === undefined ? undefined : part.approvalId,
+    approvalInput,
+    artifacts,
+  });
+}
+
+function agentPartsEqual(left: AgentPart | undefined, right: AgentPart): boolean {
+  if (left === right) return true;
+  if (!left || left.kind !== right.kind || left.id !== right.id || left.order !== right.order) {
+    return false;
+  }
+  switch (right.kind) {
+    case "text":
+      return left.kind === "text"
+        && left.messageId === right.messageId
+        && left.state === right.state
+        && left.markdown === right.markdown;
+    case "reasoning":
+      return left.kind === "reasoning"
+        && left.messageId === right.messageId
+        && left.state === right.state
+        && left.summary === right.summary;
+    case "error":
+      return left.kind === "error"
+        && left.retryable === right.retryable
+        && left.retryMessageId === right.retryMessageId
+        && JSON.stringify(presentAgentError(left.error, left.retryable))
+          === JSON.stringify(presentAgentError(right.error, right.retryable));
+    case "tool":
+      return left.kind === "tool"
+        && left.messageId === right.messageId
+        && left.callId === right.callId
+        && toolDisplayFingerprint(left) === toolDisplayFingerprint(right);
+  }
+}
+
+const ACTIVE_TOOL_PRESENTATION_STATES = new Set<AgentToolPart["state"]>([
+  "input-streaming",
+  "input-ready",
+  "approval-required",
+  "approved",
+  "running",
+]);
+
+function terminalToolPresentation(
+  part: AgentPart,
+  presentation: AgentConversationPresentation,
+): AgentPart {
+  if (
+    part.kind !== "tool"
+    || presentation.busy
+    || !ACTIVE_TOOL_PRESENTATION_STATES.has(part.state)
+  ) {
+    return part;
+  }
+  const state: AgentToolPart["state"] = presentation.phase === "cancelled"
+    ? "cancelled"
+    : presentation.phase === "failed"
+      ? "failed"
+      : "outcome-unknown";
+  return { ...part, state };
+}
+
 /** Projects durable messages plus the active normalized agent run into native DOM. */
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
@@ -143,7 +236,13 @@ export class AgentConversationRenderer extends Component {
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activePartRefs = new Map<string, AgentPart>();
   private readonly activeToolGroupRefs = new Map<string, readonly AgentToolPart[]>();
-  private readonly activeActivityNodes = new Map<string, HTMLElement>();
+  private readonly activeToolErrorSuppression = new Map<string, boolean>();
+  private activeTailStatus: HTMLElement | null = null;
+  private historyRows = new Map<string, Readonly<{
+    fingerprint: string;
+    node: HTMLElement;
+  }>>();
+  private historyMessageIds: ReadonlySet<string> = new Set<string>();
   private inlineMessageEdit: AgentInlineMessageEdit | null = null;
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
@@ -153,13 +252,17 @@ export class AgentConversationRenderer extends Component {
   private suppressedEditorKeyupTimer: number | null = null;
   private inlineEditorShortcutCleanup: (() => void) | null = null;
   private readonly copyFeedbackTimers = new Map<HTMLButtonElement, number>();
+  private readonly liveMarkdown: LiveMarkdownRenderer;
   private renderGeneration = 0;
+  private lifecycleGeneration = 0;
+  private renderingEnabled = true;
 
   constructor(parent: HTMLElement, private readonly options: AgentConversationRendererOptions) {
     super();
     this.element = parent.createDiv({
       cls: "systemsculpt-agent-conversation",
       attr: {
+        "data-testid": "chat.scroller",
         role: "log",
         ...(options.labelledBy
           ? { "aria-labelledby": options.labelledBy }
@@ -176,11 +279,29 @@ export class AgentConversationRenderer extends Component {
     };
     this.element.addEventListener("keyup", containEditorKeyup, true);
     this.register(() => this.element.removeEventListener("keyup", containEditorKeyup, true));
+    this.liveMarkdown = new LiveMarkdownRenderer({
+      render: async (markdown, staging, component) => {
+        await MarkdownRenderer.render(
+          this.options.app,
+          markdown,
+          staging,
+          this.options.sourcePath(),
+          component,
+        );
+        this.enhanceCodeBlocks(staging);
+      },
+    });
+    this.addChild(this.liveMarkdown);
   }
 
   public async renderHistory(messages: readonly ChatMessage[]): Promise<void> {
+    if (!this.renderingEnabled) return;
+    const lifecycleGeneration = this.lifecycleGeneration;
     const generation = ++this.renderGeneration;
-    this.clearInlineEditorShortcutGuard();
+    const isCurrent = (): boolean =>
+      this.renderingEnabled
+      && lifecycleGeneration === this.lifecycleGeneration
+      && generation === this.renderGeneration;
     if (
       this.inlineMessageEdit
       && !messages.some((message) =>
@@ -189,8 +310,15 @@ export class AgentConversationRenderer extends Component {
       this.inlineMessageEdit = null;
     }
     const nextHistory = createSurfaceElement(this.historyRoot.ownerDocument, "div");
+    const nextRows = new Map<string, Readonly<{
+      fingerprint: string;
+      node: HTMLElement;
+    }>>();
+    const nextMessageIds = new Set<string>();
+    const desiredRows: HTMLElement[] = [];
+    let hasInlineEdit = false;
     for (let index = 0; index < messages.length;) {
-      if (generation !== this.renderGeneration) return;
+      if (!isCurrent()) return;
       const message = messages[index];
       index += 1;
       if (message.role !== "user" && message.role !== "assistant") continue;
@@ -225,11 +353,27 @@ export class AgentConversationRenderer extends Component {
         copyText,
       };
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
+      for (const entry of turnMessages) nextMessageIds.add(entry.message_id);
       const anchorMessage = turnMessages[0];
       const inlineEdit = message.role === "user"
         && this.inlineMessageEdit?.messageId === anchorMessage.message_id
         ? this.inlineMessageEdit
         : null;
+      hasInlineEdit ||= inlineEdit !== null;
+      const rowKey = JSON.stringify({
+        role: message.role,
+        messageIds: turnMessages.map((entry) => entry.message_id),
+      });
+      const fingerprint = JSON.stringify({
+        messages: turnMessages,
+        inlineEdit,
+      });
+      const existing = this.historyRows.get(rowKey);
+      if (existing?.fingerprint === fingerprint) {
+        nextRows.set(rowKey, existing);
+        desiredRows.push(existing.node);
+        continue;
+      }
       const row = nextHistory.createDiv({
         cls: [
           "systemsculpt-agent-turn",
@@ -257,12 +401,14 @@ export class AgentConversationRenderer extends Component {
           }];
         });
         await this.renderHistoricalParts(body, turnParts);
+        if (!isCurrent()) return;
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
           this.renderInlineMessageEditor(body, inlineEdit);
         } else if (content.markdown.trim()) {
           await this.renderMarkdown(content.markdown, body);
+          if (!isCurrent()) return;
         }
         if (content.attachments.length > 0) this.renderMessageAttachments(body, content.attachments);
       }
@@ -273,9 +419,15 @@ export class AgentConversationRenderer extends Component {
           semantics.copyText,
         );
       }
+      const rendered = { fingerprint, node: row };
+      nextRows.set(rowKey, rendered);
+      desiredRows.push(row);
     }
-    if (generation !== this.renderGeneration) return;
-    this.historyRoot.replaceChildren(...Array.from(nextHistory.childNodes));
+    if (!isCurrent()) return;
+    this.reconcileChildren(this.historyRoot, desiredRows);
+    this.historyRows = nextRows;
+    this.historyMessageIds = nextMessageIds;
+    if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
   }
 
   public setInlineMessageEdit(edit: AgentInlineMessageEdit | null): void {
@@ -333,27 +485,14 @@ export class AgentConversationRenderer extends Component {
       parts,
       (part) => part.type === "tool_call" ? this.historicalToolPart(part.data) : null,
     );
-    const activityEntries = timelineEntries.filter((entry) =>
-      entry.kind === "tools"
-      || (entry.item.type === "reasoning"));
-    let renderedActivity = false;
 
-    for (const part of parts) {
-      if (part.type === "reasoning" || part.type === "tool_call") {
-        if (renderedActivity) continue;
-        const activity = this.createActivity(parent, "Done");
-        for (const entry of activityEntries) {
-          if (entry.kind === "item") {
-            await this.renderHistoricalPart(activity.body, entry.item);
-            continue;
-          }
-          const node = activity.body.createDiv({ cls: "systemsculpt-agent-part is-tool" });
-          await this.renderTool(node, entry.tools);
-        }
-        renderedActivity = true;
+    for (const entry of timelineEntries) {
+      if (entry.kind === "item") {
+        await this.renderHistoricalPart(parent, entry.item);
         continue;
       }
-      await this.renderHistoricalPart(parent, part);
+      const node = parent.createDiv({ cls: "systemsculpt-agent-part is-tool" });
+      await this.renderTool(node, entry.tools);
     }
   }
 
@@ -361,88 +500,151 @@ export class AgentConversationRenderer extends Component {
     snapshot: AgentConversationSnapshot,
     presentation: AgentConversationPresentation,
   ): Promise<void> {
+    if (!this.renderingEnabled) return;
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const isCurrent = (): boolean =>
+      this.renderingEnabled && lifecycleGeneration === this.lifecycleGeneration;
     this.element.setAttribute("aria-busy", String(presentation.busy));
     const body = this.ensureActiveTurn(snapshot.turnId);
     const wantedParts = new Set<string>();
-    const wantedActivities = new Set<string>();
-    const orderedParts = [...presentation.visibleParts];
+    const orderedParts = presentation.visibleParts
+      .map((part) => terminalToolPresentation(part, presentation))
+      .map((part, index) => ({ part, index }))
+      .sort((left, right) =>
+        left.part.order - right.part.order || left.index - right.index)
+      .map(({ part }) => part)
+      // History and the live run are sibling containers. Once a part's
+      // message is rendered in the committed transcript above, its live copy
+      // would show the same content twice; only parts history cannot carry
+      // (the terminal error and its Retry affordance) may stay.
+      .filter((part) =>
+        part.kind === "error" || !this.historyMessageIds.has(part.messageId));
+    const terminalErrors = orderedParts.filter(
+      (part): part is Extract<AgentPart, { kind: "error" }> => part.kind === "error",
+    );
+    const showTerminalStatus = presentation.phase === "cancelled"
+      || (presentation.phase === "failed" && terminalErrors.length === 0);
+    if (presentation.busy || showTerminalStatus) {
+      this.ensureTailStatus(presentation);
+    } else if (this.activeTailStatus) {
+      this.activeTailStatus.remove();
+      this.activeTailStatus = null;
+    }
+    const duplicatesTerminalError = (part: AgentToolPart): boolean =>
+      Boolean(part.error && terminalErrors.some((terminal) =>
+        visibleToolError(part.error) === presentAgentError(
+          terminal.error,
+          terminal.retryable,
+        ).message));
     const lanes: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
+    let firstRenderError: unknown;
 
     const timelineEntries = groupConsecutiveToolActivity(
       orderedParts,
       (part) => part.kind === "tool" ? part : null,
       presentation.phase === "completed",
     );
-    const activityEntries = timelineEntries.filter((entry) =>
-      entry.kind === "tools" || entry.item.kind === "reasoning");
-    let renderedActivity = false;
 
-    for (const part of orderedParts) {
-      if (part.kind !== "reasoning" && part.kind !== "tool") {
-        const key = `${part.kind}:${part.id}`;
-        const node = await this.renderActivePart(part, key);
+    for (const entry of timelineEntries) {
+      if (entry.kind === "item") {
+        const key = `${entry.item.kind}:${entry.item.id}`;
         wantedParts.add(key);
-        lanes.push({ key, node });
+        try {
+          const node = await this.renderActivePart(entry.item, key);
+          if (!isCurrent()) return;
+          lanes.push({
+            key,
+            node,
+          });
+        } catch (error) {
+          if (!isCurrent()) return;
+          firstRenderError ??= error;
+          const node = this.activeNodes.get(key);
+          if (node) lanes.push({ key, node });
+        }
         continue;
       }
-
-      if (renderedActivity) continue;
-      const activityKey = `activity:${snapshot.turnId ?? "active"}`;
-      wantedActivities.add(activityKey);
-      const activity = this.ensureActivity(activityKey, presentation);
-      const activityBody = activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-body")!;
-      const activityNodes: HTMLElement[] = [];
-      for (const entry of activityEntries) {
-        if (entry.kind === "item") {
-          const key = `${entry.item.kind}:${entry.item.id}`;
-          wantedParts.add(key);
-          activityNodes.push(await this.renderActivePart(entry.item, key));
-          continue;
-        }
-        const first = entry.tools[0];
-        const key = `tool:${first.id}`;
-        wantedParts.add(key);
-        activityNodes.push(await this.renderActiveToolGroup(entry.tools, key));
+      const first = entry.tools[0];
+      const key = `tool:${first.callId}`;
+      wantedParts.add(key);
+      try {
+        const node = await this.renderActiveToolGroup(
+          entry.tools,
+          key,
+          entry.tools.some(duplicatesTerminalError),
+        );
+        if (!isCurrent()) return;
+        lanes.push({
+          key,
+          node,
+        });
+      } catch (error) {
+        if (!isCurrent()) return;
+        firstRenderError ??= error;
+        const node = this.activeNodes.get(key);
+        if (node) lanes.push({ key, node });
       }
-      this.reconcileChildren(activityBody, activityNodes);
-      lanes.push({ key: activityKey, node: activity });
-      renderedActivity = true;
+    }
+    if (!isCurrent()) return;
+    if (presentation.busy || showTerminalStatus) {
+      lanes.push({
+        key: "tail-status",
+        node: this.ensureTailStatus(presentation),
+      });
     }
 
     this.reconcileChildren(body, lanes.map((lane) => lane.node));
-    for (const [key, node] of this.activeActivityNodes) {
-      if (!wantedActivities.has(key)) {
-        node.remove();
-        this.activeActivityNodes.delete(key);
-      }
-    }
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
+        this.liveMarkdown.forget(node);
         node.remove();
         this.activeNodes.delete(key);
         this.activePartRefs.delete(key);
         this.activeToolGroupRefs.delete(key);
+        this.activeToolErrorSuppression.delete(key);
       }
     }
+    if (typeof firstRenderError !== "undefined") throw firstRenderError;
   }
 
-  private async renderActivePart(part: AgentPart, key: string): Promise<HTMLElement> {
+  private async renderActivePart(
+    part: AgentPart,
+    key: string,
+    suppressToolError = false,
+  ): Promise<HTMLElement> {
     let node = this.activeNodes.get(key);
     if (!node) {
       node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
       node.addClass("systemsculpt-agent-part", `is-${part.kind}`);
       node.dataset.partKey = key;
       this.activeNodes.set(key, node);
+      this.insertActiveNode(node);
     }
     const candidate = node.ownerDocument.activeElement;
     const activeElement = candidate?.nodeType === 1 ? candidate as HTMLElement : null;
     const preservedFocusKey = activeElement && node.contains(activeElement)
       ? activeElement.dataset.focusKey
       : undefined;
-    if (this.activePartRefs.get(key) !== part || this.activeToolGroupRefs.has(key)) {
-      await this.renderPart(node, part, this.activePartRefs.get(key));
+    const suppressionChanged = part.kind === "tool"
+      && this.activeToolErrorSuppression.get(key) !== suppressToolError;
+    if (
+      !agentPartsEqual(this.activePartRefs.get(key), part)
+      || this.activeToolGroupRefs.has(key)
+      || suppressionChanged
+    ) {
+      await this.renderPart(
+        node,
+        part,
+        this.activePartRefs.get(key),
+        suppressToolError,
+      );
       this.activePartRefs.set(key, part);
       this.activeToolGroupRefs.delete(key);
+      if (part.kind === "tool") {
+        this.activeToolErrorSuppression.set(key, suppressToolError);
+      } else {
+        this.activeToolErrorSuppression.delete(key);
+      }
     }
     if (preservedFocusKey) {
       node.querySelector<HTMLElement>(`[data-focus-key="${preservedFocusKey}"]`)?.focus();
@@ -453,25 +655,40 @@ export class AgentConversationRenderer extends Component {
   private async renderActiveToolGroup(
     parts: readonly AgentToolPart[],
     key: string,
+    suppressToolError: boolean,
   ): Promise<HTMLElement> {
-    if (parts.length === 1) return this.renderActivePart(parts[0], key);
+    if (parts.length === 1) {
+      return this.renderActivePart(parts[0], key, suppressToolError);
+    }
     let node = this.activeNodes.get(key);
     if (!node) {
       node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
       node.dataset.partKey = key;
       this.activeNodes.set(key, node);
+      this.insertActiveNode(node);
     }
     const previous = this.activeToolGroupRefs.get(key);
     const unchanged = previous?.length === parts.length
-      && previous.every((part, index) => part === parts[index]);
-    if (!unchanged) {
-      node.empty();
-      node.className = "systemsculpt-agent-part is-tool";
-      await this.renderTool(node, parts);
+      && previous.every((part, index) => agentPartsEqual(part, parts[index]));
+    const suppressionChanged =
+      this.activeToolErrorSuppression.get(key) !== suppressToolError;
+    if (!unchanged || suppressionChanged) {
+      await this.renderTool(node, parts, suppressToolError);
       this.activePartRefs.delete(key);
       this.activeToolGroupRefs.set(key, parts);
+      this.activeToolErrorSuppression.set(key, suppressToolError);
     }
     return node;
+  }
+
+  private insertActiveNode(node: HTMLElement): void {
+    if (!this.activeBody) return;
+    this.activeBody.insertBefore(
+      node,
+      this.activeTailStatus?.parentElement === this.activeBody
+        ? this.activeTailStatus
+        : null,
+    );
   }
 
   private ensureActiveTurn(turnId: string | null): HTMLElement {
@@ -489,43 +706,63 @@ export class AgentConversationRenderer extends Component {
     return this.activeBody;
   }
 
-  private ensureActivity(
-    key: string,
+  private ensureTailStatus(
     presentation: AgentConversationPresentation,
   ): HTMLElement {
-    let activity = this.activeActivityNodes.get(key);
-    if (!activity) {
-      activity = this.createActivity(this.activeRoot, presentation.activityStatus).element;
-      activity.dataset.activityKey = key;
-      this.activeActivityNodes.set(key, activity);
+    let status = this.activeTailStatus;
+    if (!status) {
+      status = this.activeRoot.createDiv({
+        cls: "systemsculpt-agent-tail-status",
+        attr: {
+          role: "status",
+          "aria-live": "polite",
+          "aria-atomic": "true",
+        },
+      });
+      status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
+      status.createSpan({ cls: "systemsculpt-agent-tail-status-label" });
+      this.activeTailStatus = status;
     }
-    activity.className = `systemsculpt-agent-activity is-${presentation.phase}`;
-    activity.setAttribute("aria-label", `Agent activity: ${presentation.activityStatus}`);
-    const state = activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
-    state?.setText(presentation.activityStatus);
-    activity.querySelector<HTMLElement>(".systemsculpt-agent-activity-header")?.setAttrs({
-      role: "status",
-      "aria-live": "polite",
-      "aria-atomic": "true",
-    });
-    return activity;
-  }
-
-  private createActivity(
-    parent: HTMLElement,
-    state: string,
-  ): Readonly<{ element: HTMLElement; body: HTMLElement }> {
-    const element = parent.createDiv({
-      cls: "systemsculpt-agent-activity",
-      attr: { "aria-label": `Agent activity: ${state}` },
-    });
-    const header = element.createDiv({ cls: "systemsculpt-agent-activity-header" });
-    const icon = header.createSpan({ cls: "systemsculpt-agent-activity-icon" });
-    setIcon(icon, "sparkles");
-    header.createEl("strong", { cls: "systemsculpt-agent-activity-label", text: "Activity" });
-    header.createSpan({ cls: "systemsculpt-agent-activity-state", text: state });
-    const body = element.createDiv({ cls: "systemsculpt-agent-activity-body" });
-    return { element, body };
+    status.className =
+      `systemsculpt-agent-tail-status is-${presentation.phase}`;
+    const statusChanged =
+      status.dataset.status !== presentation.activityStatus;
+    if (statusChanged) {
+      status.dataset.status = presentation.activityStatus;
+      status.setAttribute(
+        "aria-label",
+        `Agent status: ${presentation.activityStatus}`,
+      );
+      status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label")
+        ?.setText(presentation.activityStatus);
+    }
+    const icon = status.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tail-status-icon",
+    );
+    const iconName = presentation.phase === "cancelled"
+      ? "circle-stop"
+      : presentation.phase === "failed"
+        ? "circle-alert"
+        : presentation.phase === "awaiting-approval"
+          ? "shield-question"
+          : "loader-circle";
+    if (icon && icon.dataset.iconState !== iconName) {
+      setIcon(icon, iconName);
+      icon.dataset.iconState = iconName;
+    }
+    icon?.classList.toggle(
+      "is-animated",
+      presentation.busy && presentation.phase !== "awaiting-approval",
+    );
+    status.setAttribute(
+      "role",
+      presentation.phase === "failed" ? "alert" : "status",
+    );
+    status.setAttribute(
+      "aria-live",
+      presentation.phase === "failed" ? "assertive" : "polite",
+    );
+    return status;
   }
 
   private reconcileChildren(parent: HTMLElement, desired: readonly HTMLElement[]): void {
@@ -542,72 +779,97 @@ export class AgentConversationRenderer extends Component {
   }
 
   public clearActive(): void {
+    this.liveMarkdown.clear();
     this.activeRoot.empty();
     this.activeTurn = null;
     this.activeBody = null;
     this.activeTurnId = null;
-    this.activeActivityNodes.clear();
+    this.activeTailStatus = null;
     this.activeNodes.clear();
     this.activePartRefs.clear();
     this.activeToolGroupRefs.clear();
+    this.activeToolErrorSuppression.clear();
     this.element.setAttribute("aria-busy", "false");
+  }
+
+  public showCompletedRenderFallback(): void {
+    this.element.setAttribute("aria-busy", "false");
+    if (this.activeRoot.querySelector(".systemsculpt-agent-render-fallback")) return;
+    this.activeRoot.createDiv({
+      cls: "systemsculpt-agent-render-fallback systemsculpt-agent-banner is-error",
+      text: "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+      attr: {
+        role: "alert",
+        "aria-live": "assertive",
+      },
+    });
   }
 
   /*
    * Stable part nodes are reconciled above. Only the changed part subtree is
    * refreshed, so adding a tool does not remount earlier text or disclosures.
    */
-  private async renderPart(node: HTMLElement, part: AgentPart, previousPart?: AgentPart): Promise<void> {
-    const previousDetails = part.kind === "reasoning"
-      ? node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")
-      : null;
-    const previousOpen = previousDetails?.open;
+  private async renderPart(
+    node: HTMLElement,
+    part: AgentPart,
+    previousPart?: AgentPart,
+    suppressToolError = false,
+  ): Promise<void> {
+    if (part.kind === "text") {
+      node.className = "systemsculpt-agent-part is-text";
+      node.classList.toggle("is-streaming", part.state === "streaming");
+      if (part.state === "streaming") {
+        this.liveMarkdown.stream(node, part.markdown);
+        return;
+      }
+      await this.liveMarkdown.settle(node, part.markdown);
+      return;
+    }
+    if (
+      part.kind === "reasoning"
+      && previousPart?.kind === "reasoning"
+      && await this.updateReasoning(node, part)
+    ) {
+      return;
+    }
+    if (part.kind === "tool") {
+      await this.renderTool(node, part, suppressToolError);
+      return;
+    }
     node.empty();
     node.className = `systemsculpt-agent-part is-${part.kind}`;
     switch (part.kind) {
       case "reasoning": {
-        const justCompleted = previousPart?.kind === "reasoning"
-          && previousPart.state === "streaming"
-          && part.state === "complete";
         await this.renderReasoning(
           node,
           part.summary,
           part.state === "streaming",
-          justCompleted ? false : previousOpen,
         );
         return;
       }
-      case "text":
-        node.classList.toggle("is-streaming", part.state === "streaming");
-        await this.renderMarkdown(part.markdown, node);
-        return;
-      case "status": {
-        node.classList.add(`is-${part.phase}`);
-        node.setAttribute("role", "status");
-        node.setAttribute("aria-live", "polite");
-        const icon = node.createSpan({ cls: "systemsculpt-agent-status-icon" });
-        setIcon(icon, part.phase === "complete" ? "check" : "loader-circle");
-        node.createSpan({ text: part.label || "Working…" });
-        return;
-      }
-      case "tool":
-        await this.renderTool(node, part);
-        return;
       case "error": {
         node.setAttrs({ role: "alert", "aria-live": "assertive" });
-        const errorIcon = node.createSpan();
+        const errorIcon = node.createSpan({ cls: "systemsculpt-agent-error-icon" });
         setIcon(errorIcon, "circle-alert");
-        const copy = node.createDiv();
-        copy.createEl("strong", { text: "Agent stopped" });
-        copy.createDiv({ text: part.error.message });
-        if (part.retryable && part.retryMessageId && this.options.onRetryMessage) {
+        const copy = node.createDiv({ cls: "systemsculpt-agent-error-copy" });
+        const presented = presentAgentError(part.error, part.retryable);
+        copy.createEl("strong", {
+          cls: "systemsculpt-agent-error-heading",
+          text: presented.heading,
+        });
+        copy.createDiv({
+          cls: "systemsculpt-agent-error-message",
+          text: presented.message,
+        });
+        if (part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
           const retry = createUiAction(copy, {
             label: "Retry",
+            testId: "chat.turn.retry-failed",
             tone: "primary",
             size: "small",
           });
           retry.addClass("systemsculpt-agent-error-retry");
-          retry.onclick = () => void this.options.onRetryMessage?.(part.retryMessageId!);
+          retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
         }
         return;
       }
@@ -617,11 +879,22 @@ export class AgentConversationRenderer extends Component {
   }
 
   public override onunload(): void {
+    this.renderingEnabled = false;
+    this.lifecycleGeneration += 1;
+    this.renderGeneration += 1;
+    this.liveMarkdown.clear();
     const ownerWindow = getSurfaceOwnerWindow(this.element);
     for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
     this.copyFeedbackTimers.clear();
+    this.historyRows.clear();
+    this.historyMessageIds = new Set<string>();
     this.clearInlineEditorShortcutGuard();
     this.clearSuppressedEditorKeyup();
+  }
+
+  public override onload(): void {
+    this.renderingEnabled = true;
+    this.lifecycleGeneration += 1;
   }
 
   private async renderReasoning(
@@ -646,52 +919,196 @@ export class AgentConversationRenderer extends Component {
     setIcon(disclosure, "chevron-right");
     const icon = header.createSpan({ cls: "systemsculpt-agent-reasoning-icon" });
     setIcon(icon, streaming ? "loader-circle" : "sparkles");
+    icon.dataset.iconState = streaming ? "streaming" : "complete";
     icon.classList.toggle("is-animated", streaming);
     header.createEl("strong", { text: streaming ? "Thinking" : "Reasoning" });
     const body = details.createDiv({ cls: "systemsculpt-agent-reasoning-body" });
+    if (streaming) {
+      this.liveMarkdown.stream(body, summary);
+      return;
+    }
     if (summary.trim()) await this.renderMarkdown(summary, body);
+  }
+
+  private async updateReasoning(
+    node: HTMLElement,
+    current: Extract<AgentPart, { kind: "reasoning" }>,
+  ): Promise<boolean> {
+    const details = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details");
+    const header = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-header");
+    const icon = header?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-icon");
+    const label = header?.querySelector<HTMLElement>("strong");
+    const body = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-body");
+    if (!details || !header || !icon || !label || !body) return false;
+
+    const streaming = current.state === "streaming";
+    node.className = "systemsculpt-agent-part is-reasoning";
+    node.classList.toggle("is-streaming", streaming);
+    header.setAttribute("aria-label", streaming ? "Thinking summary" : "Reasoning summary");
+    label.setText(streaming ? "Thinking" : "Reasoning");
+    const iconState = streaming ? "streaming" : "complete";
+    if (icon.dataset.iconState !== iconState) {
+      setIcon(icon, streaming ? "loader-circle" : "sparkles");
+      icon.dataset.iconState = iconState;
+    }
+    icon.classList.toggle("is-animated", streaming);
+    if (current.state === "streaming") {
+      this.liveMarkdown.stream(body, current.summary);
+      return true;
+    }
+    await this.liveMarkdown.settle(body, current.summary);
+    return true;
   }
 
   private async renderTool(
     node: HTMLElement,
     partOrParts: AgentToolPart | readonly AgentToolPart[],
+    suppressToolError = false,
   ): Promise<void> {
     const parts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
     const part = parts[0];
     if (!part) return;
-    node.classList.add(`is-${part.state}`);
-    node.classList.toggle("is-grouped", parts.length > 1);
-    if (parts.length > 1) node.dataset.toolCount = String(parts.length);
     const presentation = presentAgentToolGroup(parts);
-    const shell = node.createDiv({ cls: "systemsculpt-agent-tool" });
-    const header = shell.createDiv({
-      cls: "systemsculpt-agent-tool-header",
-      attr: {
-        "aria-label": [
-          presentation.label,
-          presentation.summary,
-          presentation.stateLabel,
-        ].filter(Boolean).join(", "),
-      },
-    });
-    const icon = header.createSpan({ cls: "systemsculpt-agent-tool-icon" });
-    setIcon(icon, presentation.icon);
-    icon.classList.toggle("is-animated", presentation.animated);
-    header.createEl("strong", { text: presentation.label });
-    if (presentation.summary) {
-      header.createSpan({ cls: "systemsculpt-agent-tool-summary", text: presentation.summary });
+    node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
+    node.classList.toggle("is-grouped", parts.length > 1);
+    if (parts.length > 1) {
+      node.dataset.toolCount = String(parts.length);
+    } else {
+      delete node.dataset.toolCount;
     }
-    header.createSpan({ cls: "systemsculpt-agent-tool-state", text: presentation.stateLabel });
+    const webSearchDisclosure = presentation.canonicalName === "web_search";
+    let shell = node.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
+    let header = shell?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-header",
+    ) ?? null;
+    let disclosureIcon = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-disclosure",
+    ) ?? null;
+    let icon = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-icon",
+    ) ?? null;
+    let label = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-label",
+    ) ?? null;
+    let summary = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-summary",
+    ) ?? null;
+    let state = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-state",
+    ) ?? null;
+    let support = shell?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-support",
+    ) ?? null;
+    const wrongShellType = shell
+      ? (shell.tagName === "DETAILS") !== webSearchDisclosure
+      : false;
+    if (
+      !shell
+      || wrongShellType
+      || !header
+      || (webSearchDisclosure && !disclosureIcon)
+      || !icon
+      || !label
+      || !summary
+      || !state
+      || !support
+    ) {
+      node.empty();
+      shell = webSearchDisclosure
+        ? node.createEl("details", { cls: "systemsculpt-agent-tool is-disclosure" })
+        : node.createDiv({ cls: "systemsculpt-agent-tool" });
+      header = webSearchDisclosure
+        ? shell.createEl("summary", { cls: "systemsculpt-agent-tool-header" })
+        : shell.createDiv({ cls: "systemsculpt-agent-tool-header" });
+      if (webSearchDisclosure) {
+        disclosureIcon = header.createSpan({
+          cls: "systemsculpt-agent-tool-disclosure",
+        });
+        setIcon(disclosureIcon, "chevron-right");
+        header.dataset.focusKey = "web-search-summary";
+      } else {
+        disclosureIcon = null;
+      }
+      icon = header.createSpan({ cls: "systemsculpt-agent-tool-icon" });
+      label = header.createEl("strong", {
+        cls: "systemsculpt-agent-tool-label",
+      });
+      summary = header.createSpan({
+        cls: "systemsculpt-agent-tool-summary",
+      });
+      state = header.createSpan({ cls: "systemsculpt-agent-tool-state" });
+      support = shell.createDiv({ cls: "systemsculpt-agent-tool-support" });
+    }
 
-    const support = shell.createDiv({ cls: "systemsculpt-agent-tool-support" });
-    if (parts.length === 1 && part.error) {
+    const ariaLabel = [
+      presentation.label,
+      presentation.summary,
+      presentation.stateLabel,
+    ].filter(Boolean).join(", ");
+    if (header.getAttribute("aria-label") !== ariaLabel) {
+      header.setAttribute("aria-label", ariaLabel);
+    }
+    if (icon.dataset.iconState !== presentation.icon) {
+      setIcon(icon, presentation.icon);
+      icon.dataset.iconState = presentation.icon;
+    }
+    icon.classList.toggle("is-animated", presentation.animated);
+    if (label.textContent !== presentation.label) label.setText(presentation.label);
+    if (presentation.summary) {
+      if (summary.textContent !== presentation.summary) summary.setText(presentation.summary);
+      summary.toggleAttribute("hidden", false);
+    } else {
+      if (summary.textContent) summary.setText("");
+      summary.toggleAttribute("hidden", true);
+    }
+    if (state.textContent !== presentation.stateLabel) state.setText(presentation.stateLabel);
+
+    support.empty();
+    if (webSearchDisclosure) {
+      const queryPanel = support.createDiv({
+        cls: "systemsculpt-agent-web-search",
+        attr: {
+          role: "group",
+          "aria-label": presentation.queries.length === 1
+            ? "Web search query"
+            : "Web search queries",
+        },
+      });
+      queryPanel.createDiv({
+        cls: "systemsculpt-agent-web-search-label",
+        text: presentation.queries.length === 1 ? "Query" : "Queries",
+      });
+      const queryList = queryPanel.createEl("ol", {
+        cls: "systemsculpt-agent-web-search-queries",
+      });
+      for (const query of presentation.queries) {
+        const item = queryList.createEl("li");
+        item.setText(query ?? (
+          presentation.animated
+            ? "Query details will appear when this search finishes."
+            : "Query details unavailable."
+        ));
+        item.classList.toggle("is-placeholder", query === null);
+      }
+    }
+    node.querySelectorAll(":scope > .systemsculpt-agent-approval")
+      .forEach((approval) => approval.remove());
+    if (parts.length === 1 && part.error && !suppressToolError) {
       support.createDiv({
         cls: "systemsculpt-agent-tool-error",
-        text: part.error.message,
+        text: presentAgentErrorMessage(
+          part.error.message,
+          part.error.retryable === true,
+        ),
         attr: { role: "alert" },
       });
     }
-    if (parts.length === 1 && part.state === "approval-required" && part.approvalId) {
+    if (
+      parts.length === 1
+      && part.location === "vault"
+      && part.state === "approval-required"
+      && part.approvalId
+    ) {
       const approval = node.createDiv({
         cls: "systemsculpt-agent-approval",
         attr: {
@@ -705,11 +1122,13 @@ export class AgentConversationRenderer extends Component {
       const actions = approval.createDiv({ cls: "systemsculpt-agent-approval-actions" });
       const deny = createUiAction(actions, {
         label: "Deny",
+        testId: "chat.approval.deny",
         size: "small",
       });
       deny.setAttr("data-focus-key", "tool-deny");
       const approve = createUiAction(actions, {
         label: "Allow once",
+        testId: "chat.approval.allow-once",
         tone: "primary",
         size: "small",
       });
@@ -719,6 +1138,7 @@ export class AgentConversationRenderer extends Component {
       if (presentation.canonicalName !== "trash") {
         const allowForChat = createUiAction(actions, {
           label: "Allow for chat",
+          testId: "chat.approval.allow-for-chat",
           size: "small",
         });
         allowForChat.setAttr("data-focus-key", "tool-allow-chat");
@@ -750,13 +1170,13 @@ export class AgentConversationRenderer extends Component {
     const copy = card.createDiv({ cls: "systemsculpt-agent-artifact-copy" });
     copy.createEl("strong", { text: artifact.title });
     if (artifact.description) copy.createDiv({ text: artifact.description });
+    if (!artifact.path?.trim()) return;
     const actions = card.createDiv({ cls: "systemsculpt-agent-artifact-actions" });
-    const open = button(actions, "Open", "arrow-up-right");
+    const open = button(actions, "chat.tool.file.open", "Open", "arrow-up-right");
     open.onclick = () => void this.options.onOpenArtifact(artifact);
-    if (artifact.path) {
-      const copyPath = button(actions, "Copy path", "copy");
-      copyPath.onclick = () => void this.options.onCopyArtifactPath(artifact);
-    }
+    const copyPath = button(actions, "chat.tool.file.copy-path", "Copy path", "copy");
+    copyPath.setAttrs({ "aria-label": "Copy path", "aria-live": "polite" });
+    copyPath.onclick = () => void this.copyArtifactPath(copyPath, artifact);
   }
 
   private historicalToolPart(tool: ToolCall): AgentToolPart {
@@ -828,6 +1248,7 @@ export class AgentConversationRenderer extends Component {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
         label: `Copy ${subject}`,
+        testId: "chat.turn.copy",
         icon: "copy",
         size: "icon",
       });
@@ -838,6 +1259,7 @@ export class AgentConversationRenderer extends Component {
     if (canRetry) {
       const retry = createUiAction(actions, {
         label: "Edit and resubmit",
+        testId: "chat.turn.edit-resubmit",
         icon: "pencil",
         size: "icon",
       });
@@ -896,10 +1318,12 @@ export class AgentConversationRenderer extends Component {
     const actions = editor.createDiv({ cls: "systemsculpt-agent-message-editor-actions" });
     const cancel = createUiAction(actions, {
       label: "Cancel",
+      testId: "chat.editor.cancel",
       size: "small",
     });
     const save = createUiAction(actions, {
       label: "Save and resubmit",
+      testId: "chat.editor.save-resubmit",
       tone: "primary",
       size: "small",
     });
@@ -1051,9 +1475,17 @@ export class AgentConversationRenderer extends Component {
   }
 
   private async renderMarkdown(markdown: string, parent: HTMLElement): Promise<void> {
-    parent.empty();
-    await MarkdownRenderer.render(this.options.app, markdown, parent, this.options.sourcePath(), this);
-    this.enhanceCodeBlocks(parent);
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const staging = createSurfaceElement(parent.ownerDocument, "div");
+    await MarkdownRenderer.render(this.options.app, markdown, staging, this.options.sourcePath(), this);
+    if (
+      !this.renderingEnabled
+      || lifecycleGeneration !== this.lifecycleGeneration
+    ) {
+      return;
+    }
+    this.enhanceCodeBlocks(staging);
+    parent.replaceChildren(...Array.from(staging.childNodes));
   }
 
   private enhanceCodeBlocks(parent: HTMLElement): void {
@@ -1067,6 +1499,7 @@ export class AgentConversationRenderer extends Component {
 
       const copyButton = createUiAction(pre, {
         label: "Copy",
+        testId: "chat.code.copy",
         icon: "copy",
         size: "small",
       });
@@ -1138,6 +1571,45 @@ export class AgentConversationRenderer extends Component {
       if (!button.isConnected) return;
       button.removeClass("is-copied", "is-copy-failed");
       updateUiAction(button, { label: `Copy ${subject}`, icon: "copy" });
+    }, copied ? 1_800 : 3_000);
+    this.copyFeedbackTimers.set(button, timer);
+  }
+
+  private async copyArtifactPath(
+    button: HTMLButtonElement,
+    artifact: AgentArtifact,
+  ): Promise<void> {
+    const attempt = String(Number(button.dataset.copyAttempt ?? "0") + 1);
+    button.dataset.copyAttempt = attempt;
+    let copied = false;
+    try {
+      copied = await this.options.onCopyArtifactPath(artifact) === true;
+    } catch {
+      copied = false;
+    }
+    if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
+
+    const ownerWindow = getSurfaceOwnerWindow(button);
+    const previousTimer = this.copyFeedbackTimers.get(button);
+    if (typeof previousTimer === "number") ownerWindow.clearTimeout(previousTimer);
+
+    button.classList.toggle("is-copied", copied);
+    button.classList.toggle("is-copy-failed", !copied);
+    updateUiAction(button, {
+      label: copied ? "Path copied" : "Could not copy path. Try again",
+      icon: copied ? "check" : "circle-alert",
+    });
+    button.setAttribute(
+      "aria-label",
+      copied ? "Path copied" : "Could not copy path. Try again",
+    );
+
+    const timer = ownerWindow.setTimeout(() => {
+      this.copyFeedbackTimers.delete(button);
+      if (!button.isConnected) return;
+      button.removeClass("is-copied", "is-copy-failed");
+      updateUiAction(button, { label: "Copy path", icon: "copy" });
+      button.setAttribute("aria-label", "Copy path");
     }, copied ? 1_800 : 3_000);
     this.copyFeedbackTimers.set(button, timer);
   }

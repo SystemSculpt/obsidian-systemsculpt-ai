@@ -22,10 +22,11 @@
     "obsidian": "latest",
     "tslib": "2.8.1",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.44.1"
+    "typescript-eslint": "^8.44.1",
+    "ws": "^8.21.1"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=22.18.0"
   },
   "keywords": [],
   "license": "MIT",
@@ -34,7 +35,9 @@
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
-    "check": "npm run check:plugin:fast && npm run test:mobile:interactions && npm run test:chatview:critical && npm run test:mobile:bundle",
+    "build:local-agent": "node scripts/build-local-agent-plugin.mjs",
+    "build:staging": "node scripts/build-staging-plugin.mjs",
+    "check": "npm run check:plugin:fast && npm run test:mobile:interactions && npm run test:chatview:critical && npm run test:thin-agent:endurance && npm run test:mobile:bundle",
     "lint:obsidian": "eslint --cache --cache-location .cache/eslint/source.cache -c eslint.config.mjs --max-warnings 0 \"src/**/*.{ts,tsx,mts,cts}\"",
     "lint:obsidian:fix": "npm run lint:obsidian -- --fix",
     "lint:obsidian:meta": "eslint --cache --cache-location .cache/eslint/meta.cache -c eslint.meta.config.mjs --max-warnings 0 manifest.json LICENSE",
@@ -46,21 +49,27 @@
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",
     "check:types": "tsc --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.check.tsbuildinfo",
     "check:mobile": "node --test scripts/mobile-compatibility.test.mjs && npm run test:mobile:interactions && npm run build && npm run test:mobile:bundle",
-    "check:ci": "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical && npm run test:chatview:mutants && npm run test:unit:ci && npm run test:embeddings:ci && npm run test:integration:ci && npm run test:release-script",
+    "check:ci": "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical && npm run test:thin-agent:endurance && npm run test:chatview:mutants && npm run test:unit:ci && npm run test:embeddings:ci && npm run test:integration:ci && npm run test:release-script",
     "check:compat": "npm run check:plugin:fast && npm run test:chatview:compat && npm run test:integration:ci",
     "check:full": "npm run check:ci",
     "check:all": "npm run check:full",
-    "dev": "node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs development",
     "dev:watch:install": "node scripts/dev-watcher-service.mjs install",
+    "dev:watch:install:local-agent": "node scripts/dev-watcher-service.mjs install --target local-agent",
+    "dev:watch:install:staging": "node scripts/dev-watcher-service.mjs install --target staging",
     "dev:watch:status": "node scripts/dev-watcher-service.mjs status",
     "dev:watch:uninstall": "node scripts/dev-watcher-service.mjs uninstall",
+    "e2e": "node scripts/e2e/e2e.mjs",
     "sync:local": "node scripts/sync-local-vaults.mjs",
+    "sync:local:agent": "node scripts/sync-local-vaults.mjs --target local-agent",
+    "sync:local:staging": "node scripts/sync-local-vaults.mjs --target staging",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",
     "test:strict": "node scripts/jest.mjs --strict-console --config jest.config.cjs --passWithNoTests",
     "test:unit:ci": "node scripts/jest.mjs --strict-console --config jest.unit-ci.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:chatview:critical": "node scripts/jest.mjs --strict-console --config jest.chatview-critical-risk.config.cjs --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:chatview:compat": "node scripts/jest.mjs --strict-console --config jest.chatview-critical-compat.config.cjs --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:chatview:mutants": "node scripts/chatview-critical-mutants.mjs",
+    "test:thin-agent:endurance": "node scripts/jest.mjs --strict-console --config jest.thin-agent-endurance.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000",
     "test:debug": "node scripts/jest.mjs --debug-console --config jest.config.cjs --passWithNoTests",
     "test:serial": "node scripts/jest.mjs --config jest.config.cjs --runInBand --passWithNoTests",
     "test:watch": "node scripts/jest.mjs --config jest.config.cjs --watch",
@@ -75,9 +84,8 @@
     "test:mobile:interactions": "node scripts/jest.mjs --strict-console --config jest.mobile-interactions.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:embeddings:serial": "node scripts/jest.mjs --config jest.embeddings.config.cjs --runInBand --passWithNoTests",
     "test:release-script": "node --test scripts/build-provenance.test.mjs scripts/plugin-build-options.test.mjs scripts/plugin-artifacts.test.mjs scripts/release-plugin.test.mjs",
-    "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag",
-    "smoke:chat:live": "node scripts/live-chat-smoke.mjs"
+    "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag"
   },
   "type": "module",
-  "version": "6.2.7"
+  "version": "6.3.0"
 }

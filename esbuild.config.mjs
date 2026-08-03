@@ -1,9 +1,9 @@
 import esbuild from "esbuild";
 import process from "process";
 import {
-	CANONICAL_API_BASE_URL,
+	assertNoRetiredBuildOverrides,
 	createPluginBuildOptions,
-	normalizeApiBaseUrl,
+	resolvePluginBuildArguments,
 	resolvePluginBuildStamp,
 } from "./scripts/plugin-build-options.mjs";
 import fs from "fs";
@@ -13,10 +13,11 @@ import { buildCssArtifact } from "./scripts/build-css.mjs";
 import { assertSafePluginArtifactPathsForBuild } from "./scripts/plugin-artifacts.mjs";
 import { createBuildSyncController } from "./scripts/plugin-sync.mjs";
 
-const prod = (process.argv[2] === "production");
-const apiBaseUrl = normalizeApiBaseUrl(
-	process.env.SYSTEMSCULPT_API_BASE_URL || CANONICAL_API_BASE_URL,
-);
+assertNoRetiredBuildOverrides(process.env);
+const buildTarget = resolvePluginBuildArguments(process.argv.slice(2));
+const prod = buildTarget.production;
+const shouldWatch = buildTarget.watch;
+const apiBaseUrl = buildTarget.apiBaseUrl;
 const logger = new BuildLogger("Build");
 const cssLogger = new BuildLogger("CSS");
 assertSafePluginArtifactPathsForBuild({ root: process.cwd() });
@@ -27,17 +28,16 @@ const stylesOutputPath = path.join(process.cwd(), "styles.css");
 const manifestVersion = JSON.parse(
 	fs.readFileSync(path.join(process.cwd(), "manifest.json"), "utf8"),
 ).version;
-const buildStamp = resolvePluginBuildStamp({
-	version: manifestVersion,
-	override: process.env.SYSTEMSCULPT_BUILD_STAMP,
-	production: prod,
-});
+const buildStamp = buildTarget.releaseBuild
+	? resolvePluginBuildStamp({ version: manifestVersion, production: true })
+	: buildTarget.buildStamp;
 const syncQuiet = /^(?:1|true|yes|on)$/i.test(String(process.env.SYSTEMSCULPT_AUTO_SYNC_QUIET || "").trim());
 const buildSyncController = createBuildSyncController({
 	env: process.env,
 	root: process.cwd(),
 	logger,
 	quiet: syncQuiet,
+	apiBaseUrl,
 });
 
 const buildCSS = () => {
@@ -64,8 +64,10 @@ const watchCss = () => {
 
 const buildOptions = createPluginBuildOptions({
 	production: prod,
+	releaseBuild: buildTarget.releaseBuild,
 	apiBaseUrl,
 	buildStamp,
+	testDriver: buildTarget.testDriver,
 	plugins: [
 		{
 			name: "build-reporter",
@@ -95,7 +97,7 @@ const buildOptions = createPluginBuildOptions({
 					if (result.errors.length > 0) {
 						return;
 					}
-					finalizeBuild(buildStart, { watch: !prod && isWatching });
+					finalizeBuild(buildStart, { watch: isWatching });
 				});
 			}
 		}
@@ -112,9 +114,7 @@ const finalizeBuild = (startedAt, { watch } = {}) => {
 	if (watch) {
 		logger.info(`Rebuild updated assets (${formatDuration(duration)})`);
 		logger.info(`Main bundle size: ${formatBytes(mainStats.size)}`);
-		if (!prod) {
-			buildSyncController.schedule();
-		}
+		buildSyncController.schedule();
 		return;
 	}
 
@@ -129,7 +129,7 @@ const finalizeBuild = (startedAt, { watch } = {}) => {
 
 const run = async () => {
 	try {
-		if (prod) {
+		if (!shouldWatch) {
 			await esbuild.build(buildOptions);
 			return;
 		}

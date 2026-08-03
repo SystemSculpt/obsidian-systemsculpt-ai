@@ -127,12 +127,14 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.setButtons([
       {
         label: "Hide",
+        testId: "document.progress.hide",
         onClick: () => this.close(),
       },
       ...(this.onCancel
         ? [
             {
               label: "Cancel",
+              testId: "document.progress.cancel",
               onClick: () => {
                 this.onCancel?.();
                 this.close();
@@ -185,6 +187,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.setButtons([
       {
         label: "Open Markdown",
+        testId: "document.progress.open-markdown",
         variant: "primary",
         onClick: async () => {
           try {
@@ -197,6 +200,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       },
       {
         label: "Close",
+        testId: "document.progress.close",
         onClick: () => this.close(),
       },
     ]);
@@ -224,6 +228,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.setButtons([
       {
         label: "Copy error",
+        testId: "document.progress.copy-error",
         onClick: async () => {
           try {
             const copied = await tryCopyToClipboard(message, this.panel.element);
@@ -239,6 +244,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       },
       {
         label: "Close",
+        testId: "document.progress.close",
         variant: "primary",
         onClick: () => this.close(),
       },
@@ -255,7 +261,12 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
   }
 
   private setButtons(
-    descriptors: Array<{ label: string; onClick: () => void; variant?: "primary" | "default" }>
+    descriptors: Array<{
+      label: string;
+      testId: string;
+      onClick: () => void;
+      variant?: "primary" | "default";
+    }>
   ): void {
     this.panel.setActions(descriptors);
   }

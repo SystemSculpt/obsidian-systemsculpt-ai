@@ -217,7 +217,7 @@ describe("built bundle in Obsidian Mobile", () => {
     ).not.toBeNull();
     expect(
       chatView.contentEl.querySelector(
-        'button[aria-label^="Add vault context"]',
+        'button[aria-label="Pin files for every message"]',
       ),
     ).not.toBeNull();
     expect(

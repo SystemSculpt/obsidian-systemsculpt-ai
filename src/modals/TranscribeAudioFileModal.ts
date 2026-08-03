@@ -95,13 +95,14 @@ export class TranscribeAudioFileModal extends StandardModal {
     );
 
     this.transcribeButton = this.addActionButton(
+      "transcribe.confirm",
       "Transcribe",
       () => void this.handleTranscribe(),
       true,
       "mic",
     );
     this.transcribeButton.addClass("ss-transcribe-audio__transcribe-btn");
-    this.addActionButton("Cancel", () => this.close(), false, "x");
+    this.addActionButton("transcribe.cancel", "Cancel", () => this.close(), false, "x");
 
     this.renderLayout();
     this.refreshAudioFiles();
@@ -145,8 +146,8 @@ export class TranscribeAudioFileModal extends StandardModal {
       cls: "ss-transcribe-audio__tabs",
       attr: { "aria-label": "Choose audio source" },
     });
-    const vaultTab = createUiAction(tablist, { label: "Vault", icon: "folder" });
-    const deviceTab = createUiAction(tablist, { label: "Device", icon: "upload" });
+    const vaultTab = createUiAction(tablist, { label: "Vault", testId: "transcribe.tab.vault", icon: "folder" });
+    const deviceTab = createUiAction(tablist, { label: "Device", testId: "transcribe.tab.device", icon: "upload" });
     vaultTab.addClass("ss-transcribe-audio__tab");
     deviceTab.addClass("ss-transcribe-audio__tab");
 
@@ -173,6 +174,7 @@ export class TranscribeAudioFileModal extends StandardModal {
 
   private buildVaultPanel(container: HTMLElement): void {
     this.search = createUiSearch(container, {
+      testId: "transcribe.search",
       label: "Search vault audio",
       placeholder: "Search by name or path",
       value: this.searchQuery,
@@ -313,12 +315,14 @@ export class TranscribeAudioFileModal extends StandardModal {
     const options = section.createDiv({ cls: "ss-transcribe-audio__output-options" });
     const markdownButton = this.createOutputOption(
       options,
+      "transcribe.output.markdown",
       "Markdown",
       "Readable note",
       "file-text",
     );
     const srtButton = this.createOutputOption(
       options,
+      "transcribe.output.srt",
       "SRT",
       "Timed subtitles",
       "captions",
@@ -361,11 +365,12 @@ export class TranscribeAudioFileModal extends StandardModal {
 
   private createOutputOption(
     container: HTMLElement,
+    testId: string,
     label: string,
     detail: string,
     icon: string,
   ): HTMLButtonElement {
-    const button = createUiAction(container, { label, icon });
+    const button = createUiAction(container, { label, testId, icon });
     button.addClass("ss-transcribe-audio__output-option");
     button.createSpan({ cls: "ss-transcribe-audio__output-detail", text: detail });
     return button;

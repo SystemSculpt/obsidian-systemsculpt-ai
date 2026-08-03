@@ -20,6 +20,7 @@ import {
   AUDIO_PROCESSOR_OUTPUT_PRESETS,
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
+import { retryAfterHeaderMs } from "../../services/managed/ManagedJobObservation";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -75,6 +76,7 @@ export class AudioProcessorApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code: string,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "AudioProcessorApiError";
@@ -231,14 +233,16 @@ export class AudioProcessorApiClient {
   }
 
   async getJob(jobId: string, signal?: AbortSignal): Promise<AudioProcessorJob> {
-    const payload = await this.apiJson(
+    const { payload, response } = await this.apiJsonResponse(
       `/audio-processor/jobs/${encodeURIComponent(jobId)}`,
       "GET",
       undefined,
       undefined,
       signal,
     );
-    return parseJobEnvelope(payload, "Audio job response");
+    const job = parseJobEnvelope(payload, "Audio job response");
+    const pollAfterMs = retryAfterHeaderMs(response.headers.get("retry-after"));
+    return pollAfterMs === undefined ? job : { ...job, pollAfterMs };
   }
 
   async resumeJob(
@@ -336,6 +340,16 @@ export class AudioProcessorApiClient {
     operationId?: string,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    return (await this.apiJsonResponse(path, method, body, operationId, signal)).payload;
+  }
+
+  private async apiJsonResponse(
+    path: string,
+    method: "GET" | "POST",
+    body?: unknown,
+    operationId?: string,
+    signal?: AbortSignal,
+  ): Promise<Readonly<{ payload: unknown; response: Response }>> {
     const licenseKey = this.options.licenseKey().trim();
     const headers = {
       ...SystemSculptEnvironment.buildHeaders(licenseKey || undefined),
@@ -370,9 +384,14 @@ export class AudioProcessorApiClient {
         : typeof root.error === "string"
           ? root.error
         : `Audio service request failed (${response.status}).`;
-      throw new AudioProcessorApiError(message, response.status, code);
+      throw new AudioProcessorApiError(
+        message,
+        response.status,
+        code,
+        retryAfterHeaderMs(response.headers.get("retry-after")),
+      );
     }
-    return payload;
+    return { payload, response };
   }
 }
 

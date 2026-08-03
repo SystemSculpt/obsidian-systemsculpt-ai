@@ -31,6 +31,24 @@ test("launch agent plist keeps the watcher alive and preserves escaped paths", (
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.match(plist, /plugin &lt;dev&gt;\/run\.sh/);
   assert.match(plist, /sync &amp; reload\.json/);
+  assert.match(
+    plist,
+    /<string>--<\/string>\s*<string>production-watch<\/string>/,
+  );
+});
+
+test("launch agent selects staging through an explicit watcher target", (t) => {
+  const root = tempRoot(t);
+  const plist = createDevWatcherLaunchAgentPlist({
+    root: path.join(root, "plugin"),
+    configPath: path.join(root, "sync.json"),
+    home: path.join(root, "home"),
+    target: "staging",
+  });
+
+  assert.match(plist, /<string>staging-watch<\/string>/);
+  assert.doesNotMatch(plist, /SYSTEMSCULPT_API_BASE_URL|SYSTEMSCULPT_TEST_DRIVER/);
+  assert.doesNotMatch(plist, /MASTER_LICENSE_KEY|OPENROUTER|DATABASE_URL/);
 });
 
 test("install writes and bootstraps a per-user persistent watcher", (t) => {
@@ -66,6 +84,10 @@ test("install writes and bootstraps a per-user persistent watcher", (t) => {
   ]);
   assert.match(fs.readFileSync(result.plistPath, "utf8"), /--headless/);
   assert.match(fs.readFileSync(result.plistPath, "utf8"), /--sync-config/);
+  assert.match(
+    fs.readFileSync(result.plistPath, "utf8"),
+    /<string>production-watch<\/string>/,
+  );
 });
 
 test("install waits for an asynchronous launchd bootout before bootstrapping", (t) => {

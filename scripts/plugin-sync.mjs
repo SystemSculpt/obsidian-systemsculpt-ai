@@ -5,13 +5,24 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { inspectPluginArtifacts, REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
+import {
+  formatArtifactProblems,
+  inspectPluginArtifacts,
+  REQUIRED_PLUGIN_ARTIFACTS,
+} from "./plugin-artifacts.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  LOCAL_AGENT_API_BASE_URL,
+  STAGING_API_BASE_URL,
+  normalizeApiBaseUrl,
+} from "./plugin-build-options.mjs";
 import { replaceFileAtomically } from "./platform-portability.mjs";
 
 export { replaceFileAtomically } from "./platform-portability.mjs";
 
 export const DEFAULT_SYNC_CONFIG_PATH = path.resolve(process.cwd(), "systemsculpt-sync.config.json");
 export const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild";
+export const DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS = 15_000;
 export const OBSOLETE_PLUGIN_FILES = [
   "README.md",
   "LICENSE",
@@ -25,6 +36,13 @@ export const OBSOLETE_PLUGIN_FILES = [
 function booleanFlag(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   return !/^(?:0|false|no|off)$/i.test(String(value).trim());
+}
+
+function positiveTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : fallback;
 }
 
 export function resolveSyncConfigPath(
@@ -80,7 +98,7 @@ export function createDevelopmentBuildIdentity(options = {}) {
   const branch = options.branch
     || gitValue(root, ["branch", "--show-current"], "detached");
   const dirty = options.dirty ?? Boolean(
-    gitValue(root, ["status", "--porcelain", "--untracked-files=no"], ""),
+    gitValue(root, ["status", "--porcelain", "--untracked-files=normal"], ""),
   );
   const compactTime = syncedAt.replace(/[-:.]/g, "");
   const artifacts = Object.fromEntries(
@@ -101,8 +119,28 @@ export function createDevelopmentBuildIdentity(options = {}) {
   });
 }
 
-function developmentManifest(root, buildIdentity) {
-  const source = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+function readSourceArtifactBytes(root) {
+  return new Map(
+    REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
+      fileName,
+      fs.readFileSync(path.join(root, fileName)),
+    ]),
+  );
+}
+
+function assertBuildIdentityMatchesSource(buildIdentity, sourceArtifactBytes) {
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const expected = sha256(sourceArtifactBytes.get(fileName));
+    if (buildIdentity?.artifacts?.[fileName] !== expected) {
+      throw new Error(
+        `[sync] Development build identity does not match source ${fileName}.`,
+      );
+    }
+  }
+}
+
+function developmentManifest(sourceBytes, buildIdentity) {
+  const source = JSON.parse(sourceBytes.toString("utf8"));
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     throw new Error("manifest.json must contain an object");
   }
@@ -112,21 +150,36 @@ function developmentManifest(root, buildIdentity) {
   }, null, 2)}\n`);
 }
 
-function copyPluginArtifacts(root, target, buildIdentity, replaceFile) {
-  fs.mkdirSync(target.path, { recursive: true });
-  const artifactBytes = new Map(
+function createTargetArtifactBytes(sourceArtifactBytes, buildIdentity) {
+  return new Map(
     REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
       fileName,
       fileName === "manifest.json"
-        ? developmentManifest(root, buildIdentity)
-        : fs.readFileSync(path.join(root, fileName)),
+        ? developmentManifest(sourceArtifactBytes.get(fileName), buildIdentity)
+        : sourceArtifactBytes.get(fileName),
     ]),
   );
+}
+
+function assertTargetArtifactBytes(target, expectedArtifactBytes) {
+  for (const fileName of REQUIRED_PLUGIN_ARTIFACTS) {
+    const targetPath = path.join(target.path, fileName);
+    const stats = fs.lstatSync(targetPath);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error(`[sync] Target ${fileName} is not a regular file: ${targetPath}`);
+    }
+    const actual = fs.readFileSync(targetPath);
+    if (!actual.equals(expectedArtifactBytes.get(fileName))) {
+      throw new Error(`[sync] Target ${fileName} failed byte-for-byte read-back: ${targetPath}`);
+    }
+  }
+}
+
+function copyPluginArtifacts(target, artifactBytes, replaceFile) {
+  fs.mkdirSync(target.path, { recursive: true });
   // Replace executable and style bytes first. The manifest is the final
   // transaction marker and identifies the exact source artifact hashes.
   for (const fileName of ["main.js", "styles.css", "manifest.json"]) {
-    const sourcePath = path.join(root, fileName);
-    if (!fs.existsSync(sourcePath)) throw new Error(`Required file missing: ${sourcePath}`);
     replaceFile(path.join(target.path, fileName), artifactBytes.get(fileName));
   }
   for (const relativePath of OBSOLETE_PLUGIN_FILES) {
@@ -137,25 +190,46 @@ function copyPluginArtifacts(root, target, buildIdentity, replaceFile) {
       retryDelay: 150,
     });
   }
+  assertTargetArtifactBytes(target, artifactBytes);
 }
 
 export function syncConfiguredTargets(options = {}) {
   const root = path.resolve(String(options.root || process.cwd()));
   const logger = options.logger || console;
   const loaded = loadConfiguredTargets({ root, configPath: options.configPath });
-  const inspection = inspectPluginArtifacts({ root });
-  if (inspection.missingFiles.length > 0) {
-    throw new Error(`Missing plugin artifacts: ${inspection.missingFiles.join(", ")}`);
+  const expectedApiBaseUrl = normalizeApiBaseUrl(
+    options.apiBaseUrl || CANONICAL_API_BASE_URL,
+  );
+  const inspection = inspectPluginArtifacts({
+    root,
+    expectedApiBaseUrl,
+    forbiddenApiBaseUrls: expectedApiBaseUrl === STAGING_API_BASE_URL
+      ? [CANONICAL_API_BASE_URL, LOCAL_AGENT_API_BASE_URL]
+      : expectedApiBaseUrl === LOCAL_AGENT_API_BASE_URL
+        ? [CANONICAL_API_BASE_URL, STAGING_API_BASE_URL]
+        : [STAGING_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: expectedApiBaseUrl === LOCAL_AGENT_API_BASE_URL
+      ? [LOCAL_AGENT_API_BASE_URL]
+      : [],
+  });
+  if (!inspection.ok) {
+    throw new Error(`[sync] ${formatArtifactProblems(inspection)}`);
   }
   if (!loaded.configExists && options.failWhenNoTargets !== false) {
     throw new Error(`[sync] Config file not found at ${loaded.configPath}.`);
   }
 
+  const sourceArtifactBytes = readSourceArtifactBytes(root);
   const buildIdentity = options.buildIdentity
     || createDevelopmentBuildIdentity({ root });
+  assertBuildIdentityMatchesSource(buildIdentity, sourceArtifactBytes);
+  const targetArtifactBytes = createTargetArtifactBytes(
+    sourceArtifactBytes,
+    buildIdentity,
+  );
   const replaceFile = options.replaceFile || replaceFileAtomically;
   for (const target of loaded.targets) {
-    copyPluginArtifacts(root, target, buildIdentity, replaceFile);
+    copyPluginArtifacts(target, targetArtifactBytes, replaceFile);
     logger.info?.(`[sync] Updated ${formatSyncTarget(target)} (${buildIdentity.id})`);
   }
   return { ...loaded, succeeded: loaded.targets, buildIdentity };
@@ -178,25 +252,47 @@ export function reloadConfiguredTargets(options = {}) {
   const root = path.resolve(String(options.root || process.cwd()));
   const logger = options.logger || console;
   const runCommand = options.runCommand || spawnSync;
+  const timeoutMs = positiveTimeout(
+    options.timeoutMs ?? env.SYSTEMSCULPT_OBSIDIAN_RELOAD_TIMEOUT_MS,
+    DEFAULT_OBSIDIAN_RELOAD_TIMEOUT_MS,
+  );
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
   const pluginId = String(manifest?.id || "").trim();
   if (!pluginId) throw new Error("manifest.json is missing the plugin id");
 
   const reloaded = [];
+  const failures = [];
   for (const target of options.targets || []) {
     const vault = target.vault || inferVaultName(target.path);
     const result = runCommand(
       "obsidian",
       ["plugin:reload", `id=${pluginId}`, `vault=${vault}`],
-      { encoding: "utf8", stdio: "pipe" },
+      {
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+      },
     );
     if (result?.error || result?.status !== 0) {
+      if (result?.error?.code === "ETIMEDOUT") {
+        const reason = `timed out after ${timeoutMs}ms; terminated child with SIGKILL`;
+        logger.warn?.(`[sync] Obsidian reload timed out for ${vault} after ${timeoutMs}ms; terminated child with SIGKILL.`);
+        failures.push({ vault, reason });
+        continue;
+      }
       const reason = result?.error?.message || result?.stderr || `exit ${result?.status}`;
       logger.warn?.(`[sync] Obsidian reload skipped for ${vault}: ${String(reason).trim()}`);
+      failures.push({ vault, reason: String(reason).trim() });
       continue;
     }
     reloaded.push({ target, vault });
     logger.info?.(`[sync] Reloaded ${pluginId} in ${vault}`);
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `[sync] Failed to reload ${failures.map(({ vault }) => vault).join(", ")}.`,
+    );
   }
   return { reloaded };
 }
@@ -207,6 +303,7 @@ export function createBuildSyncController(options = {}) {
   const configPath = resolveSyncConfigPath(options.configPath);
   const logger = options.logger || console;
   const reloadTargets = options.reloadTargets || reloadConfiguredTargets;
+  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl || CANONICAL_API_BASE_URL);
   let inFlight = false;
   let rerunRequested = false;
 
@@ -218,6 +315,7 @@ export function createBuildSyncController(options = {}) {
         configPath,
         failWhenNoTargets: false,
         logger,
+        apiBaseUrl,
       });
       reloadTargets({ root, targets: result.succeeded, env, logger });
     } catch (error) {

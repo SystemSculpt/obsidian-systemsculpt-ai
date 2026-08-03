@@ -95,6 +95,65 @@ function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
   return require("./context-menu/FileContextMenuService");
 }
 
+type PublicSupportResourceSample = Readonly<{
+  captured_at?: string;
+  heap_used_mb?: number;
+  heap_limit_mb?: number;
+  rss_mb?: number;
+  cpu_percent?: number;
+  event_loop_lag_ms?: number;
+  freeze_delta_ms?: number;
+}>;
+
+function normalizePublicDiagnosticsLimit(value: number, fallback: number, maximum: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(maximum, Math.max(0, Math.floor(value)));
+}
+
+function sanitizePublicVersion(value: unknown): string {
+  if (typeof value !== "string") return "unknown";
+  return /^\d{1,4}(?:\.\d{1,4}){1,3}$/u.test(value) ? value : "unknown";
+}
+
+function projectPublicSupportResourceSample(sample: unknown): PublicSupportResourceSample | null {
+  if (!sample || typeof sample !== "object" || Array.isArray(sample)) return null;
+  const candidate = sample as Record<string, unknown>;
+  const projected: {
+    captured_at?: string;
+    heap_used_mb?: number;
+    heap_limit_mb?: number;
+    rss_mb?: number;
+    cpu_percent?: number;
+    event_loop_lag_ms?: number;
+    freeze_delta_ms?: number;
+  } = {};
+
+  if (typeof candidate.iso === "string" && candidate.iso.length <= 40) {
+    const parsed = Date.parse(candidate.iso);
+    if (Number.isFinite(parsed) && new Date(parsed).toISOString() === candidate.iso) {
+      projected.captured_at = candidate.iso;
+    }
+  }
+
+  const metrics = [
+    ["heap_used_mb", candidate.heapUsedMB],
+    ["heap_limit_mb", candidate.heapLimitMB],
+    ["rss_mb", candidate.rssMB],
+    ["cpu_percent", candidate.cpuPercent],
+    ["event_loop_lag_ms", candidate.eventLoopLagMs],
+    ["freeze_delta_ms", candidate.freezeDeltaMs],
+  ] as const;
+  let metricCount = 0;
+  for (const [key, value] of metrics) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000_000) {
+      continue;
+    }
+    projected[key] = Math.round(value * 10) / 10;
+    metricCount += 1;
+  }
+  return metricCount > 0 ? Object.freeze(projected) : null;
+}
+
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
   public _internal_settings_systemsculpt_plugin: SystemSculptSettings;
@@ -367,6 +426,8 @@ export default class SystemSculptPlugin extends Plugin {
 
       this.registerLayoutReadyHandler(loadStart);
 
+      this.startTestDriverIfEnabled(buildStamp);
+
       onloadPhase.complete({
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
         failureCount: this.failures.length,
@@ -399,6 +460,29 @@ export default class SystemSculptPlugin extends Plugin {
       this.showErrorNotice(
         `SystemSculpt had issues with: ${this.failures.join(", ")}. Some features may be unavailable.`
       );
+    }
+  }
+
+  /**
+   * The E2E test driver exists only in non-release builds: release builds
+   * define __SS_TEST_DRIVER__ false, so esbuild eliminates this branch and
+   * the driver module never enters the production bundle. The driver dials
+   * out to a CLI-hosted localhost WebSocket server; it never listens.
+   */
+  private startTestDriverIfEnabled(buildStamp: string): void {
+    // The positive constant guard is load-bearing: esbuild eliminates this
+    // branch (and the imported driver module) when the define is false.
+    if (typeof __SS_TEST_DRIVER__ !== "undefined" && __SS_TEST_DRIVER__) {
+      void import("./testing/driver/TestDriverClient").then(({ TestDriverClient }) => {
+        const driver = new TestDriverClient(this.app, this.manifest, buildStamp);
+        driver.start();
+        this.register(() => driver.stop());
+      }).catch((error) => {
+        this.getLogger().warn("E2E test driver failed to start", {
+          source: "SystemSculptPlugin",
+          metadata: { message: error instanceof Error ? error.message : String(error) },
+        });
+      });
     }
   }
 
@@ -440,7 +524,7 @@ export default class SystemSculptPlugin extends Plugin {
    * diagnostics and tell the user their settings are safe. Idempotent and
    * defensive — it runs on the failure path and must not throw.
    */
-  private enterSafeMode(reason: string): void {
+  private enterSafeMode(_reason: string): void {
     if (this.safeMode) {
       return;
     }
@@ -451,8 +535,8 @@ export default class SystemSculptPlugin extends Plugin {
         name: "Show load diagnostics (safe mode)",
         callback: () => {
           new Notice(
-            `SystemSculpt AI did not finish loading (${reason}). Your settings and backups are safe. ` +
-              `Details:\n${this.collectErrorDetails()}`,
+            "SystemSculpt AI did not finish loading. Your settings and backups are safe. " +
+              `Support snapshot:\n${this.buildDiagnosticsSnapshot()}`,
             0
           );
         },
@@ -462,7 +546,7 @@ export default class SystemSculptPlugin extends Plugin {
     }
     try {
       this.showErrorNotice(
-        `SystemSculpt AI could not finish loading (${reason}). Your settings are safe — run ` +
+        "SystemSculpt AI could not finish loading. Your settings are safe. Run " +
           `"Show load diagnostics (safe mode)" from the command palette for details.`
       );
     } catch {
@@ -858,104 +942,52 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   /**
-   * Collect detailed error information for reporting
+   * Build the only diagnostic surface intended for clipboard or support use.
+   * Raw console entries and local log files deliberately stay outside this
+   * allowlisted, content-free schema.
    */
-  private collectErrorDetails(): string {
-    const details = [];
-
-    // Add version info
-    details.push(`SystemSculpt Version: ${this.manifest.version}`);
-    details.push(`Obsidian Version: ${this.app.vault.configDir.split('/').pop() || 'Unknown'}`);
-
-    // Add failure details
-    details.push(`\nFailures: ${this.failures.join(", ")}`);
-
-    // Add initialization state info
-    details.push(`\nInitialization State:`);
-    details.push(`- Directory Manager Initialized: ${this.directoryManager?.isInitialized() || false}`);
-    details.push(`- Settings Loaded: ${!!this.settings}`);
-
-    // Add directory verification info if available
-    if (this.directoryManager) {
-      this.directoryManager.verifyDirectories().then(({valid, issues}) => {
-        if (!valid) {
-          details.push(`\nDirectory Issues:`);
-          issues.forEach(issue => details.push(`- ${issue}`));
-        }
-      }).catch(e => {
-        details.push(`\nError verifying directories: ${e.message}`);
-      });
-    }
-
-    // Add any captured error summaries (kept for backwards compatibility)
-    details.push(`\nRecent Error Notes:`);
-
-    const recentErrors = this.getRecentSystemSculptErrors();
-    recentErrors.forEach(error => details.push(error));
-
-    return details.join('\n');
-  }
-
-  /**
-   * Get recent SystemSculpt-related console errors
-   */
-  private getRecentSystemSculptErrors(): string[] {
-    if (this.errorCollectorService) {
-      return this.errorCollectorService.getErrorLogs();
-    }
-
-    // Fallback if error collector not available
-    const errors: string[] = [];
-    const now = new Date();
-
-    this.failures.forEach((failure) => {
-      errors.push(`[${now.toISOString()}] Error with: ${failure}`);
-    });
-
-    return errors;
-  }
-
-  /**
-   * Get all SystemSculpt-related console logs
-   */
-  public getAllSystemSculptLogs(): string[] {
-    if (this.errorCollectorService) {
-      return this.errorCollectorService.getAllLogs();
-    }
-
-    if (this.pluginLogger) {
-      return this.pluginLogger
-        .getRecentEntries()
-        .map((entry) => `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`);
-    }
-
-    return [];
-  }
-
-  public buildDiagnosticsSnapshot(logLines: number = 200, resourceLines: number = 8): string {
-    const lines: string[] = [];
-    const now = new Date().toISOString();
-    lines.push(`SystemSculpt Diagnostics — ${now}`);
-    lines.push(`Plugin version: ${this.manifest.version}`);
-    lines.push(`Obsidian config dir: ${this.app.vault.configDir}`);
-    lines.push(`Failures: ${this.failures.length ? this.failures.join(", ") : "None"}`);
-    lines.push("");
-    lines.push("Resource usage:");
+  public buildDiagnosticsSnapshot(eventLimit: number = 200, resourceLimit: number = 8): string {
     const monitor = this.getResourceMonitor();
+    let resources: PublicSupportResourceSample[] = [];
     if (monitor) {
-      lines.push(monitor.buildSummary(resourceLines));
-    } else {
-      lines.push("Resource monitor not running.");
+      try {
+        resources = monitor
+          .getRecentSamples(normalizePublicDiagnosticsLimit(resourceLimit, 8, 24))
+          .map(projectPublicSupportResourceSample)
+          .filter((sample): sample is PublicSupportResourceSample => sample !== null);
+      } catch {
+        resources = [];
+      }
     }
-    lines.push("");
-    const logs = this.getAllSystemSculptLogs();
-    lines.push(`Recent logs (latest ${Math.min(logLines, logs.length)} entries):`);
-    if (logs.length === 0) {
-      lines.push("No logs captured yet.");
-    } else {
-      logs.slice(-logLines).forEach((log) => lines.push(log));
+
+    let directoriesReady = false;
+    try {
+      directoriesReady = this.directoryManager?.isInitialized() === true;
+    } catch {
+      directoriesReady = false;
     }
-    return lines.join("\n");
+
+    const events = this.getLogger().getSupportDiagnostics(
+      normalizePublicDiagnosticsLimit(eventLimit, 200, 500),
+    );
+    const snapshot = {
+      schema_version: 1,
+      generated_at: new Date().toISOString(),
+      plugin_version: sanitizePublicVersion(this.manifest.version),
+      obsidian_version: sanitizePublicVersion(this.getObsidianApiVersion()),
+      status: {
+        safe_mode: this.safeMode,
+        initialization_issue_count: Math.min(9_999, this.failures.length),
+        settings_loaded: Boolean(this._internal_settings_systemsculpt_plugin),
+        directories_ready: directoriesReady,
+        resource_monitor_running: monitor !== null,
+      },
+      event_count: events.length,
+      events,
+      resource_sample_count: resources.length,
+      resources,
+    };
+    return JSON.stringify(snapshot, null, 2);
   }
 
   public async exportDiagnosticsSnapshot(
@@ -1635,7 +1667,37 @@ export default class SystemSculptPlugin extends Plugin {
   
 
   async onunload() {
-    this.isUnloading = true;
+    // Microphone privacy is the first teardown action and must never wait on
+    // diagnostics disk I/O or an unrelated service cleanup.
+    const recorder = this.recorderService;
+    this.recorderService = null;
+    try {
+      recorder?.unload();
+    } catch {
+      // Recorder teardown is internally best-effort; continue plugin unload.
+    }
+
+    // Stop diagnostic producers, durably drain entries accepted while the
+    // plugin was active, then make the global unload guard authoritative.
+    // PluginLogger quiesces itself during the awaited drain, so nothing new can
+    // enter the queue before the guard flips.
+    try {
+      FreezeMonitor.stop();
+    } catch {
+      // A failed producer stop must not skip the pending diagnostics drain.
+    }
+    try {
+      await this.pluginLogger?.flushBeforeUnload();
+    } catch {
+      // Diagnostics are best-effort and must never block plugin teardown.
+    }
+    try {
+      this.pluginLogger?.dispose();
+    } catch {
+      // Timer disposal is best-effort; the global guard remains authoritative.
+    } finally {
+      this.isUnloading = true;
+    }
 
     try {
       AudioTranscriptionPanel.disposeOwnedBy(this);
@@ -1647,27 +1709,6 @@ export default class SystemSculptPlugin extends Plugin {
       disposeMobileHostLayoutStates();
     } catch {
       // Host-layout observers are best-effort and must never block teardown.
-    }
-
-    // Halt self-rescheduling timers first and unconditionally (#214/#158): the
-    // FreezeMonitor interval and PluginLogger flush timer never auto-clean, so
-    // they must stop even if a later teardown step throws.
-    try {
-      FreezeMonitor.stop();
-      this.pluginLogger?.dispose();
-    } catch (error) {
-      // Best-effort; teardown continues regardless.
-    }
-
-    // Microphone privacy is a first teardown priority. Keep this isolated from
-    // the broader cleanup block so an unrelated service failure can never
-    // leave capture running after the plugin is disabled.
-    const recorder = this.recorderService;
-    this.recorderService = null;
-    try {
-      recorder?.unload();
-    } catch {
-      // Recorder teardown is internally best-effort; continue plugin unload.
     }
 
     try {

@@ -95,6 +95,6 @@ class StudioGraphMediaPreviewModal extends StandardModal {
       });
     }
 
-    this.addActionButton("Close", () => this.close(), true);
+    this.addActionButton("studio.media-preview.close", "Close", () => this.close(), true);
   }
 }

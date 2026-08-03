@@ -50,6 +50,7 @@ export class CreditsBalanceModal extends StandardModal {
 
   private statusEl: HTMLElement | null = null;
   private refreshButton: HTMLButtonElement | null = null;
+  private purchaseButton: HTMLButtonElement | null = null;
   private isRefreshingBalance: boolean = false;
   private isRefreshingUsage: boolean = false;
   private isLoadingMoreUsage: boolean = false;
@@ -80,8 +81,8 @@ export class CreditsBalanceModal extends StandardModal {
 
     const root = this.contentEl.createDiv({ cls: "ss-credits-balance" });
     this.tabBarEl = root.createDiv({ cls: "ss-credits-balance__tabs" });
-    this.balanceTabButton = this.createTabButton("Balance");
-    this.usageTabButton = this.createTabButton("Usage");
+    this.balanceTabButton = this.createTabButton("credits.tab.balance", "Balance");
+    this.usageTabButton = this.createTabButton("credits.tab.usage", "Usage");
 
     this.balancePanelEl = root.createDiv({ cls: "ss-credits-balance__panel ss-credits-balance__panel--balance" });
     this.summaryEl = this.balancePanelEl.createDiv({ cls: "ss-credits-balance__summary" });
@@ -94,6 +95,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.usageHintEl = this.usagePanelEl.createDiv({ cls: "ss-credits-usage__hint" });
     this.usageLoadMoreButton = createUiAction(this.usagePanelEl, {
       label: "Load more",
+      testId: "credits.usage.load-more",
       size: "small",
     });
     this.usageLoadMoreButton.addClass("ss-credits-usage__load-more");
@@ -120,6 +122,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.statusEl = root.createDiv({ cls: "ss-credits-balance__status" });
 
     this.refreshButton = this.addActionButton(
+      "credits.refresh",
       "Refresh",
       () => {
         if (this.activeTab === "usage") {
@@ -132,21 +135,23 @@ export class CreditsBalanceModal extends StandardModal {
       "refresh-cw"
     ) as HTMLButtonElement;
 
-    this.addActionButton(
+    this.purchaseButton = this.addActionButton(
+      "credits.buy",
       "Buy Credits",
       () => this.openPurchasePage(),
       true,
       "external-link"
-    );
+    ) as HTMLButtonElement;
 
     this.addActionButton(
+      "credits.open-account",
       "Open Account",
       () => this.options.onOpenSetup(),
       false,
       "settings"
     );
 
-    this.addActionButton("Close", () => this.close(), false);
+    this.addActionButton("credits.close", "Close", () => this.close(), false);
 
     this.renderBalance();
     this.renderUsage();
@@ -156,12 +161,13 @@ export class CreditsBalanceModal extends StandardModal {
     void this.refreshBalance(true);
   }
 
-  private createTabButton(label: string): HTMLButtonElement {
+  private createTabButton(testId: string, label: string): HTMLButtonElement {
     if (!this.tabBarEl) {
       throw new Error("Tab bar is not initialized.");
     }
     const button = createUiAction(this.tabBarEl, {
       label,
+      testId,
       size: "small",
     });
     button.addClass("ss-credits-balance__tab");
@@ -195,9 +201,14 @@ export class CreditsBalanceModal extends StandardModal {
     this.statsEl.empty();
     this.timelineEl.empty();
     this.hintEl.empty();
+    this.syncPurchaseButton();
 
     if (!this.balance) {
       this.renderNoDataState();
+      return;
+    }
+    if (this.balance.usageClass === "master_auth") {
+      this.renderInternalQaState();
       return;
     }
 
@@ -273,6 +284,37 @@ export class CreditsBalanceModal extends StandardModal {
       this.hintEl.setText("Need more headroom? You can buy additional credits anytime.");
       this.hintEl.removeClass("is-warning");
     }
+  }
+
+  private renderInternalQaState(): void {
+    if (!this.summaryEl || !this.statsEl || !this.hintEl) return;
+    const hero = this.summaryEl.createDiv({
+      cls: "ss-credits-balance__hero is-internal-qa",
+    });
+    const heroIcon = hero.createDiv({ cls: "ss-credits-balance__hero-icon" });
+    setIcon(heroIcon, "shield-check");
+    const heroContent = hero.createDiv({ cls: "ss-credits-balance__hero-content" });
+    heroContent.createDiv({
+      cls: "ss-credits-balance__hero-label",
+      text: "Usage mode",
+    });
+    heroContent.createDiv({
+      cls: "ss-credits-balance__hero-value",
+      text: "Internal QA",
+    });
+    this.createStatCard("Customer credits", "Not used");
+    this.createStatCard("Provider usage", "Tracked internally");
+    this.hintEl.setText(
+      "Provider usage is tracked internally. Customer credits are not used for this test session.",
+    );
+    this.hintEl.removeClass("is-warning");
+  }
+
+  private syncPurchaseButton(): void {
+    if (!this.purchaseButton) return;
+    const internalQa = this.balance?.usageClass === "master_auth";
+    this.purchaseButton.toggleAttribute("hidden", internalQa);
+    this.purchaseButton.disabled = internalQa;
   }
 
   private renderUsage(): void {

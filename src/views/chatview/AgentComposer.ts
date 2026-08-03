@@ -4,7 +4,7 @@ import {
   updateUiAction,
   type UiActionTone,
 } from "../../core/ui/surface";
-import type { ManagedChatInputLimits } from "../../services/managed/ManagedChatInputLimits";
+import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import {
   CHAT_ATTACHMENT_PICKER_ACCEPT,
   ChatMessageAttachmentCollection,
@@ -22,7 +22,6 @@ export type AgentComposerAttachment = Readonly<{
 
 export type AgentComposerSubmit = Readonly<{
   text: string;
-  webSearch: boolean;
   mode: "send" | "queue";
   attachments?: readonly ChatMessageAttachment[];
 }>;
@@ -33,21 +32,28 @@ export type AgentComposerOptions = Readonly<{
   onAttach: () => void | Promise<void>;
   onVaultContextDrop?: (path: string) => void | Promise<void>;
   documentAttachmentProcessor?: ChatDocumentAttachmentProcessor;
-  attachmentLimits?: ManagedChatInputLimits;
+  attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
   onApprovalModeChange?: (mode: "ask" | "full-access") => void;
+  onHeightChange?: () => void;
 }>;
+
+const DEFAULT_COMPOSER_PLACEHOLDER = "Ask SystemSculpt to work in your vault…";
+const PINNED_FILES_DESCRIPTION =
+  "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.";
 
 function createButton(
   parent: HTMLElement,
   className: string,
+  testId: string,
   label: string,
   icon: string,
   tone: UiActionTone = "default",
 ): HTMLButtonElement {
   const button = createUiAction(parent, {
     label,
+    testId,
     icon,
     size: "icon",
     tone,
@@ -75,46 +81,58 @@ export class AgentComposer extends Component {
   private readonly hint: HTMLElement;
   private running = false;
   private historyEditing = false;
+  private readOnlyMessage: string | null = null;
   private submitting = false;
   private attachmentBusy = false;
-  private contextAttachments: readonly AgentComposerAttachment[] = [];
-  private readonly messageAttachments: ChatMessageAttachmentCollection;
+  private attachmentGeneration = 0;
+  private attachmentLimits: ThinAgentInputLimits | undefined;
+  private pinnedAttachments: readonly AgentComposerAttachment[] = [];
+  private messageAttachments: ChatMessageAttachmentCollection;
 
   constructor(parent: HTMLElement, private readonly options: AgentComposerOptions) {
     super();
-    this.messageAttachments = new ChatMessageAttachmentCollection(
-      undefined,
-      options.documentAttachmentProcessor,
-      options.attachmentLimits,
-    );
-    this.element = parent.createDiv({ cls: "systemsculpt-agent-composer" });
+    this.attachmentLimits = options.attachmentLimits;
+    this.messageAttachments = this.createMessageAttachmentCollection();
+    this.element = parent.createDiv({
+      cls: "systemsculpt-agent-composer",
+      attr: { "data-testid": "chat.composer" },
+    });
     this.attachmentList = this.element.createDiv({
       cls: "systemsculpt-agent-composer-attachments",
-      attr: { role: "list", "aria-label": "Attached files and vault context" },
+      attr: {
+        role: "list",
+        "aria-label": "Message attachments and pinned files",
+        "aria-description": PINNED_FILES_DESCRIPTION,
+      },
     });
 
     const prompt = this.element.createDiv({ cls: "systemsculpt-agent-prompt" });
     this.input = prompt.createEl("textarea", {
       cls: "systemsculpt-agent-prompt-input",
       attr: {
+        "data-testid": "chat.composer.input",
         rows: "1",
-        placeholder: "Ask SystemSculpt to work in your vault…",
+        placeholder: DEFAULT_COMPOSER_PLACEHOLDER,
         "aria-label": "Message SystemSculpt",
       },
     });
 
     const toolbar = prompt.createDiv({ cls: "systemsculpt-agent-prompt-toolbar" });
     const tools = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-tools" });
-    this.attachButton = createButton(tools, "systemsculpt-agent-icon-button", "Attach files", "paperclip");
+    this.attachButton = createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.attach", "Attach files", "paperclip");
     this.vaultContextButton = createButton(
       tools,
       "systemsculpt-agent-icon-button",
-      "Add vault context, including images",
+      "chat.composer.pin",
+      "Pin files for every message",
       "files",
     );
+    this.vaultContextButton.setAttribute("aria-description", PINNED_FILES_DESCRIPTION);
+    this.vaultContextButton.title = PINNED_FILES_DESCRIPTION;
     this.filePicker = tools.createEl("input", {
       cls: "systemsculpt-agent-file-picker",
       attr: {
+        "data-testid": "chat.composer.file-picker",
         type: "file",
         multiple: "true",
         accept: CHAT_ATTACHMENT_PICKER_ACCEPT,
@@ -124,21 +142,21 @@ export class AgentComposer extends Component {
     });
     this.approvalMode = tools.createEl("select", {
       cls: "dropdown systemsculpt-agent-approval-mode",
-      attr: { "aria-label": "Vault changes" },
+      attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
     });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
     // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "full-access", text: "Full Access" });
     this.micButton = options.onMic
-      ? createButton(tools, "systemsculpt-agent-icon-button", "Record message", "mic")
+      ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
       : null;
 
     this.hint = toolbar.createSpan({ cls: "systemsculpt-agent-prompt-hint", text: "Enter to send" });
 
     const actions = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-actions" });
-    this.stopButton = createButton(actions, "systemsculpt-agent-stop", "Stop agent", "square", "danger");
-    this.sendButton = createButton(actions, "systemsculpt-agent-send", "Send message", "arrow-up", "primary");
+    this.stopButton = createButton(actions, "systemsculpt-agent-stop", "chat.composer.stop", "Stop response", "square", "danger");
+    this.sendButton = createButton(actions, "systemsculpt-agent-send", "chat.composer.send", "Send message", "arrow-up", "primary");
 
     this.registerDomEvent(this.input, "input", () => {
       this.resize();
@@ -161,6 +179,7 @@ export class AgentComposer extends Component {
       if (files.length > 0) void this.ingestFiles(files);
     });
     this.registerDomEvent(this.element, "dragover", (event) => {
+      if (this.readOnlyMessage) return;
       if (!this.transferHasAttachments(event.dataTransfer)) return;
       event.preventDefault();
       this.element.classList.add("is-dragging-files");
@@ -176,6 +195,7 @@ export class AgentComposer extends Component {
       this.element.classList.remove("is-dragging-files");
     });
     this.registerDomEvent(this.element, "drop", (event) => {
+      if (this.readOnlyMessage) return;
       const files = this.filesFromTransfer(event.dataTransfer);
       const vaultPath = this.similarNotePathFromTransfer(event.dataTransfer);
       this.element.classList.remove("is-dragging-files");
@@ -214,6 +234,22 @@ export class AgentComposer extends Component {
     if (options.focus) this.focus();
   }
 
+  /**
+   * Starts a fresh ephemeral message draft without changing selected vault
+   * context or run state. Replacing the owned collection also retires any
+   * attachment ingestion or retry still resolving for the previous draft.
+   */
+  public resetDraft(): void {
+    this.attachmentGeneration += 1;
+    this.attachmentBusy = false;
+    this.input.value = "";
+    this.filePicker.value = "";
+    this.messageAttachments = this.createMessageAttachmentCollection();
+    this.renderAttachments();
+    this.resize();
+    this.syncControls();
+  }
+
   public setApprovalMode(mode: "ask" | "full-access"): void {
     this.approvalMode.value = mode;
     this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
@@ -235,6 +271,16 @@ export class AgentComposer extends Component {
     this.syncControls();
   }
 
+  public setReadOnly(message: string | null): void {
+    this.readOnlyMessage = message?.trim() || null;
+    this.element.classList.toggle("is-read-only", Boolean(this.readOnlyMessage));
+    this.input.placeholder = this.readOnlyMessage
+      ? "Start a new chat to continue."
+      : DEFAULT_COMPOSER_PLACEHOLDER;
+    this.renderAttachments();
+    this.syncControls();
+  }
+
   public setRecording(recording: boolean): void {
     if (!this.micButton) return;
     updateUiAction(this.micButton, {
@@ -245,12 +291,13 @@ export class AgentComposer extends Component {
   }
 
   public setAttachments(attachments: readonly AgentComposerAttachment[]): void {
-    this.contextAttachments = [...attachments];
+    this.pinnedAttachments = [...attachments];
     this.renderAttachments();
     this.syncControls();
   }
 
-  public setMessageAttachmentLimits(limits: ManagedChatInputLimits): void {
+  public setMessageAttachmentLimits(limits: ThinAgentInputLimits): void {
+    this.attachmentLimits = limits;
     this.messageAttachments.setLimits(limits);
   }
 
@@ -284,16 +331,24 @@ export class AgentComposer extends Component {
     return this.messageAttachments.snapshot();
   }
 
+  public setMessageAttachments(attachments: readonly ChatMessageAttachment[]): void {
+    this.messageAttachments.replace(attachments);
+    this.renderAttachments();
+    this.syncControls();
+  }
+
   private renderAttachments(): void {
     this.attachmentList.empty();
     const messageAttachments = this.messageAttachments.displaySnapshot();
-    this.attachmentList.classList.toggle("is-empty", this.contextAttachments.length + messageAttachments.length === 0);
-    for (const attachment of this.contextAttachments) {
+    this.attachmentList.classList.toggle("is-empty", this.pinnedAttachments.length + messageAttachments.length === 0);
+    for (const attachment of this.pinnedAttachments) {
+      const pinnedPath = (attachment.path || attachment.label)
+        .replace(/^\[\[(.*?)\]\]$/, "$1");
       const chip = this.attachmentList.createDiv({
-        cls: "systemsculpt-agent-attachment is-context",
+        cls: "systemsculpt-agent-attachment is-pinned",
         attr: {
           role: "listitem",
-          title: attachment.path || attachment.label,
+          title: `${pinnedPath}. Pinned and reread for every message.`,
         },
       });
       if (attachment.kind === "image" && attachment.previewUrl) {
@@ -302,7 +357,9 @@ export class AgentComposer extends Component {
         this.renderAttachmentIcon(chip, attachment.kind === "image" ? "image" : "file-text");
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.label });
-      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Remove ${attachment.label}`, "x");
+      chip.createSpan({ cls: "systemsculpt-agent-attachment-badge", text: "Pinned" });
+      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", "chat.composer.attachment.unpin", `Unpin ${attachment.label}`, "x");
+      remove.disabled = Boolean(this.readOnlyMessage);
       // Attachment chips are replaced wholesale. Keeping their listeners on
       // the component cleanup stack would retain every removed chip until the
       // view closes.
@@ -325,10 +382,12 @@ export class AgentComposer extends Component {
       }
       chip.createSpan({ cls: "systemsculpt-agent-attachment-label", text: attachment.name });
       if (attachment.status === "failed") {
-        const retry = createButton(chip, "systemsculpt-agent-attachment-retry", `Retry ${attachment.name}`, "rotate-cw");
+        const retry = createButton(chip, "systemsculpt-agent-attachment-retry", "chat.composer.attachment.retry", `Retry ${attachment.name}`, "rotate-cw");
+        retry.disabled = Boolean(this.readOnlyMessage);
         retry.onclick = () => void this.retryMessageAttachment(attachment.id);
       }
-      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", `Remove ${attachment.name}`, "x");
+      const remove = createButton(chip, "systemsculpt-agent-attachment-remove", "chat.composer.attachment.remove", `Remove ${attachment.name}`, "x");
+      remove.disabled = Boolean(this.readOnlyMessage);
       remove.onclick = () => void this.removeMessageAttachment(attachment.id);
     }
   }
@@ -363,6 +422,7 @@ export class AgentComposer extends Component {
     if (
       (!text && attachments.length === 0)
       || this.historyEditing
+      || Boolean(this.readOnlyMessage)
       || this.submitting
       || this.attachmentBusy
     ) return;
@@ -376,9 +436,6 @@ export class AgentComposer extends Component {
     try {
       await this.options.onSubmit({
         text,
-        // Retained in the submission shape for legacy queued-state
-        // compatibility. Managed search is server-owned and autonomous.
-        webSearch: false,
         mode: this.running ? "queue" : "send",
         ...(attachments.length > 0 ? { attachments } : {}),
       });
@@ -393,65 +450,98 @@ export class AgentComposer extends Component {
   }
 
   private resize(): void {
+    const previousHeight = this.input.style.height;
     this.input.setCssStyles({ height: "auto" });
     const next = Math.min(Math.max(this.input.scrollHeight, 40), 180);
-    this.input.setCssStyles({ height: `${next}px` });
+    const nextHeight = `${next}px`;
+    this.input.setCssStyles({ height: nextHeight });
+    if (previousHeight !== nextHeight) this.options.onHeightChange?.();
   }
 
   private syncControls(): void {
     const hasText = this.input.value.trim().length > 0;
     const hasMessage = hasText || this.messageAttachments.hasAny();
     this.hint.setText(
-      this.historyEditing
+      this.readOnlyMessage
+        ? this.readOnlyMessage
+        : this.historyEditing
         ? "Finish editing the earlier message"
         : this.running ? "Enter to queue" : "Enter to send",
     );
-    this.input.disabled = this.historyEditing;
-    this.sendButton.disabled = this.historyEditing || this.submitting || this.attachmentBusy
+    const readOnly = Boolean(this.readOnlyMessage);
+    this.input.disabled = this.historyEditing || readOnly;
+    this.sendButton.disabled = this.historyEditing || readOnly || this.submitting || this.attachmentBusy
       || this.messageAttachments.hasBlockingFailures() || !hasMessage;
     this.stopButton.toggleAttribute("hidden", !this.running);
-    this.attachButton.disabled = this.historyEditing || this.attachmentBusy;
-    this.vaultContextButton.disabled = this.historyEditing || this.attachmentBusy;
-    this.filePicker.disabled = this.historyEditing || this.attachmentBusy;
-    this.approvalMode.disabled = this.historyEditing || this.running;
-    if (this.micButton) this.micButton.disabled = this.historyEditing || this.attachmentBusy;
+    this.attachButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
+    this.vaultContextButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
+    this.filePicker.disabled = this.historyEditing || readOnly || this.attachmentBusy;
+    this.approvalMode.disabled = this.historyEditing || readOnly || this.running;
+    if (this.micButton) this.micButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.element.classList.toggle("is-submitting", this.submitting);
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);
   }
 
   private async ingestFiles(files: readonly File[]): Promise<void> {
-    if (files.length === 0 || this.attachmentBusy) return;
+    if (files.length === 0 || this.attachmentBusy || this.readOnlyMessage) return;
+    const generation = this.attachmentGeneration;
+    const collection = this.messageAttachments;
     this.attachmentBusy = true;
     this.syncControls();
     try {
       this.hint.setText("Processing attachments…");
-      const result = await this.messageAttachments.addFiles(files, this.input.value);
+      const result = await collection.addFiles(files, this.input.value);
+      if (!this.isCurrentAttachmentOperation(generation, collection)) return;
       for (const problem of result.issues) new Notice(problem.message, 5000);
       this.renderAttachments();
     } finally {
-      this.attachmentBusy = false;
-      this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
-      this.syncControls();
+      if (this.isCurrentAttachmentOperation(generation, collection)) {
+        this.attachmentBusy = false;
+        this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
+        this.syncControls();
+      }
     }
   }
 
   private async retryMessageAttachment(id: string): Promise<void> {
-    if (this.attachmentBusy) return;
+    if (this.attachmentBusy || this.readOnlyMessage) return;
+    const generation = this.attachmentGeneration;
+    const collection = this.messageAttachments;
     this.attachmentBusy = true;
     this.hint.setText("Retrying document…");
     this.syncControls();
     try {
-      const result = await this.messageAttachments.retry(id, this.input.value);
+      const result = await collection.retry(id, this.input.value);
+      if (!this.isCurrentAttachmentOperation(generation, collection)) return;
       for (const problem of result.issues) new Notice(problem.message, 5000);
       this.renderAttachments();
     } finally {
-      this.attachmentBusy = false;
-      this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
-      this.syncControls();
+      if (this.isCurrentAttachmentOperation(generation, collection)) {
+        this.attachmentBusy = false;
+        this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
+        this.syncControls();
+      }
     }
   }
 
+  private createMessageAttachmentCollection(): ChatMessageAttachmentCollection {
+    return new ChatMessageAttachmentCollection(
+      undefined,
+      this.options.documentAttachmentProcessor,
+      this.attachmentLimits,
+    );
+  }
+
+  private isCurrentAttachmentOperation(
+    generation: number,
+    collection: ChatMessageAttachmentCollection,
+  ): boolean {
+    return generation === this.attachmentGeneration
+      && collection === this.messageAttachments;
+  }
+
   private async removeMessageAttachment(id: string): Promise<void> {
+    if (this.readOnlyMessage) return;
     try {
       await this.messageAttachments.remove(id);
     } catch {

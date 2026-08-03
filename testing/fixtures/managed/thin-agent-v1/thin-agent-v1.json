@@ -1,0 +1,272 @@
+{
+  "fixture_version": "thin-agent-v1-fixture-1",
+  "endpoints": {
+    "bootstrap": {
+      "method": "POST",
+      "path": "/api/plugin/agent/bootstrap"
+    },
+    "messages": {
+      "method": "GET",
+      "path": "/api/plugin/agent/connect/get-messages"
+    },
+    "context": {
+      "method": "POST",
+      "path": "/api/plugin/agent/context"
+    },
+    "turn": {
+      "method": "POST",
+      "path": "/api/plugin/agent/turn",
+      "response_content_type": "text/event-stream"
+    }
+  },
+  "capability_manifest": {
+    "contract_version": "thin-agent-capabilities-v1",
+    "capabilities": [
+      {
+        "id": "obsidian.vault",
+        "version": 1
+      }
+    ]
+  },
+  "capability_manifest_canonical_json": "{\"capabilities\":[{\"id\":\"obsidian.vault\",\"version\":1}],\"contract_version\":\"thin-agent-capabilities-v1\"}",
+  "capability_manifest_sha256": "sha256:fb3e72b592556f80d6047339bdef5d82c0570b195f1abc8a8c9a3d7bf162d22c",
+  "bootstrap": {
+    "request": {
+      "contract_version": "thin-agent-v1",
+      "conversation_id": "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "client_id": "client_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "plugin_build_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "capability_manifest": {
+        "contract_version": "thin-agent-capabilities-v1",
+        "capabilities": [
+          {
+            "id": "obsidian.vault",
+            "version": 1
+          }
+        ]
+      }
+    },
+    "fork_request": {
+      "contract_version": "thin-agent-v1",
+      "conversation_id": "conversation_11111111111111111111111111111111",
+      "client_id": "client_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "plugin_build_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "capability_manifest": {
+        "contract_version": "thin-agent-capabilities-v1",
+        "capabilities": [
+          {
+            "id": "obsidian.vault",
+            "version": 1
+          }
+        ]
+      },
+      "fork": {
+        "source_conversation_id": "conversation_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "before_message_id": "msg-user-0001"
+      }
+    },
+    "response": {
+      "contract_version": "thin-agent-v1",
+      "conversation_id": "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "session": {
+        "id": "session_dddddddddddddddddddddddddddddddd"
+      },
+      "access": {
+        "token": "fixture.access.signature",
+        "expires_at": "2030-01-01T00:01:00.000Z"
+      },
+      "run_state": {
+        "version": 1,
+        "cursor": 0,
+        "state": "idle"
+      },
+      "client_input_limits": {
+        "image_mime_types": [
+          "image/png",
+          "image/jpeg",
+          "image/webp"
+        ],
+        "max_content_blocks_per_message": 16,
+        "max_images_per_turn": 6,
+        "max_image_bytes": 6291456,
+        "max_total_image_bytes": 16777216,
+        "max_text_bytes_per_block": 1048576,
+        "max_total_text_bytes": 2097152,
+        "max_document_bytes": 26214400
+      },
+      "accepted_capabilities": [
+        {
+          "id": "obsidian.vault",
+          "version": 1
+        }
+      ]
+    }
+  },
+  "context_staging": {
+    "request": {
+      "contract_version": "thin-agent-v1",
+      "root_message_id": "message_root_success",
+      "context_sources": [
+        {
+          "kind": "text",
+          "path": "Projects/Plan.md",
+          "content": "Private selected vault context."
+        }
+      ]
+    },
+    "response": {
+      "contract_version": "thin-agent-v1",
+      "context_ref": "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expires_at": "2030-01-01T02:00:00.000Z",
+      "bytes": 143,
+      "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "turn_body": {
+      "context_ref": "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "semantics": {
+      "authentication": "authorization_bearer_header",
+      "access_token_consumed": false,
+      "automatic_retry": false,
+      "raw_context_allowed_in_turn_body": false,
+      "context_ref_bound_to": [
+        "account",
+        "session",
+        "client",
+        "root_message_id",
+        "expiry",
+        "bytes",
+        "sha256"
+      ],
+      "context_ref_ttl_seconds": 7200,
+      "max_http_body_bytes": 25165824
+    }
+  },
+  "data_parts": [
+    {
+      "type": "data-systemsculpt-run-terminal",
+      "data": {
+        "version": 1,
+        "run_id": "run_ffffffffffffffffffffffffffffffff",
+        "root_message_id": "message_root_success",
+        "outcome": "succeeded",
+        "code": "completed"
+      }
+    },
+    {
+      "type": "data-systemsculpt-run-terminal",
+      "data": {
+        "version": 1,
+        "run_id": "run_33333333333333333333333333333333",
+        "root_message_id": "message_root_failure",
+        "outcome": "failed",
+        "code": "service_temporarily_unavailable",
+        "message": "The service is temporarily unavailable.",
+        "incident_id": "incident_44444444444444444444444444444444",
+        "retryable": true
+      }
+    },
+    {
+      "type": "data-systemsculpt-client-tool-request",
+      "id": "call_fixture_read",
+      "data": {
+        "version": 1,
+        "tool_call_id": "call_fixture_read",
+        "tool_name": "read",
+        "target": {
+          "id": "obsidian.vault",
+          "version": 1
+        },
+        "input": {
+          "paths": [
+            "Notes/project.md"
+          ]
+        }
+      }
+    }
+  ],
+  "bootstrap_semantics": {
+    "identity_scope": "authenticated_account_plus_conversation_id",
+    "client_conversation_is_execution_authority": false,
+    "server_session_is_execution_authority": true,
+    "same_account_exact_retry": {
+      "status": 200,
+      "session_id": "same_as_first_success",
+      "access_token": "fresh_short_lived_access_token"
+    },
+    "same_conversation_conflicting_fork": {
+      "status": 409,
+      "code": "conversation_conflict"
+    },
+    "cross_account_fork_source": {
+      "status": 404,
+      "code": "fork_source_not_found",
+      "indistinguishable_from_missing_source": true
+    },
+    "missing_source_message": {
+      "status": 409,
+      "code": "fork_boundary_not_found"
+    },
+    "fork_copy_boundary": "server_history_strictly_before_before_message_id",
+    "fork_target_conversation_id_must_be_new": true,
+    "forbidden_request_fields": [
+      "capability_manifest_sha256",
+      "history",
+      "messages",
+      "plugin_version",
+      "resume_cursor",
+      "session_id",
+      "transcript"
+    ],
+    "fork_cache_affinity": "inherit_root_lineage"
+  },
+  "transport_semantics": {
+    "snapshot_first": true,
+    "snapshot": "bounded_http_get",
+    "turn_submission": "streaming_http_post",
+    "client_tool_result": "streaming_http_post",
+    "tool_approval": "streaming_http_post",
+    "turn_cancel": "streaming_http_post",
+    "uncertain_delivery": "fresh_snapshot_then_idempotent_replay",
+    "valid_bootstrap_reused_until": "expiry_or_401",
+    "per_request_response_scope": true,
+    "queued_turn_response_remains_open": true,
+    "queued_cancel_replay": "durable_acknowledgement",
+    "max_bootstrap_response_bytes": 65536,
+    "max_snapshot_bytes": 67108864,
+    "max_turn_frame_bytes": 67108864,
+    "max_event_frame_bytes": 67108864,
+    "custom_live_session_commands": false,
+    "custom_turn_rpc": false,
+    "session_snapshot_queue_projection": "bounded_request_ids_without_queued_message_content",
+    "session_snapshot_recent_cancel_receipt_limit": 256,
+    "queue_snapshot_stream_projection": "request_scoped_command_only",
+    "cancel_command_ack": "delivery_only_after_request_scoped_snapshot",
+    "unknown_cancel_target": "authoritative_idempotent_no_op_acknowledgement_with_late_delivery_fence"
+  },
+  "event_semantics": {
+    "unknown_data_part_types": "ignore",
+    "unknown_fields_on_known_data_parts": "ignore",
+    "invalid_known_data_part": "ignore_payload_and_report_protocol_diagnostic",
+    "run_terminal_count_per_accepted_run": 1,
+    "run_terminal_root_message_id_is_authoritative": true,
+    "failed_terminal_requires_incident_and_retryability": true,
+    "stream_end_is_not_a_substitute_for_run_terminal": true
+  },
+  "capability_semantics": {
+    "client_authored_model_tool_schema": false,
+    "client_authored_model_tool_description": false,
+    "client_authored_mutation_classification": false,
+    "obsidian_vault_v1_maps_to_canonical_local_tool_count": 12,
+    "server_tool_catalog_canonicalization": "sort_tools_by_name_then_recursively_sort_object_keys_preserve_array_order_compact_utf8_json",
+    "server_tool_catalog_canonical_bytes": 13475,
+    "server_tool_catalog_sha256": "d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228",
+    "unknown_required_capability_version": "reject_before_access_grant"
+  },
+  "legacy_compatibility": {
+    "contract_version": "managed-capabilities-v2",
+    "status": "frozen",
+    "transport": "legacy_endpoint_only",
+    "thin_agent_negotiation": false
+  }
+}

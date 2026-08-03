@@ -4,6 +4,8 @@ import capabilityFixture from "../../../testing/fixtures/managed/managed-capabil
 import routeFixture from "../../../testing/fixtures/managed/managed-text-generation-route-v1.json";
 import { ManagedCapabilityCatalog } from "../managed/ManagedCapabilityCatalog";
 import {
+  MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
+  MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER,
   ManagedTextGenerationAdapter,
   ManagedTextGenerationError,
 } from "../managed/ManagedTextGenerationAdapter";
@@ -115,6 +117,33 @@ describe("ManagedTextGenerationAdapter", () => {
       },
       signal: undefined,
     });
+  });
+
+  it("negotiates server-owned transcript policy without changing the frozen route fixture", async () => {
+    const { adapter, request } = harness();
+    await adapter.generate({
+      operationId: "postprocess:operation_1",
+      purpose: "transcript_postprocess",
+      buildMessages: () => [{
+        role: "user",
+        content: JSON.stringify({
+          cleanupInstructions: "Remove filler words.",
+          transcript: "Raw transcript.",
+        }),
+      }],
+    });
+
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/plugin/chat/completions",
+      capability: "text_generation",
+      headers: {
+        [MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER]:
+          MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
+      },
+      body: expect.objectContaining({
+        purpose: "transcript_postprocess",
+      }),
+    }));
   });
 
   it.each([

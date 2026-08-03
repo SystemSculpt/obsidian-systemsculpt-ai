@@ -5,11 +5,14 @@ import {
 } from "../ManagedTypes";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
 import { decodeManagedAdmissionResponse } from "../ManagedAdmissionResponse";
+import {
+  MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+  MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES,
+} from "../../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
-export type ManagedChatTransportTicket = Readonly<{ kind: "managed_chat_transport_ticket" }>;
-type ManagedChatConfiguration = Readonly<{ licenseKey: string; pluginVersion: string }>;
-const MANAGED_CHAT_ACTIVITY_CONTRACT = "web-search-v1";
 
 function isReplaySafeManagedRead(operation: ManagedTransportOperation): boolean {
   return (operation.method ?? "POST").toUpperCase() === "GET";
@@ -17,7 +20,6 @@ function isReplaySafeManagedRead(operation: ManagedTransportOperation): boolean 
 
 export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
-  private readonly managedChatConfigurations = new WeakMap<ManagedChatTransportTicket, ManagedChatConfiguration>();
   constructor(private readonly options: HostedTransportOptions) { this.client = options.requestClient ?? new PlatformRequestClient(); }
 
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
@@ -39,29 +41,8 @@ export class HostedTransportAdapter {
     };
   }
 
-  public beginManagedChatDispatch(): ManagedChatTransportTicket | null {
-    const licenseKey = this.options.licenseKey().trim();
-    const pluginVersion = this.options.pluginVersion.trim();
-    if (!licenseKey || !pluginVersion) return null;
-    const ticket: ManagedChatTransportTicket = Object.freeze({ kind: "managed_chat_transport_ticket" });
-    this.managedChatConfigurations.set(ticket, Object.freeze({ licenseKey, pluginVersion }));
-    return ticket;
-  }
-
   request(operation: ManagedTransportOperation) { return this.send(operation); }
-  stream(operation: ManagedTransportOperation) { return this.send({ ...operation, method: operation.method ?? "POST" }, {}, true); }
-  streamAcceptedChat(ticket: ManagedChatTransportTicket, operation: ManagedTransportOperation) {
-    const configuration = this.managedChatConfigurations.get(ticket);
-    if (!configuration) return Promise.reject(new Error("Managed Chat transport configuration is unavailable."));
-    return this.send(
-      { ...operation, method: "POST" },
-      { "x-systemsculpt-chat-activity": MANAGED_CHAT_ACTIVITY_CONTRACT },
-      true,
-      false,
-      configuration,
-    );
-  }
-  job(operation: ManagedTransportOperation, readErrorBody = true) { return this.send(operation, operation.headers ?? {}, false, true, undefined, readErrorBody); }
+  job(operation: ManagedTransportOperation, readErrorBody = true) { return this.send(operation, operation.headers ?? {}, true, readErrorBody); }
 
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
     const response = await this.client.request({
@@ -86,23 +67,128 @@ export class HostedTransportAdapter {
     }
     return this.send(
       { path, method: "GET", headers, signal },
-      headers, false, true, undefined, false,
+      headers, true, false,
       { transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: MANAGED_IMAGE_OUTPUT_MAX_BYTES },
     );
   }
 
-  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, stream = false, scopedHeaders = false, managedChatConfiguration?: ManagedChatConfiguration, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding" | "maxResponseBytes"> = {}): Promise<ManagedTransportResult> {
-    const pluginVersion = managedChatConfiguration?.pluginVersion ?? this.options.pluginVersion;
-    const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": pluginVersion, ...extra };
+  async managedEmbeddingsIndex(
+    body: ArrayBuffer,
+    contentSha256: string,
+    signal?: AbortSignal,
+  ): Promise<ManagedTransportResult> {
+    if (
+      body.byteLength < 1
+      || body.byteLength > MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES
+      || !/^[a-f0-9]{64}$/.test(contentSha256)
+    ) {
+      throw new TypeError("Invalid managed embeddings index source.");
+    }
+    return this.managedEmbeddingsIndexRequest({
+      path: "/api/plugin/embeddings/index",
+      method: "POST",
+      headers: {
+        ...this.managedEmbeddingsIndexHeaders(),
+        "content-type": "text/markdown; charset=utf-8",
+        "x-systemsculpt-content-sha256": contentSha256,
+        "x-systemsculpt-content-size": String(body.byteLength),
+        "Idempotency-Key": `idx:${contentSha256}`,
+      },
+      body,
+      bodyEncoding: "raw",
+      maxResponseBytes: MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES,
+      signal,
+    });
+  }
+
+  getManagedEmbeddingsIndexMetadata(signal?: AbortSignal): Promise<ManagedTransportResult> {
+    return this.managedEmbeddingsIndexRequest({
+      path: "/api/plugin/embeddings/index",
+      method: "GET",
+      headers: this.managedEmbeddingsIndexHeaders(),
+      maxResponseBytes: MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
+      signal,
+    });
+  }
+
+  managedEmbeddingsIndexQuery(
+    query: string,
+    contentSha256: string,
+    signal?: AbortSignal,
+  ): Promise<ManagedTransportResult> {
+    if (!query || !/^[a-f0-9]{64}$/.test(contentSha256)) {
+      return Promise.reject(new TypeError("Invalid managed embeddings index query."));
+    }
+    return this.managedEmbeddingsIndexRequest({
+      path: "/api/plugin/embeddings/index/query",
+      method: "POST",
+      headers: {
+        ...this.managedEmbeddingsIndexHeaders(),
+        "Idempotency-Key": `idxq:${contentSha256}`,
+      },
+      body: { query },
+      maxResponseBytes: MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
+      signal,
+    });
+  }
+
+  private managedEmbeddingsIndexHeaders(): Record<string, string> {
+    return {
+      Accept: "application/json",
+      "x-plugin-version": this.options.pluginVersion.trim(),
+      "x-license-key": this.options.licenseKey().trim(),
+      "x-systemsculpt-capability": "embeddings",
+      "x-systemsculpt-embeddings-index-contract": MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+    };
+  }
+
+  private async managedEmbeddingsIndexRequest(input: {
+    path: string;
+    method: "GET" | "POST";
+    headers: Record<string, string>;
+    body?: unknown;
+    bodyEncoding?: "raw";
+    maxResponseBytes: number;
+    signal?: AbortSignal;
+  }): Promise<ManagedTransportResult> {
+    const response = await this.client.request({
+      url: this.url(input.path),
+      method: input.method,
+      headers: input.headers,
+      body: input.body,
+      stream: false,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
+      transport: "requestUrl",
+      ...(input.bodyEncoding ? { bodyEncoding: input.bodyEncoding } : {}),
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: input.maxResponseBytes,
+      signal: input.signal,
+    });
+    return {
+      response,
+      diagnostics: {
+        status: response.status,
+        requestId: response.headers.get("x-request-id"),
+        contentType: response.headers.get("content-type"),
+        rateLimitLimit: response.headers.get("x-ratelimit-limit"),
+        rateLimitRemaining: response.headers.get("x-ratelimit-remaining"),
+        rateLimitReset: response.headers.get("x-ratelimit-reset"),
+        retryAfter: response.headers.get("retry-after"),
+        errorText: "",
+      },
+    };
+  }
+
+  private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, scopedHeaders = false, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding" | "maxResponseBytes"> = {}): Promise<ManagedTransportResult> {
+    const headers: Record<string, string> = scopedHeaders ? { ...extra } : { "x-plugin-version": this.options.pluginVersion, ...extra };
     if (!extra["x-systemsculpt-admission-contract"]) headers["x-systemsculpt-contract"] = MANAGED_CAPABILITY_CONTRACT;
     if (operation.capability) headers["x-systemsculpt-capability"] = operation.capability;
     if (operation.idempotencyKey) headers["Idempotency-Key"] = operation.idempotencyKey;
-    const licenseKey = managedChatConfiguration?.licenseKey ?? this.key();
-    if (managedChatConfiguration) headers["x-license-key"] = managedChatConfiguration.licenseKey;
+    const licenseKey = this.key();
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
-      body: operation.body, stream, preserveResponseHeaders: true,
-      streamingProbeUrl: stream ? this.url("/api/plugin/connectivity") : undefined,
+      body: operation.body, stream: false, preserveResponseHeaders: true,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
       ...requestOverrides,

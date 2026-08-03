@@ -267,6 +267,134 @@ describe("SearchOperations", () => {
       expect(result).toBeDefined();
     });
 
+    it("scopes a search to exact vault folders without prefix leakage", async () => {
+      const files = [
+        new TFile({ path: "Research/one.md" }),
+        new TFile({ path: "Research/Nested/two.md" }),
+        new TFile({ path: "Research-old/outside.md" }),
+        new TFile({ path: "Elsewhere/outside.md" }),
+      ];
+      files.forEach((file) => {
+        (file.stat as any) = {
+          ctime: Date.now(),
+          mtime: Date.now(),
+          size: 100,
+        };
+      });
+      (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+      (app.vault.cachedRead as jest.Mock).mockResolvedValue("needle");
+
+      const result = await searchOps.grepVault({
+        patterns: ["needle"],
+        paths: ["Research"],
+      });
+
+      const readPaths = (app.vault.cachedRead as jest.Mock).mock.calls
+        .map(([file]) => file.path)
+        .sort();
+      expect(readPaths).toEqual([
+        "Research/Nested/two.md",
+        "Research/one.md",
+      ]);
+      expect(result.results.map((entry: any) => entry.path).sort()).toEqual([
+        "Research/Nested/two.md",
+        "Research/one.md",
+      ]);
+      expect(result.scope).toEqual({ paths: ["Research"] });
+    });
+
+    it("supports exact-file and multiple normalized search scopes", async () => {
+      const files = [
+        new TFile({ path: "Research/one.md" }),
+        new TFile({ path: "Research/Nested/two.md" }),
+        new TFile({ path: "Projects/architecture.md" }),
+        new TFile({ path: "Projects/other.md" }),
+      ];
+      files.forEach((file) => {
+        (file.stat as any) = {
+          ctime: Date.now(),
+          mtime: Date.now(),
+          size: 100,
+        };
+      });
+      (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+      (app.vault.cachedRead as jest.Mock).mockResolvedValue("server-owned");
+
+      const result = await searchOps.grepVault({
+        patterns: ["server-owned"],
+        paths: [
+          "Research%2FNested",
+          "Projects\\architecture.md",
+          "Research%2FNested",
+        ],
+      });
+
+      expect((app.vault.cachedRead as jest.Mock).mock.calls
+        .map(([file]) => file.path)
+        .sort()).toEqual([
+        "Projects/architecture.md",
+        "Research/Nested/two.md",
+      ]);
+      expect(result.scope).toEqual({
+        paths: ["Projects/architecture.md", "Research/Nested"],
+      });
+    });
+
+    it("intersects requested paths with the executor's allowed vault scope", async () => {
+      const restrictedSearch = new SearchOperations(app, ["notes"], plugin);
+      (app.vault.cachedRead as jest.Mock).mockResolvedValue("test content");
+
+      const result = await restrictedSearch.grepVault({
+        patterns: ["test"],
+        paths: ["projects"],
+      });
+
+      expect(app.vault.cachedRead).not.toHaveBeenCalled();
+      expect(result.scope).toEqual({ paths: ["projects"] });
+      expect(result.metaInfo).toEqual(expect.arrayContaining([
+        expect.objectContaining({ file: "_no_matches" }),
+      ]));
+    });
+
+    it.each([
+      { label: "a scalar", paths: "Research" },
+      { label: "an empty array", paths: [] },
+      { label: "a blank path", paths: ["   "] },
+      { label: "a traversal", paths: ["../Outside"] },
+      {
+        label: "too many paths",
+        paths: Array.from({ length: 65 }, (_, index) => `Folder-${index}`),
+      },
+    ])("rejects $label instead of silently searching the whole vault", async ({ paths }) => {
+      await expect(searchOps.grepVault({
+        patterns: ["needle"],
+        paths,
+      } as any)).rejects.toThrow(/Search|search path/i);
+      expect(app.vault.cachedRead).not.toHaveBeenCalled();
+    });
+
+    it("binds pagination cursors to their normalized path scope", async () => {
+      const unscopedCursor = Buffer.from(JSON.stringify({
+        q: "content|literal|needle",
+        o: 0,
+      })).toString("base64");
+
+      await expect(searchOps.grepVault({
+        patterns: ["needle"],
+        paths: ["Research"],
+        cursor: unscopedCursor,
+      })).rejects.toThrow("Invalid search cursor");
+    });
+
+    it("preserves whole-vault behavior when paths are omitted", async () => {
+      (app.vault.cachedRead as jest.Mock).mockResolvedValue("needle");
+
+      const result = await searchOps.grepVault({ patterns: ["needle"] });
+
+      expect(app.vault.cachedRead).toHaveBeenCalledTimes(3);
+      expect(result.scope).toBeUndefined();
+    });
+
     it("searches hidden adapter file contents when allowed", async () => {
       const hiddenRoot = ".systemsculpt/temp/runtime-smoke";
       const hiddenPath = `${hiddenRoot}/Inbox/Note.md`;

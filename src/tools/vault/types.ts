@@ -208,6 +208,7 @@ export interface FindFilesParams {
 
 export interface GrepVaultParams {
   patterns: string[];
+  paths?: string[] | null;
   patternMode?: "literal" | "regex" | null;
   contextSize?: "small" | "medium" | "large";
   includeRelated?: boolean;

@@ -211,12 +211,28 @@ export function renderAccountSection(
       percentSaved: number;
       checkoutUrl: string;
     } | null = null;
+    let internalQa = false;
     let refreshAnnualUpgradeButton: (() => void) | null = null;
+    let refreshBuyCreditsButton: (() => void) | null = null;
 
     const syncCredits = async () => {
       try {
         creditsSetting.setDesc("Fetching credits balance…");
         const balance = await aiService.getCreditsBalance();
+        internalQa = balance.usageClass === "master_auth";
+        if (internalQa) {
+          purchaseUrl = null;
+          annualUpgradeOffer = null;
+          creditsSetting
+            .setName("Usage mode")
+            .setDesc(
+              "Internal testing. Provider usage is tracked internally; customer credits are not used.",
+            );
+          refreshAnnualUpgradeButton?.();
+          refreshBuyCreditsButton?.();
+          return;
+        }
+        creditsSetting.setName("Credits");
         purchaseUrl = balance.purchaseUrl;
         annualUpgradeOffer =
           balance.billingCycle === "monthly" &&
@@ -244,9 +260,11 @@ export function renderAccountSection(
           )}). Resets ${formatDate(balance.cycleEndsAt)}.${annualSavingsSuffix}`
         );
         refreshAnnualUpgradeButton?.();
+        refreshBuyCreditsButton?.();
       } catch {
         annualUpgradeOffer = null;
         refreshAnnualUpgradeButton?.();
+        refreshBuyCreditsButton?.();
         creditsSetting.setDesc("Unable to fetch credits balance. Try again.");
       }
     };
@@ -288,11 +306,18 @@ export function renderAccountSection(
     });
 
     creditsSetting.addButton((button) => {
+      const applyState = () => {
+        button.buttonEl.style.display = internalQa ? "none" : "";
+        button.setDisabled(internalQa);
+      };
+      refreshBuyCreditsButton = applyState;
       button
         .setButtonText("Buy credits")
         .onClick(() => {
+          if (internalQa) return;
           void openExternalUrl(purchaseUrl || SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow);
         });
+      applyState();
     });
 
     void syncCredits();

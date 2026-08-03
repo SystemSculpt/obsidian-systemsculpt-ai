@@ -37,7 +37,7 @@ export class BackupSelectionModal extends StandardModal {
       this.renderManualForm(manual, this);
     }
 
-    const search = this.addSearchBar("Search backups…", (query) => {
+    const search = this.addSearchBar("settings.backup.search", "Search backups…", (query) => {
       this.query = query.trim().toLowerCase();
       this.renderBackups();
     });
@@ -183,6 +183,7 @@ export class BackupRestoreModal {
 
     const createBackupButton = createUiAction(manualBackupContainer, {
       label: "Create manual backup",
+      testId: "settings.backup.create-manual",
       tone: "primary",
       onSelect: (event) => {
         const button = event.currentTarget as HTMLButtonElement;

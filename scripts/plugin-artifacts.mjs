@@ -5,14 +5,115 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { builtinModules } from "node:module";
 import process from "node:process";
-import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  CANONICAL_API_BASE_URL,
+  LOCAL_AGENT_API_BASE_URL,
+  RETIRED_BUILD_OVERRIDE_ENVIRONMENT_KEYS,
+  STAGING_API_BASE_URL,
+  normalizeApiBaseUrl,
+} from "./plugin-build-options.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
 const INLINE_SOURCE_MAP_PATTERN = /[#@]\s*sourceMappingURL=data:/;
 const CSS_BUILD_FAILURE_PATTERN = /\/\*\s*CSS build failed\s*\*\//i;
+const PLUGIN_API_BASE_PATTERN = /https?:\/\/(?:\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::\d+)?\/api\/plugin\b/gi;
 const RETIRED_SYSTEMSCULPT_API_HOST = "https://api.systemsculpt.com";
-const DEFAULT_TAIL_BYTES = 2 * 1024 * 1024;
+
+const FORBIDDEN_SERVICE_IDENTITY_RULES = [
+  { identity: "OpenRouter", pattern: /\bopenrouter\b|openrouter\.ai|@openrouter\//i },
+  { identity: "AI SDK", pattern: /\bai[ _-]?sdk\b|@ai-sdk\//i },
+  { identity: "Think runtime", pattern: /@cloudflare\/think\b|\bthink(?:agent|client|runtime|sdk)\b/i },
+  {
+    identity: "Pi runtime",
+    pattern: /@(?:earendil-works|mariozechner)\/pi-(?:agent-core|ai|coding-agent)\b|\bpi-client-v\d+\b|["'`]pi["'`]/i,
+  },
+  {
+    identity: "OpenAI",
+    pattern: /\bopenai\b|openai(?:api|client|credential|key|model|provider|secret)|api\.openai\.com/i,
+  },
+  { identity: "Anthropic", pattern: /\banthropic\b|api\.anthropic\.com/i },
+  { identity: "Google Gemini", pattern: /\bgemini\b|generativelanguage\.googleapis\.com/i },
+];
+
+const FORBIDDEN_SECRET_RULES = [
+  { kind: "private key", pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
+  { kind: "OpenAI-compatible API key", pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/ },
+  { kind: "Stripe live secret", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/ },
+  { kind: "GitHub access token", pattern: /\b(?:gh[oprsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
+  { kind: "npm access token", pattern: /\bnpm_[A-Za-z0-9]{30,}\b/ },
+  { kind: "Google API key", pattern: /\bAIza[0-9A-Za-z_-]{30,}\b/ },
+  { kind: "AWS access key", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/ },
+  { kind: "Slack token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/ },
+  {
+    kind: "literal credential assignment",
+    pattern: /\b(?:apiKey|api_key|accessToken|access_token|clientSecret|client_secret|password)\b\s*[:=]\s*["'`][^\s"'`]{20,}["'`]/i,
+  },
+  { kind: "credential-bearing URL", pattern: /https?:\/\/[^\s/"'`:@]+:[^\s/"'`@]+@/i },
+];
+function bundleFragmentRules(message, fragments) {
+  return fragments.map((fragment) => ({ fragment, message }));
+}
+
+export const THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS = [
+  ...bundleFragmentRules(
+    "main.js still bundles retired client chat authority.",
+    [
+      "ManagedAgentController",
+      "ManagedChatRuntimeAdapter",
+      "ManagedChatSessionBudget",
+      "ManagedChatInputLimits",
+      "AcceptedChatRequestSnapshot",
+      "ChatRequestPreparationService",
+      "OrderedMessageStream",
+      "ManagedToolContinuationBudget",
+      "inspectManagedToolContinuationBudget",
+      "DEFAULT_MAX_CONTINUATION_ROUNDS",
+      "maxContinuationRounds",
+      "max_tool_continuation_depth",
+      "MAX_SAME_KEY_RETRIES",
+      "MAX_DISCONNECT_RECOVERY_REQUESTS",
+      "DISCONNECT_RETRY_BASE_DELAY_MS",
+    ],
+  ),
+  ...bundleFragmentRules(
+    "main.js still bundles retired client model or provider authority.",
+    [
+      "ModelManagementService",
+      "UnifiedModelService",
+      "PiTextCatalog",
+      "RemoteProviderCatalog",
+      "createPiModelRegistry",
+      "ChatModelSelectionController",
+      "LocalPiStreamExecutor",
+      "PiLocalAgentExecutor",
+      "PiTextRuntime",
+      "PiSdkSessionCore",
+    ],
+  ),
+  ...bundleFragmentRules(
+    "main.js still bundles a retired client SDK or UI runtime.",
+    [
+      "node_modules/agents/",
+      "node_modules/ai/",
+      "node_modules/@ai-sdk/",
+      "node_modules/react/",
+      "node_modules/react-dom/",
+      "WebSocketChatTransport",
+      "cf_agent_",
+      "Invalid hook call",
+    ],
+  ),
+  {
+    fragment: "Agent stopped",
+    message: "main.js still contains the retired stop-response copy.",
+  },
+  {
+    fragment: "connection.ticket",
+    message: "main.js still exposes an internal connection ticket field.",
+  },
+];
+
 const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
   {
     fragment: "node_modules/@mariozechner/",
@@ -34,10 +135,11 @@ const FORBIDDEN_CLIENT_BUNDLE_FRAGMENTS = [
     fragment: "node_modules/@openai/codex",
     message: "main.js still bundles a retired local AI runtime.",
   },
+  ...THIN_CLIENT_FORBIDDEN_BUNDLE_FRAGMENTS,
 ];
 
-const LOOPBACK_API_BASE_PATTERN =
-  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?\/api\/(?:v1|plugin)\b/gi;
+const LOOPBACK_SERVICE_URL_PATTERN =
+  /https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s"'`\\)<>\]]*)?/gi;
 const REQUIRE_CALL_PATTERN = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
 const NODE_BUILTINS = new Set(
   builtinModules.flatMap((name) => [name, name.replace(/^node:/, "")]),
@@ -51,24 +153,6 @@ const DESKTOP_HOST_NODE_REQUIRES = new Set([
 
 function isNodeBuiltin(specifier) {
   return specifier.startsWith("node:") || NODE_BUILTINS.has(specifier.replace(/^node:/, ""));
-}
-
-function readFileTail(filePath, maxBytes = DEFAULT_TAIL_BYTES) {
-  const stats = fs.statSync(filePath);
-  const bytesToRead = Math.min(stats.size, maxBytes);
-  if (bytesToRead <= 0) {
-    return "";
-  }
-
-  const buffer = Buffer.alloc(bytesToRead);
-  const fileHandle = fs.openSync(filePath, "r");
-  try {
-    fs.readSync(fileHandle, buffer, 0, bytesToRead, Math.max(stats.size - bytesToRead, 0));
-  } finally {
-    fs.closeSync(fileHandle);
-  }
-
-  return buffer.toString("utf8");
 }
 
 function formatBytes(sizeBytes) {
@@ -136,8 +220,27 @@ export function assertSafePluginArtifactPathsForBuild({
   return files;
 }
 
-export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
+/**
+ * Marker embedded by src/testing/driver/protocol.ts. Kept as a literal here
+ * because build scripts cannot import TypeScript sources.
+ */
+export const TEST_DRIVER_BUNDLE_MARKER = "SystemSculptTestDriver/v1";
+
+export function inspectPluginArtifacts({
+  root = process.cwd(),
+  expectedApiBaseUrl = CANONICAL_API_BASE_URL,
+  forbiddenApiBaseUrls = [],
+  allowedLoopbackApiBaseUrls = [],
+  expectTestDriver = null,
+} = {}) {
   const resolvedRoot = path.resolve(root);
+  const normalizedExpectedApiBaseUrl = normalizeApiBaseUrl(expectedApiBaseUrl);
+  const normalizedForbiddenApiBaseUrls = Array.from(
+    new Set(forbiddenApiBaseUrls.map((value) => normalizeApiBaseUrl(value))),
+  ).filter((value) => value !== normalizedExpectedApiBaseUrl);
+  const normalizedAllowedLoopbackApiBaseUrls = new Set(
+    allowedLoopbackApiBaseUrls.map((value) => normalizeApiBaseUrl(value)),
+  );
   const files = Object.fromEntries(
     REQUIRED_PLUGIN_ARTIFACTS.map((fileName) => [
       fileName,
@@ -176,27 +279,57 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     formattedSize: mainFile.exists ? formatBytes(mainFile.sizeBytes) : "missing",
     hasInlineSourceMap: false,
     hasCanonicalApiBase: false,
+    expectedApiBaseUrl: normalizedExpectedApiBaseUrl,
+    hasExpectedApiBase: false,
+    pluginApiBases: [],
+    unexpectedPluginApiBases: [],
+    forbiddenApiBases: [],
     hasRetiredApiHost: false,
     loopbackApiBases: [],
     forbiddenClientFragments: [],
+    upstreamRuntimeIdentities: [],
+    forbiddenSecrets: [],
     nodeBuiltinRequires: [],
     mobileUnsafeNodeRequires: [],
+    hasTestDriver: false,
   };
 
   if (mainFile.isRegularFile) {
-    const tail = readFileTail(mainFile.path);
-    mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(tail);
+    const bundleText = fs.readFileSync(mainFile.path, "utf8");
+    mainBundle.hasInlineSourceMap = INLINE_SOURCE_MAP_PATTERN.test(bundleText);
     if (mainBundle.hasInlineSourceMap) {
       problems.push(
         `main.js still contains an inline source map (${mainBundle.formattedSize}); plugin sync must use a production build.`
       );
     }
 
-    const bundleText = fs.readFileSync(mainFile.path, "utf8");
     mainBundle.hasCanonicalApiBase = bundleText.includes(CANONICAL_API_BASE_URL);
-    if (!mainBundle.hasCanonicalApiBase) {
+    mainBundle.pluginApiBases = Array.from(
+      new Set((bundleText.match(PLUGIN_API_BASE_PATTERN) || []).map(normalizeApiBaseUrl)),
+    );
+    mainBundle.hasExpectedApiBase = mainBundle.pluginApiBases.includes(normalizedExpectedApiBaseUrl);
+    if (!mainBundle.hasExpectedApiBase) {
+      const qualifier = normalizedExpectedApiBaseUrl === CANONICAL_API_BASE_URL
+        ? "canonical"
+        : "expected";
       problems.push(
-        `main.js does not contain the canonical SystemSculpt API base ${CANONICAL_API_BASE_URL}.`,
+        `main.js does not contain the ${qualifier} SystemSculpt API base ${normalizedExpectedApiBaseUrl}.`,
+      );
+    }
+    mainBundle.unexpectedPluginApiBases = mainBundle.pluginApiBases.filter(
+      (value) => value !== normalizedExpectedApiBaseUrl,
+    );
+    if (mainBundle.unexpectedPluginApiBases.length > 0) {
+      problems.push(
+        `main.js contains plugin API bases outside the selected build route: ${mainBundle.unexpectedPluginApiBases.join(", ")}.`,
+      );
+    }
+    mainBundle.forbiddenApiBases = normalizedForbiddenApiBaseUrls.filter((value) =>
+      mainBundle.pluginApiBases.includes(value)
+    );
+    if (mainBundle.forbiddenApiBases.length > 0) {
+      problems.push(
+        `main.js contains API bases forbidden for this build target: ${mainBundle.forbiddenApiBases.join(", ")}.`,
       );
     }
 
@@ -206,11 +339,16 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     }
 
     mainBundle.loopbackApiBases = Array.from(
-      new Set(bundleText.match(LOOPBACK_API_BASE_PATTERN) || []),
+      new Set(bundleText.match(LOOPBACK_SERVICE_URL_PATTERN) || []),
     );
-    if (mainBundle.loopbackApiBases.length > 0) {
+    const unexpectedLoopbackApiBases = mainBundle.loopbackApiBases.filter(
+      (value) => !Array.from(normalizedAllowedLoopbackApiBaseUrls).some(
+        (allowed) => value === allowed || value.startsWith(`${allowed}/`),
+      ),
+    );
+    if (unexpectedLoopbackApiBases.length > 0) {
       problems.push(
-        `main.js contains a loopback QA API base: ${mainBundle.loopbackApiBases.join(", ")}.`,
+        `main.js contains a loopback service URL: ${unexpectedLoopbackApiBases.join(", ")}.`,
       );
     }
 
@@ -223,6 +361,24 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
 
     for (const match of mainBundle.forbiddenClientFragments) {
       problems.push(`${match.message} (${mainBundle.formattedSize})`);
+    }
+
+    mainBundle.upstreamRuntimeIdentities = FORBIDDEN_SERVICE_IDENTITY_RULES
+      .filter(({ pattern }) => pattern.test(bundleText))
+      .map(({ identity }) => identity);
+    if (mainBundle.upstreamRuntimeIdentities.length > 0) {
+      problems.push(
+        `main.js exposes upstream service or provider identities: ${mainBundle.upstreamRuntimeIdentities.join(", ")}.`,
+      );
+    }
+
+    mainBundle.forbiddenSecrets = FORBIDDEN_SECRET_RULES
+      .filter(({ pattern }) => pattern.test(bundleText))
+      .map(({ kind }) => kind);
+    if (mainBundle.forbiddenSecrets.length > 0) {
+      problems.push(
+        `main.js appears to contain embedded secrets: ${mainBundle.forbiddenSecrets.join(", ")}.`,
+      );
     }
 
     mainBundle.nodeBuiltinRequires = Array.from(bundleText.matchAll(REQUIRE_CALL_PATTERN))
@@ -238,6 +394,18 @@ export function inspectPluginArtifacts({ root = process.cwd() } = {}) {
     if (mainBundle.mobileUnsafeNodeRequires.length > 0) {
       problems.push(
         `main.js loads Node builtins outside the desktop host seam: ${mainBundle.mobileUnsafeNodeRequires.join(", ")}.`,
+      );
+    }
+
+    mainBundle.hasTestDriver = bundleText.includes(TEST_DRIVER_BUNDLE_MARKER);
+    if (expectTestDriver === false && mainBundle.hasTestDriver) {
+      problems.push(
+        "main.js contains the E2E test driver; release artifacts must exclude it.",
+      );
+    }
+    if (expectTestDriver === true && !mainBundle.hasTestDriver) {
+      problems.push(
+        "main.js is missing the E2E test driver expected in this development artifact.",
       );
     }
   }
@@ -285,11 +453,83 @@ export function formatArtifactProblems(inspection) {
 }
 
 export function assertProductionPluginArtifacts(options = {}) {
-  const inspection = inspectPluginArtifacts(options);
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: CANONICAL_API_BASE_URL,
+    forbiddenApiBaseUrls: [STAGING_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [],
+    expectTestDriver: false,
+  });
   if (!inspection.ok) {
     throw new Error(formatArtifactProblems(inspection));
   }
   return inspection;
+}
+
+export function assertStagingPluginArtifacts(options = {}) {
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: STAGING_API_BASE_URL,
+    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL, LOCAL_AGENT_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [],
+    expectTestDriver: true,
+  });
+  if (!inspection.ok) {
+    throw new Error(formatArtifactProblems(inspection));
+  }
+  return inspection;
+}
+
+export function assertLocalAgentPluginArtifacts(options = {}) {
+  const inspection = inspectPluginArtifacts({
+    ...options,
+    expectedApiBaseUrl: LOCAL_AGENT_API_BASE_URL,
+    forbiddenApiBaseUrls: [CANONICAL_API_BASE_URL, STAGING_API_BASE_URL],
+    allowedLoopbackApiBaseUrls: [LOCAL_AGENT_API_BASE_URL],
+    expectTestDriver: true,
+  });
+  if (!inspection.ok) {
+    throw new Error(formatArtifactProblems(inspection));
+  }
+  return inspection;
+}
+
+function sanitizedBuildEnvironment(environment) {
+  const sanitized = { ...environment };
+  for (const key of RETIRED_BUILD_OVERRIDE_ENVIRONMENT_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
+}
+
+function buildPluginTarget({
+  root,
+  stdio,
+  env,
+  spawnSyncImpl,
+  target,
+  label,
+  assertArtifacts,
+}) {
+  const resolvedRoot = path.resolve(root);
+  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
+  const result = spawnSyncImpl(
+    process.execPath,
+    [path.join(resolvedRoot, "esbuild.config.mjs"), target],
+    {
+      cwd: resolvedRoot,
+      env: sanitizedBuildEnvironment(env),
+      stdio,
+      encoding: "utf8",
+    },
+  );
+
+  if (result?.error) throw result.error;
+  if ((result?.status ?? 1) !== 0) {
+    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`${label} plugin build failed.${output ? `\n${output}` : ""}`);
+  }
+  return assertArtifacts({ root: resolvedRoot });
 }
 
 export function buildProductionPlugin({
@@ -298,31 +538,47 @@ export function buildProductionPlugin({
   env = process.env,
   spawnSyncImpl = spawnSync,
 } = {}) {
-  const resolvedRoot = path.resolve(root);
-  assertSafePluginArtifactPathsForBuild({ root: resolvedRoot });
-  const releaseEnv = {
-    ...env,
-    SYSTEMSCULPT_API_BASE_URL: CANONICAL_API_BASE_URL,
-  };
-  const result = spawnSyncImpl(
-    process.execPath,
-    [path.join(resolvedRoot, "esbuild.config.mjs"), "production"],
-    {
-      cwd: resolvedRoot,
-      env: releaseEnv,
-      stdio,
-      encoding: "utf8",
-    },
-  );
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "production",
+    label: "Production",
+    assertArtifacts: assertProductionPluginArtifacts,
+  });
+}
 
-  if (result?.error) {
-    throw result.error;
-  }
+export function buildStagingPlugin({
+  root = process.cwd(),
+  stdio = "inherit",
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "staging",
+    label: "Staging",
+    assertArtifacts: assertStagingPluginArtifacts,
+  });
+}
 
-  if ((result?.status ?? 1) !== 0) {
-    const output = [result?.stderr, result?.stdout].filter(Boolean).join("\n").trim();
-    throw new Error(`Production plugin build failed.${output ? `\n${output}` : ""}`);
-  }
-
-  return assertProductionPluginArtifacts({ root: resolvedRoot });
+export function buildLocalAgentPlugin({
+  root = process.cwd(),
+  stdio = "inherit",
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  return buildPluginTarget({
+    root,
+    stdio,
+    env,
+    spawnSyncImpl,
+    target: "local-agent",
+    label: "Local agent",
+    assertArtifacts: assertLocalAgentPluginArtifacts,
+  });
 }

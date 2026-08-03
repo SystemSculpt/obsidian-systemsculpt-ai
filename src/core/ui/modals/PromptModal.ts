@@ -96,13 +96,14 @@ export class PromptModal extends StandardModal {
     }
 
     if (this.options.secondaryButton) {
-      this.addActionButton(this.options.secondaryButton, () => {
+      this.addActionButton("modal.prompt.secondary", this.options.secondaryButton, () => {
         this.result = { confirmed: false, action: "secondary" };
         this.close();
       });
     }
 
     this.primaryButton = this.addActionButton(
+      "modal.prompt.primary",
       this.options.primaryButton || "OK",
       () => this.submit(),
       true

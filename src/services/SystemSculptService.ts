@@ -12,10 +12,6 @@ import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
 import { LicenseService, type LicenseValidationResult } from "./LicenseService";
-import { ContextFileService } from "./ContextFileService";
-import { ChatRequestPreparationService, type ManagedChatPreparationInput } from "./chat/ChatRequestPreparationService";
-import type { AcceptedChatRequestSnapshot } from "./chat/AcceptedChatRequestSnapshot";
-import type { AcceptedChatOperation } from "./managed/ManagedTypes";
 import { FirstPartyToolService } from "../tools/FirstPartyToolService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 import type { FirstPartyToolChatTarget } from "../tools/types";
@@ -110,6 +106,7 @@ export type CreditsBalanceSnapshot = {
   addOnRemaining: number;
   totalRemaining: number;
   includedPerMonth: number;
+  usageClass?: "customer" | "master_auth";
   cycleEndsAt: string;
   cycleStartedAt: string;
   cycleAnchorAt: string;
@@ -178,7 +175,7 @@ export const normalizeCreditsCheckoutUrl = (value: unknown): string | null => {
   return parsed.toString();
 };
 
-function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
+export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return invalidCreditsBalance();
   }
@@ -188,6 +185,10 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   const totalRemaining = creditsInteger(value.total_remaining);
   const includedPerMonth = creditsInteger(value.included_per_month);
   if (!Number.isSafeInteger(includedRemaining + addOnRemaining) || totalRemaining !== includedRemaining + addOnRemaining) {
+    return invalidCreditsBalance();
+  }
+  const usageClass = value.usage_class;
+  if (usageClass !== "customer" && usageClass !== "master_auth") {
     return invalidCreditsBalance();
   }
 
@@ -237,6 +238,7 @@ function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     addOnRemaining,
     totalRemaining,
     includedPerMonth,
+    usageClass,
     cycleEndsAt,
     cycleStartedAt,
     cycleAnchorAt,
@@ -298,33 +300,8 @@ export class SystemSculptService {
   public baseUrl: string;
   private plugin: SystemSculptPlugin;
   private licenseService: LicenseService;
-  private contextFileService: ContextFileService;
   private toolService: FirstPartyToolService;
-  private acceptedChatPreparation = new ChatRequestPreparationService();
   private readonly requestClient = new PlatformRequestClient();
-
-  private managedPreparationDependencies() {
-    return {
-      contextFileService: this.contextFileService,
-      getAvailableTools: () => this.toolService.getAvailableTools(),
-    };
-  }
-
-  public prepareAcceptedChatRequest(
-    operation: AcceptedChatOperation,
-    options: ManagedChatPreparationInput,
-  ): Promise<AcceptedChatRequestSnapshot> {
-    this.refreshSettings();
-    return this.acceptedChatPreparation.prepare(
-      operation,
-      options,
-      this.managedPreparationDependencies(),
-    );
-  }
-
-  public releaseAcceptedChatRequest(operation: AcceptedChatOperation): void {
-    this.acceptedChatPreparation.release(operation);
-  }
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
@@ -334,7 +311,6 @@ export class SystemSculptService {
     this.baseUrl = this.getValidServerUrl();
 
     this.licenseService = new LicenseService(plugin);
-    this.contextFileService = new ContextFileService(plugin.app);
     this.toolService = new FirstPartyToolService(plugin, plugin.app);
   }
 
@@ -555,7 +531,7 @@ export class SystemSculptService {
       nextBefore: asNullableString(payload?.next_before),
     };
   }
-  public async executeHostedToolCall(options: {
+  public async executeLocalVaultToolCall(options: {
     toolCall: ToolCall | ToolCallRequest;
     chatView?: FirstPartyToolChatTarget;
     timeoutMs?: number;
@@ -616,7 +592,7 @@ export class SystemSculptService {
             ? executionCode
             : "TOOL_EXECUTION_FAILED",
           message: error instanceof Error ? error.message : `Tool execution failed for ${functionName}.`,
-          details: error,
+          details: error instanceof Error ? error.message : String(error),
         },
       };
     }

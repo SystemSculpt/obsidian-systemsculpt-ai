@@ -56,9 +56,7 @@ export class ManagementOperations {
     return { opened, errors };
   }
 
-  /**
-   * Manage context by adding or removing files from the current chat's context window
-   */
+  /** Pin or unpin files for every message in the originating chat. */
   async manageContext(
     params: ManageContextParams,
     originatingChatView: FirstPartyToolChatTarget | undefined = this.defaultChatView,
@@ -86,14 +84,14 @@ export class ManagementOperations {
     }
 
     if (action === "add") {
-      // Handle adding files to context
+      // Handle pinning files
       let filesInCurrentRequest = 0;
       
       for (const path of paths) {
         try {
           const normalized = normalizePath(normalizeVaultPath(path));
           // Fall back to the Folder Notes layout (X.md -> X/X.md) so folder
-          // notes can be added to context too (#154).
+          // notes can be pinned too (#154).
           let abstractFile = this.app.vault.getAbstractFileByPath(normalized);
           if (!abstractFile) {
             const folderNotePath = resolveFolderNotePath(this.app, normalized);
@@ -131,11 +129,11 @@ export class ManagementOperations {
               continue;
             }
 
-            // Add files from directory using the existing DocumentContextManager
+            // Pin files from the directory through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
-            const addedCount = await documentContextManager.addFilesToContext(
+            const addedCount = await documentContextManager.pinVaultFiles(
               folderFiles, 
               currentChatView.contextManager, 
               {
@@ -150,7 +148,7 @@ export class ManagementOperations {
               filesInCurrentRequest += addedCount;
               totalFilesProcessed += addedCount;
             } else {
-              results.push({ path, success: false, reason: "No files were added from directory" });
+              results.push({ path, success: false, reason: "No files were pinned from directory" });
             }
 
           } else if (abstractFile instanceof TFile) {
@@ -164,11 +162,11 @@ export class ManagementOperations {
               continue;
             }
 
-            // Add individual file using DocumentContextManager
+            // Pin an individual file through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
-            const success = await documentContextManager.addFileToContext(
+            const success = await documentContextManager.pinVaultFile(
               abstractFile, 
               currentChatView.contextManager, 
               {
@@ -182,7 +180,7 @@ export class ManagementOperations {
               filesInCurrentRequest++;
               totalFilesProcessed++;
             } else {
-              results.push({ path, success: false, reason: "Failed to add file to context (may already be in context)" });
+              results.push({ path, success: false, reason: "Could not pin file. It may already be pinned." });
             }
           }
 
@@ -207,12 +205,11 @@ export class ManagementOperations {
           // Normalize the path to match how files are stored in context
           const normalized = normalizePath(normalizeVaultPath(path));
           const wikiLink = `[[${normalized}]]`;
-          const hasFile = currentChatView.contextManager.hasContextFile(wikiLink) || 
-                         currentChatView.contextManager.hasContextFile(normalized);
+          const hasFile = currentChatView.contextManager.hasPinnedFile(wikiLink)
+            || currentChatView.contextManager.hasPinnedFile(normalized);
 
           if (hasFile) {
-            // Remove from context using the new public method
-            const removed = await currentChatView.contextManager.removeFromContextFiles(normalized);
+            const removed = await currentChatView.contextManager.unpinFile(normalized);
             if (removed) {
               results.push({ path, success: true });
               totalFilesProcessed++;
@@ -220,14 +217,14 @@ export class ManagementOperations {
               results.push({ 
                 path, 
                 success: false, 
-                reason: "Failed to remove file from context" 
+                reason: "Could not unpin file"
               });
             }
           } else {
             results.push({ 
               path, 
               success: false, 
-              reason: "File not found in current context" 
+              reason: "File is not pinned"
             });
           }
         } catch (error) {
@@ -246,12 +243,13 @@ export class ManagementOperations {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
     
-    let summary = `Context management completed: ${action} operation processed ${totalFilesProcessed} files. `;
-    summary += `${successCount} paths succeeded, ${failureCount} paths failed.`;
+    const actionLabel = action === "add" ? "Pinned" : "Unpinned";
+    let summary = `${actionLabel} ${totalFilesProcessed} file${totalFilesProcessed === 1 ? "" : "s"}. `;
+    summary += `${successCount} path${successCount === 1 ? "" : "s"} succeeded, ${failureCount} failed.`;
     
     if (action === 'add' && totalFilesProcessed > 0) {
-      const currentCount = currentChatView.contextManager.getContextFiles().size;
-      summary += ` Current context: ${currentCount} files total.`;
+      const currentCount = currentChatView.contextManager.getPinnedFiles().size;
+      summary += ` ${currentCount} file${currentCount === 1 ? " is" : "s are"} pinned for every message.`;
     }
 
     return {

@@ -131,8 +131,8 @@ export class AudioTranscriptionPanel {
     });
 
     this.setButtons([
-      { label: "Hide", onClick: () => this.minimize() },
-      { label: "Stop waiting", onClick: () => this.stopWaiting() },
+      { label: "Hide", testId: "transcription.progress.hide", onClick: () => this.minimize() },
+      { label: "Stop waiting", testId: "transcription.progress.stop-waiting", onClick: () => this.stopWaiting() },
     ]);
   }
 
@@ -152,7 +152,7 @@ export class AudioTranscriptionPanel {
       progress: 1,
       details: "Your source audio is unchanged.",
     });
-    this.setButtons([{ label: "Hide", onClick: () => this.minimize() }]);
+    this.setButtons([{ label: "Hide", testId: "transcription.progress.hide", onClick: () => this.minimize() }]);
     this.task.cancel();
   }
 
@@ -201,10 +201,11 @@ export class AudioTranscriptionPanel {
       this.setButtons([
         {
           label: "Open transcript",
+          testId: "transcription.progress.open-transcript",
           variant: "primary",
           onClick: () => void this.openOutput(result.outputPath),
         },
-        { label: "Close", onClick: () => this.finish() },
+        { label: "Close", testId: "transcription.progress.close", onClick: () => this.finish() },
       ]);
     } catch (error) {
       if (this.disposed || this.task !== task) return;
@@ -246,10 +247,11 @@ export class AudioTranscriptionPanel {
         this.setButtons([
           ...(!blocked ? [{
             label: this.resumeOperationId ? "Resume" : "Retry",
+            testId: "transcription.progress.retry",
             variant: "primary" as const,
             onClick: () => this.startTask(),
           }] : []),
-          { label: "Close", onClick: () => this.finish() },
+          { label: "Close", testId: "transcription.progress.close", onClick: () => this.finish() },
         ]);
         return;
       }
@@ -288,10 +290,11 @@ export class AudioTranscriptionPanel {
         this.setButtons([
           ...(!blocked ? [{
             label: this.resumeOperationId ? "Resume" : "Retry",
+            testId: "transcription.progress.retry",
             variant: "primary" as const,
             onClick: () => this.startTask(),
           }] : []),
-          { label: "Close", onClick: () => this.finish() },
+          { label: "Close", testId: "transcription.progress.close", onClick: () => this.finish() },
         ]);
         return;
       }
@@ -320,15 +323,18 @@ export class AudioTranscriptionPanel {
       this.setButtons([
         ...(this.resumeOperationId ? [{
           label: "Retry save",
+          testId: "transcription.progress.retry",
           variant: "primary" as const,
           onClick: () => this.startTask(),
         }] : []),
         {
           label: "Copy error",
+          testId: "transcription.progress.copy-error",
           onClick: () => void this.copyError(message),
         },
         {
           label: "Close",
+          testId: "transcription.progress.close",
           variant: this.resumeOperationId ? "default" : "primary",
           onClick: () => this.finish(),
         },
@@ -337,7 +343,12 @@ export class AudioTranscriptionPanel {
   }
 
   private setButtons(
-    descriptors: Array<{ label: string; onClick: () => void; variant?: "primary" | "default" }>,
+    descriptors: Array<{
+      label: string;
+      testId: string;
+      onClick: () => void;
+      variant?: "primary" | "default";
+    }>,
   ): void {
     if (this.disposed) return;
     this.panel?.setActions(descriptors);

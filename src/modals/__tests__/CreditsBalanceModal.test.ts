@@ -169,6 +169,42 @@ describe("CreditsBalanceModal", () => {
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
   });
 
+  it("presents master auth as Internal QA without customer-credit actions", async () => {
+    const balance = {
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      includedPerMonth: 0,
+      usageClass: "master_auth" as const,
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    };
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: balance,
+      loadBalance: jest.fn().mockResolvedValue(balance),
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("Usage mode");
+    expect(modal.modalEl.textContent).toContain("Internal QA");
+    expect(modal.modalEl.textContent).toContain("Customer credits");
+    expect(modal.modalEl.textContent).toContain("Not used");
+    expect(modal.modalEl.textContent).toContain("Provider usage");
+    expect(modal.modalEl.textContent).toContain("Tracked internally");
+    expect(modal.modalEl.textContent).not.toContain("0 credits");
+    expect(modal.modalEl.textContent).not.toContain("running low");
+    const purchase = findButtonByText(modal.modalEl, "Buy Credits");
+    expect(purchase.hidden).toBe(true);
+    expect(purchase.disabled).toBe(true);
+  });
+
   it("falls back to LICENSE_URL when purchase_url is unavailable and refreshes on demand", async () => {
     const refreshedBalance = {
       includedRemaining: 1000,

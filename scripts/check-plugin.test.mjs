@@ -12,13 +12,15 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   assert.equal(
     packageJson.scripts.check,
     "npm run check:plugin:fast && npm run test:mobile:interactions "
-      + "&& npm run test:chatview:critical && npm run test:mobile:bundle",
+      + "&& npm run test:chatview:critical && npm run test:thin-agent:endurance "
+      + "&& npm run test:mobile:bundle",
   );
   assert.equal(packageJson.scripts["check:all"], "npm run check:full");
   assert.equal(
     packageJson.scripts["check:ci"],
     "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
-      + "&& npm run test:chatview:mutants && npm run test:unit:ci && npm run test:embeddings:ci "
+      + "&& npm run test:thin-agent:endurance && npm run test:chatview:mutants "
+      + "&& npm run test:unit:ci && npm run test:embeddings:ci "
       + "&& npm run test:integration:ci && npm run test:release-script",
   );
   assert.equal(
@@ -89,6 +91,7 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
 
 test("fast plugin checks include the live managed policy and exclude unbounded Jest work", () => {
   assert.match(source, /scripts\/check\/managed-only-policy\.test\.mjs/);
+  assert.doesNotMatch(source, /scripts\/live-chat-smoke\.test\.mjs/);
   assert.doesNotMatch(source, /testing\/native/);
   assert.doesNotMatch(source, /jest\.config\.cjs --passWithNoTests/);
   assert.doesNotMatch(source, /findRelatedTests/);

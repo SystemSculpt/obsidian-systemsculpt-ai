@@ -34,18 +34,35 @@ describe("agent workspace CSS contract", () => {
     expect(css).not.toContain(".systemsculpt-agent-tool-details-label");
   });
 
-  it("keeps activity geometry stable from the first row through completion", () => {
+  it("keeps the ephemeral tail status compact and animation-safe", () => {
     const css = readAgentWorkspaceCss();
 
     expect(css).toMatch(
-      /\.systemsculpt-agent-activity-header\s*\{[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
+      /\.systemsculpt-agent-tail-status\s*\{[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
     );
     expect(css).toMatch(
-      /\.systemsculpt-agent-activity-state\s*\{[^}]*flex:\s*0 0 7rem;[^}]*text-align:\s*right;/s,
+      /\.systemsculpt-agent-tail-status-label\s*\{[^}]*text-overflow:\s*ellipsis;/s,
     );
-    expect(css).not.toContain('.systemsculpt-agent-activity[data-count="1"]');
+    expect(css).not.toContain(".systemsculpt-agent-activity");
+    expect(css).toMatch(
+      /\.systemsculpt-agent-tail-status-icon\.is-animated svg[\s\S]*animation:\s*ss-spin 0\.9s linear infinite;/,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-workspace\.is-reduced-motion \*[\s\S]*animation-duration:\s*0\.01ms;/,
+    );
     expect(css).toMatch(
       /\.systemsculpt-agent-reasoning-header\s*\{[^}]*width:\s*100%;[^}]*min-height:\s*var\(--ss-control-height-sm\)/s,
+    );
+  });
+
+  it("preserves whitespace only for the raw live-Markdown fallback", () => {
+    const css = readAgentWorkspaceCss();
+
+    expect(css).toMatch(
+      /\.systemsculpt-agent-part\.is-text\.is-streaming\.is-live-markdown-fallback,\s*\.systemsculpt-agent-part\.is-reasoning\.is-streaming\s+\.systemsculpt-agent-reasoning-body\.is-live-markdown-fallback\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*pre-wrap;/s,
+    );
+    expect(css).not.toMatch(
+      /\.systemsculpt-agent-part\.is-text\.is-streaming,\s*\.systemsculpt-agent-part\.is-reasoning\.is-streaming \.systemsculpt-agent-reasoning-body\s*\{/s,
     );
   });
 

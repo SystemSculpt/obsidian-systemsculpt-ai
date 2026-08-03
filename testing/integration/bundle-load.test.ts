@@ -86,6 +86,28 @@ describe("built bundle (main.js)", () => {
     plugin.unload();
   });
 
+  it("ships only the thin-agent protocol without legacy SDK runtimes", () => {
+    const code = readFileSync(BUNDLE_PATH, "utf8");
+
+    expect(code).toContain("systemsculpt.agent.command.v1");
+    expect(code).toContain("systemsculpt.agent.event.v1");
+    for (const forbidden of [
+      "node_modules/agents/",
+      "node_modules/ai/",
+      "node_modules/@ai-sdk/",
+      "node_modules/react/",
+      "node_modules/react-dom/",
+      "WebSocketChatTransport",
+      "cf_agent_",
+    ]) {
+      expect(code).not.toContain(forbidden);
+    }
+    expect(code).not.toContain("Invalid hook call");
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    expect(() => require(BUNDLE_PATH)).not.toThrow();
+  });
+
   it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const bundleModule = require(BUNDLE_PATH);

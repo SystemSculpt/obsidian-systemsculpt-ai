@@ -19,12 +19,11 @@ import type { EmbeddingVector } from "../types";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import {
   isManagedNamespace,
-  MANAGED_EMBEDDING_GENERATION,
-  parseNamespaceDimension,
+  parseManagedNamespace,
 } from "../utils/namespace";
 
 /** Bump when the envelope shape changes incompatibly. */
-export const EMBEDDINGS_INDEX_FORMAT = 2;
+export const EMBEDDINGS_INDEX_FORMAT = 3;
 
 export interface SerializedEmbeddingVector {
   id: string;
@@ -173,11 +172,12 @@ export function deserializeEmbeddingsIndex(input: unknown): EmbeddingVector[] {
       && metadata.isEmpty === true
       && float.length === 1
       && metadata.dimension === 1;
+    const managedIdentity = parseManagedNamespace(namespace);
     const validManaged = isManagedNamespace(namespace)
-      && metadata.generation === MANAGED_EMBEDDING_GENERATION
+      && metadata.generation === managedIdentity?.generationId
       && float.length > 0
       && metadata.dimension === float.length
-      && parseNamespaceDimension(namespace) === float.length;
+      && managedIdentity?.dimensions === float.length;
     if (!validLocalEmpty && !validManaged) continue;
 
     vectors.push({
