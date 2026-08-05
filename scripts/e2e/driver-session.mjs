@@ -53,6 +53,20 @@ export function resolvePluginTarget({
   return normalized[0];
 }
 
+export function expectedBuildStampFromTarget(pluginDir) {
+  const manifestPath = path.join(pluginDir, "manifest.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Unable to read ${manifestPath}: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+  }
+  const id = manifest?.systemsculptDevBuild?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
 export class DriverSession {
   constructor({ pluginDir, connectTimeoutMs = 20000, actionTimeoutMs = 60000 }) {
     this.pluginDir = pluginDir;
@@ -208,27 +222,33 @@ async function captureFailureDiagnostics(session) {
 export async function runSteps(session, steps) {
   const results = [];
   let failed = false;
+  let blocked = false;
   let diagnostics = null;
   for (const [index, step] of steps.entries()) {
     const label = step.label ?? `${index + 1}. ${step.action}`;
-    if (failed) {
+    if (blocked && step.resumeAfterFailure !== true) {
       results.push({ label, action: step.action, skipped: true });
       continue;
     }
+    if (step.resumeAfterFailure === true) blocked = false;
     const startedAt = Date.now();
     try {
       const result = await session.run(step.action, step.params ?? {});
       results.push({ label, action: step.action, ok: true, ms: Date.now() - startedAt, result });
     } catch (error) {
       failed = true;
-      results.push({
+      blocked = true;
+      const failedStep = {
         label,
         action: step.action,
         ok: false,
         ms: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error),
-      });
-      diagnostics = await captureFailureDiagnostics(session);
+      };
+      results.push(failedStep);
+      const failureDiagnostics = await captureFailureDiagnostics(session);
+      failedStep.diagnostics = failureDiagnostics;
+      diagnostics ??= failureDiagnostics;
     }
   }
   return { ok: !failed, steps: results, ...(diagnostics ? { diagnostics } : {}) };

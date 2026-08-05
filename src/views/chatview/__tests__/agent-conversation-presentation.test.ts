@@ -89,6 +89,16 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it("shows actionable first-party copy for a safety filter", () => {
+    expect(presentAgentError({
+      code: "content_filter",
+      message: "Provider detail that must stay hidden.",
+    }, false)).toEqual({
+      heading: "Could not finish",
+      message: "The safety filter stopped this response. Change the request and try again.",
+    });
+  });
+
   it("uses the same final copy filter for global banners and tool failures", () => {
     expect(presentAgentErrorMessage(
       "Agent connection closed: WebSocket closed with code 4001",

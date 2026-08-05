@@ -426,7 +426,7 @@ export default class SystemSculptPlugin extends Plugin {
 
       this.registerLayoutReadyHandler(loadStart);
 
-      this.startTestDriverIfEnabled(buildStamp);
+      this.startTestDriverIfEnabled(developmentBuild?.id ?? buildStamp);
 
       onloadPhase.complete({
         totalMs: Number((performance.now() - loadStart).toFixed(1)),
@@ -474,7 +474,12 @@ export default class SystemSculptPlugin extends Plugin {
     // branch (and the imported driver module) when the define is false.
     if (typeof __SS_TEST_DRIVER__ !== "undefined" && __SS_TEST_DRIVER__) {
       void import("./testing/driver/TestDriverClient").then(({ TestDriverClient }) => {
-        const driver = new TestDriverClient(this.app, this.manifest, buildStamp);
+        const driver = new TestDriverClient(
+          this.app,
+          this.manifest,
+          buildStamp,
+          () => this.settingsTab?.containerEl ?? null,
+        );
         driver.start();
         this.register(() => driver.stop());
       }).catch((error) => {

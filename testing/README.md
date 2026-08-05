@@ -148,3 +148,68 @@ systemsculpt-sync.config.json is ignored and lists local Obsidian plugin
 targets. ./run.sh copies successful artifacts while watching. Use the official
 Obsidian CLI or Computer Use for live reload, runtime errors, DOM inspection,
 and visual behavior.
+
+### ChatView QA loop
+
+Run the deterministic ChatView gate before live checks:
+
+~~~bash
+npm run qa:chatview:deterministic
+~~~
+
+Confirm that the watcher uses the canonical checkout. Restart it when the QA
+vault reports another revision:
+
+~~~bash
+npm run dev:watch:status
+npm run dev:watch:install
+npm run e2e -- status --json
+~~~
+
+The status result must name the current development build ID. Do not accept a
+version-only match.
+
+The driver reads the target manifest and fails when Obsidian loaded another
+development build. Use `--expected-build <id>` for a staging manifest that has
+no development identity. Every evidence report records the plugin version,
+loaded build, and expected build.
+
+Run the normal live acceptance in the configured QA vault:
+
+~~~bash
+npm run qa:chatview:live -- --evidence /absolute/path/chatview-live.json
+~~~
+
+This journey uses provider credits. It checks an exact text response, copy
+feedback, saved history, a text attachment, and manual approval. It verifies
+the proposed path and content before approval. It then reads the unique file
+under `QA/E2E` and requires exact content. A failed journey does not hide later
+journeys. The command still exits with failure.
+
+Run one live journey when you must isolate a failure:
+
+~~~bash
+npm run qa:chatview:live:text -- --evidence /absolute/path/chatview-text.json
+npm run qa:chatview:live:attachment -- --evidence /absolute/path/chatview-attachment.json
+npm run qa:chatview:live:approval -- --evidence /absolute/path/chatview-approval.json
+~~~
+
+Run the long tool loop only when the normal live acceptance passes:
+
+~~~bash
+npm run qa:chatview:stress -- --evidence /absolute/path/chatview-stress.json
+~~~
+
+The stress journey uses provider credits and creates a unique folder under
+`QA`. It makes about 30 separate vault calls. It fails on a silent stall.
+
+Each `waitForRun` result records these client-visible durations:
+
+- `runStartedMs`: Submit to active-run UI.
+- `firstVisibleFeedbackMs`: Submit to visible assistant activity.
+- `firstVisibleContentMs`: Submit to the first visible reasoning, tool, or text part.
+- `completedMs`: Submit to the finished UI.
+
+These values start when the wait action begins, a few milliseconds after the
+synthetic Enter event. They are UI acceptance values. They are not provider
+TTFT or browser-paint measurements.

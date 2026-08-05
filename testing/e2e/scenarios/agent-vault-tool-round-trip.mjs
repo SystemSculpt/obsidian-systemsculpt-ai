@@ -4,14 +4,18 @@
  *
  * A text-only prompt exercises none of the client-tool path, so it stays green
  * while tool delivery is broken. This scenario therefore makes the model write
- * a real vault file and waits on run completion with `waitForRun`, which fails
- * loudly on a stall instead of timing out ambiguously.
+ * a uniquely named vault file and waits on run completion with `waitForRun`,
+ * which fails loudly on a stall instead of timing out ambiguously.
  */
 
 const STALL_MS = 60000;
 const RUN_TIMEOUT_MS = 180000;
 
-export default [
+export default function makeAgentVaultToolRoundTrip(now = Date.now()) {
+  const runId = now.toString(36).toUpperCase();
+  const filePath = `QA/E2E/round-trip-${runId}.md`;
+  const completionMarker = `DONE-${runId}`;
+  return [
   { label: "open chat", action: "chat.open" },
   {
     label: "full access so tools run without prompting",
@@ -33,8 +37,8 @@ export default [
     label: "submit a vault-tool prompt",
     action: "type",
     params: {
-      text: "Create exactly one file at QA/E2E/round-trip.md containing the "
-        + "single line OK. Use your vault tools. Then reply with just DONE.",
+      text: `Create exactly one file at ${filePath} containing the single line ${runId}. `
+        + `Use your vault tools. Then reply with exactly ${completionMarker}.`,
       submit: true,
     },
   },
@@ -43,10 +47,26 @@ export default [
     action: "waitForRun",
     params: { timeoutMs: RUN_TIMEOUT_MS, stallMs: STALL_MS },
   },
+  {
+    label: "expected completion marker",
+    action: "waitFor",
+    params: {
+      target: "css:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+      state: "textEquals",
+      text: completionMarker,
+      timeoutMs: 5000,
+    },
+  },
+  {
+    label: "round-trip file has exact content",
+    action: "vault.assertText",
+    params: { path: filePath, text: runId },
+  },
   { label: "transcript", action: "snapshot", params: { scope: "chat" } },
   {
     label: "no error banner",
     action: "waitFor",
     params: { target: "css:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
   },
-];
+  ];
+}

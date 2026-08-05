@@ -8,6 +8,7 @@ import {
   isVisible,
   knownSemanticTargets,
   liveTestIdCatalog,
+  queryElements,
   resolveTarget,
 } from "./locators";
 
@@ -25,6 +26,7 @@ export interface ActionContext {
   pluginVersion: string;
   buildStamp: string;
   diagnostics: DriverDiagnostics;
+  settingsRoot?: () => HTMLElement | null;
 }
 
 interface AppWithCommands extends App {
@@ -46,7 +48,7 @@ function requireTarget(ctx: ActionContext, target: unknown, fallback?: string): 
     ? target
     : fallback;
   if (!name) throw new DriverActionError("A target is required for this action.");
-  const element = resolveTarget({ app: ctx.app }, name);
+  const element = resolveTarget(ctx, name);
   if (!element) {
     throw new DriverActionError(
       `Target "${name}" did not resolve. Targets are data-testid values (run the catalog ` +
@@ -124,6 +126,20 @@ function buildFile(params: Record<string, unknown>): File {
   return new File([bytes.buffer as ArrayBuffer], name, { type: mimeType });
 }
 
+function validatedVaultPath(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
+    throw new DriverActionError("A vault-relative file path is required.");
+  }
+  if (
+    value.startsWith("/")
+    || value.includes("\\")
+    || value.split("/").some((part) => part.length === 0 || part === "." || part === "..")
+  ) {
+    throw new DriverActionError("The vault file path is unsafe.");
+  }
+  return value;
+}
+
 function chatSnapshot(ctx: ActionContext): Record<string, unknown> {
   const container = chatContainer(ctx.app);
   if (!container) return { open: false };
@@ -179,8 +195,8 @@ function chatSnapshot(ctx: ActionContext): Record<string, unknown> {
   };
 }
 
-function settingsSnapshot(): Record<string, unknown> {
-  const surface = document.querySelector(".ss-settings-surface");
+function settingsSnapshot(ctx: ActionContext): Record<string, unknown> {
+  const surface = resolveTarget(ctx, "settings.surface");
   if (!surface?.instanceOf(HTMLElement) || !isVisible(surface)) return { open: false };
   const tabs: Array<Record<string, unknown>> = [];
   const bar = surface.querySelector(".ss-settings-tab-bar");
@@ -230,6 +246,23 @@ function runProgressFingerprint(snapshot: Record<string, unknown>): string {
   ].join(":");
 }
 
+function visibleRunSignals(snapshot: Record<string, unknown>): {
+  feedbackVisible: boolean;
+  contentVisible: boolean;
+} {
+  const turns = Array.isArray(snapshot.turns) ? snapshot.turns : [];
+  const assistantTurns = turns
+    .map((turn) => asRecord(turn))
+    .filter((turn) => turn.role === "assistant");
+  return {
+    feedbackVisible: assistantTurns.some((turn) =>
+      (typeof turn.text === "string" && turn.text.length > 0)
+      || (Array.isArray(turn.parts) && turn.parts.length > 0)),
+    contentVisible: assistantTurns.some((turn) =>
+      Array.isArray(turn.parts) && turn.parts.length > 0),
+  };
+}
+
 /**
  * Waits for a chat run to finish, but fails fast and *specifically* when the
  * run stops producing anything.
@@ -246,6 +279,7 @@ async function waitForRun(
   const stallMs = typeof params.stallMs === "number" ? params.stallMs : 45000;
   const startMs = typeof params.startMs === "number" ? params.startMs : 20000;
   const approve = params.approve !== false;
+  const returnOnApproval = params.returnOnApproval === true;
   const startedAt = Date.now();
 
   // Submitting is asynchronous, so the run has not necessarily begun when this
@@ -265,26 +299,23 @@ async function waitForRun(
     );
   }
 
+  const runStartedMs = Date.now() - startedAt;
+  let firstVisibleFeedbackMs: number | null = null;
+  let firstVisibleContentMs: number | null = null;
   let fingerprint = "";
   let lastProgressAt = Date.now();
   let approvals = 0;
   for (;;) {
-    // Approve exactly as a user would, rather than relying on the composer's
-    // approval mode. A run that parks on approval is otherwise indisputably
-    // "not progressing", so a driven run would stall by design.
-    if (approve) {
-      const button = resolveTarget({ app: ctx.app }, "chat.approval.allow-for-chat")
-        ?? resolveTarget({ app: ctx.app }, "chat.approval.allow-once");
-      if (button && isVisible(button)) {
-        button.click();
-        approvals += 1;
-        lastProgressAt = Date.now();
-        await sleep(120);
-        continue;
-      }
-    }
     const snapshot = chatSnapshot(ctx);
     const composer = asRecord(snapshot.composer);
+    const elapsedMs = Date.now() - startedAt;
+    const visibleSignals = visibleRunSignals(snapshot);
+    if (firstVisibleFeedbackMs === null && visibleSignals.feedbackVisible) {
+      firstVisibleFeedbackMs = elapsedMs;
+    }
+    if (firstVisibleContentMs === null && visibleSignals.contentVisible) {
+      firstVisibleContentMs = elapsedMs;
+    }
     const current = runProgressFingerprint(snapshot);
     if (current !== fingerprint) {
       fingerprint = current;
@@ -293,10 +324,46 @@ async function waitForRun(
     if (composer.stopVisible === false) {
       return {
         finished: true,
-        waitedMs: Date.now() - startedAt,
+        waitedMs: elapsedMs,
         approvals,
+        timing: {
+          runStartedMs,
+          firstVisibleFeedbackMs,
+          firstVisibleContentMs,
+          completedMs: elapsedMs,
+        },
         snapshot,
       };
+    }
+
+    // Approve exactly as a user would, rather than relying on the composer's
+    // approval mode. A run that parks on approval is otherwise indisputably
+    // "not progressing", so a driven run would stall by design.
+    const approvalButton = resolveTarget(ctx, "chat.approval.allow-for-chat")
+      ?? resolveTarget(ctx, "chat.approval.allow-once");
+    if (approvalButton && isVisible(approvalButton)) {
+      if (returnOnApproval) {
+        return {
+          finished: false,
+          approvalRequired: true,
+          waitedMs: elapsedMs,
+          approvals,
+          timing: {
+            runStartedMs,
+            firstVisibleFeedbackMs,
+            firstVisibleContentMs,
+            completedMs: null,
+          },
+          snapshot,
+        };
+      }
+      if (approve) {
+        approvalButton.click();
+        approvals += 1;
+        lastProgressAt = Date.now();
+        await sleep(120);
+        continue;
+      }
     }
     const idleMs = Date.now() - lastProgressAt;
     if (idleMs >= stallMs) {
@@ -328,7 +395,7 @@ async function waitForCondition(
   if (!target) throw new DriverActionError("waitFor requires a target.");
   const startedAt = Date.now();
   const evaluate = (): boolean => {
-    const element = resolveTarget({ app: ctx.app }, target);
+    const element = resolveTarget(ctx, target);
     switch (state) {
       case "exists": return element !== null;
       case "gone": return element === null;
@@ -348,9 +415,18 @@ async function waitForCondition(
             : false;
       case "textContains":
         return element !== null && (element.textContent ?? "").includes(text);
+      case "textEquals": {
+        if (target.trim().startsWith("css:")) {
+          const matches = queryElements(ctx, target.trim().slice(4));
+          return matches.length === 1
+            && (matches[0]?.textContent ?? "").trim() === text.trim();
+        }
+        return element !== null
+          && (element.textContent ?? "").trim() === text.trim();
+      }
       default:
         throw new DriverActionError(
-          `waitFor state must be exists, gone, visible, hidden, enabled, disabled, or textContains; got "${state}".`,
+          `waitFor state must be exists, gone, visible, hidden, enabled, disabled, textContains, or textEquals; got "${state}".`,
         );
     }
   };
@@ -359,7 +435,7 @@ async function waitForCondition(
       return { satisfied: true, waitedMs: Date.now() - startedAt };
     }
     if (Date.now() - startedAt >= timeoutMs) {
-      const element = resolveTarget({ app: ctx.app }, target);
+      const element = resolveTarget(ctx, target);
       throw new DriverActionError(
         `waitFor timed out after ${timeoutMs}ms: ${target} did not reach "${state}". ` +
           `Current: ${JSON.stringify(describeElement(element))}`,
@@ -382,7 +458,7 @@ export async function runDriverAction(
         buildStamp: ctx.buildStamp,
         vault: ctx.app.vault.getName(),
         chatOpen: chatContainer(ctx.app) !== null,
-        settingsOpen: settingsSnapshot().open === true,
+        settingsOpen: settingsSnapshot(ctx).open === true,
         consoleErrorCount: ctx.diagnostics.recentErrorCount(),
       };
     }
@@ -459,6 +535,19 @@ export async function runDriverAction(
       const element = requireTarget(ctx, params.target);
       return describeElement(element);
     }
+    case "vault.assertText": {
+      const path = validatedVaultPath(params.path);
+      if (typeof params.text !== "string") {
+        throw new DriverActionError("vault.assertText requires exact text.");
+      }
+      const actual = await ctx.app.vault.adapter.read(path);
+      if (actual !== params.text) {
+        throw new DriverActionError(
+          `Vault file "${path}" did not contain the expected exact text.`,
+        );
+      }
+      return { path, exact: true, characters: actual.length };
+    }
     case "select": {
       const element = requireTarget(ctx, params.target);
       if (!element.instanceOf(HTMLSelectElement)) {
@@ -491,23 +580,23 @@ export async function runDriverAction(
       });
     }
     case "catalog": {
-      return { testIds: liveTestIdCatalog() };
+      return { testIds: liveTestIdCatalog(ctx) };
     }
     case "query": {
       const css = typeof params.css === "string" ? params.css : "";
       if (!css) throw new DriverActionError("query requires a css selector.");
       const limit = typeof params.limit === "number" ? Math.min(params.limit, 50) : 10;
       const matches: Array<Record<string, unknown>> = [];
-      for (const element of document.querySelectorAll(css)) {
+      for (const element of queryElements(ctx, css)) {
         if (matches.length >= limit) break;
-        if (element.instanceOf(HTMLElement)) matches.push(describeElement(element));
+        matches.push(describeElement(element));
       }
       return { count: matches.length, matches };
     }
     case "snapshot": {
       const scope = typeof params.scope === "string" ? params.scope : "chat";
       if (scope === "chat") return chatSnapshot(ctx);
-      if (scope === "settings") return settingsSnapshot();
+      if (scope === "settings") return settingsSnapshot(ctx);
       throw new DriverActionError(`snapshot scope must be chat or settings; got "${scope}".`);
     }
     case "waitFor": {
@@ -534,7 +623,7 @@ export async function runDriverAction(
         pointerSequence(button);
         await new Promise((resolve) => window.setTimeout(resolve, 50));
       }
-      return settingsSnapshot();
+      return settingsSnapshot(ctx);
     }
     case "settings.close": {
       (ctx.app as AppWithSettings).setting.close();
@@ -543,7 +632,7 @@ export async function runDriverAction(
     default:
       throw new DriverActionError(
         `Unknown driver action "${action}". Available: status, chat.open, click, type, press, ` +
-          "attach, scroll, select, read, query, catalog, logs, notices, snapshot, waitFor, " +
+          "attach, scroll, select, read, vault.assertText, query, catalog, logs, notices, snapshot, waitFor, " +
           "command, settings.open, settings.close.",
       );
   }

@@ -11,6 +11,7 @@ import {
   DRIVER_MARKER,
   HANDSHAKE_FILE,
   PROTOCOL_VERSION,
+  expectedBuildStampFromTarget,
   resolvePluginTarget,
   runSteps,
 } from "./driver-session.mjs";
@@ -63,6 +64,22 @@ test("resolvePluginTarget prefers explicit paths and validates config targets", 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("expectedBuildStampFromTarget reads the synced development identity", () => {
+  const pluginDir = makeTempPluginDir();
+  try {
+    fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+      id: "systemsculpt-ai",
+      systemsculptDevBuild: { id: "abc12345-dirty-20260805T120000000Z" },
+    }));
+    assert.equal(
+      expectedBuildStampFromTarget(pluginDir),
+      "abc12345-dirty-20260805T120000000Z",
+    );
+  } finally {
+    fs.rmSync(pluginDir, { recursive: true, force: true });
+  }
+});
+
 test("DriverSession writes a valid handshake, accepts the driver, and round-trips actions", async () => {
   const pluginDir = makeTempPluginDir();
   const session = new DriverSession({ pluginDir, connectTimeoutMs: 5000, actionTimeoutMs: 5000 });
@@ -96,6 +113,19 @@ test("DriverSession writes a valid handshake, accepts the driver, and round-trip
     assert.equal(outcome.steps[1].ok, false);
     assert.match(outcome.steps[1].error, /boom/);
     assert.equal(outcome.steps[2].skipped, true);
+
+    const resumed = await runSteps(session, [
+      { action: "status" },
+      { action: "failing" },
+      { action: "skipped-after-failure" },
+      { action: "status", resumeAfterFailure: true },
+      { action: "reached-after-resume" },
+    ]);
+    assert.equal(resumed.ok, false);
+    assert.equal(resumed.steps[2].skipped, true);
+    assert.equal(resumed.steps[3].ok, true);
+    assert.equal(resumed.steps[4].ok, true);
+    assert.deepEqual(resumed.steps[1].diagnostics.logs, { echoed: "logs" });
 
     driver.close();
   } finally {
