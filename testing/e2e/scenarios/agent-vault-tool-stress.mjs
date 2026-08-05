@@ -71,7 +71,7 @@ export default function makeAgentVaultToolStress(now = Date.now()) {
     label: "expected completion marker",
     action: "waitFor",
     params: {
-      target: "css:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+      target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
       state: "textEquals",
       text: completionMarker,
       timeoutMs: 5000,
@@ -91,7 +91,7 @@ export default function makeAgentVaultToolStress(now = Date.now()) {
   {
     label: "no error banner",
     action: "waitFor",
-    params: { target: "css:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
+    params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
   },
   ];
 }

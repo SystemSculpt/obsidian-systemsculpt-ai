@@ -28,7 +28,12 @@ export interface LocatorContext {
 
 function chatContainer(app: App): HTMLElement | null {
   const leaves: WorkspaceLeaf[] = app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-  const leaf = leaves[0];
+  const activeLeaf = app.workspace.activeLeaf;
+  const leaf = activeLeaf && leaves.includes(activeLeaf)
+    ? activeLeaf
+    : leaves.length === 1
+      ? leaves[0]
+      : null;
   if (!leaf) return null;
   const view = leaf.view as { containerEl?: HTMLElement } | undefined;
   return view?.containerEl ?? null;
@@ -57,9 +62,10 @@ function inChat(app: App, selector: string): HTMLElement | null {
 }
 
 function searchRoots(ctx: LocatorContext): ParentNode[] {
+  const chatDocument = chatContainer(ctx.app)?.ownerDocument;
   const roots = [
+    chatDocument,
     document,
-    chatContainer(ctx.app)?.ownerDocument,
     ctx.settingsRoot?.()?.ownerDocument,
   ].filter((root): root is Document => root !== undefined);
   return [...new Set(roots)];
@@ -81,7 +87,13 @@ function byAriaLabelInDocuments(ctx: LocatorContext, label: string): HTMLElement
 
 function byTestId(ctx: LocatorContext, id: string): HTMLElement | null {
   const attributeValue = id.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return inDocuments(ctx, `[data-testid="${attributeValue}"]`);
+  const selector = `[data-testid="${attributeValue}"]`;
+  if (id.startsWith("chat.")) {
+    const match = inChat(ctx.app, selector);
+    if (match) return match;
+    if (ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE).length > 0) return null;
+  }
+  return inDocuments(ctx, selector);
 }
 
 const SETTING_CONTROL_SELECTOR =
@@ -177,6 +189,13 @@ export function queryElements(ctx: LocatorContext, selector: string): HTMLElemen
     }
   }
   return matches;
+}
+
+export function queryChatElements(app: App, selector: string): HTMLElement[] {
+  const container = chatContainer(app);
+  if (!container) return [];
+  return [...container.querySelectorAll(selector)]
+    .filter((element): element is HTMLElement => element.instanceOf(HTMLElement));
 }
 
 /** Lists every `data-testid` currently in the DOM with its visibility. */

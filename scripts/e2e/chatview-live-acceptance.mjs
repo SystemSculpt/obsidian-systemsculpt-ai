@@ -32,7 +32,7 @@ export function makeChatLiveTextRoundTrip(now = Date.now()) {
       label: "expected response is visible",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+        target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
         state: "textEquals",
         text: marker,
         timeoutMs: 5000,
@@ -41,7 +41,7 @@ export function makeChatLiveTextRoundTrip(now = Date.now()) {
     {
       label: "copy the assistant response",
       action: "click",
-      params: { target: "css:.systemsculpt-agent-turn.is-assistant [data-testid='chat.turn.copy']" },
+      params: { target: "chat:.systemsculpt-agent-turn.is-assistant [data-testid='chat.turn.copy']" },
     },
     {
       label: "copy feedback",
@@ -58,7 +58,7 @@ export function makeChatLiveTextRoundTrip(now = Date.now()) {
     {
       label: "no error banner",
       action: "waitFor",
-      params: { target: "css:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
+      params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
     },
     { label: "text transcript", action: "snapshot", params: { scope: "chat" } },
   ];
@@ -102,7 +102,7 @@ export function makeChatLiveAttachmentRoundTrip(now = Date.now()) {
       label: "attachment content reached the response",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+        target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
         state: "textEquals",
         text: marker,
         timeoutMs: 5000,
@@ -112,7 +112,7 @@ export function makeChatLiveAttachmentRoundTrip(now = Date.now()) {
       label: "attachment remains visible in history",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-message-attachment.is-file",
+        target: "chat:.systemsculpt-agent-message-attachment.is-file",
         state: "visible",
         timeoutMs: 5000,
       },
@@ -163,7 +163,7 @@ export function makeAgentVaultToolApprovalRoundTrip(now = Date.now()) {
       label: "approval preview has the exact path",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-approval-preview .systemsculpt-diff-filename",
+        target: "chat:.systemsculpt-agent-approval-preview .systemsculpt-diff-filename",
         state: "textEquals",
         text: filePath,
         timeoutMs: 5000,
@@ -173,7 +173,7 @@ export function makeAgentVaultToolApprovalRoundTrip(now = Date.now()) {
       label: "approval preview has the exact content",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-approval-preview .systemsculpt-diff-line-added .systemsculpt-diff-line-content",
+        target: "chat:.systemsculpt-agent-approval-preview .systemsculpt-diff-line-added .systemsculpt-diff-line-content",
         state: "textEquals",
         text: fileContent,
         timeoutMs: 5000,
@@ -193,7 +193,7 @@ export function makeAgentVaultToolApprovalRoundTrip(now = Date.now()) {
       label: "expected completion marker",
       action: "waitFor",
       params: {
-        target: "css:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+        target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
         state: "textEquals",
         text: completionMarker,
         timeoutMs: 5000,
@@ -207,7 +207,7 @@ export function makeAgentVaultToolApprovalRoundTrip(now = Date.now()) {
     {
       label: "no final error banner",
       action: "waitFor",
-      params: { target: "css:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
+      params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
     },
     { label: "approval transcript", action: "snapshot", params: { scope: "chat" } },
   ];

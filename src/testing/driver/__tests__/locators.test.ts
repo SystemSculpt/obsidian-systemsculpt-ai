@@ -107,4 +107,75 @@ describe("test driver locators", () => {
       count: 1,
     });
   });
+
+  it("prefers the active ChatView when main and pop-out views are visible", () => {
+    const mainContainer = document.createElement("div");
+    const mainSend = document.createElement("button");
+    mainSend.dataset.testid = "chat.composer.send";
+    mainSend.textContent = "Main send";
+    mainContainer.append(mainSend);
+    document.body.append(mainContainer);
+
+    const popoutDocument = document.implementation.createHTMLDocument("Active Chat");
+    const popoutContainer = popoutDocument.createElement("div");
+    const popoutSend = popoutDocument.createElement("button");
+    popoutSend.dataset.testid = "chat.composer.send";
+    popoutSend.textContent = "Active send";
+    popoutContainer.append(popoutSend);
+    popoutDocument.body.append(popoutContainer);
+
+    const mainLeaf = { view: { containerEl: mainContainer } };
+    const activeLeaf = { view: { containerEl: popoutContainer } };
+    const ctx: LocatorContext = {
+      app: {
+        workspace: {
+          activeLeaf,
+          getLeavesOfType: () => [mainLeaf, activeLeaf],
+        },
+      } as unknown as App,
+    };
+
+    expect(resolveTarget(ctx, "chat.composer.send")).toBe(popoutSend);
+    expect(resolveTarget(ctx, "css:[data-testid='chat.composer.send']")).toBe(popoutSend);
+    expect(resolveTarget(ctx, "chat:[data-testid='chat.composer.send']")).toBe(popoutSend);
+  });
+
+  it("scopes bare chat targets to the active ChatView in one document", () => {
+    const inactiveContainer = document.createElement("div");
+    const inactiveSend = document.createElement("button");
+    inactiveSend.dataset.testid = "chat.composer.send";
+    inactiveContainer.append(inactiveSend);
+    document.body.append(inactiveContainer);
+
+    const activeContainer = document.createElement("div");
+    const activeSend = document.createElement("button");
+    activeSend.dataset.testid = "chat.composer.send";
+    activeContainer.append(activeSend);
+    document.body.append(activeContainer);
+
+    const inactiveLeaf = { view: { containerEl: inactiveContainer } };
+    const activeLeaf = { view: { containerEl: activeContainer } };
+    const ctx: LocatorContext = {
+      app: {
+        workspace: {
+          activeLeaf,
+          getLeavesOfType: () => [inactiveLeaf, activeLeaf],
+        },
+      } as unknown as App,
+    };
+
+    expect(resolveTarget(ctx, "chat.composer.send")).toBe(activeSend);
+    expect(resolveTarget(ctx, "chat:[data-testid='chat.composer.send']")).toBe(activeSend);
+
+    const ambiguousCtx: LocatorContext = {
+      app: {
+        workspace: {
+          activeLeaf: null,
+          getLeavesOfType: () => [inactiveLeaf, activeLeaf],
+        },
+      } as unknown as App,
+    };
+    expect(resolveTarget(ambiguousCtx, "chat.composer.send")).toBeNull();
+    expect(resolveTarget(ambiguousCtx, "chat:[data-testid='chat.composer.send']")).toBeNull();
+  });
 });

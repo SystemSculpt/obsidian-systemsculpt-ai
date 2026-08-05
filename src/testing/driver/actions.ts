@@ -8,6 +8,7 @@ import {
   isVisible,
   knownSemanticTargets,
   liveTestIdCatalog,
+  queryChatElements,
   queryElements,
   resolveTarget,
 } from "./locators";
@@ -416,8 +417,11 @@ async function waitForCondition(
       case "textContains":
         return element !== null && (element.textContent ?? "").includes(text);
       case "textEquals": {
-        if (target.trim().startsWith("css:")) {
-          const matches = queryElements(ctx, target.trim().slice(4));
+        const trimmedTarget = target.trim();
+        if (trimmedTarget.startsWith("css:") || trimmedTarget.startsWith("chat:")) {
+          const matches = trimmedTarget.startsWith("chat:")
+            ? queryChatElements(ctx.app, trimmedTarget.slice(5))
+            : queryElements(ctx, trimmedTarget.slice(4));
           return matches.length === 1
             && (matches[0]?.textContent ?? "").trim() === text.trim();
         }
@@ -463,13 +467,17 @@ export async function runDriverAction(
       };
     }
     case "chat.open": {
-      const existing = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+      const leaves = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+      const activeLeaf = ctx.app.workspace.activeLeaf;
+      const existing = activeLeaf && leaves.includes(activeLeaf)
+        ? activeLeaf
+        : leaves[0];
       if (existing) {
-        ctx.app.workspace.revealLeaf(existing);
+        await ctx.app.workspace.revealLeaf(existing);
       } else {
         const leaf = ctx.app.workspace.getLeaf(true);
         await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
-        ctx.app.workspace.revealLeaf(leaf);
+        await ctx.app.workspace.revealLeaf(leaf);
       }
       await waitForCondition(ctx, { target: "chat.composer.input", state: "visible", timeoutMs: 10000 });
       return chatSnapshot(ctx);
