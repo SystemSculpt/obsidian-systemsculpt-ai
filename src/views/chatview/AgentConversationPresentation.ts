@@ -34,6 +34,12 @@ export function presentAgentError(
   error: ManagedAgentError,
   retryable: boolean,
 ): PresentedAgentError {
+  if (error.code === "content_filter") {
+    return {
+      heading: "Could not finish",
+      message: "The safety filter stopped this response. Change the request and try again.",
+    };
+  }
   const interrupted = retryable
     && !NOT_STARTED_ERROR.test(`${error.code} ${error.message}`)
     && (

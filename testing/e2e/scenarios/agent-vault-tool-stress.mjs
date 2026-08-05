@@ -13,7 +13,11 @@
 const RUN_TIMEOUT_MS = 900000;
 const STALL_MS = 120000;
 
-export default [
+export default function makeAgentVaultToolStress(now = Date.now()) {
+  const runId = now.toString(36).toUpperCase();
+  const folder = `QA/Stress-${runId}`;
+  const completionMarker = `FINISHED-${runId}`;
+  return [
   { label: "open chat", action: "chat.open" },
   { label: "new chat", action: "click", params: { target: "chat.header.new" } },
   {
@@ -43,17 +47,17 @@ export default [
       text: [
         "Use your vault tools to do EVERY step below, in order, each as its own",
         "separate tool call. Do not batch them.",
-        "1. Create the folder QA/Stress2.",
-        "2-21. Create twenty files QA/Stress2/Item-01.md .. Item-20.md.",
+        `1. Create the folder ${folder}.`,
+        `2-21. Create twenty files ${folder}/Item-01.md .. Item-20.md.`,
         "Each file's entire contents must be its own number, e.g. Item-07.md",
         "contains exactly 7.",
-        "22. List the folder QA/Stress2.",
-        "23. Read QA/Stress2/Item-05.md.",
-        "24. Read QA/Stress2/Item-15.md.",
-        "25. Overwrite QA/Stress2/Item-03.md so it contains exactly THREE.",
-        "26. Read QA/Stress2/Item-03.md to confirm.",
-        "27. Create QA/Stress2/SUMMARY.md containing exactly DONE-30.",
-        "Then reply with only the word FINISHED.",
+        `22. List the folder ${folder}.`,
+        `23. Read ${folder}/Item-05.md.`,
+        `24. Read ${folder}/Item-15.md.`,
+        `25. Overwrite ${folder}/Item-03.md so it contains exactly THREE.`,
+        `26. Read ${folder}/Item-03.md to confirm.`,
+        `27. Create ${folder}/SUMMARY.md containing exactly DONE-30.`,
+        `Then reply with exactly ${completionMarker}.`,
       ].join(" "),
       submit: true,
     },
@@ -63,10 +67,31 @@ export default [
     action: "waitForRun",
     params: { timeoutMs: RUN_TIMEOUT_MS, stallMs: STALL_MS },
   },
+  {
+    label: "expected completion marker",
+    action: "waitFor",
+    params: {
+      target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
+      state: "textEquals",
+      text: completionMarker,
+      timeoutMs: 5000,
+    },
+  },
+  {
+    label: "stress overwrite has exact content",
+    action: "vault.assertText",
+    params: { path: `${folder}/Item-03.md`, text: "THREE" },
+  },
+  {
+    label: "stress summary has exact content",
+    action: "vault.assertText",
+    params: { path: `${folder}/SUMMARY.md`, text: "DONE-30" },
+  },
   { label: "transcript", action: "snapshot", params: { scope: "chat" } },
   {
     label: "no error banner",
     action: "waitFor",
-    params: { target: "css:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
+    params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
   },
-];
+  ];
+}

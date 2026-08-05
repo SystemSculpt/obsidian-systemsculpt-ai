@@ -41,6 +41,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/check/managed-only-policy.test.mjs",
   "scripts/check/testid-coverage-policy.test.mjs",
   "scripts/e2e/generate-testid-catalog.test.mjs",
+  "scripts/e2e/scenarios.test.mjs",
   "scripts/platform-portability.test.mjs",
 ];
 

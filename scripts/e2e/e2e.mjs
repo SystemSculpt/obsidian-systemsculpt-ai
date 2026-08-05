@@ -5,7 +5,12 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { DriverSession, resolvePluginTarget, runSteps } from "./driver-session.mjs";
+import {
+  DriverSession,
+  expectedBuildStampFromTarget,
+  resolvePluginTarget,
+  runSteps,
+} from "./driver-session.mjs";
 
 /**
  * SystemSculpt E2E CLI.
@@ -60,7 +65,7 @@ function parseArgs(argv) {
     const valueFlags = new Set([
       "plugin-dir", "vault", "target", "text", "mime", "name", "via",
       "timeout", "connect-timeout", "tab", "evidence", "mode", "limit",
-      "stall",
+      "stall", "expected-build",
       "pattern", "level", "since",
     ]);
     if (valueFlags.has(key)) {
@@ -226,7 +231,7 @@ async function loadScriptSteps(scriptPath) {
 async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   if (positional.length === 0 || flags.help) {
-    console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--json]");
+    console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--expected-build id] [--json]");
     console.log("Verbs: status, open-chat, click, type, press, attach, scroll, select, read,");
     console.log("       query, logs, notices, snapshot, wait, wait-run, command, settings,");
     console.log("       settings-close, targets [--live], script <file>");
@@ -258,21 +263,37 @@ async function main() {
     connectTimeoutMs: flags["connect-timeout"] ? Number(flags["connect-timeout"]) : 20000,
     actionTimeoutMs: flags.timeout ? Number(flags.timeout) : 60000,
   });
+  const expectedBuild = typeof flags["expected-build"] === "string"
+    ? flags["expected-build"]
+    : expectedBuildStampFromTarget(targetInfo.path);
 
   let outcome;
+  let hello;
   try {
-    const hello = await session.connect();
+    hello = await session.connect();
     if (!flags.json) {
       console.error(
         `[e2e] Connected: vault "${hello.vault}", plugin ${hello.pluginVersion} (${hello.buildStamp})`,
       );
     }
-    outcome = await runSteps(session, steps);
+    outcome = expectedBuild && hello.buildStamp !== expectedBuild
+      ? {
+          ok: false,
+          error: `Loaded build ${hello.buildStamp} does not match expected build ${expectedBuild}.`,
+          steps: [],
+        }
+      : await runSteps(session, steps);
   } finally {
     session.close();
   }
 
-  const report = { vault: targetInfo.vault, ...outcome };
+  const report = {
+    vault: targetInfo.vault,
+    pluginVersion: hello.pluginVersion,
+    buildStamp: hello.buildStamp,
+    expectedBuild,
+    ...outcome,
+  };
   if (flags.evidence) {
     fs.mkdirSync(path.dirname(path.resolve(flags.evidence)), { recursive: true });
     fs.writeFileSync(path.resolve(flags.evidence), JSON.stringify(report, null, 2));

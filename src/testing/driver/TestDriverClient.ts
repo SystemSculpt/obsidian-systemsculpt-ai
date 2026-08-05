@@ -35,6 +35,7 @@ export class TestDriverClient {
     private readonly app: App,
     private readonly manifest: PluginManifest,
     private readonly buildStamp: string,
+    private readonly settingsRoot?: () => HTMLElement | null,
   ) {}
 
   public start(): void {
@@ -160,6 +161,7 @@ export class TestDriverClient {
       pluginVersion: this.manifest.version,
       buildStamp: this.buildStamp,
       diagnostics: this.diagnostics,
+      settingsRoot: this.settingsRoot,
     };
     let response: TestDriverActionResult;
     try {
