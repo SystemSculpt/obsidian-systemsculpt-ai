@@ -846,10 +846,56 @@ describe("AgentWorkspace", () => {
     });
 
     expect(credits.textContent).toBe("500");
-    expect(credits.title).toBe("Credits: 500");
-    expect(credits.getAttribute("aria-label")).toBe("Credits: 500");
+    expect(credits.title).toBe("Credits available: 500");
+    expect(credits.getAttribute("aria-label")).toBe("Credits available: 500");
     expect(credits.classList.contains("is-internal-qa")).toBe(false);
     expect(credits.classList.contains("is-low")).toBe(true);
+
+    workspace.setCreditsBalance({
+      includedRemaining: 500,
+      addOnRemaining: 0,
+      totalRemaining: 500,
+      heldInFlight: 500,
+      availableUnreserved: 0,
+      includedPerMonth: 2000,
+      usageClass: "customer",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    });
+
+    expect(credits.textContent).toBe("0 available");
+    expect(credits.title).toContain("500 held in flight");
+    expect(credits.getAttribute("aria-label")).toContain("No credits are available");
+    expect(credits.classList.contains("is-empty")).toBe(false);
+
+    workspace.setCreditsBalance({
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      includedPerMonth: 2000,
+      usageClass: "customer",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    });
+
+    expect(credits.textContent).toBe("Out of credits");
+    expect(credits.title).toBe("You are out of credits. Add credits to continue.");
+    expect(credits.getAttribute("aria-label")).toBe("Out of credits. Add credits to continue.");
+    expect(credits.classList.contains("is-empty")).toBe(true);
+
+    workspace.setCreditsBalance(null);
+
+    expect(credits.hidden).toBe(true);
+    expect(credits.textContent).toBe("Credits");
+    expect(credits.title).toBe("Credits");
+    expect(credits.getAttribute("aria-label")).toBe("Credits");
+    expect(credits.classList.contains("is-empty")).toBe(false);
     workspace.unload();
   });
 

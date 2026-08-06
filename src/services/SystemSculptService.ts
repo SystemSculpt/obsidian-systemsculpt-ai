@@ -105,6 +105,8 @@ export type CreditsBalanceSnapshot = {
   includedRemaining: number;
   addOnRemaining: number;
   totalRemaining: number;
+  heldInFlight?: number;
+  availableUnreserved?: number;
   includedPerMonth: number;
   usageClass?: "customer" | "master_auth";
   cycleEndsAt: string;
@@ -187,6 +189,16 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   if (!Number.isSafeInteger(includedRemaining + addOnRemaining) || totalRemaining !== includedRemaining + addOnRemaining) {
     return invalidCreditsBalance();
   }
+  const hasHeldInFlight = Object.prototype.hasOwnProperty.call(value, "held_in_flight");
+  const hasAvailableUnreserved = Object.prototype.hasOwnProperty.call(value, "available_unreserved");
+  if (hasHeldInFlight !== hasAvailableUnreserved) return invalidCreditsBalance();
+  const heldInFlight = hasHeldInFlight ? creditsInteger(value.held_in_flight) : 0;
+  const availableUnreserved = hasAvailableUnreserved
+    ? creditsInteger(value.available_unreserved)
+    : totalRemaining;
+  if (availableUnreserved !== Math.max(0, totalRemaining - heldInFlight)) {
+    return invalidCreditsBalance();
+  }
   const usageClass = value.usage_class;
   if (usageClass !== "customer" && usageClass !== "master_auth") {
     return invalidCreditsBalance();
@@ -237,6 +249,8 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     includedRemaining,
     addOnRemaining,
     totalRemaining,
+    heldInFlight,
+    availableUnreserved,
     includedPerMonth,
     usageClass,
     cycleEndsAt,

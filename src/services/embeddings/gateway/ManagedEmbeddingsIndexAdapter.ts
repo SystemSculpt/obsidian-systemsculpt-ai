@@ -15,15 +15,22 @@ export type ManagedEmbeddingsErrorCode =
   | "local_preparation_failed"
   | "request_cancelled";
 
+const SAFE_MANAGED_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+
 export class ManagedEmbeddingsError extends Error {
+  public readonly requestId: string | null;
+
   constructor(
     public readonly code: ManagedEmbeddingsErrorCode,
     message: string,
     public readonly status: number,
-    public readonly requestId: string | null = null,
+    requestId: string | null = null,
   ) {
     super(message.slice(0, 256));
     this.name = "ManagedEmbeddingsError";
+    this.requestId = typeof requestId === "string" && SAFE_MANAGED_REQUEST_ID.test(requestId)
+      ? requestId
+      : null;
   }
 }
 
@@ -62,6 +69,13 @@ const HTTP_CODES: Readonly<Record<number, ManagedEmbeddingsErrorCode>> = {
   502: "temporarily_unavailable",
   503: "temporarily_unavailable",
 };
+const MANAGED_EMBEDDINGS_MAX_ERROR_BYTES = 4 * 1024;
+const MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH = 256;
+
+type ManagedEmbeddingsErrorPayload = Readonly<{
+  message: string;
+  creditsRemaining?: number;
+}>;
 
 export type ManagedEmbeddingsIndexSource = Readonly<{
   markdown: string;
@@ -292,7 +306,7 @@ export class ManagedEmbeddingsIndexAdapter {
       throw this.transportError(error, signal);
     }
     if (signal?.aborted) throw requestCancelled();
-    this.requireSuccess(result);
+    await this.requireSuccess(result);
     const payload = await this.readBoundedJson(result, signal);
 
     try {
@@ -382,7 +396,7 @@ export class ManagedEmbeddingsIndexAdapter {
       throw this.transportError(error, signal);
     }
     if (signal?.aborted) throw requestCancelled();
-    this.requireSuccess(result);
+    await this.requireSuccess(result);
     const payload = await this.readBoundedJson(result, signal);
 
     try {
@@ -478,24 +492,115 @@ export class ManagedEmbeddingsIndexAdapter {
       throw this.transportError(error, operation.signal);
     }
     if (operation.signal?.aborted) throw requestCancelled();
-    this.requireSuccess(result);
+    await this.requireSuccess(result);
 
     const indexed = await this.readResult(result, contentSha256, operation.signal);
     if (indexed.generation) this.activeGeneration = indexed.generation;
     return indexed;
   }
 
-  private requireSuccess(result: ManagedTransportResult): void {
+  private async requireSuccess(result: ManagedTransportResult): Promise<void> {
     if (!result.response.ok) {
       const code = HTTP_CODES[result.response.status] ?? "temporarily_unavailable";
+      const payload = await this.readErrorPayload(result, code);
+      const message = code === "payment_required"
+        ? payload?.creditsRemaining === 0
+          ? "You have no credits left. Add credits to continue indexing notes."
+          : "Not enough credits are available. Add credits to continue indexing notes."
+        : payload?.message ?? "Managed embedding index request failed.";
       throw new ManagedEmbeddingsError(
         code,
-        "Managed embedding index request failed.",
+        message,
         result.response.status,
         result.diagnostics.requestId,
       );
     }
     if (result.response.status !== 200) throw this.invalidResponse(result);
+  }
+
+  private async readErrorPayload(
+    result: ManagedTransportResult,
+    expectedCode: ManagedEmbeddingsErrorCode,
+  ): Promise<ManagedEmbeddingsErrorPayload | null> {
+    const response = result.response;
+    const declaredLength = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(declaredLength)
+      && declaredLength > MANAGED_EMBEDDINGS_MAX_ERROR_BYTES
+    ) return null;
+    if (!response.body) return null;
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let byteLength = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        byteLength += value.byteLength;
+        if (byteLength > MANAGED_EMBEDDINGS_MAX_ERROR_BYTES) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+    } catch {
+      return null;
+    } finally {
+      reader.releaseLock();
+    }
+    if (byteLength < 1) return null;
+
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    try {
+      const value = JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      ) as unknown;
+      if (!isRecord(value) || !isRecord(value.error)) return null;
+      const error = value.error;
+      if (
+        (
+          error.code !== expectedCode
+          && !(expectedCode === "payment_required" && error.code === "insufficient_credits")
+        )
+        || typeof error.message !== "string"
+        || error.message.length < 1
+        || error.message.length > MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH
+        || /[\u0000-\u001f\u007f]/u.test(error.message)
+      ) return null;
+      if (
+        error.request_id !== undefined
+        && (
+          typeof error.request_id !== "string"
+          || !SAFE_MANAGED_REQUEST_ID.test(error.request_id)
+          || (
+            result.diagnostics.requestId !== null
+            && error.request_id !== result.diagnostics.requestId
+          )
+        )
+      ) return null;
+      if (
+        error.credits_remaining !== undefined
+        && (
+          !Number.isSafeInteger(error.credits_remaining)
+          || (error.credits_remaining as number) < 0
+        )
+      ) return null;
+      return {
+        message: error.message,
+        ...(typeof error.credits_remaining === "number"
+          ? { creditsRemaining: error.credits_remaining }
+          : {}),
+      };
+    } catch {
+      return null;
+    }
   }
 
   private transportError(error: unknown, signal?: AbortSignal): ManagedEmbeddingsError {

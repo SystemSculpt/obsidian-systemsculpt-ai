@@ -27,10 +27,19 @@ export interface EmbeddingSourceRevision {
 
 export interface EmbeddingsProcessingOptions {
   sourceRevisions?: ReadonlyMap<TFile, EmbeddingSourceRevision>;
+  preflight?: () => Promise<void>;
 }
 
 type IndexGateway = Pick<ManagedEmbeddingsIndexAdapter, "index">;
 type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath">;
+
+const FATAL_MANAGED_ERROR_CODES = new Set([
+  "payment_required",
+  "license_required",
+  "license_rejected",
+  "version_unsupported",
+  "capability_unavailable",
+]);
 
 class StaleEmbeddingSourceError extends Error {
   constructor() {
@@ -60,6 +69,8 @@ export class EmbeddingsProcessor {
     const failedPaths: string[] = [];
     const failedDetails: Record<string, FailedProcessingDetail> = {};
     let generation: ManagedEmbeddingsIndexGeneration | undefined;
+    let fatalError: ManagedEmbeddingsError | null = null;
+    let preflightAttempted = false;
 
     for (const file of files) {
       if (this.cancelled) break;
@@ -71,6 +82,11 @@ export class EmbeddingsProcessor {
       });
 
       try {
+        if (!preflightAttempted) {
+          preflightAttempted = true;
+          await options.preflight?.();
+        }
+        if (this.cancelled) break;
         const markdown = await app.vault.read(file);
         if (this.cancelled) break;
         const indexed = await this.gateway.index({
@@ -110,8 +126,13 @@ export class EmbeddingsProcessor {
             path: revision.path,
             code: detail.code,
             status: detail.status ?? 0,
+            ...(detail.requestId ? { requestId: detail.requestId } : {}),
           },
         });
+        if (managed && FATAL_MANAGED_ERROR_CODES.has(managed.code)) {
+          fatalError = managed;
+          break;
+        }
       }
     }
 
@@ -121,7 +142,7 @@ export class EmbeddingsProcessor {
       failed: failedPaths.length,
       failedPaths,
       cancelled: this.cancelled,
-      fatalError: null,
+      fatalError,
       ...(generation ? { generation } : {}),
       ...(failedPaths.length > 0 ? { failedDetails } : {}),
     };
@@ -216,6 +237,7 @@ export class EmbeddingsProcessor {
         code: managed.code,
         message: managed.message,
         status: managed.status,
+        requestId: managed.requestId ?? undefined,
       };
     }
     if (error instanceof StaleEmbeddingSourceError) {

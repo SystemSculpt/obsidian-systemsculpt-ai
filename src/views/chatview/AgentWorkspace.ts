@@ -241,11 +241,16 @@ export class AgentWorkspace extends Component {
       balance?.usageClass === "master_auth",
     );
     if (balance === null) {
-      this.creditsButton.classList.remove("is-low");
+      this.creditsButton.classList.remove("is-low", "is-empty");
+      updateUiAction(this.creditsButton, {
+        label: "Credits",
+        title: "Credits",
+      });
+      this.creditsButton.setAttribute("aria-label", "Credits");
       return;
     }
     if (balance.usageClass === "master_auth") {
-      this.creditsButton.classList.remove("is-low");
+      this.creditsButton.classList.remove("is-low", "is-empty");
       updateUiAction(this.creditsButton, {
         label: "Internal QA",
         title: "Internal testing mode",
@@ -253,13 +258,32 @@ export class AgentWorkspace extends Component {
       this.creditsButton.setAttribute("aria-label", "Internal testing mode");
       return;
     }
-    const label = formatCredits(balance.totalRemaining);
-    this.creditsButton.classList.toggle("is-low", balance.totalRemaining <= 1000);
+    const available = balance.availableUnreserved ?? balance.totalRemaining;
+    const held = balance.heldInFlight ?? 0;
+    const label = formatCredits(available);
+    const outOfCredits = balance.totalRemaining <= 0;
+    const unavailable = !outOfCredits && available <= 0;
+    this.creditsButton.classList.toggle("is-low", available <= 1000);
+    this.creditsButton.classList.toggle("is-empty", outOfCredits);
+    const availableTitle = held > 0
+      ? `${label} credits available; ${formatCredits(held)} held in flight; ${formatCredits(balance.totalRemaining)} total.`
+      : `Credits available: ${label}`;
     updateUiAction(this.creditsButton, {
-      label,
-      title: `Credits: ${label}`,
+      label: outOfCredits ? "Out of credits" : unavailable ? "0 available" : label,
+      title: outOfCredits
+        ? "You are out of credits. Add credits to continue."
+        : unavailable
+          ? `${availableTitle} Add credits or wait for in-flight work to settle.`
+          : availableTitle,
     });
-    this.creditsButton.setAttribute("aria-label", `Credits: ${label}`);
+    this.creditsButton.setAttribute(
+      "aria-label",
+      outOfCredits
+        ? "Out of credits. Add credits to continue."
+        : unavailable
+          ? "No credits are available. Add credits or wait for in-flight work to settle."
+          : availableTitle,
+    );
   }
 
   public setBanner(message: string | null, kind: "info" | "error" = "info"): void {

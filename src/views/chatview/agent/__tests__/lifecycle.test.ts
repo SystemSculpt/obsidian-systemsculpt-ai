@@ -29,6 +29,7 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       toolName: "read",
       toolCallId: "call_0123456789abcdef",
       incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      failureCode: "response_capacity_unavailable",
     });
     const third = lifecycle.record({
       code: "run_finished_completed",
@@ -51,6 +52,7 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       clientInstanceId: "client_0123456789abcdef0123456789abcdef",
       toolName: "read",
       toolCallId: "call_0123456789abcdef",
+      failureCode: "response_capacity_unavailable",
     });
     expect(first).not.toBeNull();
     expect(third).not.toBeNull();

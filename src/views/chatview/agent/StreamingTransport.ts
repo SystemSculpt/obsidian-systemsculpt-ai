@@ -90,6 +90,34 @@ async function readBoundedText(
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
+async function responseErrorPayload(response: Response): Promise<Readonly<{
+  code?: string;
+  incidentId?: string;
+}>> {
+  try {
+    const text = await readBoundedText(response, 4_096);
+    const value = JSON.parse(text) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const record = value as Record<string, unknown>;
+    const nested = record.error && typeof record.error === "object"
+      && !Array.isArray(record.error)
+      ? record.error as Record<string, unknown>
+      : {};
+    const code = nested.code ?? record.code;
+    const incidentId = nested.incident_id ?? record.incident_id;
+    return {
+      ...(typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(code)
+        ? { code }
+        : {}),
+      ...(typeof incidentId === "string" && /^incident_[a-f0-9]{32}$/u.test(incidentId)
+        ? { incidentId }
+        : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 function isInitialSessionSnapshot(
   value: unknown,
   conversationId: string,
@@ -332,9 +360,16 @@ implements AgentConnectionPort {
       maxResponseBytes: MAX_BOOTSTRAP_RESPONSE_BYTES,
     });
     if (!response.ok) {
-      throw new Error(
+      const payload = await responseErrorPayload(response);
+      throw Object.assign(new Error(
         `SystemSculpt could not start this chat (${response.status}).`,
-      );
+      ), {
+        ...(payload.code ? { code: payload.code } : {}),
+        ...(payload.incidentId ? { requestId: payload.incidentId } : {}),
+        status: response.status,
+        retryable: response.status === 401 || response.status === 429
+          || response.status >= 500,
+      });
     }
     const value = JSON.parse(
       await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES),
@@ -375,8 +410,10 @@ implements AgentConnectionPort {
       });
       if (!response.ok || !response.body) {
         if (response.status === 401) this.access = null;
+        const payload = response.ok ? {} : await responseErrorPayload(response);
         const serverAdmissionPossible = ![
           400,
+          402,
           404,
           405,
           413,
@@ -386,6 +423,8 @@ implements AgentConnectionPort {
         throw Object.assign(new Error(
           `SystemSculpt could not run this message (${response.status}).`,
         ), {
+          ...(payload.code ? { code: payload.code } : {}),
+          ...(payload.incidentId ? { requestId: payload.incidentId } : {}),
           status: response.status,
           serverAdmissionPossible,
         });

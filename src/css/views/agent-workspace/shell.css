@@ -79,6 +79,12 @@
   color: var(--ss-warning);
 }
 
+.systemsculpt-agent-credits.is-empty {
+  border-color: var(--ss-danger-line);
+  background: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
 .systemsculpt-agent-credits.is-internal-qa {
   border-color: var(--interactive-accent);
   color: var(--text-accent);
