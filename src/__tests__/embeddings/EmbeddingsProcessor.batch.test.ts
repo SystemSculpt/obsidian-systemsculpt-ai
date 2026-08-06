@@ -166,6 +166,66 @@ describe("EmbeddingsProcessor server indexing", () => {
     );
   });
 
+  it("stops on an authoritative zero-balance preflight before reading or uploading a note", async () => {
+    const state = fixture();
+    const failure = new ManagedEmbeddingsError(
+      "payment_required",
+      "You have no credits left. Add credits to continue indexing notes.",
+      402,
+    );
+    const preflight = jest.fn().mockRejectedValue(failure);
+
+    const processed = await state.processor.processFiles(
+      [state.file] as never,
+      state.app as never,
+      undefined,
+      { preflight },
+    );
+
+    expect(preflight).toHaveBeenCalledTimes(1);
+    expect(state.app.vault.read).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
+    expect(processed).toMatchObject({
+      completed: 0,
+      failed: 1,
+      failedPaths: ["Note.md"],
+      fatalError: failure,
+    });
+  });
+
+  it("stops the vault run after one out-of-credits response", async () => {
+    const state = fixture();
+    const first = { path: "First.md", basename: "First", stat: { mtime: 1 } };
+    const remaining = { path: "Remaining.md", basename: "Remaining", stat: { mtime: 2 } };
+    const failure = new ManagedEmbeddingsError(
+      "payment_required",
+      "You have no credits left. Add credits to continue indexing notes.",
+      402,
+      "request-credits-1",
+    );
+    state.index.mockRejectedValueOnce(failure);
+
+    const processed = await state.processor.processFiles(
+      [first, remaining] as never,
+      state.app as never,
+    );
+
+    expect(state.index).toHaveBeenCalledTimes(1);
+    expect(processed).toMatchObject({
+      completed: 0,
+      failed: 1,
+      failedPaths: ["First.md"],
+      fatalError: failure,
+      failedDetails: {
+        "First.md": {
+          code: "payment_required",
+          status: 402,
+          requestId: "request-credits-1",
+        },
+      },
+    });
+  });
+
   it("atomically replaces every prior generation with a local empty marker", async () => {
     const state = fixture(indexedResult({ empty: true }));
 

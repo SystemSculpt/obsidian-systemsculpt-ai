@@ -693,6 +693,158 @@ describe("AgentChatView composer admission", () => {
     document.body.empty();
   });
 
+  it.each([
+    {
+      name: "an empty balance",
+      totalRemaining: 0,
+      heldInFlight: 0,
+      expected: "You have no credits left. Add credits to continue using Chat.",
+    },
+    {
+      name: "a fully held balance",
+      totalRemaining: 5,
+      heldInFlight: 5,
+      expected: "Not enough credits are available. Add credits to continue using Chat.",
+    },
+  ])("rejects $name before attachment or vault-note preparation", async ({
+    totalRemaining,
+    heldInFlight,
+    expected,
+  }) => {
+    const harness = createHarness("before-start");
+    const refreshCreditsBalance = jest.fn(async () => undefined);
+    harness.view.refreshCreditsBalance = refreshCreditsBalance;
+    harness.view.creditsBalance = {
+      includedRemaining: totalRemaining,
+      addOnRemaining: 0,
+      totalRemaining,
+      heldInFlight,
+      availableUnreserved: 0,
+      includedPerMonth: 2_000,
+      usageClass: "customer",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    };
+    harness.composer.setValue("Do not read my pinned note");
+    harness.composer.restoreMessageAttachments([ORIGINAL_ATTACHMENT]);
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    await Promise.resolve();
+
+    expect((harness.view as any).attachmentStore.hydrateMessage).not.toHaveBeenCalled();
+    expect((harness.view as any).readThinAgentContextSources).not.toHaveBeenCalled();
+    expect(harness.agent.stageContext).not.toHaveBeenCalled();
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
+    expect(harness.workspace.setBanner).toHaveBeenCalledWith(expected, "error");
+    harness.composer.unload();
+  });
+
+  it("starts a post-terminal balance fetch instead of joining a pre-terminal request", async () => {
+    const older = deferred<any>();
+    const fresh = deferred<any>();
+    const getCreditsBalance = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const setCreditsBalance = jest.fn();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      plugin: { settings: { licenseKey: "test-license" } },
+      aiService: { getCreditsBalance },
+      workspace: { setCreditsBalance },
+      creditsPromise: null,
+      creditsBalance: null,
+    });
+
+    const preTerminal = view.refreshCreditsBalance();
+    const afterTerminal = view.refreshCreditsBalance({ requireFresh: true });
+    expect(getCreditsBalance).toHaveBeenCalledTimes(1);
+
+    older.resolve({
+      usageClass: "customer",
+      totalRemaining: 5,
+      heldInFlight: 5,
+      availableUnreserved: 0,
+    });
+    await preTerminal;
+    await Promise.resolve();
+    expect(getCreditsBalance).toHaveBeenCalledTimes(2);
+    let postTerminalSettled = false;
+    void afterTerminal.finally(() => { postTerminalSettled = true; });
+    await Promise.resolve();
+    expect(postTerminalSettled).toBe(false);
+
+    fresh.resolve({
+      usageClass: "customer",
+      totalRemaining: 5,
+      heldInFlight: 0,
+      availableUnreserved: 5,
+    });
+    await afterTerminal;
+    expect(view.creditsBalance).toMatchObject({ availableUnreserved: 5 });
+    expect(setCreditsBalance).toHaveBeenLastCalledWith(
+      expect.objectContaining({ availableUnreserved: 5 }),
+    );
+  });
+
+  it("refreshes credits after a server billing rejection", async () => {
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    const refreshCreditsBalance = jest.fn(async () => undefined);
+    const setBanner = jest.fn();
+    Object.assign(view, {
+      refreshCreditsBalance,
+      workspace: { setBanner },
+    });
+
+    await view.handleError({
+      code: "insufficient_credits",
+      message: "private server copy must not surface",
+      status: 402,
+      retryable: false,
+    });
+    await Promise.resolve();
+
+    expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
+    expect(setBanner).toHaveBeenCalledWith(
+      "Not enough credits are available. Add credits to continue using Chat.",
+      "error",
+    );
+  });
+
+  it("bypasses the customer balance gate for master auth", async () => {
+    const harness = createHarness("before-start");
+    harness.view.creditsBalance = {
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      heldInFlight: 0,
+      availableUnreserved: 0,
+      includedPerMonth: 0,
+      usageClass: "master_auth",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    };
+    harness.composer.setValue("Use internal testing mode");
+    harness.composer.restoreMessageAttachments([ORIGINAL_ATTACHMENT]);
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect((harness.view as any).attachmentStore.hydrateMessage).toHaveBeenCalled();
+    expect(harness.workspace.setBanner).not.toHaveBeenCalledWith(
+      expect.stringMatching(/credits/iu),
+      "error",
+    );
+    harness.composer.unload();
+  });
+
   it("merges text and attachments back when local transcript persistence rejects before admission", async () => {
     const harness = createHarness("before-commit");
     harness.composer.setValue("Original request");
@@ -1201,6 +1353,12 @@ describe("AgentChatView composer admission", () => {
     await expect(view.setApprovalMode("full-access")).rejects.toThrow(
       "Tool access cannot change while SystemSculpt is working.",
     );
+    (view as any).creditsBalance = {
+      usageClass: "customer",
+      totalRemaining: 5,
+      heldInFlight: 5,
+      availableUnreserved: 0,
+    };
 
     (view as any).acceptComposerSubmission(second);
     expect((view as any).queuedFollowUps).toEqual([
@@ -1213,6 +1371,7 @@ describe("AgentChatView composer admission", () => {
     expect((view as any).syncQueue).toHaveBeenCalledTimes(1);
     expect((view as any).scheduleQueuePersistence).toHaveBeenCalledTimes(1);
     expect(executeSubmission).not.toHaveBeenCalled();
+    expect((view as any).hasAuthoritativeUnavailableBalance()).toBe(true);
 
     await (view as any).stopActiveRun();
     expect((view as any).activeSubmissionOperation).toBeNull();

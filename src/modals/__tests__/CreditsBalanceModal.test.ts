@@ -146,7 +146,10 @@ describe("CreditsBalanceModal", () => {
     await flushPromises();
 
     expect(modal.modalEl.textContent).toContain("Credits & Usage");
-    expect(modal.modalEl.textContent).toContain("Total remaining");
+    expect(modal.modalEl.textContent).toContain("Available to spend");
+    expect(modal.modalEl.textContent).toContain("Total balance");
+    expect(modal.modalEl.textContent).toContain("Held in flight");
+    expect(modal.modalEl.textContent).toContain("Available now");
     expect(modal.modalEl.textContent).toContain("Included left");
     expect(modal.modalEl.textContent).toContain("Included remaining this cycle");
     expect(modal.modalEl.textContent).toContain(
@@ -167,6 +170,69 @@ describe("CreditsBalanceModal", () => {
 
     findButtonByText(modal.modalEl, "Open Account").click();
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes held credits from a positive gross balance", async () => {
+    const balance = {
+      includedRemaining: 6_000,
+      addOnRemaining: 30,
+      totalRemaining: 6_030,
+      heldInFlight: 5_349,
+      availableUnreserved: 681,
+      includedPerMonth: 10_000,
+      usageClass: "customer" as const,
+      cycleEndsAt: "2026-08-23T22:38:04.787Z",
+      cycleStartedAt: "2026-07-23T22:38:04.787Z",
+      cycleAnchorAt: "2026-07-23T22:38:04.787Z",
+      turnInFlightUntil: null,
+      purchaseUrl: "https://systemsculpt.com/buy-credits",
+    };
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: balance,
+      loadBalance: jest.fn().mockResolvedValue(balance),
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("Available to spend");
+    expect(modal.modalEl.textContent).toContain("681 credits");
+    expect(modal.modalEl.textContent).toContain("5,349 credits");
+    expect(modal.modalEl.textContent).toContain("6,030 credits");
+    expect(modal.modalEl.textContent).not.toContain("Out of credits");
+  });
+
+  it("states clearly when a customer has no credits left", async () => {
+    const balance = {
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      includedPerMonth: 10_000,
+      usageClass: "customer" as const,
+      cycleEndsAt: "2026-08-23T22:38:04.787Z",
+      cycleStartedAt: "2026-07-23T22:38:04.787Z",
+      cycleAnchorAt: "2026-07-23T22:38:04.787Z",
+      turnInFlightUntil: null,
+      purchaseUrl: "https://systemsculpt.com/buy-credits",
+    };
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: balance,
+      loadBalance: jest.fn().mockResolvedValue(balance),
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("Out of credits");
+    expect(modal.modalEl.textContent).toContain("0 credits");
+    expect(modal.modalEl.textContent).toContain(
+      "You have no credits left. Buy credits to continue using chat and similar notes.",
+    );
+    expect(findButtonByText(modal.modalEl, "Buy Credits").hidden).toBe(false);
   });
 
   it("presents master auth as Internal QA without customer-credit actions", async () => {

@@ -93,6 +93,7 @@ export type AgentLifecycleInput = Readonly<{
   status?: number;
   retryable?: boolean;
   incidentId?: string;
+  failureCode?: string;
 }>;
 
 export type AgentLifecycleRecord = Readonly<{
@@ -111,6 +112,7 @@ export type AgentLifecycleRecord = Readonly<{
   status?: number;
   retryable?: boolean;
   incidentId?: string;
+  failureCode?: string;
 }>;
 
 const CODE_SET = new Set<string>(THIN_AGENT_LIFECYCLE_CODES);
@@ -185,6 +187,10 @@ export class AgentLifecycle {
       && INCIDENT_ID.test(input.incidentId)
       ? input.incidentId
       : undefined;
+    const failureCode = typeof input.failureCode === "string"
+      && /^[a-z][a-z0-9_]{0,63}$/u.test(input.failureCode)
+      ? input.failureCode
+      : undefined;
     const record: AgentLifecycleRecord = Object.freeze({
       sequence: ++this.sequence,
       timestamp: this.now(),
@@ -201,6 +207,7 @@ export class AgentLifecycle {
       ...(status === undefined ? {} : { status }),
       ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
       ...(incidentId ? { incidentId } : {}),
+      ...(failureCode ? { failureCode } : {}),
     });
     try {
       this.persist(record);

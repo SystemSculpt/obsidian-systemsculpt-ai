@@ -33,6 +33,7 @@ export type SupportDiagnosticEvent = Readonly<{
   status?: number;
   retryable?: boolean;
   incident_id?: string;
+  failure_code?: string;
 }>;
 
 interface PluginLogEntry {
@@ -629,6 +630,12 @@ function sanitizeLifecycleMetadata(
   ) {
     sanitized.incidentId = metadata.incidentId;
   }
+  if (
+    typeof metadata.failureCode === "string"
+    && /^[a-z][a-z0-9_]{0,63}$/u.test(metadata.failureCode)
+  ) {
+    sanitized.failureCode = metadata.failureCode;
+  }
   return sanitized;
 }
 
@@ -680,6 +687,7 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     status?: number;
     retryable?: boolean;
     incident_id?: string;
+    failure_code?: string;
   } = {
     timestamp,
     severity: isLifecycle ? "info" : "error",
@@ -756,6 +764,13 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     && SAFE_THIN_AGENT_INCIDENT_ID.test(metadata.incidentId)
   ) {
     projected.incident_id = metadata.incidentId;
+  }
+  if (
+    isLifecycle
+    && typeof metadata.failureCode === "string"
+    && /^[a-z][a-z0-9_]{0,63}$/u.test(metadata.failureCode)
+  ) {
+    projected.failure_code = metadata.failureCode;
   }
   return Object.freeze(projected);
 }

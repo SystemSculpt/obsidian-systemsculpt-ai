@@ -384,7 +384,7 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     [429, "rate_limited"],
     [502, "temporarily_unavailable"],
     [503, "temporarily_unavailable"],
-  ] as const)("maps HTTP %s to %s without reading or exposing the response body", async (status, code) => {
+  ] as const)("maps HTTP %s to %s without exposing an unsafe response body", async (status, code) => {
     const body = { private_markdown: "do not expose this vault text" };
     const adapter = adapterWith(jest.fn(async () => transport(body, { status })));
 
@@ -395,6 +395,100 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     expect(error).toMatchObject({ code, status, requestId: "request-1" });
     expect(error.message).not.toContain("vault text");
     expect(error.message).not.toContain("private_markdown");
+    if (status === 402) {
+      expect(error.message).toBe(
+        "Not enough credits are available. Add credits to continue indexing notes.",
+      );
+    }
+  });
+
+  it("uses a bounded safe managed error message", async () => {
+    const adapter = adapterWith(jest.fn(async () => transport({
+      error: {
+        code: "rate_limited",
+        message: "Indexing is busy. Try again soon.",
+        request_id: "request-1",
+      },
+    }, { status: 429 })));
+
+    await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+      .rejects.toMatchObject({
+        code: "rate_limited",
+        message: "Indexing is busy. Try again soon.",
+        requestId: "request-1",
+      });
+  });
+
+  it.each([
+    [0, "You have no credits left. Add credits to continue indexing notes."],
+    [5, "Not enough credits are available. Add credits to continue indexing notes."],
+  ])("uses authoritative remaining credits for 402 copy (%s)", async (creditsRemaining, message) => {
+    const adapter = adapterWith(jest.fn(async () => transport({
+      error: {
+        code: "insufficient_credits",
+        message: "Untrusted billing copy.",
+        request_id: "request-1",
+        credits_remaining: creditsRemaining,
+      },
+    }, { status: 402 })));
+
+    await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+      .rejects.toMatchObject({ code: "payment_required", message });
+  });
+
+  it("does not retain an oversized managed error body", async () => {
+    const privateCanary = "PRIVATE_ERROR_CANARY";
+    const adapter = adapterWith(jest.fn(async () => transport({
+      error: {
+        code: "rate_limited",
+        message: `${privateCanary}${"x".repeat(5_000)}`,
+        request_id: "request-1",
+      },
+    }, { status: 429 })));
+
+    const error = await adapter.index({
+      prepare: () => ({ markdown: MARKDOWN }),
+    }).catch((caught) => caught as ManagedEmbeddingsError);
+
+    expect(error.message).toBe("Managed embedding index request failed.");
+    expect(JSON.stringify(error)).not.toContain(privateCanary);
+  });
+
+  it("rejects invalid UTF-8 without retaining managed error bytes", async () => {
+    const privateCanary = "PRIVATE_INVALID_UTF8_CANARY";
+    const prefix = UTF8.encode(privateCanary);
+    const raw = new Uint8Array(prefix.byteLength + 2);
+    raw.set(prefix);
+    raw.set([0xc3, 0x28], prefix.byteLength);
+    const adapter = adapterWith(jest.fn(async () => transport(null, {
+      status: 429,
+      raw,
+    })));
+
+    const error = await adapter.index({
+      prepare: () => ({ markdown: MARKDOWN }),
+    }).catch((caught) => caught as ManagedEmbeddingsError);
+
+    expect(error.message).toBe("Managed embedding index request failed.");
+    expect(JSON.stringify(error)).not.toContain(privateCanary);
+  });
+
+  it("drops unsafe managed request IDs before persistence", async () => {
+    const adapter = adapterWith(jest.fn(async () => transport({
+      error: {
+        code: "rate_limited",
+        message: "Indexing is busy. Try again soon.",
+      },
+    }, {
+      status: 429,
+      headers: { "x-request-id": "unsafe request id" },
+    })));
+
+    await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+      .rejects.toMatchObject({
+        code: "rate_limited",
+        requestId: null,
+      });
   });
 
   it("maps preparation failures and invalid local sources without dispatch", async () => {

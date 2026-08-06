@@ -1999,6 +1999,15 @@ export default class SystemSculptPlugin extends Plugin {
           try {
             const balance = await this.aiService.getCreditsBalance();
             lastKnownBalance = balance;
+            if (
+              (
+                balance.usageClass === "master_auth"
+                || (balance.availableUnreserved ?? balance.totalRemaining) > 0
+              )
+              && this.embeddingsManager?.isSuspended()
+            ) {
+              void Promise.resolve(this.embeddingsManager.resumeProcessing("funding")).catch(() => undefined);
+            }
             if (options?.onBalanceUpdated) {
               await options.onBalanceUpdated(balance);
             }

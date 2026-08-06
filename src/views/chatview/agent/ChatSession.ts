@@ -290,13 +290,22 @@ function managedError(
     const retryable = typeof error.retryable === "boolean"
       ? error.retryable
       : status === undefined || status === 401 || status === 429 || status >= 500;
+    const code = typeof error.code === "string"
+      && /^[a-z][a-z0-9_]{0,63}$/u.test(error.code)
+      ? error.code
+      : fallbackCode;
+    const requestId = typeof error.requestId === "string"
+      && /^incident_[a-f0-9]{32}$/u.test(error.requestId)
+      ? error.requestId
+      : undefined;
     return {
-      code: fallbackCode,
+      code,
       message: safeServiceMessage(
         typeof error.message === "string" ? error.message : undefined,
         fallbackMessage,
       ),
       ...(status === undefined ? {} : { status }),
+      ...(requestId ? { requestId } : {}),
       retryable,
     };
   }
@@ -312,7 +321,7 @@ function managedError(
 
 function terminalError(terminal: Extract<ThinAgentRunTerminalData, { outcome: "failed" }>): ManagedAgentError {
   return {
-    code: "agent_turn_failed",
+    code: terminal.code,
     message: safeServiceMessage(
       terminal.message,
       "SystemSculpt could not complete the response.",
@@ -1348,7 +1357,7 @@ export class AgentChatSession {
       connection: transport,
       isAuthoritativeMessage: isWireMessage,
       onProtocolError: (error) => this.reportLocalIssue(error),
-      onCommandError: (error) => this.reportLocalIssue(error),
+      onCommandError: (error) => this.handleCommandDeliveryError(error, generation),
       onCommandAck: (ack) => this.handleCommandAck(ack, generation),
       onQueueSnapshot: (snapshot) =>
         this.handleQueueSnapshot(snapshot, generation),
@@ -1474,7 +1483,11 @@ export class AgentChatSession {
         requestId: input.turnId,
       });
     } catch (error) {
-      if (!active.terminal && active.cancelRequested && wasDefinitelyRejected(error)) {
+      const definitelyRejected = wasDefinitelyRejected(error);
+      if (!active.terminal && definitelyRejected) {
+        active.serverAdmissionPossible = false;
+      }
+      if (!active.terminal && active.cancelRequested && definitelyRejected) {
         this.finishLocalCancellation(active);
       } else if (!active.terminal && !active.cancelRequested) {
         const normalized = managedError(
@@ -2083,6 +2096,30 @@ export class AgentChatSession {
     active.label = "Queued";
     this.publishActive(active, true);
     void this.trySendPendingCancel();
+  }
+
+  private handleCommandDeliveryError(error: Error, generation: number): void {
+    const normalized = managedError(
+      error,
+      "response_start_failed",
+      "SystemSculpt could not start the response.",
+    );
+    const billingFailure = normalized.status === 402
+      || normalized.code === "insufficient_credits"
+      || normalized.code === "payment_required"
+      || normalized.code === "out_of_credits";
+    const active = this.active;
+    if (
+      !billingFailure
+      || generation !== this.generation
+      || !active
+      || active.terminal
+    ) {
+      this.reportLocalIssue(error);
+      return;
+    }
+    active.serverAdmissionPossible = false;
+    this.finishLocalFailure(active, normalized);
   }
 
   private handleCommandAck(
@@ -2884,7 +2921,11 @@ export class AgentChatSession {
       requestId: active.requestId,
       serverRunId: terminal.run_id,
       ...(terminal.outcome === "failed"
-        ? { retryable: terminal.retryable, incidentId: terminal.incident_id }
+        ? {
+            retryable: terminal.retryable,
+            incidentId: terminal.incident_id,
+            failureCode: terminal.code,
+          }
         : {}),
     });
     this.publishActive(active, true);
@@ -2959,10 +3000,14 @@ export class AgentChatSession {
       : terminal.outcome === "cancelled"
         ? { kind: "cancelled", snapshot }
         : { kind: "failed", snapshot, error: terminalError(terminal) };
-    this.completeActive(active, result);
     if (terminal.outcome === "succeeded") {
-      void this.options.refreshCredits?.().catch((error) => this.reportLocalIssue(error));
+      try {
+        await this.options.refreshCredits?.();
+      } catch (error) {
+        this.reportLocalIssue(error);
+      }
     }
+    this.completeActive(active, result);
   }
 
   private completeActive(active: ActiveRun, result: AgentRunResult): void {
@@ -2987,8 +3032,21 @@ export class AgentChatSession {
       ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
       ...(result.kind === "failed" ? { retryable: result.error.retryable } : {}),
     });
+    if (result.kind === "failed") {
+      this.refreshCreditsAfterBillingFailure(result.error);
+    }
     this.active = null;
     active.resolve(result);
+  }
+
+  private refreshCreditsAfterBillingFailure(error: ManagedAgentError): void {
+    if (
+      error.status !== 402
+      && error.code !== "insufficient_credits"
+      && error.code !== "payment_required"
+      && error.code !== "out_of_credits"
+    ) return;
+    void this.options.refreshCredits?.().catch(this.reportLocalIssue.bind(this));
   }
 
   private finishLocalCancellation(active: ActiveRun): void {
@@ -3202,8 +3260,8 @@ export class AgentChatSession {
       delivery.attemptedOpenEpoch = null;
       if (wasDefinitelyRejected(error)) {
         this.pendingRegenerate = null;
+        active.serverAdmissionPossible = false;
         if (active.cancelRequested) {
-          active.serverAdmissionPossible = false;
           this.finishLocalCancellation(active);
         } else {
           this.finishLocalFailure(active, managedError(

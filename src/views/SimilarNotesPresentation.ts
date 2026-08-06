@@ -15,7 +15,7 @@ export type SimilarNotesViewModel =
   | Readonly<{ state: "idle" }>
   | Readonly<{ state: "disabled" }>
   | Readonly<{ state: "empty-content" }>
-  | Readonly<{ state: "error"; message: string }>
+  | Readonly<{ state: "error"; message: string; code?: string }>
   | Readonly<{ state: "index-required" }>
   | Readonly<{ state: "processing" }>
   | Readonly<{
@@ -27,6 +27,7 @@ export type SimilarNotesViewModel =
 
 export type SimilarNotesPresentationActions = Readonly<{
   onRefresh: () => void | Promise<void>;
+  onOpenCredits: () => void | Promise<void>;
   onOpenSettings: () => void;
   onOpenPendingFiles: () => void;
   onStartProcessing: () => void | Promise<void>;
@@ -138,6 +139,8 @@ export class SimilarNotesPresentation extends Component {
         : null;
       if (target?.dataset.indexAction === "pending") {
         this.actions.onOpenPendingFiles();
+      } else if (target?.dataset.indexAction === "credits") {
+        void this.actions.onOpenCredits();
       }
     });
 
@@ -193,17 +196,28 @@ export class SimilarNotesPresentation extends Component {
     let stateClass = "is-initializing";
     let showProgress = false;
     let showPendingAction = false;
+    let showCreditsAction = false;
 
-    if (snapshot.failed > 0 || snapshot.phase === "error") {
+    if (
+      snapshot.lastError?.code === "payment_required"
+      || snapshot.failed > 0
+      || snapshot.phase === "error"
+    ) {
+      const paymentRequired = snapshot.lastError?.code === "payment_required";
       iconName = "circle-alert";
-      label = snapshot.failed > 0
-        ? `${snapshot.failed} ${snapshot.failed === 1 ? "note needs" : "notes need"} attention`
-        : "Semantic index needs attention";
-      detail = snapshot.lastError?.message
-        ? readEmbeddingErrorMessage(snapshot.lastError.message, "Try again from Remaining embeddings.")
-        : "Review the remaining files and retry.";
+      label = paymentRequired
+        ? "Indexing paused. Not enough credits."
+        : snapshot.failed > 0
+          ? `${snapshot.failed} ${snapshot.failed === 1 ? "note needs" : "notes need"} attention`
+          : "Semantic index needs attention";
+      detail = paymentRequired
+        ? "Not enough credits are available. Add credits to resume indexing."
+        : snapshot.lastError?.message
+          ? readEmbeddingErrorMessage(snapshot.lastError.message, "Try again from Remaining embeddings.")
+          : "Review the remaining files and retry.";
       stateClass = "is-error";
-      showPendingAction = true;
+      showCreditsAction = paymentRequired;
+      showPendingAction = !paymentRequired;
     } else if (snapshot.phase === "paused") {
       iconName = "pause";
       label = "Indexing paused";
@@ -251,10 +265,19 @@ export class SimilarNotesPresentation extends Component {
       progress.value = Math.min(snapshot.completed, total);
     }
 
-    if (showPendingAction) {
+    if (showCreditsAction) {
+      const action = createUiAction(this.indexStatusEl, {
+        label: "Add credits",
+        testId: "embeddings.index.add-credits",
+        tone: "primary",
+        size: "small",
+      });
+      action.dataset.indexAction = "credits";
+    } else if (showPendingAction) {
       const action = createUiAction(this.indexStatusEl, {
         label: "Review",
         testId: "embeddings.index.review-pending",
+        tone: "default",
         size: "small",
       });
       action.dataset.indexAction = "pending";
@@ -294,18 +317,31 @@ export class SimilarNotesPresentation extends Component {
           description: "Add text to this note or chat.",
         });
         break;
-      case "error":
+      case "error": {
+        const paymentRequired = model.code === "payment_required";
         this.renderStatePane({
           kind: "error",
           icon: "circle-alert",
-          title: "Couldn’t find similar notes",
-          description: readEmbeddingErrorMessage(
-            model.message,
-            "Similar notes are unavailable. Try again.",
-          ),
+          title: paymentRequired ? "Not enough credits" : "Couldn’t find similar notes",
+          description: paymentRequired
+            ? "Not enough credits are available. Add credits to continue using Similar notes."
+            : readEmbeddingErrorMessage(
+              model.message,
+              "Similar notes are unavailable. Try again.",
+            ),
         });
-        this.addStateAction("embeddings.state.retry", "Try again", () => this.actions.onRefresh(), true);
+        if (paymentRequired) {
+          this.addStateAction(
+            "embeddings.state.add-credits",
+            "Add credits",
+            () => this.actions.onOpenCredits(),
+            true,
+          );
+        } else {
+          this.addStateAction("embeddings.state.retry", "Try again", () => this.actions.onRefresh(), true);
+        }
         break;
+      }
       case "index-required":
         this.renderStatePane({
           kind: "index",

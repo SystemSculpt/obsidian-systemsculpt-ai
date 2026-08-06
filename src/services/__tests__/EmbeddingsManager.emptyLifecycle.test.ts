@@ -1,13 +1,15 @@
 import type { EmbeddingVector } from "../embeddings/types";
-import type {
-  ManagedEmbeddingsIndexAdapter,
-  ManagedEmbeddingsIndexGeneration,
-  ManagedEmbeddingsIndexMetadata,
-  ManagedEmbeddingsIndexOperation,
-  ManagedEmbeddingsIndexResult,
+import {
+  ManagedEmbeddingsError,
+  type ManagedEmbeddingsIndexAdapter,
+  type ManagedEmbeddingsIndexGeneration,
+  type ManagedEmbeddingsIndexMetadata,
+  type ManagedEmbeddingsIndexOperation,
+  type ManagedEmbeddingsIndexResult,
 } from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 
 const mockVectors = new Map<string, EmbeddingVector>();
+const mockState = new Map<string, unknown>();
 const mockStorage = {
   initialize: jest.fn(async () => undefined),
   loadEmbeddings: jest.fn(async () => undefined),
@@ -57,6 +59,14 @@ const mockStorage = {
   renameByDirectory: jest.fn(async () => undefined),
   removeByDirectory: jest.fn(async () => undefined),
   clear: jest.fn(async () => { mockVectors.clear(); }),
+  readState: jest.fn(async <T>(key: string): Promise<T | null> =>
+    (mockState.get(key) as T | undefined) ?? null),
+  writeState: jest.fn(async <T>(key: string, value: T) => {
+    mockState.set(key, value);
+  }),
+  deleteState: jest.fn(async (key: string) => {
+    mockState.delete(key);
+  }),
   getDistinctPaths: jest.fn(() => [...new Set([...mockVectors.values()].map((vector) => vector.path))]),
   size: jest.fn(() => mockVectors.size),
 };
@@ -215,6 +225,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockVectors.clear();
+    mockState.clear();
   });
   afterEach(() => {
     jest.restoreAllMocks();
@@ -280,6 +291,198 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
         },
       },
     );
+  });
+
+  it("checks authoritative spendable credits before reading a vault note", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = harness("This note would otherwise be uploaded for embeddings. ".repeat(4));
+    (state.plugin as any).aiService = {
+      getCreditsBalance: jest.fn(async () => ({
+        usageClass: "customer",
+        totalRemaining: 5,
+        heldInFlight: 5,
+        availableUnreserved: 0,
+      })),
+    };
+    await state.manager.initialize();
+    state.vault.read.mockClear();
+
+    await expect(state.manager.processVault()).resolves.toMatchObject({
+      status: "aborted",
+      failure: { code: "payment_required", status: 402 },
+    });
+
+    expect(state.vault.read).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
+    expect(state.manager.isSuspended()).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("cancels a competing worker before note reads when metadata fails fatally", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = harness("This note must not be read after a concurrent fatal suspension. ".repeat(4));
+    let releaseBalance!: () => void;
+    let signalBalanceStarted!: () => void;
+    const balanceStarted = new Promise<void>((resolve) => { signalBalanceStarted = resolve; });
+    const balanceRelease = new Promise<void>((resolve) => { releaseBalance = resolve; });
+    (state.plugin as any).aiService = {
+      getCreditsBalance: jest.fn(async () => {
+        signalBalanceStarted();
+        await balanceRelease;
+        return {
+          usageClass: "customer",
+          totalRemaining: 5,
+          heldInFlight: 0,
+          availableUnreserved: 5,
+        };
+      }),
+    };
+    state.getMetadata
+      .mockResolvedValueOnce(managedMetadata)
+      .mockRejectedValueOnce(new ManagedEmbeddingsError(
+        "capability_unavailable",
+        "Managed embeddings are unavailable.",
+        503,
+        "request-concurrent-metadata",
+      ));
+    await state.manager.initialize();
+    state.vault.read.mockClear();
+
+    const worker = state.manager.processVault();
+    await balanceStarted;
+    await expect(state.manager.processVault()).rejects.toMatchObject({
+      code: "capability_unavailable",
+      status: 503,
+    });
+    releaseBalance();
+    await expect(worker).resolves.toMatchObject({ status: "aborted", processed: 0 });
+
+    expect(state.manager.isSuspended()).toBe(true);
+    expect(state.vault.read).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("does not reset a fatal suspension before queued processor dispatch", async () => {
+    const state = harness("Queued work must honor a suspension raised during preparation. ".repeat(4));
+    await state.manager.initialize();
+    state.plugin.settings.embeddingsEnabled = true;
+    const queue = (state.manager as any).workQueue;
+    await queue.enqueueImmediate(state.file.path, "modify", state.file.stat.mtime);
+    const complete = queue.complete.bind(queue);
+    jest.spyOn(queue, "complete").mockImplementation(async (items: unknown[]) => {
+      await complete(items);
+      (state.manager as any).processingSuspended = true;
+      (state.manager as any).fatalSuspensionCode = "capability_unavailable";
+    });
+    const processFiles = jest.spyOn((state.manager as any).processor, "processFiles");
+    state.vault.read.mockClear();
+
+    await (state.manager as any).processQueuedWork();
+
+    expect(processFiles).not.toHaveBeenCalled();
+    expect(state.vault.read).not.toHaveBeenCalled();
+    expect(state.index).not.toHaveBeenCalled();
+  });
+
+  it("persists the managed request ID with a failed work item", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const state = harness("This note reaches the managed embeddings route. ".repeat(4));
+    state.index.mockRejectedValueOnce(new ManagedEmbeddingsError(
+      "payment_required",
+      "Not enough credits are available.",
+      402,
+      "request-embeddings-payment",
+    ));
+    await state.manager.initialize();
+
+    await state.manager.processVault();
+
+    expect((state.manager as any).workQueue.get(state.file.path)).toMatchObject({
+      failure: {
+        code: "payment_required",
+        status: 402,
+        requestId: "request-embeddings-payment",
+      },
+    });
+    await (state.manager as any).workQueue.settled();
+
+    const restored = harness("This note reaches the managed embeddings route. ".repeat(4));
+    restored.plugin.settings.embeddingsEnabled = true;
+    restored.getMetadata.mockClear();
+    restored.vault.read.mockClear();
+    restored.index.mockClear();
+    await restored.manager.initialize();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect((restored.manager as any).workQueue.get(restored.file.path)).toMatchObject({
+      failure: {
+        code: "payment_required",
+        status: 402,
+        requestId: "request-embeddings-payment",
+      },
+    });
+    expect(restored.manager.isSuspended()).toBe(true);
+    expect(restored.getMetadata).not.toHaveBeenCalled();
+    expect(restored.vault.read).not.toHaveBeenCalled();
+    expect(restored.index).not.toHaveBeenCalled();
+
+    restored.plugin.settings.embeddingsEnabled = false;
+    await restored.manager.resumeProcessing("explicit");
+    await waitFor(() => !restored.manager.isSuspended());
+    expect(mockState.has("semantic-fatal-suspension-v1")).toBe(false);
+
+    const afterResume = harness("This note reaches the managed embeddings route. ".repeat(4));
+    await afterResume.manager.initialize();
+    expect(afterResume.manager.isSuspended()).toBe(false);
+    expect((afterResume.manager as any).workQueue.get(afterResume.file.path)?.failure).toBeNull();
+    warn.mockRestore();
+  });
+
+  it("persists a fatal metadata rejection and blocks automatic work after restart", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const first = harness("Metadata admission must fail closed after restart. ".repeat(4));
+    first.getMetadata.mockRejectedValueOnce(new ManagedEmbeddingsError(
+      "license_rejected",
+      "The managed capability is unavailable.",
+      403,
+      "request-metadata-license",
+    ));
+    await first.manager.initialize();
+
+    await expect(first.manager.processVault()).rejects.toMatchObject({
+      code: "license_rejected",
+      status: 403,
+    });
+    expect(first.manager.isSuspended()).toBe(true);
+    expect(mockState.get("semantic-fatal-suspension-v1")).toMatchObject({
+      version: 1,
+      code: "license_rejected",
+      status: 403,
+      requestId: "request-metadata-license",
+    });
+
+    const restored = harness("Metadata admission must fail closed after restart. ".repeat(4));
+    restored.plugin.settings.embeddingsEnabled = true;
+    restored.getMetadata.mockClear();
+    restored.vault.read.mockClear();
+    restored.index.mockClear();
+    await restored.manager.initialize();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(restored.manager.isSuspended()).toBe(true);
+    expect(restored.getMetadata).not.toHaveBeenCalled();
+    expect(restored.vault.read).not.toHaveBeenCalled();
+    expect(restored.index).not.toHaveBeenCalled();
+
+    await restored.manager.resumeProcessing("funding");
+    expect(restored.manager.isSuspended()).toBe(true);
+    expect(mockState.has("semantic-fatal-suspension-v1")).toBe(true);
+    restored.plugin.settings.embeddingsEnabled = false;
+    await restored.manager.resumeProcessing("explicit");
+    expect(restored.manager.isSuspended()).toBe(false);
+    warn.mockRestore();
   });
 
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
@@ -420,10 +623,14 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     });
     expect(state.index).not.toHaveBeenCalled();
 
-    state.manager.syncFromSettings();
-    for (let attempt = 0; attempt < 30 && state.manager.getLifecycleSnapshot().phase !== "idle"; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    if (code === "license_required") {
+      expect(state.manager.isSuspended()).toBe(true);
+      state.manager.resumeProcessing();
+      await waitFor(() => !state.manager.isSuspended());
+    } else {
+      state.manager.syncFromSettings();
     }
+    await waitFor(() => state.manager.getLifecycleSnapshot().phase === "idle");
 
     expect(state.index).toHaveBeenCalledTimes(1);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });

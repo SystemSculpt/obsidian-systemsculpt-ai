@@ -120,6 +120,16 @@ function submit(id: string) {
   } as never;
 }
 
+function regenerate(id: string) {
+  return {
+    type: "systemsculpt.agent.command.v1",
+    version: 1,
+    kind: "regenerate",
+    request_id: id,
+    root_message_id: "user_original",
+  } as never;
+}
+
 describe("AgentStreamingTransport", () => {
   it("streams a turn's authoritative frames and settles when the stream ends", async () => {
     const turnId = "user_stream_ok";
@@ -351,6 +361,37 @@ describe("AgentStreamingTransport", () => {
     await expect(failed.transport.connect()).rejects.toThrow("connection is closed");
   });
 
+  it("preserves safe root error metadata from a failed bootstrap", async () => {
+    const failed = harness([]);
+    failed.request.mockResolvedValueOnce(new Response(JSON.stringify({
+      code: "unauthorized_agent_session",
+      incident_id: "incident_0123456789abcdef0123456789abcdef",
+    }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    }));
+
+    await expect(failed.transport.connect()).rejects.toMatchObject({
+      code: "unauthorized_agent_session",
+      requestId: "incident_0123456789abcdef0123456789abcdef",
+      status: 401,
+      retryable: true,
+    });
+  });
+
+  it("ignores unstructured bootstrap error bodies", async () => {
+    const failed = harness([]);
+    failed.request.mockResolvedValueOnce(new Response(JSON.stringify("service detail"), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    }));
+
+    const failure = await failed.transport.connect().catch((error: unknown) => error);
+    expect(failure).toMatchObject({ status: 503, retryable: true });
+    expect(failure).not.toHaveProperty("code");
+    expect(failure).not.toHaveProperty("requestId");
+  });
+
   it("does not bootstrap or send after close", async () => {
     const { transport, calls } = harness([]);
     transport.close();
@@ -368,6 +409,80 @@ describe("AgentStreamingTransport", () => {
       .rejects.toThrow("could not run");
 
     expect(transport.state).toBe("closed");
+  });
+
+  it("treats HTTP 402 as definite non-admission without recovery replay", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "insufficient_credits",
+        message: "private provider and vault data must not surface",
+      },
+      incident_id: `incident_${"a".repeat(32)}`,
+    }), {
+      status: 402,
+      headers: { "content-type": "application/json" },
+    }));
+
+    const error = await transport.sendSubmit(submit("user_payment"))
+      .catch((caught) => caught as Error & Record<string, unknown>);
+
+    expect(error).toMatchObject({
+      code: "insufficient_credits",
+      status: 402,
+      serverAdmissionPossible: false,
+      requestId: `incident_${"a".repeat(32)}`,
+    });
+    expect(error.message).not.toContain("private provider");
+    expect(transport.state).toBe("open");
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("preserves a safe code for a definitely rejected command", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "conversation_capacity_reached",
+        message: "This chat reached its history limit.",
+      },
+    }), {
+      status: 413,
+      headers: { "content-type": "application/json" },
+    }));
+
+    await expect(transport.sendSubmit(submit("user_capacity"))).rejects
+      .toMatchObject({
+        code: "conversation_capacity_reached",
+        status: 413,
+        serverAdmissionPossible: false,
+      });
+    expect(transport.state).toBe("open");
+  });
+
+  it.each([
+    ["submit", submit("user_payment_submit")],
+    ["regenerate", regenerate("request_payment_regenerate")],
+  ])("treats a 402 %s rejection as definite non-admission", async (_kind, command) => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "insufficient_credits",
+        message: "Not enough credits are available.",
+      },
+    }), {
+      status: 402,
+      headers: { "content-type": "application/json" },
+    }));
+
+    await expect(transport.sendSubmit(command)).rejects.toMatchObject({
+      code: "insufficient_credits",
+      status: 402,
+      serverAdmissionPossible: false,
+    });
+    expect(transport.state).toBe("open");
   });
 
   it("aborts every concurrent turn stream when it closes", async () => {
