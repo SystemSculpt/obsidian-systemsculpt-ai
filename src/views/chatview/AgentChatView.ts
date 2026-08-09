@@ -22,10 +22,14 @@ import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
-import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
+import type {
+  AgentArtifact,
+  AgentConversationSnapshot,
+  ManagedAgentError,
+} from "./AgentConversation";
 import { AgentConversationSessionBinding } from "./AgentConversationSessionBinding";
 import type { AgentComposerSubmit } from "./AgentComposer";
-import { presentAgentErrorMessage } from "./AgentConversationPresentation";
+import { presentAgentError } from "./AgentConversationPresentation";
 import {
   composeAttachmentMetadata,
   composeUserMessageContent,
@@ -517,7 +521,7 @@ export class AgentChatView extends ItemView {
         this.chatInputLimits = limits;
         this.workspace?.setMessageAttachmentLimits(limits);
       },
-      refreshCredits: () => this.refreshCreditsBalance(),
+      refreshCredits: () => this.refreshCreditsBalance({ requireFresh: true }),
       reportError: (error) => this.logAgentError(error, "agentSession"),
       onLifecycle: (record) => this.plugin.getLogger().lifecycle({ ...record }),
     });
@@ -940,11 +944,16 @@ export class AgentChatView extends ItemView {
     return (await this.exportChat(options)).markdown;
   }
 
-  public async refreshCreditsBalance(): Promise<void> {
+  public async refreshCreditsBalance(
+    options: Readonly<{ requireFresh?: boolean }> = {},
+  ): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return;
+    }
+    if (options.requireFresh && this.creditsPromise) {
+      await this.creditsPromise;
     }
     if (this.creditsPromise) return this.creditsPromise;
     this.creditsPromise = (async () => {
@@ -952,6 +961,7 @@ export class AgentChatView extends ItemView {
         this.creditsBalance = await this.aiService.getCreditsBalance();
         this.workspace?.setCreditsBalance(this.creditsBalance);
       } catch {
+        this.creditsBalance = null;
         this.workspace?.setCreditsBalance(null);
       }
     })().finally(() => { this.creditsPromise = null; });
@@ -970,6 +980,7 @@ export class AgentChatView extends ItemView {
   }
 
   public async handleError(error: unknown): Promise<void> {
+    this.refreshCreditsAfterBillingFailure(error);
     // Session failures reject with structured payloads ({code, message,
     // retryable}), not Error instances — read message the same way as
     // retryable so an object never renders as "[object Object]".
@@ -990,10 +1001,23 @@ export class AgentChatView extends ItemView {
       && !Array.isArray(error)
       && (error as { retryable?: unknown }).retryable === true,
     );
-    this.workspace?.setBanner(
-      presentAgentErrorMessage(rawMessage, retryable),
-      "error",
-    );
+    const structuredCode = error
+      && typeof error === "object"
+      && typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code.trim()
+      : "";
+    const status = error
+      && typeof error === "object"
+      && Number.isInteger((error as { status?: unknown }).status)
+      ? Number((error as { status: number }).status)
+      : undefined;
+    const presented = presentAgentError({
+      code: structuredCode || "agent_ui_failed",
+      message: rawMessage,
+      ...(status === undefined ? {} : { status }),
+      retryable,
+    } satisfies ManagedAgentError, retryable);
+    this.workspace?.setBanner(presented.message, "error");
   }
 
   public async onClose(): Promise<void> {
@@ -1241,6 +1265,41 @@ export class AgentChatView extends ItemView {
     this.scheduleQueuePersistence();
   }
 
+  private hasAuthoritativeUnavailableBalance(): boolean {
+    if (!this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
+    return (this.creditsBalance.availableUnreserved ?? this.creditsBalance.totalRemaining) <= 0;
+  }
+
+  private unavailableBalanceAdmissionError(): Error {
+    const outOfCredits = (this.creditsBalance?.totalRemaining ?? 0) <= 0;
+    return Object.assign(
+      new Error(outOfCredits
+        ? "You have no credits left. Add credits to continue using Chat."
+        : "Not enough credits are available. Add credits to continue using Chat."),
+      {
+        code: outOfCredits ? "out_of_credits" : "insufficient_credits",
+        status: 402,
+        retryable: false,
+        serverAdmissionPossible: false,
+      },
+    );
+  }
+
+  private refreshCreditsAfterBillingFailure(error: unknown): void {
+    if (!error || typeof error !== "object") return;
+    const code = typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+    const status = (error as { status?: unknown }).status;
+    if (
+      status !== 402
+      && code !== "insufficient_credits"
+      && code !== "payment_required"
+      && code !== "out_of_credits"
+    ) return;
+    void this.refreshCreditsBalance();
+  }
+
   private acceptComposerSubmission(
     submission: AgentComposerSubmit,
     expectedConversationOriginToken?: string,
@@ -1262,6 +1321,19 @@ export class AgentChatView extends ItemView {
           clearComposerAfterAdmission,
         );
       });
+      return;
+    }
+    // Follow-up queueing reads no attachment or vault content. Recheck the
+    // spendable balance only when the queued item is promoted for admission.
+    if (this.isSubmissionActive()) {
+      if (this.isCurrentConversationOrigin(admissionOriginToken)) {
+        this.queueSubmission(submission, true);
+      }
+      return;
+    }
+    if (this.hasAuthoritativeUnavailableBalance()) {
+      const error = this.unavailableBalanceAdmissionError();
+      void this.handleError(error);
       return;
     }
     const operation = this.beginSubmissionOperation(
@@ -1487,6 +1559,9 @@ export class AgentChatView extends ItemView {
     }> | null = null;
 
     try {
+      if (this.hasAuthoritativeUnavailableBalance()) {
+        throw this.unavailableBalanceAdmissionError();
+      }
       if (
         options.historicalResubmit
         && !this.transcript.snapshot().agentConversationId

@@ -19,6 +19,7 @@ import {
   type SimilaritySearchRun,
 } from './SimilaritySearchRunCoordinator';
 import { readEmbeddingErrorMessage } from '../services/embeddings/EmbeddingErrorMessage';
+import { ManagedEmbeddingsError } from '../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter';
 import type { SemanticIndexSnapshot } from '../services/embeddings/SemanticIndexLifecycle';
 import { getSurfaceOwnerWindow } from '../core/ui/surface/SurfaceDomContext';
 import {
@@ -51,7 +52,14 @@ export class EmbeddingsView extends ItemView {
       isVisible: () => this.isViewVisible(),
       getOwnerWindow: () => getSurfaceOwnerWindow(this.contentEl),
       execute: (run) => this.executeSimilaritySearch(run),
-      onError: (error) => this.showError(`Failed to find similar notes: ${this.errorMessage(error)}`),
+      onError: (error) => {
+        const message = `Failed to find similar notes: ${this.errorMessage(error)}`;
+        if (error instanceof ManagedEmbeddingsError) {
+          this.showError(message, error.code);
+        } else {
+          this.showError(message);
+        }
+      },
       onCancel: () => this.presentation?.setRefreshing(false),
     });
   }
@@ -101,6 +109,7 @@ export class EmbeddingsView extends ItemView {
     this.contentEl.empty();
     this.presentation = new SimilarNotesPresentation(this.contentEl, {
       onRefresh: () => this.refreshCurrentContext(),
+      onOpenCredits: () => this.openCredits(),
       onOpenSettings: () => this.plugin.openSettingsTab("knowledge"),
       onOpenPendingFiles: () => this.openPendingFilesModal(),
       onStartProcessing: () => this.startProcessing(),
@@ -586,11 +595,12 @@ export class EmbeddingsView extends ItemView {
     this.presentation?.render({ state: 'empty-content' });
   }
 
-  private showError(message: string): void {
+  private showError(message: string, code?: string): void {
     this.currentResults = [];
     this.presentation?.render({
       state: 'error',
       message: readEmbeddingErrorMessage(message, 'Similar notes are unavailable. Try again.'),
+      ...(code ? { code } : {}),
     });
   }
 
@@ -644,12 +654,19 @@ export class EmbeddingsView extends ItemView {
   }
 
   private showUnavailableIndex(snapshot: Readonly<SemanticIndexSnapshot>): void {
-    if (snapshot.phase === "reconciling" || snapshot.pending > 0) {
-      this.showProcessingStatus();
+    if (
+      snapshot.lastError?.code === "payment_required"
+      || snapshot.phase === "error"
+      || snapshot.failed > 0
+    ) {
+      this.showError(
+        snapshot.lastError?.message || "The semantic index needs attention.",
+        snapshot.lastError?.code,
+      );
       return;
     }
-    if (snapshot.phase === "error" || snapshot.failed > 0) {
-      this.showError(snapshot.lastError?.message || "The semantic index needs attention.");
+    if (snapshot.phase === "reconciling" || snapshot.pending > 0) {
+      this.showProcessingStatus();
       return;
     }
     this.showProcessingPrompt();
@@ -664,7 +681,7 @@ export class EmbeddingsView extends ItemView {
       await manager.awaitReady();
       
       // Ensure processing isn't suspended from prior scan/config actions
-      manager.resumeProcessing();
+      await manager.resumeProcessing("prepare");
 
       if (manager.isCurrentlyProcessing()) {
         this.showProcessingStatus();
@@ -687,10 +704,13 @@ export class EmbeddingsView extends ItemView {
           await this.refreshCurrentContext();
         }
       } else {
-        this.showError(readEmbeddingErrorMessage(
-          result.message ?? result.failure,
-          'Embeddings processing stopped. Try again.',
-        ));
+        this.showError(
+          readEmbeddingErrorMessage(
+            result.message ?? result.failure,
+            'Embeddings processing stopped. Try again.',
+          ),
+          result.failure?.code,
+        );
       }
 
     } catch (error) {
@@ -711,6 +731,10 @@ export class EmbeddingsView extends ItemView {
    */
   private updateProcessingStatus(progress: { current: number; total: number; currentFile?: string }): void {
     this.presentation?.updateProgress(progress);
+  }
+
+  private async openCredits(): Promise<void> {
+    await this.plugin.openCreditsBalanceModal();
   }
 
   private openPendingFilesModal(): void {

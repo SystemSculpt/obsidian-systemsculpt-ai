@@ -78,6 +78,7 @@ export interface FailedProcessingDetail {
   message: string;
   status?: number;
   retryInMs?: number;
+  requestId?: string;
   chunkId?: number;
   sectionTitle?: string;
   headingPath?: string[];

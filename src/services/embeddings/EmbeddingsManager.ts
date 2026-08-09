@@ -4,11 +4,13 @@ import SystemSculptPlugin from "../../main";
 import type {
   EmbeddingVector,
   EmbeddingsManagerConfig,
+  FailedProcessingDetail,
   ProcessingProgress,
   SearchResult,
 } from "./types";
 import {
   ManagedEmbeddingsError,
+  type ManagedEmbeddingsErrorCode,
   type ManagedEmbeddingsIndexAdapter,
 } from "./gateway/ManagedEmbeddingsIndexAdapter";
 import {
@@ -42,6 +44,7 @@ import {
 import {
   SemanticWorkQueue,
   type SemanticWorkItem,
+  type SemanticWorkStore,
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
 
@@ -100,6 +103,39 @@ type FileState = {
   existingNamespace?: string;
 };
 
+const FATAL_MANAGED_ERROR_CODES = new Set<ManagedEmbeddingsErrorCode>([
+  "payment_required",
+  "license_required",
+  "license_rejected",
+  "version_unsupported",
+  "capability_unavailable",
+]);
+const FATAL_SUSPENSION_STATE_KEY = "semantic-fatal-suspension-v1";
+
+type PersistedFatalSuspension = Readonly<{
+  version: 1;
+  code: ManagedEmbeddingsErrorCode;
+  status?: number;
+  requestId?: string;
+  recordedAt: number;
+}>;
+
+function isFatalManagedError(error: unknown): error is ManagedEmbeddingsError {
+  return error instanceof ManagedEmbeddingsError
+    && FATAL_MANAGED_ERROR_CODES.has(error.code);
+}
+
+function fatalManagedErrorMessage(code: ManagedEmbeddingsErrorCode): string {
+  if (code === "payment_required") return "Credits are required before note indexing can continue.";
+  if (code === "license_required" || code === "license_rejected") {
+    return "A valid license is required before note indexing can continue.";
+  }
+  if (code === "version_unsupported") {
+    return "Update SystemSculpt before note indexing can continue.";
+  }
+  return "Managed embeddings are unavailable. Try again later.";
+}
+
 /**
  * Managed-only embeddings coordinator.
  *
@@ -115,11 +151,13 @@ export class EmbeddingsManager {
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
   private readonly lifecycle = new SemanticIndexLifecycle();
+  private readonly stateStore: SemanticWorkStore;
   private readonly workQueue: SemanticWorkQueue;
   private config: EmbeddingsManagerConfig;
   private initializationPromise: Promise<void> | null = null;
   private initialized = false;
   private processingSuspended = false;
+  private fatalSuspensionCode: ManagedEmbeddingsErrorCode | null = null;
   private automaticRunQueued = false;
   /** Namespace that is complete enough to query while another is written. */
   private searchNamespace: string | null = null;
@@ -143,7 +181,7 @@ export class EmbeddingsManager {
       EmbeddingsStorage,
       "readState" | "writeState" | "deleteState"
     >>;
-    this.workQueue = new SemanticWorkQueue({
+    this.stateStore = {
       readState: <T>(key: string) => typeof stateStorage.readState === "function"
         ? stateStorage.readState<T>(key)
         : Promise.resolve(null),
@@ -153,7 +191,8 @@ export class EmbeddingsManager {
       deleteState: (key: string) => typeof stateStorage.deleteState === "function"
         ? stateStorage.deleteState(key)
         : Promise.resolve(),
-    });
+    };
+    this.workQueue = new SemanticWorkQueue(this.stateStore);
     this.processor = new EmbeddingsProcessor(
       this.gateway,
       this.storage,
@@ -175,6 +214,7 @@ export class EmbeddingsManager {
     await this.storage.initialize();
     await this.workQueue.restore();
     this.hydrateFailuresFromWorkQueue();
+    await this.restoreFatalSuspension();
     await this.restorePortableIndexIfEmpty();
     await this.storage.loadEmbeddings();
     await this.migrateToManagedNamespaceContract();
@@ -196,7 +236,18 @@ export class EmbeddingsManager {
     }
     this.setupFileWatchers();
     this.initialized = true;
-    this.refreshLifecycle({ phase: this.processingSuspended ? "paused" : "idle", ready: true });
+    this.refreshLifecycle({
+      phase: this.processingSuspended ? "paused" : "idle",
+      ready: true,
+      ...(this.fatalSuspensionCode
+        ? {
+            lastError: {
+              code: this.fatalSuspensionCode,
+              message: fatalManagedErrorMessage(this.fatalSuspensionCode),
+            },
+          }
+        : {}),
+    });
   }
 
   async processVault(onProgress?: (progress: ProcessingProgress) => void): Promise<EmbeddingsRunResult> {
@@ -207,14 +258,23 @@ export class EmbeddingsManager {
     try {
       await this.gateway.getMetadata();
     } catch (error) {
+      if (isFatalManagedError(error)) {
+        await this.persistFatalSuspension(error);
+      }
       this.reportLifecycleFailure(error);
       throw error;
+    }
+    if (this.processingSuspended) {
+      return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
     if (this.processingMutex.isLocked()) {
       throw new Error("Embeddings processing is already in progress.");
     }
 
     return this.processingMutex.runExclusive(async () => {
+      if (this.processingSuspended) {
+        return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
+      }
       await this.setRebuildPending(true);
       const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !this.isFileExcluded(file));
       this.refreshLifecycle({
@@ -258,8 +318,12 @@ export class EmbeddingsManager {
           currentPath: progress.currentFile ?? null,
         });
         onProgress?.(progress);
-      }, { sourceRevisions });
+      }, {
+        sourceRevisions,
+        preflight: () => this.preflightCredits(),
+      });
       await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
       const failedPaths = new Set(result.failedPaths);
       for (const path of completedPaths) this.failedFiles.delete(path);
@@ -345,6 +409,9 @@ export class EmbeddingsManager {
   async retryFailedFiles(): Promise<EmbeddingsRunResult> {
     await this.workQueue.retryFailures();
     this.failedFiles.clear();
+    await this.clearFatalSuspension();
+    this.fatalSuspensionCode = null;
+    this.processingSuspended = false;
     return this.processVault();
   }
 
@@ -553,10 +620,23 @@ export class EmbeddingsManager {
     this.refreshLifecycle({ phase: "paused", currentPath: null });
   }
 
-  resumeProcessing(): void {
-    this.processingSuspended = false;
-    this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
-    if (this.plugin.settings.embeddingsEnabled) this.requestAutomaticProcessing();
+  async resumeProcessing(source: "explicit" | "funding" | "prepare" = "explicit"): Promise<void> {
+    if (source === "funding" && this.fatalSuspensionCode !== "payment_required") return;
+    try {
+      await this.workQueue.retryFailures();
+      await this.clearFatalSuspension();
+      this.failedFiles.clear();
+      this.fatalSuspensionCode = null;
+      this.processingSuspended = false;
+      this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
+      if (source !== "prepare" && this.plugin.settings.embeddingsEnabled) {
+        this.requestAutomaticProcessing();
+      }
+    } catch (error) {
+      this.processingSuspended = true;
+      this.reportLifecycleFailure(error);
+      throw error;
+    }
   }
 
   isSuspended(): boolean {
@@ -616,6 +696,8 @@ export class EmbeddingsManager {
     this.processor.cancel();
     await this.processingMutex.runExclusive(async () => {
       await this.storage.reset();
+      this.processingSuspended = false;
+      this.fatalSuspensionCode = null;
       this.initialized = false;
       this.initializationPromise = null;
       this.failedFiles.clear();
@@ -634,6 +716,10 @@ export class EmbeddingsManager {
     this.suspendProcessing();
     try {
       await this.processingMutex.runExclusive(async () => {
+        await this.workQueue.retryFailures();
+        await this.clearFatalSuspension();
+        this.failedFiles.clear();
+        this.fatalSuspensionCode = null;
         await this.storage.removeCurrentManagedGeneration();
         this.searchNamespace = null;
         this.queryCache.clear();
@@ -671,9 +757,13 @@ export class EmbeddingsManager {
     this.automaticRunQueued = true;
     this.refreshLifecycle({ phase: "initializing", currentPath: null, lastError: null });
     queueMicrotask(() => {
-      this.automaticRunQueued = false;
-      if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended || this.processingMutex.isLocked()) return;
-      void this.processVault().catch((error) => this.reportLifecycleFailure(error));
+      if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended || this.processingMutex.isLocked()) {
+        this.automaticRunQueued = false;
+        return;
+      }
+      void this.processVault()
+        .catch((error) => this.reportLifecycleFailure(error))
+        .finally(() => { this.automaticRunQueued = false; });
     });
   }
 
@@ -819,6 +909,7 @@ export class EmbeddingsManager {
         this.refreshLifecycle({ phase: "idle", currentPath: null });
         return;
       }
+      if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
 
       this.refreshLifecycle({
         phase: "reconciling",
@@ -836,8 +927,12 @@ export class EmbeddingsManager {
           completed: progress.current,
           currentPath: progress.currentFile ?? null,
         });
-      }, { sourceRevisions });
+      }, {
+        sourceRevisions,
+        preflight: () => this.preflightCredits(),
+      });
       await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
       await this.workQueue.complete(
         [...completedPaths]
@@ -888,10 +983,29 @@ export class EmbeddingsManager {
     this.scheduleQueuedWork();
   }
 
+  private async preflightCredits(): Promise<void> {
+    let balance;
+    try {
+      balance = await this.plugin.aiService.getCreditsBalance();
+    } catch {
+      // The managed route remains authoritative when balance lookup is unavailable.
+      return;
+    }
+    const available = balance.availableUnreserved ?? balance.totalRemaining;
+    if (balance.usageClass === "master_auth" || available > 0) return;
+    throw new ManagedEmbeddingsError(
+      "payment_required",
+      balance.totalRemaining === 0
+        ? "You have no credits left. Add credits to continue indexing notes."
+        : "Not enough credits are available. Add credits to continue indexing notes.",
+      402,
+    );
+  }
+
   private async recordFailures(
     paths: string[],
     workClaims: ReadonlyMap<string, SemanticWorkItem>,
-    details: Record<string, { code: string; message: string; status?: number }> | undefined,
+    details: Record<string, FailedProcessingDetail> | undefined,
     fatalError: ManagedEmbeddingsError | null,
   ): Promise<void> {
     const failedAt = Date.now();
@@ -906,6 +1020,7 @@ export class EmbeddingsManager {
       const recorded = await this.workQueue.fail(claim, {
         ...error,
         ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
+        ...(detail?.requestId ? { requestId: detail.requestId } : {}),
       }, failedAt);
       if (!recorded) continue;
       this.failedFiles.set(path, {
@@ -1506,7 +1621,86 @@ export class EmbeddingsManager {
         error: { code: item.failure.code, message: item.failure.message },
         failedAt: item.failure.failedAt,
       });
+      if (FATAL_MANAGED_ERROR_CODES.has(item.failure.code as ManagedEmbeddingsErrorCode)) {
+        const code = item.failure.code as ManagedEmbeddingsErrorCode;
+        this.processingSuspended = true;
+        if (this.fatalSuspensionCode === null || code !== "payment_required") {
+          this.fatalSuspensionCode = code;
+        }
+      }
     }
+  }
+
+  private async restoreFatalSuspension(): Promise<void> {
+    const stored = await this.stateStore.readState<unknown>(FATAL_SUSPENSION_STATE_KEY);
+    if (stored === null) return;
+    if (
+      typeof stored === "object"
+      && stored !== null
+      && !Array.isArray(stored)
+      && (stored as { version?: unknown }).version === 1
+      && typeof (stored as { code?: unknown }).code === "string"
+      && FATAL_MANAGED_ERROR_CODES.has(
+        (stored as { code: ManagedEmbeddingsErrorCode }).code,
+      )
+    ) {
+      const code = (stored as { code: ManagedEmbeddingsErrorCode }).code;
+      this.processingSuspended = true;
+      if (this.fatalSuspensionCode === null || code !== "payment_required") {
+        this.fatalSuspensionCode = code;
+      }
+      this.refreshLifecycle({
+        phase: "error",
+        currentPath: null,
+        lastError: {
+          code,
+          message: code === "payment_required"
+            ? "Not enough credits are available. Add credits to resume indexing."
+            : "Managed embeddings need account attention before indexing can resume.",
+        },
+      });
+      return;
+    }
+    // Corrupt suspension state must fail closed until the user explicitly retries.
+    this.processingSuspended = true;
+    this.fatalSuspensionCode = "capability_unavailable";
+    this.refreshLifecycle({
+      phase: "error",
+      currentPath: null,
+      lastError: {
+        code: "capability_unavailable",
+        message: "Managed embeddings need account attention before indexing can resume.",
+      },
+    });
+  }
+
+  private async persistFatalSuspension(error: ManagedEmbeddingsError): Promise<void> {
+    if (!isFatalManagedError(error)) return;
+    this.processingSuspended = true;
+    this.fatalSuspensionCode = error.code;
+    this.clearWorkTimer();
+    this.processor.cancel();
+    const state: PersistedFatalSuspension = {
+      version: 1,
+      code: error.code,
+      ...(Number.isInteger(error.status) && error.status >= 100 && error.status <= 599
+        ? { status: error.status }
+        : {}),
+      ...(typeof error.requestId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(error.requestId)
+        ? { requestId: error.requestId }
+        : {}),
+      recordedAt: Date.now(),
+    };
+    await this.stateStore.writeState(FATAL_SUSPENSION_STATE_KEY, state);
+    this.refreshLifecycle({
+      phase: "error",
+      currentPath: null,
+      lastError: { code: error.code, message: error.message },
+    });
+  }
+
+  private clearFatalSuspension(): Promise<void> {
+    return this.stateStore.deleteState(FATAL_SUSPENSION_STATE_KEY);
   }
 
   private generationSnapshotForNamespace(namespace: string): SemanticIndexSnapshot["generation"] {

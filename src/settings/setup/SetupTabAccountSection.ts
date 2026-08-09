@@ -219,6 +219,15 @@ export function renderAccountSection(
       try {
         creditsSetting.setDesc("Fetching credits balance…");
         const balance = await aiService.getCreditsBalance();
+        if (
+          (
+            balance.usageClass === "master_auth"
+            || (balance.availableUnreserved ?? balance.totalRemaining) > 0
+          )
+          && plugin.embeddingsManager?.isSuspended()
+        ) {
+          void Promise.resolve(plugin.embeddingsManager.resumeProcessing("funding")).catch(() => undefined);
+        }
         internalQa = balance.usageClass === "master_auth";
         if (internalQa) {
           purchaseUrl = null;
@@ -252,8 +261,12 @@ export function renderAccountSection(
               annualUpgradeOffer.percentSaved > 0 ? ` (${annualUpgradeOffer.percentSaved}%)` : ""
             }.`
           : "";
+        const heldInFlight = balance.heldInFlight ?? 0;
+        const availableUnreserved = balance.availableUnreserved ?? balance.totalRemaining;
         creditsSetting.setDesc(
-          `Remaining: ${formatCredits(balance.totalRemaining)} credits (Included ${formatCredits(
+          `Available: ${formatCredits(availableUnreserved)} credits. Held in current requests: ${formatCredits(
+            heldInFlight
+          )} credits. Total balance: ${formatCredits(balance.totalRemaining)} credits (Included ${formatCredits(
             balance.includedRemaining
           )}/${formatCredits(balance.includedPerMonth)}, Add-on ${formatCredits(
             balance.addOnRemaining

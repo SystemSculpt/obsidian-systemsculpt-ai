@@ -10,6 +10,7 @@ import type { SemanticIndexSnapshot } from "../../services/embeddings/SemanticIn
 function createActions(overrides: Partial<SimilarNotesPresentationActions> = {}): SimilarNotesPresentationActions {
   return {
     onRefresh: jest.fn(),
+    onOpenCredits: jest.fn(),
     onOpenSettings: jest.fn(),
     onOpenPendingFiles: jest.fn(),
     onStartProcessing: jest.fn(),
@@ -86,6 +87,28 @@ describe("SimilarNotesPresentation", () => {
     expect(root.querySelector('[role="alert"]')?.textContent).toContain("Network unavailable");
     (root.querySelector(".ss-embeddings-view__state-actions button") as HTMLButtonElement).click();
     expect(actions.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a not-enough-credits error with a direct credits action", () => {
+    const actions = createActions();
+    const presentation = new SimilarNotesPresentation(root, actions);
+
+    presentation.render({
+      state: "error",
+      code: "payment_required",
+      message: "Managed embedding index request failed.",
+    });
+
+    expect(root.textContent).toContain("Not enough credits");
+    expect(root.textContent).toContain(
+      "Not enough credits are available. Add credits to continue using Similar notes.",
+    );
+    expect(root.textContent).not.toContain("Try again");
+    const action = root.querySelector<HTMLButtonElement>(
+      '[data-testid="embeddings.state.add-credits"]',
+    );
+    action?.click();
+    expect(actions.onOpenCredits).toHaveBeenCalledTimes(1);
   });
 
   it("never renders an empty Similar Notes error", () => {
@@ -290,6 +313,44 @@ describe("SimilarNotesPresentation", () => {
     expect(lifecycle?.hidden).toBe(true);
     expect(lifecycle?.childElementCount).toBe(0);
     expect(lifecycle?.classList.contains("is-processing")).toBe(false);
+  });
+
+  it("routes a payment lifecycle failure to the credits modal", () => {
+    const actions = createActions();
+    const presentation = new SimilarNotesPresentation(root, actions);
+    presentation.setIndexSnapshot(indexSnapshot({
+      phase: "error",
+      failed: 1,
+      lastError: {
+        code: "payment_required",
+        message: "Not enough credits are available.",
+      },
+    }));
+
+    expect(root.textContent).toContain("Indexing paused. Not enough credits.");
+    expect(root.textContent).toContain("Not enough credits are available. Add credits to resume indexing.");
+    root.querySelector<HTMLButtonElement>("[data-index-action='credits']")?.click();
+    expect(actions.onOpenCredits).toHaveBeenCalledTimes(1);
+    expect(actions.onOpenPendingFiles).not.toHaveBeenCalled();
+  });
+
+  it("keeps a payment failure visible while notes remain pending", () => {
+    const actions = createActions();
+    const presentation = new SimilarNotesPresentation(root, actions);
+    presentation.setIndexSnapshot(indexSnapshot({
+      phase: "reconciling",
+      pending: 4,
+      failed: 0,
+      lastError: {
+        code: "payment_required",
+        message: "Not enough credits are available.",
+      },
+    }));
+
+    expect(root.textContent).toContain("Indexing paused. Not enough credits.");
+    expect(root.textContent).not.toContain("4 notes remaining");
+    expect(root.querySelector('[data-testid="embeddings.index.add-credits"]')).not.toBeNull();
+    expect(root.querySelector('[data-testid="embeddings.index.review-pending"]')).toBeNull();
   });
 
   it("routes lifecycle failures to the existing remaining-files workflow", () => {

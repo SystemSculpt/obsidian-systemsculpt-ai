@@ -76,6 +76,11 @@ describe("SystemSculptPlugin.openCreditsBalanceModal", () => {
     };
 
     const onBalanceUpdated = jest.fn().mockResolvedValue(undefined);
+    const resumeProcessing = jest.fn();
+    (plugin as any).embeddingsManager = {
+      isSuspended: jest.fn(() => true),
+      resumeProcessing,
+    };
 
     await plugin.openCreditsBalanceModal({
       initialBalance,
@@ -89,11 +94,49 @@ describe("SystemSculptPlugin.openCreditsBalanceModal", () => {
     const firstLoad = await capturedCreditsModalOptions.loadBalance();
     expect(firstLoad).toEqual(refreshedBalance);
     expect(onBalanceUpdated).toHaveBeenCalledWith(refreshedBalance);
+    expect(resumeProcessing).toHaveBeenCalledTimes(1);
 
     const secondLoad = await capturedCreditsModalOptions.loadBalance();
     expect(secondLoad).toEqual(refreshedBalance);
     expect(onBalanceUpdated).toHaveBeenCalledTimes(1);
     expect(onBalanceUpdated).not.toHaveBeenCalledWith(null);
   });
+  it("resumes payment-suspended embeddings for zero-balance master auth", async () => {
+    const app = new App();
+    const plugin = new SystemSculptPlugin(app, {
+      id: "systemsculpt",
+      version: "1.0.0",
+    } as any);
+    plugin._internal_settings_systemsculpt_plugin = { ...DEFAULT_SETTINGS };
+    const balance = {
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      heldInFlight: 0,
+      availableUnreserved: 0,
+      includedPerMonth: 0,
+      usageClass: "master_auth",
+      cycleEndsAt: "2026-03-01T00:00:00.000Z",
+      cycleStartedAt: "2026-02-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    };
+    (plugin as any)._aiService = {
+      getCreditsBalance: jest.fn(async () => balance),
+      getCreditsUsage: jest.fn(),
+    };
+    const resumeProcessing = jest.fn();
+    (plugin as any).embeddingsManager = {
+      isSuspended: jest.fn(() => true),
+      resumeProcessing,
+    };
+
+    await plugin.openCreditsBalanceModal();
+    await capturedCreditsModalOptions.loadBalance();
+
+    expect(resumeProcessing).toHaveBeenCalledTimes(1);
+  });
+
 });
 

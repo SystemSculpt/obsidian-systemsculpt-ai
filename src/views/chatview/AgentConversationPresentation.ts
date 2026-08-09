@@ -14,7 +14,7 @@ const NOT_STARTED_ERROR =
   /(?:bootstrap|context|admission|license|rate_limit)|\bbootstrap\b/i;
 
 export type PresentedAgentError = Readonly<{
-  heading: "Response interrupted" | "Could not finish";
+  heading: "Response interrupted" | "Could not finish" | "Not enough credits" | "Out of credits";
   message: string;
 }>;
 
@@ -34,6 +34,18 @@ export function presentAgentError(
   error: ManagedAgentError,
   retryable: boolean,
 ): PresentedAgentError {
+  if (error.code === "out_of_credits") {
+    return {
+      heading: "Out of credits",
+      message: "You have no credits left. Add credits to continue using Chat.",
+    };
+  }
+  if (error.code === "insufficient_credits" || error.code === "payment_required") {
+    return {
+      heading: "Not enough credits",
+      message: "Not enough credits are available. Add credits to continue using Chat.",
+    };
+  }
   if (error.code === "content_filter") {
     return {
       heading: "Could not finish",

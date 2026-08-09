@@ -49,6 +49,10 @@ const createPluginStub = () => {
     getSettingsManager: jest.fn(() => settingsManager),
     getLicenseManager: jest.fn(() => licenseManager),
     openCreditsBalanceModal: jest.fn().mockResolvedValue(undefined),
+    embeddingsManager: {
+      isSuspended: jest.fn(() => false),
+      resumeProcessing: jest.fn(),
+    },
     modelService: {
       refreshModels: jest.fn().mockResolvedValue(undefined),
     },
@@ -132,6 +136,50 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.openCreditsBalanceModal).toHaveBeenCalledTimes(1);
   });
 
+  it("resumes payment-suspended embeddings when account refresh confirms credits", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-test";
+    plugin.embeddingsManager.isSuspended.mockReturnValue(true);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await flushSetupSectionRender();
+
+    expect(plugin.embeddingsManager.resumeProcessing).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels spendable, held, and gross credit balances separately", async () => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: 6030,
+      heldInFlight: 5349,
+      availableUnreserved: 681,
+      includedRemaining: 6030,
+      includedPerMonth: 10000,
+      addOnRemaining: 0,
+      usageClass: "customer",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "monthly",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-held";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    displaySetupTabContent(container, tab, true);
+    await flushSetupSectionRender();
+
+    expect(container.textContent).toContain("Available: 681 credits");
+    expect(container.textContent).toContain("Held in current requests: 5,349 credits");
+    expect(container.textContent).toContain("Total balance: 6,030 credits");
+    expect(container.textContent).not.toContain("Remaining: 6,030 credits");
+  });
+
   it("presents master auth as Internal QA without customer billing actions", async () => {
     getCreditsBalanceMock.mockResolvedValueOnce({
       totalRemaining: 0,
@@ -148,6 +196,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const plugin = createPluginStub();
     plugin.settings.licenseValid = true;
     plugin.settings.licenseKey = "skss-master-auth";
+    plugin.embeddingsManager.isSuspended.mockReturnValue(true);
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
@@ -158,6 +207,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(container.textContent).toContain("Internal testing");
     expect(container.textContent).toContain("Provider usage is tracked internally");
     expect(container.textContent).not.toContain("Remaining: 0 credits");
+    expect(plugin.embeddingsManager.resumeProcessing).toHaveBeenCalledTimes(1);
     const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Buy credits",
     ) as HTMLButtonElement | undefined;

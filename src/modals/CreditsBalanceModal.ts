@@ -214,9 +214,15 @@ export class CreditsBalanceModal extends StandardModal {
 
     const metrics = this.calculateCreditsMetrics(this.balance);
     const lowCreditsThreshold = 1000;
-    const isLowBalance = metrics.conservativeTotalRemaining <= lowCreditsThreshold;
+    const heldInFlight = this.balance.heldInFlight ?? 0;
+    const availableUnreserved = this.balance.availableUnreserved
+      ?? metrics.conservativeTotalRemaining;
+    const isOutOfCredits = metrics.conservativeTotalRemaining <= 0;
+    const isUnavailable = !isOutOfCredits && availableUnreserved <= 0;
+    const isLowBalance = availableUnreserved <= lowCreditsThreshold;
     const hero = this.summaryEl.createDiv({ cls: "ss-credits-balance__hero" });
     hero.classList.toggle("is-low", isLowBalance);
+    hero.classList.toggle("is-empty", isOutOfCredits);
 
     const heroIcon = hero.createDiv({ cls: "ss-credits-balance__hero-icon" });
     setIcon(heroIcon, isLowBalance ? "alert-triangle" : "coins");
@@ -224,11 +230,15 @@ export class CreditsBalanceModal extends StandardModal {
     const heroContent = hero.createDiv({ cls: "ss-credits-balance__hero-content" });
     heroContent.createDiv({
       cls: "ss-credits-balance__hero-label",
-      text: "Total remaining",
+      text: isOutOfCredits
+        ? "Out of credits"
+        : isUnavailable
+          ? "No credits available"
+          : "Available to spend",
     });
     heroContent.createDiv({
       cls: "ss-credits-balance__hero-value",
-      text: `${this.formatCredits(metrics.conservativeTotalRemaining)} credits`,
+      text: `${this.formatCredits(availableUnreserved)} credits`,
     });
 
     const includedMeter = this.summaryEl.createDiv({ cls: "ss-credits-balance__meter" });
@@ -248,6 +258,18 @@ export class CreditsBalanceModal extends StandardModal {
       text: "Included credits reset each month. Purchased add-on credits never reset or expire.",
     });
 
+    this.createStatCard(
+      "Total balance",
+      `${this.formatCredits(metrics.conservativeTotalRemaining)} credits`
+    );
+    this.createStatCard(
+      "Held in flight",
+      `${this.formatCredits(heldInFlight)} credits`
+    );
+    this.createStatCard(
+      "Available now",
+      `${this.formatCredits(availableUnreserved)} credits`
+    );
     this.createStatCard(
       "Included left",
       `${this.formatCredits(this.balance.includedRemaining)} credits`
@@ -275,6 +297,14 @@ export class CreditsBalanceModal extends StandardModal {
     if (metrics.totalsMismatch) {
       this.hintEl.setText(
         `Balance sources disagree (reported ${this.formatCredits(metrics.reportedTotalRemaining)} vs breakdown ${this.formatCredits(metrics.derivedTotalRemaining)}). Showing the conservative total to avoid overestimating available credits.`
+      );
+      this.hintEl.addClass("is-warning");
+    } else if (isOutOfCredits) {
+      this.hintEl.setText("You have no credits left. Buy credits to continue using chat and similar notes.");
+      this.hintEl.addClass("is-warning");
+    } else if (isUnavailable) {
+      this.hintEl.setText(
+        `${this.formatCredits(heldInFlight)} credits are held for in-flight work. Add credits or wait for that work to settle.`,
       );
       this.hintEl.addClass("is-warning");
     } else if (isLowBalance) {

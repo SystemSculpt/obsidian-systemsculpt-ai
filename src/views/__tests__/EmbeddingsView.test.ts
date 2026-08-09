@@ -49,6 +49,7 @@ const createMockPlugin = (manager = createMockManager()) => ({
     embeddingsExclusions: {},
   },
   getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
+  openCreditsBalanceModal: jest.fn().mockResolvedValue(undefined),
   openSettingsTab: jest.fn(),
   app: {
     workspace: {
@@ -116,6 +117,40 @@ describe("EmbeddingsView", () => {
 
     it("returns correct display text", () => {
       expect(view.getDisplayText()).toBe("Similar notes");
+    });
+
+    it("routes the credits action through the shared purchase entry point", async () => {
+      await (view as any).openCredits();
+
+      expect(mockPlugin.openCreditsBalanceModal).toHaveBeenCalledWith();
+    });
+
+    it("keeps a payment failure ahead of pending-index progress", () => {
+      const showError = jest.spyOn(view as any, "showError").mockImplementation(() => undefined);
+      const showProcessingStatus = jest.spyOn(view as any, "showProcessingStatus")
+        .mockImplementation(() => undefined);
+
+      (view as any).showUnavailableIndex({
+        phase: "reconciling",
+        ready: false,
+        generation: null,
+        total: 5,
+        completed: 1,
+        pending: 4,
+        failed: 0,
+        currentPath: null,
+        lastError: {
+          code: "payment_required",
+          message: "Not enough credits are available.",
+        },
+        updatedAt: 1,
+      });
+
+      expect(showError).toHaveBeenCalledWith(
+        "Not enough credits are available.",
+        "payment_required",
+      );
+      expect(showProcessingStatus).not.toHaveBeenCalled();
     });
 
     it("returns correct icon", () => {

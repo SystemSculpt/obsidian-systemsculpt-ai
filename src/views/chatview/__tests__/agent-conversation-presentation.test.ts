@@ -99,6 +99,24 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it.each([
+    {
+      code: "insufficient_credits",
+      heading: "Not enough credits",
+      message: "Not enough credits are available. Add credits to continue using Chat.",
+    },
+    {
+      code: "out_of_credits",
+      heading: "Out of credits",
+      message: "You have no credits left. Add credits to continue using Chat.",
+    },
+  ])("shows actionable first-party billing copy for $code", ({ code, heading, message }) => {
+    expect(presentAgentError({
+      code,
+      message: "Unsafe remote billing detail.",
+    }, false)).toEqual({ heading, message });
+  });
+
   it("uses the same final copy filter for global banners and tool failures", () => {
     expect(presentAgentErrorMessage(
       "Agent connection closed: WebSocket closed with code 4001",

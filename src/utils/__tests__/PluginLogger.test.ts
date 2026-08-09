@@ -173,6 +173,7 @@ describe("PluginLogger", () => {
         toolName: "read",
         toolCallId: "call-safe",
         incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        failureCode: "response_capacity_unavailable",
         prompt: "private prompt",
         content: "private content",
         path: "Private.md",
@@ -206,6 +207,7 @@ describe("PluginLogger", () => {
               toolName: "read",
               toolCallId: "call-safe",
               incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              failureCode: "response_capacity_unavailable",
             },
           },
         }),
@@ -361,6 +363,7 @@ describe("PluginLogger", () => {
         serverRunId: "run_0123456789abcdef0123456789abcdef",
         toolName: "read",
         toolCallId: "call-safe",
+        failureCode: "response_capacity_unavailable",
         prompt: hostileCanaries[0],
         path: hostileCanaries[1],
         canary: hostileCanaries[2],
@@ -397,6 +400,7 @@ describe("PluginLogger", () => {
           server_run_id: "run_0123456789abcdef0123456789abcdef",
           tool_name: "read",
           tool_call_id: "call-safe",
+          failure_code: "response_capacity_unavailable",
         },
         {
           timestamp: expect.any(String),
@@ -415,6 +419,20 @@ describe("PluginLogger", () => {
       expect(copied).not.toMatch(
         /\b(?:model|provider|harness|transport|protocol|Cloudflare|Think|Pi|OpenRouter|WebSocket)\b|agent connection|connection ticket|AI SDK/iu,
       );
+    });
+
+    it("drops an invalid lifecycle failure classifier", () => {
+      logger.lifecycle({
+        code: "response_result_received_failed",
+        phase: "response",
+        failureCode: "Provider Failure: private detail",
+      });
+
+      expect(logger.getRecentEntries()[0].context?.metadata).toEqual({
+        code: "response_result_received_failed",
+        phase: "response",
+      });
+      expect(logger.getSupportDiagnostics()[0]).not.toHaveProperty("failure_code");
     });
 
     it("bounds results and rejects poisoned buffered metadata", () => {

@@ -422,7 +422,7 @@ describe("AgentChatView historical Retry integration", () => {
       expect(agent.getSnapshot()).toMatchObject({
         status: "failed",
         turnId: ORIGINAL_USER_ID,
-        terminalError: { code: "agent_turn_failed" },
+        terminalError: { code: "response_capacity_unavailable" },
       });
       expect(JSON.stringify(projectedSnapshot)).toContain(SOURCE_RUN_ID);
       expect(durableMessages).toEqual([

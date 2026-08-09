@@ -135,6 +135,27 @@ function cancelledTerminal(requestId: string, rootMessageId: string) {
   });
 }
 
+function failedTerminal(
+  requestId: string,
+  rootMessageId: string,
+  code: string,
+  retryable: boolean,
+) {
+  return event("terminal", {
+    request_id: requestId,
+    terminal: {
+      version: 1,
+      run_id: RUN_ID,
+      root_message_id: rootMessageId,
+      outcome: "failed",
+      code,
+      message: "SystemSculpt is temporarily busy.",
+      incident_id: `incident_${"f".repeat(32)}`,
+      retryable,
+    },
+  });
+}
+
 function clientToolRequest(
   callId: string,
   name: string,
@@ -289,7 +310,13 @@ class FakeAgentServer {
     // finished, so starting a turn closes the one before it.
     this.endTurn();
     if (this.turnStatus !== 200) {
-      return new Response("{}", { status: this.turnStatus });
+      return new Response(JSON.stringify({
+        error: { code: "insufficient_credits" },
+        incident_id: `incident_${"e".repeat(32)}`,
+      }), {
+        status: this.turnStatus,
+        headers: { "content-type": "application/json" },
+      });
     }
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -385,6 +412,7 @@ function createHarness(input: Readonly<{
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
   conversationId?: string;
+  refreshCredits?: () => Promise<void>;
 }> = {}) {
   const conversationId = input.conversationId ?? CONVERSATION_ID;
   const identitySuffix = conversationId.slice("conversation_".length);
@@ -405,6 +433,7 @@ function createHarness(input: Readonly<{
   const reconcileHistory = jest.fn(async () => undefined);
   const reportError = jest.fn();
   const onLifecycle = jest.fn();
+  const refreshCredits = jest.fn(input.refreshCredits ?? (async () => undefined));
   const agent = new AgentChatSession({
     baseUrl: "https://systemsculpt.test",
     pluginVersion: "6.2.7",
@@ -416,6 +445,7 @@ function createHarness(input: Readonly<{
     reconcileHistory,
     reportError,
     onLifecycle,
+    refreshCredits,
     requestClient: { request },
     ...(input.runStallGraceMs
       ? { runStallGraceMs: input.runStallGraceMs }
@@ -433,6 +463,7 @@ function createHarness(input: Readonly<{
     reconcileHistory,
     reportError,
     onLifecycle,
+    refreshCredits,
     mutationAdapter: mutation.adapter,
     async open(messages: readonly WireMessage[] = []): Promise<FakeAgentServer> {
       // Hydration is a request now, so the snapshot is what the server answers
@@ -587,6 +618,184 @@ describe("AgentChatSession", () => {
     );
     expect(JSON.stringify(first.agent.getSnapshot()))
       .not.toContain("Second answer");
+  });
+
+  it("preserves the server failure classifier for safe support diagnostics", async () => {
+    const harness = createHarness();
+    const server = await harness.open();
+    const turnId = "user_classified_failure";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Classify this failure"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(failedTerminal(
+      turnId,
+      turnId,
+      "response_capacity_unavailable",
+      true,
+    ));
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        code: "response_capacity_unavailable",
+        requestId: `incident_${"f".repeat(32)}`,
+        retryable: true,
+      },
+    });
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "response_result_received_failed",
+      failureCode: "response_capacity_unavailable",
+      incidentId: `incident_${"f".repeat(32)}`,
+    }));
+  });
+
+  it("waits for the successful-run balance refresh before admitting follow-up work", async () => {
+    const refreshStarted = deferred<void>();
+    const releaseRefresh = deferred<void>();
+    const harness = createHarness({
+      refreshCredits: async () => {
+        refreshStarted.resolve();
+        await releaseRefresh.promise;
+      },
+    });
+    const server = await harness.open();
+    const turnId = "user_refresh_before_follow_up";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Settle my held credits first"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_refresh_before_follow_up", "Credits settled"),
+    ));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+
+    await refreshStarted.promise;
+    let runSettled = false;
+    void run.finally(() => { runSettled = true; });
+    await tick();
+    expect(runSettled).toBe(false);
+
+    releaseRefresh.resolve();
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes credits after an authoritative billing failure", async () => {
+    const refreshFailure = new Error("balance refresh failed");
+    const harness = createHarness({
+      refreshCredits: async () => { throw refreshFailure; },
+    });
+    const server = await harness.open();
+    const turnId = "user_billing_terminal";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Use the remaining credits"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(failedTerminal(turnId, turnId, "insufficient_credits", false));
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "insufficient_credits" },
+    });
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    await tick();
+    expect(harness.reportError).toHaveBeenCalledWith(refreshFailure);
+  });
+
+  it("settles a queued command billing failure and refreshes credits", async () => {
+    const harness = createHarness();
+    const server = await harness.open();
+    const turnId = "user_billing_queued_command";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Start after reconnecting"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+
+    (harness.agent as any).handleCommandDeliveryError(Object.assign(
+      new Error("Not enough credits are available."),
+      {
+        code: "insufficient_credits",
+        status: 402,
+        retryable: false,
+        serverAdmissionPossible: false,
+      },
+    ), (harness.agent as any).generation);
+    server.endTurn();
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "insufficient_credits", status: 402, retryable: false },
+    });
+    expect(server.turnRequests).toBe(1);
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a 402 submit as definite non-admission without replay", async () => {
+    const harness = createHarness();
+    const server = await harness.open();
+    server.turnStatus = 402;
+    const turnId = "user_billing_submit";
+
+    await expect(harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Start a billed response"),
+    })).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        code: "insufficient_credits",
+        requestId: `incident_${"e".repeat(32)}`,
+        status: 402,
+        retryable: false,
+      },
+    });
+
+    await tick();
+    await tick();
+    expect(server.turnRequests).toBe(1);
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a 402 regeneration as definite non-admission without replay", async () => {
+    const harness = createHarness();
+    const rootMessageId = "user_billing_regeneration_root";
+    const server = await harness.open([
+      wireUser(rootMessageId, "Retry this response"),
+      wireAssistant("assistant_billing_regeneration_old", "Old answer"),
+    ]);
+    server.turnStatus = 402;
+
+    await expect(harness.agent.regenerate({
+      conversationId: CONVERSATION_ID,
+      requestId: "request_billing_regeneration",
+      rootMessageId,
+    })).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        code: "insufficient_credits",
+        requestId: `incident_${"e".repeat(32)}`,
+        status: 402,
+        retryable: false,
+      },
+    });
+
+    await tick();
+    await tick();
+    expect(server.turnRequests).toBe(1);
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
   });
 
   it("does not confirm detach while terminal persistence can still call the outgoing view", async () => {
@@ -2414,7 +2623,7 @@ describe("AgentChatSession", () => {
 
     expect(harness.agent.getSnapshot()).toMatchObject({
       status: "failed",
-      terminalError: { code: "agent_turn_failed", retryable: false },
+      terminalError: { code: "approval_identity_mismatch", retryable: false },
     });
     expect(harness.reportError).toHaveBeenCalledWith(expect.objectContaining({
       code: "approval_identity_mismatch",
