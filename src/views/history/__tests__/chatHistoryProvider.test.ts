@@ -1,16 +1,9 @@
 import { createChatHistoryProvider } from "../chatHistoryProvider";
 import { ChatStorageService } from "../../chatview/ChatStorageService";
-import { ChatFavoritesService } from "../../chatview/ChatFavoritesService";
 import * as ChatResumeUtils from "../../chatview/ChatResumeUtils";
 
 jest.mock("../../chatview/ChatStorageService", () => ({
   ChatStorageService: jest.fn(),
-}));
-
-jest.mock("../../chatview/ChatFavoritesService", () => ({
-  ChatFavoritesService: {
-    getInstance: jest.fn(),
-  },
 }));
 
 jest.mock("../../chatview/ChatResumeUtils", () => ({
@@ -33,15 +26,12 @@ describe("chatHistoryProvider", () => {
       },
     ]);
     (ChatStorageService as jest.Mock).mockImplementation(() => ({ loadChats }));
-    (ChatFavoritesService.getInstance as jest.Mock).mockReturnValue({
-      isFavorite: jest.fn(() => false),
-      toggleFavorite: jest.fn(async () => false),
-    });
 
     const plugin = {
       app: {},
       settings: {
         chatsDirectory: "SystemSculpt/Chats",
+        favoriteChats: [],
       },
     } as any;
 
@@ -59,7 +49,18 @@ describe("chatHistoryProvider", () => {
       chatPath: "SystemSculpt/Chats/chat-1.md",
       lastModified: Date.parse("2026-03-10T10:00:00.000Z"),
       messageCount: 2,
-    });
+    }, undefined);
+
+    const originLeaf = { id: "origin-chat-leaf" } as any;
+    await entry.openPrimary(originLeaf);
+
+    expect(ChatResumeUtils.openChatResumeDescriptor).toHaveBeenLastCalledWith(plugin, {
+      chatId: "chat-1",
+      title: "Chat 1",
+      chatPath: "SystemSculpt/Chats/chat-1.md",
+      lastModified: Date.parse("2026-03-10T10:00:00.000Z"),
+      messageCount: 2,
+    }, originLeaf);
   });
 
 });

@@ -46,7 +46,6 @@ import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
 import { hasHostCapability, openLocalFolder } from "./platform/hostCapabilities";
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
-import { PlatformContext } from "./services/PlatformContext";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
@@ -58,11 +57,17 @@ import type { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
-import { ManagedCapabilityClientFactory, type ManagedCapabilityClientGraph } from "./services/managed/ManagedCapabilityClientFactory";
-import { PluginUpdateService } from "./services/PluginUpdateService";
+import { ManagedAdmission } from "./services/managed/ManagedAdmission";
+import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
+
+export type ManagedCapabilityClientGraph = Readonly<{
+  transport: HostedTransportAdapter;
+  admission: ManagedAdmission;
+  client: ManagedCapabilityClient;
+}>;
 
 type ViewManagerModule = typeof import("./core/plugin/views");
 type CommandManagerModule = typeof import("./core/plugin/commands");
@@ -195,7 +200,6 @@ export default class SystemSculptPlugin extends Plugin {
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
-  private pluginUpdateService: PluginUpdateService | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
@@ -224,10 +228,15 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   public getManagedCapabilityGraph(): ManagedCapabilityClientGraph {
-    if (!this.managedCapabilityGraph) this.managedCapabilityGraph = ManagedCapabilityClientFactory.createGraph({
-      baseUrl: new URL(API_BASE_URL).origin, pluginVersion: this.manifest.version,
-      licenseKey: () => this.settings.licenseKey,
-    });
+    if (!this.managedCapabilityGraph) {
+      const licenseKey = () => this.settings.licenseKey;
+      const transport = new HostedTransportAdapter({
+        baseUrl: new URL(API_BASE_URL).origin, pluginVersion: this.manifest.version, licenseKey,
+      });
+      const admission = new ManagedAdmission({ transport, licenseKey });
+      const client = new ManagedCapabilityClient({ admission, transport });
+      this.managedCapabilityGraph = Object.freeze({ transport, admission, client });
+    }
     return this.managedCapabilityGraph;
   }
 
@@ -478,7 +487,9 @@ export default class SystemSculptPlugin extends Plugin {
           this.app,
           this.manifest,
           buildStamp,
+          API_BASE_URL,
           () => this.settingsTab?.containerEl ?? null,
+          () => this.getLogger().getSupportDiagnostics(500),
         );
         driver.start();
         this.register(() => driver.stop());
@@ -597,7 +608,6 @@ export default class SystemSculptPlugin extends Plugin {
           settingsKeys: Object.keys(DEFAULT_SETTINGS).length,
         });
 
-        PlatformContext.initialize();
         // Registered empty; filled in / cleared by syncRelativeLineNumbersExtension()
         // once settings load and whenever the toggle changes.
         this.registerEditorExtension(this.relativeLineNumberExtensions);
@@ -665,15 +675,6 @@ export default class SystemSculptPlugin extends Plugin {
       run: () => {
         this.errorCollectorService = new ErrorCollectorService(500);
         this.errorCollectorService.enableCaptureAllLogs();
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
-      id: "services.pluginUpdates",
-      label: "plugin updates",
-      optional: true,
-      run: () => {
-        this.pluginUpdateService = new PluginUpdateService(this);
       },
     });
 
@@ -756,15 +757,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
-    coordinator.registerTask("layout", {
-      id: "updates.start",
-      label: "update notifications",
-      optional: true,
-      run: () => {
-        if (this.pluginUpdateService) void this.pluginUpdateService.start();
-      },
-    });
-
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
@@ -1003,12 +995,29 @@ export default class SystemSculptPlugin extends Plugin {
     if (!this.storage) {
       return { text: snapshot };
     }
-    const fileName = `diagnostics-${this.formatDiagnosticsFileTimestamp(new Date())}.txt`;
+    const nonce = this.createDiagnosticsFileNonce();
+    if (!/^[0-9a-f]{32}$/u.test(nonce)) {
+      throw new Error("Secure diagnostics export identifier is invalid.");
+    }
+    const fileName =
+      `diagnostics-${this.formatDiagnosticsFileTimestamp(new Date())}-${nonce}.txt`;
     const result = await this.storage.writeFile("diagnostics", fileName, snapshot);
     return {
       text: snapshot,
       path: result.success ? result.path : undefined,
     };
+  }
+
+  private createDiagnosticsFileNonce(): string {
+    // Filename nonces are host-level work, not UI bound to a popout window.
+    // eslint-disable-next-line obsidianmd/no-global-this
+    const runtimeCrypto = globalThis.crypto;
+    if (typeof runtimeCrypto?.getRandomValues !== "function") {
+      throw new Error("Secure diagnostics export identifiers are unavailable.");
+    }
+    const bytes = new Uint8Array(16);
+    runtimeCrypto.getRandomValues(bytes);
+    return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   private formatDiagnosticsFileTimestamp(date: Date): string {
@@ -1741,11 +1750,6 @@ export default class SystemSculptPlugin extends Plugin {
       if (this.resourceMonitor) {
         this.resourceMonitor.stop();
         this.resourceMonitor = null;
-      }
-
-      if (this.pluginUpdateService) {
-        this.pluginUpdateService.stop();
-        this.pluginUpdateService = null;
       }
 
       // Clean up settings manager (stop automatic backups)

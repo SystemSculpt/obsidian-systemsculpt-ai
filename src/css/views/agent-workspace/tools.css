@@ -129,6 +129,11 @@
   color: var(--ss-success);
 }
 
+.systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-error {
+  color: var(--ss-warning);
+}
+
 .systemsculpt-agent-part.is-tool.is-failed,
 .systemsculpt-agent-part.is-tool.is-cancelled,
 .systemsculpt-agent-part.is-tool.is-outcome-unknown,

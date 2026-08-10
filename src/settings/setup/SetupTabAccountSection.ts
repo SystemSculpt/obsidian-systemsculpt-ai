@@ -23,7 +23,7 @@ export function renderAccountSection(
   validateCurrentLicense = async (): Promise<LicenseValidationResult> => {
     const validatingNotice = new Notice("Validating license key...", 0);
     try {
-      const result = await plugin.getLicenseManager().validateLicenseKeyDetailed(true, false);
+      const result = await plugin.getLicenseManager().validateLicenseKeyDetailed();
       validatingNotice.hide?.();
       if (result.outcome === "rejected") {
         new Notice("Invalid license key. Please check and try again.");

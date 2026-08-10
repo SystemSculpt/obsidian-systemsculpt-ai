@@ -1,6 +1,17 @@
+import { requestUrl } from "obsidian";
 import {
   AgentStreamingTransport,
+  type AgentTransportTimingEvent,
 } from "../StreamingTransport";
+import {
+  PlatformRequestClient,
+  type PlatformResponseDeliveryMode,
+} from "../../../../services/PlatformRequestClient";
+
+jest.mock("obsidian", () => ({
+  ...jest.requireActual("obsidian"),
+  requestUrl: jest.fn(),
+}));
 
 const CONVERSATION_ID = `conversation_${"a".repeat(32)}`;
 const CLIENT_ID = `client_${"b".repeat(32)}`;
@@ -86,6 +97,13 @@ function harness(
   frames: readonly unknown[],
   initialSnapshot?: unknown,
   isAuthoritativeFrame?: (value: unknown) => boolean,
+  timing?: Readonly<{
+    monotonicNow: () => number;
+    onTiming: (event: AgentTransportTimingEvent) => void;
+    classifyResponseDelivery?: (
+      response: Response,
+    ) => PlatformResponseDeliveryMode | undefined;
+  }>,
 ) {
   const calls: Array<Record<string, unknown>> = [];
   const request = jest.fn(async (input: Record<string, unknown>) => {
@@ -106,6 +124,7 @@ function harness(
     bootstrapRequest,
     requestClient: { request } as never,
     ...(isAuthoritativeFrame ? { isAuthoritativeFrame } : {}),
+    ...timing,
   });
   return { transport, calls, request };
 }
@@ -120,6 +139,19 @@ function submit(id: string) {
   } as never;
 }
 
+function toolResult(requestId: string, toolCallId: string) {
+  return {
+    type: "systemsculpt.agent.command.v1",
+    version: 1,
+    kind: "client_tool_result",
+    request_id: requestId,
+    tool_call_id: toolCallId,
+    tool_name: "read",
+    state: "output-available",
+    output: { success: true },
+  } as never;
+}
+
 function regenerate(id: string) {
   return {
     type: "systemsculpt.agent.command.v1",
@@ -131,6 +163,33 @@ function regenerate(id: string) {
 }
 
 describe("AgentStreamingTransport", () => {
+  it("opens after authoritative synchronization without awaiting observational prewarm", async () => {
+    let releasePrewarm!: () => void;
+    const prewarm = new Promise<boolean>((resolve) => {
+      releasePrewarm = () => resolve(true);
+    });
+    const request = jest.fn(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/agent/bootstrap")) return bootstrapResponse();
+      if (url.includes("/get-messages")) return snapshotResponse();
+      return sseResponse([]);
+    });
+    const prewarmStreamingFetch = jest.fn(() => prewarm);
+    const transport = new AgentStreamingTransport({
+      baseUrl: "https://systemsculpt.test",
+      licenseKey: () => "license_test",
+      pluginVersion: "6.3.1",
+      bootstrapRequest,
+      requestClient: { request, prewarmStreamingFetch } as never,
+    });
+
+    await transport.connect();
+    expect(transport.state).toBe("open");
+    expect(prewarmStreamingFetch).toHaveBeenCalledTimes(1);
+    releasePrewarm();
+    await prewarm;
+  });
+
   it("streams a turn's authoritative frames and settles when the stream ends", async () => {
     const turnId = "user_stream_ok";
     const { transport, calls } = harness([
@@ -155,7 +214,483 @@ describe("AgentStreamingTransport", () => {
       method: "POST",
       url: "https://systemsculpt.test/api/plugin/agent/turn",
       headers: { Authorization: "Bearer access_token_streaming_transport" },
+      preserveResponseHeaders: true,
+      streamingProbeUrl: "https://systemsculpt.test/api/plugin/connectivity",
+      allowTransportFallback: false,
     });
+  });
+
+  it("selects requestUrl once before a supported-host turn when the CORS probe fails", async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn().mockRejectedValue(
+      new TypeError("Direct CORS fetch is unavailable on this host."),
+    );
+    global.fetch = fetchMock as typeof fetch;
+    const nativeRequest = requestUrl as jest.Mock;
+    nativeRequest.mockImplementation(async (input: { url: string }) => {
+      if (input.url.endsWith("/agent/bootstrap")) {
+        const encoded = new TextEncoder().encode(await bootstrapResponse().text());
+        return {
+          status: 200,
+          arrayBuffer: encoded.buffer,
+          text: "",
+          json: null,
+          headers: { "content-type": "application/json" },
+        };
+      }
+      if (input.url.endsWith("/get-messages")) {
+        const text = await snapshotResponse().text();
+        return {
+          status: 200,
+          arrayBuffer: new ArrayBuffer(0),
+          text,
+          json: JSON.parse(text),
+          headers: { "content-type": "application/json" },
+        };
+      }
+      return {
+        status: 200,
+        arrayBuffer: new ArrayBuffer(0),
+        text: `data: ${JSON.stringify({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "run_state",
+        })}\n\ndata: ${JSON.stringify({
+          type: "systemsculpt.agent.event.v1",
+          version: 1,
+          kind: "terminal",
+        })}\n\n`,
+        json: null,
+        headers: { "content-type": "text/event-stream" },
+      };
+    });
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const transport = new AgentStreamingTransport({
+      baseUrl: "https://systemsculpt.test",
+      licenseKey: () => "license_test",
+      pluginVersion: "6.2.7",
+      bootstrapRequest,
+      requestClient: new PlatformRequestClient(),
+      monotonicNow: () => 50,
+      onTiming: (event) => timingEvents.push(event),
+    });
+    const seen: string[] = [];
+    transport.addAuthoritativeFrameListener((frame) => {
+      seen.push(frame.kind);
+    });
+
+    try {
+      await transport.connect();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://systemsculpt.test/api/plugin/connectivity",
+        expect.objectContaining({ method: "GET" }),
+      );
+      await transport.sendSubmit(submit("user_native_buffered"));
+
+      // The submit consumes the prewarmed failure decision; it does not put a
+      // new connectivity round trip on the state-changing command's TTFT.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const stateChangingRequests = nativeRequest.mock.calls.filter(
+        ([input]) => input.url.endsWith("/agent/turn"),
+      );
+      expect(stateChangingRequests).toHaveLength(1);
+      expect(stateChangingRequests[0]?.[0]).toMatchObject({
+        method: "POST",
+        body: JSON.stringify(submit("user_native_buffered")),
+      });
+      expect(seen).toEqual(["session_snapshot", "run_state", "terminal"]);
+      expect(timingEvents).toEqual([
+        expect.objectContaining({
+          milestone: "command_dispatch_started",
+          observedAtMonotonicMs: 50,
+        }),
+        expect.objectContaining({
+          milestone: "response_available",
+          observedAtMonotonicMs: 50,
+          responseDeliveryMode: "request_url_buffered",
+        }),
+        expect.objectContaining({
+          milestone: "first_body_chunk",
+          observedAtMonotonicMs: 50,
+          responseDeliveryMode: "request_url_buffered",
+        }),
+        expect.objectContaining({
+          milestone: "first_sse_frame",
+          observedAtMonotonicMs: 50,
+          responseDeliveryMode: "request_url_buffered",
+        }),
+      ]);
+      expect(timingEvents.every((event) =>
+        event.requestId === "user_native_buffered"
+        && event.commandKind === "submit"
+        && event.commandSegmentOrdinal === 1)).toBe(true);
+      expect(transport.state).toBe("open");
+    } finally {
+      transport.close();
+      nativeRequest.mockReset();
+      global.fetch = originalFetch;
+    }
+  });
+
+  it("reports response availability, body observation, and parsed frame once for fetch_stream", async () => {
+    const responseDeliveryMode = "fetch_stream" as const;
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    let now = 10;
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => now,
+      onTiming: (event) => timingEvents.push(event),
+      classifyResponseDelivery: () => responseDeliveryMode,
+    });
+    await transport.connect();
+
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(value) { controller = value; },
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "x-systemsculpt-agent-latency-trace": "f".repeat(32),
+        "server-timing": "app;dur=12.3456, auth;dur=2.5, private;desc=ignored",
+      },
+    }));
+
+    const pending = transport.sendSubmit(submit("user_timing"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(timingEvents).toEqual([
+      expect.objectContaining({
+        milestone: "command_dispatch_started",
+        requestId: "user_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 10,
+      }),
+      expect.objectContaining({
+        milestone: "response_available",
+        requestId: "user_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 10,
+        status: 200,
+        responseDeliveryMode,
+        latencyTraceId: "f".repeat(32),
+        serverTimingAppMs: 12.346,
+        serverTimingAuthMs: 2.5,
+      }),
+    ]);
+
+    now = 20;
+    controller.enqueue(new TextEncoder().encode(
+      'data: {"type":"systemsculpt.agent.event.v1","version":1,"kind":"run_state"}',
+    ));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(timingEvents.map((event) => event.milestone)).toEqual([
+      "command_dispatch_started",
+      "response_available",
+      "first_body_chunk",
+    ]);
+
+    now = 30;
+    controller.enqueue(new TextEncoder().encode("\n\n"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(timingEvents.map((event) => event.milestone)).toEqual([
+      "command_dispatch_started",
+      "response_available",
+      "first_body_chunk",
+      "first_sse_frame",
+    ]);
+    controller.enqueue(new TextEncoder().encode(
+      'data: {"type":"systemsculpt.agent.event.v1","version":1,"kind":"terminal"}\n\n',
+    ));
+    controller.close();
+    await pending;
+
+    expect(timingEvents.map((event) => event.milestone)).toEqual([
+      "command_dispatch_started",
+      "response_available",
+      "first_body_chunk",
+      "first_sse_frame",
+    ]);
+    expect(timingEvents.filter((event) => event.milestone !== "command_dispatch_started")
+      .every((event) => event.responseDeliveryMode === responseDeliveryMode)).toBe(true);
+    expect(timingEvents.every((event) =>
+      event.commandKind === "submit"
+      && event.commandSegmentOrdinal === 1)).toBe(true);
+    expect(timingEvents.filter((event) => event.milestone !== "command_dispatch_started")
+      .every((event) => event.latencyTraceId === "f".repeat(32))).toBe(true);
+  });
+
+  it("assigns distinct joinable ordinals to every command segment in one run", async () => {
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const { transport } = harness([
+      { type: "systemsculpt.agent.event.v1", version: 1, kind: "terminal" },
+    ], undefined, undefined, {
+      monotonicNow: () => 17,
+      onTiming: (event) => timingEvents.push(event),
+    });
+    await transport.connect();
+
+    await transport.sendSubmit(submit("user_segment_join"));
+    await transport.sendToolResult(toolResult("user_segment_join", "call_segment_join"));
+
+    const dispatches = timingEvents.filter((event) =>
+      event.milestone === "command_dispatch_started");
+    expect(dispatches).toEqual([
+      expect.objectContaining({
+        requestId: "user_segment_join",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+      }),
+      expect.objectContaining({
+        requestId: "user_segment_join",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 2,
+        toolCallId: "call_segment_join",
+      }),
+    ]);
+    expect(timingEvents.filter((event) => event.commandSegmentOrdinal === 1)
+      .every((event) => event.commandKind === "submit")).toBe(true);
+    expect(timingEvents.filter((event) => event.commandSegmentOrdinal === 2)
+      .every((event) => event.commandKind === "client_tool_result"
+        && event.toolCallId === "call_segment_join")).toBe(true);
+  });
+
+  it("orders exact ACK, assistant, and terminal segment timing around delivery", async () => {
+    const requestId = "user_exact_segment_frames";
+    const toolCallId = "call_exact_segment_frames";
+    const responseDeliveryMode = "fetch_stream" as const;
+    const chronology: string[] = [];
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const frames = [
+      {
+        type: "systemsculpt.agent.event.v1",
+        version: 1,
+        kind: "command_ack",
+        conversation_id: CONVERSATION_ID,
+        request_id: requestId,
+        command_kind: "client_tool_result",
+        tool_call_id: toolCallId,
+        status: "accepted",
+      },
+      {
+        type: "systemsculpt.agent.event.v1",
+        version: 1,
+        kind: "assistant_snapshot",
+        conversation_id: CONVERSATION_ID,
+        request_id: requestId,
+        message: {
+          id: "assistant_exact_segment_frames",
+          role: "assistant",
+          parts: [{ type: "text", text: "Continued", state: "streaming" }],
+        },
+      },
+      {
+        type: "systemsculpt.agent.event.v1",
+        version: 1,
+        kind: "terminal",
+        conversation_id: CONVERSATION_ID,
+        request_id: requestId,
+        terminal: {
+          version: 1,
+          run_id: `run_${"d".repeat(32)}`,
+          root_message_id: requestId,
+          outcome: "succeeded",
+          code: "completed",
+        },
+      },
+    ];
+    const { transport } = harness(frames, undefined, undefined, {
+      monotonicNow: () => 29,
+      onTiming: (event) => {
+        timingEvents.push(event);
+        if (event.milestone.includes("assistant")
+          || event.milestone.includes("ack")
+          || event.milestone.includes("terminal")) {
+          chronology.push(`timing:${event.milestone}`);
+        }
+      },
+      classifyResponseDelivery: () => responseDeliveryMode,
+    });
+    transport.addAuthoritativeFrameListener((frame) => {
+      if (["command_ack", "assistant_snapshot", "terminal"].includes(frame.kind)) {
+        chronology.push(`frame:${frame.kind}`);
+      }
+    });
+    await transport.connect();
+
+    await transport.sendToolResult(toolResult(requestId, toolCallId));
+
+    expect(chronology).toEqual([
+      "timing:command_ack_sse_frame",
+      "frame:command_ack",
+      "timing:command_ack_sse_frame_delivery_completed",
+      "timing:first_assistant_sse_frame",
+      "frame:assistant_snapshot",
+      "timing:assistant_sse_frame_delivery_completed",
+      "timing:terminal_sse_frame",
+      "frame:terminal",
+      "timing:terminal_sse_frame_delivery_completed",
+    ]);
+    expect(timingEvents.filter((event) =>
+      event.milestone.includes("assistant")
+      || event.milestone.includes("ack")
+      || event.milestone.includes("terminal")))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          requestId,
+          commandKind: "client_tool_result",
+          commandSegmentOrdinal: 1,
+          toolCallId,
+          responseDeliveryMode,
+        }),
+      ]));
+  });
+
+  it("keeps sparse timing diagnostics non-blocking at an unterminated boundary", async () => {
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const onTiming = jest.fn((event: AgentTransportTimingEvent) => {
+      timingEvents.push(event);
+      throw new Error("The optional timing observer failed.");
+    });
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => Number.NaN,
+      onTiming,
+    });
+    await transport.connect();
+    const seen: string[] = [];
+    transport.addAuthoritativeFrameListener((frame) => {
+      seen.push((frame as { kind: string }).kind);
+    });
+    const terminal = JSON.stringify({
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "terminal",
+    });
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array());
+        controller.enqueue(new TextEncoder().encode(`data: ${terminal}`));
+        controller.close();
+      },
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "x-systemsculpt-agent-latency-trace": "not-a-trace",
+        "server-timing": 'app;dur="7.25", auth;desc=ignored',
+      },
+    }));
+
+    await expect(transport.sendSubmit(submit("user_sparse_timing")))
+      .resolves.toBeUndefined();
+
+    expect(seen).toEqual(["terminal"]);
+    expect(timingEvents).toEqual([
+      {
+        milestone: "command_dispatch_started",
+        requestId: "user_sparse_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 0,
+      },
+      {
+        milestone: "response_available",
+        requestId: "user_sparse_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 0,
+        status: 200,
+        serverTimingAppMs: 7.25,
+      },
+      {
+        milestone: "first_body_chunk",
+        requestId: "user_sparse_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 0,
+      },
+      {
+        milestone: "first_sse_frame",
+        requestId: "user_sparse_timing",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 0,
+      },
+    ]);
+    expect(timingEvents.every(Object.isFrozen)).toBe(true);
+    expect(onTiming).toHaveBeenCalledTimes(4);
+    expect(transport.state).toBe("open");
+  });
+
+  it("falls back to a platform clock when the injected timing clock fails", async () => {
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const { transport } = harness([
+      { type: "systemsculpt.agent.event.v1", version: 1, kind: "terminal" },
+    ], undefined, undefined, {
+      monotonicNow: () => {
+        throw new Error("The injected monotonic clock failed.");
+      },
+      onTiming: (event) => timingEvents.push(event),
+    });
+    await transport.connect();
+
+    await expect(transport.sendSubmit(submit("user_clock_fallback")))
+      .resolves.toBeUndefined();
+
+    expect(timingEvents).not.toHaveLength(0);
+    expect(timingEvents.every((event) =>
+      Number.isFinite(event.observedAtMonotonicMs)
+      && event.observedAtMonotonicMs >= 0)).toBe(true);
+    expect(transport.state).toBe("open");
+  });
+
+  it("ignores malformed timing metrics and does not count SSE metadata as a frame", async () => {
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 42,
+      onTiming: (event) => timingEvents.push(event),
+    });
+    await transport.connect();
+    const seen: unknown[] = [];
+    transport.addAuthoritativeFrameListener((frame) => seen.push(frame));
+    request.mockResolvedValueOnce(new Response(": heartbeat\nretry: 1000\n\n", {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "server-timing": "app;dur=NaN, auth;dur=NaN",
+      },
+    }));
+
+    await expect(transport.sendSubmit(submit("user_metadata_only")))
+      .resolves.toBeUndefined();
+
+    expect(seen).toEqual([]);
+    expect(timingEvents).toEqual([
+      {
+        milestone: "command_dispatch_started",
+        requestId: "user_metadata_only",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 42,
+      },
+      {
+        milestone: "response_available",
+        requestId: "user_metadata_only",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 42,
+        status: 200,
+      },
+      {
+        milestone: "first_body_chunk",
+        requestId: "user_metadata_only",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        observedAtMonotonicMs: 42,
+      },
+    ]);
+    expect(transport.state).toBe("open");
   });
 
   it("reuses one validated bootstrap for identity, context, and turns", async () => {
@@ -359,6 +894,7 @@ describe("AgentStreamingTransport", () => {
 
     failed.transport.close();
     await expect(failed.transport.connect()).rejects.toThrow("connection is closed");
+    await expect(failed.transport.forceReconnect()).rejects.toThrow("connection is closed");
   });
 
   it("preserves safe root error metadata from a failed bootstrap", async () => {
@@ -458,6 +994,31 @@ describe("AgentStreamingTransport", () => {
         status: 413,
         serverAdmissionPossible: false,
       });
+    expect(transport.state).toBe("open");
+  });
+
+  it("preserves a safe nested incident while dropping an unsafe error code", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "UNSAFE-CODE",
+        incident_id: `incident_${"b".repeat(32)}`,
+      },
+    }), {
+      status: 422,
+      headers: { "content-type": "application/json" },
+    }));
+
+    const error = await transport.sendSubmit(submit("user_nested_incident"))
+      .catch((caught) => caught as Error & Record<string, unknown>);
+
+    expect(error).toMatchObject({
+      requestId: `incident_${"b".repeat(32)}`,
+      status: 422,
+      serverAdmissionPossible: false,
+    });
+    expect(error).not.toHaveProperty("code");
     expect(transport.state).toBe("open");
   });
 
@@ -571,6 +1132,138 @@ describe("AgentStreamingTransport", () => {
     await staleTurn;
 
     expect(seen).toEqual(["session_snapshot"]);
+    expect(transport.state).toBe("open");
+  });
+
+  it("force-reconnects from a dead-open tool result, fences its late ACK, and retires its reader", async () => {
+    const { transport, request } = harness([]);
+    const seen: string[] = [];
+    const requestId = "user_dead_open_reconnect";
+    const toolCallId = "call_dead_open_reconnect";
+    transport.addAuthoritativeFrameListener((frame) => {
+      seen.push((frame as { kind: string }).kind);
+    });
+    await transport.connect();
+    seen.length = 0;
+
+    let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let releaseSnapshot: ((response: Response) => void) | null = null;
+    const streamCancelled = jest.fn();
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/get-messages")) {
+        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { staleController = controller; },
+        cancel() { streamCancelled(); },
+      }), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const staleTurn = transport.sendToolResult(toolResult(requestId, toolCallId));
+    while (!staleController) await Promise.resolve();
+    const recovery = transport.forceReconnect();
+    while (!releaseSnapshot) await Promise.resolve();
+
+    // The replacement generation is already active while its snapshot is
+    // gated, so the orphaned command's late ACK cannot settle a replay even
+    // before its reader is physically cancelled.
+    const controller = staleController as ReadableStreamDefaultController<Uint8Array>;
+    controller.enqueue(new TextEncoder().encode(
+      `data: ${JSON.stringify({
+        type: "systemsculpt.agent.event.v1",
+        version: 1,
+        kind: "command_ack",
+        conversation_id: CONVERSATION_ID,
+        request_id: requestId,
+        command_kind: "client_tool_result",
+        tool_call_id: toolCallId,
+        status: "accepted",
+      })}\n\n`,
+    ));
+    releaseSnapshot(snapshotResponse());
+
+    await recovery;
+    await staleTurn;
+    expect(seen).toEqual(["session_snapshot"]);
+    expect(streamCancelled).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe("open");
+  });
+
+  it("retires a silent superseded turn only after replacement authority settles", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+
+    let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let staleSignal: AbortSignal | null = null;
+    let releaseSnapshot: ((response: Response) => void) | null = null;
+    const streamCancelled = jest.fn();
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/get-messages")) {
+        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+      }
+      staleSignal = input.signal as AbortSignal;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { staleController = controller; },
+        cancel() { streamCancelled(); },
+      }), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const staleTurn = transport.sendSubmit(submit("user_silent_dead_open_reconnect"));
+    while (!staleController || !staleSignal) await Promise.resolve();
+    const recovery = transport.forceReconnect();
+    while (!releaseSnapshot) await Promise.resolve();
+
+    expect((staleSignal as AbortSignal).aborted).toBe(false);
+    expect(streamCancelled).not.toHaveBeenCalled();
+
+    releaseSnapshot(snapshotResponse());
+    await recovery;
+    await staleTurn;
+
+    expect((staleSignal as AbortSignal).aborted).toBe(true);
+    expect(streamCancelled).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe("open");
+  });
+
+  it("contains a stale turn error while replacement synchronization is gated", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+
+    let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let releaseSnapshot: ((response: Response) => void) | null = null;
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/get-messages")) {
+        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { staleController = controller; },
+      }), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const staleTurn = transport.sendSubmit(submit("user_stale_error_during_reconnect"));
+    while (!staleController) await Promise.resolve();
+    const recovery = transport.forceReconnect();
+    while (!releaseSnapshot) await Promise.resolve();
+
+    (staleController as ReadableStreamDefaultController<Uint8Array>)
+      .error(new Error("orphaned Worker stream failed"));
+    await expect(staleTurn).resolves.toBeUndefined();
+    expect(transport.state).toBe("connecting");
+
+    releaseSnapshot(snapshotResponse());
+    await recovery;
     expect(transport.state).toBe("open");
   });
 

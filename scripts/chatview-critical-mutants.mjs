@@ -99,23 +99,42 @@ export function locateMutationSpan(source, fileName, mutant) {
     scriptKind,
   );
   const matches = [];
+  const semanticScope = (node) => {
+    for (let current = node; current; current = current.parent) {
+      if (ts.isMethodDeclaration(current) && current.name) {
+        const owner = ts.isClassDeclaration(current.parent)
+          ? current.parent.name?.text
+          : undefined;
+        const name = current.name.getText(sourceFile);
+        return owner ? `${owner}.${name}` : name;
+      }
+      if (ts.isFunctionDeclaration(current) && current.name) {
+        return current.name.text;
+      }
+    }
+    return "<module>";
+  };
   const visit = (node) => {
     const start = node.getStart(sourceFile);
     const candidate = source.slice(start, node.end);
-    if (candidate.replace(/\r\n/g, "\n") === mutant.anchorText.replace(/\r\n/g, "\n")) {
-      matches.push({ start, end: node.end });
+    const scope = semanticScope(node);
+    if (
+      candidate.replace(/\r\n/g, "\n") === mutant.anchorText.replace(/\r\n/g, "\n")
+      && (!mutant.anchorScope || scope === mutant.anchorScope)
+    ) {
+      matches.push({ start, end: node.end, scope });
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
   if (matches.length !== 1) {
+    const scope = mutant.anchorScope ? ` in ${mutant.anchorScope}` : "";
     throw new Error(
-      `${mutant.id} expected one AST anchor in ${fileName}, found ${matches.length}.`,
+      `${mutant.id} expected one AST anchor${scope} in ${fileName}, found ${matches.length}.`,
     );
   }
-  const [{ start, end }] = matches;
-  const line = source.slice(0, start).split(/\r?\n/).length;
-  return { start, end, line };
+  const [{ start, end, scope }] = matches;
+  return { start, end, scope };
 }
 
 export function assertMutationParses(source, fileName, mutantId) {
@@ -274,11 +293,6 @@ export function applyMutant(mutant, { targetRoot = mirrorRoot } = {}) {
   ).path;
   const source = fs.readFileSync(filePath, "utf8");
   const span = locateMutationSpan(source, mutant.file, mutant);
-  if (Math.abs(span.line - mutant.anchorLine) > 8) {
-    throw new Error(
-      `${mutant.id} moved from line ${mutant.anchorLine} to ${span.line}; review its intent.`,
-    );
-  }
   const replacement = source.includes("\r\n")
     ? mutant.replacement.replace(/\n/g, "\r\n")
     : mutant.replacement;

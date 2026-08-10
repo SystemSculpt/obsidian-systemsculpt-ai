@@ -1,25 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { buildChatResumeState, openChatResumeDescriptor } from "../ChatResumeUtils";
+import { openChatResumeDescriptor } from "../ChatResumeUtils";
 
 describe("ChatResumeUtils", () => {
-  it("builds resume state with only the managed chat identity", () => {
-    const state = buildChatResumeState({
-      chatId: "chat-123",
-      title: "Test Chat",
-      chatPath: "SystemSculpt/Chats/test.md",
-      lastModified: Date.now(),
-      messageCount: 2,
-    });
-
-    expect(state).toEqual({
-      chatId: "chat-123",
-      chatTitle: "Test Chat",
-      file: "SystemSculpt/Chats/test.md",
-    });
-  });
-
   it("reveals the resumed chat leaf after opening it", async () => {
     const targetLeaf = {
       setViewState: jest.fn().mockResolvedValue(undefined),

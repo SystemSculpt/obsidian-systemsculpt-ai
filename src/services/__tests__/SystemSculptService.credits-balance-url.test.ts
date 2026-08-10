@@ -5,6 +5,7 @@
 import {
   decodeCreditsBalance,
   normalizeCreditsCheckoutUrl,
+  parseCreditsBalanceServerTiming,
 } from "../SystemSculptService";
 
 const creditsBalancePayload = {
@@ -86,6 +87,27 @@ describe("decodeCreditsBalance", () => {
     expect(() => decodeCreditsBalance(payload)).toThrow(
       "Unable to read credits balance.",
     );
+  });
+});
+
+describe("parseCreditsBalanceServerTiming", () => {
+  it("extracts only bounded credits-route phase durations", () => {
+    expect(parseCreditsBalanceServerTiming(
+      "auth;dur=5.1239, rate-limit;dur=3, balance-store;dur=8.25, total;dur=25",
+    )).toEqual({
+      authMs: 5.124,
+      rateLimitMs: 3,
+      balanceStoreMs: 8.25,
+      totalMs: 25,
+    });
+  });
+
+  it("drops unknown, duplicate, negative, non-finite, and oversized values", () => {
+    expect(parseCreditsBalanceServerTiming(
+      "provider;dur=999, auth;dur=-1, total;dur=Infinity, total;dur=7, total;dur=8",
+    )).toEqual({ totalMs: 7 });
+    expect(parseCreditsBalanceServerTiming("x".repeat(1_025))).toBeUndefined();
+    expect(parseCreditsBalanceServerTiming(null)).toBeUndefined();
   });
 });
 

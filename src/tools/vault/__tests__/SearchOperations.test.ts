@@ -28,8 +28,8 @@ jest.mock("../searchScoring", () => ({
   sortByScore: jest.fn((results: any[]) =>
     [...results].sort((a, b) => b.score - a.score)
   ),
-  formatScoredResults: jest.fn((results: any[], _limit: number) => ({
-    results: results.map((r) => ({
+  formatScoredResults: jest.fn((results: any[], limit: number) => ({
+    results: results.slice(0, limit).map((r) => ({
       path: r.path,
       score: r.score,
       matchDetails: r.matchDetails,
@@ -224,6 +224,32 @@ describe("SearchOperations", () => {
       // Results include files and folders, so check that formatScoredResults was called with limit
       expect(result.results).toBeDefined();
     });
+
+    it("honors a smaller positive maxResults request", async () => {
+      const result = await searchOps.findFiles({ patterns: ["test"], maxResults: 1 });
+
+      expect(result.results).toHaveLength(1);
+      expect(jest.requireMock("../searchScoring").formatScoredResults)
+        .toHaveBeenLastCalledWith(expect.any(Array), 1);
+    });
+
+    it("clamps maxResults to the existing global result ceiling", async () => {
+      await searchOps.findFiles({ patterns: ["test"], maxResults: Number.MAX_SAFE_INTEGER });
+
+      expect(jest.requireMock("../searchScoring").formatScoredResults)
+        .toHaveBeenLastCalledWith(
+          expect.any(Array),
+          FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3,
+        );
+    });
+
+    it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+      "rejects invalid maxResults %s without broadening the search response",
+      async (maxResults) => {
+        await expect(searchOps.findFiles({ patterns: ["test"], maxResults }))
+          .rejects.toThrow("maxResults must be a positive integer");
+      },
+    );
 
     it("respects allowed paths when searching files and folders", async () => {
       const restrictedSearch = new SearchOperations(app, ["notes"], plugin);

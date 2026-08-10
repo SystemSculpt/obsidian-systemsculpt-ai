@@ -244,7 +244,8 @@ export class ChatMarkdownSerializer {
       const restored = storedMultipart.state === "valid"
         ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
         : reconstructed;
-      messages.push(attachmentMetadata.state === "valid" ? { ...restored, attachmentMetadata: attachmentMetadata.metadata } : restored);
+      const withOutcome = this.withTerminalOutcome(restored, attrs);
+      messages.push(attachmentMetadata.state === "valid" ? { ...withOutcome, attachmentMetadata: attachmentMetadata.metadata } : withOutcome);
     }
 
     if (parsedBlocks !== declaredStarts || messages.length !== declaredStarts) {
@@ -280,16 +281,19 @@ export class ChatMarkdownSerializer {
         const attachmentMetadata = this.extractAttachmentMetadata(attributes, multipart);
         if (attachmentMetadata.state === "invalid") return null;
         const timestamp = Date.now();
-        const restored: ChatMessage = multipart
-          ? { role, message_id, content: multipart }
-          : decoded.content.length > 0
-            ? this.reconstructMessageFromParts(role, message_id, [{
-                id: `content-${timestamp}`,
-                type: "content",
-                data: decoded.content,
-                timestamp,
-              }])
-            : { role, message_id, content: "" };
+        const restored = this.withTerminalOutcome(
+          multipart
+            ? { role, message_id, content: multipart }
+            : decoded.content.length > 0
+              ? this.reconstructMessageFromParts(role, message_id, [{
+                  id: `content-${timestamp}`,
+                  type: "content",
+                  data: decoded.content,
+                  timestamp,
+                }])
+              : { role, message_id, content: "" },
+          attributes,
+        );
         return attachmentMetadata.state === "valid"
           ? { ...restored, attachmentMetadata: attachmentMetadata.metadata }
           : restored;
@@ -327,7 +331,10 @@ export class ChatMarkdownSerializer {
         }
         throw new Error("Unsupported framed message part.");
       });
-      const restored = this.reconstructMessageFromParts(role, message_id, parts);
+      const restored = this.withTerminalOutcome(
+        this.reconstructMessageFromParts(role, message_id, parts),
+        attributes,
+      );
       const attachmentMetadata = this.extractAttachmentMetadata(attributes, null);
       if (attachmentMetadata.state === "invalid") return null;
       return attachmentMetadata.state === "valid"
@@ -336,6 +343,23 @@ export class ChatMarkdownSerializer {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Restore the additive terminal-outcome marker. Only the exact known value
+   * is honored so a corrupted attribute can never invent a new outcome.
+   */
+  private static withTerminalOutcome(
+    message: ChatMessage,
+    attributes: string,
+  ): ChatMessage {
+    if (
+      message.role === "assistant"
+      && attributes.includes("terminal-outcome=\"cancelled\"")
+    ) {
+      return { ...message, terminalOutcome: "cancelled" };
+    }
+    return message;
   }
 
   private static isFramedMessagePayload(value: unknown): value is FramedMessagePayload {
@@ -601,6 +625,11 @@ export class ChatMarkdownSerializer {
     if (hasToolCalls) attributes += " has-tool-calls=\"true\"";
     if (hasReasoning) attributes += " has-reasoning=\"true\"";
     if (isStreaming) attributes += " streaming=\"true\"";
+    // Additive attribute: older parsers ignore unknown attributes, so a note
+    // written with this marker still loads everywhere.
+    if (msg.terminalOutcome === "cancelled") {
+      attributes += " terminal-outcome=\"cancelled\"";
+    }
     if (Array.isArray(msg.content) && msg.attachmentMetadata?.length) {
       attributes += ` attachment-metadata="${this.encodeBase64Json(msg.attachmentMetadata)}"`;
     }

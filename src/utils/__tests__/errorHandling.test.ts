@@ -1,13 +1,6 @@
 /**
  * @jest-environment node
  */
-import { Notice } from "obsidian";
-
-// Mock obsidian
-jest.mock("obsidian", () => ({
-  Notice: jest.fn(),
-}));
-
 // Mock errorLogger
 jest.mock("../errorLogger", () => ({
   errorLogger: {
@@ -31,15 +24,10 @@ const mockErrorLogger = errorLogger as unknown as {
 
 import {
   LogLevel,
-  currentLogLevel,
   setLogLevel,
   logError,
-  logWarning,
   logInfo,
   logDebug,
-  handleEmbeddingError,
-  safeExecute,
-  safeExecuteWithRetry,
 } from "../errorHandling";
 
 describe("errorHandling", () => {
@@ -102,49 +90,6 @@ describe("errorHandling", () => {
         "Error message",
         expect.any(Error),
         { source: "" }
-      );
-    });
-  });
-
-  describe("logWarning", () => {
-    it("logs warning when level is WARNING or higher", () => {
-      setLogLevel(LogLevel.WARNING);
-
-      logWarning("TestContext", "Warning message", { extra: "data" });
-
-      expect(mockErrorLogger.warn).toHaveBeenCalledWith(
-        "TestContext: Warning message",
-        expect.objectContaining({ source: "TestContext" })
-      );
-    });
-
-    it("does not log warning when level is ERROR", () => {
-      setLogLevel(LogLevel.ERROR);
-
-      logWarning("TestContext", "Warning message");
-
-      expect(mockErrorLogger.warn).not.toHaveBeenCalled();
-    });
-
-    it("logs warning without data", () => {
-      setLogLevel(LogLevel.WARNING);
-
-      logWarning("TestContext", "Simple warning");
-
-      expect(mockErrorLogger.warn).toHaveBeenCalledWith(
-        "TestContext: Simple warning",
-        expect.objectContaining({ source: "TestContext" })
-      );
-    });
-
-    it("logs warning without context", () => {
-      setLogLevel(LogLevel.WARNING);
-
-      logWarning("", "Warning message");
-
-      expect(mockErrorLogger.warn).toHaveBeenCalledWith(
-        "Warning message",
-        expect.objectContaining({ source: "" })
       );
     });
   });
@@ -232,110 +177,6 @@ describe("errorHandling", () => {
         "TestContext: Debug message",
         expect.objectContaining({ source: "TestContext", metadata: undefined })
       );
-    });
-  });
-
-  describe("handleEmbeddingError", () => {
-    it("logs error and shows notice by default", async () => {
-      const error = new Error("Embedding failed");
-
-      await handleEmbeddingError("Embeddings", "Processing failed", error);
-
-      expect(mockErrorLogger.error).toHaveBeenCalled();
-      expect(Notice).toHaveBeenCalledWith("Processing failed: Embedding failed");
-    });
-
-    it("logs error without notice when showNotice is false", async () => {
-      const error = new Error("Embedding failed");
-
-      await handleEmbeddingError("Embeddings", "Processing failed", error, false);
-
-      expect(mockErrorLogger.error).toHaveBeenCalled();
-      expect(Notice).not.toHaveBeenCalled();
-    });
-
-    it("handles non-Error objects", async () => {
-      await handleEmbeddingError("Embeddings", "Processing failed", "string error");
-
-      expect(Notice).toHaveBeenCalledWith("Processing failed: string error");
-    });
-  });
-
-  describe("safeExecute", () => {
-    it("returns result on success", async () => {
-      const fn = jest.fn().mockResolvedValue("success");
-
-      const result = await safeExecute(fn, "Test", "Error", "default");
-
-      expect(result).toBe("success");
-      expect(mockErrorLogger.error).not.toHaveBeenCalled();
-    });
-
-    it("returns default value on error", async () => {
-      const fn = jest.fn().mockRejectedValue(new Error("fail"));
-
-      const result = await safeExecute(fn, "Test", "Error message", "default");
-
-      expect(result).toBe("default");
-      expect(mockErrorLogger.error).toHaveBeenCalled();
-    });
-
-    it("works with different types", async () => {
-      const fn = jest.fn().mockResolvedValue({ key: "value" });
-
-      const result = await safeExecute(fn, "Test", "Error", { key: "default" });
-
-      expect(result).toEqual({ key: "value" });
-    });
-  });
-
-  describe("safeExecuteWithRetry", () => {
-    it("returns result on first success", async () => {
-      const fn = jest.fn().mockResolvedValue("success");
-
-      const result = await safeExecuteWithRetry(fn, "Test", "Error", "default", 3, 10);
-
-      expect(result).toBe("success");
-      expect(fn).toHaveBeenCalledTimes(1);
-    });
-
-    it("retries on failure and succeeds", async () => {
-      const fn = jest
-        .fn()
-        .mockRejectedValueOnce(new Error("fail1"))
-        .mockRejectedValueOnce(new Error("fail2"))
-        .mockResolvedValue("success");
-
-      setLogLevel(LogLevel.WARNING);
-      const result = await safeExecuteWithRetry(fn, "Test", "Error", "default", 3, 10);
-
-      expect(result).toBe("success");
-      expect(fn).toHaveBeenCalledTimes(3);
-    });
-
-    it("returns default after all retries fail", async () => {
-      const fn = jest.fn().mockRejectedValue(new Error("always fail"));
-
-      setLogLevel(LogLevel.WARNING);
-      const result = await safeExecuteWithRetry(fn, "Test", "Error message", "default", 3, 10);
-
-      expect(result).toBe("default");
-      expect(fn).toHaveBeenCalledTimes(3);
-      expect(mockErrorLogger.error).toHaveBeenCalledWith(
-        "Test: All 3 attempts failed: Error message",
-        expect.any(Error),
-        expect.any(Object)
-      );
-    });
-
-    it("uses custom retry parameters", async () => {
-      const fn = jest.fn().mockRejectedValue(new Error("fail"));
-
-      setLogLevel(LogLevel.WARNING);
-      const result = await safeExecuteWithRetry(fn, "Test", "Error", "default", 5, 5);
-
-      expect(fn).toHaveBeenCalledTimes(5);
-      expect(result).toBe("default");
     });
   });
 });

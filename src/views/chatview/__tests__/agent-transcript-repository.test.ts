@@ -378,6 +378,28 @@ describe("AgentTranscriptRepository", () => {
     expect(records.get(accepted.chatId).version).toBe(2);
   });
 
+  it("does not rewrite history when the projected echo only reorders message keys", async () => {
+    const { repository, storage } = createHarness();
+    // The locally committed user row serializes as {role, content, message_id}.
+    const committed = await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    expect(committed.version).toBe(1);
+
+    // The server-projected echo of the same message carries identical fields
+    // in a different insertion order: {role, message_id, content}.
+    const reorderedEcho = {
+      role: "user",
+      message_id: "user-1",
+      content: "Check the plan.",
+    } as ChatMessage;
+    const reconciled = await repository.reconcileServerHistory([reorderedEcho]);
+
+    expect(reconciled.version).toBe(1);
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
   it("persists real content and tool-result updates despite synthesized timestamp changes", async () => {
     const { repository, storage } = createHarness();
     await repository.commitUser({

@@ -172,6 +172,19 @@ export class SearchOperations {
     if (patterns.length === 0) {
       throw new Error("Missing required 'patterns'. Provide one or more search terms, e.g., [\"systemsculpt\", \"API_TOKEN\"].");
     }
+    const globalResultLimit = FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3;
+    const requestedMaxResults = (params as any)?.maxResults;
+    if (
+      requestedMaxResults !== undefined
+      && requestedMaxResults !== null
+      && (!Number.isSafeInteger(requestedMaxResults) || requestedMaxResults < 1)
+    ) {
+      throw new Error("maxResults must be a positive integer.");
+    }
+    const resultLimit = Math.min(
+      requestedMaxResults ?? globalResultLimit,
+      globalResultLimit,
+    );
     
     // Extract search terms from patterns
     const originalQuery = patterns.join(' ');
@@ -287,7 +300,7 @@ export class SearchOperations {
     
     // Sort by score and format results
     const sortedResults = sortByScore(scoredResults);
-    const response = formatScoredResults(sortedResults, FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
+    const response = formatScoredResults(sortedResults, resultLimit);
     while (
       Array.isArray(response.results)
       && response.results.length > 0

@@ -43,18 +43,14 @@ export class LicenseManager {
     this.scheduleDeferredValidation(previousLicenseValidState === true);
   }
 
-  async validateLicenseKey(force = false, _showReloadPrompt = true): Promise<boolean> {
-    return (await this.validateLicenseKeyDetailed(force, _showReloadPrompt)).isValid;
-  }
-
-  async validateLicenseKeyDetailed(force = false, _showReloadPrompt = true): Promise<LicenseValidationResult> {
+  async validateLicenseKeyDetailed(): Promise<LicenseValidationResult> {
     if (!this.plugin.settings.licenseKey) {
       await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
       return { outcome: "rejected", isValid: false, reason: "missing" };
     }
 
     try {
-      return await this.plugin.aiService.validateLicenseDetailed(force);
+      return await this.plugin.aiService.validateLicenseDetailed();
     } catch (error) {
       return { outcome: "unavailable", isValid: !!this.plugin.settings.licenseValid };
     }
@@ -72,8 +68,8 @@ export class LicenseManager {
 
     this.pendingValidation = new Promise<void>((resolve) => {
       scheduler(() => {
-        void this.validateLicenseKey(true, false).then((isValidNow) => {
-          if (hadValidLicense && !isValidNow) {
+        void this.validateLicenseKeyDetailed().then((result) => {
+          if (hadValidLicense && !result.isValid) {
             new Notice(
               "Your SystemSculpt license is no longer valid or failed to validate. Premium features may be unavailable.",
               7000

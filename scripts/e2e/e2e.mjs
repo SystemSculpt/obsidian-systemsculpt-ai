@@ -7,9 +7,13 @@ import { pathToFileURL } from "node:url";
 
 import {
   DriverSession,
+  expectedApiBaseUrlFromTarget,
+  expectedArtifactIdFromTarget,
   expectedBuildStampFromTarget,
   resolvePluginTarget,
-  runSteps,
+  runScenario,
+  scenarioFromModule,
+  validateScenario,
 } from "./driver-session.mjs";
 
 /**
@@ -32,6 +36,10 @@ import {
  *   npm run e2e -- settings --tab Chat
  *   npm run e2e -- query "css:.systemsculpt-agent-turn"
  *   npm run e2e -- command systemsculpt-ai:open-chat
+ *   npm run e2e -- tool-lifecycle-start
+ *   npm run e2e -- assert-tool-settled --tool-label "Read files" --text "Done" --require-command-ack --require-all-tool-result-acks --expected-all-tool-result-state succeeded
+ *   npm run e2e -- assert-tool-results-completed --tool-label "Read files" --text "Done"
+ *   npm run e2e -- assert-no-client-tools --text "INVALID-TOOLS-CORRECTED-V1"
  *   npm run e2e -- script testing/e2e/scenarios/chat-composer-journey.mjs
  *
  * Targets are canonical data-testid values (list them with
@@ -65,8 +73,9 @@ function parseArgs(argv) {
     const valueFlags = new Set([
       "plugin-dir", "vault", "target", "text", "mime", "name", "via",
       "timeout", "connect-timeout", "tab", "evidence", "mode", "limit",
-      "stall", "expected-build",
+      "stall", "expected-build", "expected-api",
       "pattern", "level", "since",
+      "tool-label", "text-mode",
     ]);
     if (valueFlags.has(key)) {
       flags[key] = argv[index + 1];
@@ -172,6 +181,77 @@ function stepsForVerb(positional, flags) {
         },
       }];
     }
+    case "tool-lifecycle-start":
+      return [{ action: "chat.beginToolLifecycleCapture" }];
+    case "tool-lifecycle":
+      return [{ action: "chat.toolLifecycle" }];
+    case "tool-lifecycle-end":
+      return [{ action: "chat.endToolLifecycleCapture" }];
+    case "assert-tool-settled":
+      if (!flags["tool-label"] || !flags.text) {
+        throw new Error("assert-tool-settled requires --tool-label and --text.");
+      }
+      if (
+        flags["text-mode"] !== undefined
+        && flags["text-mode"] !== "contains"
+        && flags["text-mode"] !== "equals"
+      ) {
+        throw new Error('--text-mode must be "contains" or "equals".');
+      }
+      if (
+        flags["expected-all-tool-result-state"] !== undefined
+        && flags["expected-all-tool-result-state"] !== "succeeded"
+        && flags["expected-all-tool-result-state"] !== "failed"
+      ) {
+        throw new Error(
+          '--expected-all-tool-result-state must be "succeeded" or "failed".',
+        );
+      }
+      return [{
+        action: "chat.assertLatestToolSettledAfterContinuation",
+        params: {
+          toolLabel: flags["tool-label"],
+          text: flags.text,
+          textMode: flags["text-mode"],
+          requireCommandAck: flags["require-command-ack"] === true,
+          requireAllToolResultAcks: flags["require-all-tool-result-acks"] === true,
+          expectedAllToolResultState: flags["expected-all-tool-result-state"],
+          timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
+        },
+      }];
+    case "assert-tool-results-completed":
+      if (!flags["tool-label"] || !flags.text) {
+        throw new Error(
+          "assert-tool-results-completed requires --tool-label and --text.",
+        );
+      }
+      if (
+        flags["text-mode"] !== undefined
+        && flags["text-mode"] !== "contains"
+        && flags["text-mode"] !== "equals"
+      ) {
+        throw new Error('--text-mode must be "contains" or "equals".');
+      }
+      return [{
+        action: "chat.assertAllToolResultSendsCompleted",
+        params: {
+          toolLabel: flags["tool-label"],
+          text: flags.text,
+          textMode: flags["text-mode"],
+          timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
+        },
+      }];
+    case "assert-no-client-tools":
+      if (!flags.text) {
+        throw new Error("assert-no-client-tools requires --text.");
+      }
+      return [{
+        action: "chat.assertNoClientToolsBeforeContinuation",
+        params: {
+          text: flags.text,
+          timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
+        },
+      }];
     case "command": {
       if (!rest[0]) throw new Error("command requires an Obsidian command id.");
       return [{ action: "command", params: { id: rest[0] } }];
@@ -204,37 +284,34 @@ function stepsForVerb(positional, flags) {
       throw new Error(
         `Unknown verb "${verb ?? ""}". Verbs: status, open-chat, click, type, press, attach, ` +
           "scroll, select, read, query, logs, notices, snapshot, wait, wait-run, command, " +
+          "tool-lifecycle-start, tool-lifecycle, tool-lifecycle-end, assert-tool-settled, " +
+          "assert-tool-results-completed, " +
+          "assert-no-client-tools, " +
           "settings, settings-close, targets, script.",
       );
   }
 }
 
-async function loadScriptSteps(scriptPath) {
+async function loadScriptScenario(scriptPath) {
   const resolved = path.resolve(scriptPath);
   if (resolved.endsWith(".json")) {
     const parsed = JSON.parse(fs.readFileSync(resolved, "utf8"));
-    const steps = Array.isArray(parsed) ? parsed : parsed?.steps;
-    if (!Array.isArray(steps)) {
-      throw new Error("A JSON scenario must be an array of steps or {steps: [...]}.");
-    }
-    return steps;
+    return validateScenario(parsed, "A JSON scenario");
   }
   const module = await import(pathToFileURL(resolved).href);
-  const exported = module.default ?? module.steps;
-  const steps = typeof exported === "function" ? await exported() : exported;
-  if (!Array.isArray(steps)) {
-    throw new Error("A scenario module must default-export an array of steps or a function returning one.");
-  }
-  return steps;
+  return scenarioFromModule(module, "A scenario module");
 }
 
 async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   if (positional.length === 0 || flags.help) {
-    console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--expected-build id] [--json]");
+    console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--expected-build id] [--expected-api url] [--json]");
     console.log("Verbs: status, open-chat, click, type, press, attach, scroll, select, read,");
     console.log("       query, logs, notices, snapshot, wait, wait-run, command, settings,");
-    console.log("       settings-close, targets [--live], script <file>");
+    console.log("       settings-close, tool-lifecycle-start, tool-lifecycle,");
+    console.log("       tool-lifecycle-end, assert-tool-settled, assert-tool-results-completed,");
+    console.log("       assert-no-client-tools,");
+    console.log("       targets [--live], script <file>");
     console.log("Targets are data-testid values (npm run e2e -- targets), plus css:, chat:,");
     console.log("label:, setting:, and settings.tab: prefixes.");
     process.exit(positional.length === 0 ? 1 : 0);
@@ -250,14 +327,15 @@ async function main() {
   if (positional[0] === "script" && !positional[1]) {
     throw new Error("script requires a file path.");
   }
-  const steps = positional[0] === "script"
-    ? await loadScriptSteps(positional[1])
-    : stepsForVerb(positional, flags);
+  const scenario = positional[0] === "script"
+    ? await loadScriptScenario(positional[1])
+    : { steps: stepsForVerb(positional, flags), cleanup: [] };
 
   const targetInfo = resolvePluginTarget({
     explicitPath: flags["plugin-dir"] ?? "",
     vaultName: flags.vault ?? "",
   });
+  let expectedArtifactId = expectedArtifactIdFromTarget(targetInfo.path);
   const session = new DriverSession({
     pluginDir: targetInfo.path,
     connectTimeoutMs: flags["connect-timeout"] ? Number(flags["connect-timeout"]) : 20000,
@@ -266,14 +344,19 @@ async function main() {
   const expectedBuild = typeof flags["expected-build"] === "string"
     ? flags["expected-build"]
     : expectedBuildStampFromTarget(targetInfo.path);
+  const expectedApiBaseUrl = typeof flags["expected-api"] === "string"
+    ? flags["expected-api"].replace(/\/+$/, "")
+    : expectedApiBaseUrlFromTarget(targetInfo.path);
 
   let outcome;
   let hello;
   try {
     hello = await session.connect();
+    expectedArtifactId = session.expectedArtifactId;
     if (!flags.json) {
       console.error(
-        `[e2e] Connected: vault "${hello.vault}", plugin ${hello.pluginVersion} (${hello.buildStamp})`,
+        `[e2e] Connected: vault "${hello.vault}", plugin ${hello.pluginVersion} `
+          + `(${hello.buildStamp}), verified installed executable, API ${hello.apiBaseUrl}`,
       );
     }
     outcome = expectedBuild && hello.buildStamp !== expectedBuild
@@ -281,8 +364,16 @@ async function main() {
           ok: false,
           error: `Loaded build ${hello.buildStamp} does not match expected build ${expectedBuild}.`,
           steps: [],
+          cleanup: [],
         }
-      : await runSteps(session, steps);
+      : hello.apiBaseUrl !== expectedApiBaseUrl
+        ? {
+            ok: false,
+            error: `Loaded API ${String(hello.apiBaseUrl)} does not match expected API ${expectedApiBaseUrl}.`,
+            steps: [],
+            cleanup: [],
+          }
+        : await runScenario(session, scenario);
   } finally {
     session.close();
   }
@@ -292,6 +383,10 @@ async function main() {
     pluginVersion: hello.pluginVersion,
     buildStamp: hello.buildStamp,
     expectedBuild,
+    artifactId: hello.artifactId,
+    expectedArtifactId,
+    apiBaseUrl: hello.apiBaseUrl,
+    expectedApiBaseUrl,
     ...outcome,
   };
   if (flags.evidence) {

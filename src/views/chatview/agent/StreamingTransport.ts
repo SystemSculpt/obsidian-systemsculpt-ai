@@ -1,6 +1,11 @@
-import type { PlatformRequestClient } from "../../../services/PlatformRequestClient";
+import {
+  getPlatformResponseDeliveryMode,
+  type PlatformRequestClient,
+  type PlatformResponseDeliveryMode,
+} from "../../../services/PlatformRequestClient";
 import {
   THIN_AGENT_BOOTSTRAP_PATH,
+  THIN_AGENT_CONNECTIVITY_PATH,
   THIN_AGENT_MESSAGES_PATH,
   THIN_AGENT_TURN_PATH,
   parseThinAgentBootstrapResponse,
@@ -12,11 +17,13 @@ import {
   parseAgentServerEvent,
   type AgentApprovalCommand,
   type AgentCancelCommand,
+  type AgentCommandKind,
   type AgentRegenerateCommand,
   type AgentServerEvent,
   type AgentSubmitCommand,
   type AgentToolResultCommand,
 } from "./Protocol";
+import { parseBoundedServerTiming } from "../../../utils/serverTiming";
 import type {
   AgentConnectionPort,
   AgentConnectionState,
@@ -39,8 +46,38 @@ export type AgentStreamingTransportOptions = Readonly<{
   licenseKey: () => string;
   pluginVersion: string;
   bootstrapRequest: () => ThinAgentBootstrapRequest;
-  requestClient: Pick<PlatformRequestClient, "request">;
+  requestClient: Pick<PlatformRequestClient, "request">
+    & Partial<Pick<PlatformRequestClient, "prewarmStreamingFetch">>;
   isAuthoritativeFrame?: (value: unknown) => boolean;
+  monotonicNow?: () => number;
+  onTiming?: (event: AgentTransportTimingEvent) => void;
+  classifyResponseDelivery?: (
+    response: Response,
+  ) => PlatformResponseDeliveryMode | undefined;
+}>;
+
+export type AgentTransportTimingEvent = Readonly<{
+  milestone:
+    | "command_dispatch_started"
+    | "response_available"
+    | "first_body_chunk"
+    | "first_sse_frame"
+    | "first_assistant_sse_frame"
+    | "assistant_sse_frame_delivery_completed"
+    | "command_ack_sse_frame"
+    | "command_ack_sse_frame_delivery_completed"
+    | "terminal_sse_frame"
+    | "terminal_sse_frame_delivery_completed";
+  requestId: string;
+  commandKind: AgentCommandKind;
+  commandSegmentOrdinal: number;
+  toolCallId?: string;
+  observedAtMonotonicMs: number;
+  responseDeliveryMode?: PlatformResponseDeliveryMode;
+  status?: number;
+  latencyTraceId?: string;
+  serverTimingAppMs?: number;
+  serverTimingAuthMs?: number;
 }>;
 
 type BootstrapAccess = Readonly<{
@@ -52,6 +89,12 @@ const ACCESS_REFRESH_MARGIN_MS = 5_000;
 const MAX_BOOTSTRAP_RESPONSE_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_EVENT_BYTES = 64 * 1024 * 1024;
+const LATENCY_TRACE_HEADER = "x-systemsculpt-agent-latency-trace";
+const LATENCY_TRACE_ID = /^[a-f0-9]{32}$/u;
+const AGENT_SERVER_TIMING_NAMES = Object.freeze({
+  app: "appMs",
+  auth: "authMs",
+} as const);
 
 async function readBoundedText(
   response: Response,
@@ -140,6 +183,42 @@ function trailingBoundaryPrefixLength(value: string): number {
   return 0;
 }
 
+function segmentFrameKind(
+  frame: unknown,
+  conversationId: string,
+  command: Readonly<{
+    requestId: string;
+    commandKind: AgentCommandKind;
+    toolCallId?: string;
+  }>,
+): "assistant_snapshot" | "command_ack" | "terminal" | null {
+  let parsed: AgentServerEvent;
+  try {
+    parsed = parseAgentServerEvent(frame, conversationId);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.kind === "assistant_snapshot"
+    && parsed.request_id === command.requestId
+  ) return "assistant_snapshot";
+  if (
+    parsed.kind === "terminal"
+    && parsed.request_id === command.requestId
+  ) return "terminal";
+  if (
+    parsed.kind !== "command_ack"
+    || parsed.request_id !== command.requestId
+    || parsed.command_kind !== command.commandKind
+  ) return null;
+  if (
+    (parsed.command_kind === "client_tool_result"
+      || parsed.command_kind === "client_tool_approval")
+    && parsed.tool_call_id !== command.toolCallId
+  ) return null;
+  return "command_ack";
+}
+
 async function cancelReaderSafely(
   reader: ReadableStreamDefaultReader<Uint8Array>,
 ): Promise<void> {
@@ -163,6 +242,7 @@ implements AgentConnectionPort {
   private readonly inFlight = new Set<AbortController>();
   private disposed = false;
   private connectGeneration = 0;
+  private nextCommandSegmentOrdinal = 0;
 
   public constructor(
     private readonly options: AgentStreamingTransportOptions,
@@ -202,6 +282,10 @@ implements AgentConnectionPort {
     const generation = ++this.connectGeneration;
     this.setState("connecting");
     try {
+      // The replay-safe CORS decision is observational and shares its in-flight
+      // request with an immediate submit. It must not hold session readiness
+      // for the probe timeout when bootstrap and synchronization are complete.
+      void this.prewarmStreamingTransport();
       const bootstrap = (await this.ensureBootstrap()).response;
       if (this.disposed || generation !== this.connectGeneration) return;
       await this.synchronize(
@@ -219,6 +303,29 @@ implements AgentConnectionPort {
     }
   }
 
+  /**
+   * Replaces every command stream that belonged to the previous connection
+   * generation with a fresh authoritative snapshot.
+   *
+   * A Worker restart can leave fetch's response reader open even though its
+   * upstream will never publish another byte. `connect()` advances the
+   * generation synchronously, so callbacks from those readers are fenced
+   * before the snapshot request begins. The readers are aborted only after the
+   * replacement synchronization settles, allowing a terminal snapshot to win
+   * before the command promise unwinds.
+   */
+  public async forceReconnect(): Promise<void> {
+    if (this.disposed) {
+      throw new Error("This chat connection is closed.");
+    }
+    const superseded = [...this.inFlight];
+    try {
+      await this.connect();
+    } finally {
+      for (const controller of superseded) controller.abort();
+    }
+  }
+
   /** Returns the same validated bootstrap used to authenticate this session. */
   public async bootstrap(): Promise<ThinAgentBootstrapResponse> {
     return (await this.ensureBootstrap()).response;
@@ -227,6 +334,11 @@ implements AgentConnectionPort {
   /** Invalidates access rejected by another HTTP route for this session. */
   public invalidateBootstrap(): void {
     this.access = null;
+  }
+
+  /** Marks a clean-but-incomplete turn stream as requiring fresh authority. */
+  public markUnsynchronized(): void {
+    if (!this.disposed) this.setState("closed");
   }
 
   /**
@@ -346,6 +458,20 @@ implements AgentConnectionPort {
     }
   }
 
+  private async prewarmStreamingTransport(): Promise<void> {
+    const prewarm = this.options.requestClient.prewarmStreamingFetch;
+    if (!prewarm) return;
+    try {
+      await prewarm.call(
+        this.options.requestClient,
+        `${this.options.baseUrl}${THIN_AGENT_CONNECTIVITY_PATH}`,
+      );
+    } catch {
+      // Prewarming is observational. The state-changing request still performs
+      // the bounded safe probe on demand and retains its no-POST-replay fence.
+    }
+  }
+
   private async requestBootstrap(): Promise<BootstrapAccess> {
     const request = this.options.bootstrapRequest();
     const response = await this.options.requestClient.request({
@@ -388,11 +514,33 @@ implements AgentConnectionPort {
    * Sends one command and consumes the authoritative events its response
    * streams, resolving when the server closes the stream at the turn boundary.
    */
-  private async runTurn(command: unknown): Promise<void> {
+  private async runTurn(command:
+    | AgentSubmitCommand
+    | AgentRegenerateCommand
+    | AgentToolResultCommand
+    | AgentApprovalCommand
+    | AgentCancelCommand
+  ): Promise<void> {
     if (this.disposed) return;
     const generation = this.connectGeneration;
-    const token = (await this.ensureBootstrap()).response.access.token;
+    const bootstrap = (await this.ensureBootstrap()).response;
+    const token = bootstrap.access.token;
     if (!this.isCurrentDelivery(generation)) return;
+    const commandSegmentOrdinal = ++this.nextCommandSegmentOrdinal;
+    const commandTiming = {
+      requestId: command.request_id,
+      commandKind: command.kind,
+      commandSegmentOrdinal,
+      ...(command.kind === "client_tool_result"
+        || command.kind === "client_tool_approval"
+        ? { toolCallId: command.tool_call_id }
+        : {}),
+    } as const;
+    this.reportTiming({
+      milestone: "command_dispatch_started",
+      ...commandTiming,
+      observedAtMonotonicMs: this.monotonicNow(),
+    });
     const controller = new AbortController();
     this.inFlight.add(controller);
     try {
@@ -405,8 +553,48 @@ implements AgentConnectionPort {
         // whole turn. The request client serializes the body itself; handing
         // it an already-encoded string would send a JSON string literal.
         stream: true,
+        preserveResponseHeaders: true,
+        // Prove direct CORS readability with a replay-safe GET before choosing
+        // the transport for this state-changing command. A failed probe may
+        // select requestUrl once up front; a failed POST must never be replayed.
+        streamingProbeUrl:
+          `${this.options.baseUrl}${THIN_AGENT_CONNECTIVITY_PATH}`,
+        // A direct fetch can fail after the server has admitted this command.
+        // Reconcile from authoritative state before any idempotent replay;
+        // never immediately send the same state-changing POST through the
+        // buffered requestUrl transport.
+        allowTransportFallback: false,
         body: command,
         signal: controller.signal,
+      });
+      const responseDeliveryMode = this.options.classifyResponseDelivery?.(response)
+        ?? getPlatformResponseDeliveryMode(response);
+      const latencyTraceHeader = response.headers.get(LATENCY_TRACE_HEADER);
+      this.reportTiming({
+        milestone: "response_available",
+        ...commandTiming,
+        observedAtMonotonicMs: this.monotonicNow(),
+        ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+        status: response.status,
+        ...(latencyTraceHeader && LATENCY_TRACE_ID.test(latencyTraceHeader)
+          ? { latencyTraceId: latencyTraceHeader }
+          : {}),
+        ...(() => {
+          const serverTiming = parseBoundedServerTiming(
+            response.headers.get("server-timing"),
+            {
+              fields: AGENT_SERVER_TIMING_NAMES,
+              maximumHeaderLength: 4_096,
+              maximumEntries: 2_048,
+            },
+          );
+          const serverTimingAppMs = serverTiming?.appMs;
+          const serverTimingAuthMs = serverTiming?.authMs;
+          return {
+            ...(serverTimingAppMs === undefined ? {} : { serverTimingAppMs }),
+            ...(serverTimingAuthMs === undefined ? {} : { serverTimingAuthMs }),
+          };
+        })(),
       });
       if (!response.ok || !response.body) {
         if (response.status === 401) this.access = null;
@@ -429,8 +617,24 @@ implements AgentConnectionPort {
           serverAdmissionPossible,
         });
       }
-      await this.consume(response.body, generation, controller.signal);
+      await this.consume(
+        response.body,
+        generation,
+        controller.signal,
+        commandTiming,
+        responseDeliveryMode,
+        latencyTraceHeader && LATENCY_TRACE_ID.test(latencyTraceHeader)
+          ? latencyTraceHeader
+          : undefined,
+        bootstrap.conversation_id,
+      );
     } catch (error) {
+      if (!this.disposed && generation !== this.connectGeneration) {
+        // A newer authoritative synchronization owns the connection now.
+        // This command may already be durable, so neither a stale pre-abort
+        // error nor the intentional retirement can imply replay or failure.
+        return;
+      }
       const definitelyRejected = error !== null
         && typeof error === "object"
         && "serverAdmissionPossible" in error
@@ -449,6 +653,15 @@ implements AgentConnectionPort {
     body: ReadableStream<Uint8Array>,
     generation: number,
     signal: AbortSignal,
+    commandTiming: Readonly<{
+      requestId: string;
+      commandKind: AgentCommandKind;
+      commandSegmentOrdinal: number;
+      toolCallId?: string;
+    }>,
+    responseDeliveryMode?: PlatformResponseDeliveryMode,
+    latencyTraceId?: string,
+    conversationId?: string,
   ): Promise<void> {
     const reader = body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -458,6 +671,75 @@ implements AgentConnectionPort {
     let eventBytes = 0;
     let fragments: string[] = [];
     let fragmentBatch: string[] = [];
+    let firstRawChunkObserved = false;
+    let firstSseFrameObserved = false;
+    let firstAssistantFrame: unknown;
+    let commandAckFrame: unknown;
+    let terminalFrame: unknown;
+
+    const observeAcceptedFrame = (
+      frame: unknown,
+      stage: "parsed" | "delivered",
+    ): void => {
+      if (stage === "parsed" && !firstSseFrameObserved) {
+        firstSseFrameObserved = true;
+        this.reportTiming({
+          milestone: "first_sse_frame",
+          ...commandTiming,
+          observedAtMonotonicMs: this.monotonicNow(),
+          ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+          ...(latencyTraceId ? { latencyTraceId } : {}),
+        });
+      }
+      if (!conversationId) return;
+      const kind = segmentFrameKind(frame, conversationId, commandTiming);
+      if (stage === "parsed") {
+        if (kind === "assistant_snapshot" && firstAssistantFrame === undefined) {
+          firstAssistantFrame = frame;
+          this.reportTiming({
+            milestone: "first_assistant_sse_frame",
+            ...commandTiming,
+            observedAtMonotonicMs: this.monotonicNow(),
+            ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+            ...(latencyTraceId ? { latencyTraceId } : {}),
+          });
+        } else if (kind === "command_ack" && commandAckFrame === undefined) {
+          commandAckFrame = frame;
+          this.reportTiming({
+            milestone: "command_ack_sse_frame",
+            ...commandTiming,
+            observedAtMonotonicMs: this.monotonicNow(),
+            ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+            ...(latencyTraceId ? { latencyTraceId } : {}),
+          });
+        } else if (kind === "terminal" && terminalFrame === undefined) {
+          terminalFrame = frame;
+          this.reportTiming({
+            milestone: "terminal_sse_frame",
+            ...commandTiming,
+            observedAtMonotonicMs: this.monotonicNow(),
+            ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+            ...(latencyTraceId ? { latencyTraceId } : {}),
+          });
+        }
+        return;
+      }
+      const milestone = frame === firstAssistantFrame
+        ? "assistant_sse_frame_delivery_completed"
+        : frame === commandAckFrame
+          ? "command_ack_sse_frame_delivery_completed"
+          : frame === terminalFrame
+            ? "terminal_sse_frame_delivery_completed"
+            : null;
+      if (!milestone) return;
+      this.reportTiming({
+        milestone,
+        ...commandTiming,
+        observedAtMonotonicMs: this.monotonicNow(),
+        ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+        ...(latencyTraceId ? { latencyTraceId } : {}),
+      });
+    };
 
     const appendEventText = (text: string): void => {
       if (!text) return;
@@ -488,7 +770,12 @@ implements AgentConnectionPort {
         match;
         match = eventBoundary.exec(input)) {
         appendEventText(input.slice(start, match.index));
-        if (!this.emit(takeEventText(), generation, signal)) {
+        if (!this.emit(
+          takeEventText(),
+          generation,
+          signal,
+          observeAcceptedFrame,
+        )) {
           throw new Error("SystemSculpt returned an invalid session event.");
         }
         start = match.index + match[0].length;
@@ -513,6 +800,16 @@ implements AgentConnectionPort {
           return;
         }
         if (done) break;
+        if (!firstRawChunkObserved && value.byteLength > 0) {
+          firstRawChunkObserved = true;
+          this.reportTiming({
+            milestone: "first_body_chunk",
+            ...commandTiming,
+            observedAtMonotonicMs: this.monotonicNow(),
+            ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
+            ...(latencyTraceId ? { latencyTraceId } : {}),
+          });
+        }
         consumeDecodedText(decoder.decode(value, { stream: true }));
       }
       if (!this.isCurrentDelivery(generation, signal)) return;
@@ -522,7 +819,12 @@ implements AgentConnectionPort {
       if (eventBytes > 0) {
         const finalEvent = takeEventText();
         if (finalEvent.trim()
-          && !this.emit(finalEvent, generation, signal)) {
+          && !this.emit(
+            finalEvent,
+            generation,
+            signal,
+            observeAcceptedFrame,
+          )) {
           throw new Error("SystemSculpt returned an invalid session event.");
         }
       }
@@ -537,6 +839,7 @@ implements AgentConnectionPort {
     chunk: string,
     generation = this.connectGeneration,
     signal?: AbortSignal,
+    onAccepted?: (frame: unknown, stage: "parsed" | "delivered") => void,
   ): boolean {
     if (!this.isCurrentDelivery(generation, signal)) return true;
     const lines = chunk.split(/\r?\n/u);
@@ -561,21 +864,24 @@ implements AgentConnectionPort {
       // is safer than surfacing a partial event as conversation state.
       return false;
     }
-    return this.emitValue(frame, generation, signal);
+    return this.emitValue(frame, generation, signal, onAccepted);
   }
 
   private emitValue(
     frame: unknown,
     generation = this.connectGeneration,
     signal?: AbortSignal,
+    onAccepted?: (frame: unknown, stage: "parsed" | "delivered") => void,
   ): boolean {
     if (!this.isCurrentDelivery(generation, signal)) return true;
     if (this.options.isAuthoritativeFrame
       && !this.options.isAuthoritativeFrame(frame)) return false;
+    onAccepted?.(frame, "parsed");
     for (const listener of this.frameListeners) {
       if (!this.isCurrentDelivery(generation, signal)) return true;
       listener(frame as AgentServerEvent);
     }
+    onAccepted?.(frame, "delivered");
     return true;
   }
 
@@ -586,5 +892,23 @@ implements AgentConnectionPort {
     return !this.disposed
       && generation === this.connectGeneration
       && signal?.aborted !== true;
+  }
+
+  private monotonicNow(): number {
+    try {
+      const value = this.options.monotonicNow?.()
+        ?? (typeof performance !== "undefined" ? performance.now() : 0);
+      return Number.isFinite(value) ? value : 0;
+    } catch {
+      return typeof performance !== "undefined" ? performance.now() : 0;
+    }
+  }
+
+  private reportTiming(event: AgentTransportTimingEvent): void {
+    try {
+      this.options.onTiming?.(Object.freeze(event));
+    } catch {
+      // Timing diagnostics are observational and cannot affect delivery.
+    }
   }
 }

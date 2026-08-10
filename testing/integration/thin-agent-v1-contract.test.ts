@@ -6,7 +6,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  canonicalizeThinAgentCapabilityManifest,
   parseThinAgentBootstrapRequest,
   parseThinAgentBootstrapResponse,
   parseThinAgentCapabilityManifest,
@@ -26,10 +25,22 @@ const FIXTURE_PATH = resolve(
 const fixtureBytes = readFileSync(FIXTURE_PATH);
 const fixture = JSON.parse(fixtureBytes.toString("utf8"));
 
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) =>
+    `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+function canonicalizeThinAgentCapabilityManifest(value: unknown): string {
+  return stableJson(parseThinAgentCapabilityManifest(value));
+}
+
 describe("thin-agent-v1 application contract", () => {
   it("keeps the canonical cross-repository fixture byte-identical", () => {
     expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("9d58aaf6d2ccf7db67d5b4e77435ddc4b3911bb7ae7e91b4b0016521ba26ef1b");
+      .toBe("8d788f65d1751f222406394c4f537cf89eac7d28c9462a7d1ab7c48824f03939");
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
     expect(fixture.endpoints).toMatchObject({
@@ -66,9 +77,9 @@ describe("thin-agent-v1 application contract", () => {
     expect(fixture.capability_semantics).toMatchObject({
       client_authored_model_tool_schema: false,
       obsidian_vault_v1_maps_to_canonical_local_tool_count: 12,
-      server_tool_catalog_canonical_bytes: 13_475,
+      server_tool_catalog_canonical_bytes: 13_760,
       server_tool_catalog_sha256:
-        "d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228",
+        "4de25bca0d6f003517c198c52e32337877bbe5367114b142aa54cd666121db14",
     });
   });
 

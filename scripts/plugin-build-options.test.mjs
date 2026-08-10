@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import esbuild from "esbuild";
 import {
   CANONICAL_API_BASE_URL,
   LOCAL_AGENT_API_BASE_URL,
@@ -11,6 +12,15 @@ import {
   resolvePluginBuildStamp,
   resolvePluginBuildTarget,
 } from "./plugin-build-options.mjs";
+import {
+  PLUGIN_ARTIFACT_ID_PLUGIN_NAME,
+  PLUGIN_ARTIFACT_ID_PREFIX,
+  TEST_DRIVER_ARTIFACT_MODULE,
+  createPluginArtifactId,
+  createPluginArtifactIdentityPlugin,
+  extractPluginArtifactId,
+  inspectPluginArtifactIdentity,
+} from "./plugin-artifact-identity.mjs";
 
 test("production API base is the build default", () => {
   const options = createPluginBuildOptions();
@@ -96,11 +106,140 @@ test("production build stamps reject overrides and development remains stable", 
   );
 });
 
-test("caller-provided plugins are preserved without hidden runtime shims", () => {
+test("internal provenance stays ahead of every caller-provided plugin", () => {
   const plugin = { name: "caller-owned-plugin", setup() {} };
   const options = createPluginBuildOptions({ plugins: [plugin] });
 
-  assert.deepEqual(options.plugins, [plugin]);
+  assert.equal(options.plugins[0].name, PLUGIN_ARTIFACT_ID_PLUGIN_NAME);
+  assert.equal(options.plugins[1], plugin);
+  assert.throws(
+    () => createPluginBuildOptions({ overrides: { plugins: [] } }),
+    /cannot replace internal plugins/,
+  );
+});
+
+test("artifact identities use exactly 128 bits and strict lowercase formatting", () => {
+  const artifactId = createPluginArtifactId((size) => {
+    assert.equal(size, 16);
+    return Buffer.alloc(size, 0xab);
+  });
+  assert.equal(
+    artifactId,
+    `${PLUGIN_ARTIFACT_ID_PREFIX}${"ab".repeat(16)}`,
+  );
+  assert.equal(extractPluginArtifactId(`const id = ${JSON.stringify(artifactId)};`), artifactId);
+});
+
+test("artifact identity extraction fails closed without echoing bundle content", () => {
+  const valid = `${PLUGIN_ARTIFACT_ID_PREFIX}${"1".repeat(32)}`;
+  const secret = "private-bundle-content-that-must-not-leak";
+  for (const [label, bundle, expected] of [
+    ["missing", secret, /identity is missing/],
+    ["short", `${PLUGIN_ARTIFACT_ID_PREFIX}${"1".repeat(31)} ${secret}`, /malformed/],
+    ["long", `${PLUGIN_ARTIFACT_ID_PREFIX}${"1".repeat(33)} ${secret}`, /malformed/],
+    ["uppercase", `${PLUGIN_ARTIFACT_ID_PREFIX}${"A".repeat(32)} ${secret}`, /malformed/],
+    ["duplicate", `${valid}\n${valid}\n${secret}`, /ambiguous/],
+  ]) {
+    assert.throws(
+      () => extractPluginArtifactId(bundle),
+      (error) => error instanceof Error
+        && expected.test(error.message)
+        && !error.message.includes(secret)
+        && !error.message.includes(valid),
+      label,
+    );
+  }
+});
+
+test("one esbuild context mints a distinct exact identity for every rebuild", async () => {
+  const context = await esbuild.context(createPluginBuildOptions({
+    entryPoint: TEST_DRIVER_ARTIFACT_MODULE,
+    outfile: "unused-artifact-identity.js",
+    write: false,
+    production: true,
+    releaseBuild: false,
+    testDriver: true,
+  }));
+  try {
+    const first = await context.rebuild();
+    const second = await context.rebuild();
+    const firstText = first.outputFiles[0].text;
+    const secondText = second.outputFiles[0].text;
+    const firstId = extractPluginArtifactId(firstText);
+    const secondId = extractPluginArtifactId(secondText);
+
+    assert.notEqual(firstId, secondId);
+    assert.deepEqual(inspectPluginArtifactIdentity(firstText), {
+      prefixCount: 1,
+      validCount: 1,
+    });
+    assert.deepEqual(inspectPluginArtifactIdentity(secondText), {
+      prefixCount: 1,
+      validCount: 1,
+    });
+  } finally {
+    await context.dispose();
+  }
+});
+
+test("release builds resolve the virtual module without minting or retaining an identity", async () => {
+  let generated = 0;
+  const result = await esbuild.build({
+    entryPoints: [TEST_DRIVER_ARTIFACT_MODULE],
+    bundle: true,
+    write: false,
+    format: "cjs",
+    plugins: [createPluginArtifactIdentityPlugin({
+      enabled: false,
+      createArtifactId() {
+        generated += 1;
+        return `${PLUGIN_ARTIFACT_ID_PREFIX}${"2".repeat(32)}`;
+      },
+    })],
+  });
+  const bundle = result.outputFiles[0].text;
+  assert.equal(generated, 0);
+  assert.equal(bundle.includes(PLUGIN_ARTIFACT_ID_PREFIX), false);
+  assert.deepEqual(inspectPluginArtifactIdentity(bundle), {
+    prefixCount: 0,
+    validCount: 0,
+  });
+});
+
+test("full driver and release bundles enforce the executable provenance boundary", async () => {
+  const driverResult = await esbuild.build(createPluginBuildOptions({
+    entryPoint: "src/main.ts",
+    outfile: "main.js",
+    write: false,
+    production: true,
+    releaseBuild: false,
+    testDriver: true,
+    apiBaseUrl: LOCAL_AGENT_API_BASE_URL,
+    buildStamp: "local-agent",
+  }));
+  const releaseResult = await esbuild.build(createPluginBuildOptions({
+    entryPoint: "src/main.ts",
+    outfile: "main.js",
+    write: false,
+    production: true,
+    releaseBuild: true,
+    testDriver: false,
+    buildStamp: "release-6.3.1",
+  }));
+  const driverBundle = driverResult.outputFiles[0].text;
+  const releaseBundle = releaseResult.outputFiles[0].text;
+
+  assert.equal(driverBundle.includes("SystemSculptTestDriver/v1"), true);
+  assert.deepEqual(inspectPluginArtifactIdentity(driverBundle), {
+    prefixCount: 1,
+    validCount: 1,
+  });
+  assert.equal(releaseBundle.includes("SystemSculptTestDriver/v1"), false);
+  assert.equal(releaseBundle.includes(PLUGIN_ARTIFACT_ID_PREFIX), false);
+  assert.deepEqual(inspectPluginArtifactIdentity(releaseBundle), {
+    prefixCount: 0,
+    validCount: 0,
+  });
 });
 
 test("named build targets select fixed release and development routes", () => {

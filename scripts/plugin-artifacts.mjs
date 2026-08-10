@@ -12,6 +12,7 @@ import {
   STAGING_API_BASE_URL,
   normalizeApiBaseUrl,
 } from "./plugin-build-options.mjs";
+import { inspectPluginArtifactIdentity } from "./plugin-artifact-identity.mjs";
 
 export const REQUIRED_PLUGIN_ARTIFACTS = ["manifest.json", "main.js", "styles.css"];
 
@@ -292,6 +293,8 @@ export function inspectPluginArtifacts({
     nodeBuiltinRequires: [],
     mobileUnsafeNodeRequires: [],
     hasTestDriver: false,
+    artifactIdentityPrefixCount: 0,
+    validArtifactIdentityCount: 0,
   };
 
   if (mainFile.isRegularFile) {
@@ -398,6 +401,9 @@ export function inspectPluginArtifacts({
     }
 
     mainBundle.hasTestDriver = bundleText.includes(TEST_DRIVER_BUNDLE_MARKER);
+    const artifactIdentity = inspectPluginArtifactIdentity(bundleText);
+    mainBundle.artifactIdentityPrefixCount = artifactIdentity.prefixCount;
+    mainBundle.validArtifactIdentityCount = artifactIdentity.validCount;
     if (expectTestDriver === false && mainBundle.hasTestDriver) {
       problems.push(
         "main.js contains the E2E test driver; release artifacts must exclude it.",
@@ -407,6 +413,25 @@ export function inspectPluginArtifacts({
       problems.push(
         "main.js is missing the E2E test driver expected in this development artifact.",
       );
+    }
+    if (
+      (expectTestDriver === true || mainBundle.hasTestDriver)
+      && (artifactIdentity.prefixCount !== 1 || artifactIdentity.validCount !== 1)
+    ) {
+      problems.push(
+        "main.js does not contain exactly one valid compiled plugin artifact identity.",
+      );
+    }
+    if (expectTestDriver === false && artifactIdentity.prefixCount !== 0) {
+      problems.push(
+        "main.js contains a development artifact identity; release artifacts must exclude it.",
+      );
+    }
+    if (
+      artifactIdentity.prefixCount > 0
+      && artifactIdentity.validCount !== artifactIdentity.prefixCount
+    ) {
+      problems.push("main.js contains a malformed compiled plugin artifact identity.");
     }
   }
 

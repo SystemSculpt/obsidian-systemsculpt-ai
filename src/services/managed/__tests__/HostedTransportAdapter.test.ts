@@ -1,11 +1,9 @@
 import { requestUrl } from "obsidian";
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
-import { PlatformContext } from "../../PlatformContext";
 import { PlatformRequestClient } from "../../PlatformRequestClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), requestUrl: jest.fn() }));
-jest.mock("../../PlatformContext", () => ({ PlatformContext: { get: jest.fn() } }));
 jest.mock("../../PlatformRequestClient");
 
 const response = (status = 200, body: unknown = { ok: true }) => new Response(JSON.stringify(body), {
@@ -118,14 +116,14 @@ describe("HostedTransportAdapter", () => {
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ allowTransportFallback: false }));
   });
 
-  it("does not invoke requestUrl or a second transport when a managed embeddings fetch fails", async () => {
+  it("makes exactly one native transport attempt when a managed embeddings request fails", async () => {
     const ActualClient = jest.requireActual("../../PlatformRequestClient").PlatformRequestClient as typeof PlatformRequestClient;
     const originalFetch = globalThis.fetch;
-    const fetchFailure = new TypeError("fetch failed");
-    const fetchMock = jest.fn().mockRejectedValue(fetchFailure);
+    const transportFailure = new TypeError("network failed");
+    const fetchMock = jest.fn();
     globalThis.fetch = fetchMock;
-    (PlatformContext.get as jest.Mock).mockReturnValue({ preferredTransport: () => "fetch" });
     (requestUrl as jest.Mock).mockReset();
+    (requestUrl as jest.Mock).mockRejectedValue(transportFailure);
     const adapter = new HostedTransportAdapter({
       baseUrl: "https://api.test",
       pluginVersion: "6",
@@ -140,9 +138,9 @@ describe("HostedTransportAdapter", () => {
         capability: "embeddings",
         idempotencyKey: "embeddings:once",
         body: { input: ["private"] },
-      })).rejects.toBe(fetchFailure);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(requestUrl).not.toHaveBeenCalled();
+      })).rejects.toBe(transportFailure);
+      expect(requestUrl).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -339,7 +337,6 @@ describe("HostedTransportAdapter", () => {
 
   it("preserves requestUrl response headers and locally suppresses an aborted result without claiming server cancellation", async () => {
     const ActualClient = jest.requireActual("../../PlatformRequestClient").PlatformRequestClient as typeof PlatformRequestClient;
-    (PlatformContext.get as jest.Mock).mockReturnValue({ preferredTransport: () => "requestUrl" });
     (requestUrl as jest.Mock).mockResolvedValue({ status: 429, text: "limited", json: null, headers: {
       "Content-Type": "application/json", "X-Request-Id": "native-1", "X-RateLimit-Remaining": "0", "Retry-After": "7",
     } });

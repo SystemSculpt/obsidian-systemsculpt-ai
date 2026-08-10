@@ -8,6 +8,7 @@ import SystemSculptPlugin from "../main";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
+import type { PlatformTransport } from "./PlatformRequestClient";
 import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
 
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
@@ -15,66 +16,30 @@ import { LicenseService, type LicenseValidationResult } from "./LicenseService";
 import { FirstPartyToolService } from "../tools/FirstPartyToolService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 import type { FirstPartyToolChatTarget } from "../tools/types";
-
-type LocalToolFailure = {
-  location: string;
-  message: string;
-};
-
-const localToolFailureMessage = (value: unknown): string | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.error === "string" && record.error.trim()) return record.error.trim();
-  if (record.error && typeof record.error === "object") {
-    const nestedMessage = (record.error as Record<string, unknown>).message;
-    if (typeof nestedMessage === "string" && nestedMessage.trim()) return nestedMessage.trim();
-  }
-  if (record.success === false) return "Operation reported failure.";
-  return null;
-};
+import {
+  analyzeLocalToolOutcome,
+  localToolFailureMessage,
+  localToolOutcomeSchema,
+} from "../tools/LocalToolOutcome";
+import { parseBoundedServerTiming } from "../utils/serverTiming";
 
 /**
  * First-party tools often return an honest structured result instead of throwing.
  * Translate those resolved failures into the same ToolCallResult failure channel
  * used for thrown errors, while retaining the full result for agent recovery.
  */
-export function normalizeLocalToolOutcome(data: unknown): ToolCallResult {
+export function normalizeLocalToolOutcome(
+  data: unknown,
+  canonicalName?: string,
+): ToolCallResult {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return { success: true, data };
   }
 
   const record = data as Record<string, unknown>;
-  const failures: LocalToolFailure[] = [];
-  let successfulOperations = 0;
-
-  const inspectEntries = (key: "results" | "files") => {
-    const entries = record[key];
-    if (!Array.isArray(entries)) return;
-    entries.forEach((entry, index) => {
-      const failureMessage = localToolFailureMessage(entry);
-      if (failureMessage) {
-        const item = entry && typeof entry === "object" && !Array.isArray(entry)
-          ? entry as Record<string, unknown>
-          : {};
-        const identity = item.path ?? item.source ?? item.file ?? index;
-        failures.push({ location: `${key}[${String(identity)}]`, message: failureMessage });
-      } else {
-        successfulOperations += 1;
-      }
-    });
-  };
-
-  inspectEntries("results");
-  inspectEntries("files");
-
-  if (Array.isArray(record.errors)) {
-    record.errors.forEach((error, index) => {
-      const message = typeof error === "string"
-        ? error.trim()
-        : localToolFailureMessage(error);
-      if (message) failures.push({ location: `errors[${index}]`, message });
-    });
-  }
+  const schema = canonicalName ? localToolOutcomeSchema(canonicalName) : undefined;
+  const analysis = analyzeLocalToolOutcome(data, schema ?? undefined);
+  const failures = analysis.failures;
 
   const topLevelFailure = record.success === false || localToolFailureMessage(record) !== null;
   if (!topLevelFailure && failures.length === 0) {
@@ -82,7 +47,7 @@ export function normalizeLocalToolOutcome(data: unknown): ToolCallResult {
   }
 
   const appliedFiles = typeof record.appliedFiles === "number" ? record.appliedFiles : 0;
-  const partial = appliedFiles > 0 || successfulOperations > 0;
+  const partial = appliedFiles > 0 || analysis.completed > 0;
   const firstFailure = failures[0]?.message
     ?? (typeof record.error === "string" && record.error.trim() ? record.error.trim() : null)
     ?? "Tool operation reported failure.";
@@ -123,6 +88,39 @@ export type CreditsBalanceSnapshot = {
     checkoutUrl: string;
   } | null;
 };
+
+export type CreditsBalanceServerTiming = Readonly<{
+  authMs?: number;
+  rateLimitMs?: number;
+  balanceStoreMs?: number;
+  totalMs?: number;
+}>;
+
+export type CreditsBalanceObservation = Readonly<{
+  transport?: PlatformTransport;
+  status?: number;
+  serverTiming?: CreditsBalanceServerTiming;
+}>;
+
+const CREDITS_SERVER_TIMING_NAMES = Object.freeze({
+  auth: "authMs",
+  "rate-limit": "rateLimitMs",
+  "balance-store": "balanceStoreMs",
+  total: "totalMs",
+} as const);
+const MAX_CREDITS_SERVER_TIMING_HEADER_LENGTH = 1_024;
+
+/** Parse only the bounded phase durations owned by the credits-balance route. */
+export function parseCreditsBalanceServerTiming(
+  header: string | null,
+): CreditsBalanceServerTiming | undefined {
+  const timing = parseBoundedServerTiming(header, {
+    fields: CREDITS_SERVER_TIMING_NAMES,
+    maximumHeaderLength: MAX_CREDITS_SERVER_TIMING_HEADER_LENGTH,
+    maximumEntries: 16,
+  });
+  return timing ? Object.freeze(timing as CreditsBalanceServerTiming) : undefined;
+}
 
 const invalidCreditsBalance = (): never => {
   throw new SystemSculptError(
@@ -366,17 +364,14 @@ export class SystemSculptService {
   }
 
   // DELEGATE TO LICENSE SERVICE
-  async validateLicense(forceCheck = false): Promise<boolean> {
+  async validateLicenseDetailed(): Promise<LicenseValidationResult> {
     this.refreshSettings(); // Ensure settings are current before validation
-    return this.licenseService.validateLicense(forceCheck);
+    return this.licenseService.validateLicenseDetailed();
   }
 
-  async validateLicenseDetailed(forceCheck = false): Promise<LicenseValidationResult> {
-    this.refreshSettings();
-    return this.licenseService.validateLicenseDetailed(forceCheck);
-  }
-
-  public async getCreditsBalance(): Promise<CreditsBalanceSnapshot> {
+  public async getCreditsBalance(options: Readonly<{
+    onObservation?: (observation: CreditsBalanceObservation) => void;
+  }> = {}): Promise<CreditsBalanceSnapshot> {
     this.refreshSettings();
 
     const licenseKey = (this.settings.licenseKey || "").trim();
@@ -395,10 +390,24 @@ export class SystemSculptService {
       ...SystemSculptEnvironment.buildHeaders(licenseKey),
       Accept: "application/json",
     };
-    const response = await this.requestClient.request({
-      url,
-      method: "GET",
-      headers,
+    let transport: PlatformTransport | undefined;
+    let response: Response;
+    try {
+      response = await this.requestClient.request({
+        url,
+        method: "GET",
+        headers,
+        onTransportSelected: (selected) => { transport = selected; },
+      });
+    } catch (error) {
+      this.observeCreditsBalanceRequest(options.onObservation, { transport });
+      throw error;
+    }
+    const serverTiming = parseCreditsBalanceServerTiming(response.headers.get("server-timing"));
+    this.observeCreditsBalanceRequest(options.onObservation, {
+      transport,
+      status: response.status,
+      ...(serverTiming ? { serverTiming } : {}),
     });
 
     if (!response.ok) {
@@ -414,6 +423,17 @@ export class SystemSculptService {
         throw error;
       }
       return invalidCreditsBalance();
+    }
+  }
+
+  private observeCreditsBalanceRequest(
+    observer: ((observation: CreditsBalanceObservation) => void) | undefined,
+    observation: CreditsBalanceObservation,
+  ): void {
+    try {
+      observer?.(observation);
+    } catch {
+      // Diagnostics must never alter balance retrieval.
     }
   }
 
@@ -595,7 +615,7 @@ export class SystemSculptService {
         signal: options.signal,
         chatView: options.chatView,
       });
-      return normalizeLocalToolOutcome(data);
+      return normalizeLocalToolOutcome(data, functionName);
     } catch (error) {
       const executionCode = (error as { code?: unknown })?.code;
       return {

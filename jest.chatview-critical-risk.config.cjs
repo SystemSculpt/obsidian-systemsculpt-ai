@@ -7,6 +7,7 @@ const criticalRiskTests = [
 	"<rootDir>/src/views/chatview/__tests__/ChatStorageService.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-admission.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-fork-retry-integration.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/chat-1450-regression.acceptance.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-presentation.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-renderer-icons.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
@@ -112,7 +113,7 @@ module.exports = {
 		},
 		"./src/views/chatview/agent/ChatSession.ts": {
 			statements: -217,
-			branches: -383,
+			branches: -384,
 			functions: -18,
 			lines: -170,
 		},

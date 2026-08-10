@@ -19,6 +19,9 @@ import {
   CANONICAL_API_BASE_URL,
   STAGING_API_BASE_URL,
 } from "./plugin-build-options.mjs";
+import { PLUGIN_ARTIFACT_ID_PREFIX } from "./plugin-artifact-identity.mjs";
+
+const TEST_ARTIFACT_ID = `${PLUGIN_ARTIFACT_ID_PREFIX}${"a".repeat(32)}`;
 
 function createTempPluginDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-artifacts-"));
@@ -112,7 +115,11 @@ test("staging artifacts require only the staging API and remain invalid release 
   const root = createTempPluginDir();
   writeRequiredArtifacts(
     root,
-    stagingBundle(`console.log('staging build');\nconst driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+    stagingBundle(
+      `console.log('staging build');\n`
+        + `const driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`
+        + `const artifact = ${JSON.stringify(TEST_ARTIFACT_ID)};\n`,
+    ),
   );
 
   const inspection = assertStagingPluginArtifacts({ root });
@@ -120,6 +127,8 @@ test("staging artifacts require only the staging API and remain invalid release 
   assert.equal(inspection.mainBundle.expectedApiBaseUrl, STAGING_API_BASE_URL);
   assert.equal(inspection.mainBundle.hasExpectedApiBase, true);
   assert.equal(inspection.mainBundle.hasCanonicalApiBase, false);
+  assert.equal(inspection.mainBundle.artifactIdentityPrefixCount, 1);
+  assert.equal(inspection.mainBundle.validArtifactIdentityCount, 1);
   assert.deepEqual(inspection.mainBundle.forbiddenApiBases, []);
   assert.throws(
     () => assertProductionPluginArtifacts({ root }),
@@ -656,7 +665,11 @@ test("buildStagingPlugin forces the staging URL and revalidates the target artif
       assert.equal(options.shell, undefined);
       writeRequiredArtifacts(
         root,
-        stagingBundle(`console.log('staging bundle');\nconst driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+        stagingBundle(
+          `console.log('staging bundle');\n`
+            + `const driver = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`
+            + `const artifact = ${JSON.stringify(TEST_ARTIFACT_ID)};\n`,
+        ),
       );
       return {
         status: 0,
@@ -719,6 +732,15 @@ test("release artifacts must exclude the E2E test driver; development artifacts 
   writeRequiredArtifacts(root, productionBundle());
   assert.equal(assertProductionPluginArtifacts({ root }).mainBundle.hasTestDriver, false);
 
+  writeRequiredArtifacts(
+    root,
+    productionBundle(`const artifact = ${JSON.stringify(TEST_ARTIFACT_ID)};\n`),
+  );
+  assert.throws(
+    () => assertProductionPluginArtifacts({ root }),
+    /development artifact identity/,
+  );
+
   const stagingRoot = createTempPluginDir();
   writeRequiredArtifacts(stagingRoot, stagingBundle());
   assert.throws(
@@ -727,7 +749,10 @@ test("release artifacts must exclude the E2E test driver; development artifacts 
   );
   writeRequiredArtifacts(
     stagingRoot,
-    stagingBundle(`const marker = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`),
+    stagingBundle(
+      `const marker = ${JSON.stringify(TEST_DRIVER_BUNDLE_MARKER)};\n`
+        + `const artifact = ${JSON.stringify(TEST_ARTIFACT_ID)};\n`,
+    ),
   );
   assert.equal(assertStagingPluginArtifacts({ root: stagingRoot }).mainBundle.hasTestDriver, true);
 });

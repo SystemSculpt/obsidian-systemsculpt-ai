@@ -1,72 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import makeAgentVaultToolRoundTrip from "../../testing/e2e/scenarios/agent-vault-tool-round-trip.mjs";
-import makeAgentVaultToolStress from "../../testing/e2e/scenarios/agent-vault-tool-stress.mjs";
-import makeChatLiveAcceptance from "./chatview-live-acceptance.mjs";
+const root = fileURLToPath(new URL("../..", import.meta.url));
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-function stepByLabel(steps, label) {
-  const step = steps.find((candidate) => candidate.label === label);
-  assert.ok(step, `Missing scenario step: ${label}`);
-  return step;
-}
+const liveScripts = Object.entries(packageJson.scripts).filter(([name]) =>
+  name.startsWith("qa:chatview:live"),
+);
 
-test("vault tool journeys use unique paths and exact completion markers", () => {
-  const first = makeAgentVaultToolRoundTrip(1000);
-  const second = makeAgentVaultToolRoundTrip(1001);
-  const firstPrompt = stepByLabel(first, "submit a vault-tool prompt").params.text;
-  const secondPrompt = stepByLabel(second, "submit a vault-tool prompt").params.text;
-  assert.notEqual(firstPrompt, secondPrompt);
-  assert.match(firstPrompt, /QA\/E2E\/round-trip-[A-Z0-9]+\.md/);
-  assert.match(firstPrompt, /reply with exactly DONE-[A-Z0-9]+/);
-  assert.equal(
-    stepByLabel(first, "round-trip file has exact content").action,
-    "vault.assertText",
-  );
-
-  const stressPrompt = stepByLabel(
-    makeAgentVaultToolStress(2000),
-    "submit a ~30 tool-call job",
-  ).params.text;
-  assert.match(stressPrompt, /QA\/Stress-[A-Z0-9]+/);
-  assert.match(stressPrompt, /reply with exactly FINISHED-[A-Z0-9]+/);
-  assert.equal(
-    stepByLabel(makeAgentVaultToolStress(2000), "stress summary has exact content").action,
-    "vault.assertText",
-  );
-});
-
-test("normal live acceptance covers text, attachment, approval, and timing", () => {
-  const steps = makeChatLiveAcceptance(3000);
-  assert.equal(steps.filter((step) => step.action === "waitForRun").length, 4);
-  assert.ok(steps.some((step) => step.label === "copy feedback"));
-  assert.ok(steps.some((step) => step.label === "attachment content reached the response"));
-  assert.ok(steps.some((step) => step.label === "approval is required"));
-  assert.ok(steps.some((step) => step.label === "allow once"));
-  assert.ok(steps.some((step) => step.label === "approval preview has the exact path"));
-  assert.ok(steps.some((step) => step.label === "approval preview has the exact content"));
-  assert.equal(
-    stepByLabel(steps, "approval preview has the exact path").params.state,
-    "textEquals",
-  );
-  assert.equal(
-    stepByLabel(steps, "approval preview has the exact content").params.state,
-    "textEquals",
-  );
-  assert.equal(
-    stepByLabel(steps, "approved file has exact content").action,
-    "vault.assertText",
-  );
-  const exactResponses = steps.filter((step) =>
-    step.label === "expected response is visible"
-    || step.label === "attachment content reached the response"
-    || step.label === "expected completion marker");
-  assert.equal(exactResponses.length, 3);
-  assert.ok(exactResponses.every((step) => step.params.state === "textEquals"));
-  assert.equal(
-    stepByLabel(steps, "wait for approval or terminal").params.returnOnApproval,
-    true,
-  );
-  assert.equal(steps.filter((step) => step.resumeAfterFailure === true).length, 4);
-  assert.ok(steps.every((step) => step.action !== "waitForRun" || step.params.stallMs > 0));
+test("every guarded live QA phase resolves to a real scenario module", async () => {
+  assert.ok(liveScripts.length > 0, "expected qa:chatview:live scripts");
+  for (const [name, command] of liveScripts) {
+    const match = /e2e\.mjs script (\S+\.mjs)/.exec(command);
+    assert.ok(match, `${name} must run a scenario through scripts/e2e/e2e.mjs`);
+    const scenarioPath = path.join(root, match[1]);
+    assert.equal(fs.existsSync(scenarioPath), true, `${name}: ${match[1]} must exist`);
+    const module = await import(pathToFileURL(scenarioPath).href);
+    assert.equal(
+      Object.values(module).some((value) => value !== undefined && value !== null),
+      true,
+      `${name}: ${match[1]} must export a scenario`,
+    );
+  }
 });

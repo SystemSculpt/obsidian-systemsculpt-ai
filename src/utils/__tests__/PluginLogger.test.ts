@@ -174,6 +174,16 @@ describe("PluginLogger", () => {
         toolCallId: "call-safe",
         incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         failureCode: "response_capacity_unavailable",
+        latencyTraceId: "c".repeat(32),
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 4,
+        toolExecutionOrdinal: 3,
+        historySyncKind: "terminal",
+        historySyncOrdinal: 5,
+        responseDeliveryMode: "fetch_stream",
+        clientMonotonicOffsetMs: 12.3456,
+        serverTimingAppMs: 7.5,
+        serverTimingAuthMs: 1.25,
         prompt: "private prompt",
         content: "private content",
         path: "Private.md",
@@ -208,6 +218,18 @@ describe("PluginLogger", () => {
               toolCallId: "call-safe",
               incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               failureCode: "response_capacity_unavailable",
+              latencyTraceId: "c".repeat(32),
+              commandKind: "client_tool_result",
+              commandSegmentOrdinal: 4,
+              toolExecutionOrdinal: 3,
+              historySyncKind: "terminal",
+              historySyncOrdinal: 5,
+              responseDeliveryMode: "fetch_stream",
+              clientMonotonicOffsetMs: 12.346,
+              clientClockDomain: "client_turn_monotonic",
+              serverTimingAppMs: 7.5,
+              serverTimingAuthMs: 1.25,
+              serverTimingClockDomain: "server_response_headers_monotonic_duration",
             },
           },
         }),
@@ -233,6 +255,7 @@ describe("PluginLogger", () => {
       "mutation_journal",
       "persistence",
       "render",
+      "account",
       "unknown",
     ])("accepts the neutral lifecycle phase %s", (phase) => {
       logger.lifecycle({ code: "run_started", phase });
@@ -246,6 +269,68 @@ describe("PluginLogger", () => {
           },
         }),
       ]);
+    });
+
+    it("persists bounded credits refresh timing without account or content data", () => {
+      logger.lifecycle({
+        sequence: 3,
+        timestamp: 456,
+        code: "credits_refresh_succeeded",
+        phase: "account",
+        status: 200,
+        creditsRefreshReason: "post_terminal",
+        creditsRefreshSequence: 2,
+        creditsRefreshTransport: "request_url",
+        creditsRefreshElapsedMs: 42_345.6789,
+        creditsRefreshServerAuthMs: 1.2345,
+        creditsRefreshServerRateLimitMs: 2,
+        creditsRefreshServerBalanceStoreMs: 39_999.9999,
+        creditsRefreshServerTotalMs: 42_000.1255,
+        license: "private-license",
+        account: "private-account",
+        content: "private-content",
+      });
+
+      expect(logger.getRecentEntries()[0].context?.metadata).toEqual({
+        sequence: 3,
+        timestamp: 456,
+        code: "credits_refresh_succeeded",
+        phase: "account",
+        status: 200,
+        creditsRefreshReason: "post_terminal",
+        creditsRefreshSequence: 2,
+        creditsRefreshTransport: "request_url",
+        creditsRefreshElapsedMs: 42_345.679,
+        creditsRefreshClockDomain: "client_refresh_monotonic_duration",
+        creditsRefreshServerAuthMs: 1.235,
+        creditsRefreshServerRateLimitMs: 2,
+        creditsRefreshServerBalanceStoreMs: 40_000,
+        creditsRefreshServerTotalMs: 42_000.126,
+        creditsRefreshServerTimingClockDomain:
+          "server_response_headers_monotonic_duration",
+      });
+      expect(logger.getSupportDiagnostics()).toEqual([{
+        timestamp: expect.any(String),
+        severity: "info",
+        code: "credits_refresh_succeeded",
+        phase: "account",
+        sequence: 3,
+        status: 200,
+        credits_refresh_reason: "post_terminal",
+        credits_refresh_sequence: 2,
+        credits_refresh_transport: "request_url",
+        credits_refresh_elapsed_ms: 42_345.679,
+        credits_refresh_clock_domain: "client_refresh_monotonic_duration",
+        credits_refresh_server_auth_ms: 1.235,
+        credits_refresh_server_rate_limit_ms: 2,
+        credits_refresh_server_balance_store_ms: 40_000,
+        credits_refresh_server_total_ms: 42_000.126,
+        credits_refresh_server_timing_clock_domain:
+          "server_response_headers_monotonic_duration",
+      }]);
+      expect(JSON.stringify(logger.getRecentEntries())).not.toMatch(
+        /private-license|private-account|private-content/u,
+      );
     });
 
     it("accepts every code in the strict lifecycle contract", () => {
@@ -364,6 +449,15 @@ describe("PluginLogger", () => {
         toolName: "read",
         toolCallId: "call-safe",
         failureCode: "response_capacity_unavailable",
+        latencyTraceId: "d".repeat(32),
+        commandKind: "client_tool_approval",
+        commandSegmentOrdinal: 2,
+        toolExecutionOrdinal: 3,
+        historySyncKind: "terminal",
+        historySyncOrdinal: 5,
+        responseDeliveryMode: "request_url_buffered",
+        clientMonotonicOffsetMs: 23.125,
+        serverTimingAppMs: 9.75,
         prompt: hostileCanaries[0],
         path: hostileCanaries[1],
         canary: hostileCanaries[2],
@@ -399,8 +493,18 @@ describe("PluginLogger", () => {
           run_id: "run-local-safe",
           server_run_id: "run_0123456789abcdef0123456789abcdef",
           tool_name: "read",
-          tool_call_id: "call-safe",
           failure_code: "response_capacity_unavailable",
+          latency_trace_id: "d".repeat(32),
+          command_kind: "client_tool_approval",
+          command_segment_ordinal: 2,
+          tool_execution_ordinal: 3,
+          history_sync_kind: "terminal",
+          history_sync_ordinal: 5,
+          response_delivery_mode: "request_url_buffered",
+          client_monotonic_offset_ms: 23.125,
+          client_clock_domain: "client_turn_monotonic",
+          server_timing_app_ms: 9.75,
+          server_timing_clock_domain: "server_response_headers_monotonic_duration",
         },
         {
           timestamp: expect.any(String),
@@ -416,6 +520,7 @@ describe("PluginLogger", () => {
       for (const canary of hostileCanaries) {
         expect(copied).not.toContain(canary);
       }
+      expect(copied).not.toContain("call-safe");
       expect(copied).not.toMatch(
         /\b(?:model|provider|harness|transport|protocol|Cloudflare|Think|Pi|OpenRouter|WebSocket)\b|agent connection|connection ticket|AI SDK/iu,
       );

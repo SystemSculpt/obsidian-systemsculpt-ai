@@ -3,10 +3,6 @@ import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { buildChatLeafState, type ChatResumeDescriptor } from "./storage/ChatPersistenceTypes";
 
-export function buildChatResumeState(descriptor: ChatResumeDescriptor): Record<string, unknown> {
-  return buildChatLeafState(descriptor);
-}
-
 export async function openChatResumeDescriptor(
   plugin: SystemSculptPlugin,
   descriptor: ChatResumeDescriptor,
@@ -16,7 +12,7 @@ export async function openChatResumeDescriptor(
   await targetLeaf.setViewState({
     type: CHAT_VIEW_TYPE,
     active: true,
-    state: buildChatResumeState(descriptor),
+    state: buildChatLeafState(descriptor),
   });
   plugin.app.workspace.revealLeaf(targetLeaf);
 }

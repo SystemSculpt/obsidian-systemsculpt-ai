@@ -80,12 +80,30 @@ function normalizeProjectedServerTimestamps(message: ChatMessage): ChatMessage {
   };
 }
 
+// Key order is serialization noise, not identity: the locally committed user
+// message and its server-projected echo carry the same fields in different
+// insertion order, and a raw JSON.stringify comparison would bump the
+// transcript version — and rebuild history rows — for every turn's echo.
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => typeof entryValue !== "undefined")
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJson(entryValue)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 function isSameProjectedServerHistory(
   left: readonly ChatMessage[],
   right: readonly ChatMessage[],
 ): boolean {
-  return JSON.stringify(left.map(normalizeProjectedServerTimestamps))
-    === JSON.stringify(right.map(normalizeProjectedServerTimestamps));
+  return stableJson(left.map(normalizeProjectedServerTimestamps))
+    === stableJson(right.map(normalizeProjectedServerTimestamps));
 }
 
 function hasUniqueIds(values: readonly string[]): boolean {

@@ -1,10 +1,20 @@
-import type { PlatformRequestInput } from "../../../../services/PlatformRequestClient";
+import {
+  PlatformRequestClient,
+  type PlatformRequestInput,
+} from "../../../../services/PlatformRequestClient";
 import {
   parseThinAgentDataPart,
   type ThinAgentBootstrapRequest,
 } from "../../../../services/managed/ThinAgentV1Contract";
 import type { ChatMessage } from "../../../../types";
-import type { ToolCallResult } from "../../../../types/toolCalls";
+import type { ToolCall, ToolCallResult } from "../../../../types/toolCalls";
+import {
+  presentAgentTool,
+  presentAgentToolFailure,
+} from "../../AgentToolPresentation";
+import { AgentConversationRenderer } from "../../AgentConversationRenderer";
+import type { AgentToolPart } from "../../AgentConversation";
+import { ChatMarkdownSerializer } from "../../storage/ChatMarkdownSerializer";
 import {
   THIN_AGENT_EVENT_TYPE,
   type AgentUserMessage,
@@ -47,6 +57,25 @@ function wireAssistant(
       ? [{ type: "text", text: parts, state: "done" }]
       : parts,
   };
+}
+
+function reloadSavedMessage(message: ChatMessage): ChatMessage {
+  const parsed = (ChatMarkdownSerializer as unknown as {
+    parseSequentialFormat(content: string): {
+      success: boolean;
+      messages: ChatMessage[];
+    };
+  }).parseSequentialFormat(ChatMarkdownSerializer.serializeMessages([message]));
+  expect(parsed.success).toBe(true);
+  expect(parsed.messages).toHaveLength(1);
+  return parsed.messages[0]!;
+}
+
+function projectReloadedTool(tool: ToolCall): AgentToolPart {
+  const prototype = AgentConversationRenderer.prototype as unknown as {
+    historicalToolPart(input: ToolCall): AgentToolPart;
+  };
+  return prototype.historicalToolPart(tool);
 }
 
 function idle(cursor: number) {
@@ -216,9 +245,9 @@ function bootstrapResponse(
   };
 }
 
-function jsonResponse(value: unknown): Response {
+function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" },
   });
 }
@@ -243,6 +272,12 @@ class FakeAgentServer {
   public snapshotQueuedRequestIds: readonly string[] = [];
   public snapshotCancelledQueuedRequestIds: readonly string[] = [];
   public turnStatus = 200;
+  public turnHeaders: Record<string, string> = {
+    "content-type": "text/event-stream",
+  };
+  public transformTurnResponse:
+    | ((response: Response) => Promise<Response>)
+    | null = null;
   /**
    * Lets a test decide one command's delivery outcome. Call deliver() to let
    * the turn proceed. Throw to make the HTTP delivery outcome uncertain.
@@ -279,7 +314,13 @@ class FakeAgentServer {
         });
       }
       if (url.includes("/agent/context")) {
-        return jsonResponse({ context_ref: "context_ref_test" });
+        return jsonResponse({
+          contract_version: "thin-agent-v1",
+          context_ref: `ctx1_${"a".repeat(43)}.${"b".repeat(43)}`,
+          expires_at: "2030-01-01T02:00:00.000Z",
+          bytes: 2,
+          sha256: `sha256:${"f".repeat(64)}`,
+        }, 201);
       }
       if (url.includes("/agent/turn")) {
         this.turnRequests += 1;
@@ -296,10 +337,16 @@ class FakeAgentServer {
           if (!delivered) {
             throw new Error("SystemSculpt could not run this message (0).");
           }
-          return this.openTurn();
+          const response = this.openTurn();
+          return this.transformTurnResponse
+            ? await this.transformTurnResponse(response)
+            : response;
         }
         this.sent.push(raw);
-        return this.openTurn();
+        const response = this.openTurn();
+        return this.transformTurnResponse
+          ? await this.transformTurnResponse(response)
+          : response;
       }
       throw new Error(`unexpected request url: ${url}`);
     },
@@ -326,7 +373,7 @@ class FakeAgentServer {
     });
     return new Response(body, {
       status: 200,
-      headers: { "content-type": "text/event-stream" },
+      headers: this.turnHeaders,
     });
   }
 
@@ -342,10 +389,27 @@ class FakeAgentServer {
     else this.buffered.push(frame);
   }
 
+  /**
+   * Models an event broadcast by another live response sink. Its terminal must
+   * not close the command stream that still owns a later acknowledgement.
+   */
+  public parallelServerMessage(value: unknown): void {
+    const controller = this.controller;
+    if (!controller) throw new Error("No agent turn is open for a parallel event.");
+    const frame = typeof value === "string" ? value : JSON.stringify(value);
+    controller.enqueue(this.encoder.encode(`data: ${frame}\n\n`));
+  }
+
   public endTurn(): void {
     const controller = this.controller;
     this.controller = null;
     try { controller?.close(); } catch { /* already closed */ }
+  }
+
+  public failTurn(error: Error): void {
+    const controller = this.controller;
+    this.controller = null;
+    try { controller?.error(error); } catch { /* already closed */ }
   }
 }
 
@@ -412,7 +476,11 @@ function createHarness(input: Readonly<{
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
   conversationId?: string;
-  refreshCredits?: () => Promise<void>;
+  refreshCredits?: (
+    reason: "post_terminal" | "billing_failure",
+    correlation: Readonly<{ requestId: string; serverRunId?: string }>,
+  ) => Promise<void>;
+  monotonicNow?: () => number;
 }> = {}) {
   const conversationId = input.conversationId ?? CONVERSATION_ID;
   const identitySuffix = conversationId.slice("conversation_".length);
@@ -452,6 +520,7 @@ function createHarness(input: Readonly<{
       : {}),
     resynchronizationDelayMs: input.resynchronizationDelayMs ?? (() => 0),
     now: () => 10_000,
+    monotonicNow: input.monotonicNow ?? (() => 0),
   });
 
   return {
@@ -547,6 +616,50 @@ afterEach(async () => {
 });
 
 describe("AgentChatSession", () => {
+  it("bootstraps and stages selected context before the chat session is hydrated", async () => {
+    const harness = createHarness();
+    const rootMessageId = "user_context_before_hydration";
+
+    await expect(harness.agent.stageContext(rootMessageId, []))
+      .resolves.toMatchObject({
+        contract_version: "thin-agent-v1",
+        context_ref: expect.stringMatching(/^ctx1_/u),
+        bytes: 2,
+      });
+
+    expect(harness.request).toHaveBeenCalledTimes(2);
+    expect(harness.request.mock.calls[0]?.[0]).toMatchObject({
+      url: "https://systemsculpt.test/api/plugin/agent/bootstrap",
+      method: "POST",
+      licenseKey: "license_test",
+      preserveResponseHeaders: true,
+      allowTransportFallback: true,
+      responseEncoding: "arrayBuffer",
+    });
+    expect(harness.request.mock.calls[1]?.[0]).toMatchObject({
+      url: "https://systemsculpt.test/api/plugin/agent/context",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer access_token_${"a".repeat(32)}`,
+        "x-plugin-version": "6.2.7",
+      },
+      body: {
+        contract_version: "thin-agent-v1",
+        root_message_id: rootMessageId,
+        context_sources: [],
+      },
+      preserveResponseHeaders: true,
+      allowTransportFallback: true,
+      responseEncoding: "arrayBuffer",
+    });
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "context_prepare_completed",
+      phase: "start",
+      conversationId: CONVERSATION_ID,
+      requestId: rootMessageId,
+    }));
+  });
+
   it("isolates overlapping turns in independent conversations", async () => {
     const firstConversationId = `conversation_${"1".repeat(32)}`;
     const secondConversationId = `conversation_${"2".repeat(32)}`;
@@ -653,45 +766,215 @@ describe("AgentChatSession", () => {
     }));
   });
 
-  it("waits for the successful-run balance refresh before admitting follow-up work", async () => {
-    const refreshStarted = deferred<void>();
-    const releaseRefresh = deferred<void>();
-    const harness = createHarness({
-      refreshCredits: async () => {
-        refreshStarted.resolve();
-        await releaseRefresh.promise;
+  it("releases a fast failure terminal before running is observed and admits the next turn", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const firstTurnId = "user_fast_terminal_failure";
+    const firstRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: firstTurnId,
+      message: userMessage(firstTurnId, "Fail before publishing running"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    // A rejected provider request may publish terminal authority without a
+    // preceding running observation. That ordering must still finish and
+    // release the local run immediately.
+    server.serverMessage(failedTerminal(
+      firstTurnId,
+      firstTurnId,
+      "response_capacity_unavailable",
+      true,
+    ));
+
+    await expect(firstRun).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        code: "response_capacity_unavailable",
+        retryable: true,
       },
     });
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "run_finished_failed",
+      requestId: firstTurnId,
+    }));
+    expect((harness.agent as unknown as { active: unknown }).active).toBeNull();
+    expect(harness.refreshCredits).not.toHaveBeenCalled();
+
+    server.snapshotMessages = [wireUser(firstTurnId, "Fail before publishing running")];
+    server.snapshotRunState = idle(1);
+    const secondTurnId = "user_after_fast_terminal_failure";
+    const secondRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: secondTurnId,
+      message: userMessage(secondTurnId, "Recover immediately"),
+    });
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "submit").length === 2);
+    server.serverMessage(assistantSnapshot(
+      secondTurnId,
+      wireAssistant("assistant_after_fast_terminal_failure", "Recovered immediately"),
+    ));
+    server.serverMessage(succeededTerminal(secondTurnId, secondTurnId));
+
+    await expect(secondRun).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    expect(harness.refreshCredits).toHaveBeenCalledWith("post_terminal", {
+      requestId: secondTurnId,
+      serverRunId: RUN_ID,
+    });
+  });
+
+  it("releases a provider-timeout failure delivered after only queue and placeholder traffic", async () => {
+    // Pins the live incident wire order for a provider timeout: the turn
+    // stream carried a queue snapshot, the submit acknowledgement, and a
+    // streaming assistant placeholder — never a running run_state — before the
+    // failed terminal arrived and the stream closed. That terminal must still
+    // release the run as failed instead of leaving a live "Thinking" turn.
+    const harness = trackedHarness();
     const server = await harness.open();
-    const turnId = "user_refresh_before_follow_up";
+    const turnId = "user_provider_timeout_failure";
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
-      message: userMessage(turnId, "Settle my held credits first"),
+      message: userMessage(turnId, "Time out at the provider"),
     });
-    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
-    server.serverMessage(runState(active(1, turnId, turnId)));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    server.serverMessage(event("queue_snapshot", {
+      queue: {
+        version: 1,
+        cursor: 1,
+        items: [{
+          kind: "submit",
+          request_id: turnId,
+          user_message: userMessage(turnId, "Time out at the provider"),
+        }],
+      },
+    }));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "submit",
+      status: "accepted",
+    }));
     server.serverMessage(assistantSnapshot(
       turnId,
-      wireAssistant("assistant_refresh_before_follow_up", "Credits settled"),
+      wireAssistant("assistant_provider_timeout", [
+        { type: "text", text: "", state: "streaming" },
+      ]),
     ));
-    server.serverMessage(succeededTerminal(turnId, turnId));
-
-    await refreshStarted.promise;
-    let runSettled = false;
-    void run.finally(() => { runSettled = true; });
     await tick();
-    expect(runSettled).toBe(false);
+    server.serverMessage(failedTerminal(
+      turnId,
+      turnId,
+      "response_service_unavailable",
+      true,
+    ));
 
-    releaseRefresh.resolve();
-    await expect(run).resolves.toMatchObject({ kind: "completed" });
-    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        code: "response_service_unavailable",
+        retryable: true,
+      },
+    });
+    expect(harness.agent.getSnapshot()).toMatchObject({ status: "failed" });
+    expect((harness.agent as unknown as { active: unknown }).active).toBeNull();
+  });
+
+  it("does not let a stalled balance refresh hold terminal completion or follow-up work", async () => {
+    const refreshStarted = deferred<void>();
+    const neverRefreshes = deferred<void>();
+    const harness = createHarness({
+      refreshCredits: async () => {
+        refreshStarted.resolve();
+        await neverRefreshes.promise;
+      },
+    });
+    const server = await harness.open();
+    const firstTurnId = "user_stalled_refresh_first";
+    const firstRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: firstTurnId,
+      message: userMessage(firstTurnId, "Complete before refreshing credits"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+    server.serverMessage(runState(active(1, firstTurnId, firstTurnId)));
+    server.serverMessage(assistantSnapshot(
+      firstTurnId,
+      wireAssistant("assistant_stalled_refresh_first", "First answer"),
+    ));
+    // Production publishes idle immediately before terminal. The completed
+    // run must release even when the best-effort balance request never does.
+    server.serverMessage(sessionSnapshot([
+      wireUser(firstTurnId, "Complete before refreshing credits"),
+      wireAssistant("assistant_stalled_refresh_first", "First answer"),
+    ], idle(2)));
+    server.serverMessage(succeededTerminal(firstTurnId, firstTurnId));
+
+    await expect(firstRun).resolves.toMatchObject({ kind: "completed" });
+    await refreshStarted.promise;
+    expect(harness.refreshCredits).toHaveBeenCalledWith("post_terminal", {
+      requestId: firstTurnId,
+      serverRunId: RUN_ID,
+    });
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "completed",
+      turnId: firstTurnId,
+    });
+    expect(harness.persistAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      message_id: "assistant_stalled_refresh_first",
+      content: "First answer",
+    }));
+    expect(harness.reportError).not.toHaveBeenCalled();
+
+    // hydrate() reconnects before a same-conversation follow-up, so its GET
+    // snapshot must expose the same terminal authority the live server does.
+    server.snapshotMessages = [
+      wireUser(firstTurnId, "Complete before refreshing credits"),
+      wireAssistant("assistant_stalled_refresh_first", "First answer"),
+    ];
+    server.snapshotRunState = idle(2);
+    const secondTurnId = "user_stalled_refresh_second";
+    const secondRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: secondTurnId,
+      message: userMessage(secondTurnId, "Start while credits still refresh"),
+    });
+    await waitFor(() => harness.commands().filter((command) =>
+      command.kind === "submit").length === 2);
+    server.serverMessage(runState(active(3, secondTurnId, secondTurnId)));
+    server.serverMessage(assistantSnapshot(
+      secondTurnId,
+      wireAssistant("assistant_stalled_refresh_second", "Second answer"),
+    ));
+    server.serverMessage(sessionSnapshot([
+      wireUser(firstTurnId, "Complete before refreshing credits"),
+      wireAssistant("assistant_stalled_refresh_first", "First answer"),
+      wireUser(secondTurnId, "Start while credits still refresh"),
+      wireAssistant("assistant_stalled_refresh_second", "Second answer"),
+    ], idle(4)));
+    server.serverMessage(succeededTerminal(secondTurnId, secondTurnId));
+
+    await expect(secondRun).resolves.toMatchObject({ kind: "completed" });
+    await waitFor(() => harness.refreshCredits.mock.calls.length === 2);
+    expect(harness.refreshCredits.mock.calls).toEqual([
+      ["post_terminal", { requestId: firstTurnId, serverRunId: RUN_ID }],
+      ["post_terminal", { requestId: secondTurnId, serverRunId: RUN_ID }],
+    ]);
+    expect(harness.reportError).not.toHaveBeenCalled();
   });
 
   it("refreshes credits after an authoritative billing failure", async () => {
     const refreshFailure = new Error("balance refresh failed");
+    const completionOrder: string[] = [];
     const harness = createHarness({
-      refreshCredits: async () => { throw refreshFailure; },
+      refreshCredits: async () => {
+        completionOrder.push("session_refresh");
+        throw refreshFailure;
+      },
     });
     const server = await harness.open();
     const turnId = "user_billing_terminal";
@@ -700,6 +983,7 @@ describe("AgentChatSession", () => {
       turnId,
       message: userMessage(turnId, "Use the remaining credits"),
     });
+    void run.then(() => { completionOrder.push("run_consumer"); });
     await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
     server.serverMessage(runState(active(1, turnId, turnId)));
     server.serverMessage(failedTerminal(turnId, turnId, "insufficient_credits", false));
@@ -709,7 +993,44 @@ describe("AgentChatSession", () => {
       error: { code: "insufficient_credits" },
     });
     expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    expect(harness.refreshCredits).toHaveBeenCalledWith("billing_failure", {
+      requestId: turnId,
+      serverRunId: RUN_ID,
+    });
     await tick();
+    expect(completionOrder).toEqual(["session_refresh", "run_consumer"]);
+    expect(harness.reportError).toHaveBeenCalledWith(refreshFailure);
+  });
+
+  it("contains a synchronous billing balance refresh failure after releasing the run", async () => {
+    const refreshFailure = new Error("synchronous balance refresh failed");
+    const harness = createHarness({
+      refreshCredits: (() => { throw refreshFailure; }) as (
+        reason: "post_terminal" | "billing_failure",
+        correlation: Readonly<{ requestId: string; serverRunId?: string }>,
+      ) => Promise<void>,
+    });
+    const server = await harness.open();
+    const turnId = "user_sync_billing_refresh_failure";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Finish despite refresh failure"),
+    });
+    await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(failedTerminal(turnId, turnId, "insufficient_credits", false));
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "insufficient_credits" },
+    });
+    await tick();
+    expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    expect(harness.refreshCredits).toHaveBeenCalledWith("billing_failure", {
+      requestId: turnId,
+      serverRunId: RUN_ID,
+    });
     expect(harness.reportError).toHaveBeenCalledWith(refreshFailure);
   });
 
@@ -975,6 +1296,88 @@ describe("AgentChatSession", () => {
     });
   });
 
+  it("keeps the cancelled partial in durable history when the post-cancel snapshot omits it", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_cancel_partial_snapshot_race";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Stream a long response"),
+    });
+    await waitFor(() => harness.commands().some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("message_cancel_partial_race", [
+      { type: "text", text: "PARTIAL-STREAM-START\n1\n2\n3", state: "streaming" },
+    ])));
+    await tick();
+
+    const cancellation = harness.agent.cancel();
+    await waitFor(() => harness.commands().some((command) =>
+      command.kind === "cancel"));
+    // The server broadcast racing the durable write of the partial: the
+    // snapshot still carries only the user root when the terminal lands.
+    server.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Stream a long response")],
+      active(2, turnId, turnId),
+    ));
+    server.serverMessage(cancelledTerminal(turnId, turnId));
+    server.endTurn();
+
+    await cancellation;
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+    await harness.agent.detach();
+    const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
+      readonly ChatMessage[];
+    const restored = reconciled.find((message) =>
+      message.role === "assistant"
+      && String(message.content).includes("PARTIAL-STREAM-START"));
+    expect(restored).toBeDefined();
+    expect(restored?.terminalOutcome).toBe("cancelled");
+  });
+
+  it("never rewrites durable history to a bare prefix while the run is finalizing", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_finalizing_prefix";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Answer briefly"),
+    });
+    await waitFor(() => harness.commands().some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(
+      "message_finalizing_prefix",
+      [{ type: "text", text: "SETTLED-ANSWER", state: "done" }],
+    )));
+    await tick();
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    // A late snapshot lands between terminal acceptance and finalization,
+    // carrying only the turn's user root. It must not rewrite durable
+    // history without the finished assistant turn.
+    server.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Answer briefly")],
+      idle(2),
+    ));
+    server.endTurn();
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    await harness.agent.detach();
+    const rewrites = harness.reconcileHistory.mock.calls.map((call) =>
+      call[0] as readonly ChatMessage[]);
+    expect(rewrites.length).toBeGreaterThan(0);
+    const droppedFinishedTurn = rewrites.some((messages) =>
+      messages.some((message) =>
+        message.role === "user" && message.message_id === turnId)
+      && !messages.some((message) =>
+        message.role === "assistant"
+        && String(message.content).includes("SETTLED-ANSWER")));
+    expect(droppedFinishedTurn).toBe(false);
+  });
+
   it("accepts a persisted terminal before a cancellation receipt or another request", async () => {
     const harness = trackedHarness();
     const server = await harness.open();
@@ -1095,6 +1498,580 @@ describe("AgentChatSession", () => {
       message_id: assistant.id,
       content: "Recovered answer",
     }));
+  });
+
+  it("resynchronizes a clean EOF without a terminal instead of inventing an outcome", async () => {
+    let now = 100;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    server.turnHeaders = {
+      "content-type": "text/event-stream",
+      "x-systemsculpt-agent-latency-trace": "1".repeat(32),
+    };
+    server.turnHeaders = {
+      "content-type": "text/event-stream",
+      "x-systemsculpt-agent-latency-trace": "1".repeat(32),
+      "server-timing": "app;dur=8.5, auth;dur=1.25",
+    };
+    const turnId = "user_clean_eof_recovery";
+    const user = wireUser(turnId, "Recover a clean EOF");
+    const assistant = wireAssistant("assistant_clean_eof_recovery", [{
+      type: "text",
+      text: "Recovered from durable authority",
+      state: "done",
+    }, {
+      type: "data-systemsculpt-run-terminal",
+      data: {
+        version: 1,
+        run_id: RUN_ID,
+        root_message_id: turnId,
+        outcome: "succeeded",
+        code: "completed",
+      },
+    }]);
+    const initialSnapshotReads = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Recover a clean EOF"),
+      clientStartedAtMonotonicMs: 90,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    now = 120;
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    await tick();
+    server.snapshotMessages = [user, assistant];
+    server.snapshotRunState = idle(2);
+    now = 130;
+    server.endTurn();
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    const snapshotReads = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+    expect(snapshotReads).toBeGreaterThan(initialSnapshotReads);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit" && command.request_id === turnId)).toHaveLength(1);
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "response_stream_ended_incomplete",
+      requestId: turnId,
+      failureCode: "turn_stream_incomplete",
+      retryable: true,
+      clientClockDomain: "client_turn_monotonic",
+    }));
+    expect(harness.onLifecycle).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "run_stalled" }),
+    );
+    expect(harness.persistAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      message_id: assistant.id,
+      content: "Recovered from durable authority",
+    }));
+  });
+
+  it("accepts clean EOF at a waiting-for-client segment boundary", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_waiting_segment_eof";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Pause at the client boundary"),
+      clientStartedAtMonotonicMs: 0,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(
+      1,
+      turnId,
+      turnId,
+      "waiting_for_client",
+    )));
+    await tick();
+    server.endTurn();
+    await tick();
+
+    expect(harness.onLifecycle).not.toHaveBeenCalledWith(expect.objectContaining({
+      code: "response_stream_ended_incomplete",
+    }));
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      turnId,
+      status: "running",
+    });
+
+    server.serverMessage(cancelledTerminal(turnId, turnId));
+    await harness.agent.cancel();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("does not switch authoritative conversations while a response is active", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_active_conversation_guard";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep this response in its original chat"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    await tick();
+
+    await expect(harness.agent.hydrate(`conversation_${"9".repeat(32)}`))
+      .rejects.toThrow("Wait for the current response to finish");
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("preserves an explicit client lifecycle offset without run latency state", () => {
+    const harness = trackedHarness();
+    const requestId = "user_explicit_client_lifecycle_offset";
+
+    harness.agent.recordClientRequestLifecycle({
+      code: "composer_unlocked",
+      phase: "render",
+      requestId,
+      clientMonotonicOffsetMs: 37.5,
+    });
+
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "composer_unlocked",
+      phase: "render",
+      requestId,
+      clientMonotonicOffsetMs: 37.5,
+      clientClockDomain: "client_turn_monotonic",
+    }));
+  });
+
+  it("bounds retained latency state while preserving current delivery metadata", async () => {
+    const harness = trackedHarness({
+      monotonicNow: () => {
+        throw new Error("A diagnostic clock is unavailable.");
+      },
+    });
+    const server = await harness.open();
+    const platformRequestClient = new PlatformRequestClient();
+    server.transformTurnResponse = async (response) => {
+      const fetchRequest = jest.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(response);
+      try {
+        return await platformRequestClient.request({
+          url: "https://systemsculpt.test/test-only-mark-stream",
+          method: "POST",
+          body: {},
+          stream: true,
+          preserveResponseHeaders: true,
+          allowTransportFallback: false,
+          transport: "fetch",
+        });
+      } finally {
+        fetchRequest.mockRestore();
+      }
+    };
+    server.turnStatus = 402;
+    const turnIds = Array.from(
+      { length: 9 },
+      (_, index) => `user_latency_retention_${index}`,
+    );
+
+    for (const turnId of turnIds) {
+      await expect(harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Reject this turn without losing diagnostics"),
+      })).resolves.toMatchObject({
+        kind: "failed",
+        error: { code: "insufficient_credits" },
+      });
+    }
+
+    harness.onLifecycle.mockClear();
+    const observedAt = performance.now();
+    harness.agent.recordClientRenderMilestone(
+      "response_first_dom_committed",
+      turnIds[0],
+      observedAt,
+    );
+    harness.agent.recordClientRenderMilestone(
+      "response_first_dom_committed",
+      turnIds.at(-1)!,
+      observedAt,
+    );
+
+    expect(harness.onLifecycle).toHaveBeenCalledTimes(1);
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "response_first_dom_committed",
+      requestId: turnIds.at(-1),
+      clientClockDomain: "client_turn_monotonic",
+    }));
+  });
+
+  it("records first transport, assistant, projection, and terminal timing once", async () => {
+    let now = 200;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    server.turnHeaders = {
+      "content-type": "text/event-stream",
+      "x-systemsculpt-agent-latency-trace": "2".repeat(32),
+      "server-timing": "app;dur=11.5, auth;dur=3",
+    };
+    const turnId = "user_latency_waterfall";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Measure this response"),
+      clientStartedAtMonotonicMs: 150,
+      beforeSend: async () => undefined,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    now = 220;
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    await tick();
+    now = 230;
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_latency", [{
+        type: "text",
+        text: "First delta",
+        state: "streaming",
+      }]),
+    ));
+    await tick();
+    now = 240;
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_latency", [{
+        type: "text",
+        text: "Later delta",
+        state: "streaming",
+      }]),
+    ));
+    now = 250;
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    now = 260;
+    harness.agent.recordClientRenderMilestone(
+      "response_first_dom_committed",
+      turnId,
+      now,
+    );
+    harness.agent.recordClientRenderMilestone(
+      "response_first_dom_committed",
+      turnId,
+      now + 1,
+    );
+    now = 270;
+    harness.agent.recordClientRenderMilestone(
+      "response_first_paint_opportunity",
+      turnId,
+      now,
+    );
+
+    const records = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId);
+    for (const code of [
+      "response_prepare_started",
+      "response_prepare_completed",
+      "response_available",
+      "response_first_body_chunk_observed",
+      "response_first_sse_frame_parsed",
+      "response_first_assistant_sse_frame_parsed",
+      "response_first_assistant_snapshot_received",
+      "response_first_assistant_snapshot_projected",
+      "response_first_content_projected",
+      "response_result_received_succeeded",
+      "response_save_started",
+      "response_save_completed",
+      "response_first_dom_committed",
+      "response_first_paint_opportunity",
+    ]) {
+      expect(records.filter((record) => record.code === code)).toHaveLength(1);
+    }
+    expect(records.find((record) => record.code === "response_available"))
+      .toMatchObject({
+        latencyTraceId: "2".repeat(32),
+        serverTimingAppMs: 11.5,
+        serverTimingAuthMs: 3,
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+        serverTimingClockDomain: "server_response_headers_monotonic_duration",
+      });
+    const preparationAndRun = records.filter((record) => [
+      "response_prepare_started",
+      "response_prepare_completed",
+      "run_started",
+    ].includes(String(record.code)));
+    expect(preparationAndRun).toHaveLength(3);
+    expect(preparationAndRun.every((record) =>
+      typeof record.clientMonotonicOffsetMs === "number"
+      && record.clientMonotonicOffsetMs >= 50)).toBe(true);
+    const history = records.filter((record) =>
+      String(record.code).startsWith("history_sync_"));
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "history_sync_started",
+        historySyncKind: "before_send",
+        historySyncOrdinal: 1,
+      }),
+      expect.objectContaining({
+        code: "history_sync_completed",
+        historySyncKind: "before_send",
+        historySyncOrdinal: 1,
+      }),
+      expect.objectContaining({
+        code: "history_sync_started",
+        historySyncKind: "terminal",
+        historySyncOrdinal: expect.any(Number),
+      }),
+      expect.objectContaining({
+        code: "history_sync_completed",
+        historySyncKind: "terminal",
+        historySyncOrdinal: expect.any(Number),
+      }),
+    ]));
+    const offsets = records
+      .map((record) => record.clientMonotonicOffsetMs)
+      .filter((value): value is number => typeof value === "number");
+    expect(offsets).toEqual([...offsets].sort((left, right) => left - right));
+    expect(records.filter((record) => "clientMonotonicOffsetMs" in record)
+      .every((record) => record.clientClockDomain === "client_turn_monotonic"))
+      .toBe(true);
+  });
+
+  it("keeps a cold response preparation failure on the original request clock", async () => {
+    let now = 100;
+    const request = jest.fn<Promise<Response>, [PlatformRequestInput]>(async () => {
+      now = 125;
+      throw Object.assign(new Error("cold preparation failed"), { status: 503 });
+    });
+    const harness = trackedHarness({ request, monotonicNow: () => now });
+    const turnId = "user_cold_prepare_failure";
+
+    await expect(harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep the failed preparation correlated"),
+      clientStartedAtMonotonicMs: 75,
+    })).resolves.toMatchObject({ kind: "failed" });
+
+    const preparation = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId
+        && String(record.code).startsWith("response_prepare_"));
+    expect(preparation).toEqual([
+      expect.objectContaining({
+        code: "response_prepare_started",
+        clientMonotonicOffsetMs: 25,
+        clientClockDomain: "client_turn_monotonic",
+      }),
+      expect.objectContaining({
+        code: "response_prepare_failed",
+        clientMonotonicOffsetMs: 50,
+        clientClockDomain: "client_turn_monotonic",
+        status: 503,
+      }),
+    ]);
+  });
+
+  it("keeps a rejected response save on the original request clock", async () => {
+    let now = 200;
+    const harness = trackedHarness({
+      monotonicNow: () => now,
+      persistAssistant: async () => {
+        now = 275;
+        throw new Error("save rejected");
+      },
+    });
+    const server = await harness.open();
+    const turnId = "user_response_save_rejected";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep the failed save correlated"),
+      clientStartedAtMonotonicMs: 150,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    now = 220;
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    now = 230;
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_save_rejected", "Save this authoritative answer"),
+    ));
+    await tick();
+    now = 240;
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+
+    const saves = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId
+        && String(record.code).startsWith("response_save_"));
+    expect(saves).toEqual([
+      expect.objectContaining({
+        code: "response_save_started",
+        clientMonotonicOffsetMs: 90,
+        clientClockDomain: "client_turn_monotonic",
+      }),
+      expect.objectContaining({
+        code: "response_save_failed",
+        clientMonotonicOffsetMs: 125,
+        clientClockDomain: "client_turn_monotonic",
+      }),
+    ]);
+  });
+
+  it("retains every command-segment trace and attributes later render work to the latest", async () => {
+    let now = 300;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    server.turnHeaders = {
+      "content-type": "text/event-stream",
+      "x-systemsculpt-agent-latency-trace": "3".repeat(32),
+    };
+    const turnId = "user_segment_trace_stability";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep the first segment trace"),
+      clientStartedAtMonotonicMs: 290,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    const internal = harness.agent as unknown as {
+      handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+    };
+    internal.handleTransportTiming({
+      milestone: "response_available",
+      requestId: turnId,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 2,
+      observedAtMonotonicMs: 302,
+      latencyTraceId: "4".repeat(32),
+      responseDeliveryMode: "request_url_buffered",
+      status: 200,
+    });
+    internal.handleTransportTiming({
+      milestone: "first_body_chunk",
+      requestId: turnId,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 2,
+      observedAtMonotonicMs: 303,
+      latencyTraceId: "4".repeat(32),
+      responseDeliveryMode: "request_url_buffered",
+    });
+    // A callback from the older submit stream arrives after segment 2. It must
+    // remain bound to segment 1 and cannot relabel later logical UI milestones.
+    internal.handleTransportTiming({
+      milestone: "first_body_chunk",
+      requestId: turnId,
+      commandKind: "submit",
+      commandSegmentOrdinal: 1,
+      observedAtMonotonicMs: 304,
+      latencyTraceId: "3".repeat(32),
+    });
+
+    now = 310;
+    harness.agent.recordClientRenderMilestone(
+      "response_first_dom_committed",
+      turnId,
+      now,
+    );
+    const responseAvailable = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.code === "response_available"
+        && record.requestId === turnId);
+    expect(responseAvailable).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        latencyTraceId: "3".repeat(32),
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+      }),
+      expect.objectContaining({
+        latencyTraceId: "4".repeat(32),
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 2,
+        responseDeliveryMode: "request_url_buffered",
+      }),
+    ]));
+    expect(responseAvailable).toHaveLength(2);
+    const bodyChunks = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.code === "response_first_body_chunk_observed"
+        && record.requestId === turnId);
+    expect(bodyChunks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        latencyTraceId: "3".repeat(32),
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+      }),
+      expect.objectContaining({
+        latencyTraceId: "4".repeat(32),
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 2,
+      }),
+    ]));
+    const dom = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .find((record) => record.code === "response_first_dom_committed"
+        && record.requestId === turnId);
+    expect(dom).toEqual(expect.objectContaining({
+      code: "response_first_dom_committed",
+      requestId: turnId,
+      clientClockDomain: "client_turn_monotonic",
+    }));
+    expect(dom).not.toEqual(expect.objectContaining({
+      latencyTraceId: expect.any(String),
+    }));
+    expect(dom).not.toEqual(expect.objectContaining({
+      commandSegmentOrdinal: expect.any(Number),
+    }));
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("does not allocate a tool execution ordinal from an unknown transport ID", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_unknown_transport_tool_id";
+    void harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Ignore an unestablished transport tool identity"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    const internal = harness.agent as unknown as {
+      handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+    };
+    internal.handleTransportTiming({
+      milestone: "command_dispatch_started",
+      requestId: turnId,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 99,
+      toolCallId: "call_unestablished_transport_only",
+      observedAtMonotonicMs: 1,
+    });
+
+    const dispatch = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .find((record) => record.code === "command_segment_dispatch_started"
+        && record.commandSegmentOrdinal === 99);
+    expect(dispatch).toMatchObject({
+      requestId: turnId,
+      commandKind: "client_tool_result",
+      toolCallId: "call_unestablished_transport_only",
+    });
+    expect(dispatch).not.toHaveProperty("toolExecutionOrdinal");
   });
 
   it("orders the optimistic user before full assistant replacements and coalesces presentation", async () => {
@@ -1420,6 +2397,798 @@ describe("AgentChatSession", () => {
     await expect(run).resolves.toMatchObject({ kind: "completed" });
   });
 
+  it("settles a completed vault tool before continuation text starts streaming", async () => {
+    const harness = trackedHarness({
+      executeLocalTool: async () => ({
+        success: true,
+        data: { files: [{ path: "Notes/Ready.md", content: "Ready" }] },
+      }),
+    });
+    const server = await harness.open([]);
+    const turnId = "user_tool_settles_before_continuation";
+    const callId = "call_tool_settles_before_continuation";
+    const input = { paths: ["Notes/Ready.md"] };
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read the note and summarize it"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(
+      "assistant_tool_settles_before_continuation",
+      [
+        clientToolRequest(callId, "read", input),
+        {
+          type: "tool-read",
+          toolCallId: callId,
+          state: "input-available",
+          input,
+        },
+      ],
+    )));
+    server.serverMessage(runState(active(
+      2,
+      turnId,
+      turnId,
+      "waiting_for_client",
+    )));
+
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+    await tick();
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    server.serverMessage(runState(active(3, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(
+      "assistant_tool_settles_before_continuation",
+      [
+        clientToolRequest(callId, "read", input),
+        {
+          type: "tool-read",
+          toolCallId: callId,
+          state: "output-available",
+          input,
+          output: { success: true, data: { files: [{ path: "Notes/Ready.md" }] } },
+          // A client tool is not a generator. If an intermediate projection
+          // still carries the SDK marker, local completion truth must win.
+          preliminary: true,
+        },
+        {
+          type: "text",
+          text: "The note is ready.",
+          state: "streaming",
+        },
+      ],
+    )));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "text" && part.markdown === "The note is ready."));
+
+    expect(harness.agent.getSnapshot()).toMatchObject({
+      status: "running",
+      phase: "working",
+      statusLabel: "Responding",
+      parts: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "tool",
+          callId,
+          state: "succeeded",
+        }),
+        expect.objectContaining({
+          kind: "text",
+          state: "streaming",
+          markdown: "The note is ready.",
+        }),
+      ]),
+    });
+    expect(harness.agent.getSnapshot().waitingReason).toBeUndefined();
+
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(
+      "assistant_tool_settles_before_continuation",
+      [
+        clientToolRequest(callId, "read", input),
+        {
+          type: "tool-read",
+          toolCallId: callId,
+          state: "output-available",
+          input,
+          output: { success: true, data: { files: [{ path: "Notes/Ready.md" }] } },
+          preliminary: false,
+        },
+        { type: "text", text: "The note is ready.", state: "done" },
+      ],
+    )));
+    await waitFor(() =>
+      (harness.agent as any).active.completedLocalToolResults.size === 0);
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it.each(["input", "name"] as const)(
+    "never projects a completed local result onto a same-ID tool with changed $change identity",
+    async (change) => {
+      const localResult: ToolCallResult = {
+        success: true,
+        data: { authority: "original-local-result" },
+      };
+      const harness = trackedHarness({
+        executeLocalTool: async () => localResult,
+      });
+      const server = await harness.open([]);
+      const turnId = `user_completed_result_identity_${change}`;
+      const assistantId = `assistant_completed_result_identity_${change}`;
+      const callId = `call_completed_result_identity_${change}`;
+      const originalInput = { paths: ["Original.md"] };
+      const changedInput = change === "input"
+        ? { paths: ["Changed.md"] }
+        : originalInput;
+      const changedName = change === "name" ? "find" : "read";
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Run one stable vault action"),
+      });
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "submit"));
+      server.serverMessage(runState(active(
+        1,
+        turnId,
+        turnId,
+        "waiting_for_client",
+      )));
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+        clientToolRequest(callId, "read", originalInput),
+        {
+          type: "tool-read",
+          toolCallId: callId,
+          state: "input-available",
+          input: originalInput,
+        },
+      ])));
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "client_tool_result" && command.tool_call_id === callId));
+      await waitFor(() =>
+        (harness.agent as any).active.completedLocalToolResults.has(callId));
+      expect(harness.agent.getSnapshot().parts).toContainEqual(expect.objectContaining({
+        kind: "tool",
+        callId,
+        state: "succeeded",
+        output: expect.objectContaining({ data: localResult.data }),
+      }));
+
+      const projectedAfterIdentityChange: Array<
+        ReturnType<typeof harness.agent.getSnapshot>
+      > = [];
+      const unsubscribe = harness.agent.subscribe((snapshot) => {
+        projectedAfterIdentityChange.push(snapshot);
+      });
+      try {
+        server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+          clientToolRequest(callId, changedName, changedInput),
+          {
+            type: `tool-${changedName}`,
+            toolCallId: callId,
+            state: "input-available",
+            input: changedInput,
+          },
+        ])));
+
+        await expect(run).resolves.toMatchObject({
+          kind: "failed",
+          error: { code: "client_tool_identity_mismatch", retryable: false },
+        });
+      } finally {
+        unsubscribe();
+      }
+
+      const changedToolProjections = projectedAfterIdentityChange.flatMap(
+        (snapshot) => snapshot.parts.filter(
+          (part): part is AgentToolPart => part.kind === "tool"
+            && part.callId === callId
+            && part.name === changedName
+            && JSON.stringify(part.input) === JSON.stringify(changedInput),
+        ),
+      );
+      expect(changedToolProjections.length).toBeGreaterThan(0);
+      expect(changedToolProjections.every((part) =>
+        part.state !== "succeeded" && part.output === undefined)).toBe(true);
+    },
+  );
+
+  it.each(["input-available", "preliminary"] as const)(
+    "overlays locally settled success, partial, and failed results into a %s terminal before save, reconcile, and reload",
+    async (terminalBoundary) => {
+      const privateFailure = "/Users/private/SecretVault terminal overlay sentinel";
+      const outcomes: readonly Readonly<{
+        label: string;
+        localResult: ToolCallResult;
+        expectedResult: ToolCallResult;
+        expectedToolState: ToolCall["state"];
+        expectedProjectedState: AgentToolPart["state"];
+        expectedDisplayState: ReturnType<typeof presentAgentTool>["displayState"];
+        expectedStateLabel: string;
+      }>[] = [
+        {
+          label: "success",
+          localResult: {
+            success: true,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 2,
+              results: [
+                { path: "Notes/First.md", success: true, appliedCount: 1 },
+                { path: "Notes/Second.md", success: true, appliedCount: 1 },
+              ],
+            },
+          },
+          expectedResult: {
+            success: true,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 2,
+              results: [
+                { path: "Notes/First.md", success: true, appliedCount: 1 },
+                { path: "Notes/Second.md", success: true, appliedCount: 1 },
+              ],
+            },
+          },
+          expectedToolState: "completed",
+          expectedProjectedState: "succeeded",
+          expectedDisplayState: "succeeded",
+          expectedStateLabel: "Done",
+        },
+        {
+          label: "mixed-partial",
+          localResult: {
+            success: false,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 1,
+              results: [
+                { path: "Notes/Changed.md", success: true, appliedCount: 1 },
+                {
+                  path: "Notes/Failed.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: privateFailure,
+                },
+              ],
+            },
+            error: { code: "TOOL_PARTIAL_FAILURE", message: privateFailure },
+          },
+          expectedResult: {
+            success: false,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 1,
+              results: [
+                { path: "Notes/Changed.md", success: true, appliedCount: 1 },
+                {
+                  path: "Notes/Failed.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: "The vault action failed.",
+                },
+              ],
+            },
+            error: {
+              code: "TOOL_EXECUTION_FAILED",
+              message: "The vault action failed.",
+            },
+          },
+          expectedToolState: "failed",
+          expectedProjectedState: "failed",
+          expectedDisplayState: "partial",
+          expectedStateLabel: "Partial",
+        },
+        {
+          label: "all-failed",
+          localResult: {
+            success: false,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 0,
+              results: [
+                {
+                  path: "Notes/First.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: `${privateFailure} first`,
+                },
+                {
+                  path: "Notes/Second.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: `${privateFailure} second`,
+                },
+              ],
+            },
+            error: { code: "TOOL_OPERATION_FAILED", message: privateFailure },
+          },
+          expectedResult: {
+            success: false,
+            data: {
+              requestedFiles: 2,
+              appliedFiles: 0,
+              results: [
+                {
+                  path: "Notes/First.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: "The vault action failed.",
+                },
+                {
+                  path: "Notes/Second.md",
+                  success: false,
+                  appliedCount: 0,
+                  error: "The vault action failed.",
+                },
+              ],
+            },
+            error: {
+              code: "TOOL_EXECUTION_FAILED",
+              message: "The vault action failed.",
+            },
+          },
+          expectedToolState: "failed",
+          expectedProjectedState: "failed",
+          expectedDisplayState: "failed",
+          expectedStateLabel: "Failed",
+        },
+      ];
+
+      for (const outcome of outcomes) {
+        const harness = trackedHarness({
+          executeLocalTool: async () => outcome.localResult,
+        });
+        const server = await harness.open([]);
+        const turnId = `user_durable_overlay_${terminalBoundary}_${outcome.label}`;
+        const assistantId = `assistant_durable_overlay_${terminalBoundary}_${outcome.label}`;
+        const callId = `call_durable_overlay_${terminalBoundary}_${outcome.label}`;
+        const input = {
+          files: [
+            {
+              path: "Notes/First.md",
+              edits: [{ oldText: "before", newText: "after" }],
+            },
+            {
+              path: "Notes/Second.md",
+              edits: [{ oldText: "before", newText: "after" }],
+            },
+          ],
+        };
+        const request = clientToolRequest(callId, "multi_edit", input);
+        const inputAvailable = {
+          type: "tool-multi_edit",
+          toolCallId: callId,
+          state: "input-available",
+          input,
+        } as const;
+        const run = harness.agent.start({
+          conversationId: CONVERSATION_ID,
+          turnId,
+          message: userMessage(turnId, "Apply this batch and retain its exact outcome"),
+          approvalPolicy: { requireDestructiveApproval: false },
+        });
+        await waitFor(() => harness.commands(server).some((command) =>
+          command.kind === "submit"));
+        server.serverMessage(sessionSnapshot(
+          [wireUser(turnId, "Apply this batch and retain its exact outcome")],
+          active(1, turnId, turnId, "waiting_for_client"),
+        ));
+        server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+          request,
+          inputAvailable,
+          { type: "text", text: "The batch is settled.", state: "done" },
+        ])));
+        await waitFor(() => harness.commands(server).some((command) =>
+          command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+        const outbound = harness.commands(server).find((command) =>
+          command.kind === "client_tool_result" && command.tool_call_id === callId);
+        expect(outbound).toMatchObject({
+          tool_call_id: callId,
+          tool_name: "multi_edit",
+          output: outcome.expectedResult,
+        });
+        expect(JSON.stringify(outbound)).not.toContain(privateFailure);
+
+        if (terminalBoundary === "preliminary") {
+          server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+            request,
+            {
+              ...inputAvailable,
+              state: "output-available",
+              output: {
+                success: true,
+                data: { staleServerPreliminaryResult: true },
+              },
+              preliminary: true,
+            },
+            { type: "text", text: "The batch is settled.", state: "done" },
+          ])));
+        }
+        server.serverMessage(succeededTerminal(turnId, turnId));
+
+        const result = await waitForResult(run);
+        expect(result).toMatchObject({ kind: "completed" });
+        const persisted = harness.persistAssistant.mock.calls.at(-1)?.[0];
+        const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0];
+        const reconciledAssistant = reconciled?.find((message) =>
+          message.message_id === assistantId);
+        const persistedTool = persisted?.tool_calls?.find((tool) => tool.id === callId);
+        const reconciledTool = reconciledAssistant?.tool_calls?.find((tool) =>
+          tool.id === callId);
+
+        expect(persistedTool).toMatchObject({
+          id: callId,
+          messageId: assistantId,
+          state: outcome.expectedToolState,
+          request: {
+            id: callId,
+            type: "function",
+            function: {
+              name: "multi_edit",
+              arguments: expect.any(String),
+            },
+          },
+          result: outcome.expectedResult,
+        });
+        expect(JSON.parse(persistedTool!.request.function.arguments)).toEqual(input);
+        expect(persistedTool).not.toHaveProperty("executedOn");
+        expect(reconciledTool).toMatchObject({
+          id: callId,
+          messageId: assistantId,
+          state: outcome.expectedToolState,
+          result: outcome.expectedResult,
+        });
+        expect(persisted?.messageParts?.find((part) =>
+          part.type === "tool_call" && part.data.id === callId)?.data.result)
+          .toEqual(outcome.expectedResult);
+        expect(reconciledAssistant?.messageParts?.find((part) =>
+          part.type === "tool_call" && part.data.id === callId)?.data.result)
+          .toEqual(outcome.expectedResult);
+        expect(JSON.stringify({ persisted, reconciledAssistant }))
+          .not.toContain(privateFailure);
+        expect(JSON.stringify({ persisted, reconciledAssistant }))
+          .not.toContain("staleServerPreliminaryResult");
+
+        const reloaded = reloadSavedMessage(persisted!);
+        const reloadedTool = reloaded.tool_calls?.find((tool) => tool.id === callId);
+        expect(reloadedTool?.result).toEqual(outcome.expectedResult);
+        const projected = projectReloadedTool(reloadedTool!);
+        expect(projected).toMatchObject({
+          callId,
+          name: "multi_edit",
+          location: "vault",
+          state: outcome.expectedProjectedState,
+          output: { data: outcome.expectedResult.data },
+        });
+        expect(presentAgentTool(projected)).toMatchObject({
+          displayState: outcome.expectedDisplayState,
+          stateLabel: outcome.expectedStateLabel,
+        });
+      }
+    },
+  );
+
+  it("keeps structured error arrays private without losing their safe shape", async () => {
+    const privateFailure = "/Users/private/SecretVault open failure sentinel";
+    const expectedResult: ToolCallResult = {
+      success: false,
+      data: {
+        opened: ["Visible.md"],
+        errors: ["The vault action failed."],
+        nested: {
+          messages: ["The vault action failed."],
+          paths: ["Visible.md"],
+        },
+      },
+      error: {
+        code: "TOOL_EXECUTION_FAILED",
+        message: "The vault action failed.",
+      },
+    };
+    const harness = trackedHarness({
+      executeLocalTool: async () => ({
+        success: false,
+        data: {
+          opened: ["Visible.md"],
+          errors: [privateFailure],
+          nested: {
+            messages: [`${privateFailure} nested`],
+            paths: ["Visible.md"],
+          },
+        },
+        error: { code: "TOOL_OPERATION_FAILED", message: privateFailure },
+      }),
+    });
+    const server = await harness.open([]);
+    const turnId = "user_structured_error_array_privacy";
+    const assistantId = "assistant_structured_error_array_privacy";
+    const callId = "call_structured_error_array_privacy";
+    const input = { files: [{ path: "Visible.md" }, { path: "Private.md" }] };
+    const request = clientToolRequest(callId, "open", input);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Open the visible note"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId, "waiting_for_client")));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      request,
+      {
+        type: "tool-open",
+        toolCallId: callId,
+        state: "input-available",
+        input,
+      },
+    ])));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    const outbound = harness.commands(server).find((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId);
+    expect(outbound).toMatchObject({ output: expectedResult });
+    const liveTool = harness.agent.getSnapshot().parts.find(
+      (part): part is AgentToolPart => part.kind === "tool" && part.callId === callId,
+    );
+    expect(liveTool?.output?.data).toEqual(expectedResult.data);
+    expect(JSON.stringify({ outbound, liveTool })).not.toContain(privateFailure);
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    const persisted = harness.persistAssistant.mock.calls.at(-1)?.[0];
+    const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0];
+    expect(persisted?.tool_calls?.[0]?.result).toEqual(expectedResult);
+    expect(reconciled?.find((message) => message.message_id === assistantId)
+      ?.tool_calls?.[0]?.result).toEqual(expectedResult);
+    expect(JSON.stringify({ persisted, reconciled })).not.toContain(privateFailure);
+  });
+
+  it("never replaces a final server-owned outcome with a same-ID local result", async () => {
+    const harness = trackedHarness({
+      executeLocalTool: async () => ({
+        success: true,
+        data: { authority: "locally-settled-result" },
+      }),
+    });
+    const server = await harness.open([]);
+    const turnId = "user_server_outcome_remains_authoritative";
+    const assistantId = "assistant_server_outcome_remains_authoritative";
+    const callId = "call_server_outcome_remains_authoritative";
+    const input = { paths: ["Authority.md"] };
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read the authority note"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId, "waiting_for_client")));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      clientToolRequest(callId, "read", input),
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "input-available",
+        input,
+      },
+    ])));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    // Removing the explicit client-tool request makes this replacement a
+    // server-owned action. Its final wire result must win even though a local
+    // result with the same call ID remains in the active-run cache.
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "output-available",
+        input,
+        output: {
+          success: true,
+          data: { authority: "final-server-owned-result" },
+        },
+      },
+      { type: "text", text: "The authoritative result is settled.", state: "done" },
+    ])));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+
+    const persisted = harness.persistAssistant.mock.calls.at(-1)?.[0];
+    const persistedTool = persisted?.tool_calls?.find((tool) => tool.id === callId);
+    expect(persistedTool).toMatchObject({
+      id: callId,
+      executedOn: "server",
+      state: "completed",
+      result: {
+        success: true,
+        data: { authority: "final-server-owned-result" },
+      },
+    });
+    expect(JSON.stringify(persistedTool)).not.toContain("locally-settled-result");
+    const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0];
+    expect(reconciled?.find((message) => message.message_id === assistantId)
+      ?.tool_calls?.[0]).toMatchObject({
+      executedOn: "server",
+      result: {
+        success: true,
+        data: { authority: "final-server-owned-result" },
+      },
+    });
+  });
+
+  it.each([
+    {
+      outcome: "mixed",
+      appliedFiles: 1,
+      results: [
+        { path: "Notes/Changed.md", success: true, appliedCount: 1 },
+        {
+          path: "Notes/Failed.md",
+          success: false,
+          appliedCount: 0,
+          error: "/Users/private/SecretVault conflict sentinel",
+        },
+      ],
+      resultCode: "TOOL_PARTIAL_FAILURE",
+      expectedDisplayState: "partial",
+      expectedStateLabel: "Partial",
+      expectedSummary: "1 completed, 1 failed",
+      expectedFailureCopy: "Some requested items failed; successful items were kept.",
+    },
+    {
+      outcome: "all-failed",
+      appliedFiles: 0,
+      results: [
+        {
+          path: "Notes/First failed.md",
+          success: false,
+          appliedCount: 0,
+          error: "/Users/private/SecretVault first failure sentinel",
+        },
+        {
+          path: "Notes/Second failed.md",
+          success: false,
+          appliedCount: 0,
+          error: "/Users/private/SecretVault second failure sentinel",
+        },
+      ],
+      resultCode: "TOOL_OPERATION_FAILED",
+      expectedDisplayState: "failed",
+      expectedStateLabel: "Failed",
+      expectedSummary: "0 completed, 2 failed",
+      expectedFailureCopy: "This vault action could not be completed.",
+    },
+  ])(
+    "presents a sanitized $outcome mutation batch honestly without failing the run",
+    async ({
+      outcome,
+      appliedFiles,
+      results,
+      resultCode,
+      expectedDisplayState,
+      expectedStateLabel,
+      expectedSummary,
+      expectedFailureCopy,
+    }) => {
+      const privateFailure = "/Users/private/SecretVault";
+      const input = {
+        files: results.map(({ path }) => ({
+          path,
+          edits: [{ oldText: "before", newText: "after" }],
+        })),
+      };
+      const harness = trackedHarness({
+        executeLocalTool: async () => ({
+          success: false,
+          data: {
+            success: false,
+            requestedFiles: results.length,
+            appliedFiles,
+            preflightFailed: appliedFiles === 0,
+            results,
+          },
+          error: {
+            code: resultCode,
+            message: `${privateFailure} ${outcome} failure sentinel`,
+          },
+        }),
+      });
+      const server = await harness.open([]);
+      const turnId = `user_sanitized_multi_edit_${outcome}`;
+      const callId = `call_sanitized_multi_edit_${outcome}`;
+      const assistantId = `assistant_sanitized_multi_edit_${outcome}`;
+      const request = clientToolRequest(callId, "multi_edit", input);
+      const toolPart = {
+        type: "tool-multi_edit",
+        toolCallId: callId,
+        state: "input-available",
+        input,
+      } as const;
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Update both notes, then continue"),
+        approvalPolicy: { requireDestructiveApproval: false },
+      });
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "submit"));
+      server.serverMessage(runState(active(1, turnId, turnId)));
+      server.serverMessage(assistantSnapshot(
+        turnId,
+        wireAssistant(assistantId, [request, toolPart]),
+      ));
+      server.serverMessage(runState(active(2, turnId, turnId, "waiting_for_client")));
+
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "client_tool_result" && command.tool_call_id === callId));
+      const outbound = harness.commands(server).find((command) =>
+        command.kind === "client_tool_result" && command.tool_call_id === callId);
+      expect(JSON.stringify(outbound)).not.toContain(privateFailure);
+
+      const projectedTool = harness.agent.getSnapshot().parts.find(
+        (part): part is AgentToolPart => part.kind === "tool" && part.callId === callId,
+      );
+      expect(projectedTool).toBeDefined();
+      const presentation = presentAgentTool(projectedTool!);
+      expect(presentation).toMatchObject({
+        displayState: expectedDisplayState,
+        stateLabel: expectedStateLabel,
+        summary: expectedSummary,
+      });
+      expect(presentAgentToolFailure(projectedTool!)).toBe(expectedFailureCopy);
+      expect(JSON.stringify({ presentation, error: presentAgentToolFailure(projectedTool!) }))
+        .not.toContain(privateFailure);
+
+      server.serverMessage(event("command_ack", {
+        request_id: turnId,
+        command_kind: "client_tool_result",
+        tool_call_id: callId,
+        status: "accepted",
+      }));
+      server.serverMessage(runState(active(3, turnId, turnId)));
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
+        request,
+        toolPart,
+        { type: "text", text: "The batch is settled.", state: "done" },
+      ])));
+      server.serverMessage(succeededTerminal(turnId, turnId));
+
+      await expect(run).resolves.toMatchObject({ kind: "completed" });
+      const completed = harness.agent.getSnapshot();
+      expect(completed).toMatchObject({
+        status: "completed",
+        parts: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "text",
+            markdown: "The batch is settled.",
+          }),
+        ]),
+      });
+      expect(completed.terminalError).toBeUndefined();
+      expect(completed.parts.some((part) => part.kind === "error")).toBe(false);
+      const completedTool = completed.parts.find(
+        (part): part is AgentToolPart => part.kind === "tool" && part.callId === callId,
+      );
+      expect(completedTool).toBeDefined();
+      expect(presentAgentTool(completedTool!)).toMatchObject({
+        displayState: expectedDisplayState,
+        stateLabel: expectedStateLabel,
+        summary: expectedSummary,
+      });
+    },
+  );
+
   it("serializes a tool result full of legal-JS-but-not-JSON values instead of failing delivery", async () => {
     // Local tool implementations return idiomatic JavaScript: optional fields
     // set to undefined (every folder listing does this), NaN durations, Dates,
@@ -1561,11 +3330,27 @@ describe("AgentChatSession", () => {
     await expect(run).resolves.toMatchObject({ kind: "completed" });
   });
 
-  it("stops claiming progress when a healthy connection produces no server activity", async () => {
+  it("recovers a terminal snapshot when a healthy-looking turn stream dies open", async () => {
     const harness = trackedHarness({ runStallGraceMs: 25 });
     const server = await harness.open([]);
 
     const turnId = "user_stalled_run";
+    const user = wireUser(turnId, "Do a long job");
+    const assistant = wireAssistant("assistant_stalled_run", [
+      { type: "text", text: "The durable response completed.", state: "done" },
+      {
+        type: "data-systemsculpt-run-terminal",
+        data: {
+          version: 1,
+          run_id: RUN_ID,
+          root_message_id: turnId,
+          outcome: "succeeded",
+          code: "completed",
+        },
+      },
+    ]);
+    const initialSnapshotReads = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
@@ -1573,34 +3358,124 @@ describe("AgentChatSession", () => {
     });
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "submit"));
-    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(sessionSnapshot([user], active(1, turnId, turnId)));
     await tick();
     await waitFor(() => harness.agent.getSnapshot().statusLabel === "Thinking");
+    server.snapshotMessages = [user, assistant];
+    server.snapshotRunState = idle(2);
 
-    // The stream stays healthy while the server goes quiet. Transport health
-    // cannot detect this, which is exactly the eternal-spinner case.
-    await waitFor(() =>
-      harness.agent.getSnapshot().statusLabel === "Still waiting on the server");
-    expect(harness.agent.getSnapshot()).toMatchObject({
-      status: "running",
-      phase: "retrying",
+    // The turn response never closes and never publishes another byte. The
+    // watchdog must replace it with a fresh authoritative snapshot instead of
+    // waiting forever for fetch to notice the dead upstream.
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "run_stalled" && record.requestId === turnId));
+    await expect(run).resolves.toMatchObject({
+      kind: "completed",
+      message: expect.objectContaining({
+        message_id: assistant.id,
+        content: "The durable response completed.",
+      }),
     });
-    // A silent stall must leave a trace; the whole failure was invisibility.
+    const snapshotReads = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+    expect(snapshotReads).toBeGreaterThan(initialSnapshotReads);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit" && command.request_id === turnId)).toHaveLength(1);
     expect(harness.reportError).toHaveBeenCalled();
     expect(harness.onLifecycle).toHaveBeenCalledWith(
       expect.objectContaining({ code: "run_stalled" }),
     );
-
-    server.serverMessage(succeededTerminal(turnId, turnId));
-    await tick();
-    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.onLifecycle).not.toHaveBeenCalledWith(expect.objectContaining({
+      code: "run_finished_failed",
+      requestId: turnId,
+    }));
+    expect(harness.agent.getSnapshot().terminalError).toBeUndefined();
   });
 
-  it("clears a stall as soon as the server produces new content", async () => {
-    const harness = trackedHarness({ runStallGraceMs: 25 });
+  it("cancels a scheduled stall reconnect across a terminal and the next run", async () => {
+    const harness = trackedHarness({
+      runStallGraceMs: 20,
+      resynchronizationDelayMs: () => 30,
+    });
+    const server = await harness.open([]);
+    const firstTurnId = "user_stall_timer_first";
+    const firstUser = wireUser(firstTurnId, "Finish before recovery polls");
+    const firstRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: firstTurnId,
+      message: userMessage(firstTurnId, "Finish before recovery polls"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit" && command.request_id === firstTurnId));
+    server.serverMessage(sessionSnapshot(
+      [firstUser],
+      active(1, firstTurnId, firstTurnId),
+    ));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "run_stalled" && record.requestId === firstTurnId));
+
+    // The terminal arrives on the still-live response before the delayed
+    // recovery poll. Completing the run must remove that scheduled reconnect.
+    server.serverMessage(succeededTerminal(firstTurnId, firstTurnId));
+    await expect(firstRun).resolves.toMatchObject({ kind: "completed" });
+    server.snapshotMessages = [
+      firstUser,
+      wireAssistant("assistant_stall_timer_first", [{
+        type: "data-systemsculpt-run-terminal",
+        data: {
+          version: 1,
+          run_id: RUN_ID,
+          root_message_id: firstTurnId,
+          outcome: "succeeded",
+          code: "completed",
+        },
+      }]),
+    ];
+    server.snapshotRunState = idle(2);
+
+    const secondTurnId = "user_stall_timer_second";
+    const secondRun = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: secondTurnId,
+      message: userMessage(secondTurnId, "Start the next response cleanly"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit" && command.request_id === secondTurnId));
+    server.serverMessage(runState(active(3, secondTurnId, secondTurnId)));
+    server.serverMessage(succeededTerminal(secondTurnId, secondTurnId));
+    await expect(secondRun).resolves.toMatchObject({ kind: "completed" });
+    const readsAfterSecondRun = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+
+    await new Promise((resolve) => setTimeout(resolve, 45));
+    expect(harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length)
+      .toBe(readsAfterSecondRun);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit" && command.request_id === firstTurnId)).toHaveLength(1);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit" && command.request_id === secondTurnId)).toHaveLength(1);
+  });
+
+  it("retries an unchanged stalled snapshot, then cancels backoff on same-cursor tool progress", async () => {
+    const resynchronizationDelayMs = jest.fn((attempt: number) =>
+      attempt === 0 ? 0 : 10);
+    const harness = trackedHarness({
+      runStallGraceMs: 50,
+      resynchronizationDelayMs,
+    });
     const server = await harness.open([]);
 
     const turnId = "user_recovering_run";
+    const user = wireUser(turnId, "Recover from a quiet patch");
+    const assistantId = "assistant_recovering_run";
+    const toolCallId = "call_recovering_server_tool";
+    const streamingAssistant = wireAssistant(assistantId, [{
+      type: "tool-web_search",
+      toolCallId,
+      state: "input-streaming",
+      input: { query: "quiet patch" },
+    }]);
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
@@ -1608,25 +3483,55 @@ describe("AgentChatSession", () => {
     });
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "submit"));
-    server.serverMessage(runState(active(1, turnId, turnId)));
-    await tick();
-    await waitFor(() =>
-      harness.agent.getSnapshot().statusLabel === "Still waiting on the server");
-
     server.serverMessage(sessionSnapshot(
-      [
-        wireUser(turnId, "Recover from a quiet patch"),
-        wireAssistant("assistant_recovered", "Back with you"),
-      ],
-      active(2, turnId, turnId),
+      [user, streamingAssistant],
+      active(1, turnId, turnId),
     ));
+    server.snapshotMessages = [user, streamingAssistant];
+    server.snapshotRunState = active(1, turnId, turnId);
     await tick();
+    const initialSnapshotReads = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+
+    await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+      attempt === 1));
+    expect(harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length)
+      .toBe(initialSnapshotReads + 1);
+
+    server.snapshotMessages = [
+      user,
+      wireAssistant(assistantId, [{
+        type: "tool-web_search",
+        toolCallId,
+        state: "output-available",
+        input: { query: "quiet patch" },
+        output: { success: true, data: { matches: 1 } },
+      }]),
+    ];
+    // Assistant replacement acceptance does not require a run-cursor change.
+    // The semantic tool transition itself is authoritative progress.
+    server.snapshotRunState = active(1, turnId, turnId);
+    await waitFor(() => harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length
+      === initialSnapshotReads + 2);
     await waitFor(() =>
       harness.agent.getSnapshot().statusLabel !== "Still waiting on the server");
+    const readsAfterProgress = harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length)
+      .toBe(readsAfterProgress);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit" && command.request_id === turnId)).toHaveLength(1);
 
-    server.serverMessage(succeededTerminal(turnId, turnId));
-    await tick();
-    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(harness.request.mock.calls.filter(([request]) =>
+      String(request.url).includes("/get-messages")).length)
+      .toBe(readsAfterProgress);
   });
 
   it("does not call a run stalled while the client owes the server a tool result", async () => {
@@ -1656,6 +3561,197 @@ describe("AgentChatSession", () => {
     server.serverMessage(succeededTerminal(turnId, turnId));
     await tick();
     await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it("keeps server-wait ownership after an approval ack and unrelated progress", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const server = await harness.open([]);
+    const turnId = "user_acknowledged_approval_stall";
+    const assistantId = "assistant_acknowledged_approval_stall";
+    const callId = "call_acknowledged_approval_stall";
+    const user = wireUser(turnId, "Approve once and wait for the server");
+    const requested = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "approval-requested"),
+    );
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Approve once and wait for the server"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, requested));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required"));
+
+    expect(harness.agent.respondToApproval(`approval_${callId}`, true)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingApprovalDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingApprovalDeliveries.get(callId)?.acknowledged === true);
+
+    // A separate assistant detail can advance without changing the requested
+    // approval. The accepted delivery still means the server owns the wait.
+    const progressed = wireAssistant(assistantId, [
+      { type: "reasoning", text: "Approval received", state: "done" },
+      ...writeApprovalParts(callId, "approval-requested"),
+    ]);
+    server.snapshotMessages = [user, progressed];
+    server.snapshotRunState = active(1, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, progressed));
+
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "run_stalled" && record.requestId === turnId));
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId)).toHaveLength(1);
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("recovers when a sent local mutation result stream dies without repeating the mutation", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const server = await harness.open([]);
+    const turnId = "user_result_stream_stalled";
+    const assistantId = "assistant_result_stream_stalled";
+    const callId = "call_result_stream_stalled";
+    const input = { path: "Result recovery.md", content: "Apply exactly once" };
+    const request = clientToolRequest(callId, "write", input);
+    const tool = {
+      type: "tool-write",
+      toolCallId: callId,
+      state: "input-available",
+      input,
+    } as const;
+    const user = wireUser(turnId, "Write this once, then finish");
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Write this once, then finish"),
+      approvalPolicy: { requireDestructiveApproval: false },
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit" && command.request_id === turnId));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, [request, tool]),
+    ));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+    expect(harness.executeLocalTool).toHaveBeenCalledTimes(1);
+
+    server.snapshotMessages = [
+      user,
+      wireAssistant(assistantId, [
+        request,
+        tool,
+        { type: "text", text: "The one mutation is durable.", state: "done" },
+        {
+          type: "data-systemsculpt-run-terminal",
+          data: {
+            version: 1,
+            run_id: RUN_ID,
+            root_message_id: turnId,
+            outcome: "succeeded",
+            code: "completed",
+          },
+        },
+      ]),
+    ];
+    server.snapshotRunState = idle(2);
+
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "run_stalled" && record.requestId === turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool).toHaveBeenCalledTimes(1);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId))
+      .toHaveLength(1);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId))
+      .toHaveLength(0);
+    expect(harness.agent.getSnapshot().terminalError).toBeUndefined();
+  });
+
+  it("recovers a sent approval stream without presenting or submitting approval twice", async () => {
+    const harness = trackedHarness({ runStallGraceMs: 25 });
+    const server = await harness.open([]);
+    const turnId = "user_approval_stream_stalled";
+    const assistantId = "assistant_approval_stream_stalled";
+    const callId = "call_approval_stream_stalled";
+    const user = wireUser(turnId, "Approve this once, then write it");
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Approve this once, then write it"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit" && command.request_id === turnId));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant(assistantId, writeApprovalParts(callId, "approval-requested")),
+    ));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.callId === callId
+      && part.state === "approval-required" && typeof part.approvalId === "string"));
+    const approval = harness.agent.getSnapshot().parts.find((part) =>
+      part.kind === "tool" && part.callId === callId);
+    expect(approval?.kind).toBe("tool");
+    expect(harness.agent.respondToApproval(
+      approval?.kind === "tool" ? approval.approvalId! : "",
+      true,
+    )).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId));
+
+    server.snapshotMessages = [
+      user,
+      wireAssistant(assistantId, writeApprovalParts(callId, "approval-responded", true)),
+    ];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "run_stalled" && record.requestId === turnId));
+    await waitFor(() => harness.executeLocalTool.mock.calls.length === 1);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool).toHaveBeenCalledTimes(1);
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval" && command.tool_call_id === callId))
+      .toHaveLength(1);
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "approval_presented" && record.toolCallId === callId))
+      .toHaveLength(1);
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "approval_submitted_approved_manual" && record.toolCallId === callId))
+      .toHaveLength(1);
   });
 
   it("regenerates an exact authoritative root without sending client history", async () => {
@@ -1839,6 +3935,12 @@ describe("AgentChatSession", () => {
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "client_tool_result"
       && command.tool_call_id === "call_read"));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: "call_read",
+      status: "accepted",
+    }));
     expect(harness.executeLocalTool).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call_read", name: "read" }),
       expect.any(AbortSignal),
@@ -1872,6 +3974,12 @@ describe("AgentChatSession", () => {
       command.kind === "client_tool_approval"
       && command.tool_call_id === "call_write"
       && command.approved === true));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: "call_write",
+      status: "accepted",
+    }));
     expect(harness.executeLocalTool.mock.calls.some(([call]) =>
       call.name === "write")).toBe(false);
 
@@ -1897,6 +4005,12 @@ describe("AgentChatSession", () => {
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "client_tool_result"
       && command.tool_call_id === "call_write"));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: "call_write",
+      status: "accepted",
+    }));
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.name === "write")).toHaveLength(1);
     expect(harness.mutationAdapter.write).toHaveBeenCalledTimes(2);
@@ -1937,6 +4051,12 @@ describe("AgentChatSession", () => {
       command.kind === "client_tool_approval"
       && command.tool_call_id === "call_denied"
       && command.approved === false));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: "call_denied",
+      status: "accepted",
+    }));
 
     server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [
       readRequest,
@@ -1970,6 +4090,18 @@ describe("AgentChatSession", () => {
     await tick();
 
     await expect(run).resolves.toMatchObject({ kind: "completed" });
+    harness.agent.recordClientToolRenderMilestone(
+      "local_tool_terminal_dom_committed",
+      turnId,
+      "call_write",
+      1,
+    );
+    harness.agent.recordClientToolRenderMilestone(
+      "continuation_content_dom_committed",
+      turnId,
+      "call_write",
+      2,
+    );
     expect(harness.executeLocalTool.mock.calls.some(([call]) =>
       call.callId === "call_denied")).toBe(false);
     expect(harness.commands(server).filter((command) =>
@@ -1983,6 +4115,84 @@ describe("AgentChatSession", () => {
         expect.objectContaining({ id: "call_denied", state: "failed" }),
       ]),
     }));
+    const lifecycle = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId);
+    expect(lifecycle).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "local_tool_terminal_dom_committed",
+        toolExecutionOrdinal: 2,
+      }),
+      expect.objectContaining({
+        code: "continuation_content_dom_committed",
+        toolExecutionOrdinal: 2,
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+    ]));
+    expect(lifecycle.filter((record) => [
+      "local_tool_terminal_dom_committed",
+      "continuation_content_dom_committed",
+    ].includes(String(record.code))).every((record) =>
+      !("toolCallId" in record))).toBe(true);
+    const toolLifecycle = lifecycle.filter((record) =>
+      typeof record.toolCallId === "string"
+      && [
+        "approval_presented",
+        "approval_submitted_approved_manual",
+        "approval_submitted_denied",
+        "approval_acknowledged_approved",
+        "approval_acknowledged_denied",
+        "local_tool_started",
+        "local_tool_completed_succeeded",
+        "tool_result_sent_succeeded",
+      ].includes(String(record.code)));
+    expect(toolLifecycle.length).toBeGreaterThan(0);
+    expect(toolLifecycle.every((record) =>
+      typeof record.clientMonotonicOffsetMs === "number"
+      && record.clientClockDomain === "client_turn_monotonic")).toBe(true);
+    // Local/UI milestones never borrow a trace from whichever overlapping
+    // stream spoke last. Exact ACKs now carry their own command segment.
+    expect(toolLifecycle.filter((record) =>
+      !String(record.code).startsWith("approval_acknowledged_")).every((record) =>
+      !("latencyTraceId" in record)
+      && !("commandSegmentOrdinal" in record))).toBe(true);
+    expect(lifecycle).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "tool_result_acknowledged_succeeded",
+        toolCallId: "call_read",
+        toolExecutionOrdinal: 1,
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+      expect.objectContaining({
+        code: "tool_result_acknowledged_succeeded",
+        toolCallId: "call_write",
+        toolExecutionOrdinal: 2,
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+    ]));
+    const toolCommandSegments = lifecycle.filter((record) =>
+      record.code === "command_segment_dispatch_started"
+      && typeof record.toolCallId === "string");
+    expect(toolCommandSegments).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        toolCallId: "call_read",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+      expect.objectContaining({
+        toolCallId: "call_write",
+        commandKind: "client_tool_approval",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+      expect.objectContaining({
+        toolCallId: "call_write",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+      }),
+    ]));
   });
 
   it.each([
@@ -2080,6 +4290,13 @@ describe("AgentChatSession", () => {
         code: "run_finished_failed",
       }));
 
+      server.serverMessage(event("command_ack", {
+        request_id: requestId,
+        command_kind: "client_tool_approval",
+        tool_call_id: callId,
+        status: "accepted",
+      }));
+      await tick();
       const acknowledged = wireAssistant(
         assistantId,
         writeApprovalParts(callId, "approval-responded", approved),
@@ -2091,10 +4308,6 @@ describe("AgentChatSession", () => {
           ? "approval_acknowledged_approved"
           : "approval_acknowledged_denied")
         && record.toolCallId === callId));
-      const internal = harness.agent as unknown as {
-        pendingApprovalDeliveries: ReadonlyMap<string, unknown>;
-      };
-      expect(internal.pendingApprovalDeliveries.has(callId)).toBe(false);
 
       if (approved) {
         await waitFor(() => harness.commands(server).some((command) =>
@@ -2174,9 +4387,9 @@ describe("AgentChatSession", () => {
       status: "accepted",
     }));
     await tick();
-    await waitFor(() => !(harness.agent as unknown as {
-      pendingApprovalDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingApprovalDeliveries.has(callId));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingApprovalDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingApprovalDeliveries.get(callId)?.acknowledged === true);
     expect(harness.onLifecycle.mock.calls.filter(([record]) =>
       record.code === "approval_acknowledged_approved"
       && record.toolCallId === callId)).toHaveLength(1);
@@ -2189,7 +4402,8 @@ describe("AgentChatSession", () => {
     ));
     await tick();
     await new Promise((resolve) => setTimeout(resolve, 10));
-    // Delivery already settled, so the snapshot must not provoke a resend.
+    // The ACK is retained with the in-flight stream, so an unrelated snapshot
+    // must not provoke a resend in the same connection epoch.
     expect(harness.commands(server).filter((command) =>
       command.kind === "client_tool_approval"
       && command.tool_call_id === callId)).toHaveLength(1);
@@ -2219,7 +4433,7 @@ describe("AgentChatSession", () => {
       call.callId === callId)).toHaveLength(1);
   });
 
-  it("replays an uncertain tool result once without executing the local tool again", async () => {
+  it("replays an acknowledged tool result after its continuation stream fails", async () => {
     const harness = trackedHarness();
     const server = await harness.open();
     const turnId = "user_tool_result_recovery";
@@ -2250,24 +4464,11 @@ describe("AgentChatSession", () => {
     await tick();
     server.snapshotMessages = [user, pendingAssistant];
     server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
-    server.commandBehavior = (command, deliver) => {
-      deliver();
-      if (command.kind !== "client_tool_result") return;
-      server.commandBehavior = null;
-      throw new Error("Tool result delivery outcome is uncertain.");
-    };
     server.serverMessage(assistantSnapshot(turnId, pendingAssistant));
 
     await waitFor(() => harness.commands(server).filter((command) =>
       command.kind === "client_tool_result"
-      && command.tool_call_id === callId).length === 2);
-    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
-      call.callId === callId)).toHaveLength(1);
-    expect(harness.commands(server).filter((command) =>
-      command.kind === "client_tool_result"
-      && command.tool_call_id === callId)).toHaveLength(2);
-    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
-      call.callId === callId)).toHaveLength(1);
+      && command.tool_call_id === callId).length === 1);
 
     server.serverMessage(event("command_ack", {
       request_id: turnId,
@@ -2276,28 +4477,63 @@ describe("AgentChatSession", () => {
       status: "accepted",
     }));
     await tick();
-    await waitFor(() => !(harness.agent as unknown as {
+    await waitFor(() => (harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    expect((harness.agent as unknown as {
       pendingDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingDeliveries.has(callId));
+    }).pendingDeliveries.has(callId)).toBe(true);
+    const beforeStreamFailure = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId);
+    expect(beforeStreamFailure).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "tool_result_acknowledged_succeeded",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+        toolExecutionOrdinal: 1,
+      }),
+    ]));
+    expect(beforeStreamFailure.some((record) => String(record.code).startsWith(
+      "tool_result_command_stream_",
+    ))).toBe(false);
 
-    const secondRecovery = server;
-    const deliveredOnce = harness.commands(server).filter((command) =>
-      command.kind === "client_tool_result"
-      && command.tool_call_id === callId).length;
-    secondRecovery.serverMessage(sessionSnapshot(
-      [user, pendingAssistant],
-      active(3, turnId, turnId, "waiting_for_client"),
+    server.failTurn(new Error(
+      "The acknowledged continuation stream failed before a clean close.",
     ));
-    await tick();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    // Delivery already settled, so a later snapshot adds no further send.
-    expect(harness.commands(secondRecovery).filter((command) =>
+    await waitFor(() => harness.commands(server).filter((command) =>
       command.kind === "client_tool_result"
-      && command.tool_call_id === callId)).toHaveLength(deliveredOnce);
+      && command.tool_call_id === callId).length === 2);
+
+    const deliveries = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId);
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toEqual(deliveries[0]);
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.callId === callId)).toHaveLength(1);
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "tool_result_command_stream_failed",
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: expect.any(Number),
+      failureCode: "command_stream_failed",
+      toolExecutionOrdinal: 1,
+    }));
 
-    secondRecovery.serverMessage(assistantSnapshot(
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId)).toHaveLength(1);
+
+    server.serverMessage(assistantSnapshot(
       turnId,
       wireAssistant(assistantId, [
         request,
@@ -2311,11 +4547,783 @@ describe("AgentChatSession", () => {
       ]),
     ));
     await tick();
-    secondRecovery.serverMessage(succeededTerminal(turnId, turnId));
+    server.serverMessage(succeededTerminal(turnId, turnId));
     await tick();
     await expect(run).resolves.toMatchObject({ kind: "completed" });
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.callId === callId)).toHaveLength(1);
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "tool_result_command_stream_completed_output_available"
+      && record.toolExecutionOrdinal === 1));
+  });
+
+  it("replays an acknowledged tool result after clean EOF without authoritative projection", async () => {
+    const resynchronizationDelayMs = jest.fn(() => 10);
+    const harness = trackedHarness({ resynchronizationDelayMs });
+    const server = await harness.open();
+    const turnId = "user_tool_result_ack_clean_eof_pending";
+    const assistantId = "assistant_tool_result_ack_clean_eof_pending";
+    const callId = "call_tool_result_ack_clean_eof_pending";
+    const input = { paths: ["ACK pending.md"] };
+    const user = wireUser(turnId, "Read this note once and recover after ACK-only EOF");
+    const request = clientToolRequest(callId, "read", input);
+    const pendingAssistant = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read this note once and recover after ACK-only EOF"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.snapshotMessages = [user, pendingAssistant];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, pendingAssistant));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId).length === 1);
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    server.endTurn();
+
+    await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+      attempt === 0));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId).length === 2);
+    const deliveries = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId);
+    expect(deliveries[1]).toEqual(deliveries[0]);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId)).toHaveLength(1);
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("replays an acknowledged output error after clean EOF without authoritative projection", async () => {
+    const resynchronizationDelayMs = jest.fn(() => 10);
+    const harness = trackedHarness({
+      resynchronizationDelayMs,
+      executeLocalTool: async () => {
+        throw new Error("Exact output-error fixture");
+      },
+    });
+    const server = await harness.open();
+    const turnId = "user_tool_error_ack_clean_eof_pending";
+    const assistantId = "assistant_tool_error_ack_clean_eof_pending";
+    const callId = "call_tool_error_ack_clean_eof_pending";
+    const input = { paths: ["ACK error.md"] };
+    const user = wireUser(turnId, "Fail this read once and recover after ACK-only EOF");
+    const pendingAssistant = wireAssistant(assistantId, [
+      clientToolRequest(callId, "read", input),
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Fail this read once and recover after ACK-only EOF"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.snapshotMessages = [user, pendingAssistant];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, pendingAssistant));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId
+      && command.state === "output-error").length === 1);
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    server.endTurn();
+
+    await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+      attempt === 0));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId
+      && command.state === "output-error").length === 2);
+    const deliveries = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId);
+    expect(deliveries[1]).toEqual(deliveries[0]);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "tool_result_acknowledged_failed"
+      && record.toolCallId === callId)).toHaveLength(1);
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it.each([
+    {
+      scenario: "retains and replays an acknowledged result after mismatched payload authority",
+      localOutcome: "output-available",
+      authority: "mismatched",
+      shouldReplay: true,
+    },
+    {
+      scenario: "retires an acknowledged result after matching payload authority",
+      localOutcome: "output-available",
+      authority: "matching",
+      shouldReplay: false,
+    },
+    {
+      scenario: "retains and replays an acknowledged error after mismatched error authority",
+      localOutcome: "output-error",
+      authority: "mismatched",
+      shouldReplay: true,
+    },
+    {
+      scenario: "retires an acknowledged error after matching error authority",
+      localOutcome: "output-error",
+      authority: "matching",
+      shouldReplay: false,
+    },
+  ] as const)("$scenario", async ({ localOutcome, authority, shouldReplay }) => {
+    const resynchronizationDelayMs = jest.fn(() => 10);
+    const harness = trackedHarness({
+      resynchronizationDelayMs,
+      ...(localOutcome === "output-error"
+        ? {
+            executeLocalTool: async () => {
+              throw new Error("Exact local output-error fixture");
+            },
+          }
+        : {}),
+    });
+    const server = await harness.open();
+    const kind = localOutcome === "output-available" ? "payload" : "error";
+    const suffix = `${kind}_${authority}`;
+    const turnId = `user_tool_authority_${suffix}`;
+    const assistantId = `assistant_tool_authority_${suffix}`;
+    const callId = `call_tool_authority_${suffix}`;
+    const input = { paths: [`Authority ${suffix}.md`] };
+    const user = wireUser(turnId, `Verify ${suffix} authority once`);
+    const request = clientToolRequest(callId, "read", input);
+    const pendingAssistant = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const authoritativeAssistant = wireAssistant(assistantId, [
+      request,
+      localOutcome === "output-available"
+        ? {
+            type: "tool-read",
+            toolCallId: callId,
+            state: "output-available",
+            input,
+            output: {
+              success: true,
+              data: { ok: authority === "matching" },
+            },
+          }
+        : {
+            type: "tool-read",
+            toolCallId: callId,
+            state: "output-error",
+            input,
+            errorText: authority === "matching"
+              ? "The vault action failed."
+              : "A different sanitized vault failure.",
+          },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, `Verify ${suffix} authority once`),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.snapshotMessages = [user, pendingAssistant];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, pendingAssistant));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId).length === 1);
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => (harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    server.snapshotMessages = [user, authoritativeAssistant];
+    server.serverMessage(assistantSnapshot(turnId, authoritativeAssistant));
+    server.endTurn();
+
+    const expectedDeliveryCount = shouldReplay ? 2 : 1;
+    if (shouldReplay) {
+      await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+        attempt === 0));
+      await waitFor(() => harness.commands(server).filter((command) =>
+        command.kind === "client_tool_result"
+        && command.tool_call_id === callId).length === expectedDeliveryCount);
+      expect((harness.agent as unknown as {
+        pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
+      }).pendingDeliveries.get(callId)?.acknowledged).toBe(false);
+    } else {
+      await waitFor(() => !(harness.agent as unknown as {
+        pendingDeliveries: ReadonlyMap<string, unknown>;
+      }).pendingDeliveries.has(callId));
+      const transport = (harness.agent as unknown as {
+        transport: { forceReconnect(): Promise<void> } | null;
+      }).transport;
+      if (!transport) throw new Error("Expected an active test transport.");
+      await transport.forceReconnect();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const deliveries = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId);
+    expect(deliveries).toHaveLength(expectedDeliveryCount);
+    if (shouldReplay) expect(deliveries[1]).toEqual(deliveries[0]);
+    expect(resynchronizationDelayMs.mock.calls.map(([attempt]) => attempt))
+      .toEqual(shouldReplay ? [0] : []);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    const acknowledgementCode = localOutcome === "output-available"
+      ? "tool_result_acknowledged_succeeded"
+      : "tool_result_acknowledged_failed";
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === acknowledgementCode
+      && record.toolCallId === callId)).toHaveLength(1);
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("reconnects and replays an unacknowledged tool result after clean EOF", async () => {
+    const resynchronizationDelayMs = jest.fn(() => 10);
+    const harness = trackedHarness({ resynchronizationDelayMs });
+    const server = await harness.open();
+    const turnId = "user_tool_result_clean_eof_without_ack";
+    const assistantId = "assistant_tool_result_clean_eof_without_ack";
+    const callId = "call_tool_result_clean_eof_without_ack";
+    const input = { paths: ["Clean EOF.md"] };
+    const user = wireUser(turnId, "Read once and recover from an ownerless clean EOF");
+    const request = clientToolRequest(callId, "read", input);
+    const pending = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const settled = wireAssistant(assistantId, [
+      request,
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "output-available",
+        input,
+        output: { success: true, data: { ok: true } },
+      },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read once and recover from an ownerless clean EOF"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.snapshotMessages = [user, pending];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, pending));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId).length === 1);
+
+    server.endTurn();
+    await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+      attempt === 0));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId).length === 2);
+
+    const deliveries = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId);
+    expect(deliveries[1]).toEqual(deliveries[0]);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    expect((harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, unknown>;
+    }).pendingDeliveries.has(callId)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId)).toHaveLength(2);
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    server.serverMessage(runState(active(3, turnId, turnId, "running")));
+    server.serverMessage(assistantSnapshot(turnId, settled));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+    const toolSegmentLifecycle = harness.onLifecycle.mock.calls
+      .map(([record]) => record as Record<string, unknown>)
+      .filter((record) => record.requestId === turnId);
+    expect(toolSegmentLifecycle).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "response_first_assistant_snapshot_projected",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+        toolExecutionOrdinal: 1,
+      }),
+      expect.objectContaining({
+        code: "response_result_received_succeeded",
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: expect.any(Number),
+        toolExecutionOrdinal: 1,
+      }),
+    ]));
+  });
+
+  it("reconnects and replays an unacknowledged denial after clean EOF", async () => {
+    const resynchronizationDelayMs = jest.fn(() => 10);
+    const harness = trackedHarness({ resynchronizationDelayMs });
+    const server = await harness.open();
+    const turnId = "user_denial_clean_eof_without_ack";
+    const assistantId = "assistant_denial_clean_eof_without_ack";
+    const callId = "call_denial_clean_eof_without_ack";
+    const user = wireUser(turnId, "Deny once and recover from an ownerless clean EOF");
+    const requested = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "approval-requested"),
+    );
+    const denied = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "output-denied", false),
+    );
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Deny once and recover from an ownerless clean EOF"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, requested));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required"));
+    expect(harness.agent.respondToApproval(`approval_${callId}`, false)).toBe(true);
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false).length === 1);
+
+    server.snapshotMessages = [user, denied];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.endTurn();
+    await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
+      attempt === 0));
+    await waitFor(() => harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false).length === 2);
+
+    const denials = harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false);
+    expect(denials[1]).toEqual(denials[0]);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+    expect(harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required")).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false)).toHaveLength(2);
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    server.serverMessage(runState(active(3, turnId, turnId, "running")));
+    server.serverMessage(assistantSnapshot(turnId, denied));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+  });
+
+  it("records one delayed tool-result ACK after idle terminal authority wins", async () => {
+    const persistence = deferred<void>();
+    const harness = trackedHarness({
+      persistAssistant: async () => await persistence.promise,
+    });
+    const server = await harness.open();
+    const turnId = "user_tool_result_ack_after_terminal";
+    const assistantId = "assistant_tool_result_ack_after_terminal";
+    const callId = "call_tool_result_ack_after_terminal";
+    const input = { paths: ["Terminal first.md"] };
+    const user = wireUser(turnId, "Read once even when terminal arrives first");
+    const request = clientToolRequest(callId, "read", input);
+    const pending = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const settled = wireAssistant(assistantId, [
+      request,
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "output-available",
+        input,
+        output: { success: true, data: { ok: true } },
+      },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read once even when terminal arrives first"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, pending));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId));
+
+    server.serverMessage(assistantSnapshot(turnId, settled));
+    server.serverMessage(runState(idle(2)));
+    server.parallelServerMessage(succeededTerminal(turnId, turnId));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "response_result_received_succeeded"
+      && record.requestId === turnId));
+    expect((harness.agent as unknown as {
+      session: { current: { runState: { state: string } } } | null;
+    }).session?.current.runState.state).toBe("idle");
+    expect((harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, { inFlight: boolean }>;
+    }).pendingDeliveries.get(callId)?.inFlight).toBe(true);
+
+    for (let duplicate = 0; duplicate < 2; duplicate += 1) {
+      server.serverMessage(event("command_ack", {
+        request_id: turnId,
+        command_kind: "client_tool_result",
+        tool_call_id: callId,
+        status: "accepted",
+      }));
+    }
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId));
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+
+    server.endTurn();
+    await waitFor(() => harness.persistAssistant.mock.calls.length === 1);
+    persistence.resolve();
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+  });
+
+  it("records one delayed denial ACK after idle terminal authority without reprompting", async () => {
+    const persistence = deferred<void>();
+    const harness = trackedHarness({
+      persistAssistant: async () => await persistence.promise,
+    });
+    const server = await harness.open();
+    const turnId = "user_denial_ack_after_terminal";
+    const assistantId = "assistant_denial_ack_after_terminal";
+    const callId = "call_denial_ack_after_terminal";
+    const user = wireUser(turnId, "Deny once even when terminal arrives first");
+    const requested = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "approval-requested"),
+    );
+    const denied = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "output-denied", false),
+    );
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Deny once even when terminal arrives first"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, requested));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required"));
+    expect(harness.agent.respondToApproval(`approval_${callId}`, false)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false));
+
+    server.serverMessage(assistantSnapshot(turnId, denied));
+    server.serverMessage(runState(idle(2)));
+    server.parallelServerMessage(succeededTerminal(turnId, turnId));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "response_result_received_succeeded"
+      && record.requestId === turnId));
+    expect((harness.agent as unknown as {
+      session: { current: { runState: { state: string } } } | null;
+    }).session?.current.runState.state).toBe("idle");
+    expect((harness.agent as unknown as {
+      pendingApprovalDeliveries: ReadonlyMap<string, { inFlight: boolean }>;
+    }).pendingApprovalDeliveries.get(callId)?.inFlight).toBe(true);
+
+    for (let duplicate = 0; duplicate < 2; duplicate += 1) {
+      server.serverMessage(event("command_ack", {
+        request_id: turnId,
+        command_kind: "client_tool_approval",
+        tool_call_id: callId,
+        status: "accepted",
+      }));
+    }
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "approval_acknowledged_denied"
+      && record.toolCallId === callId));
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "approval_acknowledged_denied"
+      && record.toolCallId === callId)).toHaveLength(1);
+    expect(harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required")).toBe(false);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+
+    server.endTurn();
+    await waitFor(() => harness.persistAssistant.mock.calls.length === 1);
+    persistence.resolve();
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+  });
+
+  it("does not replay an acknowledged exact tool result when recovery supersedes its stream", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_tool_result_post_ack_recovery";
+    const assistantId = "assistant_tool_result_post_ack_recovery";
+    const callId = "call_tool_result_post_ack_recovery";
+    const input = { paths: ["Post ACK.md"] };
+    const user = wireUser(turnId, "Read once and recover after the ACK");
+    const request = clientToolRequest(callId, "read", input);
+    const pending = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const settled = wireAssistant(assistantId, [
+      request,
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "output-available",
+        input,
+        output: { success: true, data: { ok: true } },
+      },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read once and recover after the ACK"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, pending));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId));
+
+    server.snapshotMessages = [user, settled];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    // Durable projection precedes the explicit ACK, matching the real server.
+    server.serverMessage(assistantSnapshot(turnId, settled));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId));
+    expect((harness.agent as unknown as {
+      pendingDeliveries: ReadonlyMap<string, unknown>;
+    }).pendingDeliveries.has(callId)).toBe(false);
+    const transport = (harness.agent as unknown as {
+      transport: { forceReconnect(): Promise<void> } | null;
+    }).transport;
+    if (!transport) throw new Error("Expected an active test transport.");
+    await transport.forceReconnect();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_result"
+      && command.tool_call_id === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "tool_result_acknowledged_succeeded"
+      && record.toolCallId === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
+      call.callId === callId)).toHaveLength(1);
+  });
+
+  it.each([
+    { scenario: "after its continuation stream fails", supersede: false },
+    { scenario: "when recovery supersedes its open stream", supersede: true },
+  ])("does not replay an acknowledged exact denial $scenario", async ({ supersede }) => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_denial_post_ack_recovery";
+    const assistantId = "assistant_denial_post_ack_recovery";
+    const callId = "call_denial_post_ack_recovery";
+    const user = wireUser(turnId, "Deny once and recover after the ACK");
+    const requested = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "approval-requested"),
+    );
+    const denied = wireAssistant(
+      assistantId,
+      writeApprovalParts(callId, "output-denied", false),
+    );
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Deny once and recover after the ACK"),
+      approvalPolicy: { requireDestructiveApproval: true },
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, requested));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool"
+      && part.callId === callId
+      && part.state === "approval-required"));
+    expect(harness.agent.respondToApproval(`approval_${callId}`, false)).toBe(true);
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false));
+
+    server.snapshotMessages = [user, denied];
+    server.snapshotRunState = active(2, turnId, turnId, "waiting_for_client");
+    server.serverMessage(assistantSnapshot(turnId, denied));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "approval_acknowledged_denied"
+      && record.toolCallId === callId));
+    expect((harness.agent as unknown as {
+      pendingApprovalDeliveries: ReadonlyMap<string, unknown>;
+    }).pendingApprovalDeliveries.has(callId)).toBe(false);
+    if (supersede) {
+      const transport = (harness.agent as unknown as {
+        transport: { forceReconnect(): Promise<void> } | null;
+      }).transport;
+      if (!transport) throw new Error("Expected an active test transport.");
+      await transport.forceReconnect();
+    } else {
+      server.failTurn(new Error("Actor stopped after writing the denial ACK."));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "client_tool_approval"
+      && command.tool_call_id === callId
+      && command.approved === false)).toHaveLength(1);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
+
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+    expect(harness.onLifecycle.mock.calls.filter(([record]) =>
+      record.code === "approval_acknowledged_denied"
+      && record.toolCallId === callId)).toHaveLength(1);
+    expect(harness.executeLocalTool).not.toHaveBeenCalled();
   });
 
   it("fails closed when server approval contradicts an acknowledged local denial", async () => {
@@ -2415,6 +5423,12 @@ describe("AgentChatSession", () => {
     expect(harness.agent.respondToApproval(approvalId, true)).toBe(true);
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "client_tool_approval" && command.tool_call_id === callId));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
     const approved = assistantSnapshot(
       turnId,
       wireAssistant(assistantId, parts(reorderedInput, "approval-responded")),
@@ -2424,6 +5438,12 @@ describe("AgentChatSession", () => {
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "client_tool_result" && command.tool_call_id === callId));
 
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.callId === callId)).toHaveLength(1);
     expect(harness.executeLocalTool).toHaveBeenCalledWith(
@@ -2708,6 +5728,12 @@ describe("AgentChatSession", () => {
       command.kind === "client_tool_approval"
       && command.tool_call_id === callId
       && command.approved === true));
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_approval",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
     expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
       code: "approval_submitted_approved_policy",
       toolCallId: callId,
@@ -2724,6 +5750,12 @@ describe("AgentChatSession", () => {
       command.kind === "client_tool_result" && command.tool_call_id === callId));
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.callId === callId)).toHaveLength(1);
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
     server.serverMessage(assistantSnapshot(
       turnId,
       wireAssistant(assistantId, writeApprovalParts(callId, "output-available", true)),
