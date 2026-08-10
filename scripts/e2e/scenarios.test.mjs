@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const root = path.join(new URL("../..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("../..", import.meta.url));
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 const liveScripts = Object.entries(packageJson.scripts).filter(([name]) =>
