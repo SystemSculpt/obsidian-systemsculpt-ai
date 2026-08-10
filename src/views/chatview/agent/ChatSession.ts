@@ -1,4 +1,7 @@
-import { PlatformRequestClient } from "../../../services/PlatformRequestClient";
+import {
+  PlatformRequestClient,
+  type PlatformResponseDeliveryMode,
+} from "../../../services/PlatformRequestClient";
 import {
   THIN_AGENT_BOOTSTRAP_PATH,
   THIN_AGENT_CONTEXT_PATH,
@@ -51,8 +54,10 @@ import {
 } from "./AuthoritativeSession";
 import {
   AgentStreamingTransport,
+  type AgentTransportTimingEvent,
 } from "./StreamingTransport";
 import type {
+  AgentCommandKind,
   AgentJsonValue,
   AgentQueueSnapshotEvent,
   AgentUserMessage,
@@ -63,9 +68,13 @@ import {
 } from "./MutationJournal";
 import {
   AgentLifecycle,
+  type AgentLifecycleCode,
   type AgentLifecycleInput,
   type AgentLifecycleRecord,
+  type CreditsRefreshReason,
+  type HistorySyncKind,
 } from "./Lifecycle";
+import { isAgentBillingFailure } from "./AgentFailurePolicy";
 
 export type {
   AgentLifecycleCode,
@@ -128,6 +137,7 @@ export type AgentRunInput = Readonly<{
   ) => Promise<Readonly<{ context_ref?: string }> | undefined>;
   approvalPolicy?: ToolApprovalPolicy;
   beforeSend?: () => Promise<void>;
+  clientStartedAtMonotonicMs?: number;
 }>;
 
 type RequestClient = Pick<PlatformRequestClient, "request">;
@@ -145,13 +155,20 @@ export type AgentChatSessionOptions = Readonly<{
   persistAssistant: (message: ChatMessage) => Promise<void>;
   reconcileHistory?: (messages: readonly ChatMessage[]) => Promise<void>;
   updateInputLimits?: (limits: ThinAgentInputLimits) => void;
-  refreshCredits?: () => Promise<void>;
+  refreshCredits?: (
+    reason: Extract<CreditsRefreshReason, "post_terminal" | "billing_failure">,
+    correlation: Readonly<{
+      requestId: string;
+      serverRunId?: string;
+    }>,
+  ) => Promise<void>;
   reportError?: (error: unknown) => void;
   onLifecycle?: (record: AgentLifecycleRecord) => void;
   requestClient?: RequestClient;
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
   now?: () => number;
+  monotonicNow?: () => number;
 }>;
 
 /**
@@ -166,6 +183,10 @@ export type AgentChatSessionOptions = Readonly<{
  */
 const RUN_STALL_GRACE_MS = 240_000;
 const MAX_RESYNCHRONIZATION_DELAY_MS = 5_000;
+const MAX_RETAINED_LATENCY_RUNS = 8;
+const MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN = 512;
+const MAX_TOOL_EXECUTIONS_PER_RUN = 512;
+const MAX_HISTORY_SYNCS_PER_RUN = 2_048;
 
 type ToolIdentity = Readonly<{
   toolName: string;
@@ -195,7 +216,9 @@ type ActiveRun = {
   readonly completion: Promise<AgentRunResult>;
   readonly resolve: (result: AgentRunResult) => void;
   readonly executingToolIds: Set<string>;
+  readonly completedLocalToolResults: Map<string, ToolCallResult>;
   readonly settledToolIds: Set<string>;
+  readonly acknowledgedClientContinuationIds: Set<string>;
   readonly toolIdentities: Map<string, ToolIdentity>;
   readonly approvalDecisions: Map<string, LocalApprovalDecision>;
   readonly approvalIds: Map<string, string>;
@@ -211,6 +234,49 @@ type ActiveRun = {
   cancelRequested: boolean;
   serverAdmissionPossible: boolean;
   serverQueued: boolean;
+  streamSupersededByRecovery: boolean;
+  // The turn's streamed assistant messages as last observed before a durable
+  // session snapshot replaced the projection. A snapshot built before the
+  // terminal fold can momentarily omit the streamed content of a run that is
+  // ending; finalization restores this capture so cancellation never erases
+  // content the user already watched stream.
+  streamedTurnMessages: readonly WireMessage[];
+};
+
+type StallRecovery = Readonly<{
+  runToken: object;
+  progressKey: string;
+}>;
+
+type ClientLatencyContext = {
+  readonly conversationId: string;
+  readonly requestId: string;
+  readonly startedAtMonotonicMs: number;
+  readonly milestones: Set<AgentLifecycleCode>;
+  readonly segmentMilestones: Set<string>;
+  readonly toolMilestones: Set<string>;
+  readonly segments: Map<number, ClientLatencySegment>;
+  readonly toolExecutionOrdinals: Map<string, number>;
+  nextToolExecutionOrdinal: number;
+  nextHistorySyncOrdinal: number;
+  pendingAssistantProjectionOrdinal: number | null;
+  pendingCommandAck: Readonly<{
+    ordinal: number;
+    commandKind: AgentCommandKind;
+    toolCallId: string | null;
+  }> | null;
+  pendingTerminalOrdinal: number | null;
+  lastOffsetMs: number;
+};
+
+type ClientLatencySegment = {
+  readonly ordinal: number;
+  readonly commandKind: AgentCommandKind;
+  readonly toolCallId: string | null;
+  readonly toolExecutionOrdinal: number | null;
+  toolName: string | null;
+  latencyTraceId: string | null;
+  responseDeliveryMode: PlatformResponseDeliveryMode | null;
 };
 
 type PendingRegenerateDelivery = {
@@ -223,11 +289,14 @@ type PendingRegenerateDelivery = {
 type PendingToolDelivery = {
   readonly requestId: string;
   readonly call: LocalToolCall;
+  readonly toolExecutionOrdinal?: number;
   readonly state: "output-available" | "output-error";
   readonly output?: AgentJsonValue;
   readonly errorText?: string;
   attemptedOpenEpoch: number | null;
   inFlight: boolean;
+  acknowledged: boolean;
+  acknowledgementRecorded: boolean;
 };
 
 type PendingApprovalDecision = LocalApprovalDecision & Readonly<{
@@ -239,7 +308,22 @@ type PendingApprovalDelivery = {
   readonly decision: PendingApprovalDecision;
   attemptedOpenEpoch: number | null;
   inFlight: boolean;
+  acknowledged: boolean;
+  acknowledgementRecorded: boolean;
 };
+
+type ClientToolRenderCode = Extract<AgentLifecycleCode,
+  | "local_tool_terminal_dom_committed"
+  | "local_tool_terminal_paint_opportunity"
+  | "continuation_content_dom_committed"
+  | "continuation_content_paint_opportunity">;
+
+type HistorySyncCorrelation = Readonly<{
+  conversationId?: string;
+  requestId?: string;
+  historySyncKind: HistorySyncKind;
+  historySyncOrdinal?: number;
+}>;
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const INTERNAL_SERVER_TOOL_NAMES = new Set(["set_context"]);
@@ -492,6 +576,12 @@ function toolStateRank(part: WirePart): number {
   }
 }
 
+function isAuthoritativeTerminalToolPart(part: WirePart): boolean {
+  return part.state === "output-error"
+    || part.state === "output-denied"
+    || (part.state === "output-available" && part.preliminary !== true);
+}
+
 function outputAsToolResult(output: unknown): ToolCallResult {
   return isRecord(output) && typeof output.success === "boolean"
     ? output as unknown as ToolCallResult
@@ -532,10 +622,15 @@ function sanitizeVaultResultData(
 ): AgentJsonValue {
   if (
     typeof value === "string"
-    && /^(?:cause|error|errorText|message|reason|stack)$/i.test(key)
+    && /^(?:cause|error(?:s|Text)?|message(?:s)?|reason(?:s)?|stack)$/i.test(key)
   ) return "The vault action failed.";
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeVaultResultData(entry));
+    // Keep the owning field while walking an array. Otherwise a structured
+    // payload such as `open.errors: ["/private/vault failure"]` loses the
+    // `errors` key at the array boundary and leaks raw local failure text.
+    // Entries remain in place so safe counts and sibling path metadata keep
+    // their exact shape for Partial/Failed presentation.
+    return value.map((entry) => sanitizeVaultResultData(entry, key));
   }
   if (isRecord(value)) {
     return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [
@@ -609,10 +704,54 @@ function sameToolIdentity(left: ToolIdentity, right: ToolIdentity): boolean {
     && left.canonicalInput === right.canonicalInput;
 }
 
+function projectedToolResult(
+  tool: ProjectedTool,
+  active: ActiveRun,
+): ToolCallResult | undefined {
+  const authoritative = isAuthoritativeTerminalToolPart(tool.part);
+  if (authoritative && tool.part.state === "output-available") {
+    return safeToolResult(outputAsToolResult(toolOutput(tool.part)), tool);
+  }
+  if (
+    tool.location === "vault"
+    && !authoritative
+  ) {
+    const identity = active.toolIdentities.get(tool.callId);
+    if (!identity || !sameToolIdentity(identity, toolIdentity(tool))) {
+      return undefined;
+    }
+    return active.completedLocalToolResults.get(tool.callId);
+  }
+  return undefined;
+}
+
+function discardSupersededLocalToolResults(
+  active: ActiveRun,
+  tools: ReadonlyMap<string, ProjectedTool>,
+): void {
+  for (const callId of active.completedLocalToolResults.keys()) {
+    const tool = tools.get(callId);
+    const identity = active.toolIdentities.get(callId);
+    if (
+      !tool
+      || tool.location !== "vault"
+      || !identity
+      || !sameToolIdentity(identity, toolIdentity(tool))
+    ) continue;
+    if (isAuthoritativeTerminalToolPart(tool.part)) {
+      active.completedLocalToolResults.delete(callId);
+    }
+  }
+}
+
 function projectedToolState(
   tool: ProjectedTool,
   active: ActiveRun,
+  result = projectedToolResult(tool, active),
 ): AgentToolPart["state"] {
+  if (tool.part.state === "output-error") return "failed";
+  if (tool.part.state === "output-denied") return "denied";
+  if (result) return result.success ? "succeeded" : "failed";
   if (active.executingToolIds.has(tool.callId)) return "running";
   const decision = active.approvalDecisions.get(tool.callId);
   const locallyApproved = decision?.approved === true
@@ -660,7 +799,10 @@ function projectedToolState(
   }
 }
 
-function toolFailure(tool: ProjectedTool): ManagedAgentError | undefined {
+function toolFailure(
+  tool: ProjectedTool,
+  result: ToolCallResult | undefined,
+): ManagedAgentError | undefined {
   const part = tool.part;
   if (part.state === "output-error") {
     return {
@@ -672,14 +814,11 @@ function toolFailure(tool: ProjectedTool): ManagedAgentError | undefined {
           : defaultToolFailureMessage(tool),
     };
   }
-  if (part.state === "output-available" && part.preliminary !== true) {
-    const result = safeToolResult(outputAsToolResult(toolOutput(part)), tool);
-    if (!result.success) {
-      return {
-        code: result.error?.code ?? "TOOL_EXECUTION_FAILED",
-        message: result.error?.message ?? defaultToolFailureMessage(tool),
-      };
-    }
+  if (result && !result.success) {
+    return {
+      code: result.error?.code ?? "TOOL_EXECUTION_FAILED",
+      message: result.error?.message ?? defaultToolFailureMessage(tool),
+    };
   }
   return undefined;
 }
@@ -741,23 +880,52 @@ function freezeSnapshot(snapshot: AgentConversationSnapshot): AgentConversationS
   });
 }
 
+function partProgressToken(part: WirePart): readonly unknown[] {
+  const approval = isRecord(part.approval) ? part.approval : null;
+  const output = isRecord(part.output) ? part.output : null;
+  return [
+    part.type,
+    typeof part.text === "string" ? part.text.length : null,
+    typeof part.state === "string" ? part.state : null,
+    toolCallId(part),
+    typeof approval?.id === "string" ? approval.id : null,
+    typeof approval?.approved === "boolean" ? approval.approved : null,
+    typeof part.preliminary === "boolean" ? part.preliminary : null,
+    Object.prototype.hasOwnProperty.call(part, "output"),
+    typeof output?.success === "boolean" ? output.success : null,
+    Object.prototype.hasOwnProperty.call(part, "error"),
+  ];
+}
+
 /**
- * Cheap "did the server produce anything new" fingerprint.
+ * Content-free "did the server produce anything new" fingerprint.
  *
- * Counts alone would miss a long single text stream, whose deltas only grow
- * the trailing part in place, so the trailing part's text length is included.
+ * Run cursors need not advance for accepted assistant replacements. Track the
+ * latest assistant's semantic part state as well, so text/reasoning growth and
+ * tool approval/result transitions cancel a stalled recovery immediately.
  */
 function runProgressKey(
   snapshot: AgentSessionSnapshot<WireMessage>,
 ): string {
   const messages = snapshot.messages;
-  const last = messages[messages.length - 1];
-  const parts = last?.parts ?? [];
-  const trailingText: unknown = parts[parts.length - 1]?.text;
-  const text = typeof trailingText === "string" ? trailingText.length : 0;
+  let assistant: WireMessage | undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      assistant = messages[index];
+      break;
+    }
+  }
+  const parts = assistant?.parts ?? [];
   const runState = snapshot.runState;
   const runId = "run_id" in runState ? runState.run_id : "";
-  return `${runState.state}:${runId}:${messages.length}:${parts.length}:${text}`;
+  return JSON.stringify([
+    runState.state,
+    runState.cursor,
+    runId,
+    messages.length,
+    assistant?.id ?? null,
+    parts.map(partProgressToken),
+  ]);
 }
 
 function projectRun(
@@ -769,6 +937,7 @@ function projectRun(
   const turnMessages = currentTurnMessages(messages, active.turnId);
   const targets = collectClientToolTargets(turnMessages);
   const tools = canonicalTools(turnMessages, targets);
+  discardSupersededLocalToolResults(active, tools);
   const parts: AgentPart[] = [];
   const projectedMessages: AgentConversationSnapshot["messages"][number][] = [];
   let order = 0;
@@ -811,13 +980,11 @@ function projectRun(
       if (!tool || tool.messageId !== message.id || tool.partIndex !== partIndex
         || INTERNAL_SERVER_TOOL_NAMES.has(tool.name)) return;
       const id = `tool:${callId}`;
-      const state = projectedToolState(tool, active);
-      const result = tool.part.state === "output-available" && tool.part.preliminary !== true
-        ? safeToolResult(outputAsToolResult(toolOutput(tool.part)), tool)
-        : undefined;
+      const result = projectedToolResult(tool, active);
+      const state = projectedToolState(tool, active, result);
       const approval = toolApproval(tool.part);
       const syntheticApprovalId = active.approvalIds.get(callId);
-      const failure = toolFailure(tool);
+      const failure = toolFailure(tool, result);
       partIds.push(id);
       parts.push({
         id,
@@ -1051,7 +1218,8 @@ function durableTool(
   timestamp: number,
 ): ToolCall | null {
   const state = tool.part.state;
-  if (state === "output-available" && tool.part.preliminary !== true) {
+  if (!isAuthoritativeTerminalToolPart(tool.part)) return null;
+  if (state === "output-available") {
     const result = safeToolResult(
       outputAsToolResult(toolOutput(tool.part)),
       tool,
@@ -1070,34 +1238,31 @@ function durableTool(
       ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
     };
   }
-  if (state === "output-error" || state === "output-denied") {
-    return {
+  return {
+    id: tool.callId,
+    messageId: "",
+    request: {
       id: tool.callId,
-      messageId: "",
-      request: {
-        id: tool.callId,
-        type: "function",
-        function: { name: tool.name, arguments: JSON.stringify(tool.input ?? {}) },
-      },
-      state: "failed",
-      timestamp,
-      result: {
-        success: false,
-        error: state === "output-denied"
-          ? { code: "USER_DENIED", message: "The user denied this vault action." }
-          : {
-              code: "TOOL_EXECUTION_FAILED",
-              message: tool.location === "server"
-                ? defaultToolFailureMessage(tool)
-                : typeof tool.part.errorText === "string"
-                  ? tool.part.errorText
-                  : "The vault action failed.",
-            },
-      },
-      ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
-    };
-  }
-  return null;
+      type: "function",
+      function: { name: tool.name, arguments: JSON.stringify(tool.input ?? {}) },
+    },
+    state: "failed",
+    timestamp,
+    result: {
+      success: false,
+      error: state === "output-denied"
+        ? { code: "USER_DENIED", message: "The user denied this vault action." }
+        : {
+            code: "TOOL_EXECUTION_FAILED",
+            message: tool.location === "server"
+              ? defaultToolFailureMessage(tool)
+              : typeof tool.part.errorText === "string"
+                ? tool.part.errorText
+                : "The vault action failed.",
+          },
+    },
+    ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
+  };
 }
 
 function durableAssistantMessage(
@@ -1179,6 +1344,27 @@ function durableAssistantMessage(
   };
 }
 
+/**
+ * The run-terminal outcome carried by an assistant wire sequence, whether the
+ * terminal is folded into the streamed message or persisted as a standalone
+ * marker sibling by an older server.
+ */
+function sequenceTerminalOutcome(
+  sequence: readonly WireMessage[],
+): ThinAgentRunTerminalData["outcome"] | null {
+  for (let messageIndex = sequence.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = sequence[messageIndex]!;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const parsed = parseThinAgentDataPart(message.parts[partIndex]);
+      if (
+        parsed?.kind === "known"
+        && parsed.type === "data-systemsculpt-run-terminal"
+      ) return parsed.data.outcome;
+    }
+  }
+  return null;
+}
+
 function durableServerHistory(messages: readonly WireMessage[], now: number): ChatMessage[] {
   const output: ChatMessage[] = [];
   for (let index = 0; index < messages.length;) {
@@ -1191,6 +1377,8 @@ function durableServerHistory(messages: readonly WireMessage[], now: number): Ch
     const start = index;
     while (index < messages.length && messages[index]!.role === "assistant") index += 1;
     const sequence = messages.slice(start, index);
+    const cancelled = sequenceTerminalOutcome(sequence) === "cancelled";
+    const sequenceStart = output.length;
     sequence.forEach((assistant, sequenceIndex) => {
       const durable = durableAssistantMessage(
         assistant,
@@ -1200,8 +1388,73 @@ function durableServerHistory(messages: readonly WireMessage[], now: number): Ch
       );
       if (durable) output.push(durable);
     });
+    if (cancelled && output.length > sequenceStart) {
+      const tail = output[output.length - 1]!;
+      output[output.length - 1] = { ...tail, terminalOutcome: "cancelled" };
+    }
   }
   return output;
+}
+
+/**
+ * Build the terminal-only durability view of authoritative history.
+ *
+ * The server can legitimately finish after accepting a client tool result
+ * while its last assistant snapshot still contains only the original
+ * `input-available` part (or an SDK `preliminary` echo). Live projection keeps
+ * the locally settled result visible from ActiveRun, but persistence otherwise
+ * consumes that stale wire part and drops the tool on save/reconcile.
+ *
+ * Only the exact vault call that executed locally may be upgraded. A final
+ * wire outcome remains authoritative, server-owned tools are never touched,
+ * and the stored execution identity must still match the current request.
+ */
+function overlayCompletedLocalToolResults(
+  messages: readonly WireMessage[],
+  active: Pick<
+    ActiveRun,
+    "turnId" | "completedLocalToolResults" | "toolIdentities"
+  >,
+): readonly WireMessage[] {
+  if (active.completedLocalToolResults.size === 0) return messages;
+  const turn = currentTurnMessages(messages, active.turnId);
+  const targets = collectClientToolTargets(turn);
+  const tools = canonicalTools(turn, targets);
+  const replacements = new Map<WirePart, WirePart>();
+
+  for (const [callId, result] of active.completedLocalToolResults) {
+    const tool = tools.get(callId);
+    const identity = active.toolIdentities.get(callId);
+    if (
+      !tool
+      || tool.location !== "vault"
+      || !identity
+      || !sameToolIdentity(identity, toolIdentity(tool))
+      || isAuthoritativeTerminalToolPart(tool.part)
+    ) continue;
+
+    const safeResult = safeOutboundVaultToolResult(result);
+    replacements.set(tool.part, Object.freeze({
+      ...tool.part,
+      state: "output-available",
+      output: toJsonValue(safeResult),
+      preliminary: false,
+    }));
+  }
+
+  if (replacements.size === 0) return messages;
+  return messages.map((message) => {
+    let changed = false;
+    const parts = message.parts.map((part) => {
+      const replacement = replacements.get(part);
+      if (!replacement) return part;
+      changed = true;
+      return replacement;
+    });
+    return changed
+      ? Object.freeze({ ...message, parts: Object.freeze(parts) })
+      : message;
+  });
 }
 
 function terminalFromMessages(
@@ -1223,6 +1476,56 @@ function terminalFromMessages(
     }
   }
   return null;
+}
+
+/**
+ * Reinstate the streamed assistant tail of an interrupted run into the final
+ * durable projection. A durable session snapshot built between cancellation
+ * and the server's terminal fold can omit content that already streamed;
+ * finalization is the last owner able to keep that content durable. When the
+ * projection carries no run-terminal part, the terminal is folded into the
+ * restored tail so restored history still knows the turn ended early.
+ */
+function restoreInterruptedTurnTail(
+  messages: readonly WireMessage[],
+  active: Pick<ActiveRun, "turnId" | "streamedTurnMessages">,
+  terminal: ThinAgentRunTerminalData,
+): readonly WireMessage[] {
+  const rootIndex = messages.findIndex((message) => message.id === active.turnId);
+  if (rootIndex < 0) return messages;
+  let end = rootIndex + 1;
+  while (end < messages.length && messages[end]!.role !== "user") end += 1;
+  const turn = messages.slice(rootIndex + 1, end);
+  const present = new Set(turn.map((message) => message.id));
+  const missing = active.streamedTurnMessages.filter((message) =>
+    message.role === "assistant" && !present.has(message.id));
+  if (missing.length === 0) return messages;
+  const restored = [...turn, ...missing];
+  const hasTerminalPart = restored.some((message) =>
+    message.parts.some((part) => {
+      const parsed = parseThinAgentDataPart(part);
+      return parsed?.kind === "known"
+        && parsed.type === "data-systemsculpt-run-terminal";
+    }));
+  if (!hasTerminalPart) {
+    const last = restored[restored.length - 1]!;
+    restored[restored.length - 1] = {
+      ...last,
+      parts: [
+        ...last.parts,
+        {
+          type: "data-systemsculpt-run-terminal",
+          id: `terminal:${terminal.run_id}`,
+          data: terminal,
+        },
+      ],
+    };
+  }
+  return [
+    ...messages.slice(0, rootIndex + 1),
+    ...restored,
+    ...messages.slice(end),
+  ];
 }
 
 function latestUserId(messages: readonly WireMessage[]): string | null {
@@ -1273,6 +1576,7 @@ function boundedErrorPayload(text: string): Readonly<{
 export class AgentChatSession {
   private readonly requestClient: RequestClient;
   private readonly now: () => number;
+  private readonly monotonicNow: () => number;
   private readonly listeners = new Set<(snapshot: AgentConversationSnapshot) => void>();
   private transport: AgentStreamingTransport | null = null;
   private session: AgentSession<WireMessage> | null = null;
@@ -1305,10 +1609,21 @@ export class AgentChatSession {
   private resynchronizationTimer: number | null = null;
   private resynchronizationInFlight = false;
   private resynchronizationAttempt = 0;
+  private stallRecovery: StallRecovery | null = null;
+  private readonly clientLatency = new Map<string, ClientLatencyContext>();
 
   public constructor(private readonly options: AgentChatSessionOptions) {
     this.requestClient = options.requestClient ?? new PlatformRequestClient();
     this.now = options.now ?? Date.now;
+    this.monotonicNow = () => {
+      try {
+        const value = options.monotonicNow?.()
+          ?? (typeof performance !== "undefined" ? performance.now() : 0);
+        return Number.isFinite(value) ? value : 0;
+      } catch {
+        return typeof performance !== "undefined" ? performance.now() : 0;
+      }
+    };
     this.lifecycle = new AgentLifecycle(
       (record) => this.options.onLifecycle?.(record),
       this.now,
@@ -1329,15 +1644,130 @@ export class AgentChatSession {
     this.lifecycle.record(input);
   }
 
-  public async hydrate(conversationId: string): Promise<void> {
+  public recordClientRequestLifecycle(input: AgentLifecycleInput): void {
+    const latency = input.requestId && input.clientMonotonicOffsetMs === undefined
+      ? this.clientLatencyFields(input.requestId)
+      : {};
+    this.lifecycle.record({ ...input, ...latency });
+  }
+
+  public recordClientRenderMilestone(
+    code: "response_first_dom_committed" | "response_first_paint_opportunity",
+    requestId: string,
+    observedAtMonotonicMs: number,
+  ): void {
+    this.recordClientLatencyMilestone(code, requestId, observedAtMonotonicMs);
+  }
+
+  public needsClientRenderMilestone(
+    code: "response_first_dom_committed" | "response_first_paint_opportunity",
+    requestId: string,
+  ): boolean {
+    const context = this.clientLatency.get(requestId);
+    return Boolean(context && !context.milestones.has(code));
+  }
+
+  public recordClientToolRenderMilestone(
+    code: ClientToolRenderCode,
+    requestId: string,
+    toolCallId: string,
+    observedAtMonotonicMs: number,
+  ): void {
+    this.recordClientToolLatencyMilestone(
+      code,
+      requestId,
+      toolCallId,
+      observedAtMonotonicMs,
+    );
+  }
+
+  public needsClientToolRenderMilestone(
+    code: ClientToolRenderCode,
+    requestId: string,
+    toolCallId: string,
+  ): boolean {
+    const context = this.clientLatency.get(requestId);
+    const ordinal = context?.toolExecutionOrdinals.get(toolCallId);
+    return Boolean(
+      context
+      && ordinal !== undefined
+      && !context.toolMilestones.has(`${ordinal}:${code}`),
+    );
+  }
+
+  public async hydrate(
+    conversationId: string,
+    submittedLatency?: Readonly<{
+      requestId: string;
+      startedAtMonotonicMs?: number;
+    }>,
+  ): Promise<void> {
     if (this.conversationId === conversationId && this.session && this.transport) {
-      await this.transport.connect();
-      return;
+      if (submittedLatency) {
+        this.ensureClientLatency({
+          conversationId,
+          requestId: submittedLatency.requestId,
+          startedAtMonotonicMs: submittedLatency.startedAtMonotonicMs,
+        });
+      }
+      this.recordLifecycle({
+        code: "response_prepare_started",
+        phase: "start",
+        conversationId,
+        ...(submittedLatency
+          ? {
+              requestId: submittedLatency.requestId,
+              ...this.clientLatencyFields(submittedLatency.requestId),
+            }
+          : {}),
+      });
+      try {
+        await this.transport.connect();
+        this.recordLifecycle({
+          code: "response_prepare_completed",
+          phase: "start",
+          conversationId,
+          ...(submittedLatency
+            ? {
+                requestId: submittedLatency.requestId,
+                ...this.clientLatencyFields(submittedLatency.requestId),
+              }
+            : {}),
+        });
+        await this.pendingReconcile.catch(() => undefined);
+        return;
+      } catch (error) {
+        this.recordLifecycle({
+          code: "response_prepare_failed",
+          phase: "start",
+          conversationId,
+          ...(submittedLatency
+            ? {
+                requestId: submittedLatency.requestId,
+                ...this.clientLatencyFields(submittedLatency.requestId),
+              }
+            : {}),
+          status: responseStatus(error),
+          retryable: true,
+        });
+        throw managedError(
+          error,
+          "response_start_failed",
+          "SystemSculpt could not restore this chat. Retry in a moment.",
+        );
+      }
     }
     if (this.active && !this.active.terminal) {
       throw new Error("Wait for the current response to finish before changing chats.");
     }
     this.disconnect();
+    if (submittedLatency) {
+      this.ensureClientLatency({
+        conversationId,
+        requestId: submittedLatency.requestId,
+        startedAtMonotonicMs: submittedLatency.startedAtMonotonicMs,
+      });
+    }
     const generation = ++this.generation;
     const transport = new AgentStreamingTransport({
       baseUrl: this.options.baseUrl,
@@ -1351,6 +1781,10 @@ export class AgentChatSession {
         return request;
       },
       requestClient: this.requestClient,
+      monotonicNow: this.monotonicNow,
+      onTiming: (event) => {
+        if (this.generation === generation) this.handleTransportTiming(event);
+      },
     });
     const session = new AgentSession<WireMessage>({
       conversationId,
@@ -1375,11 +1809,31 @@ export class AgentChatSession {
       this.connectionState = state;
       this.handleConnectionState(state);
     });
-    this.recordLifecycle({ code: "response_prepare_started", phase: "start", conversationId });
+    this.recordLifecycle({
+      code: "response_prepare_started",
+      phase: "start",
+      conversationId,
+      ...(submittedLatency
+        ? {
+            requestId: submittedLatency.requestId,
+            ...this.clientLatencyFields(submittedLatency.requestId),
+          }
+        : {}),
+    });
     try {
       await transport.connect();
       if (this.generation !== generation) return;
-      this.recordLifecycle({ code: "response_prepare_completed", phase: "start", conversationId });
+      this.recordLifecycle({
+        code: "response_prepare_completed",
+        phase: "start",
+        conversationId,
+        ...(submittedLatency
+          ? {
+              requestId: submittedLatency.requestId,
+              ...this.clientLatencyFields(submittedLatency.requestId),
+            }
+          : {}),
+      });
       await this.pendingReconcile.catch(() => undefined);
     } catch (error) {
       if (this.generation !== generation) return;
@@ -1387,6 +1841,12 @@ export class AgentChatSession {
         code: "response_prepare_failed",
         phase: "start",
         conversationId,
+        ...(submittedLatency
+          ? {
+              requestId: submittedLatency.requestId,
+              ...this.clientLatencyFields(submittedLatency.requestId),
+            }
+          : {}),
         status: responseStatus(error),
         retryable: true,
       });
@@ -1406,7 +1866,10 @@ export class AgentChatSession {
       );
     }
     try {
-      await this.hydrate(input.conversationId);
+      await this.hydrate(input.conversationId, {
+        requestId: input.turnId,
+        startedAtMonotonicMs: input.clientStartedAtMonotonicMs,
+      });
     } catch (error) {
       const normalized = managedError(
         error,
@@ -1430,6 +1893,7 @@ export class AgentChatSession {
       requestId: input.turnId,
       turnId: input.turnId,
       approvalPolicy: input.approvalPolicy ?? {},
+      clientStartedAtMonotonicMs: input.clientStartedAtMonotonicMs,
     });
     this.active = active;
     this.recordLifecycle({
@@ -1437,6 +1901,7 @@ export class AgentChatSession {
       phase: "response",
       conversationId: input.conversationId,
       requestId: input.turnId,
+      ...this.clientLatencyFields(input.turnId),
     });
     this.publishActive(active, true);
     try {
@@ -1449,15 +1914,13 @@ export class AgentChatSession {
         return await active.completion;
       }
       if (input.beforeSend) {
+        const historySync = this.createHistorySyncCorrelation("before_send");
+        this.recordHistorySyncLifecycle("history_sync_started", historySync);
         try {
           await input.beforeSend();
+          this.recordHistorySyncLifecycle("history_sync_completed", historySync);
         } catch (error) {
-          this.recordLifecycle({
-            code: "history_sync_failed",
-            phase: "persistence",
-            conversationId: input.conversationId,
-            requestId: input.turnId,
-          });
+          this.recordHistorySyncLifecycle("history_sync_failed", historySync);
           this.reportLocalIssue(error);
         }
       }
@@ -1470,18 +1933,38 @@ export class AgentChatSession {
         phase: "response",
         conversationId: input.conversationId,
         requestId: input.turnId,
+        ...this.clientLatencyFields(input.turnId),
       });
-      await session.submit({
+      const delivery = await session.submit({
         request_id: input.turnId,
         user_message: input.message,
         ...(contextRef ? { context_ref: contextRef } : {}),
       });
+      const supersededByRecovery = active.streamSupersededByRecovery;
+      active.streamSupersededByRecovery = false;
       this.recordLifecycle({
         code: "request_dispatch_returned",
         phase: "response",
         conversationId: input.conversationId,
         requestId: input.turnId,
+        ...this.clientLatencyFields(input.turnId),
       });
+      if (
+        delivery === "sent"
+        && !supersededByRecovery
+        && this.isIncompleteSubmitBoundary(active, session)
+      ) {
+        this.recordClientLatencyMilestone(
+          "response_stream_ended_incomplete",
+          input.turnId,
+          this.monotonicNow(),
+          {
+            retryable: true,
+            failureCode: "turn_stream_incomplete",
+          },
+        );
+        this.transport?.markUnsynchronized();
+      }
     } catch (error) {
       const definitelyRejected = wasDefinitelyRejected(error);
       if (!active.terminal && definitelyRejected) {
@@ -1501,6 +1984,7 @@ export class AgentChatSession {
           conversationId: input.conversationId,
           requestId: input.turnId,
           retryable: normalized.retryable,
+          ...this.clientLatencyFields(input.turnId),
         });
         this.finishLocalFailure(active, normalized);
       }
@@ -1553,6 +2037,7 @@ export class AgentChatSession {
       phase: "start",
       ...(conversationId ? { conversationId } : {}),
       requestId: rootMessageId,
+      ...this.clientLatencyFields(rootMessageId),
     });
     try {
       const bootstrap = await this.issueBootstrap();
@@ -1605,6 +2090,7 @@ export class AgentChatSession {
         phase: "start",
         conversationId: bootstrap.conversation_id,
         requestId: rootMessageId,
+        ...this.clientLatencyFields(rootMessageId),
       });
       return context;
     } catch (error) {
@@ -1617,6 +2103,7 @@ export class AgentChatSession {
         requestId: rootMessageId,
         status: responseStatus(error),
         retryable: !cancelled,
+        ...this.clientLatencyFields(rootMessageId),
       });
       throw error;
     }
@@ -1795,6 +2282,7 @@ export class AgentChatSession {
       requestId: active.requestId,
       toolName: tool.name,
       toolCallId: callId,
+      ...this.clientLatencyFields(active.requestId),
     });
     const serverRequested = tool.part.state === "approval-requested";
     if (serverRequested) {
@@ -1806,6 +2294,8 @@ export class AgentChatSession {
         }),
         attemptedOpenEpoch: null,
         inFlight: false,
+        acknowledged: false,
+        acknowledgementRecorded: false,
       };
       this.pendingApprovalDeliveries.set(callId, delivery);
       this.deliverPendingApproval(active, delivery);
@@ -1869,6 +2359,7 @@ export class AgentChatSession {
     this.clearRunStallTimer();
     this.clearResynchronization();
     this.runStalled = false;
+    this.stallRecovery = null;
     this.detachSession?.();
     this.detachConnectionState?.();
     this.detachSession = null;
@@ -1887,6 +2378,7 @@ export class AgentChatSession {
     this.pendingApprovalDeliveries.clear();
     this.pendingCancelRequestId = null;
     this.pendingCancelInFlight = false;
+    this.clientLatency.clear();
   }
 
   private createActiveRun(input: Readonly<{
@@ -1895,19 +2387,26 @@ export class AgentChatSession {
     requestId: string;
     turnId: string;
     approvalPolicy: ToolApprovalPolicy;
+    clientStartedAtMonotonicMs?: number;
   }>): ActiveRun {
     let resolve!: (result: AgentRunResult) => void;
     const completion = new Promise<AgentRunResult>((settle) => {
       resolve = settle;
     });
-    return {
+    const active: ActiveRun = {
       token: {},
-      ...input,
+      origin: input.origin,
+      conversationId: input.conversationId,
+      requestId: input.requestId,
+      turnId: input.turnId,
+      approvalPolicy: input.approvalPolicy,
       abort: new AbortController(),
       completion,
       resolve,
       executingToolIds: new Set(),
+      completedLocalToolResults: new Map(),
       settledToolIds: new Set(),
+      acknowledgedClientContinuationIds: new Set(),
       toolIdentities: new Map(),
       approvalDecisions: new Map(),
       approvalIds: new Map(),
@@ -1923,7 +2422,390 @@ export class AgentChatSession {
       cancelRequested: false,
       serverAdmissionPossible: input.origin === "recovered",
       serverQueued: false,
+      streamSupersededByRecovery: false,
+      streamedTurnMessages: Object.freeze([]),
     };
+    if (input.origin === "submitted") {
+      this.ensureClientLatency({
+        conversationId: input.conversationId,
+        requestId: input.requestId,
+        startedAtMonotonicMs: input.clientStartedAtMonotonicMs,
+      });
+    }
+    return active;
+  }
+
+  private retainClientLatency(input: Readonly<{
+    conversationId: string;
+    requestId: string;
+    startedAtMonotonicMs?: number;
+  }>): void {
+    const fallback = this.monotonicNow();
+    const startedAtMonotonicMs = typeof input.startedAtMonotonicMs === "number"
+      && Number.isFinite(input.startedAtMonotonicMs)
+      ? input.startedAtMonotonicMs
+      : fallback;
+    this.clientLatency.delete(input.requestId);
+    this.clientLatency.set(input.requestId, {
+      conversationId: input.conversationId,
+      requestId: input.requestId,
+      startedAtMonotonicMs,
+      milestones: new Set(),
+      segmentMilestones: new Set(),
+      toolMilestones: new Set(),
+      segments: new Map(),
+      toolExecutionOrdinals: new Map(),
+      nextToolExecutionOrdinal: 0,
+      nextHistorySyncOrdinal: 0,
+      pendingAssistantProjectionOrdinal: null,
+      pendingCommandAck: null,
+      pendingTerminalOrdinal: null,
+      lastOffsetMs: 0,
+    });
+    while (this.clientLatency.size > MAX_RETAINED_LATENCY_RUNS) {
+      const oldest = this.clientLatency.keys().next().value;
+      if (!oldest) break;
+      this.clientLatency.delete(oldest);
+    }
+  }
+
+  private ensureClientLatency(input: Readonly<{
+    conversationId: string;
+    requestId: string;
+    startedAtMonotonicMs?: number;
+  }>): void {
+    const existing = this.clientLatency.get(input.requestId);
+    if (existing?.conversationId === input.conversationId) return;
+    this.retainClientLatency(input);
+  }
+
+  private ensureToolExecutionOrdinal(
+    active: ActiveRun,
+    toolCallId: string,
+  ): number | undefined {
+    const context = this.clientLatency.get(active.requestId);
+    if (!context || context.conversationId !== active.conversationId) return undefined;
+    const existing = context.toolExecutionOrdinals.get(toolCallId);
+    if (existing !== undefined) return existing;
+    if (context.nextToolExecutionOrdinal >= MAX_TOOL_EXECUTIONS_PER_RUN) return undefined;
+    const ordinal = ++context.nextToolExecutionOrdinal;
+    context.toolExecutionOrdinals.set(toolCallId, ordinal);
+    return ordinal;
+  }
+
+  private latestToolResultSegmentOrdinal(
+    context: ClientLatencyContext,
+    toolCallId: string,
+    toolExecutionOrdinal: number,
+    requireAssistantProjection = false,
+  ): number | undefined {
+    const segments = [...context.segments.values()]
+      .sort((left, right) => right.ordinal - left.ordinal);
+    return segments.find((segment) =>
+      segment.commandKind === "client_tool_result"
+      && segment.toolCallId === toolCallId
+      && segment.toolExecutionOrdinal === toolExecutionOrdinal
+      && (!requireAssistantProjection || context.segmentMilestones.has(
+        `${segment.ordinal}:response_first_assistant_snapshot_projected`,
+      )))?.ordinal;
+  }
+
+  private recordClientToolLatencyMilestone(
+    code: ClientToolRenderCode,
+    requestId: string,
+    toolCallId: string,
+    observedAtMonotonicMs: number,
+  ): void {
+    const context = this.clientLatency.get(requestId);
+    const toolExecutionOrdinal = context?.toolExecutionOrdinals.get(toolCallId);
+    if (!context || toolExecutionOrdinal === undefined) return;
+    const milestone = `${toolExecutionOrdinal}:${code}`;
+    if (context.toolMilestones.has(milestone)) return;
+    const continuation = code === "continuation_content_dom_committed"
+      || code === "continuation_content_paint_opportunity";
+    const commandSegmentOrdinal = this.latestToolResultSegmentOrdinal(
+      context,
+      toolCallId,
+      toolExecutionOrdinal,
+      continuation,
+    );
+    context.toolMilestones.add(milestone);
+    const active = this.active?.requestId === requestId ? this.active : null;
+    this.recordLifecycle({
+      code,
+      phase: "render",
+      conversationId: context.conversationId,
+      requestId,
+      ...(active?.serverRunId ? { serverRunId: active.serverRunId } : {}),
+      toolExecutionOrdinal,
+      ...this.clientLatencyFields(
+        requestId,
+        observedAtMonotonicMs,
+        commandSegmentOrdinal,
+      ),
+    });
+  }
+
+  private createHistorySyncCorrelation(
+    historySyncKind: HistorySyncKind,
+  ): HistorySyncCorrelation {
+    const active = this.active;
+    const conversationId = active?.conversationId ?? this.conversationId ?? undefined;
+    if (!active) return { ...(conversationId ? { conversationId } : {}), historySyncKind };
+    const context = this.clientLatency.get(active.requestId);
+    if (!context || context.nextHistorySyncOrdinal >= MAX_HISTORY_SYNCS_PER_RUN) {
+      return { conversationId: active.conversationId, historySyncKind };
+    }
+    const historySyncOrdinal = ++context.nextHistorySyncOrdinal;
+    return {
+      conversationId: active.conversationId,
+      requestId: active.requestId,
+      historySyncKind,
+      historySyncOrdinal,
+    };
+  }
+
+  private recordHistorySyncLifecycle(
+    code: Extract<AgentLifecycleCode,
+      "history_sync_started" | "history_sync_completed" | "history_sync_failed">,
+    correlation: HistorySyncCorrelation,
+  ): void {
+    this.recordLifecycle({
+      code,
+      phase: "persistence",
+      ...correlation,
+      ...(correlation.requestId
+        ? this.clientLatencyFields(correlation.requestId)
+        : {}),
+    });
+  }
+
+  private clientLatencyFields(
+    requestId: string,
+    observedAtMonotonicMs = this.monotonicNow(),
+    commandSegmentOrdinal?: number,
+  ): Readonly<{
+    latencyTraceId?: string;
+    commandKind?: AgentCommandKind;
+    commandSegmentOrdinal?: number;
+    toolExecutionOrdinal?: number;
+    responseDeliveryMode?: PlatformResponseDeliveryMode;
+    clientMonotonicOffsetMs?: number;
+  }> {
+    const context = this.clientLatency.get(requestId);
+    if (!context || !Number.isFinite(observedAtMonotonicMs)) return {};
+    // Segment identity is intentionally opt-in. Multiple /turn streams for one
+    // logical request can overlap, so a global "last callback" pointer would
+    // let a late callback relabel DOM, paint, tool, or terminal milestones.
+    const segment = commandSegmentOrdinal === undefined
+      ? undefined
+      : context.segments.get(commandSegmentOrdinal);
+    const offset = Math.max(
+      context.lastOffsetMs,
+      observedAtMonotonicMs - context.startedAtMonotonicMs,
+      0,
+    );
+    context.lastOffsetMs = offset;
+    return {
+      ...(segment?.latencyTraceId
+        ? { latencyTraceId: segment.latencyTraceId }
+        : {}),
+      ...(segment
+        ? {
+            commandKind: segment.commandKind,
+            commandSegmentOrdinal: segment.ordinal,
+          }
+        : {}),
+      ...(typeof segment?.toolExecutionOrdinal === "number"
+        ? { toolExecutionOrdinal: segment.toolExecutionOrdinal }
+        : {}),
+      ...(segment?.responseDeliveryMode
+        ? { responseDeliveryMode: segment.responseDeliveryMode }
+        : {}),
+      clientMonotonicOffsetMs: offset,
+    };
+  }
+
+  private recordClientLatencyMilestone(
+    code: AgentLifecycleCode,
+    requestId: string,
+    observedAtMonotonicMs: number,
+    extra: Readonly<{
+      status?: number;
+      retryable?: boolean;
+      failureCode?: string;
+      serverTimingAppMs?: number;
+      serverTimingAuthMs?: number;
+      responseDeliveryMode?: PlatformResponseDeliveryMode;
+      toolName?: string;
+      toolCallId?: string;
+      toolExecutionOrdinal?: number;
+    }> = {},
+    commandSegmentOrdinal?: number,
+  ): void {
+    const context = this.clientLatency.get(requestId);
+    if (!context) return;
+    const segmentMilestone = commandSegmentOrdinal === undefined
+      ? null
+      : `${commandSegmentOrdinal}:${code}`;
+    const milestones = segmentMilestone === null
+      ? context.milestones
+      : context.segmentMilestones;
+    const milestone = segmentMilestone ?? code;
+    if (milestones.has(milestone)) return;
+    milestones.add(milestone);
+    const active = this.active?.requestId === requestId ? this.active : null;
+    this.recordLifecycle({
+      code,
+      phase: code === "response_first_dom_committed"
+        || code === "response_first_paint_opportunity"
+        || code === "local_tool_terminal_dom_committed"
+        || code === "local_tool_terminal_paint_opportunity"
+        || code === "continuation_content_dom_committed"
+        || code === "continuation_content_paint_opportunity"
+        ? "render"
+        : "response",
+      conversationId: context.conversationId,
+      requestId,
+      ...(active?.serverRunId ? { serverRunId: active.serverRunId } : {}),
+      ...extra,
+      ...this.clientLatencyFields(
+        requestId,
+        observedAtMonotonicMs,
+        commandSegmentOrdinal,
+      ),
+    });
+  }
+
+  private handleTransportTiming(event: AgentTransportTimingEvent): void {
+    const context = this.clientLatency.get(event.requestId);
+    if (!context) return;
+    const active = this.active?.requestId === event.requestId ? this.active : null;
+    // A transport callback may carry an unknown or adversarial call ID. Only
+    // a locally started execution establishes the export ordinal; exact IDs
+    // can join that existing map but can never create a new ordinal here.
+    const toolExecutionOrdinal = event.toolCallId
+      ? context.toolExecutionOrdinals.get(event.toolCallId)
+      : undefined;
+    const existing = context.segments.get(event.commandSegmentOrdinal);
+    if (existing && existing.commandKind !== event.commandKind) return;
+    const segment: ClientLatencySegment = existing ?? {
+      ordinal: event.commandSegmentOrdinal,
+      commandKind: event.commandKind,
+      toolCallId: event.toolCallId ?? null,
+      toolExecutionOrdinal: toolExecutionOrdinal ?? null,
+      toolName: null,
+      latencyTraceId: null,
+      responseDeliveryMode: null,
+    };
+    if (existing && existing.toolCallId !== (event.toolCallId ?? null)) return;
+    if (
+      existing
+      && existing.toolExecutionOrdinal !== (toolExecutionOrdinal ?? null)
+    ) return;
+    if (segment.toolCallId && segment.toolName === null) {
+      segment.toolName = active
+        ? this.findCurrentTool(active, segment.toolCallId)?.name ?? null
+        : null;
+    }
+    if (event.latencyTraceId) segment.latencyTraceId = event.latencyTraceId;
+    if (event.responseDeliveryMode) {
+      segment.responseDeliveryMode = event.responseDeliveryMode;
+    }
+    context.segments.set(segment.ordinal, segment);
+    while (context.segments.size > MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN) {
+      const oldest = context.segments.keys().next().value;
+      if (oldest === undefined) break;
+      context.segments.delete(oldest);
+      for (const code of [
+        "command_segment_dispatch_started",
+        "response_available",
+        "response_first_body_chunk_observed",
+        "response_first_sse_frame_parsed",
+        "response_first_assistant_sse_frame_parsed",
+        "response_first_assistant_snapshot_projected",
+      ] as const) {
+        context.segmentMilestones.delete(`${oldest}:${code}`);
+      }
+    }
+    if (event.milestone === "assistant_sse_frame_delivery_completed") {
+      if (context.pendingAssistantProjectionOrdinal === event.commandSegmentOrdinal) {
+        context.pendingAssistantProjectionOrdinal = null;
+      }
+      return;
+    }
+    if (event.milestone === "command_ack_sse_frame_delivery_completed") {
+      if (context.pendingCommandAck?.ordinal === event.commandSegmentOrdinal) {
+        context.pendingCommandAck = null;
+      }
+      return;
+    }
+    if (event.milestone === "terminal_sse_frame_delivery_completed") {
+      if (context.pendingTerminalOrdinal === event.commandSegmentOrdinal) {
+        context.pendingTerminalOrdinal = null;
+      }
+      return;
+    }
+    if (event.milestone === "command_ack_sse_frame") {
+      context.pendingCommandAck = {
+        ordinal: event.commandSegmentOrdinal,
+        commandKind: event.commandKind,
+        toolCallId: event.toolCallId ?? null,
+      };
+      return;
+    }
+    if (event.milestone === "terminal_sse_frame") {
+      context.pendingTerminalOrdinal = event.commandSegmentOrdinal;
+      return;
+    }
+    if (event.milestone === "first_assistant_sse_frame") {
+      context.pendingAssistantProjectionOrdinal = event.commandSegmentOrdinal;
+    }
+    const code = event.milestone === "command_dispatch_started"
+      ? "command_segment_dispatch_started"
+      : event.milestone === "response_available"
+        ? "response_available"
+        : event.milestone === "first_body_chunk"
+          ? "response_first_body_chunk_observed"
+          : event.milestone === "first_assistant_sse_frame"
+            ? "response_first_assistant_sse_frame_parsed"
+            : "response_first_sse_frame_parsed";
+    this.recordClientLatencyMilestone(
+      code,
+      event.requestId,
+      event.observedAtMonotonicMs,
+      {
+        ...(event.status === undefined ? {} : { status: event.status }),
+        ...(event.serverTimingAppMs === undefined
+          ? {}
+          : { serverTimingAppMs: event.serverTimingAppMs }),
+        ...(event.serverTimingAuthMs === undefined
+          ? {}
+          : { serverTimingAuthMs: event.serverTimingAuthMs }),
+        ...(event.responseDeliveryMode
+          ? { responseDeliveryMode: event.responseDeliveryMode }
+          : {}),
+        ...(segment.toolName ? { toolName: segment.toolName } : {}),
+        ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
+        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
+      },
+      event.commandSegmentOrdinal,
+    );
+  }
+
+  private isIncompleteSubmitBoundary(
+    active: ActiveRun,
+    session: AgentSession<WireMessage>,
+  ): boolean {
+    if (this.active?.token !== active.token || active.terminal) return false;
+    const snapshot = session.current;
+    if (
+      snapshot.runState.state === "waiting_for_client"
+      && snapshot.runState.request_id === active.requestId
+    ) return false;
+    if (snapshot.queuedRequestIds.includes(active.requestId)
+      || snapshot.cancelledQueuedRequestIds.includes(active.requestId)) return false;
+    return true;
   }
 
   private messagesWithOptimisticUser(
@@ -1959,15 +2841,32 @@ export class AgentChatSession {
     // stand in for that: between the run entering waiting_for_client and the
     // tool part rendering, the projection still reads as "thinking".
     this.awaitingClientWork = snapshot.runState.state === "waiting_for_client";
-    const progressKey = runProgressKey(snapshot);
-    if (progressKey !== this.runProgressKey) {
-      this.runProgressKey = progressKey;
-      this.noteServerProgress();
+    // A reconnect temporarily projects the last known run as `unknown` while
+    // the replacement snapshot is loading. That transport-only transition is
+    // not server progress and must not cancel recovery for the dead stream.
+    if (snapshot.runState.state !== "unknown") {
+      const progressKey = runProgressKey(snapshot);
+      if (progressKey !== this.runProgressKey) {
+        this.runProgressKey = progressKey;
+        this.noteServerProgress();
+      }
+    }
+    // Capture the streamed tail before the wholesale replacement below. Only
+    // a non-empty capture is kept: a snapshot that omits the run's streamed
+    // assistant content must never downgrade what already streamed.
+    const capturing = this.active;
+    if (capturing && !capturing.terminal) {
+      const streamed = currentTurnMessages(
+        this.presentationMessages,
+        capturing.turnId,
+      ).filter((message) => message.role === "assistant");
+      if (streamed.length > 0) capturing.streamedTurnMessages = streamed;
     }
     this.authoritativeMessages = snapshot.messages;
     this.presentationMessages = this.messagesWithOptimisticUser(snapshot);
     const runState = snapshot.runState;
     let active = this.active;
+    if (active) this.reconcileAcknowledgedContinuations(active);
     if (snapshot.terminal && active
       && snapshot.terminal.request_id === active.requestId) {
       this.acceptTerminal(active, snapshot.terminal.value);
@@ -1996,7 +2895,7 @@ export class AgentChatSession {
       if (this.pendingCancelRequestId === active.requestId) {
         this.pendingCancelRequestId = null;
       }
-      void this.reconcileMessages(this.presentationMessages)
+      void this.reconcileMessages(this.presentationMessages, "cancelled_queue")
         .catch(() => undefined);
       this.finishLocalCancellation(active);
       return;
@@ -2054,6 +2953,18 @@ export class AgentChatSession {
         }
       }
     }
+    if (
+      active
+      && !active.terminal
+      && currentTurnMessages(this.presentationMessages, active.turnId)
+        .some((message) => message.role === "assistant")
+    ) {
+      this.recordClientLatencyMilestone(
+        "response_first_assistant_snapshot_received",
+        active.requestId,
+        this.monotonicNow(),
+      );
+    }
     if (active?.serverQueued) {
       this.publishActive(active);
       void this.trySendPendingCancel();
@@ -2104,10 +3015,7 @@ export class AgentChatSession {
       "response_start_failed",
       "SystemSculpt could not start the response.",
     );
-    const billingFailure = normalized.status === 402
-      || normalized.code === "insufficient_credits"
-      || normalized.code === "payment_required"
-      || normalized.code === "out_of_credits";
+    const billingFailure = isAgentBillingFailure(normalized);
     const active = this.active;
     if (
       !billingFailure
@@ -2133,54 +3041,85 @@ export class AgentChatSession {
     ) return;
     const session = this.session;
     const active = this.active;
-    if (!session || !active || active.terminal || active.requestId !== ack.request_id) return;
+    if (!session || !active || active.requestId !== ack.request_id) return;
+    const latency = this.clientLatency.get(active.requestId);
+    const pendingAck = latency?.pendingCommandAck;
+    const acknowledgedToolCallId = "tool_call_id" in ack ? ack.tool_call_id : null;
+    const commandSegmentOrdinal = pendingAck
+      && pendingAck.commandKind === ack.command_kind
+      && pendingAck.toolCallId === acknowledgedToolCallId
+      ? pendingAck.ordinal
+      : undefined;
     if (ack.command_kind === "cancel") {
       // The acknowledgement confirms delivery, not the final outcome. A stale
       // queued projection can race with an already persisted terminal. Wait
       // for the preceding snapshot, a later resynchronization, or a terminal.
       return;
     }
-
-    const runState = session.current.runState;
-    if (
-      (runState.state !== "running" && runState.state !== "waiting_for_client")
-      || runState.request_id !== ack.request_id
-      || (active.serverRunId !== null && active.serverRunId !== runState.run_id)
-    ) return;
-
     if (ack.command_kind === "client_tool_approval") {
       const pending = this.pendingApprovalDeliveries.get(ack.tool_call_id);
       if (!pending || pending.decision.requestId !== ack.request_id) return;
-      this.pendingApprovalDeliveries.delete(ack.tool_call_id);
-      const tool = this.findCurrentTool(active, ack.tool_call_id);
-      this.recordLifecycle({
-        code: pending.decision.approved
-          ? "approval_acknowledged_approved"
-          : "approval_acknowledged_denied",
-        phase: "approval",
-        conversationId: active.conversationId,
-        requestId: active.requestId,
-        ...(tool?.name ? { toolName: tool.name } : {}),
-        toolCallId: ack.tool_call_id,
-      });
+      if (
+        !pending.inFlight
+        || pending.attemptedOpenEpoch !== this.openEpoch
+      ) return;
+      pending.acknowledged = true;
+      active.acknowledgedClientContinuationIds.add(ack.tool_call_id);
+      if (!pending.acknowledgementRecorded) {
+        pending.acknowledgementRecorded = true;
+        const tool = this.findCurrentTool(active, ack.tool_call_id);
+        this.recordLifecycle({
+          code: pending.decision.approved
+            ? "approval_acknowledged_approved"
+            : "approval_acknowledged_denied",
+          phase: "approval",
+          conversationId: active.conversationId,
+          requestId: active.requestId,
+          ...(tool?.name ? { toolName: tool.name } : {}),
+          toolCallId: ack.tool_call_id,
+          ...this.clientLatencyFields(
+            active.requestId,
+            this.monotonicNow(),
+            commandSegmentOrdinal,
+          ),
+        });
+      }
+      this.reconcileAcknowledgedContinuations(active);
       return;
     }
 
     if (ack.command_kind === "client_tool_result") {
       const pending = this.pendingDeliveries.get(ack.tool_call_id);
       if (!pending || pending.requestId !== ack.request_id) return;
-      this.pendingDeliveries.delete(ack.tool_call_id);
+      if (
+        !pending.inFlight
+        || pending.attemptedOpenEpoch !== this.openEpoch
+      ) return;
+      pending.acknowledged = true;
       active.settledToolIds.add(ack.tool_call_id);
-      this.recordLifecycle({
-        code: pending.state === "output-available"
-          ? "tool_result_acknowledged_succeeded"
-          : "tool_result_acknowledged_failed",
-        phase: "tool_execution",
-        conversationId: active.conversationId,
-        requestId: active.requestId,
-        toolName: pending.call.name,
-        toolCallId: ack.tool_call_id,
-      });
+      active.acknowledgedClientContinuationIds.add(ack.tool_call_id);
+      if (!pending.acknowledgementRecorded) {
+        pending.acknowledgementRecorded = true;
+        this.recordLifecycle({
+          code: pending.state === "output-available"
+            ? "tool_result_acknowledged_succeeded"
+            : "tool_result_acknowledged_failed",
+          phase: "tool_execution",
+          conversationId: active.conversationId,
+          requestId: active.requestId,
+          toolName: pending.call.name,
+          toolCallId: ack.tool_call_id,
+          ...(pending.toolExecutionOrdinal === undefined
+            ? {}
+            : { toolExecutionOrdinal: pending.toolExecutionOrdinal }),
+          ...this.clientLatencyFields(
+            active.requestId,
+            this.monotonicNow(),
+            commandSegmentOrdinal,
+          ),
+        });
+      }
+      this.reconcileAcknowledgedContinuations(active);
     }
   }
 
@@ -2256,15 +3195,32 @@ export class AgentChatSession {
         || (active.cancelRequested
           && this.pendingCancelRequestId !== active.requestId)
       ) return;
+      const stallRecovery = this.currentStallRecovery(active);
+      if (stallRecovery) active.streamSupersededByRecovery = true;
       this.resynchronizationInFlight = true;
-      void transport.connect()
+      void (stallRecovery ? transport.forceReconnect() : transport.connect())
         .catch((error) => this.reportLocalIssue(error))
         .finally(() => {
           if (this.generation !== generation || this.transport !== transport) return;
           this.resynchronizationInFlight = false;
-          if (transport.state !== "open") this.scheduleResynchronization(active);
+          if (
+            this.currentStallRecovery(active)
+            || transport.state !== "open"
+          ) this.scheduleResynchronization(active);
         });
     }, delay);
+  }
+
+  private currentStallRecovery(active: ActiveRun): StallRecovery | null {
+    const recovery = this.stallRecovery;
+    return recovery
+      && recovery.runToken === active.token
+      && recovery.progressKey === this.runProgressKey
+      && this.runStalled
+      && this.active?.token === active.token
+      && !active.terminal
+      ? recovery
+      : null;
   }
 
   private clearResynchronization(resetAttempt = true): void {
@@ -2283,8 +3239,10 @@ export class AgentChatSession {
    * covers connection trouble, which the connection watchdog already owns.
    */
   private syncRunStallWatchdog(snapshot: AgentConversationSnapshot): void {
+    const clientOwnsWait = this.awaitingClientWork
+      && !this.clientContinuationAwaitingServer();
     const awaitingServer = !this.runStalled
-      && !this.awaitingClientWork
+      && !clientOwnsWait
       && (snapshot.phase === "thinking" || snapshot.phase === "working");
     if (!awaitingServer) {
       this.clearRunStallTimer();
@@ -2298,6 +3256,10 @@ export class AgentChatSession {
       const current = this.active;
       if (!current || current.terminal) return;
       this.runStalled = true;
+      this.stallRecovery = {
+        runToken: current.token,
+        progressKey: this.runProgressKey,
+      };
       this.reportLocalIssue(new Error(
         "The agent run produced no server activity for "
           + `${this.runStallGraceMs()}ms while the connection was healthy `
@@ -2313,7 +3275,34 @@ export class AgentChatSession {
         retryable: true,
       });
       this.publishActive(current, true);
+      this.scheduleResynchronization(current);
     }, this.runStallGraceMs());
+  }
+
+  /**
+   * `waiting_for_client` names the protocol boundary, not permanent ownership.
+   * Once the current vault call's result or approval has been dispatched, the
+   * client has answered and the server owns the next state transition. Older
+   * settled calls cannot mask a newer approval or local execution because only
+   * the final current vault call is considered here.
+   */
+  private clientContinuationAwaitingServer(): boolean {
+    const active = this.active;
+    if (!active || active.terminal) return false;
+    const turn = currentTurnMessages(this.presentationMessages, active.turnId);
+    const targets = collectClientToolTargets(turn);
+    const tools = [...canonicalTools(turn, targets).values()]
+      .filter((tool) => tool.location === "vault");
+    const current = tools[tools.length - 1];
+    if (!current || active.executingToolIds.has(current.callId)) return false;
+    const result = this.pendingDeliveries.get(current.callId);
+    if (result?.requestId === active.requestId
+      && (result.inFlight || result.attemptedOpenEpoch !== null)) return true;
+    const approval = this.pendingApprovalDeliveries.get(current.callId);
+    if (approval?.decision.requestId === active.requestId
+      && (approval.inFlight || approval.attemptedOpenEpoch !== null)) return true;
+    return active.acknowledgedClientContinuationIds.has(current.callId)
+      || active.settledToolIds.has(current.callId);
   }
 
   private runStallGraceMs(): number {
@@ -2332,7 +3321,10 @@ export class AgentChatSession {
    * run must not reset the bound or hide the failure.
    */
   private noteServerProgress(): void {
-    this.resynchronizationAttempt = 0;
+    const recoveringFromStall = this.stallRecovery !== null;
+    this.stallRecovery = null;
+    if (recoveringFromStall) this.clearResynchronization();
+    else this.resynchronizationAttempt = 0;
     const wasStalled = this.runStalled;
     this.runStalled = false;
     this.clearRunStallTimer();
@@ -2354,13 +3346,8 @@ export class AgentChatSession {
       if (state === "input-streaming") continue;
       if (!this.ensureToolIdentity(active, tool)) return;
       if (!this.reconcilePendingApproval(active, tool)) return;
-      if (
-        (state === "output-available" && tool.part.preliminary !== true)
-        || state === "output-error"
-        || state === "output-denied"
-      ) {
+      if (isAuthoritativeTerminalToolPart(tool.part)) {
         active.settledToolIds.add(callId);
-        this.pendingDeliveries.delete(callId);
         continue;
       }
       if (
@@ -2381,6 +3368,7 @@ export class AgentChatSession {
             requestId: active.requestId,
             toolName: tool.name,
             toolCallId: callId,
+            ...this.clientLatencyFields(active.requestId),
           });
           if (!requiresUserApproval(tool.name, active.approvalPolicy)) {
             this.respondToApproval(active.approvalIds.get(callId)!, true, "policy");
@@ -2496,18 +3484,10 @@ export class AgentChatSession {
       });
       return false;
     }
-    if (!pending) return true;
-    this.pendingApprovalDeliveries.delete(tool.callId);
-    this.recordLifecycle({
-      code: acknowledged
-        ? "approval_acknowledged_approved"
-        : "approval_acknowledged_denied",
-      phase: "approval",
-      conversationId: active.conversationId,
-      requestId: active.requestId,
-      toolName: tool.name,
-      toolCallId: tool.callId,
-    });
+    // The assistant projection proves the decision is durable, not that the
+    // matching command acknowledgement reached this response stream. Keep the
+    // exact idempotent delivery until its explicit ACK arrives so a failed
+    // stream can safely replay it without re-running local work.
     return true;
   }
 
@@ -2530,17 +3510,42 @@ export class AgentChatSession {
     const tool = this.findCurrentTool(active, delivery.decision.callId);
     if (!tool || tool.location !== "vault") return;
     if (!this.reconcilePendingApproval(active, tool)) return;
+    const replayingDurableDenial = delivery.decision.approved === false
+      && (tool.part.state === "output-denied"
+        || (tool.part.state === "approval-responded"
+          && toolApproval(tool.part)?.approved === false));
     if (this.pendingApprovalDeliveries.get(delivery.decision.callId) !== delivery
-      || tool.part.state !== "approval-requested") return;
+      || (tool.part.state !== "approval-requested" && !replayingDurableDenial)) return;
 
     const attemptedEpoch = this.openEpoch;
     delivery.attemptedOpenEpoch = attemptedEpoch;
+    delivery.acknowledged = false;
     delivery.inFlight = true;
+    this.publishActive(active, true);
     void session.sendToolApproval({
       request_id: delivery.decision.requestId,
       tool_call_id: delivery.decision.callId,
       approved: delivery.decision.approved,
+    }).then(() => {
+      this.reconcileAcknowledgedContinuations(active);
+      // forceReconnect retires an older reader only after the replacement
+      // snapshot lands. Its stale promise resolves intentionally, so only the
+      // same open epoch can treat that resolution as a clean command stream.
+      if (this.openEpoch !== attemptedEpoch) return;
+      if (
+        this.active?.token === active.token
+        && !active.terminal
+        && this.pendingApprovalDeliveries.get(delivery.decision.callId) === delivery
+      ) {
+        // ACK is a delivery milestone, not continuation authority. A clean EOF
+        // is safe only after the matching decision also appears in the
+        // authoritative projection. Otherwise retain the exact decision and
+        // obtain a fresh snapshot before replaying it through bounded backoff.
+        delivery.attemptedOpenEpoch = null;
+        this.transport?.markUnsynchronized();
+      }
     }).catch((error) => {
+      this.reconcileAcknowledgedContinuations(active);
       if (
         this.active?.token === active.token
         && !active.terminal
@@ -2551,6 +3556,9 @@ export class AgentChatSession {
       }
     }).finally(() => {
       delivery.inFlight = false;
+      if (this.active?.token === active.token && !active.terminal) {
+        this.publishActive(active, true);
+      }
       if (
         this.active?.token === active.token
         && !active.terminal
@@ -2597,6 +3605,7 @@ export class AgentChatSession {
       name: tool.name,
       input: tool.input,
     };
+    const toolExecutionOrdinal = this.ensureToolExecutionOrdinal(active, call.callId);
     active.executingToolIds.add(call.callId);
     this.recordLifecycle({
       code: "local_tool_started",
@@ -2605,6 +3614,8 @@ export class AgentChatSession {
       requestId: active.requestId,
       toolName: call.name,
       toolCallId: call.callId,
+      ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
+      ...this.clientLatencyFields(active.requestId),
     });
     this.publishActive(active, true);
     const task = this.executeLocalTool(active, call, replayOnly)
@@ -2650,7 +3661,9 @@ export class AgentChatSession {
     call: LocalToolCall,
     replayOnly = false,
   ): Promise<void> {
+    const toolExecutionOrdinal = this.ensureToolExecutionOrdinal(active, call.callId);
     let result: ToolCallResult;
+    let presentationResult: ToolCallResult;
     let delivery: PendingToolDelivery;
     try {
       if (isMutatingTool(call.name)) {
@@ -2772,6 +3785,7 @@ export class AgentChatSession {
         );
       }
       result = safeOutboundVaultToolResult(result);
+      presentationResult = result;
       this.recordLifecycle({
         code: result.success
           ? "local_tool_completed_succeeded"
@@ -2781,17 +3795,29 @@ export class AgentChatSession {
         requestId: active.requestId,
         toolName: call.name,
         toolCallId: call.callId,
+        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
+        ...this.clientLatencyFields(active.requestId),
       });
       delivery = {
         requestId: active.requestId,
         call,
+        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         state: "output-available",
         output: toJsonValue(result),
         attemptedOpenEpoch: null,
         inFlight: false,
+        acknowledged: false,
+        acknowledgementRecorded: false,
       };
     } catch (error) {
       if (active.abort.signal.aborted || active.terminal) return;
+      presentationResult = {
+        success: false,
+        error: {
+          code: "TOOL_EXECUTION_FAILED",
+          message: "The vault action failed.",
+        },
+      };
       this.recordLifecycle({
         code: "local_tool_completed_failed",
         phase: "tool_execution",
@@ -2799,15 +3825,29 @@ export class AgentChatSession {
         requestId: active.requestId,
         toolName: call.name,
         toolCallId: call.callId,
+        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
+        ...this.clientLatencyFields(active.requestId),
       });
       delivery = {
         requestId: active.requestId,
         call,
+        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         state: "output-error",
         errorText: "The vault action failed.",
         attemptedOpenEpoch: null,
         inFlight: false,
+        acknowledged: false,
+        acknowledgementRecorded: false,
       };
+    }
+    // Local execution is complete before the continuation stream finishes.
+    // Keep that truth visible while the server acknowledges the result and
+    // resumes its own model loop; a vault tool is not still executing merely
+    // because later assistant content is streaming on the same HTTP request.
+    active.completedLocalToolResults.set(call.callId, presentationResult);
+    active.executingToolIds.delete(call.callId);
+    if (this.active?.token === active.token && !active.terminal) {
+      this.publishActive(active, true);
     }
     this.pendingDeliveries.set(call.callId, delivery);
     await this.deliverToolResult(active, delivery);
@@ -2831,7 +3871,9 @@ export class AgentChatSession {
     ) return;
     const attemptedEpoch = this.openEpoch;
     delivery.attemptedOpenEpoch = attemptedEpoch;
+    delivery.acknowledged = false;
     delivery.inFlight = true;
+    this.publishActive(active, true);
     try {
       if (delivery.state === "output-available") {
         await session.sendToolResult({
@@ -2850,6 +3892,38 @@ export class AgentChatSession {
           error_text: delivery.errorText ?? "The vault action failed.",
         });
       }
+      this.reconcileAcknowledgedContinuations(active);
+      // A newer authoritative synchronization can intentionally retire this
+      // reader after an ACK. That stale command resolves without an error, but
+      // it is not a clean close for this delivery attempt; the new epoch must
+      // inspect authority and, if still waiting, replay the stored result.
+      if (this.openEpoch !== attemptedEpoch) return;
+      const latency = this.clientLatency.get(active.requestId);
+      const commandSegmentOrdinal = latency && delivery.toolExecutionOrdinal !== undefined
+        ? this.latestToolResultSegmentOrdinal(
+            latency,
+            delivery.call.callId,
+            delivery.toolExecutionOrdinal,
+          )
+        : undefined;
+      this.recordLifecycle({
+        code: delivery.state === "output-available"
+          ? "tool_result_command_stream_completed_output_available"
+          : "tool_result_command_stream_completed_output_error",
+        phase: "tool_execution",
+        conversationId: active.conversationId,
+        requestId: active.requestId,
+        toolName: delivery.call.name,
+        toolCallId: delivery.call.callId,
+        ...(delivery.toolExecutionOrdinal === undefined
+          ? {}
+          : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
+        ...this.clientLatencyFields(
+          active.requestId,
+          this.monotonicNow(),
+          commandSegmentOrdinal,
+        ),
+      });
       this.recordLifecycle({
         code: delivery.state === "output-available"
           ? "tool_result_sent_succeeded"
@@ -2859,8 +3933,53 @@ export class AgentChatSession {
         requestId: active.requestId,
         toolName: delivery.call.name,
         toolCallId: delivery.call.callId,
+        ...(delivery.toolExecutionOrdinal === undefined
+          ? {}
+          : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
+        ...this.clientLatencyFields(active.requestId),
       });
+      if (
+        this.active?.token === active.token
+        && !active.terminal
+        && this.pendingDeliveries.get(delivery.call.callId) === delivery
+      ) {
+        // ACK is a delivery milestone, not continuation authority. A clean EOF
+        // is safe only after the matching tool result also appears in the
+        // authoritative projection. Otherwise retain the exact result and
+        // obtain a fresh snapshot before replaying it through bounded backoff.
+        delivery.attemptedOpenEpoch = null;
+        this.transport?.markUnsynchronized();
+      }
     } catch (error) {
+      this.reconcileAcknowledgedContinuations(active);
+      if (this.openEpoch === attemptedEpoch) {
+        const latency = this.clientLatency.get(active.requestId);
+        const commandSegmentOrdinal = latency
+          && delivery.toolExecutionOrdinal !== undefined
+          ? this.latestToolResultSegmentOrdinal(
+              latency,
+              delivery.call.callId,
+              delivery.toolExecutionOrdinal,
+            )
+          : undefined;
+        this.recordLifecycle({
+          code: "tool_result_command_stream_failed",
+          phase: "tool_execution",
+          conversationId: active.conversationId,
+          requestId: active.requestId,
+          toolName: delivery.call.name,
+          toolCallId: delivery.call.callId,
+          failureCode: "command_stream_failed",
+          ...(delivery.toolExecutionOrdinal === undefined
+            ? {}
+            : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
+          ...this.clientLatencyFields(
+            active.requestId,
+            this.monotonicNow(),
+            commandSegmentOrdinal,
+          ),
+        });
+      }
       if (
         this.active?.token === active.token
         && !active.terminal
@@ -2871,6 +3990,9 @@ export class AgentChatSession {
       }
     } finally {
       delivery.inFlight = false;
+      if (this.active?.token === active.token && !active.terminal) {
+        this.publishActive(active, true);
+      }
       if (
         this.active?.token === active.token
         && !active.terminal
@@ -2899,6 +4021,92 @@ export class AgentChatSession {
     return canonicalTools(turn, targets).get(callId) ?? null;
   }
 
+  private findAuthoritativeTool(active: ActiveRun, callId: string): ProjectedTool | null {
+    const turn = currentTurnMessages(this.authoritativeMessages, active.turnId);
+    const targets = collectClientToolTargets(turn);
+    return canonicalTools(turn, targets).get(callId) ?? null;
+  }
+
+  private reconcileAcknowledgedContinuations(active: ActiveRun): void {
+    if (this.active?.token !== active.token) return;
+    for (const [callId, delivery] of this.pendingDeliveries) {
+      if (
+        delivery.requestId === active.requestId
+        && delivery.acknowledged
+        && this.hasAuthoritativeToolResultProjection(active, delivery)
+      ) {
+        this.pendingDeliveries.delete(callId);
+      }
+    }
+    for (const [callId, delivery] of this.pendingApprovalDeliveries) {
+      if (
+        delivery.decision.requestId === active.requestId
+        && delivery.acknowledged
+        && this.hasAuthoritativeApprovalProjection(active, delivery)
+      ) {
+        this.pendingApprovalDeliveries.delete(callId);
+      }
+    }
+  }
+
+  private hasAuthoritativeToolResultProjection(
+    active: ActiveRun,
+    delivery: PendingToolDelivery,
+  ): boolean {
+    const tool = this.findAuthoritativeTool(active, delivery.call.callId);
+    if (
+      !tool
+      || tool.location !== "vault"
+      || !sameToolIdentity(toolIdentity(tool), toolIdentity(delivery.call))
+      || canonicalAgentToolInput(toolInput(tool.part))
+        !== canonicalAgentToolInput(delivery.call.input)
+    ) return false;
+    if (delivery.state === "output-error") {
+      return tool.part.state === "output-error"
+        && typeof tool.part.errorText === "string"
+        && tool.part.errorText === (delivery.errorText ?? "The vault action failed.");
+    }
+    return tool.part.state === "output-available"
+      && tool.part.preliminary !== true
+      && Object.prototype.hasOwnProperty.call(tool.part, "output")
+      && canonicalAgentToolInput(toJsonValue(tool.part.output))
+        === canonicalAgentToolInput(delivery.output ?? null);
+  }
+
+  private hasAuthoritativeApprovalProjection(
+    active: ActiveRun,
+    delivery: PendingApprovalDelivery,
+  ): boolean {
+    const tool = this.findAuthoritativeTool(active, delivery.decision.callId);
+    if (
+      !tool
+      || tool.location !== "vault"
+      || !sameToolIdentity(toolIdentity(tool), delivery.decision.identity)
+      || canonicalAgentToolInput(toolInput(tool.part))
+        !== delivery.decision.identity.canonicalInput
+    ) return false;
+    const approval = toolApproval(tool.part);
+    const carriesApproval = Object.prototype.hasOwnProperty.call(tool.part, "approval");
+    if (carriesApproval && (
+      !approval
+      || approval.id !== delivery.decision.approvalId
+      || approval.approved !== delivery.decision.approved
+    )) return false;
+    const projectedDecision = typeof approval?.approved === "boolean"
+      ? approval.approved
+      : tool.part.state === "output-denied"
+        ? false
+        : isAuthoritativeTerminalToolPart(tool.part)
+          ? true
+          : undefined;
+    if (projectedDecision !== delivery.decision.approved) return false;
+    return delivery.decision.approved
+      ? tool.part.state === "approval-responded"
+        || isAuthoritativeTerminalToolPart(tool.part)
+      : tool.part.state === "approval-responded"
+        || tool.part.state === "output-denied";
+  }
+
   private acceptTerminal(active: ActiveRun, terminal: ThinAgentRunTerminalData): void {
     if (
       this.active?.token !== active.token
@@ -2910,6 +4118,8 @@ export class AgentChatSession {
     active.terminal = terminal;
     active.phase = terminal.outcome === "succeeded" ? "settling" : "complete";
     active.label = terminal.outcome === "succeeded" ? "Finishing" : "";
+    const terminalSegmentOrdinal = this.clientLatency.get(active.requestId)
+      ?.pendingTerminalOrdinal ?? undefined;
     this.recordLifecycle({
       code: terminal.outcome === "succeeded"
         ? "response_result_received_succeeded"
@@ -2927,6 +4137,11 @@ export class AgentChatSession {
             failureCode: terminal.code,
           }
         : {}),
+      ...this.clientLatencyFields(
+        active.requestId,
+        this.monotonicNow(),
+        terminalSegmentOrdinal,
+      ),
     });
     this.publishActive(active, true);
     const finalization = this.finalizeTerminal(active);
@@ -2942,9 +4157,20 @@ export class AgentChatSession {
     active.finalizing = true;
     await Promise.allSettled(active.toolTasks.values());
     const terminal = active.terminal;
+    if (terminal.outcome !== "succeeded") {
+      this.presentationMessages = restoreInterruptedTurnTail(
+        this.presentationMessages,
+        active,
+        terminal,
+      );
+    }
+    const durableMessages = overlayCompletedLocalToolResults(
+      this.presentationMessages,
+      active,
+    );
     let assistantMessage: ChatMessage | undefined;
     if (terminal.outcome === "succeeded") {
-      const turn = currentTurnMessages(this.presentationMessages, active.turnId);
+      const turn = currentTurnMessages(durableMessages, active.turnId);
       const assistant = [...turn].reverse().find((message) => message.role === "assistant");
       if (assistant) {
         const durable = durableAssistantMessage(
@@ -2961,6 +4187,7 @@ export class AgentChatSession {
             conversationId: active.conversationId,
             requestId: active.requestId,
             serverRunId: terminal.run_id,
+            ...this.clientLatencyFields(active.requestId),
           });
           try {
             await this.options.persistAssistant(durable);
@@ -2970,6 +4197,7 @@ export class AgentChatSession {
               conversationId: active.conversationId,
               requestId: active.requestId,
               serverRunId: terminal.run_id,
+              ...this.clientLatencyFields(active.requestId),
             });
           } catch (error) {
             this.recordLifecycle({
@@ -2978,13 +4206,14 @@ export class AgentChatSession {
               conversationId: active.conversationId,
               requestId: active.requestId,
               serverRunId: terminal.run_id,
+              ...this.clientLatencyFields(active.requestId),
             });
             this.reportLocalIssue(error);
           }
         }
       }
     }
-    await this.reconcileMessages(this.presentationMessages).catch(() => undefined);
+    await this.reconcileMessages(durableMessages, "terminal").catch(() => undefined);
     const snapshot = projectRun(
       active,
       this.presentationMessages,
@@ -3000,14 +4229,21 @@ export class AgentChatSession {
       : terminal.outcome === "cancelled"
         ? { kind: "cancelled", snapshot }
         : { kind: "failed", snapshot, error: terminalError(terminal) };
-    if (terminal.outcome === "succeeded") {
-      try {
-        await this.options.refreshCredits?.();
-      } catch (error) {
-        this.reportLocalIssue(error);
-      }
-    }
     this.completeActive(active, result);
+    if (terminal.outcome === "succeeded") {
+      // Credit balance is presentation metadata; the server remains the
+      // authority for admitting the next billed turn. A slow balance lookup
+      // must not keep an already-persisted terminal response mounted as active,
+      // hold the composer lock, or block detach/New Chat behind finalization.
+      // Start the refresh only after releasing the run so queued and user
+      // follow-ups can proceed, and contain either synchronous or async errors.
+      void Promise.resolve()
+        .then(() => this.options.refreshCredits?.("post_terminal", {
+          requestId: active.requestId,
+          serverRunId: terminal.run_id,
+        }))
+        .catch((error) => this.reportLocalIssue(error));
+    }
   }
 
   private completeActive(active: ActiveRun, result: AgentRunResult): void {
@@ -3015,6 +4251,7 @@ export class AgentChatSession {
     this.clearRunStallTimer();
     this.clearResynchronization();
     this.runStalled = false;
+    this.stallRecovery = null;
     this.pendingRegenerate = null;
     this.pendingDeliveries.clear();
     this.pendingApprovalDeliveries.clear();
@@ -3031,22 +4268,30 @@ export class AgentChatSession {
       requestId: active.requestId,
       ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
       ...(result.kind === "failed" ? { retryable: result.error.retryable } : {}),
+      ...this.clientLatencyFields(active.requestId),
     });
-    if (result.kind === "failed") {
-      this.refreshCreditsAfterBillingFailure(result.error);
-    }
+    const billingFailure = result.kind === "failed" ? result.error : null;
     this.active = null;
+    if (billingFailure) {
+      // Queue the session-owned fresh read before the run consumer presents the
+      // same billing error. The callback itself cannot run until this stack has
+      // released `active`, and the view's generic refresh then joins it.
+      this.refreshCreditsAfterBillingFailure(billingFailure, active);
+    }
     active.resolve(result);
   }
 
-  private refreshCreditsAfterBillingFailure(error: ManagedAgentError): void {
-    if (
-      error.status !== 402
-      && error.code !== "insufficient_credits"
-      && error.code !== "payment_required"
-      && error.code !== "out_of_credits"
-    ) return;
-    void this.options.refreshCredits?.().catch(this.reportLocalIssue.bind(this));
+  private refreshCreditsAfterBillingFailure(
+    error: ManagedAgentError,
+    active: ActiveRun,
+  ): void {
+    if (!isAgentBillingFailure(error)) return;
+    void Promise.resolve()
+      .then(() => this.options.refreshCredits?.("billing_failure", {
+        requestId: active.requestId,
+        ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
+      }))
+      .catch((refreshError) => this.reportLocalIssue(refreshError));
   }
 
   private finishLocalCancellation(active: ActiveRun): void {
@@ -3087,8 +4332,11 @@ export class AgentChatSession {
       this.connectionState,
     );
     this.commitSnapshot(snapshot);
-    this.reportLocalIssue(error);
     this.completeActive(active, { kind: "failed", snapshot, error });
+    // Complete/release first so the session-owned billing refresh starts
+    // before AgentChatView's generic error presentation sees the same 402.
+    // The latter then joins the in-flight refresh instead of forcing another.
+    this.reportLocalIssue(error);
   }
 
   private failedResult(turnId: string, error: ManagedAgentError): AgentRunResult {
@@ -3120,6 +4368,27 @@ export class AgentChatSession {
       this.connectionState,
       this.runStalled,
     );
+    const latency = this.clientLatency.get(active.requestId);
+    const pendingAssistantProjectionOrdinal =
+      latency?.pendingAssistantProjectionOrdinal ?? null;
+    if (pendingAssistantProjectionOrdinal !== null && snapshot.messages.length > 0) {
+      this.recordClientLatencyMilestone(
+        "response_first_assistant_snapshot_projected",
+        active.requestId,
+        this.monotonicNow(),
+        {},
+        pendingAssistantProjectionOrdinal,
+      );
+      latency!.pendingAssistantProjectionOrdinal = null;
+    }
+    if (snapshot.parts.some((part) =>
+      part.kind === "text" || part.kind === "reasoning" || part.kind === "tool")) {
+      this.recordClientLatencyMilestone(
+        "response_first_content_projected",
+        active.requestId,
+        this.monotonicNow(),
+      );
+    }
     this.syncRunStallWatchdog(snapshot);
     if (immediate) this.commitSnapshot(snapshot);
     else this.scheduleSnapshot(snapshot);
@@ -3174,6 +4443,12 @@ export class AgentChatSession {
 
   private reconcileAuthoritativePrefix(active: ActiveRun | null): void {
     if (!this.options.reconcileHistory) return;
+    // A run that already holds its terminal is finalizing: its durable write
+    // belongs to finalizeTerminal. Reconciling the bare prefix here would
+    // momentarily rewrite history without the finished turn — a visible
+    // clear/rebuild flicker at the final paint boundary, and real content
+    // loss if the process dies between the two writes.
+    if (active?.terminal) return;
     const rootIndex = active
       ? this.authoritativeMessages.findIndex((message) =>
           message.role === "user" && message.id === active.turnId)
@@ -3184,10 +4459,14 @@ export class AgentChatSession {
         ? this.authoritativeMessages.filter((message) =>
             active.baseMessageIds.has(message.id))
         : this.authoritativeMessages;
-    void this.reconcileMessages(messages).catch(() => undefined);
+    void this.reconcileMessages(messages, "authoritative_prefix")
+      .catch(() => undefined);
   }
 
-  private reconcileMessages(messages: readonly WireMessage[]): Promise<void> {
+  private reconcileMessages(
+    messages: readonly WireMessage[],
+    historySyncKind: HistorySyncKind,
+  ): Promise<void> {
     if (!this.options.reconcileHistory) return Promise.resolve();
     // An empty fresh or fork snapshot is not an instruction to erase a local
     // cache. Wait until the server has published an authoritative root.
@@ -3195,30 +4474,19 @@ export class AgentChatSession {
     const key = JSON.stringify(messages);
     if (key === this.reconciledKey) return this.pendingReconcile;
     this.reconciledKey = key;
-    const conversationId = this.conversationId;
     const durable = durableServerHistory(messages, this.now());
-    this.recordLifecycle({
-      code: "history_sync_started",
-      phase: "persistence",
-      ...(conversationId ? { conversationId } : {}),
+    const correlation = this.createHistorySyncCorrelation(historySyncKind);
+    const task = this.pendingReconcile.then(() => {
+      this.recordHistorySyncLifecycle("history_sync_started", correlation);
+      return this.options.reconcileHistory!(durable);
     });
-    const task = this.pendingReconcile.then(() =>
-      this.options.reconcileHistory!(durable));
     this.pendingReconcile = task.then(
       () => {
-        this.recordLifecycle({
-          code: "history_sync_completed",
-          phase: "persistence",
-          ...(conversationId ? { conversationId } : {}),
-        });
+        this.recordHistorySyncLifecycle("history_sync_completed", correlation);
       },
       (error) => {
         if (this.reconciledKey === key) this.reconciledKey = null;
-        this.recordLifecycle({
-          code: "history_sync_failed",
-          phase: "persistence",
-          ...(conversationId ? { conversationId } : {}),
-        });
+        this.recordHistorySyncLifecycle("history_sync_failed", correlation);
         this.reportLocalIssue(error);
       },
     );

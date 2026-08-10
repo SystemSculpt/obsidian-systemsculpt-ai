@@ -259,6 +259,44 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain('streaming="true"');
     });
 
+    it("round-trips the cancelled terminal outcome as an additive attribute", () => {
+      const messages: ChatMessage[] = [
+        { role: "user", content: "Stream a long response", message_id: "user-1" },
+        {
+          role: "assistant",
+          content: "PARTIAL-STREAM-START\n1\n2\n3",
+          message_id: "asst-cancelled-1",
+          terminalOutcome: "cancelled",
+        },
+      ];
+
+      const serialized = ChatMarkdownSerializer.serializeMessages(messages);
+      expect(serialized).toContain('terminal-outcome="cancelled"');
+
+      const content = `---\nid: chat-cancel-roundtrip\n---\n\n${serialized}`;
+      const parsed = ChatMarkdownSerializer.parseMarkdown(content);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.messages[0]?.terminalOutcome).toBeUndefined();
+      expect(parsed?.messages[1]?.terminalOutcome).toBe("cancelled");
+      expect(String(parsed?.messages[1]?.content)).toContain("PARTIAL-STREAM-START");
+    });
+
+    it("never restores an unknown terminal outcome value", () => {
+      const content = [
+        "---",
+        "id: chat-cancel-unknown",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="asst-odd" terminal-outcome="exploded" -->',
+        "Odd outcome body",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(content);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.messages[0]?.terminalOutcome).toBeUndefined();
+    });
+
     it("joins multiple messages with double newlines", () => {
       const messages: ChatMessage[] = [
         { role: "user", content: "First", message_id: "user-1" },

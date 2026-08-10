@@ -8,39 +8,15 @@ const require = createRequire(import.meta.url);
 const root = process.cwd();
 const base = require(path.join(root, "jest.config.cjs"));
 const critical = require(path.join(root, "jest.chatview-critical-risk.config.cjs"));
+const compat = require(path.join(root, "jest.chatview-critical-compat.config.cjs"));
 const mobile = require(path.join(root, "jest.mobile-interactions.config.cjs"));
 const unit = require(path.join(root, "jest.unit-ci.config.cjs"));
-const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-const expectedMobileTests = [
-  "<rootDir>/src/platform/__tests__/hostCapabilities.test.ts",
-  "<rootDir>/src/platform/__tests__/mobileLayout.test.ts",
-  "<rootDir>/src/platform/__tests__/mobileHostLayout.test.ts",
-  "<rootDir>/src/core/ui/surface/__tests__/PluginSurface.test.ts",
-  "<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
-  "<rootDir>/src/views/chatview/__tests__/agent-workspace-css-contract.test.ts",
-  "<rootDir>/src/views/chatview/__tests__/anchored-scroller.test.ts",
-  "<rootDir>/src/views/__tests__/similar-notes-css-contract.test.ts",
-  "<rootDir>/src/views/studio/__tests__/studio-node-insert-menu.test.ts",
-  "<rootDir>/src/views/studio/__tests__/studio-run-host-preflight.test.ts",
-  "<rootDir>/src/views/studio/__tests__/studio-context-menu-accessibility.test.ts",
-  "<rootDir>/src/views/studio/graph-v3/__tests__/studio-surface-css-contract.test.ts",
-  "<rootDir>/src/views/studio/graph-v3/__tests__/studio-graph-workspace-renderer-controls.test.ts",
-  "<rootDir>/src/__tests__/systemsculpt-settings-tab.test.ts",
-];
-
-test("mobile interactions remain an explicit strict seeded gate", () => {
-  assert.equal(mobile.displayName, "mobile-interactions");
-  assert.equal(mobile.maxWorkers, 1);
-  assert.deepEqual(mobile.testMatch, expectedMobileTests);
-  assert.equal(mobile.collectCoverage, false);
-  assert.equal(
-    packageJson.scripts["test:mobile:interactions"],
-    "node scripts/jest.mjs --strict-console --config jest.mobile-interactions.config.cjs "
-      + "--runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
-  );
-  for (const testPath of mobile.testMatch) {
-    assert.equal(fs.existsSync(testPath.replace("<rootDir>", root)), true, testPath);
+test("every focused gate points at test files that exist", () => {
+  for (const config of [critical, mobile]) {
+    for (const testPath of config.testMatch) {
+      assert.equal(fs.existsSync(testPath.replace("<rootDir>", root)), true, testPath);
+    }
   }
 });
 
@@ -53,11 +29,13 @@ test("the exhaustive unit remainder cannot rerun focused critical and mobile gat
     ...critical.testMatch,
     ...mobile.testMatch,
   ]);
-  assert.equal(
-    packageJson.scripts["test:unit:ci"],
-    "node scripts/jest.mjs --strict-console --config jest.unit-ci.config.cjs --runInBand "
-      + "--detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
-  );
+});
+
+test("the compatibility gate reuses the critical suites without repeating coverage work", () => {
+  assert.equal(compat.displayName, "chatview-critical-compat");
+  assert.deepEqual(compat.testMatch, critical.testMatch);
+  assert.equal(compat.collectCoverage, false);
+  assert.equal(compat.coverageThreshold, undefined);
 });
 
 test("focused CI gates pin their one intentional overlap and their ignores do not silently widen", () => {

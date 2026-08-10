@@ -128,6 +128,76 @@ describe("thin-agent protocol parsing", () => {
     });
   });
 
+  it("accepts only a non-negative safe assistant snapshot sequence", () => {
+    const message = {
+      id: "assistant_sequenced",
+      role: "assistant",
+      parts: [{ type: "text", text: "Ordered" }],
+    };
+    const valid = parseAgentServerEvent(event("assistant_snapshot", {
+      request_id: "request_sequenced",
+      snapshot_epoch: 7,
+      snapshot_sequence: 42,
+      message,
+    }), CONVERSATION_ID);
+
+    expect(valid).toMatchObject({
+      kind: "assistant_snapshot",
+      request_id: "request_sequenced",
+      snapshot_epoch: 7,
+      snapshot_sequence: 42,
+      message,
+    });
+    for (const snapshotSequence of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => parseAgentServerEvent(event("assistant_snapshot", {
+        request_id: "request_sequenced",
+        snapshot_epoch: 7,
+        snapshot_sequence: snapshotSequence,
+        message,
+      }), CONVERSATION_ID)).toThrow(expect.objectContaining({
+        name: "AgentProtocolError",
+        code: "invalid_server_event",
+      } satisfies Partial<AgentProtocolError>));
+    }
+    for (const partialOrder of [
+      { snapshot_epoch: 7 },
+      { snapshot_sequence: 42 },
+    ]) {
+      expect(() => parseAgentServerEvent(event("assistant_snapshot", {
+        request_id: "request_sequenced",
+        ...partialOrder,
+        message,
+      }), CONVERSATION_ID)).toThrow(AgentProtocolError);
+    }
+  });
+
+  it("accepts only a complete non-negative full snapshot order", () => {
+    const valid = parseAgentServerEvent(event("session_snapshot", {
+      snapshot_epoch: 7,
+      snapshot_sequence: 42,
+      messages: [],
+      run_state: { version: 1, cursor: 0, state: "idle" },
+    }), CONVERSATION_ID);
+
+    expect(valid).toMatchObject({
+      kind: "session_snapshot",
+      snapshot_epoch: 7,
+      snapshot_sequence: 42,
+    });
+    for (const invalidOrder of [
+      { snapshot_epoch: 7 },
+      { snapshot_sequence: 42 },
+      { snapshot_epoch: -1, snapshot_sequence: 42 },
+      { snapshot_epoch: 7, snapshot_sequence: 1.5 },
+    ]) {
+      expect(() => parseAgentServerEvent(event("session_snapshot", {
+        ...invalidOrder,
+        messages: [],
+        run_state: { version: 1, cursor: 0, state: "idle" },
+      }), CONVERSATION_ID)).toThrow(AgentProtocolError);
+    }
+  });
+
   it("rejects malformed snapshot messages before reading run state", () => {
     let runStateRead = false;
     const snapshot = {

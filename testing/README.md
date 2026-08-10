@@ -40,7 +40,6 @@ npm run test:embeddings
 npm run test:integration
 npm run test:chatview:critical
 npm run test:chatview:mutants
-npm run test:thin-agent:endurance
 npm run check:plugin
 npm run check:ci
 npm run check:compat
@@ -54,6 +53,9 @@ npm run check:full
   accessibility, and Studio capability tests; then rebuilds the artifact and
   opens settings, Chat, Similar Notes, and Studio without desktop-only globals.
 - test:integration imports the production artifact in the Obsidian host mock.
+  It also drives the credential-free thin-agent endurance fixture through the
+  real headless Chat, native transport, approval, mutation-journal, reconnect,
+  and terminal seams.
 - check:plugin adds types, mobile, sync, artifact, and release guards.
 - test:chatview:critical uses strict console, randomized test order with a
   printed replay seed, open-handle detection, adversarial thin-session and
@@ -63,9 +65,6 @@ npm run check:full
   an isolated temporary mirror, applies 5 curated AST-anchored regressions one
   at a time, and requires focused tests to kill every one. It runs without
   coverage or randomized order so a survivor is deterministic and actionable.
-- test:thin-agent:endurance drives the real headless Chat, Bridge, native
-  transport, approval, mutation-journal, reconnect, and terminal seams through
-  the credential-free long-run fixture.
 - check:ci is the exact exhaustive PR gate: check:plugin plus the critical-risk
   and mutation gates, focused mobile interactions, strict randomized unit and
   embeddings tests, already-built integration, and release suites.

@@ -1,31 +1,96 @@
 import { requestUrl } from "obsidian";
-import { PlatformContext } from "../PlatformContext";
-import { PlatformRequestClient } from "../PlatformRequestClient";
+import {
+  getPlatformResponseDeliveryMode,
+  isSafeLoopbackHttpUrl,
+  PlatformRequestClient,
+} from "../PlatformRequestClient";
 
 jest.mock("obsidian", () => ({
   ...jest.requireActual("obsidian"),
   requestUrl: jest.fn(),
 }));
 
-jest.mock("../PlatformContext", () => ({
-  PlatformContext: {
-    get: jest.fn(),
-  },
-}));
-
 describe("PlatformRequestClient", () => {
-  const preferredTransport = jest.fn();
-
   beforeEach(() => {
     jest.clearAllMocks();
-    preferredTransport.mockReset();
-    preferredTransport.mockReturnValue("fetch");
-    (PlatformContext.get as jest.Mock).mockReturnValue({
-      preferredTransport,
-    });
   });
 
-  it("uses fetch when the platform prefers fetch", async () => {
+  it.each([
+    "http://127.0.0.1:8787/api/plugin/license/validate",
+    "http://localhost:8787/api/plugin/releases/latest",
+    "http://[::1]:8787/api/plugin/credits/balance",
+  ])("uses direct fetch for the exact safe loopback HTTP origin %s", async (url) => {
+    const client = new PlatformRequestClient();
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as any;
+
+    await expect(client.request({ url, method: "GET" })).resolves.toMatchObject({
+      status: 200,
+    });
+
+    expect(isSafeLoopbackHttpUrl(url)).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      url,
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://127.0.0.1:8787/api/plugin/license/validate",
+    "http://127.0.0.2:8787/api/plugin/license/validate",
+    "http://user@localhost:8787/api/plugin/license/validate",
+    "not a URL",
+  ])("does not classify a non-exact loopback URL as safe: %s", (url) => {
+    expect(isSafeLoopbackHttpUrl(url)).toBe(false);
+  });
+
+  it("never falls back to the native gateway after a loopback fetch failure", async () => {
+    const client = new PlatformRequestClient();
+    const failure = new Error("loopback worker unavailable");
+    global.fetch = jest.fn().mockRejectedValue(failure) as any;
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      text: JSON.stringify({ ok: true }),
+      json: { ok: true },
+    });
+
+    await expect(client.request({
+      url: "http://127.0.0.1:8787/api/plugin/license/validate",
+      method: "GET",
+    })).rejects.toBe(failure);
+
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a loopback request has no direct fetch implementation", async () => {
+    const client = new PlatformRequestClient();
+    const originalFetch = global.fetch;
+    Object.defineProperty(global, "fetch", {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+    try {
+      await expect(client.request({
+        url: "http://127.0.0.1:8787/api/plugin/license/validate",
+        method: "GET",
+      })).rejects.toThrow("Direct loopback fetch is unavailable");
+      expect(requestUrl).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(global, "fetch", {
+        value: originalFetch,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it("uses direct fetch for streaming requests when fetch is available", async () => {
     const client = new PlatformRequestClient();
     global.fetch = jest.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
@@ -38,7 +103,7 @@ describe("PlatformRequestClient", () => {
       url: "https://systemsculpt.com/api/plugin/chat/completions",
       method: "POST",
       body: { ok: true },
-      stream: false,
+      stream: true,
       licenseKey: "license",
       headers: {
         "x-plugin-version": "4.15.0",
@@ -46,10 +111,6 @@ describe("PlatformRequestClient", () => {
     });
 
     expect(response.ok).toBe(true);
-    expect(preferredTransport).toHaveBeenCalledWith({
-      endpoint: "https://systemsculpt.com/api/plugin/chat/completions",
-      stream: false,
-    });
     expect(global.fetch).toHaveBeenCalledWith(
       "https://systemsculpt.com/api/plugin/chat/completions",
       expect.objectContaining({
@@ -59,10 +120,32 @@ describe("PlatformRequestClient", () => {
           "x-plugin-version": "4.15.0",
         }),
         body: JSON.stringify({ ok: true }),
-        cache: "no-store",
       })
     );
     expect(requestUrl).not.toHaveBeenCalled();
+  });
+
+  it("observes the selected native transport without letting diagnostics alter delivery", async () => {
+    const client = new PlatformRequestClient();
+    const onTransportSelected = jest.fn(() => {
+      throw new Error("diagnostic sink unavailable");
+    });
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      text: JSON.stringify({ ok: true }),
+      json: { ok: true },
+      headers: { "Content-Type": "application/json" },
+    });
+
+    await expect(client.request({
+      url: "https://systemsculpt.com/api/plugin/credits/balance",
+      method: "GET",
+      onTransportSelected,
+    })).resolves.toMatchObject({ status: 200 });
+
+    expect(onTransportSelected).toHaveBeenCalledTimes(1);
+    expect(onTransportSelected).toHaveBeenCalledWith("requestUrl");
+    expect(requestUrl).toHaveBeenCalledTimes(1);
   });
 
   it("chooses requestUrl before a streaming POST when the replay-safe CORS probe fails", async () => {
@@ -72,6 +155,7 @@ describe("PlatformRequestClient", () => {
       status: 200,
       text: "data: [DONE]\n\n",
       json: null,
+      headers: { "x-systemsculpt-response-delivery-mode": "fetch_stream" },
     });
 
     const response = await client.request({
@@ -79,6 +163,8 @@ describe("PlatformRequestClient", () => {
       method: "POST",
       body: { ok: true },
       stream: true,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
       licenseKey: "license",
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
@@ -95,10 +181,6 @@ describe("PlatformRequestClient", () => {
         throw: false,
       })
     );
-    expect(preferredTransport).toHaveBeenCalledWith({
-      endpoint: "https://systemsculpt.com/api/plugin/chat/completions",
-      stream: true,
-    });
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledWith(
       "https://systemsculpt.com/api/plugin/connectivity",
@@ -106,6 +188,49 @@ describe("PlatformRequestClient", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(response.headers.get("x-systemsculpt-response-delivery-mode"))
+      .toBe("fetch_stream");
+    expect(getPlatformResponseDeliveryMode(response)).toBe("request_url_buffered");
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares an in-flight prewarm with an immediate streaming request", async () => {
+    const client = new PlatformRequestClient();
+    let releaseProbe!: () => void;
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    global.fetch = jest.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/api/plugin/connectivity")) {
+        await probeGate;
+        return new Response(null, { status: 204 });
+      }
+      return new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+
+    const prewarm = client.prewarmStreamingFetch(
+      "https://systemsculpt.com/api/plugin/connectivity",
+    );
+    await Promise.resolve();
+    const request = client.request({
+      url: "https://systemsculpt.com/api/plugin/agent/turn",
+      method: "POST",
+      body: { ok: true },
+      stream: true,
+      preserveResponseHeaders: true,
+      allowTransportFallback: false,
+      streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
+    });
+    await Promise.resolve();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    releaseProbe();
+    await expect(prewarm).resolves.toBe(true);
+    await expect(request).resolves.toMatchObject({ status: 200 });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect((global.fetch as jest.Mock).mock.calls.filter(([url]) =>
+      String(url).endsWith("/api/plugin/connectivity"))).toHaveLength(1);
   });
 
   it("streams through fetch only after the replay-safe CORS probe succeeds", async () => {
@@ -131,6 +256,7 @@ describe("PlatformRequestClient", () => {
     });
 
     expect(response).toBe(streamed);
+    expect(getPlatformResponseDeliveryMode(response)).toBe("fetch_stream");
     expect(global.fetch).toHaveBeenNthCalledWith(
       1,
       "https://systemsculpt.com/api/plugin/connectivity",
@@ -153,7 +279,7 @@ describe("PlatformRequestClient", () => {
       url: "https://systemsculpt.com/api/plugin/chat/completions",
       method: "POST",
       body: { purpose: "workflow_automation" },
-      stream: false,
+      stream: true,
       licenseKey: "license",
       allowTransportFallback: false,
     })).rejects.toBe(failure);
@@ -189,8 +315,6 @@ describe("PlatformRequestClient", () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(PlatformContext.get).not.toHaveBeenCalled();
-    expect(preferredTransport).not.toHaveBeenCalled();
     expect(requestUrl).toHaveBeenCalledWith({
       url: "https://signed.example.com/upload?signature=exact",
       method: "PUT",
@@ -230,8 +354,6 @@ describe("PlatformRequestClient", () => {
       transport: "requestUrl",
     })).rejects.toThrow("Raw platform request bodies must be an ArrayBuffer");
 
-    expect(PlatformContext.get).not.toHaveBeenCalled();
-    expect(preferredTransport).not.toHaveBeenCalled();
     expect(requestUrl).not.toHaveBeenCalled();
   });
 
@@ -266,7 +388,6 @@ describe("PlatformRequestClient", () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(PlatformContext.get).not.toHaveBeenCalled();
     expect(requestUrl).toHaveBeenCalledWith(expect.objectContaining({
       method: "GET",
       headers: expect.objectContaining({ "x-request-id": "output-1", "x-license-key": "license" }),

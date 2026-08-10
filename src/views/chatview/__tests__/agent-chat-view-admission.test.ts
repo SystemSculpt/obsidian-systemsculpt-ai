@@ -82,8 +82,12 @@ const NEWER_ATTACHMENT: ChatMessageAttachment = Object.freeze({
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((settle) => { resolve = settle; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function failedRun(code: string, message: string): AgentRunResult {
@@ -790,6 +794,385 @@ describe("AgentChatView composer admission", () => {
     );
   });
 
+  it("keeps post-terminal credit refresh correlation distinct across serialized fresh reads", async () => {
+    const first = deferred<any>();
+    const second = deferred<any>();
+    const third = deferred<any>();
+    const privateSentinel = "private balance payload must not enter lifecycle data";
+    const getCreditsBalance = jest.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
+    const recordClientRequestLifecycle = jest.fn();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      plugin: { settings: { licenseKey: "test-license" } },
+      aiService: { getCreditsBalance },
+      agent: { recordClientRequestLifecycle },
+      workspace: { setCreditsBalance: jest.fn() },
+      creditsPromise: null,
+      creditsBalance: null,
+      creditsRefreshSequence: 0,
+      clientMonotonicNow: jest.fn()
+        .mockReturnValueOnce(100)
+        .mockReturnValueOnce(115)
+        .mockReturnValueOnce(200)
+        .mockReturnValueOnce(230)
+        .mockReturnValueOnce(300)
+        .mockReturnValueOnce(345),
+    });
+    const firstCorrelation = {
+      requestId: "user-credit-correlation-first",
+      serverRunId: `run_${"1".repeat(32)}`,
+    };
+    const secondCorrelation = {
+      requestId: "user-credit-correlation-second",
+      serverRunId: `run_${"2".repeat(32)}`,
+    };
+    const thirdCorrelation = {
+      requestId: "user-credit-correlation-third",
+      serverRunId: `run_${"3".repeat(32)}`,
+    };
+
+    const firstRefresh = view.refreshCreditsBalance({
+      requireFresh: true,
+      reason: "post_terminal",
+      ...firstCorrelation,
+    });
+    const secondRefresh = view.refreshCreditsBalance({
+      requireFresh: true,
+      reason: "post_terminal",
+      ...secondCorrelation,
+    });
+    const thirdRefresh = view.refreshCreditsBalance({
+      requireFresh: true,
+      reason: "post_terminal",
+      ...thirdCorrelation,
+    });
+
+    expect(getCreditsBalance).toHaveBeenCalledTimes(1);
+    expect(recordClientRequestLifecycle).toHaveBeenCalledTimes(1);
+    first.resolve({
+      usageClass: "customer",
+      totalRemaining: 4,
+      heldInFlight: 0,
+      availableUnreserved: 4,
+      privateSentinel,
+    });
+    await firstRefresh;
+    await Promise.resolve();
+    expect(getCreditsBalance).toHaveBeenCalledTimes(2);
+
+    second.resolve({
+      usageClass: "customer",
+      totalRemaining: 3,
+      heldInFlight: 0,
+      availableUnreserved: 3,
+      privateSentinel,
+    });
+    await secondRefresh;
+    await Promise.resolve();
+    expect(getCreditsBalance).toHaveBeenCalledTimes(3);
+
+    third.resolve({
+      usageClass: "customer",
+      totalRemaining: 2,
+      heldInFlight: 0,
+      availableUnreserved: 2,
+      privateSentinel,
+    });
+    await thirdRefresh;
+
+    expect(recordClientRequestLifecycle.mock.calls.map(([record]) => ({
+      code: record.code,
+      reason: record.creditsRefreshReason,
+      sequence: record.creditsRefreshSequence,
+      requestId: record.requestId,
+      serverRunId: record.serverRunId,
+      elapsedMs: record.creditsRefreshElapsedMs,
+    }))).toEqual([
+      {
+        code: "credits_refresh_started",
+        reason: "post_terminal",
+        sequence: 1,
+        ...firstCorrelation,
+        elapsedMs: undefined,
+      },
+      {
+        code: "credits_refresh_succeeded",
+        reason: "post_terminal",
+        sequence: 1,
+        ...firstCorrelation,
+        elapsedMs: 15,
+      },
+      {
+        code: "credits_refresh_started",
+        reason: "post_terminal",
+        sequence: 2,
+        ...secondCorrelation,
+        elapsedMs: undefined,
+      },
+      {
+        code: "credits_refresh_succeeded",
+        reason: "post_terminal",
+        sequence: 2,
+        ...secondCorrelation,
+        elapsedMs: 30,
+      },
+      {
+        code: "credits_refresh_started",
+        reason: "post_terminal",
+        sequence: 3,
+        ...thirdCorrelation,
+        elapsedMs: undefined,
+      },
+      {
+        code: "credits_refresh_succeeded",
+        reason: "post_terminal",
+        sequence: 3,
+        ...thirdCorrelation,
+        elapsedMs: 45,
+      },
+    ]);
+    expect(JSON.stringify(recordClientRequestLifecycle.mock.calls)).not.toContain(privateSentinel);
+  });
+
+  it("records composer unlock after the active submission releases the UI", () => {
+    const eventOrder: string[] = [];
+    const privateSentinel = "private composer text must not enter lifecycle data";
+    const recordLifecycle = jest.fn((record: { code?: string }) => {
+      if (record.code === "composer_unlocked") eventOrder.push("composer_unlocked");
+    });
+    const setRunPending = jest.fn((pending: boolean) => {
+      if (!pending) eventOrder.push("run_pending_false");
+    });
+    const agent: Record<string, any> = { recordLifecycle };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      activeSubmissionOperation: null,
+      agent,
+      workspace: {
+        setRunPending,
+        setBanner: jest.fn(),
+      },
+      clientMonotonicNow: jest.fn(() => 137.5),
+    });
+
+    const operation = (view as any).beginSubmissionOperation(
+      "origin-unlock",
+      { text: privateSentinel, mode: "send" },
+      true,
+      100,
+    );
+    const serverRunId = `run_${"d".repeat(32)}`;
+    agent.getSnapshot = jest.fn(() => ({
+      runId: serverRunId,
+      turnId: operation.turnId,
+      status: "completed",
+      messages: [],
+      parts: [],
+    }));
+    recordLifecycle.mockClear();
+    setRunPending.mockClear();
+
+    (view as any).finishSubmissionOperation(operation);
+
+    expect(eventOrder).toEqual(["run_pending_false", "composer_unlocked"]);
+    expect(recordLifecycle).toHaveBeenCalledTimes(1);
+    expect(recordLifecycle).toHaveBeenCalledWith({
+      code: "composer_unlocked",
+      phase: "render",
+      requestId: operation.turnId,
+      serverRunId,
+      clientMonotonicOffsetMs: 37.5,
+    });
+    expect(JSON.stringify(recordLifecycle.mock.calls)).not.toContain(privateSentinel);
+
+    const mismatchedSnapshot = (view as any).createSubmissionOperation(
+      "submission",
+      "origin-unlock",
+      { text: "mismatched snapshot submission", mode: "send" },
+      true,
+      120,
+    );
+    (view as any).activeSubmissionOperation = mismatchedSnapshot;
+    agent.getSnapshot = jest.fn(() => ({
+      runId: `run_${"e".repeat(32)}`,
+      turnId: "user-from-another-turn",
+      status: "completed",
+      messages: [],
+      parts: [],
+    }));
+    recordLifecycle.mockClear();
+    setRunPending.mockClear();
+
+    (view as any).finishSubmissionOperation(mismatchedSnapshot);
+
+    expect(recordLifecycle).toHaveBeenCalledWith({
+      code: "composer_unlocked",
+      phase: "render",
+      requestId: mismatchedSnapshot.turnId,
+      clientMonotonicOffsetMs: 17.5,
+    });
+    expect(recordLifecycle.mock.calls[0]?.[0]).not.toHaveProperty("serverRunId");
+
+    const stale = (view as any).createSubmissionOperation(
+      "submission",
+      "origin-unlock",
+      { text: "stale submission", mode: "send" },
+      true,
+      140,
+    );
+    const replacement = (view as any).createSubmissionOperation(
+      "submission",
+      "origin-unlock",
+      { text: "replacement submission", mode: "send" },
+      true,
+      150,
+    );
+    (view as any).activeSubmissionOperation = replacement;
+    recordLifecycle.mockClear();
+    setRunPending.mockClear();
+
+    (view as any).finishSubmissionOperation(stale);
+
+    expect(recordLifecycle).not.toHaveBeenCalled();
+    expect(setRunPending).not.toHaveBeenCalled();
+
+    const transition = (view as any).createSubmissionOperation(
+      "transition",
+      "origin-transition",
+      null,
+      false,
+      160,
+    );
+    (view as any).activeSubmissionOperation = transition;
+    (view as any).finishSubmissionOperation(transition);
+
+    expect(setRunPending).toHaveBeenCalledWith(false);
+    expect(recordLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("records content-free balance request timing and transport", async () => {
+    const recordLifecycle = jest.fn();
+    const setCreditsBalance = jest.fn();
+    const getCreditsBalance = jest.fn(async (options: {
+      onObservation?: (observation: {
+        transport?: "fetch" | "requestUrl";
+        status?: number;
+        serverTiming?: {
+          authMs?: number;
+          rateLimitMs?: number;
+          balanceStoreMs?: number;
+          totalMs?: number;
+        };
+      }) => void;
+    }) => {
+      options.onObservation?.({
+        transport: "requestUrl",
+        status: 200,
+        serverTiming: {
+          authMs: 1,
+          rateLimitMs: 2,
+          balanceStoreMs: 37,
+          totalMs: 41,
+        },
+      });
+      return {
+        usageClass: "customer",
+        totalRemaining: 5,
+        heldInFlight: 0,
+        availableUnreserved: 5,
+      };
+    });
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      plugin: { settings: { licenseKey: "test-license" } },
+      aiService: { getCreditsBalance },
+      agent: { recordLifecycle },
+      workspace: { setCreditsBalance },
+      creditsPromise: null,
+      creditsBalance: null,
+      creditsRefreshSequence: 0,
+      clientMonotonicNow: jest.fn()
+        .mockReturnValueOnce(100)
+        .mockReturnValueOnce(142.3456),
+    });
+
+    await view.refreshCreditsBalance({ reason: "view_open" });
+
+    expect(recordLifecycle.mock.calls.map(([record]) => record)).toEqual([
+      {
+        code: "credits_refresh_started",
+        phase: "account",
+        creditsRefreshReason: "view_open",
+        creditsRefreshSequence: 1,
+      },
+      {
+        code: "credits_refresh_succeeded",
+        phase: "account",
+        creditsRefreshReason: "view_open",
+        creditsRefreshSequence: 1,
+        creditsRefreshTransport: "request_url",
+        creditsRefreshElapsedMs: expect.closeTo(42.3456, 4),
+        creditsRefreshServerAuthMs: 1,
+        creditsRefreshServerRateLimitMs: 2,
+        creditsRefreshServerBalanceStoreMs: 37,
+        creditsRefreshServerTotalMs: 41,
+        status: 200,
+      },
+    ]);
+  });
+
+  it("records only a bounded failure classifier and joins a duplicate billing refresh", async () => {
+    const pending = deferred<any>();
+    const recordLifecycle = jest.fn();
+    const getCreditsBalance = jest.fn(() => pending.promise);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      plugin: { settings: { licenseKey: "test-license" } },
+      aiService: { getCreditsBalance },
+      agent: { recordLifecycle },
+      workspace: { setCreditsBalance: jest.fn() },
+      creditsPromise: null,
+      creditsBalance: null,
+      creditsRefreshSequence: 0,
+      clientMonotonicNow: jest.fn()
+        .mockReturnValueOnce(200)
+        .mockReturnValueOnce(225),
+    });
+
+    const sessionOwned = view.refreshCreditsBalance({
+      requireFresh: true,
+      reason: "billing_failure",
+    });
+    const genericErrorPresentation = view.refreshCreditsBalance({
+      reason: "billing_failure",
+    });
+    expect(getCreditsBalance).toHaveBeenCalledTimes(1);
+
+    pending.reject(Object.assign(new Error("private server detail"), {
+      code: "INSUFFICIENT_CREDITS",
+      statusCode: 402,
+      licenseKey: "must-not-log",
+    }));
+    await Promise.all([sessionOwned, genericErrorPresentation]);
+
+    expect(getCreditsBalance).toHaveBeenCalledTimes(1);
+    const serialized = JSON.stringify(recordLifecycle.mock.calls);
+    expect(serialized).toContain("insufficient_credits");
+    expect(serialized).not.toContain("private server detail");
+    expect(serialized).not.toContain("must-not-log");
+    expect(recordLifecycle).toHaveBeenLastCalledWith(expect.objectContaining({
+      code: "credits_refresh_failed",
+      creditsRefreshReason: "billing_failure",
+      creditsRefreshSequence: 1,
+      creditsRefreshElapsedMs: 25,
+      status: 402,
+      failureCode: "insufficient_credits",
+    }));
+  });
+
   it("refreshes credits after a server billing rejection", async () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     const refreshCreditsBalance = jest.fn(async () => undefined);
@@ -808,6 +1191,7 @@ describe("AgentChatView composer admission", () => {
     await Promise.resolve();
 
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
+    expect(refreshCreditsBalance).toHaveBeenCalledWith({ reason: "billing_failure" });
     expect(setBanner).toHaveBeenCalledWith(
       "Not enough credits are available. Add credits to continue using Chat.",
       "error",
@@ -925,6 +1309,82 @@ describe("AgentChatView composer admission", () => {
     harness.composer.unload();
   });
 
+  it("admits an immediate recovery turn before failed history settlement finishes", async () => {
+    const harness = createHarness("after-commit");
+    const firstSettlement = deferred<void>();
+    harness.workspace.settleUnfinishedRun.mockImplementationOnce(
+      () => firstSettlement.promise,
+    );
+    harness.composer.setValue("First committed request");
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    await harness.runStarted.promise;
+    harness.runGate.resolve();
+    await harness.runFinished.promise;
+
+    expect(harness.workspace.settleUnfinishedRun).toHaveBeenCalledTimes(1);
+    expect(harness.workspace.settleUnfinishedRun.mock.calls[0]?.[0])
+      .toHaveLength(1);
+    expect((harness.view as any).activeSubmissionOperation).toBeNull();
+    expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(false);
+
+    const secondResult = deferred<AgentRunResult>();
+    const secondStarted = deferred<AgentRunInput>();
+    harness.agent.start.mockImplementationOnce((input: AgentRunInput) => {
+      secondStarted.resolve(input);
+      return (async () => {
+        await input.buildBody?.(new AbortController().signal);
+        await input.beforeSend?.();
+        return secondResult.promise;
+      })();
+    });
+    (harness.view as any).acceptComposerSubmission({
+      text: "Recover immediately in this conversation",
+      mode: "send",
+    }, "origin-admission");
+
+    const secondInput = await secondStarted.promise;
+    const secondOperation = (harness.view as any).activeSubmissionOperation;
+    expect(secondOperation).not.toBeNull();
+    expect(secondOperation.turnId).toBe(secondInput.turnId);
+    expect((harness.view as any).queuedFollowUps).toEqual([]);
+    expect(harness.agent.start).toHaveBeenCalledTimes(2);
+    expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(
+      true,
+      secondInput.turnId,
+    );
+
+    // Completing the older render and its finally block must not clear the
+    // newer submission owner or return its composer to idle.
+    firstSettlement.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect((harness.view as any).activeSubmissionOperation).toBe(secondOperation);
+    expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(
+      true,
+      secondInput.turnId,
+    );
+    expect(harness.durableMessages).toHaveLength(2);
+
+    secondResult.resolve({
+      kind: "cancelled",
+      snapshot: {
+        runId: "run-recovery-cleanup",
+        turnId: secondInput.turnId,
+        status: "cancelled",
+        messages: [],
+        parts: [],
+      },
+    });
+    await secondOperation.finished;
+    expect((harness.view as any).activeSubmissionOperation).toBeNull();
+    expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(false);
+    expect(harness.workspace.settleUnfinishedRun).toHaveBeenLastCalledWith(
+      harness.durableMessages,
+    );
+    harness.composer.unload();
+  });
+
   it("omits obsolete web-search preferences from the autonomous thin turn body", async () => {
     const harness = createHarness("before-commit");
     harness.composer.setValue("Research this");
@@ -1023,6 +1483,248 @@ describe("AgentChatView composer admission", () => {
     expect(contextManager.pinFile).not.toHaveBeenCalled();
     expect(contextManager.unpinFile).not.toHaveBeenCalled();
     expect([...contextManager.getPinnedFiles()]).toEqual(["[[Projects/Plan.md]]"]);
+  });
+
+  it("records DOM commit before the owner-window paint opportunity", async () => {
+    const host = document.body.createDiv();
+    const activeRoot = host.createDiv({ cls: "systemsculpt-agent-active-run" });
+    const renderedTurn = activeRoot.createDiv({
+      cls: "systemsculpt-agent-turn is-assistant",
+      attr: { "data-turn-id": "user-render" },
+    });
+    renderedTurn.createDiv({ cls: "systemsculpt-agent-part is-text" });
+    const render = deferred();
+    let paint: FrameRequestCallback | null = null;
+    const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      paint = callback;
+      return 7;
+    });
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: requestAnimationFrame,
+    });
+    const recordClientRenderMilestone = jest.fn();
+    const needsClientRenderMilestone = jest.fn(() => true);
+    const agent = { recordClientRenderMilestone, needsClientRenderMilestone };
+    const workspace = {
+      element: host,
+      setAgentSnapshot: jest.fn(() => render.promise),
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      workspace,
+      agent,
+      conversationOriginToken: "origin-render",
+      runConversationOrigins: new Map([["user-render", "origin-render"]]),
+    });
+
+    const snapshot = {
+        runId: "run_render",
+        turnId: "user-render",
+        status: "running",
+        messages: [{
+          id: "assistant-render",
+          role: "assistant",
+          partIds: ["text-render"],
+        }],
+        parts: [{
+          id: "text-render",
+          kind: "text",
+          messageId: "assistant-render",
+          state: "streaming",
+          markdown: "Visible delta",
+          order: 0,
+        }],
+      } as const;
+
+    try {
+      (view as any).renderAgentSnapshot(snapshot);
+      expect(recordClientRenderMilestone).not.toHaveBeenCalled();
+      render.resolve();
+      await Promise.resolve();
+
+      expect(recordClientRenderMilestone).toHaveBeenCalledWith(
+        "response_first_dom_committed",
+        "user-render",
+        expect.any(Number),
+      );
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+      expect(recordClientRenderMilestone).not.toHaveBeenCalledWith(
+        "response_first_paint_opportunity",
+        expect.anything(),
+        expect.anything(),
+      );
+
+      (paint as FrameRequestCallback)(321.5);
+      expect(recordClientRenderMilestone).toHaveBeenLastCalledWith(
+        "response_first_paint_opportunity",
+        "user-render",
+        window.performance.timeOrigin + 321.5,
+      );
+
+      needsClientRenderMilestone.mockReturnValue(false);
+      (view as any).renderAgentSnapshot(snapshot);
+      await Promise.resolve();
+      expect(recordClientRenderMilestone).toHaveBeenCalledTimes(2);
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      });
+      host.remove();
+    }
+  });
+
+  it("records a terminal vault tool before its continuation DOM and paint", async () => {
+    const host = document.body.createDiv();
+    const activeRoot = host.createDiv({ cls: "systemsculpt-agent-active-run" });
+    const renderedTurn = activeRoot.createDiv({
+      cls: "systemsculpt-agent-turn is-assistant",
+      attr: { "data-turn-id": "user-tool-render" },
+    });
+    renderedTurn.createDiv({
+      cls: "systemsculpt-agent-part is-tool is-succeeded",
+      attr: { "data-part-key": "tool:call-tool-render" },
+    });
+    renderedTurn.createDiv({
+      cls: "systemsculpt-agent-part is-text",
+      attr: { "data-part-key": "text:text-continuation-render" },
+    });
+    const render = deferred();
+    let paint: FrameRequestCallback | null = null;
+    const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      paint = callback;
+      return 8;
+    });
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: requestAnimationFrame,
+    });
+    const recordClientToolRenderMilestone = jest.fn();
+    const agent = {
+      recordClientRenderMilestone: jest.fn(),
+      needsClientRenderMilestone: jest.fn(() => false),
+      needsClientToolRenderMilestone: jest.fn(() => true),
+      recordClientToolRenderMilestone,
+    };
+    const workspace = {
+      element: host,
+      setAgentSnapshot: jest.fn(() => render.promise),
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      workspace,
+      agent,
+      conversationOriginToken: "origin-tool-render",
+      runConversationOrigins: new Map([
+        ["user-tool-render", "origin-tool-render"],
+      ]),
+    });
+    const snapshot = {
+      runId: "run_tool_render",
+      turnId: "user-tool-render",
+      status: "running",
+      messages: [{
+        id: "assistant-tool-render",
+        role: "assistant",
+        partIds: ["tool-render", "text-continuation-render"],
+      }],
+      parts: [{
+        id: "tool-render",
+        kind: "tool",
+        messageId: "assistant-tool-render",
+        callId: "call-tool-render",
+        name: "read",
+        location: "vault",
+        input: {},
+        state: "succeeded",
+        order: 0,
+      }, {
+        id: "text-continuation-render",
+        kind: "text",
+        messageId: "assistant-tool-render",
+        state: "streaming",
+        markdown: "Continuation visible",
+        order: 1,
+      }],
+    } as const;
+
+    try {
+      (view as any).renderAgentSnapshot(snapshot);
+      render.resolve();
+      await Promise.resolve();
+
+      expect(recordClientToolRenderMilestone.mock.calls.slice(0, 2)).toEqual([
+        [
+          "local_tool_terminal_dom_committed",
+          "user-tool-render",
+          "call-tool-render",
+          expect.any(Number),
+        ],
+        [
+          "continuation_content_dom_committed",
+          "user-tool-render",
+          "call-tool-render",
+          expect.any(Number),
+        ],
+      ]);
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+      (paint as FrameRequestCallback)(400.25);
+      expect(recordClientToolRenderMilestone.mock.calls.slice(2)).toEqual([
+        [
+          "local_tool_terminal_paint_opportunity",
+          "user-tool-render",
+          "call-tool-render",
+          window.performance.timeOrigin + 400.25,
+        ],
+        [
+          "continuation_content_paint_opportunity",
+          "user-tool-render",
+          "call-tool-render",
+          window.performance.timeOrigin + 400.25,
+        ],
+      ]);
+    } finally {
+      Object.defineProperty(window, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      });
+      host.remove();
+    }
+  });
+
+  it("normalizes monotonic timestamps across pop-out window time origins", () => {
+    const firstFrame = document.body.createEl("iframe");
+    const secondFrame = document.body.createEl("iframe");
+    const firstWindow = firstFrame.contentWindow!;
+    const secondWindow = secondFrame.contentWindow!;
+    const firstHost = firstWindow.document.createElement("div");
+    const secondHost = secondWindow.document.createElement("div");
+    firstWindow.document.body.append(firstHost);
+    secondWindow.document.body.append(secondHost);
+    Object.defineProperties(firstWindow.performance, {
+      timeOrigin: { configurable: true, value: 1_000 },
+      now: { configurable: true, value: () => 100 },
+    });
+    Object.defineProperties(secondWindow.performance, {
+      timeOrigin: { configurable: true, value: 1_090 },
+      now: { configurable: true, value: () => 20 },
+    });
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, { workspace: { element: firstHost } });
+
+    try {
+      expect((view as any).clientMonotonicNow()).toBe(1_100);
+      view.workspace.element = secondHost;
+      expect((view as any).clientMonotonicNow()).toBe(1_110);
+    } finally {
+      firstFrame.remove();
+      secondFrame.remove();
+    }
   });
 
   it("retries a pre-commit failure from the inline error without resending the newer draft", async () => {
@@ -2632,10 +3334,12 @@ describe("AgentChatView thin conversation lifecycle", () => {
       },
     });
     expect(harness.agent.disconnect).toHaveBeenCalledTimes(1);
-    expect(harness.recordLifecycle).toHaveBeenCalledWith({
+    expect(harness.recordLifecycle).toHaveBeenCalledWith(expect.objectContaining({
       code: "submission_admitted",
       phase: "response",
-    });
+      requestId: expect.stringMatching(/^user-/),
+      clientMonotonicOffsetMs: 0,
+    }));
     expect(harness.recordLifecycle).toHaveBeenCalledWith({
       code: "historical_resubmit_committed",
       phase: "persistence",

@@ -1,5 +1,4 @@
 import type SystemSculptPlugin from "../../main";
-import { ChatFavoritesService } from "../chatview/ChatFavoritesService";
 import { openChatResumeDescriptor } from "../chatview/ChatResumeUtils";
 import { ChatStorageService } from "../chatview/ChatStorageService";
 import type { SystemSculptHistoryEntry, SystemSculptHistoryProvider } from "./types";
@@ -20,6 +19,18 @@ function joinMessageContent(messages: unknown[]): string {
     .join("\n");
 }
 
+function isFavoriteChat(plugin: SystemSculptPlugin, chatId: string): boolean {
+  return plugin.settings.favoriteChats.includes(chatId);
+}
+
+async function toggleFavoriteChat(plugin: SystemSculptPlugin, chatId: string): Promise<void> {
+  const favorites = plugin.settings.favoriteChats;
+  const updated = favorites.includes(chatId)
+    ? favorites.filter((id) => id !== chatId)
+    : [...favorites, chatId];
+  await plugin.getSettingsManager().updateSettings({ favoriteChats: updated });
+}
+
 function asTimestamp(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -33,13 +44,12 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
     id: "chat-history",
     loadEntries: async () => {
       const chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory || "SystemSculpt/Chats");
-      const chatFavorites = ChatFavoritesService.getInstance(plugin);
 
       const summaries = await chatStorage.loadChats();
       const entries: SystemSculptHistoryEntry[] = summaries.map((summary) => {
         const timestampMs = asTimestamp(summary.lastModified);
         const title = String(summary.title || "Untitled Chat").trim() || "Untitled Chat";
-        const isFavorite = chatFavorites.isFavorite(summary.id);
+        const isFavorite = isFavoriteChat(plugin, summary.id);
         const messageCount = Array.isArray(summary.messages) ? summary.messages.length : 0;
         const subtitle = `${messageCount} messages`;
         const searchText = [
@@ -61,17 +71,17 @@ export function createChatHistoryProvider(plugin: SystemSculptPlugin): SystemScu
           metadataPath: summary.chatPath,
           isFavorite,
           toggleFavorite: async () => {
-            await chatFavorites.toggleFavorite(summary.id);
-            return chatFavorites.isFavorite(summary.id);
+            await toggleFavoriteChat(plugin, summary.id);
+            return isFavoriteChat(plugin, summary.id);
           },
-          openPrimary: async () => {
+          openPrimary: async (leaf) => {
             await openChatResumeDescriptor(plugin, {
               chatId: summary.id,
               title,
               chatPath: summary.chatPath,
               lastModified: timestampMs,
               messageCount,
-            });
+            }, leaf);
           },
         };
       });

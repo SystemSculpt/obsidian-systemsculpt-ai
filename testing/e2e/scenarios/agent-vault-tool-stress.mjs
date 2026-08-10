@@ -1,97 +1,161 @@
 /**
- * Heavy client-tool stress: ~30 separate vault tool calls in one turn.
+ * Guarded current-run stress: one approved seed write followed by exactly
+ * thirty sequential read calls in a single assistant run.
  *
- * This is the shape that used to wedge — six writes landed and the seventh
- * provider attempt streamed nothing forever, leaving the run marked active
- * with no executor. It exercises the whole client-tool loop repeatedly:
- * approval policy, tool dispatch, result delivery, and continuation.
- *
- * Approval mode is set to full access *before* the run starts, because the
- * composer refuses to change tool access while a run is live.
+ * The declared action waits total 276 seconds and emit stall evidence after
+ * 30 seconds without visible progress. The scenario runner does not enforce a
+ * single wall-clock deadline or a provider/credit budget; the invocation must
+ * separately pin the loaded artifact to the intended loopback API. Cleanup can
+ * trash only the exact approved seed file beneath this run's unique marker.
  */
 
-const RUN_TIMEOUT_MS = 900000;
-const STALL_MS = 120000;
+import {
+  LATEST_DURABLE_ASSISTANT_TEXT,
+  makeDevelopmentContext,
+  withOwnedDevelopmentState,
+} from "../../../scripts/e2e/chatview-development-state.mjs";
 
+const SEED_APPROVAL_TIMEOUT_MS = 45000;
+const SEED_RUN_TIMEOUT_MS = 60000;
+const STRESS_RUN_TIMEOUT_MS = 120000;
+const STALL_MS = 30000;
+const TOOL_SETTLEMENT_TIMEOUT_MS = 15000;
+const DURABILITY_TIMEOUT_MS = 2000;
+const STRESS_TOOL_CALLS = 30;
 export default function makeAgentVaultToolStress(now = Date.now()) {
-  const runId = now.toString(36).toUpperCase();
-  const folder = `QA/Stress-${runId}`;
-  const completionMarker = `FINISHED-${runId}`;
-  return [
-  { label: "open chat", action: "chat.open" },
-  { label: "new chat", action: "click", params: { target: "chat.header.new" } },
-  {
-    label: "composer ready",
-    action: "waitFor",
-    params: { target: "chat.composer.input", state: "visible", timeoutMs: 10000 },
-  },
-  {
-    label: "no phantom run on a fresh chat",
-    action: "waitFor",
-    params: { target: "chat.composer.stop", state: "hidden", timeoutMs: 5000 },
-  },
-  {
-    label: "full access (no manual approvals)",
-    action: "select",
-    params: { target: "chat.composer.approval-mode", value: "full-access" },
-  },
-  {
-    label: "approval mode really is full access",
-    action: "read",
-    params: { target: "chat.composer.approval-mode" },
-  },
-  {
-    label: "submit a ~30 tool-call job",
-    action: "type",
-    params: {
-      text: [
-        "Use your vault tools to do EVERY step below, in order, each as its own",
-        "separate tool call. Do not batch them.",
-        `1. Create the folder ${folder}.`,
-        `2-21. Create twenty files ${folder}/Item-01.md .. Item-20.md.`,
-        "Each file's entire contents must be its own number, e.g. Item-07.md",
-        "contains exactly 7.",
-        `22. List the folder ${folder}.`,
-        `23. Read ${folder}/Item-05.md.`,
-        `24. Read ${folder}/Item-15.md.`,
-        `25. Overwrite ${folder}/Item-03.md so it contains exactly THREE.`,
-        `26. Read ${folder}/Item-03.md to confirm.`,
-        `27. Create ${folder}/SUMMARY.md containing exactly DONE-30.`,
-        `Then reply with exactly ${completionMarker}.`,
-      ].join(" "),
-      submit: true,
-    },
-  },
-  {
-    label: "run completes without stalling",
-    action: "waitForRun",
-    params: { timeoutMs: RUN_TIMEOUT_MS, stallMs: STALL_MS },
-  },
-  {
-    label: "expected completion marker",
-    action: "waitFor",
-    params: {
-      target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
-      state: "textEquals",
-      text: completionMarker,
-      timeoutMs: 5000,
-    },
-  },
-  {
-    label: "stress overwrite has exact content",
-    action: "vault.assertText",
-    params: { path: `${folder}/Item-03.md`, text: "THREE" },
-  },
-  {
-    label: "stress summary has exact content",
-    action: "vault.assertText",
-    params: { path: `${folder}/SUMMARY.md`, text: "DONE-30" },
-  },
-  { label: "transcript", action: "snapshot", params: { scope: "chat" } },
-  {
-    label: "no error banner",
-    action: "waitFor",
-    params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
-  },
-  ];
+  const context = makeDevelopmentContext("S", now);
+  const seedPath = `${context.markerRoot}/stress-seed.md`;
+  const seedContent = `STRESS-SEED-${context.runId}`;
+  const seedCompletionMarker = `STRESS-READY-${context.runId}`;
+  const completionMarker = `STRESS-FINISHED-${context.runId}`;
+  return withOwnedDevelopmentState(context, [
+      {
+        label: "submit exact stress seed write",
+        action: "chat.typeDevelopmentDraft",
+        params: {
+          text: `Create exactly one file at ${seedPath} containing exactly ${seedContent}. `
+            + `Use your vault tools. Then reply with exactly ${seedCompletionMarker}.`,
+          submit: true,
+        },
+      },
+      {
+        label: "stress seed approval is required",
+        action: "chat.waitForDevelopmentRun",
+        params: { until: "approval", timeoutMs: SEED_APPROVAL_TIMEOUT_MS },
+      },
+      {
+        label: "allow exact stress seed write once",
+        action: "chat.approveDevelopmentWriteOnce",
+        params: { path: seedPath, text: seedContent },
+      },
+      {
+        label: "stress seed run completes",
+        action: "chat.waitForDevelopmentRun",
+        params: { until: "complete", timeoutMs: SEED_RUN_TIMEOUT_MS },
+      },
+      {
+        label: "stress seed tool settles before continuation",
+        action: "chat.assertLatestToolSettledAfterContinuation",
+        params: {
+          toolLabel: "Write file",
+          text: seedCompletionMarker,
+          textMode: "contains",
+          expectedState: "succeeded",
+          expectedStateLabel: "Done",
+          requireCommandAck: true,
+          requireAllToolResultAcks: true,
+          expectedAllToolResultState: "succeeded",
+          timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
+        },
+      },
+      {
+        label: "stress seed completion is durable",
+        action: "waitFor",
+        params: {
+          target: LATEST_DURABLE_ASSISTANT_TEXT,
+          state: "textContains",
+          text: seedCompletionMarker,
+          timeoutMs: DURABILITY_TIMEOUT_MS,
+        },
+      },
+      {
+        label: "stress seed has exact content",
+        action: "vault.assertText",
+        params: { path: seedPath, text: seedContent },
+      },
+      {
+        label: "submit exactly 30 sequential current-run reads",
+        action: "chat.typeDevelopmentDraft",
+        params: {
+          text: [
+            `Call the read vault tool exactly ${STRESS_TOOL_CALLS} separate times in this run.`,
+            `Every call must contain one paths array with only ${JSON.stringify(seedPath)}.`,
+            "Do not batch multiple reads into one call and do not use any other tool.",
+            "Issue each call only after the previous call result is acknowledged.",
+            "Do not emit response text before every read is complete.",
+            `After all ${STRESS_TOOL_CALLS} results, reply with exactly ${completionMarker}.`,
+          ].join(" "),
+          submit: true,
+        },
+      },
+      {
+        label: "stress run completes with bounded stall evidence",
+        action: "waitForRun",
+        params: {
+          timeoutMs: STRESS_RUN_TIMEOUT_MS,
+          stallMs: STALL_MS,
+          approve: false,
+        },
+      },
+      {
+        label: "exactly 30 sequential reads are terminal before exact continuation",
+        action: "chat.assertExactSequentialToolPlan",
+        params: {
+          tools: Array.from({ length: STRESS_TOOL_CALLS }, () => ({
+            name: "read",
+            input: { paths: [seedPath] },
+          })),
+          text: completionMarker,
+          textMode: "contains",
+          requireNoOtherText: false,
+          timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
+        },
+      },
+      {
+        label: "all stress tool result sends complete after continuation",
+        action: "chat.assertAllToolResultSendsCompleted",
+        params: {
+          toolLabel: "Read 1 file",
+          text: completionMarker,
+          textMode: "contains",
+          timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
+        },
+      },
+      {
+        label: "stress completion marker is durable",
+        action: "waitFor",
+        params: {
+          target: LATEST_DURABLE_ASSISTANT_TEXT,
+          state: "textContains",
+          text: completionMarker,
+          timeoutMs: DURABILITY_TIMEOUT_MS,
+        },
+      },
+      { label: "stress lifecycle evidence", action: "chat.toolLifecycle" },
+      { label: "stress transcript", action: "snapshot", params: { scope: "chat" } },
+      {
+        label: "no response-failure banner",
+        action: "waitFor",
+        params: {
+          target: "chat:.systemsculpt-agent-banner",
+          state: "hidden",
+          timeoutMs: 2000,
+        },
+      },
+      {
+        label: "stress turn remains exact through its final paint boundary",
+        action: "chat.assertExactToolPlanCleanClose",
+        params: {},
+      },
+  ]);
 }

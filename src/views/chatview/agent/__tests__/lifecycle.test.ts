@@ -1,9 +1,75 @@
 import {
   AgentLifecycle,
+  CREDITS_REFRESH_REASONS,
+  HISTORY_SYNC_KINDS,
+  THIN_AGENT_LIFECYCLE_CODES,
+  THIN_AGENT_LIFECYCLE_PHASES,
   type AgentLifecycleInput,
 } from "../Lifecycle";
+import {
+  CREDITS_REFRESH_REASONS as SHARED_CREDITS_REFRESH_REASONS,
+  HISTORY_SYNC_KINDS as SHARED_HISTORY_SYNC_KINDS,
+  THIN_AGENT_LIFECYCLE_CODES as SHARED_THIN_AGENT_LIFECYCLE_CODES,
+  THIN_AGENT_LIFECYCLE_PHASES as SHARED_THIN_AGENT_LIFECYCLE_PHASES,
+} from "../../../../utils/ThinAgentLifecycleSchema";
 
 describe("AgentLifecycle privacy-safe chronology", () => {
+  it("keeps the Lifecycle compatibility exports bound to the shared schema", () => {
+    expect(THIN_AGENT_LIFECYCLE_CODES).toBe(SHARED_THIN_AGENT_LIFECYCLE_CODES);
+    expect(THIN_AGENT_LIFECYCLE_PHASES).toBe(SHARED_THIN_AGENT_LIFECYCLE_PHASES);
+    expect(CREDITS_REFRESH_REASONS).toBe(SHARED_CREDITS_REFRESH_REASONS);
+    expect(HISTORY_SYNC_KINDS).toBe(SHARED_HISTORY_SYNC_KINDS);
+
+    expect(THIN_AGENT_LIFECYCLE_CODES).toEqual(expect.arrayContaining([
+      "session_opened",
+      "response_stream_ended_incomplete",
+      "response_first_assistant_sse_frame_parsed",
+      "local_tool_terminal_dom_committed",
+      "continuation_content_paint_opportunity",
+      "tool_result_command_stream_failed",
+      "credits_refresh_succeeded",
+    ]));
+    expect(THIN_AGENT_LIFECYCLE_PHASES).toEqual([
+      "start",
+      "session",
+      "response",
+      "approval",
+      "tool_execution",
+      "mutation_journal",
+      "persistence",
+      "render",
+      "account",
+      "unknown",
+    ]);
+    expect(CREDITS_REFRESH_REASONS).toEqual([
+      "view_open",
+      "post_terminal",
+      "billing_failure",
+      "settings_update",
+      "unspecified",
+    ]);
+    expect(HISTORY_SYNC_KINDS).toEqual([
+      "before_send",
+      "authoritative_prefix",
+      "cancelled_queue",
+      "terminal",
+    ]);
+  });
+
+  it("uses Date.now when no clock is injected", () => {
+    const dateNow = jest.spyOn(Date, "now").mockReturnValue(500);
+    try {
+      const lifecycle = new AgentLifecycle(() => undefined);
+
+      expect(lifecycle.record({
+        code: "session_opened",
+        phase: "session",
+      })).toMatchObject({ timestamp: 500 });
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
   it("records one ordered and bounded local chronology", () => {
     const persisted: unknown[] = [];
     let now = 1_000;
@@ -165,6 +231,164 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       timestamp: 201,
       code,
       phase: "response",
+    });
+  });
+
+  it("records the content-free client latency waterfall without mixing clocks", () => {
+    const records: unknown[] = [];
+    const lifecycle = new AgentLifecycle((record) => records.push(record), () => 300);
+    const trace = "a".repeat(32);
+    const codes = [
+      "response_available",
+      "response_first_body_chunk_observed",
+      "response_first_sse_frame_parsed",
+      "response_first_assistant_snapshot_received",
+      "response_first_content_projected",
+      "response_first_dom_committed",
+      "response_first_paint_opportunity",
+      "response_stream_ended_incomplete",
+    ] as const;
+
+    codes.forEach((code, index) => lifecycle.record({
+      code,
+      phase: code.includes("dom") || code.includes("paint") ? "render" : "response",
+      conversationId: "conversation_0123456789abcdef0123456789abcdef",
+      requestId: "user_latency",
+      latencyTraceId: trace,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 3,
+      clientMonotonicOffsetMs: index + 0.1234,
+      ...(code === "response_available"
+        ? {
+            responseDeliveryMode: "fetch_stream" as const,
+            serverTimingAppMs: 12.3456,
+            serverTimingAuthMs: 2.5,
+          }
+        : {}),
+    }));
+
+    expect(records).toHaveLength(codes.length);
+    expect(records[0]).toMatchObject({
+      sequence: 1,
+      latencyTraceId: trace,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 3,
+      clientMonotonicOffsetMs: 0.123,
+      clientClockDomain: "client_turn_monotonic",
+      serverTimingAppMs: 12.346,
+      serverTimingAuthMs: 2.5,
+      responseDeliveryMode: "fetch_stream",
+      serverTimingClockDomain: "server_response_headers_monotonic_duration",
+    });
+    expect(records.map((record: any) => record.code)).toEqual(codes);
+    expect(JSON.stringify(records)).not.toContain("prompt");
+  });
+
+  it("keeps client and credits-route timing in separate monotonic clock domains", () => {
+    const lifecycle = new AgentLifecycle(() => undefined, () => 350);
+
+    expect(lifecycle.record({
+      code: "credits_refresh_succeeded",
+      phase: "account",
+      creditsRefreshReason: "post_terminal",
+      creditsRefreshSequence: 2,
+      creditsRefreshTransport: "request_url",
+      creditsRefreshElapsedMs: 42_345.6789,
+      creditsRefreshServerAuthMs: 1.2345,
+      creditsRefreshServerRateLimitMs: 2,
+      creditsRefreshServerBalanceStoreMs: 39_999.9999,
+      creditsRefreshServerTotalMs: 42_000.1255,
+      status: 200,
+    })).toEqual({
+      sequence: 1,
+      timestamp: 350,
+      code: "credits_refresh_succeeded",
+      phase: "account",
+      status: 200,
+      creditsRefreshReason: "post_terminal",
+      creditsRefreshSequence: 2,
+      creditsRefreshTransport: "request_url",
+      creditsRefreshElapsedMs: 42_345.679,
+      creditsRefreshClockDomain: "client_refresh_monotonic_duration",
+      creditsRefreshServerAuthMs: 1.235,
+      creditsRefreshServerRateLimitMs: 2,
+      creditsRefreshServerBalanceStoreMs: 40_000,
+      creditsRefreshServerTotalMs: 42_000.126,
+      creditsRefreshServerTimingClockDomain:
+        "server_response_headers_monotonic_duration",
+    });
+  });
+
+  it("drops invalid credits refresh classifiers and timings", () => {
+    const lifecycle = new AgentLifecycle(() => undefined, () => 375);
+
+    expect(lifecycle.record({
+      code: "credits_refresh_failed",
+      phase: "account",
+      creditsRefreshReason: "private_reason" as never,
+      creditsRefreshSequence: 0,
+      creditsRefreshTransport: "private_transport" as never,
+      creditsRefreshElapsedMs: -1,
+      creditsRefreshServerAuthMs: Number.POSITIVE_INFINITY,
+      creditsRefreshServerRateLimitMs: -1,
+      creditsRefreshServerBalanceStoreMs: 999_999_999,
+      creditsRefreshServerTotalMs: Number.NaN,
+      status: 500,
+    })).toEqual({
+      sequence: 1,
+      timestamp: 375,
+      code: "credits_refresh_failed",
+      phase: "account",
+      status: 500,
+    });
+  });
+
+  it("drops invalid trace and timing fields", () => {
+    const lifecycle = new AgentLifecycle(() => undefined, () => 400);
+
+    expect(lifecycle.record({
+      code: "response_available",
+      phase: "response",
+      latencyTraceId: "trace_private",
+      commandKind: "server_spoofed" as never,
+      commandSegmentOrdinal: 0,
+      responseDeliveryMode: "server_spoofed" as never,
+      clientMonotonicOffsetMs: -1,
+      serverTimingAppMs: Number.POSITIVE_INFINITY,
+      serverTimingAuthMs: 999_999_999,
+    })).toEqual({
+      sequence: 1,
+      timestamp: 400,
+      code: "response_available",
+      phase: "response",
+    });
+  });
+
+  it("keeps only bounded tool and history correlation ordinals", () => {
+    const lifecycle = new AgentLifecycle(() => undefined, () => 425);
+
+    expect(lifecycle.record({
+      code: "history_sync_completed",
+      phase: "persistence",
+      historySyncKind: "terminal",
+      historySyncOrdinal: 9,
+      toolExecutionOrdinal: 3,
+    })).toMatchObject({
+      historySyncKind: "terminal",
+      historySyncOrdinal: 9,
+      toolExecutionOrdinal: 3,
+    });
+    expect(lifecycle.record({
+      code: "history_sync_failed",
+      phase: "persistence",
+      historySyncKind: "private_path" as never,
+      historySyncOrdinal: 2_049,
+      toolExecutionOrdinal: 513,
+    })).toEqual({
+      sequence: 2,
+      timestamp: 425,
+      code: "history_sync_failed",
+      phase: "persistence",
     });
   });
 

@@ -479,7 +479,13 @@ export class AgentWorkspace extends Component {
   /** Atomically replaces the live run with its newly committed transcript. */
   public settleCompletedRun(messages: readonly ChatMessage[]): Promise<void> {
     this.snapshot = null;
-    this.pendingSnapshotRender = undefined;
+    // A queued final frame stays queued: the render chain runs it before the
+    // settle below, giving the streamed text its settled in-place render so
+    // the turn already shows final content when history takes over.
+    // Withdrawing it here would freeze the live text one flush short of its
+    // last markdown delta — and the debounced task must then leave the DOM
+    // alone rather than paint the empty pending placeholder over the still
+    // mounted turn.
     return this.settleRun(messages, null);
   }
 
@@ -645,6 +651,12 @@ export class AgentWorkspace extends Component {
       renderWaiters = this.snapshotRenderWaiters.splice(0);
       this.activeSnapshotRenderWaiters = renderWaiters;
       const snapshot = this.pendingSnapshotRender;
+      // A reset can withdraw the queued snapshot while this task waits out
+      // its debounce. Rendering anyway would paint the pending placeholder —
+      // which has no parts — stripping any still-mounted live turn just
+      // before its replacement render: a visible empty flash. Withdrawn
+      // means another owner has the surface now; leave the DOM alone.
+      if (typeof snapshot === "undefined") return;
       this.pendingSnapshotRender = undefined;
       const presentation = presentAgentConversation(snapshot ?? null, this.runPending);
       // Terminal protocol truth must update controls even if rendering the

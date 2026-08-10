@@ -149,6 +149,10 @@ type PendingSubmit = {
 };
 
 type RunStateResult = "applied" | "idempotent" | "stale" | "conflict";
+type SnapshotOrder = Readonly<{
+  epoch: number;
+  sequence: number;
+}>;
 type ActiveRunState = Extract<
   AgentAuthoritativeRunState,
   { state: "running" | "waiting_for_client" }
@@ -192,6 +196,29 @@ function sameRunState(
   return left.request_id === right.request_id
     && left.run_id === right.run_id
     && left.root_message_id === right.root_message_id;
+}
+
+function snapshotOrder(
+  frame: Readonly<{
+    snapshot_epoch?: number;
+    snapshot_sequence?: number;
+  }>,
+): SnapshotOrder | null {
+  return frame.snapshot_epoch === undefined
+    || frame.snapshot_sequence === undefined
+    ? null
+    : {
+        epoch: frame.snapshot_epoch,
+        sequence: frame.snapshot_sequence,
+      };
+}
+
+function compareSnapshotOrder(left: SnapshotOrder, right: SnapshotOrder): number {
+  if (left.epoch < right.epoch) return -1;
+  if (left.epoch > right.epoch) return 1;
+  if (left.sequence < right.sequence) return -1;
+  if (left.sequence > right.sequence) return 1;
+  return 0;
 }
 
 function command<TKind extends ProtocolCommand["kind"]>(
@@ -283,6 +310,14 @@ export class AgentSession<
   ) => void>();
   private readonly detachFrameListener: () => void;
   private readonly detachConnectionStateListener: () => void;
+  /**
+   * Assistant replacements and full-session projections share one server-side
+   * epoch/sequence. Remember the greatest accepted order across both frame
+   * kinds so a slower equal-cursor full snapshot cannot replace newer tool or
+   * assistant authority, and a delayed assistant frame cannot undo a newer
+   * full projection.
+   */
+  private latestSnapshotOrder: SnapshotOrder | null = null;
   private messages: readonly TMessage[] = Object.freeze([]);
   private runState: AgentVisibleRunState = unknownRunState(
     "awaiting_session_snapshot",
@@ -505,6 +540,11 @@ export class AgentSession<
   private handleSessionSnapshot(
     frame: Extract<AgentServerEvent, { kind: "session_snapshot" }>,
   ): void {
+    const incomingOrder = snapshotOrder(frame);
+    if (this.latestSnapshotOrder !== null && (
+      incomingOrder === null
+      || compareSnapshotOrder(incomingOrder, this.latestSnapshotOrder) <= 0
+    )) return;
     const incomingMessages = frame.messages;
     if (!Array.isArray(incomingMessages)
       || !incomingMessages.every(this.options.isAuthoritativeMessage)
@@ -512,6 +552,20 @@ export class AgentSession<
         !== incomingMessages.length) {
       this.protocolError("SystemSculpt returned invalid authoritative messages.");
       return;
+    }
+    const parsedRunState = knownRunState(frame.run_state);
+    const currentRunState = this.authoritativeRunState;
+    if (parsedRunState && currentRunState) {
+      if (parsedRunState.cursor < currentRunState.cursor) return;
+      if (parsedRunState.cursor === currentRunState.cursor) {
+        if (this.conflictedCursor === parsedRunState.cursor) return;
+        if (!sameRunState(currentRunState, parsedRunState)) {
+          // Apply only the liveness conflict. Messages, terminal authority, and
+          // queue receipts must remain one atomic snapshot on rejection.
+          this.applyRunState(parsedRunState);
+          return;
+        }
+      }
     }
     this.hasSessionSnapshot = true;
     this.messages = frozenMessages(incomingMessages);
@@ -522,7 +576,9 @@ export class AgentSession<
     this.terminal = null;
     this.awaitingTerminalRun = null;
     if (!this.reconcileOptimisticUser()) return;
-    const parsedRunState = knownRunState(frame.run_state);
+    if (incomingOrder !== null) {
+      this.latestSnapshotOrder = incomingOrder;
+    }
     if (!parsedRunState) {
       this.authoritativeRunState = null;
       this.conflictedCursor = null;
@@ -545,6 +601,11 @@ export class AgentSession<
       this.protocolError("SystemSculpt returned an invalid assistant snapshot.");
       return;
     }
+    const incomingOrder = snapshotOrder(frame);
+    if (this.latestSnapshotOrder !== null && (
+      incomingOrder === null
+      || compareSnapshotOrder(incomingOrder, this.latestSnapshotOrder) <= 0
+    )) return;
     const active = this.authoritativeRunState;
     if (!active || active.state === "idle" || active.request_id !== frame.request_id) {
       this.protocolError("The assistant snapshot does not match the active run.");
@@ -555,6 +616,9 @@ export class AgentSession<
     if (existingIndex >= 0 && this.messages[existingIndex]?.role !== "assistant") {
       this.protocolError("The assistant snapshot reuses a non-assistant message identity.");
       return;
+    }
+    if (incomingOrder !== null) {
+      this.latestSnapshotOrder = incomingOrder;
     }
     this.messages = Object.freeze(existingIndex < 0
       ? [...this.messages, message]
@@ -591,10 +655,20 @@ export class AgentSession<
       || authoritative?.state === "waiting_for_client"
       ? authoritative
       : this.awaitingTerminalRun;
-    if (!correlatedRun
-      || correlatedRun.request_id !== frame.request_id
-      || correlatedRun.run_id !== terminal.run_id
-      || correlatedRun.root_message_id !== terminal.root_message_id) {
+    const pendingSubmit = this.pendingSubmit;
+    const matchesCorrelatedRun = Boolean(
+      correlatedRun
+      && correlatedRun.request_id === frame.request_id
+      && correlatedRun.run_id === terminal.run_id
+      && correlatedRun.root_message_id === terminal.root_message_id,
+    );
+    const matchesDispatchedSubmit = Boolean(
+      pendingSubmit
+      && pendingSubmit.delivery !== "queued"
+      && pendingSubmit.command.request_id === frame.request_id
+      && pendingSubmit.command.user_message.id === terminal.root_message_id,
+    );
+    if (!matchesCorrelatedRun && !matchesDispatchedSubmit) {
       if (this.terminal?.request_id === frame.request_id
         && this.terminal.value.run_id === terminal.run_id
         && this.terminal.value.root_message_id === terminal.root_message_id) {
@@ -602,6 +676,14 @@ export class AgentSession<
       }
       this.protocolError("The terminal event does not match the active run.");
       return;
+    }
+    // A provider/admission rejection can legitimately be the first server
+    // event after dispatch, before a running state is observable. The exact
+    // dispatched request and root message identities are enough to bind that
+    // authenticated terminal; clear the optimistic owner so the next turn can
+    // be submitted immediately.
+    if (!matchesCorrelatedRun && matchesDispatchedSubmit) {
+      this.pendingSubmit = null;
     }
     this.terminal = Object.freeze({
       request_id: frame.request_id,

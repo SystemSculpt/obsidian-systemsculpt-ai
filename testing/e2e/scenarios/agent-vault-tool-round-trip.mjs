@@ -4,69 +4,86 @@
  *
  * A text-only prompt exercises none of the client-tool path, so it stays green
  * while tool delivery is broken. This scenario therefore makes the model write
- * a uniquely named vault file and waits on run completion with `waitForRun`,
- * which fails loudly on a stall instead of timing out ambiguously.
+ * a uniquely named vault file through the guarded development-state driver.
+ * The driver owns the temporary chat, requires exact Ask Approval consent,
+ * records the live tool lifecycle, and cleans only the marker-owned artifacts.
  */
+
+import {
+  LATEST_DURABLE_ASSISTANT_TEXT,
+  makeDevelopmentContext,
+  withOwnedDevelopmentState,
+} from "../../../scripts/e2e/chatview-development-state.mjs";
+
+export { LATEST_DURABLE_ASSISTANT_TEXT } from "../../../scripts/e2e/chatview-development-state.mjs";
 
 const STALL_MS = 60000;
 const RUN_TIMEOUT_MS = 180000;
 
 export default function makeAgentVaultToolRoundTrip(now = Date.now()) {
-  const runId = now.toString(36).toUpperCase();
-  const filePath = `QA/E2E/round-trip-${runId}.md`;
-  const completionMarker = `DONE-${runId}`;
-  return [
-  { label: "open chat", action: "chat.open" },
-  {
-    label: "full access so tools run without prompting",
-    action: "select",
-    params: { target: "chat.composer.approval-mode", value: "full-access" },
-  },
-  { label: "new chat", action: "click", params: { target: "chat.header.new" } },
-  {
-    label: "composer ready",
-    action: "waitFor",
-    params: { target: "chat.composer.input", state: "visible", timeoutMs: 10000 },
-  },
-  {
-    label: "no phantom run on a fresh chat",
-    action: "waitFor",
-    params: { target: "chat.composer.stop", state: "hidden", timeoutMs: 5000 },
-  },
-  {
-    label: "submit a vault-tool prompt",
-    action: "type",
-    params: {
-      text: `Create exactly one file at ${filePath} containing the single line ${runId}. `
-        + `Use your vault tools. Then reply with exactly ${completionMarker}.`,
-      submit: true,
-    },
-  },
-  {
-    label: "run completes without stalling",
-    action: "waitForRun",
-    params: { timeoutMs: RUN_TIMEOUT_MS, stallMs: STALL_MS },
-  },
-  {
-    label: "expected completion marker",
-    action: "waitFor",
-    params: {
-      target: "chat:.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-part.is-text",
-      state: "textEquals",
-      text: completionMarker,
-      timeoutMs: 5000,
-    },
-  },
-  {
-    label: "round-trip file has exact content",
-    action: "vault.assertText",
-    params: { path: filePath, text: runId },
-  },
-  { label: "transcript", action: "snapshot", params: { scope: "chat" } },
-  {
-    label: "no error banner",
-    action: "waitFor",
-    params: { target: "chat:.systemsculpt-agent-banner", state: "hidden", timeoutMs: 2000 },
-  },
-  ];
+  const context = makeDevelopmentContext("", now);
+  const filePath = `${context.markerRoot}/round-trip.md`;
+  const completionMarker = `DONE-${context.runId}`;
+  return withOwnedDevelopmentState(context, [
+      {
+        label: "submit a vault-tool prompt",
+        action: "chat.typeDevelopmentDraft",
+        params: {
+          text: `Create exactly one file at ${filePath} containing exactly ${context.runId}. `
+            + `Use your vault tools. Then reply with exactly ${completionMarker}.`,
+          submit: true,
+        },
+      },
+      {
+        label: "approval is required",
+        action: "chat.waitForDevelopmentRun",
+        params: { until: "approval", timeoutMs: RUN_TIMEOUT_MS },
+      },
+      {
+        label: "allow exact write once",
+        action: "chat.approveDevelopmentWriteOnce",
+        params: { path: filePath, text: context.runId },
+      },
+      {
+        label: "run completes without stalling",
+        action: "chat.waitForDevelopmentRun",
+        params: { until: "complete", timeoutMs: RUN_TIMEOUT_MS },
+      },
+      {
+        label: "tool settles before continuation",
+        action: "chat.assertLatestToolSettledAfterContinuation",
+        params: {
+          toolLabel: "Write file",
+          text: completionMarker,
+          textMode: "contains",
+          requireCommandAck: true,
+          timeoutMs: STALL_MS,
+        },
+      },
+      {
+        label: "expected completion marker",
+        action: "waitFor",
+        params: {
+          target: LATEST_DURABLE_ASSISTANT_TEXT,
+          state: "textContains",
+          text: completionMarker,
+          timeoutMs: 5000,
+        },
+      },
+      {
+        label: "round-trip file has exact content",
+        action: "vault.assertText",
+        params: { path: filePath, text: context.runId },
+      },
+      { label: "transcript", action: "snapshot", params: { scope: "chat" } },
+      {
+        label: "no error banner",
+        action: "waitFor",
+        params: {
+          target: "chat:.systemsculpt-agent-banner",
+          state: "hidden",
+          timeoutMs: 2000,
+        },
+      },
+  ]);
 }

@@ -462,6 +462,82 @@ describe("AgentWorkspace", () => {
     expect(node.querySelector("pre")).toBeNull();
   });
 
+  it("renders completed, partial, and failed real-schema outcomes with private details fenced", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    const privateFailure = "/Users/private/SecretVault failure sentinel";
+    const render = async (overrides: Record<string, unknown>): Promise<HTMLElement> => {
+      const node = host.createDiv();
+      await (renderer as any).renderTool(node, {
+        id: `tool-${host.childElementCount}`,
+        order: host.childElementCount,
+        kind: "tool",
+        messageId: "assistant-outcomes",
+        callId: `call-${host.childElementCount}`,
+        name: "open",
+        location: "vault",
+        input: { files: [{ path: "Ready.md" }, { path: "Missing.md" }] },
+        ...overrides,
+      });
+      return node;
+    };
+
+    const completed = await render({
+      state: "succeeded",
+      output: { data: { opened: ["Ready.md", "Second.md"], errors: [] } },
+    });
+    expect(completed.classList.contains("is-succeeded")).toBe(true);
+    expect(completed.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Done");
+
+    const partial = await render({
+      state: "failed",
+      output: { data: { opened: ["Ready.md"], errors: [privateFailure] } },
+      error: { code: "TOOL_PARTIAL_FAILURE", message: privateFailure },
+    });
+    expect(partial.classList.contains("is-partial")).toBe(true);
+    expect(partial.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Partial");
+    expect(partial.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+      .toBe("1 completed, 1 failed");
+    expect(partial.querySelector(".systemsculpt-agent-tool-error")?.textContent)
+      .toBe("Some requested items failed; successful items were kept.");
+
+    const failed = await render({
+      name: "context",
+      input: { action: "add", paths: ["First.md", "Second.md"] },
+      state: "failed",
+      output: {
+        data: {
+          action: "add",
+          processed: 0,
+          results: [
+            { path: "First.md", success: false, reason: privateFailure },
+            { path: "Second.md", success: false, reason: privateFailure },
+          ],
+          summary: "Pinned 0 files. 0 paths succeeded, 2 failed.",
+        },
+      },
+      // Item outcomes, not a stale partial code, own the visible state.
+      error: { code: "TOOL_PARTIAL_FAILURE", message: privateFailure },
+    });
+    expect(failed.classList.contains("is-failed")).toBe(true);
+    expect(failed.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Failed");
+    expect(failed.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+      .toBe("0 completed, 2 failed");
+    expect(failed.querySelector(".systemsculpt-agent-tool-error")?.textContent)
+      .toBe("This vault action could not be completed.");
+
+    for (const node of [completed, partial, failed]) {
+      expect(node.textContent).not.toContain(privateFailure);
+      expect(node.textContent).not.toContain(GENERIC_AGENT_FAILURE);
+    }
+  });
+
   it("renders fixed and generic server activity without exposing protocol tool names", async () => {
     const host = document.body.createDiv();
     const onApprove = jest.fn();
@@ -1429,6 +1505,7 @@ describe("AgentWorkspace", () => {
       ":scope > .systemsculpt-agent-part.is-tool",
     );
     expect(groupedTools).toHaveLength(1);
+    expect((groupedTools[0] as HTMLElement).dataset.partKey).toBe("tool:call-1");
     expect(groupedTools[0].querySelector("strong")?.textContent).toBe("Read 2 files");
     expect(body.querySelector(".systemsculpt-agent-activity")).toBeNull();
     expect(body.textContent).not.toContain("BeforeAfter");
@@ -1509,6 +1586,7 @@ describe("AgentWorkspace", () => {
       expect(row.dataset.messageIds).toBe(
         "assistant-multiround-1 assistant-multiround-2 assistant-multiround-3",
       );
+      expect(row.dataset.turnId).toBe("user-first");
       const body = row.querySelector<HTMLElement>(".systemsculpt-agent-turn-body")!;
       expect(Array.from(body.children).map((node) => {
         if (node.classList.contains("is-reasoning")) return "reasoning";
@@ -1526,6 +1604,13 @@ describe("AgentWorkspace", () => {
       expect(row.querySelector(".systemsculpt-agent-activity")).toBeNull();
       expect(row.querySelectorAll(".systemsculpt-agent-part.is-reasoning")).toHaveLength(2);
       expect(row.querySelectorAll(".systemsculpt-agent-part.is-tool")).toHaveLength(3);
+      expect(Array.from(row.querySelectorAll<HTMLElement>(
+        ".systemsculpt-agent-part.is-tool",
+      )).map((toolNode) => toolNode.dataset.partKey)).toEqual([
+        "tool:first",
+        "tool:second",
+        "tool:third",
+      ]);
       expect(row.querySelector(".systemsculpt-agent-part.is-tool pre")).toBeNull();
       expect(row.querySelector(".systemsculpt-agent-artifact")).toBeNull();
       expect(row.textContent).not.toContain("not product UI");
@@ -1603,9 +1688,11 @@ describe("AgentWorkspace", () => {
       expect(row.dataset.messageIds).toBe(
         "assistant-read-1 assistant-read-2 assistant-read-3",
       );
+      expect(row.dataset.turnId).toBe("user-read");
       const toolRows = row.querySelectorAll(".systemsculpt-agent-part.is-tool");
       expect(toolRows).toHaveLength(1);
       expect(toolRows[0].classList.contains("is-grouped")).toBe(true);
+      expect((toolRows[0] as HTMLElement).dataset.partKey).toBe("tool:read-1");
       expect(toolRows[0].getAttribute("data-tool-count")).toBe("3");
       expect(toolRows[0].querySelector("strong")?.textContent).toBe("Read 3 files");
       expect(toolRows[0].querySelector(".systemsculpt-agent-tool-summary")?.textContent)
@@ -1625,6 +1712,269 @@ describe("AgentWorkspace", () => {
     ]);
     assertGrouped();
     expect(parent.querySelectorAll(".systemsculpt-agent-turn.is-assistant")).toHaveLength(1);
+    workspace.unload();
+  });
+
+  it("keeps canonical tool and turn identity when live output becomes durable history", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const turnId = "user-live-history";
+    const assistantId = "assistant-live-history";
+    const callId = "call-live-history";
+    const toolPart: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-live-history",
+      order: 1,
+      kind: "tool",
+      messageId: assistantId,
+      callId,
+      name: "web_search",
+      location: "server",
+      input: { query: "stable identity" },
+      state: "succeeded",
+      output: { data: { query: "stable identity" } },
+    };
+    await workspace.setAgentSnapshot({
+      runId: "run-live-history",
+      turnId,
+      status: "completed",
+      phase: "complete",
+      messages: [{ id: assistantId, role: "assistant", partIds: [toolPart.id] }],
+      parts: [toolPart],
+    });
+
+    const liveTool = parent.querySelector<HTMLElement>(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
+    )!;
+    expect(liveTool.dataset.partKey).toBe(`tool:${callId}`);
+    const liveDetails = liveTool.querySelector<HTMLDetailsElement>("details")!;
+    liveDetails.open = true;
+    const liveSummary = liveDetails.querySelector<HTMLElement>("summary")!;
+    liveSummary.tabIndex = 0;
+    liveSummary.focus();
+    expect(document.activeElement).toBe(liveSummary);
+
+    const savedCall = {
+      id: callId,
+      messageId: assistantId,
+      request: {
+        id: callId,
+        type: "function" as const,
+        function: {
+          name: "web_search",
+          arguments: JSON.stringify({ query: "stable identity" }),
+        },
+      },
+      state: "completed" as const,
+      timestamp: 1,
+      result: { success: true, data: { query: "stable identity" } },
+    };
+    await workspace.settleCompletedRun([{
+      role: "user",
+      message_id: turnId,
+      content: "Research this.",
+    }, {
+      role: "assistant",
+      message_id: assistantId,
+      content: "Finished.",
+      tool_calls: [savedCall],
+      messageParts: [{
+        id: toolPart.id,
+        type: "tool_call",
+        timestamp: 1,
+        data: savedCall,
+      }, {
+        id: "text-live-history",
+        type: "content",
+        timestamp: 2,
+        data: "Finished.",
+      }],
+    }]);
+
+    const historicalTurn = parent.querySelector<HTMLElement>(
+      `.systemsculpt-agent-history .systemsculpt-agent-turn.is-assistant[data-turn-id="${turnId}"]`,
+    )!;
+    const historicalTools = parent.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-part.is-tool",
+    );
+    expect(historicalTurn).not.toBeNull();
+    expect(historicalTools).toHaveLength(1);
+    expect(historicalTools[0]).not.toBe(liveTool);
+    expect(historicalTools[0].dataset.partKey).toBe(`tool:${callId}`);
+    expect(historicalTools[0].querySelector(".systemsculpt-agent-tool-state")?.textContent)
+      .toBe("Done");
+    const historicalDetails = historicalTools[0].querySelector<HTMLDetailsElement>("details")!;
+    expect(historicalDetails.open).toBe(true);
+    expect(document.activeElement).toBe(historicalDetails.querySelector("summary"));
+    expect(historicalTurn.textContent).toContain("Finished.");
+    expect(parent.querySelector(".systemsculpt-agent-active-run .is-tool")).toBeNull();
+    workspace.unload();
+  });
+
+  it("never unmounts the live turn before its settled history render at the final paint boundary", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const turnId = "user-atomic-boundary";
+    const assistantId = "assistant-atomic-boundary";
+    const callId = "call-atomic-boundary";
+    const toolPart: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-atomic-boundary",
+      order: 1,
+      kind: "tool",
+      messageId: assistantId,
+      callId,
+      name: "web_search",
+      location: "server",
+      input: { query: "atomic boundary" },
+      state: "succeeded",
+      output: { data: { query: "atomic boundary" } },
+    };
+    const textPart: Extract<AgentPart, { kind: "text" }> = {
+      id: "text-atomic-boundary",
+      order: 2,
+      kind: "text",
+      messageId: assistantId,
+      state: "streaming",
+      markdown: "SETTLED-ANSWER",
+    };
+    const runningSnapshot = {
+      runId: "run-atomic-boundary",
+      turnId,
+      status: "running" as const,
+      phase: "working" as const,
+      messages: [{
+        id: assistantId,
+        role: "assistant" as const,
+        partIds: [toolPart.id, textPart.id],
+      }],
+      parts: [toolPart, textPart],
+    };
+    await workspace.setAgentSnapshot(runningSnapshot);
+    workspace.setRunPending(true, turnId);
+    const liveTool = parent.querySelector<HTMLElement>(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
+    )!;
+    expect(liveTool).not.toBeNull();
+    const liveText = parent.querySelector<HTMLElement>(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-text",
+    )!;
+    expect(liveText).not.toBeNull();
+    expect(liveText.classList.contains("is-streaming")).toBe(true);
+
+    const mutationOrder: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of Array.from(record.removedNodes)) {
+          if (node === liveTool || (node instanceof HTMLElement && node.contains(liveTool))) {
+            mutationOrder.push("live-tool-removed");
+          }
+        }
+        for (const node of Array.from(record.addedNodes)) {
+          if (
+            node instanceof HTMLElement
+            && (node.matches(".systemsculpt-agent-turn.is-assistant")
+              || node.querySelector(".systemsculpt-agent-turn.is-assistant"))
+          ) {
+            mutationOrder.push("history-turn-added");
+          }
+        }
+      }
+    });
+    observer.observe(parent, { childList: true, subtree: true });
+
+    // The session commits its final completed frame; the completed-run settle
+    // then lands before the debounced snapshot render fires. The queued frame
+    // must still render — settling the streamed text in place — and the live
+    // turn must stay mounted until the settled history render replaces it.
+    void workspace.setAgentSnapshot({
+      ...runningSnapshot,
+      status: "completed",
+      parts: [toolPart, { ...textPart, state: "complete" as const }],
+    });
+    // Let the debounced snapshot render enqueue and enter its delay so the
+    // settle below lands inside the race window, as it does in the live app.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const savedCall = {
+      id: callId,
+      messageId: assistantId,
+      request: {
+        id: callId,
+        type: "function" as const,
+        function: {
+          name: "web_search",
+          arguments: JSON.stringify({ query: "atomic boundary" }),
+        },
+      },
+      state: "completed" as const,
+      timestamp: 1,
+      result: { success: true, data: { query: "atomic boundary" } },
+    };
+    await workspace.settleCompletedRun([{
+      role: "user",
+      message_id: turnId,
+      content: "Run the atomic boundary check.",
+    }, {
+      role: "assistant",
+      message_id: assistantId,
+      content: "SETTLED-ANSWER",
+      tool_calls: [savedCall],
+      messageParts: [{
+        id: toolPart.id,
+        type: "tool_call",
+        timestamp: 1,
+        data: savedCall,
+      }, {
+        id: "text-atomic-boundary",
+        type: "content",
+        timestamp: 2,
+        data: "SETTLED-ANSWER",
+      }],
+    }]);
+    workspace.setRunPending(false);
+    await new Promise((resolve) => setTimeout(resolve, 64));
+    observer.takeRecords();
+    observer.disconnect();
+
+    const firstRemoval = mutationOrder.indexOf("live-tool-removed");
+    const firstHistory = mutationOrder.indexOf("history-turn-added");
+    expect(firstHistory).toBeGreaterThanOrEqual(0);
+    expect(firstRemoval).toBeGreaterThan(firstHistory);
+    // The queued final frame must have rendered before the settle replaced the
+    // turn: the streamed text part received its settled render rather than
+    // being frozen mid-stream one markdown flush short of the final content.
+    expect(liveText.classList.contains("is-streaming")).toBe(false);
+    const historicalTools = parent.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-history .systemsculpt-agent-part.is-tool",
+    );
+    expect(historicalTools).toHaveLength(1);
+    expect(parent.querySelector(".systemsculpt-agent-active-run .is-tool")).toBeNull();
     workspace.unload();
   });
 
@@ -2026,59 +2376,122 @@ describe("AgentWorkspace", () => {
     const afterToolNode = textNodes[1];
     const toolNode = body.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     const toolHeader = toolNode.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
-
-    const finalText: Extract<AgentPart, { kind: "text" }> = {
-      id: "text-final",
-      kind: "text",
-      messageId: "assistant-ordered",
-      state: "streaming",
-      markdown: "The project note is updated.",
-      order: 4,
+    type OrderedMutation = Readonly<{
+      order: number;
+      record: MutationRecord;
+      targetClass: string | null;
+    }>;
+    const observedMutations: OrderedMutation[] = [];
+    let nextMutationOrder = 0;
+    const recordMutations = (records: readonly MutationRecord[]): void => {
+      for (const record of records) {
+        observedMutations.push({
+          order: nextMutationOrder++,
+          record,
+          targetClass: record.target instanceof Element
+            ? record.target.getAttribute("class")
+            : null,
+        });
+      }
     };
-    await workspace.setAgentSnapshot(snapshot([
-      finalText,
-      {
-        ...afterTool,
-        state: "complete",
-        markdown: "The write completed successfully.",
-      },
-      {
-        ...approvalTool,
-        state: "succeeded",
-        output: { summary: "Updated Project.md" },
-      },
-      {
-        ...beforeTool,
-        markdown: "I found the note and prepared the update.",
-      },
-      {
-        ...reasoning,
-        summary: "The project note is ready to update.",
-      },
-    ], "running"));
+    const observer = new MutationObserver(recordMutations);
+    observer.observe(body, {
+      attributes: true,
+      attributeFilter: ["class"],
+      attributeOldValue: true,
+      childList: true,
+      subtree: true,
+    });
 
-    expect(laneKinds()).toEqual([
-      "reasoning",
-      "text",
-      "tool",
-      "text",
-      "text",
-      "status",
-    ]);
-    expect(body.querySelector(".systemsculpt-agent-tail-status")).toBe(statusRow);
-    expect(body.lastElementChild).toBe(statusRow);
-    expect(body.querySelector(".systemsculpt-agent-part.is-reasoning")).toBe(reasoningNode);
-    const updatedTextNodes = body.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-part.is-text",
-    );
-    expect(updatedTextNodes[0]).toBe(beforeToolNode);
-    expect(updatedTextNodes[1]).toBe(afterToolNode);
-    expect(body.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
-    expect(toolNode.querySelector(".systemsculpt-agent-tool-header")).toBe(toolHeader);
-    expect(toolNode.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Done");
-    expect(body.textContent).toContain("The write completed successfully.");
-    expect(body.textContent).toContain("The project note is updated.");
-    workspace.unload();
+    try {
+      const finalText: Extract<AgentPart, { kind: "text" }> = {
+        id: "text-final",
+        kind: "text",
+        messageId: "assistant-ordered",
+        state: "streaming",
+        markdown: "The project note is updated.",
+        order: 4,
+      };
+      await workspace.setAgentSnapshot(snapshot([
+        finalText,
+        {
+          ...afterTool,
+          state: "complete",
+          markdown: "The write completed successfully.",
+        },
+        {
+          ...approvalTool,
+          state: "succeeded",
+          output: { summary: "Updated Project.md" },
+        },
+        {
+          ...beforeTool,
+          markdown: "I found the note and prepared the update.",
+        },
+        {
+          ...reasoning,
+          summary: "The project note is ready to update.",
+        },
+      ], "running"));
+      recordMutations(observer.takeRecords());
+
+      expect(laneKinds()).toEqual([
+        "reasoning",
+        "text",
+        "tool",
+        "text",
+        "text",
+        "status",
+      ]);
+      expect(body.querySelector(".systemsculpt-agent-tail-status")).toBe(statusRow);
+      expect(body.lastElementChild).toBe(statusRow);
+      expect(body.querySelector(".systemsculpt-agent-part.is-reasoning")).toBe(reasoningNode);
+      const updatedTextNodes = body.querySelectorAll<HTMLElement>(
+        ".systemsculpt-agent-part.is-text",
+      );
+      expect(updatedTextNodes[0]).toBe(beforeToolNode);
+      expect(updatedTextNodes[1]).toBe(afterToolNode);
+      const finalTextNode = body.querySelector<HTMLElement>(
+        '[data-part-key="text:text-final"]',
+      )!;
+      expect(finalTextNode.classList).toContain("is-streaming");
+      expect(Boolean(
+        toolNode.compareDocumentPosition(finalTextNode) & Node.DOCUMENT_POSITION_FOLLOWING,
+      )).toBe(true);
+      expect(body.querySelector(".systemsculpt-agent-part.is-tool")).toBe(toolNode);
+      expect(toolNode.querySelector(".systemsculpt-agent-tool-header")).toBe(toolHeader);
+      expect(toolNode.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Done");
+      expect(toolNode.classList).toContain("is-succeeded");
+      expect(toolNode.classList).not.toContain("is-running");
+      const toolIcon = toolNode.querySelector<HTMLElement>(
+        ".systemsculpt-agent-tool-icon",
+      )!;
+      expect(toolIcon.dataset.iconState).toBe("circle-check");
+      expect(toolIcon.classList).not.toContain("is-animated");
+      expect(body.textContent).toContain("The write completed successfully.");
+      expect(body.textContent).toContain("The project note is updated.");
+
+      const toolCompletionMutation = observedMutations.find(({ record, targetClass }) =>
+        record.type === "attributes"
+        && record.target === toolNode
+        && record.attributeName === "class"
+        && record.oldValue?.split(/\s+/u).includes("is-approval-required") === true
+        && targetClass?.split(/\s+/u).includes("is-succeeded") === true);
+      const finalTextInsertion = observedMutations.find(({ record }) =>
+        record.type === "childList"
+        && record.target === body
+        && Array.from(record.addedNodes).some((node) =>
+          node instanceof HTMLElement
+          && node.parentElement === body
+          && node.dataset.partKey === "text:text-final"));
+      expect(toolCompletionMutation).toBeDefined();
+      expect(finalTextInsertion).toBeDefined();
+      expect(toolCompletionMutation!.order).toBeLessThan(finalTextInsertion!.order);
+    } finally {
+      recordMutations(observer.takeRecords());
+      observer.disconnect();
+      workspace.unload();
+    }
   });
 
   it("keeps one stable tail status while distinguishing work from approval waiting", async () => {
@@ -3706,11 +4119,16 @@ describe("AgentWorkspace", () => {
         order: 1,
       }],
     };
+    workspace.setRunPending(true, user.message_id);
     await workspace.setAgentSnapshot(failed);
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.textContent)
       .toContain("Partial final answer");
+    expect(parent.querySelector(".systemsculpt-agent-turn.is-active")).toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
+      .toBe(false);
 
     // The terminal reconcile committed the same turn into the transcript.
+    workspace.setRunPending(false);
     await workspace.settleUnfinishedRun([
       user,
       {
@@ -3725,6 +4143,14 @@ describe("AgentWorkspace", () => {
     expect(parent.textContent?.match(/Partial final answer/g)).toHaveLength(1);
     const active = parent.querySelector(".systemsculpt-agent-active-run")!;
     expect(active.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    expect(active.querySelector(".systemsculpt-agent-turn.is-active")).toBeNull();
+    workspace.setInputText("Recover in the same chat");
+    expect(parent.querySelector<HTMLTextAreaElement>(".systemsculpt-agent-prompt-input")?.disabled)
+      .toBe(false);
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')?.disabled)
+      .toBe(false);
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Stop response"]')?.hidden)
+      .toBe(true);
     active.querySelector<HTMLButtonElement>(".systemsculpt-agent-error-retry")!.click();
     expect(onRetryFailedTurn).toHaveBeenCalledWith(user.message_id);
 
@@ -3733,6 +4159,9 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(failed);
     expect(parent.textContent?.match(/Partial final answer/g)).toHaveLength(1);
     expect(active.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    expect(active.querySelector(".systemsculpt-agent-turn.is-active")).toBeNull();
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')?.disabled)
+      .toBe(false);
     workspace.unload();
   });
 
@@ -4738,7 +5167,7 @@ describe("AgentWorkspace", () => {
     expect(turns).toHaveLength(2);
     expect(turns[0].classList.contains("is-user")).toBe(true);
     expect(turns[1].classList.contains("is-assistant")).toBe(true);
-    expect(turns[1].classList.contains("is-active")).toBe(true);
+    expect(turns[1].classList.contains("is-active")).toBe(false);
     expect(parent.querySelectorAll('[aria-label="SystemSculpt response"]')).toHaveLength(1);
     expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
     expect(parent.textContent).toContain(GENERIC_AGENT_FAILURE);
@@ -4802,7 +5231,8 @@ describe("AgentWorkspace", () => {
     const tailStatus = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
     const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     expect(toolNode.querySelector(".systemsculpt-agent-tool-error")?.textContent)
-      .toBe(GENERIC_AGENT_FAILURE);
+      .toBe("This vault action could not be completed.");
+    expect(toolNode.textContent).not.toContain(GENERIC_AGENT_FAILURE);
 
     await workspace.setAgentSnapshot({
       ...running,
@@ -4950,7 +5380,7 @@ describe("AgentWorkspace", () => {
         state: "failed",
         output: {
           summary: "One file changed; one conflicted.",
-          data: result,
+          data: result.data,
           artifacts: [{
             id: "artifact:call-partial:Changed.md",
             kind: "vault_file",
@@ -4972,9 +5402,16 @@ describe("AgentWorkspace", () => {
       }],
     };
     await workspace.setAgentSnapshot(projected);
+    expect(parent.querySelector(".systemsculpt-agent-part.is-tool.is-partial")).not.toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Partial");
+    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+      .toBe("1 completed, 1 failed");
     expect(parent.querySelectorAll(".systemsculpt-agent-artifact")).toHaveLength(1);
     expect(parent.textContent).toContain("Changed.md");
     expect(parent.textContent).not.toContain("Failed.md");
+    expect(parent.querySelector(".systemsculpt-agent-tool-error")?.textContent)
+      .toBe("Some requested items failed; successful items were kept.");
+    expect(parent.textContent).not.toContain(GENERIC_AGENT_FAILURE);
 
     const savedCall = {
       id: "call-partial",
@@ -5009,8 +5446,14 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(null);
     await workspace.setHistory(reloadSavedMessages(savedHistory));
 
+    expect(parent.querySelector(".systemsculpt-agent-part.is-tool.is-partial")).not.toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-tool-state")?.textContent).toBe("Partial");
+    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+      .toBe("1 completed, 1 failed");
+    expect(parent.querySelector(".systemsculpt-agent-tool-error")?.textContent)
+      .toBe("Some requested items failed; successful items were kept.");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)
-      .toContain(GENERIC_AGENT_FAILURE);
+      .not.toContain(GENERIC_AGENT_FAILURE);
     expect(parent.textContent).toContain("One file changed; one conflicted.");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("results");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).toBeNull();

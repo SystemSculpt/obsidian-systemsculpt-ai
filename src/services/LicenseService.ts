@@ -1,7 +1,7 @@
 import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import { CACHE_BUSTER } from "../utils/urlHelpers";
-import type { HttpRequestError } from "../utils/httpClient";
 import SystemSculptPlugin from "../main";
+import { PlatformRequestClient } from "./PlatformRequestClient";
 import { MANAGED_ADMISSION_CONTRACT } from "./managed/ManagedTypes";
 import {
   decodeManagedAdmissionResponse,
@@ -18,7 +18,14 @@ export type LicenseValidationResult =
  * Service responsible for license validation and entitlement handling
  */
 export class LicenseService {
-  constructor(private readonly plugin: SystemSculptPlugin) {}
+  private readonly requestClient: Pick<PlatformRequestClient, "request">;
+
+  constructor(
+    private readonly plugin: SystemSculptPlugin,
+    requestClient: Pick<PlatformRequestClient, "request"> = new PlatformRequestClient(),
+  ) {
+    this.requestClient = requestClient;
+  }
 
   /**
    * Get current license key from settings
@@ -30,11 +37,7 @@ export class LicenseService {
   /**
    * Validate the current license key
    */
-  public async validateLicense(_forceCheck = false): Promise<boolean> {
-    return (await this.validateLicenseDetailed(_forceCheck)).isValid;
-  }
-
-  public async validateLicenseDetailed(_forceCheck = false): Promise<LicenseValidationResult> {
+  public async validateLicenseDetailed(): Promise<LicenseValidationResult> {
     if (!this.licenseKey?.trim()) {
       if (this.plugin.settings.licenseValid) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
@@ -45,7 +48,7 @@ export class LicenseService {
     // Apply cache busting using centralized utility
     // This permanently prevents redirect caching issues in Electron/Obsidian
     const fullUrl = CACHE_BUSTER.apply(`${API_BASE_URL}/license/validate`);
-    
+
     const headersToSend = {
       ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
       "x-plugin-version": this.plugin.manifest.version,
@@ -53,14 +56,15 @@ export class LicenseService {
     };
 
     try {
-      const { httpRequest } = await import('../utils/httpClient');
-      const response = await httpRequest({
+      const response = await this.requestClient.request({
         url: fullUrl,
-        method: 'GET',
+        method: "GET",
         headers: headersToSend,
+        cache: "no-store",
       });
+      const payload = await this.readJson(response);
 
-      const admission = decodeManagedAdmissionResponse(response.status, response.json);
+      const admission = decodeManagedAdmissionResponse(response.status, payload);
       if (admission.outcome === "allowed") {
         await this.plugin.getSettingsManager().updateSettings({
           licenseValid: true,
@@ -69,11 +73,18 @@ export class LicenseService {
         });
         return { outcome: "valid", isValid: true };
       }
+      // Only the exact negotiated 403/license_rejected envelope may downgrade
+      // cached validity. Status codes and HTML error pages alone are not proof
+      // that a paid license is invalid.
+      if (admission.outcome === "license_rejected" && admission.reason) {
+        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+        return { outcome: "rejected", isValid: false, reason: admission.reason };
+      }
 
       // Compatibility for servers that predate admission-v1 but return the
       // established successful account envelope. Negotiated responses above
       // remain the only source of authoritative rejection state.
-      const legacyProfile = this.readLegacySuccessProfile(response.status, response.json);
+      const legacyProfile = this.readLegacySuccessProfile(response.status, payload);
       if (legacyProfile) {
         await this.plugin.getSettingsManager().updateSettings({
           licenseValid: true,
@@ -87,19 +98,18 @@ export class LicenseService {
       }
 
       return this.unavailableResult();
-    } catch (error) {
-      const admission = this.isHttpRequestError(error)
-        ? decodeManagedAdmissionResponse(error.status, error.json)
-        : { outcome: "temporarily_unavailable" as const };
-
-      // Only the exact negotiated 403/license_rejected envelope may downgrade
-      // cached validity. Status codes and HTML error pages alone are not proof
-      // that a paid license is invalid.
-      if (admission.outcome === "license_rejected" && admission.reason) {
-        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
-        return { outcome: "rejected", isValid: false, reason: admission.reason };
-      }
+    } catch {
       return this.unavailableResult();
+    }
+  }
+
+  private async readJson(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text.trim()) return undefined;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return undefined;
     }
   }
 
@@ -120,15 +130,6 @@ export class LicenseService {
     const userName = typeof profile.user_name === "string" ? profile.user_name : profile.email;
     const displayName = typeof profile.display_name === "string" ? profile.display_name : userName;
     return { email: profile.email, userName, displayName };
-  }
-
-  private isHttpRequestError(error: unknown): error is HttpRequestError {
-    return (
-      typeof error === "object" &&
-      error !== null &&
-      "status" in error &&
-      typeof error.status === "number"
-    );
   }
 
 }

@@ -229,6 +229,40 @@ clicks, typing, waits, assertions — in one invocation and reports per-step
 results. The CLI resolves the vault from systemsculpt-sync.config.json; use
 --vault or --plugin-dir to override.
 
+The guarded live ChatView lanes drive the visible UI, use synthetic
+`SS-DEV-TEST-*` ownership markers, stay in Ask Approval, and trash only the
+exact saved chat and marker folder they created:
+
+~~~bash
+npm run qa:chatview:live:attachment:first-turn
+npm run qa:chatview:live:invalid-client-tools
+npm run qa:chatview:live:cancellation
+~~~
+
+The invalid-client-tools lane is only valid against the isolated loopback
+Worker fixture. It proves deterministic invalid `read {}` and `list_items {}`
+corrections never become client tool cards, executions, result deliveries, or
+acknowledgements before the exact terminal continuation.
+
+Cancellation also exposes `:phase1`, `:phase2`, and `:cleanup` variants
+for deliberate two-session diagnosis. Run those variants sequentially and do
+not reload the plugin between them; the exact ownership proof intentionally
+survives only in the loaded plugin process.
+
+Worker-restart continuity remains an explicit two-phase gate because the
+plugin repository does not own the server lifecycle:
+
+~~~bash
+npm run qa:chatview:live:worker-restart:phase1
+# Restart only the matching local Worker. Do not reload Obsidian or the plugin.
+npm run qa:chatview:live:worker-restart:phase2
+~~~
+
+If an operator stops between phases, run the matching `:cleanup` command
+before another journey. Cleanup fails closed when the loaded plugin no longer
+holds the exact ownership proof; it never treats a skipped cleanup as success.
+Do not run either two-phase journey concurrently.
+
 ## Release validation
 
 ~~~bash

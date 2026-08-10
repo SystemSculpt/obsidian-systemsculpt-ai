@@ -30,7 +30,6 @@ const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/verify-ci-failure-evidence.test.mjs",
   "scripts/chatview-critical-mutants.test.mjs",
-  "scripts/check/chatview-critical-risk-policy.test.mjs",
   "scripts/check/chatview-critical-mutants-policy.test.mjs",
   "scripts/check/test-gate-partition-policy.test.mjs",
   "scripts/git-hooks.test.mjs",

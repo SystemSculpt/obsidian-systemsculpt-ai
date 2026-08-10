@@ -2,7 +2,12 @@ import { ItemView, normalizePath, Notice, TFile, WorkspaceLeaf } from "obsidian"
 import type SystemSculptPlugin from "../../main";
 import { getLoadedPluginBuildId } from "../../core/plugin/LoadedPluginBuildIdentity";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import { SystemSculptService, type CreditsBalanceSnapshot } from "../../services/SystemSculptService";
+import {
+  SystemSculptService,
+  type CreditsBalanceObservation,
+  type CreditsBalanceServerTiming,
+  type CreditsBalanceSnapshot,
+} from "../../services/SystemSculptService";
 import type { RecorderService } from "../../services/RecorderService";
 import { readManagedToolCallFunction } from "../../services/chat/ManagedToolExecution";
 import type { ChatMessage } from "../../types";
@@ -25,6 +30,8 @@ import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
 import type {
   AgentArtifact,
   AgentConversationSnapshot,
+  AgentTextPart,
+  AgentToolPart,
   ManagedAgentError,
 } from "./AgentConversation";
 import { AgentConversationSessionBinding } from "./AgentConversationSessionBinding";
@@ -53,6 +60,8 @@ import {
   type AgentLifecyclePhase,
   type AgentRunResult,
 } from "./agent/ChatSession";
+import { isAgentBillingFailure } from "./agent/AgentFailurePolicy";
+import type { CreditsRefreshReason } from "./agent/Lifecycle";
 import { AgentMutationJournal } from "./agent/MutationJournal";
 import {
   thinAgentDataUrl,
@@ -73,6 +82,10 @@ import {
 import { isVaultImageContextFileExtension } from "../../constants/fileTypes";
 import { showConfirm } from "../../core/ui/notifications";
 import { normalizeFirstPartyToolName } from "../../tools/toolNames";
+import {
+  getSurfaceOwnerWindow,
+  requestSurfaceAnimationFrame,
+} from "../../core/ui/surface/SurfaceDomContext";
 
 export type AutomationApprovalMode = "interactive" | "auto-approve" | "deny";
 export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -123,6 +136,47 @@ const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
 const AGENT_SESSION_RESTORE_ERROR =
   "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
 
+function crossWindowMonotonicTimestamp(
+  ownerWindow: Window,
+  relativeTimestamp?: number,
+): number {
+  const performance = ownerWindow.performance;
+  const relative = relativeTimestamp ?? performance?.now();
+  if (typeof relative !== "number" || !Number.isFinite(relative)) return 0;
+  const timeOrigin = performance?.timeOrigin;
+  return typeof timeOrigin === "number" && Number.isFinite(timeOrigin)
+    ? timeOrigin + relative
+    : relative;
+}
+
+function creditsRefreshFailure(error: unknown): Readonly<{
+  code: string;
+  status?: number;
+}> {
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return { code: "request_failed" };
+  }
+  const candidate = error as { code?: unknown; status?: unknown; statusCode?: unknown };
+  const rawCode = typeof candidate.code === "string" ? candidate.code.trim() : "";
+  const code = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(rawCode)
+    ? rawCode.toLowerCase()
+    : "request_failed";
+  const rawStatus = candidate.statusCode ?? candidate.status;
+  const status = Number.isInteger(rawStatus)
+    && (rawStatus as number) >= 100
+    && (rawStatus as number) <= 599
+    ? rawStatus as number
+    : undefined;
+  return { code, ...(status === undefined ? {} : { status }) };
+}
+
+function creditsRefreshTransport(
+  observation: CreditsBalanceObservation | undefined,
+): "fetch" | "request_url" | undefined {
+  if (observation?.transport === "requestUrl") return "request_url";
+  return observation?.transport === "fetch" ? "fetch" : undefined;
+}
+
 type ActiveSubmissionOperation = {
   readonly kind: "submission" | "transition";
   readonly id: string;
@@ -130,6 +184,7 @@ type ActiveSubmissionOperation = {
   readonly turnId: string | null;
   readonly originalSubmission: AgentComposerSubmit | null;
   readonly restoreRejectedSubmission: boolean;
+  readonly clientStartedAtMonotonicMs: number;
   readonly controller: AbortController;
   readonly finished: Promise<void>;
   readonly resolveFinished: () => void;
@@ -141,6 +196,13 @@ type ActiveSubmissionOperation = {
   userCommitted: boolean;
   settled: boolean;
 };
+
+type CreditsRefreshOptions = Readonly<{
+  requireFresh?: boolean;
+  reason?: CreditsRefreshReason;
+  requestId?: string;
+  serverRunId?: string;
+}>;
 
 function messageId(prefix: string): string {
   const crypto = getRuntimeCrypto();
@@ -382,6 +444,8 @@ export class AgentChatView extends ItemView {
   private workspace: AgentWorkspace | null = null;
   private exportService: ChatExportService | null = null;
   private creditsPromise: Promise<void> | null = null;
+  private creditsFreshTail: Promise<void> | null = null;
+  private creditsRefreshSequence = 0;
   private agentUnsubscribe: (() => void) | null = null;
   private agentSessionBinding: AgentConversationSessionBinding<
     AgentConversationSnapshot,
@@ -521,9 +585,14 @@ export class AgentChatView extends ItemView {
         this.chatInputLimits = limits;
         this.workspace?.setMessageAttachmentLimits(limits);
       },
-      refreshCredits: () => this.refreshCreditsBalance({ requireFresh: true }),
+      refreshCredits: (reason, correlation) => this.refreshCreditsBalance({
+        requireFresh: true,
+        reason,
+        ...correlation,
+      }),
       reportError: (error) => this.logAgentError(error, "agentSession"),
       onLifecycle: (record) => this.plugin.getLogger().lifecycle({ ...record }),
+      monotonicNow: () => this.clientMonotonicNow(),
     });
   }
 
@@ -577,10 +646,15 @@ export class AgentChatView extends ItemView {
       app: this.app,
       sourcePath: () => this.getExpectedChatHistoryFilePath() || "",
       reducedMotion: () => this.plugin.settings.respectReducedMotion === true,
-      onSubmit: (submission) => this.acceptComposerSubmission(
-        submission,
-        this.conversationOriginToken,
-      ),
+      onSubmit: (submission) => {
+        const clientStartedAtMonotonicMs = this.clientMonotonicNow();
+        return this.acceptComposerSubmission(
+          submission,
+          this.conversationOriginToken,
+          false,
+          clientStartedAtMonotonicMs,
+        );
+      },
       onStop: () => this.stopActiveRun(),
       onAttach: () => this.contextManager.openPinFiles(),
       onVaultContextDrop: (path) => this.pinDroppedVaultFile(path),
@@ -620,7 +694,7 @@ export class AgentChatView extends ItemView {
 
     if (this.chatId) await this.loadChatById(this.chatId);
     else await this.startNewChat(false, undefined, this.draftKey);
-    void this.refreshCreditsBalance();
+    void this.refreshCreditsBalance({ reason: "view_open" });
     void this.pruneAttachmentStore().catch(() => {});
     this.workspace.focus();
   }
@@ -945,27 +1019,156 @@ export class AgentChatView extends ItemView {
   }
 
   public async refreshCreditsBalance(
-    options: Readonly<{ requireFresh?: boolean }> = {},
+    options: CreditsRefreshOptions = {},
   ): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return;
     }
-    if (options.requireFresh && this.creditsPromise) {
-      await this.creditsPromise;
+    if (options.requireFresh) return this.enqueueFreshCreditsRefresh(options);
+    return this.startCreditsRefresh(options);
+  }
+
+  private enqueueFreshCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
+    const predecessor = this.creditsFreshTail ?? this.creditsPromise;
+    if (!predecessor) {
+      return this.trackFreshCreditsRefresh(this.startCreditsRefresh(options));
     }
+    const queued = predecessor.then(async () => {
+      // A non-fresh view refresh may have started while this request waited.
+      // A terminal refresh still needs its own read and correlation, so wait
+      // for every such interloper before starting this queued request.
+      while (this.creditsPromise) await this.creditsPromise;
+      await this.startCreditsRefresh(options);
+    });
+    return this.trackFreshCreditsRefresh(queued);
+  }
+
+  private trackFreshCreditsRefresh(refresh: Promise<void>): Promise<void> {
+    let tracked!: Promise<void>;
+    tracked = refresh.finally(() => {
+      if (this.creditsFreshTail === tracked) this.creditsFreshTail = null;
+    });
+    this.creditsFreshTail = tracked;
+    return tracked;
+  }
+
+  private startCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
     if (this.creditsPromise) return this.creditsPromise;
+    const refreshSequence = (this.creditsRefreshSequence ?? 0) + 1;
+    this.creditsRefreshSequence = refreshSequence;
+    const refreshReason = options.reason ?? "unspecified";
+    const refreshCorrelation = {
+      ...(options.requestId ? { requestId: options.requestId } : {}),
+      ...(options.serverRunId ? { serverRunId: options.serverRunId } : {}),
+    };
+    const startedAtMonotonicMs = this.readCreditsRefreshMonotonicTime();
+    let observation: CreditsBalanceObservation | undefined;
+    this.recordCreditsRefreshLifecycle({
+      code: "credits_refresh_started",
+      reason: refreshReason,
+      sequence: refreshSequence,
+      ...refreshCorrelation,
+    });
     this.creditsPromise = (async () => {
       try {
-        this.creditsBalance = await this.aiService.getCreditsBalance();
+        this.creditsBalance = await this.aiService.getCreditsBalance({
+          onObservation: (value) => { observation = value; },
+        });
         this.workspace?.setCreditsBalance(this.creditsBalance);
-      } catch {
+        this.recordCreditsRefreshLifecycle({
+          code: "credits_refresh_succeeded",
+          reason: refreshReason,
+          sequence: refreshSequence,
+          ...refreshCorrelation,
+          transport: creditsRefreshTransport(observation),
+          elapsedMs: this.creditsRefreshElapsedMs(startedAtMonotonicMs),
+          serverTiming: observation?.serverTiming,
+          status: observation?.status ?? 200,
+        });
+      } catch (error) {
         this.creditsBalance = null;
         this.workspace?.setCreditsBalance(null);
+        const failure = creditsRefreshFailure(error);
+        this.recordCreditsRefreshLifecycle({
+          code: "credits_refresh_failed",
+          reason: refreshReason,
+          sequence: refreshSequence,
+          ...refreshCorrelation,
+          transport: creditsRefreshTransport(observation),
+          elapsedMs: this.creditsRefreshElapsedMs(startedAtMonotonicMs),
+          serverTiming: observation?.serverTiming,
+          status: observation?.status ?? failure.status,
+          failureCode: failure.code,
+        });
       }
     })().finally(() => { this.creditsPromise = null; });
     return this.creditsPromise;
+  }
+
+  private readCreditsRefreshMonotonicTime(): number | undefined {
+    try {
+      const value = this.clientMonotonicNow();
+      return Number.isFinite(value) && value >= 0 ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private creditsRefreshElapsedMs(startedAt: number | undefined): number | undefined {
+    if (startedAt === undefined) return undefined;
+    const finishedAt = this.readCreditsRefreshMonotonicTime();
+    if (finishedAt === undefined || finishedAt < startedAt) return undefined;
+    return finishedAt - startedAt;
+  }
+
+  private recordCreditsRefreshLifecycle(input: Readonly<{
+    code: Extract<AgentLifecycleCode,
+      "credits_refresh_started" | "credits_refresh_succeeded" | "credits_refresh_failed">;
+    reason: CreditsRefreshReason;
+    sequence: number;
+    transport?: "fetch" | "request_url";
+    elapsedMs?: number;
+    serverTiming?: CreditsBalanceServerTiming;
+    status?: number;
+    failureCode?: string;
+    requestId?: string;
+    serverRunId?: string;
+  }>): void {
+    try {
+      const record = {
+        code: input.code,
+        phase: "account",
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+        ...(input.serverRunId ? { serverRunId: input.serverRunId } : {}),
+        creditsRefreshReason: input.reason,
+        creditsRefreshSequence: input.sequence,
+        ...(input.transport ? { creditsRefreshTransport: input.transport } : {}),
+        ...(input.elapsedMs === undefined ? {} : { creditsRefreshElapsedMs: input.elapsedMs }),
+        ...(input.serverTiming?.authMs === undefined
+          ? {}
+          : { creditsRefreshServerAuthMs: input.serverTiming.authMs }),
+        ...(input.serverTiming?.rateLimitMs === undefined
+          ? {}
+          : { creditsRefreshServerRateLimitMs: input.serverTiming.rateLimitMs }),
+        ...(input.serverTiming?.balanceStoreMs === undefined
+          ? {}
+          : { creditsRefreshServerBalanceStoreMs: input.serverTiming.balanceStoreMs }),
+        ...(input.serverTiming?.totalMs === undefined
+          ? {}
+          : { creditsRefreshServerTotalMs: input.serverTiming.totalMs }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+        ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+      } as const;
+      if (input.requestId && this.agent?.recordClientRequestLifecycle) {
+        this.agent?.recordClientRequestLifecycle?.(record);
+      } else {
+        this.agent?.recordLifecycle?.(record);
+      }
+    } catch {
+      // Diagnostics must never alter balance refresh behavior.
+    }
   }
 
   public async openCreditsBalanceModal(): Promise<void> {
@@ -1111,6 +1314,12 @@ export class AgentChatView extends ItemView {
     });
   }
 
+  private clientMonotonicNow(): number {
+    const host = this.workspace?.element ?? this.contentEl;
+    const ownerWindow = host ? getSurfaceOwnerWindow(host) : window;
+    return crossWindowMonotonicTimestamp(ownerWindow);
+  }
+
   private beginQueueDrainSuppression(): () => void {
     this.queueDrainSuppressionDepth += 1;
     let released = false;
@@ -1133,6 +1342,7 @@ export class AgentChatView extends ItemView {
     conversationOriginToken: string,
     submission: AgentComposerSubmit | null,
     restoreRejectedSubmission: boolean,
+    clientStartedAtMonotonicMs = this.clientMonotonicNow(),
   ): ActiveSubmissionOperation {
     let resolveFinished = () => {};
     const finished = new Promise<void>((resolve) => {
@@ -1153,6 +1363,7 @@ export class AgentChatView extends ItemView {
       turnId: kind === "submission" ? messageId("user") : null,
       originalSubmission,
       restoreRejectedSubmission,
+      clientStartedAtMonotonicMs,
       controller: new AbortController(),
       finished,
       resolveFinished,
@@ -1170,6 +1381,7 @@ export class AgentChatView extends ItemView {
     conversationOriginToken: string,
     submission: AgentComposerSubmit,
     restoreRejectedSubmission = true,
+    clientStartedAtMonotonicMs = this.clientMonotonicNow(),
   ): ActiveSubmissionOperation | null {
     if (this.isSubmissionActive()) return null;
     const operation = this.createSubmissionOperation(
@@ -1177,11 +1389,17 @@ export class AgentChatView extends ItemView {
       conversationOriginToken,
       submission,
       restoreRejectedSubmission,
+      clientStartedAtMonotonicMs,
     );
     this.activeSubmissionOperation = operation;
     this.workspace?.setRunPending(true, operation.turnId ?? undefined);
     this.workspace?.setBanner(null);
-    this.recordUiLifecycle("submission_admitted");
+    this.agent?.recordLifecycle?.({
+      code: "submission_admitted",
+      phase: "response",
+      requestId: operation.turnId ?? undefined,
+      clientMonotonicOffsetMs: 0,
+    });
     return operation;
   }
 
@@ -1189,7 +1407,7 @@ export class AgentChatView extends ItemView {
     conversationOriginToken: string,
   ): ActiveSubmissionOperation {
     const current = this.activeSubmissionOperation;
-    if (current) this.retireSubmissionOperation(current, false);
+    if (current) this.retireSubmissionOperation(current, false, false);
     else this.workspace?.setRunPending(false);
     const transition = this.createSubmissionOperation(
       "transition",
@@ -1201,7 +1419,10 @@ export class AgentChatView extends ItemView {
     return transition;
   }
 
-  private finishSubmissionOperation(operation: ActiveSubmissionOperation): void {
+  private finishSubmissionOperation(
+    operation: ActiveSubmissionOperation,
+    recordComposerUnlock = true,
+  ): void {
     if (operation.settled) return;
     const wasActive = this.activeSubmissionOperation === operation;
     if (wasActive) this.activeSubmissionOperation = null;
@@ -1211,6 +1432,22 @@ export class AgentChatView extends ItemView {
       // streaming submission leaves runPending set, and the next empty
       // conversation renders a phantom pending turn.
       this.workspace?.setRunPending(false);
+      if (recordComposerUnlock && operation.kind === "submission" && operation.turnId) {
+        const snapshot = this.agent?.getSnapshot?.();
+        const finishedAt = this.clientMonotonicNow();
+        const elapsed = finishedAt - operation.clientStartedAtMonotonicMs;
+        this.agent?.recordLifecycle?.({
+          code: "composer_unlocked",
+          phase: "render",
+          requestId: operation.turnId,
+          ...(snapshot?.turnId === operation.turnId && snapshot.runId
+            ? { serverRunId: snapshot.runId }
+            : {}),
+          ...(Number.isFinite(elapsed) && elapsed >= 0
+            ? { clientMonotonicOffsetMs: elapsed }
+            : {}),
+        });
+      }
     }
     operation.settled = true;
     operation.resolveFinished();
@@ -1219,11 +1456,12 @@ export class AgentChatView extends ItemView {
   private retireSubmissionOperation(
     operation: ActiveSubmissionOperation,
     restoreDraft: boolean,
+    recordComposerUnlock = true,
   ): void {
     if (operation.settled) return;
     operation.controller.abort();
     if (restoreDraft) this.restoreSubmissionDraft(operation);
-    this.finishSubmissionOperation(operation);
+    this.finishSubmissionOperation(operation, recordComposerUnlock);
   }
 
   private restoreSubmissionDraft(operation: ActiveSubmissionOperation): void {
@@ -1286,24 +1524,15 @@ export class AgentChatView extends ItemView {
   }
 
   private refreshCreditsAfterBillingFailure(error: unknown): void {
-    if (!error || typeof error !== "object") return;
-    const code = typeof (error as { code?: unknown }).code === "string"
-      ? (error as { code: string }).code
-      : "";
-    const status = (error as { status?: unknown }).status;
-    if (
-      status !== 402
-      && code !== "insufficient_credits"
-      && code !== "payment_required"
-      && code !== "out_of_credits"
-    ) return;
-    void this.refreshCreditsBalance();
+    if (!isAgentBillingFailure(error)) return;
+    void this.refreshCreditsBalance({ reason: "billing_failure" });
   }
 
   private acceptComposerSubmission(
     submission: AgentComposerSubmit,
     expectedConversationOriginToken?: string,
     clearComposerAfterAdmission = false,
+    clientStartedAtMonotonicMs = this.clientMonotonicNow(),
   ): void | Promise<void> {
     if (this.blockLegacyHistoryAction()) return;
     const admissionOriginToken = expectedConversationOriginToken
@@ -1319,6 +1548,7 @@ export class AgentChatView extends ItemView {
           submission,
           admissionOriginToken,
           clearComposerAfterAdmission,
+          clientStartedAtMonotonicMs,
         );
       });
       return;
@@ -1340,6 +1570,7 @@ export class AgentChatView extends ItemView {
       admissionOriginToken,
       submission,
       !clearComposerAfterAdmission,
+      clientStartedAtMonotonicMs,
     );
     if (!operation) {
       if (this.isCurrentConversationOrigin(admissionOriginToken)) {
@@ -1692,6 +1923,7 @@ export class AgentChatView extends ItemView {
         conversationId,
         turnId: admittedUserMessage.message_id,
         message: toThinAgentUserMessage(hydratedUserMessage),
+        clientStartedAtMonotonicMs: operation.clientStartedAtMonotonicMs,
         buildBody: async (signal) => {
           if (!this.isCurrentSubmissionOperation(operation)) {
             throw new Error("This chat changed before the request was admitted.");
@@ -1755,6 +1987,19 @@ export class AgentChatView extends ItemView {
         this.pendingRejectedRetry = null;
       }
       this.handleRunResult();
+      if (
+        userWasCommitted
+        && (result.kind === "failed" || result.kind === "cancelled")
+      ) {
+        // Terminal protocol truth has already been reconciled and published.
+        // Release the admission/composer owner before the best-effort history
+        // render below: Markdown postprocessors or disk-backed history can be
+        // slow, and must not make a finished response look active or prevent
+        // an immediate recovery turn. finishSubmissionOperation is
+        // identity-guarded and idempotent, so a later settlement/finally from
+        // this turn cannot clear a newer operation admitted in the meantime.
+        this.finishSubmissionOperation(operation);
+      }
       if (result.kind === "completed") {
         try {
           const cachedMessages = this.transcript.snapshot().messages as readonly ChatMessage[];
@@ -2562,7 +2807,7 @@ export class AgentChatView extends ItemView {
       if (leaf === this.leaf) this.workspace?.focus();
     }));
     this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
-      void this.refreshCreditsBalance();
+      void this.refreshCreditsBalance({ reason: "settings_update" });
     }));
   }
 
@@ -2612,7 +2857,7 @@ export class AgentChatView extends ItemView {
 
   private async openHistory(): Promise<void> {
     const { SystemSculptHistoryModal } = await import("../history/SystemSculptHistoryModal");
-    new SystemSculptHistoryModal(this.plugin).open();
+    new SystemSculptHistoryModal(this.plugin, { chatLeaf: this.leaf }).open();
   }
 
   private async openChatSettings(): Promise<void> {
@@ -2739,9 +2984,215 @@ export class AgentChatView extends ItemView {
       ? this.runConversationOrigins.get(snapshot.turnId)
       : undefined;
     if (snapshotOrigin && !this.isCurrentConversationOrigin(snapshotOrigin)) return;
-    const rendering = this.workspace?.setAgentSnapshot(snapshot);
-    if (rendering) {
-      void rendering.catch((error) => {
+    const workspace = this.workspace;
+    const agent = this.agent;
+    const rendering = workspace?.setAgentSnapshot(snapshot);
+    if (rendering && workspace) {
+      void rendering.then(() => {
+        if (
+          this.workspace !== workspace
+          || this.agent !== agent
+          || !agent?.recordClientRenderMilestone
+          || !snapshot.turnId
+          || !snapshot.parts.some((part) =>
+            part.kind === "text"
+            || part.kind === "reasoning"
+            || part.kind === "tool")
+        ) return;
+        const needsDomMilestone = agent.needsClientRenderMilestone?.(
+          "response_first_dom_committed",
+          snapshot.turnId,
+        ) ?? true;
+        const needsPaintMilestone = agent.needsClientRenderMilestone?.(
+          "response_first_paint_opportunity",
+          snapshot.turnId,
+        ) ?? true;
+        const terminalToolStates: ReadonlySet<AgentToolPart["state"]> = new Set([
+          "succeeded",
+          "failed",
+          "denied",
+          "cancelled",
+          "outcome-unknown",
+        ]);
+        const toolEvidence = snapshot.parts
+          .filter((part): part is AgentToolPart =>
+            part.kind === "tool"
+            && part.location === "vault"
+            && terminalToolStates.has(part.state))
+          .map((tool) => ({
+            tool,
+            continuation: snapshot.parts.find((part): part is AgentTextPart =>
+              part.kind === "text"
+              && part.order > tool.order
+              && part.markdown.trim().length > 0),
+          }));
+        const needsToolDom = toolEvidence.some(({ tool }) =>
+          agent.needsClientToolRenderMilestone?.(
+            "local_tool_terminal_dom_committed",
+            snapshot.turnId!,
+            tool.callId,
+          ) ?? false);
+        const needsToolPaint = toolEvidence.some(({ tool }) =>
+          agent.needsClientToolRenderMilestone?.(
+            "local_tool_terminal_paint_opportunity",
+            snapshot.turnId!,
+            tool.callId,
+          ) ?? false);
+        const needsContinuationDom = toolEvidence.some(({ tool, continuation }) =>
+          Boolean(continuation) && (agent.needsClientToolRenderMilestone?.(
+            "continuation_content_dom_committed",
+            snapshot.turnId!,
+            tool.callId,
+          ) ?? false));
+        const needsContinuationPaint = toolEvidence.some(({ tool, continuation }) =>
+          Boolean(continuation) && (agent.needsClientToolRenderMilestone?.(
+            "continuation_content_paint_opportunity",
+            snapshot.turnId!,
+            tool.callId,
+          ) ?? false));
+        if (
+          !needsDomMilestone
+          && !needsPaintMilestone
+          && !needsToolDom
+          && !needsToolPaint
+          && !needsContinuationDom
+          && !needsContinuationPaint
+        ) return;
+        const hasRenderedContent = (): boolean => Array.from(
+          workspace.element.querySelectorAll<HTMLElement>(
+            ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
+          ),
+        ).some((turn) =>
+          turn.dataset.turnId === snapshot.turnId
+          && turn.querySelector(".systemsculpt-agent-part") !== null);
+        const renderedTurn = (): HTMLElement | undefined => Array.from(
+          workspace.element.querySelectorAll<HTMLElement>(
+            ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
+          ),
+        ).find((turn) => turn.dataset.turnId === snapshot.turnId);
+        const partNode = (key: string): HTMLElement | undefined => Array.from(
+          renderedTurn()?.querySelectorAll<HTMLElement>(
+            ".systemsculpt-agent-part[data-part-key]",
+          ) ?? [],
+        ).find((node) => node.dataset.partKey === key);
+        const terminalToolNode = (callId: string): HTMLElement | undefined => {
+          const node = partNode(`tool:${callId}`);
+          if (!node) return undefined;
+          return [
+            "is-succeeded",
+            "is-partial",
+            "is-failed",
+            "is-denied",
+            "is-cancelled",
+            "is-outcome-unknown",
+          ].some((className) => node.classList.contains(className))
+            ? node
+            : undefined;
+        };
+        const continuationNode = (
+          callId: string,
+          continuation: AgentTextPart,
+        ): HTMLElement | undefined => {
+          const tool = terminalToolNode(callId);
+          const text = partNode(`text:${continuation.id}`);
+          if (!tool || !text) return undefined;
+          return tool.compareDocumentPosition(text) & 4 ? text : undefined;
+        };
+        if (!hasRenderedContent()) return;
+        if (needsDomMilestone) {
+          agent.recordClientRenderMilestone(
+            "response_first_dom_committed",
+            snapshot.turnId,
+            this.clientMonotonicNow(),
+          );
+        }
+        for (const { tool, continuation } of toolEvidence) {
+          if (
+            terminalToolNode(tool.callId)
+            && (agent.needsClientToolRenderMilestone?.(
+              "local_tool_terminal_dom_committed",
+              snapshot.turnId,
+              tool.callId,
+            ) ?? false)
+          ) {
+            agent.recordClientToolRenderMilestone?.(
+              "local_tool_terminal_dom_committed",
+              snapshot.turnId,
+              tool.callId,
+              this.clientMonotonicNow(),
+            );
+          }
+          if (
+            continuation
+            && continuationNode(tool.callId, continuation)
+            && (agent.needsClientToolRenderMilestone?.(
+              "continuation_content_dom_committed",
+              snapshot.turnId,
+              tool.callId,
+            ) ?? false)
+          ) {
+            agent.recordClientToolRenderMilestone?.(
+              "continuation_content_dom_committed",
+              snapshot.turnId,
+              tool.callId,
+              this.clientMonotonicNow(),
+            );
+          }
+        }
+        if (!needsPaintMilestone && !needsToolPaint && !needsContinuationPaint) return;
+        const paintOwnerWindow = getSurfaceOwnerWindow(workspace.element);
+        requestSurfaceAnimationFrame(workspace.element, (timestamp) => {
+          if (
+            this.workspace !== workspace
+            || this.agent !== agent
+            || !hasRenderedContent()
+          ) return;
+          const observedAt = crossWindowMonotonicTimestamp(paintOwnerWindow, timestamp);
+          if (agent.needsClientRenderMilestone?.(
+            "response_first_paint_opportunity",
+            snapshot.turnId!,
+          ) ?? true) {
+            agent.recordClientRenderMilestone(
+              "response_first_paint_opportunity",
+              snapshot.turnId!,
+              observedAt,
+            );
+          }
+          for (const { tool, continuation } of toolEvidence) {
+            if (
+              terminalToolNode(tool.callId)
+              && (agent.needsClientToolRenderMilestone?.(
+                "local_tool_terminal_paint_opportunity",
+                snapshot.turnId!,
+                tool.callId,
+              ) ?? false)
+            ) {
+              agent.recordClientToolRenderMilestone?.(
+                "local_tool_terminal_paint_opportunity",
+                snapshot.turnId!,
+                tool.callId,
+                observedAt,
+              );
+            }
+            if (
+              continuation
+              && continuationNode(tool.callId, continuation)
+              && (agent.needsClientToolRenderMilestone?.(
+                "continuation_content_paint_opportunity",
+                snapshot.turnId!,
+                tool.callId,
+              ) ?? false)
+            ) {
+              agent.recordClientToolRenderMilestone?.(
+                "continuation_content_paint_opportunity",
+                snapshot.turnId!,
+                tool.callId,
+                observedAt,
+              );
+            }
+          }
+        });
+      }).catch((error) => {
         this.logAgentError(error, "agentSnapshotRender");
       });
     }

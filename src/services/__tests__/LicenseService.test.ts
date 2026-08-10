@@ -1,9 +1,15 @@
 import { API_BASE_URL } from "../../constants/api";
 import { LicenseService } from "../LicenseService";
 
-jest.mock("../../utils/httpClient", () => ({ httpRequest: jest.fn() }));
+const request = jest.fn();
+const requestClient = { request } as any;
 
-const httpRequest = require("../../utils/httpClient").httpRequest as jest.Mock;
+function jsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
 
 function admission(
   code: "allowed" | "license_required" | "license_rejected" | "rate_limited" | "temporarily_unavailable",
@@ -41,11 +47,14 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
 }
 
 describe("LicenseService website-owned validation", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    request.mockReset();
+  });
 
   it("returns a local rejection without making a request when the key is empty", async () => {
     const plugin = createPlugin({ licenseKey: "", licenseValid: true });
-    const service = new LicenseService(plugin);
+    const service = new LicenseService(plugin, requestClient);
 
     await expect(service.validateLicenseDetailed()).resolves.toEqual({
       outcome: "rejected",
@@ -53,25 +62,26 @@ describe("LicenseService website-owned validation", () => {
       reason: "missing",
     });
 
-    expect(httpRequest).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
     expect(plugin.updateSettings).toHaveBeenCalledWith({ licenseValid: false });
   });
 
   it("negotiates admission-v1 through the website API", async () => {
     const plugin = createPlugin();
-    httpRequest.mockResolvedValue({ status: 200, json: admission("allowed") });
+    request.mockResolvedValue(jsonResponse(200, admission("allowed")));
 
-    await expect(new LicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+    await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
       outcome: "valid",
       isValid: true,
     });
 
-    const request = httpRequest.mock.calls[0][0];
-    expect(request.url).toMatch(
+    const requestInput = request.mock.calls[0][0];
+    expect(requestInput.url).toMatch(
       new RegExp(`^${API_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/license/validate\\?_t=\\d+$`),
     );
-    expect(request).toMatchObject({
+    expect(requestInput).toMatchObject({
       method: "GET",
+      cache: "no-store",
       headers: {
         "x-license-key": "license_test",
         "x-plugin-version": "6.0.0",
@@ -87,19 +97,19 @@ describe("LicenseService website-owned validation", () => {
 
   it("accepts the established legacy success envelope without trusting arbitrary 200 JSON", async () => {
     const plugin = createPlugin();
-    httpRequest.mockResolvedValue({
-      status: 200,
-      json: {
-        status: "success",
-        data: {
-          email: "user@example.com",
-          user_name: "User",
-          subscription_status: "active",
-        },
+    request.mockResolvedValue(jsonResponse(200, {
+      status: "success",
+      data: {
+        email: "user@example.com",
+        user_name: "User",
+        subscription_status: "active",
       },
-    });
+    }));
 
-    await expect(new LicenseService(plugin).validateLicense()).resolves.toBe(true);
+    await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
+      outcome: "valid",
+      isValid: true,
+    });
     expect(plugin.updateSettings).toHaveBeenCalledWith({
       licenseValid: true,
       userEmail: "user@example.com",
@@ -114,12 +124,12 @@ describe("LicenseService website-owned validation", () => {
     "invalidates only an exact negotiated license_rejected/%s response",
     async (reason) => {
       const plugin = createPlugin({ licenseValid: true });
-      httpRequest.mockRejectedValue({
-        status: 403,
-        json: admission("license_rejected", { reason }),
-      });
+      request.mockResolvedValue(jsonResponse(
+        403,
+        admission("license_rejected", { reason }),
+      ));
 
-      await expect(new LicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+      await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
         outcome: "rejected",
         isValid: false,
         reason,
@@ -132,9 +142,9 @@ describe("LicenseService website-owned validation", () => {
     "does not reinterpret raw HTTP %s as an invalid license",
     async (status) => {
       const plugin = createPlugin({ licenseValid: true });
-      httpRequest.mockRejectedValue({ status, json: { error: "rejected" } });
+      request.mockResolvedValue(jsonResponse(status, { error: "rejected" }));
 
-      await expect(new LicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+      await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
         outcome: "unavailable",
         isValid: true,
       });
@@ -146,18 +156,20 @@ describe("LicenseService website-owned validation", () => {
     "preserves last-known-good validity for transient HTTP %s",
     async (status) => {
       const plugin = createPlugin({ licenseValid: true });
-      httpRequest.mockRejectedValue({ status, json: { error: "transient" } });
+      request.mockResolvedValue(jsonResponse(status, { error: "transient" }));
 
-      await expect(new LicenseService(plugin).validateLicense()).resolves.toBe(true);
+      await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toMatchObject({
+        isValid: true,
+      });
       expect(plugin.updateSettings).not.toHaveBeenCalledWith({ licenseValid: false });
     },
   );
 
   it("reports a transport failure as unavailable on first activation", async () => {
     const plugin = createPlugin({ licenseValid: false });
-    httpRequest.mockRejectedValue(new Error("offline"));
+    request.mockRejectedValue(new Error("offline"));
 
-    await expect(new LicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+    await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
       outcome: "unavailable",
       isValid: false,
     });
@@ -172,10 +184,9 @@ describe("LicenseService website-owned validation", () => {
     [401, admission("allowed")],
   ])("treats malformed or contradictory admission response %s as unavailable", async (status, json) => {
     const plugin = createPlugin({ licenseValid: true });
-    if ((status as number) >= 400) httpRequest.mockRejectedValue({ status, json });
-    else httpRequest.mockResolvedValue({ status, json });
+    request.mockResolvedValue(jsonResponse(status as number, json));
 
-    await expect(new LicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+    await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed()).resolves.toEqual({
       outcome: "unavailable",
       isValid: true,
     });

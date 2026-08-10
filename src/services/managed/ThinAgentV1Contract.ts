@@ -1,8 +1,8 @@
 export const THIN_AGENT_CONTRACT_VERSION = "thin-agent-v1" as const;
 export const THIN_AGENT_CAPABILITY_CONTRACT_VERSION =
   "thin-agent-capabilities-v1" as const;
-export const THIN_AGENT_CAPABILITY_MANIFEST_SHA256 =
-  "sha256:fb3e72b592556f80d6047339bdef5d82c0570b195f1abc8a8c9a3d7bf162d22c" as const;
+export const THIN_AGENT_CONNECTIVITY_PATH =
+  "/api/plugin/connectivity" as const;
 export const THIN_AGENT_BOOTSTRAP_PATH =
   "/api/plugin/agent/bootstrap" as const;
 export const THIN_AGENT_CONTEXT_PATH =
@@ -11,6 +11,26 @@ export const THIN_AGENT_MESSAGES_PATH =
   "/api/plugin/agent/connect/get-messages" as const;
 export const THIN_AGENT_TURN_PATH =
   "/api/plugin/agent/turn" as const;
+
+const THIN_AGENT_COMMAND_KINDS = Object.freeze([
+  "submit",
+  "regenerate",
+  "client_tool_result",
+  "client_tool_approval",
+  "cancel",
+] as const);
+
+export type ThinAgentCommandKind = (typeof THIN_AGENT_COMMAND_KINDS)[number];
+
+const THIN_AGENT_COMMAND_KIND_SET: ReadonlySet<string> = new Set(
+  THIN_AGENT_COMMAND_KINDS,
+);
+
+export function isThinAgentCommandKind(
+  value: unknown,
+): value is ThinAgentCommandKind {
+  return typeof value === "string" && THIN_AGENT_COMMAND_KIND_SET.has(value);
+}
 
 export const THIN_AGENT_CAPABILITIES = Object.freeze([
   Object.freeze({ id: "obsidian.vault", version: 1 as const }),
@@ -21,17 +41,17 @@ export const THIN_AGENT_DATA_PART_TYPES = Object.freeze([
   "data-systemsculpt-client-tool-request",
 ] as const);
 
-export type ThinAgentCapability = Readonly<{
+type ThinAgentCapability = Readonly<{
   id: "obsidian.vault";
   version: 1;
 }>;
 
-export type ThinAgentCapabilityManifest = Readonly<{
+type ThinAgentCapabilityManifest = Readonly<{
   contract_version: typeof THIN_AGENT_CAPABILITY_CONTRACT_VERSION;
   capabilities: readonly ThinAgentCapability[];
 }>;
 
-export type ThinAgentForkRequest = Readonly<{
+type ThinAgentForkRequest = Readonly<{
   source_conversation_id: string;
   before_message_id: string;
 }>;
@@ -64,7 +84,7 @@ export type ThinAgentContextSource =
   | Readonly<{ kind: "image"; path: string; data_url: string }>
   | Readonly<{ kind: "document_ref"; path: string; document_id: string }>;
 
-export type ThinAgentContextRequest = Readonly<{
+type ThinAgentContextRequest = Readonly<{
   contract_version: typeof THIN_AGENT_CONTRACT_VERSION;
   root_message_id: string;
   context_sources: readonly ThinAgentContextSource[];
@@ -105,7 +125,7 @@ export type ThinAgentRunTerminalData =
       retryable: boolean;
     }>;
 
-export type ThinAgentJsonValue =
+type ThinAgentJsonValue =
   | null
   | boolean
   | number
@@ -113,7 +133,7 @@ export type ThinAgentJsonValue =
   | readonly ThinAgentJsonValue[]
   | Readonly<{ [key: string]: ThinAgentJsonValue }>;
 
-export type ThinAgentClientToolRequestData = Readonly<{
+type ThinAgentClientToolRequestData = Readonly<{
   version: 1;
   tool_call_id: string;
   tool_name: string;
@@ -121,7 +141,7 @@ export type ThinAgentClientToolRequestData = Readonly<{
   input: ThinAgentJsonValue;
 }>;
 
-export type ThinAgentKnownDataPart =
+type ThinAgentKnownDataPart =
   | Readonly<{
       kind: "known";
       type: "data-systemsculpt-run-terminal";
@@ -133,13 +153,13 @@ export type ThinAgentKnownDataPart =
       data: ThinAgentClientToolRequestData;
     }>;
 
-export type ThinAgentParsedDataPart =
+type ThinAgentParsedDataPart =
   | ThinAgentKnownDataPart
   | Readonly<{ kind: "unknown"; type: string }>
   | Readonly<{ kind: "invalid"; type: string }>
   | null;
 
-export type ThinAgentContractErrorCode =
+type ThinAgentContractErrorCode =
   | "unsupported_contract"
   | "invalid_identity"
   | "invalid_capabilities"
@@ -490,18 +510,6 @@ export function parseThinAgentCapabilityManifest(
     contract_version: THIN_AGENT_CAPABILITY_CONTRACT_VERSION,
     capabilities: parseCapabilityList(value.capabilities),
   });
-}
-
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) =>
-    `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
-}
-
-export function canonicalizeThinAgentCapabilityManifest(value: unknown): string {
-  return stableJson(parseThinAgentCapabilityManifest(value));
 }
 
 function parseFork(value: unknown, conversationId: string): ThinAgentForkRequest {

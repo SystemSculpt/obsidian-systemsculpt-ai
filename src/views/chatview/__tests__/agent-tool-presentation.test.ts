@@ -1,6 +1,7 @@
 import {
   groupConsecutiveToolActivity,
   presentAgentTool,
+  presentAgentToolFailure,
   presentAgentToolGroup,
 } from "../AgentToolPresentation";
 import type { AgentToolPart } from "../AgentConversation";
@@ -18,6 +19,122 @@ function part(overrides: Partial<AgentToolPart> = {}): AgentToolPart {
     state: "running",
     ...overrides,
   };
+}
+
+const PRIVATE_FAILURE_SENTINEL = "/Users/private/SecretVault failure sentinel";
+const BATCH_TOOL_NAMES = [
+  "read",
+  "create_folders",
+  "list_items",
+  "move",
+  "trash",
+  "context",
+  "open",
+  "multi_edit",
+] as const;
+type BatchToolName = typeof BATCH_TOOL_NAMES[number];
+type BatchOutcome = "succeeded" | "failed";
+
+function batchToolInput(name: BatchToolName): Record<string, unknown> {
+  if (name === "open") {
+    return { files: [{ path: "Completed.md" }, { path: "Failed.md" }] };
+  }
+  if (name === "move") {
+    return {
+      items: [
+        { source: "Completed.md", destination: "Archive/Completed.md" },
+        { source: "Failed.md", destination: "Archive/Failed.md" },
+      ],
+    };
+  }
+  if (name === "multi_edit") {
+    return {
+      files: ["Completed.md", "Failed.md"].map((path) => ({
+        path,
+        edits: [{ oldText: "before", newText: "after" }],
+      })),
+    };
+  }
+  if (name === "context") {
+    return { action: "add", paths: ["Completed.md", "Failed.md"] };
+  }
+  return { paths: ["Completed.md", "Failed.md"] };
+}
+
+function batchToolOutput(
+  name: BatchToolName,
+  outcomes: readonly BatchOutcome[],
+): Record<string, unknown> {
+  const successful = outcomes.filter((outcome) => outcome === "succeeded").length;
+  if (name === "open") {
+    return {
+      opened: outcomes.flatMap((outcome, index) =>
+        outcome === "succeeded" ? [`Opened-${index}.md`] : []),
+      errors: outcomes.flatMap((outcome) =>
+        outcome === "failed" ? [PRIVATE_FAILURE_SENTINEL] : []),
+    };
+  }
+  if (name === "read") {
+    return {
+      files: outcomes.map((outcome, index) => outcome === "succeeded"
+        ? { path: `Read-${index}.md`, content: "ok" }
+        : { path: `Read-${index}.md`, content: "", error: PRIVATE_FAILURE_SENTINEL }),
+    };
+  }
+  if (name === "list_items") {
+    return {
+      results: outcomes.map((outcome, index) => outcome === "succeeded"
+        ? {
+            path: `Folder-${index}`,
+            files: [],
+            directories: [],
+            offset: 0,
+            totalItems: 0,
+            nextOffset: null,
+          }
+        : {
+            path: `Folder-${index}`,
+            error: PRIVATE_FAILURE_SENTINEL,
+            offset: 0,
+            totalItems: 0,
+            nextOffset: null,
+          }),
+    };
+  }
+  const results = outcomes.map((outcome, index) => ({
+    ...(name === "move"
+      ? { source: `Source-${index}.md`, destination: `Destination-${index}.md` }
+      : { path: `Item-${index}.md` }),
+    success: outcome === "succeeded",
+    ...(outcome === "failed"
+      ? name === "context"
+        ? { reason: PRIVATE_FAILURE_SENTINEL }
+        : { error: PRIVATE_FAILURE_SENTINEL }
+      : {}),
+    ...(name === "multi_edit" ? {
+      appliedCount: outcome === "succeeded" ? 1 : 0,
+      requestedCount: 1,
+      skipped: [],
+    } : {}),
+  }));
+  if (name === "context") {
+    return {
+      action: "add",
+      processed: successful,
+      results,
+      summary: "Context update completed.",
+    };
+  }
+  if (name === "multi_edit") {
+    return {
+      success: successful === outcomes.length,
+      requestedFiles: outcomes.length,
+      appliedFiles: successful,
+      preflightFailed: successful === 0,
+      results,
+    };
+  }
+  return { results };
 }
 
 describe("presentAgentTool", () => {
@@ -332,7 +449,7 @@ describe("presentAgentTool", () => {
     ]);
   });
 
-  it("does not group an item-level partial failure and summarizes its outcome plainly", () => {
+  it("does not group an item-level partial failure", () => {
     const successful = part({
       id: "read-ok",
       callId: "read-ok",
@@ -356,10 +473,93 @@ describe("presentAgentTool", () => {
     const entries = groupConsecutiveToolActivity([successful, partial], (tool) => tool);
 
     expect(entries).toHaveLength(2);
-    expect(presentAgentTool(partial)).toMatchObject({
-      label: "Read 2 files",
+  });
+
+  it.each(BATCH_TOOL_NAMES)(
+    "classifies actual %s batch outcomes without exposing failure details",
+    (name) => {
+      const input = batchToolInput(name);
+      const successful = part({
+        name,
+        input,
+        state: "succeeded",
+        output: { data: batchToolOutput(name, ["succeeded", "succeeded"]) },
+      });
+      expect(presentAgentTool(successful)).toMatchObject({
+        displayState: "succeeded",
+        stateLabel: "Done",
+        icon: "circle-check",
+      });
+
+      const mixed = part({
+        name,
+        input,
+        state: "failed",
+        output: { data: batchToolOutput(name, ["succeeded", "failed"]) },
+        error: {
+          code: "TOOL_PARTIAL_FAILURE",
+          message: PRIVATE_FAILURE_SENTINEL,
+        },
+      });
+      const mixedPresentation = presentAgentTool(mixed);
+      const mixedFailure = presentAgentToolFailure(mixed);
+      expect(mixedPresentation).toMatchObject({
+        displayState: "partial",
+        stateLabel: "Partial",
+        summary: "1 completed, 1 failed",
+        icon: "circle-alert",
+      });
+      expect(mixedFailure)
+        .toBe("Some requested items failed; successful items were kept.");
+      expect(JSON.stringify({ mixedPresentation, mixedFailure }))
+        .not.toContain(PRIVATE_FAILURE_SENTINEL);
+
+      const failed = part({
+        name,
+        input,
+        state: "failed",
+        output: { data: batchToolOutput(name, ["failed", "failed"]) },
+        // Structured outcomes must override stale partial metadata.
+        error: {
+          code: "TOOL_PARTIAL_FAILURE",
+          message: PRIVATE_FAILURE_SENTINEL,
+        },
+      });
+      const failedPresentation = presentAgentTool(failed);
+      const failedCopy = presentAgentToolFailure(failed);
+      expect(failedPresentation).toMatchObject({
+        displayState: "failed",
+        stateLabel: "Failed",
+        summary: "0 completed, 2 failed",
+        icon: "circle-x",
+      });
+      expect(failedCopy).toBe("This vault action could not be completed.");
+      expect(JSON.stringify({ failedPresentation, failedCopy }))
+        .not.toContain(PRIVATE_FAILURE_SENTINEL);
+    },
+  );
+
+  it("counts only valid opened paths in the privacy-safe workspace summary", () => {
+    const presentation = presentAgentTool(part({
+      name: "open",
+      state: "failed",
+      output: {
+        data: {
+          opened: ["One.md", "", { path: "not-an-opened-path" }],
+          errors: [PRIVATE_FAILURE_SENTINEL],
+        },
+      },
+      error: {
+        code: "TOOL_PARTIAL_FAILURE",
+        message: PRIVATE_FAILURE_SENTINEL,
+      },
+    }));
+
+    expect(presentation).toMatchObject({
+      displayState: "partial",
+      stateLabel: "Partial",
       summary: "1 completed, 1 failed",
-      stateLabel: "Done",
     });
+    expect(JSON.stringify(presentation)).not.toContain(PRIVATE_FAILURE_SENTINEL);
   });
 });

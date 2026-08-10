@@ -32,7 +32,6 @@ const createPluginStub = () => {
   };
 
   const licenseManager = {
-    validateLicenseKey: jest.fn().mockResolvedValue(true),
     validateLicenseKeyDetailed: jest.fn().mockResolvedValue({ outcome: "valid", isValid: true }),
   };
 
@@ -272,7 +271,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({ licenseKey: "skss-replacement" });
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledTimes(1);
-    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith(true, false);
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith();
     expect(mockedNotice).toHaveBeenCalledWith("Validating license key...", 0);
     expect(mockedNotice).toHaveBeenCalledWith("License activated successfully.");
   });

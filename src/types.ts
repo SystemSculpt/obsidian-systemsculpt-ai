@@ -411,6 +411,10 @@ export interface ChatMessage {
   messageParts?: MessagePart[];
   // Indicates if this message is currently being streamed (not yet complete)
   streaming?: boolean;
+  // The run that produced this assistant message ended without finishing it.
+  // Additive presentation metadata: restored history uses it to keep the
+  // interrupted turn visibly terminal ("Stopped") instead of silently complete.
+  terminalOutcome?: "cancelled";
 }
 
 export interface SystemSculptResponse {

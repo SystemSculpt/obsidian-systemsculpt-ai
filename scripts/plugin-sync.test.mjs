@@ -19,6 +19,10 @@ import {
 } from "./plugin-sync.mjs";
 import { parseArgs as parseSyncLocalArgs } from "./sync-local-vaults.mjs";
 import { STAGING_API_BASE_URL } from "./plugin-build-options.mjs";
+import {
+  PLUGIN_ARTIFACT_ID_PREFIX,
+  extractPluginArtifactId,
+} from "./plugin-artifact-identity.mjs";
 
 function createTempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-plugin-sync-"));
@@ -43,6 +47,14 @@ function writeStagingPluginArtifacts(root) {
   fs.writeFileSync(
     path.join(root, "main.js"),
     `module.exports = { version: 'test', api: ${JSON.stringify(STAGING_API_BASE_URL)} };\n`,
+  );
+}
+
+function writePluginArtifactsWithIdentity(root, artifactId) {
+  writePluginArtifacts(root);
+  fs.writeFileSync(
+    path.join(root, "main.js"),
+    `module.exports = { api: 'https://systemsculpt.com/api/plugin', artifact: ${JSON.stringify(artifactId)} };\n`,
   );
 }
 
@@ -106,6 +118,64 @@ test("syncConfiguredTargets copies local artifacts and removes obsolete extras",
   assert.equal(
     fs.readdirSync(pluginDir).some((name) => name.includes(".systemsculpt-replace-")),
     false,
+  );
+});
+
+test("sync preserves executable identity while mutable manifest labels change", (t) => {
+  const root = createTempRoot(t);
+  const artifactId = `${PLUGIN_ARTIFACT_ID_PREFIX}${"c".repeat(32)}`;
+  writePluginArtifactsWithIdentity(root, artifactId);
+  const pluginDir = path.join(root, "vault", ".obsidian", "plugins", "systemsculpt-ai");
+  const configPath = writeSyncConfig(root, { pluginTargets: [{ path: pluginDir }] });
+  const firstIdentity = createDevelopmentBuildIdentity({
+    root,
+    revision: "1234567890abcdef1234567890abcdef12345678",
+    branch: "main",
+    dirty: true,
+    syncedAt: "2026-08-09T21:00:00.000Z",
+  });
+
+  syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    buildIdentity: firstIdentity,
+  });
+  const sourceMain = fs.readFileSync(path.join(root, "main.js"));
+  assert.equal(
+    extractPluginArtifactId(fs.readFileSync(path.join(pluginDir, "main.js"), "utf8")),
+    artifactId,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(pluginDir, "main.js")), sourceMain);
+
+  fs.writeFileSync(
+    path.join(root, "manifest.json"),
+    '{"id":"systemsculpt-ai","version":"5.3.0","isDesktopOnly":false,"description":"label-only change"}\n',
+  );
+  const secondIdentity = createDevelopmentBuildIdentity({
+    root,
+    revision: "1234567890abcdef1234567890abcdef12345678",
+    branch: "main",
+    dirty: true,
+    syncedAt: "2026-08-09T21:01:00.000Z",
+  });
+  syncConfiguredTargets({
+    root,
+    configPath,
+    logger: silentLogger,
+    buildIdentity: secondIdentity,
+  });
+
+  assert.notEqual(firstIdentity.id, secondIdentity.id);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(pluginDir, "manifest.json"), "utf8"))
+      [DEVELOPMENT_BUILD_MANIFEST_KEY].id,
+    secondIdentity.id,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(pluginDir, "main.js")), sourceMain);
+  assert.equal(
+    extractPluginArtifactId(fs.readFileSync(path.join(pluginDir, "main.js"), "utf8")),
+    artifactId,
   );
 });
 

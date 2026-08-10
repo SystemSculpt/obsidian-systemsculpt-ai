@@ -111,7 +111,7 @@ const FIXTURE_PATH = resolve(
   "testing/fixtures/agent/thin-agent-v1-endurance.json",
 );
 const TEST_PATH = resolve(
-  "testing/agent-endurance/thin-agent-v1-endurance.test.ts",
+  "testing/integration/thin-agent-v1-endurance.test.ts",
 );
 const fixtureBytes = readFileSync(FIXTURE_PATH);
 const fixtureText = fixtureBytes.toString("utf8");
@@ -372,6 +372,37 @@ function matchesFailure(frame: Frame, failure: CommandFailure): boolean {
     );
 }
 
+function isTerminalToolState(value: unknown): boolean {
+  return value === "output-available"
+    || value === "output-error"
+    || value === "output-denied";
+}
+
+function commandSettledByFrame(command: Frame, value: unknown): boolean {
+  if ((value as Frame | null)?.kind === "terminal") return true;
+  if ((value as Frame | null)?.kind !== "assistant_snapshot") return false;
+  const message = (value as Frame).message as Frame | undefined;
+  const parts = Array.isArray(message?.parts) ? message.parts as Frame[] : [];
+  if (command.kind === "submit" || command.kind === "regenerate") {
+    return parts.some((part) =>
+      part.type === "data-systemsculpt-client-tool-request");
+  }
+  return parts.some((part) => {
+    if (part.toolCallId !== command.tool_call_id) return false;
+    if (command.kind === "client_tool_result") {
+      return isTerminalToolState(part.state);
+    }
+    return command.kind === "client_tool_approval"
+      && (part.state === "approval-responded" || isTerminalToolState(part.state));
+  });
+}
+
+type FakeTurnStream = {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  command: Frame;
+  settled: boolean;
+};
+
 class FakeSynchronization {
   public readyState: 0 | 1 | 3 = 0;
   public readonly attempted: Frame[] = [];
@@ -437,7 +468,7 @@ class FakeStreamingServer {
   public readonly synchronizations: FakeSynchronization[] = [];
   public readonly requestUrls: string[] = [];
   private activeSynchronization: FakeSynchronization | null = null;
-  private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private readonly turnStreams = new Set<FakeTurnStream>();
   private bootstrapIndex = 0;
   private readonly encoder = new TextEncoder();
 
@@ -472,23 +503,61 @@ class FakeStreamingServer {
         this.endTurn();
         throw new Error("Deterministic HTTP command delivery failure.");
       }
-      return this.openTurn();
+      const commandKind = String(frame.kind);
+      const acknowledgement = event("command_ack", {
+        request_id: String(frame.request_id),
+        command_kind: commandKind,
+        ...(commandKind === "client_tool_result"
+          || commandKind === "client_tool_approval"
+          ? { tool_call_id: String(frame.tool_call_id) }
+          : {}),
+        status: "accepted",
+      });
+      synchronization.serverFrames.push(acknowledgement);
+      return this.openTurn(frame, acknowledgement);
     }
     throw new Error("Unexpected endurance request URL: " + url);
   });
 
   public write(value: unknown): void {
-    if (!this.controller) throw new Error("No streaming turn is open.");
-    this.controller.enqueue(this.encoder.encode(
-      `data: ${JSON.stringify(value)}\n\n`,
-    ));
+    if (this.turnStreams.size === 0) {
+      throw new Error("No streaming turn is open.");
+    }
+    const bytes = this.encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
+    let delivered = false;
+    for (const stream of [...this.turnStreams]) {
+      try {
+        stream.controller.enqueue(bytes);
+        delivered = true;
+        if (commandSettledByFrame(stream.command, value)) {
+          stream.settled = true;
+        }
+      } catch {
+        this.turnStreams.delete(stream);
+      }
+    }
+    if (!delivered) throw new Error("No streaming turn is open.");
     if ((value as Frame).kind === "terminal") this.endTurn();
   }
 
-  private openTurn(): Response {
-    this.endTurn();
+  private openTurn(command: Frame, acknowledgement: unknown): Response {
+    for (const existing of [...this.turnStreams]) {
+      if (!existing.settled) continue;
+      try { existing.controller.close(); } catch { /* The stream already ended. */ }
+      this.turnStreams.delete(existing);
+    }
+    let stream: FakeTurnStream | null = null;
     const body = new ReadableStream<Uint8Array>({
-      start: (controller) => { this.controller = controller; },
+      start: (controller) => {
+        stream = { controller, command, settled: false };
+        this.turnStreams.add(stream);
+        controller.enqueue(this.encoder.encode(
+          `data: ${JSON.stringify(acknowledgement)}\n\n`,
+        ));
+      },
+      cancel: () => {
+        if (stream) this.turnStreams.delete(stream);
+      },
     });
     return new Response(body, {
       status: 200,
@@ -497,9 +566,10 @@ class FakeStreamingServer {
   }
 
   private endTurn(): void {
-    const controller = this.controller;
-    this.controller = null;
-    try { controller?.close(); } catch { /* The stream already ended. */ }
+    for (const stream of this.turnStreams) {
+      try { stream.controller.close(); } catch { /* The stream already ended. */ }
+    }
+    this.turnStreams.clear();
   }
 }
 
@@ -910,6 +980,23 @@ describe("thin-agent-v1 streaming HTTP endurance", () => {
 
     const successful = harness.successfulCommands();
     const attempted = harness.attemptedCommands();
+    const acknowledgements = harness.synchronizations
+      .flatMap((candidate) => candidate.serverFrames)
+      .filter((candidate): candidate is Frame =>
+        candidate !== null
+        && typeof candidate === "object"
+        && (candidate as Frame).kind === "command_ack");
+    expect(acknowledgements.map((acknowledgement) => [
+      acknowledgement.command_kind,
+      acknowledgement.request_id,
+      acknowledgement.tool_call_id ?? null,
+      acknowledgement.status,
+    ])).toEqual(successful.map((command) => [
+      command.kind,
+      command.request_id,
+      command.tool_call_id ?? null,
+      "accepted",
+    ]));
     expect(observedCalls).toHaveLength(fixture.expected.vault_tool_calls);
     expect(outputs.size).toBe(fixture.expected.vault_tool_calls);
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
@@ -933,6 +1020,21 @@ describe("thin-agent-v1 streaming HTTP endurance", () => {
       .toHaveLength(fixture.expected.successful_tool_approval_commands);
     expect(commandsFor(attempted, "client_tool_approval"))
       .toHaveLength(fixture.expected.tool_approval_send_attempts);
+    const droppedResultId = callsForRound(fixture.recovery.drop_result_round)[0]!.id;
+    expect(commandsFor(attempted, "client_tool_result", droppedResultId))
+      .toHaveLength(2);
+    expect(acknowledgements.filter((acknowledgement) =>
+      acknowledgement.command_kind === "client_tool_result"
+      && acknowledgement.tool_call_id === droppedResultId)).toHaveLength(1);
+    expect(commandsFor(
+      attempted,
+      "client_tool_approval",
+      fixture.approved_mutation.tool_call_id,
+    )).toHaveLength(2);
+    expect(acknowledgements.filter((acknowledgement) =>
+      acknowledgement.command_kind === "client_tool_approval"
+      && acknowledgement.tool_call_id === fixture.approved_mutation.tool_call_id))
+      .toHaveLength(1);
     expect(harness.synchronizations).toHaveLength(fixture.expected.synchronization_count);
     expect(harness.requestUrls.filter((url) =>
       url.includes("/agent/bootstrap"))).toHaveLength(1);

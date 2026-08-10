@@ -30,6 +30,7 @@ test("the curated ChatView mutation manifest targets the thin harness", () => {
   assert.deepEqual(CHATVIEW_CRITICAL_MUTANTS.map((mutant) => mutant.id), expectedIds);
   for (const mutant of CHATVIEW_CRITICAL_MUTANTS) {
     assert.ok(allowedSourceFiles.has(mutant.file), mutant.file);
+    assert.match(mutant.anchorScope, /^(?:[A-Za-z_$][\w$]*\.)?[A-Za-z_$][\w$]*$/u);
     assert.ok(mutant.testPaths.length >= 1 && mutant.testPaths.length <= 2);
     assert.equal(
       assertCuratedMutationTarget(root, mutant.file, { label: mutant.file }).relativePath,
@@ -42,11 +43,11 @@ test("the curated ChatView mutation manifest targets the thin harness", () => {
   }
 });
 
-test("every thin-harness mutant has one nearby AST anchor", () => {
+test("every thin-harness mutant has one AST anchor in its semantic scope", () => {
   for (const mutant of CHATVIEW_CRITICAL_MUTANTS) {
     const source = fs.readFileSync(path.join(root, mutant.file), "utf8");
     const span = locateMutationSpan(source, mutant.file, mutant);
-    assert.ok(Math.abs(span.line - mutant.anchorLine) <= 120);
+    assert.equal(span.scope, mutant.anchorScope);
   }
 });
 

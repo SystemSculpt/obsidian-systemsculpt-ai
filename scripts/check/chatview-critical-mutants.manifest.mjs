@@ -3,7 +3,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "authoritative_user_collision_not_failed_closed",
     category: "authoritative-message-reconciliation",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 724,
+    anchorScope: "AgentSession.reconcileOptimisticUser",
     anchorText: `this.protocolError(
         "The authoritative user message conflicts with the pending submission.",
       );`,
@@ -16,7 +16,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "run_state_conflict_not_failed_closed",
     category: "server-authority",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 647,
+    anchorScope: "AgentSession.applyRunState",
     anchorText: `this.protocolError(
           "SystemSculpt returned conflicting state for one session cursor.",
           "run_state_conflict",
@@ -30,7 +30,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "command_ack_callback_removed",
     category: "delivery-recovery",
     file: "src/views/chatview/agent/AuthoritativeSession.ts",
-    anchorLine: 498,
+    anchorScope: "AgentSession.handleAuthoritativeFrame",
     anchorText: "this.options.onCommandAck?.(parsed);",
     replacement: "void parsed;",
     testPaths: Object.freeze([
@@ -41,7 +41,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "mutation_receipts_truncated",
     category: "vault-mutation-safety",
     file: "src/views/chatview/agent/MutationJournal.ts",
-    anchorLine: 256,
+    anchorScope: "AgentMutationJournal.claim",
     anchorText: `try {
         await this.writeRecord(storagePath, record);
       } catch (error) {
@@ -62,7 +62,7 @@ export const CHATVIEW_CRITICAL_MUTANTS = Object.freeze([
     id: "conversation_scope_removed_from_receipts",
     category: "vault-mutation-safety",
     file: "src/views/chatview/agent/MutationJournal.ts",
-    anchorLine: 51,
+    anchorScope: "recordKey",
     anchorText: "return JSON.stringify([conversationId, toolCallId]);",
     replacement: "return JSON.stringify(toolCallId);",
     testPaths: Object.freeze([

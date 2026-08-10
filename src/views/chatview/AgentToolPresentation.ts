@@ -1,10 +1,16 @@
 import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
+import {
+  countLocalToolOutcome,
+  localToolOutcomeSchema,
+} from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "./AgentConversation";
+
+type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 
 export type AgentToolPresentation = Readonly<{
   canonicalName: string;
   label: string;
-  displayState: AgentToolPart["state"];
+  displayState: AgentToolDisplayState;
   stateLabel: string;
   icon: string;
   animated: boolean;
@@ -38,33 +44,35 @@ const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
 
 const UNKNOWN_SERVER_TOOL_LABEL = "SystemSculpt action";
 
-const STATE_LABELS: Readonly<Record<AgentToolPart["state"], string>> = {
+const STATE_LABELS: Readonly<Record<AgentToolDisplayState, string>> = {
   "input-streaming": "Preparing",
   "input-ready": "Ready",
   "approval-required": "Needs approval",
   approved: "Approved",
   running: "Working",
   succeeded: "Done",
+  partial: "Partial",
   failed: "Failed",
   denied: "Denied",
   cancelled: "Stopped",
   "outcome-unknown": "Check required",
 };
 
-const STATE_ICONS: Readonly<Record<AgentToolPart["state"], string>> = {
+const STATE_ICONS: Readonly<Record<AgentToolDisplayState, string>> = {
   "input-streaming": "loader-circle",
   "input-ready": "loader-circle",
   "approval-required": "shield-question",
   approved: "loader-circle",
   running: "loader-circle",
   succeeded: "circle-check",
+  partial: "circle-alert",
   failed: "circle-x",
   denied: "ban",
   cancelled: "square",
   "outcome-unknown": "triangle-alert",
 };
 
-const ANIMATED_STATES = new Set<AgentToolPart["state"]>([
+const ANIMATED_STATES = new Set<AgentToolDisplayState>([
   "input-streaming",
   "input-ready",
   "approved",
@@ -153,28 +161,51 @@ function countedLabel(counted: CountedTool): string {
   return `${counted.verb} ${counted.items.length} ${noun}`;
 }
 
-function resultEntries(part: AgentToolPart, canonicalName: string): readonly Record<string, unknown>[] {
-  if (!["read", "open", "list_items"].includes(canonicalName)) return [];
-  const data = record(part.output?.data);
-  const value = canonicalName === "read" ? data.files : data.results;
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is Record<string, unknown> =>
-    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry));
+type ToolOutcomeCounts = Readonly<{ completed: number; failed: number }>;
+
+function toolOutcomeCounts(part: AgentToolPart, canonicalName: string): ToolOutcomeCounts {
+  return countLocalToolOutcome(
+    part.output?.data,
+    localToolOutcomeSchema(canonicalName),
+  );
 }
 
-function failedResultEntry(entry: Record<string, unknown>): boolean {
-  return entry.success === false
-    || (typeof entry.error === "string" && entry.error.trim().length > 0)
-    || (Boolean(entry.error) && typeof entry.error === "object");
-}
-
-function partialOutcomeSummary(part: AgentToolPart, canonicalName: string): string | null {
-  const entries = resultEntries(part, canonicalName);
-  if (entries.length === 0) return null;
-  const failed = entries.filter(failedResultEntry).length;
-  if (failed === 0) return null;
-  const completed = entries.length - failed;
+function partialOutcomeSummary(counts: ToolOutcomeCounts): string | null {
+  const total = counts.completed + counts.failed;
+  if (total === 0 || counts.failed === 0) return null;
+  const { completed, failed } = counts;
   return `${completed} completed, ${failed} failed`;
+}
+
+function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): boolean {
+  const total = counts.completed + counts.failed;
+  // Structured item outcomes are more authoritative than a top-level error
+  // code. In particular, an all-failed batch must remain Failed even if an
+  // older producer mislabeled it as partial; only a genuinely mixed batch is
+  // Partial. Fall back to the code for tools without item-level results.
+  if (total > 0) return counts.completed > 0 && counts.failed > 0;
+  return /(?:^|_)PARTIAL(?:_|$)/u.test(part.error?.code ?? "");
+}
+
+/**
+ * Tool failures are local timeline events, not whole-response failures. Keep
+ * provider and vault details private while making it clear that later agent
+ * work may still continue and that successful partial results were retained.
+ */
+export function presentAgentToolFailure(part: AgentToolPart): string {
+  const { canonicalName } = splitToolName(part.name);
+  if (hasPartialOutcome(part, toolOutcomeCounts(part, canonicalName))) {
+    return "Some requested items failed; successful items were kept.";
+  }
+  if (part.state === "outcome-unknown") {
+    return "The result is uncertain. Check the vault before retrying.";
+  }
+  if (part.location === "vault") {
+    return "This vault action could not be completed.";
+  }
+  return canonicalName === "web_search"
+    ? "Web search could not be completed."
+    : "This SystemSculpt action could not be completed.";
 }
 
 function toolScope(part: AgentToolPart): CountedTool | null {
@@ -249,8 +280,8 @@ function canAppendTool(
   const existingScopes = group.map(toolScope);
   const candidateScope = toolScope(candidate);
   if (existingScopes.some((scope) => !scope) || !candidateScope) return false;
-  if (group.some((part) => resultEntries(part, previousName).some(failedResultEntry))) return false;
-  if (resultEntries(candidate, candidateName).some(failedResultEntry)) return false;
+  if (group.some((part) => toolOutcomeCounts(part, previousName).failed > 0)) return false;
+  if (toolOutcomeCounts(candidate, candidateName).failed > 0) return false;
 
   const seen = new Set(existingScopes.flatMap((scope) =>
     scope!.items.map(normalizedScopeItem)));
@@ -292,19 +323,23 @@ function contextToolLabel(input: Record<string, unknown>): string {
 
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const { canonicalName } = splitToolName(part.name);
+  const outcomeCounts = toolOutcomeCounts(part, canonicalName);
   const input = record(part.input);
   const serverLabel = part.location === "server"
     ? SERVER_TOOL_LABELS[canonicalName]
     : undefined;
   const unknownServerTool = part.location === "server" && !serverLabel;
   const serverTool = part.location === "server";
-  const displayState = displayedToolState(part);
   const counted = part.location === "vault"
     ? countedTool(canonicalName, input)
     : null;
   const partialSummary = serverTool
     ? null
-    : partialOutcomeSummary(part, canonicalName);
+    : partialOutcomeSummary(outcomeCounts);
+  const displayState: AgentToolDisplayState = !serverTool
+    && hasPartialOutcome(part, outcomeCounts)
+    ? "partial"
+    : displayedToolState(part);
   const outputSummary = serverTool
     ? null
     : compact(part.output?.summary ?? part.output?.title);

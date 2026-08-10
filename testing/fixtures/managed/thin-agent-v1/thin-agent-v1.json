@@ -259,8 +259,8 @@
     "client_authored_mutation_classification": false,
     "obsidian_vault_v1_maps_to_canonical_local_tool_count": 12,
     "server_tool_catalog_canonicalization": "sort_tools_by_name_then_recursively_sort_object_keys_preserve_array_order_compact_utf8_json",
-    "server_tool_catalog_canonical_bytes": 13475,
-    "server_tool_catalog_sha256": "d0df90f4939a33ab8b242d18821a2fde7c3f626dbcd6b24948f98987f50d3228",
+    "server_tool_catalog_canonical_bytes": 13760,
+    "server_tool_catalog_sha256": "4de25bca0d6f003517c198c52e32337877bbe5367114b142aa54cd666121db14",
     "unknown_required_capability_version": "reject_before_access_grant"
   },
   "legacy_compatibility": {

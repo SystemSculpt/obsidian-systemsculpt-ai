@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import type { WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
 import {
@@ -10,6 +11,8 @@ import type { SystemSculptHistoryEntry } from "./types";
 
 interface SystemSculptHistoryModalOptions {
   loadEntries?: (signal?: AbortSignal) => Promise<SystemSculptHistoryEntry[]>;
+  /** Chat leaf that launched the modal; chat entries resume into it in place. */
+  chatLeaf?: WorkspaceLeaf;
 }
 
 export class SystemSculptHistoryModal extends StandardModal {
@@ -189,7 +192,9 @@ export class SystemSculptHistoryModal extends StandardModal {
   }
 
   private async openEntry(entry: SystemSculptHistoryEntry): Promise<void> {
-    await entry.openPrimary();
+    await entry.openPrimary(
+      entry.kind === "chat" ? this.options.chatLeaf : undefined,
+    );
     this.close();
   }
 

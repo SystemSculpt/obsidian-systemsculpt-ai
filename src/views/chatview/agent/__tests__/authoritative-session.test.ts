@@ -382,6 +382,111 @@ describe("AgentSession server authority", () => {
     session.dispose();
   });
 
+  it("accepts an exact dispatched failure terminal before running and frees the next submit", async () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    connection.emit(event("session_snapshot", {
+      messages: [],
+      run_state: idle(0),
+    }));
+    const first = message(
+      "user_direct_terminal",
+      "user",
+      "Fail before running is published",
+    );
+    await expect(session.submit({
+      request_id: first.id,
+      user_message: first,
+    })).resolves.toBe("sent");
+    expect(session.current.optimisticUser).toMatchObject({
+      request_id: first.id,
+      delivery: "sent",
+    });
+
+    connection.emit(event("terminal", {
+      request_id: first.id,
+      terminal: {
+        version: 1,
+        run_id: RUN_A,
+        root_message_id: first.id,
+        outcome: "failed",
+        code: "response_capacity_unavailable",
+        message: "SystemSculpt is temporarily busy.",
+        incident_id: `incident_${"d".repeat(32)}`,
+        retryable: true,
+      },
+    }));
+
+    expect(protocolErrors).toEqual([]);
+    expect(session.current.terminal).toMatchObject({
+      request_id: first.id,
+      value: {
+        outcome: "failed",
+        code: "response_capacity_unavailable",
+      },
+    });
+    expect(session.current.optimisticUser).toBeNull();
+    expect(session.current.runState).toEqual(idle(0));
+
+    const second = message(
+      "user_after_direct_terminal",
+      "user",
+      "Recover immediately",
+    );
+    await expect(session.submit({
+      request_id: second.id,
+      user_message: second,
+    })).resolves.toBe("sent");
+    expect(connection.sendSubmit).toHaveBeenCalledTimes(2);
+    expect(session.current.optimisticUser).toMatchObject({
+      request_id: second.id,
+      delivery: "sent",
+    });
+    session.dispose();
+  });
+
+  it("rejects a pre-running terminal that does not match the dispatched root", async () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    connection.emit(event("session_snapshot", {
+      messages: [],
+      run_state: idle(0),
+    }));
+    const pending = message(
+      "user_direct_terminal_mismatch",
+      "user",
+      "Keep this exact request bound",
+    );
+    await expect(session.submit({
+      request_id: pending.id,
+      user_message: pending,
+    })).resolves.toBe("sent");
+
+    connection.emit(event("terminal", {
+      request_id: pending.id,
+      terminal: {
+        version: 1,
+        run_id: RUN_A,
+        root_message_id: "user_wrong_terminal_root",
+        outcome: "failed",
+        code: "response_capacity_unavailable",
+        message: "SystemSculpt is temporarily busy.",
+        incident_id: `incident_${"e".repeat(32)}`,
+        retryable: true,
+      },
+    }));
+
+    expect(protocolErrors).toHaveLength(1);
+    expect(protocolErrors[0]?.message).toContain("does not match the active run");
+    expect(session.current.terminal).toBeNull();
+    expect(session.current.optimisticUser?.message).toEqual(pending);
+    session.dispose();
+  });
+
   it("keeps a pending user and fails busy on a same-id content collision", async () => {
     const protocolErrors: Error[] = [];
     const { connection, session } = createSession({
@@ -776,6 +881,247 @@ describe("AgentSession server authority", () => {
       value: { outcome: "failed", retryable: true },
     });
     expect(session.current.runState.state).toBe("running");
+    session.dispose();
+  });
+
+  it("drops reordered same-request assistant snapshots after terminal settlement", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const user = message("user_parallel", "user", "Read three notes");
+    const first = message("assistant_parallel", "assistant", "One tool settled");
+    const second = message("assistant_parallel", "assistant", "Two tools settled");
+    const complete = message("assistant_parallel", "assistant", "All tools settled");
+
+    connection.emit(event("session_snapshot", {
+      messages: [user],
+      run_state: active(
+        7,
+        "waiting_for_client",
+        "request_parallel",
+        RUN_A,
+        user.id,
+      ),
+    }));
+
+    // These frames model two same-request HTTP response bodies arriving in a
+    // different order than the server broadcasts. Sequence 12 is authoritative;
+    // the late 11 and duplicate 12 must not replace it or cause an idle error.
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_parallel",
+      snapshot_epoch: 3,
+      snapshot_sequence: 10,
+      message: first,
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_parallel",
+      snapshot_epoch: 3,
+      snapshot_sequence: 12,
+      message: complete,
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_parallel",
+      message: second,
+    }));
+    connection.emit(event("run_state", { run_state: idle(8) }));
+    const settledRevision = session.current.revision;
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_parallel",
+      snapshot_epoch: 3,
+      snapshot_sequence: 11,
+      message: second,
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_parallel",
+      snapshot_epoch: 3,
+      snapshot_sequence: 12,
+      message: complete,
+    }));
+
+    expect(session.current.messages).toEqual([user, complete]);
+    expect(session.current.runState).toEqual(idle(8));
+    expect(session.current.revision).toBe(settledRevision);
+    expect(protocolErrors).toEqual([]);
+    session.dispose();
+  });
+
+  it("orders a new server-instance epoch ahead of delayed old response bodies", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const user = message("user_epoch", "user", "Continue after an eviction");
+    const old = message("assistant_epoch", "assistant", "Old instance");
+    const current = message("assistant_epoch", "assistant", "New instance");
+
+    connection.emit(event("session_snapshot", {
+      messages: [user],
+      run_state: active(
+        9,
+        "waiting_for_client",
+        "request_epoch",
+        RUN_A,
+        user.id,
+      ),
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_epoch",
+      snapshot_epoch: 40,
+      snapshot_sequence: 900,
+      message: old,
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_epoch",
+      snapshot_epoch: 41,
+      snapshot_sequence: 1,
+      message: current,
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: "request_epoch",
+      snapshot_epoch: 40,
+      snapshot_sequence: 901,
+      message: old,
+    }));
+
+    expect(session.current.messages).toEqual([user, current]);
+    expect(protocolErrors).toEqual([]);
+    session.dispose();
+  });
+
+  it("ignores a stale cancel or finalization session snapshot atomically", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const requestId = "request_stale_full_snapshot";
+    const user = message("user_stale_full_snapshot", "user", "Finish safely");
+    const partial = message("assistant_stale_full_snapshot", "assistant", "Partial");
+    const complete = message("assistant_stale_full_snapshot", "assistant", "Complete");
+
+    connection.emit(event("session_snapshot", {
+      messages: [user, partial],
+      run_state: active(14, "running", requestId, RUN_A, user.id),
+      queued_request_ids: ["request_keep_queued"],
+      cancelled_queued_request_ids: ["request_keep_cancelled"],
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: requestId,
+      snapshot_epoch: 5,
+      snapshot_sequence: 2,
+      message: complete,
+    }));
+    connection.emit(event("terminal", {
+      request_id: requestId,
+      terminal: {
+        version: 1,
+        run_id: RUN_A,
+        root_message_id: user.id,
+        outcome: "succeeded",
+        code: "completed",
+      },
+    }));
+    connection.emit(event("run_state", { run_state: idle(15) }));
+    const settled = session.current;
+
+    // A slower cancellation/finalization response can still contain the full
+    // pre-terminal snapshot. Its lower liveness cursor must reject the entire
+    // frame before any message, terminal, or queue authority is replaced.
+    connection.emit(event("session_snapshot", {
+      messages: [user, partial],
+      run_state: active(14, "running", requestId, RUN_A, user.id),
+      queued_request_ids: ["request_wrong_queue"],
+      cancelled_queued_request_ids: [],
+    }));
+
+    expect(session.current).toEqual(settled);
+    expect(session.current.messages).toEqual([user, complete]);
+    expect(session.current.terminal).toMatchObject({
+      request_id: requestId,
+      value: { outcome: "succeeded", code: "completed" },
+    });
+    expect(session.current.queuedRequestIds).toEqual(["request_keep_queued"]);
+    expect(session.current.cancelledQueuedRequestIds)
+      .toEqual(["request_keep_cancelled"]);
+    expect(protocolErrors).toEqual([]);
+    session.dispose();
+  });
+
+  it("orders equal-cursor full snapshots with assistant replacements", () => {
+    const protocolErrors: Error[] = [];
+    const { connection, session } = createSession({
+      onProtocolError: (error) => protocolErrors.push(error),
+    });
+    const requestId = "request_equal_cursor_snapshot_order";
+    const user = message("user_equal_cursor_snapshot_order", "user", "Inspect");
+    const partial = message(
+      "assistant_equal_cursor_snapshot_order",
+      "assistant",
+      "Partial",
+    );
+    const complete = message(
+      "assistant_equal_cursor_snapshot_order",
+      "assistant",
+      "Complete",
+    );
+    const newest = message(
+      "assistant_equal_cursor_snapshot_order",
+      "assistant",
+      "Newest",
+    );
+    const runState = active(14, "waiting_for_client", requestId, RUN_A, user.id);
+
+    connection.emit(event("session_snapshot", {
+      snapshot_epoch: 5,
+      snapshot_sequence: 1,
+      messages: [user, partial],
+      run_state: runState,
+      queued_request_ids: ["request_initial_queue"],
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: requestId,
+      snapshot_epoch: 5,
+      snapshot_sequence: 3,
+      message: complete,
+    }));
+
+    // A slower full projection has the same liveness cursor and identity but
+    // predates the accepted assistant replacement. Reject its messages and
+    // queue state atomically instead of regressing the visible tool timeline.
+    connection.emit(event("session_snapshot", {
+      snapshot_epoch: 5,
+      snapshot_sequence: 2,
+      messages: [user, partial],
+      run_state: runState,
+      queued_request_ids: ["request_stale_queue"],
+    }));
+    expect(session.current.messages).toEqual([user, complete]);
+    expect(session.current.queuedRequestIds).toEqual(["request_initial_queue"]);
+
+    // A genuinely newer same-cursor projection remains valid and advances the
+    // fence for both delayed ordered and deployment-transition legacy frames.
+    connection.emit(event("session_snapshot", {
+      snapshot_epoch: 5,
+      snapshot_sequence: 4,
+      messages: [user, newest],
+      run_state: runState,
+      queued_request_ids: ["request_newest_queue"],
+    }));
+    connection.emit(event("assistant_snapshot", {
+      request_id: requestId,
+      snapshot_epoch: 5,
+      snapshot_sequence: 3,
+      message: complete,
+    }));
+    connection.emit(event("session_snapshot", {
+      messages: [user, partial],
+      run_state: runState,
+      queued_request_ids: ["request_legacy_queue"],
+    }));
+
+    expect(session.current.messages).toEqual([user, newest]);
+    expect(session.current.queuedRequestIds).toEqual(["request_newest_queue"]);
+    expect(protocolErrors).toEqual([]);
     session.dispose();
   });
 

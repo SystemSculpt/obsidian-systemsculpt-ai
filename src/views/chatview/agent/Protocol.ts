@@ -1,4 +1,7 @@
-import type { ThinAgentRunTerminalData } from "../../../services/managed/ThinAgentV1Contract";
+import type {
+  ThinAgentCommandKind,
+  ThinAgentRunTerminalData,
+} from "../../../services/managed/ThinAgentV1Contract";
 import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
 
 export const THIN_AGENT_COMMAND_TYPE =
@@ -114,6 +117,8 @@ export type AgentCommand =
   | AgentApprovalCommand
   | AgentCancelCommand;
 
+export type AgentCommandKind = ThinAgentCommandKind;
+
 export type AgentKnownRunState =
   | Readonly<{
       version: 1;
@@ -147,6 +152,8 @@ type ServerEventBase = Readonly<{
 
 export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   kind: "session_snapshot";
+  snapshot_epoch?: number;
+  snapshot_sequence?: number;
   messages: readonly Readonly<Record<string, unknown>>[];
   run_state: AgentRunState;
   queued_request_ids: readonly string[];
@@ -156,6 +163,8 @@ export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
 export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
   kind: "assistant_snapshot";
   request_id: string;
+  snapshot_epoch?: number;
+  snapshot_sequence?: number;
   message: Readonly<Record<string, unknown>>;
 }>;
 
@@ -841,6 +850,8 @@ export function parseAgentServerEvent(
   }
   const base = serverBase(value, expectedConversationId);
   if (value.kind === "session_snapshot") {
+    const hasSnapshotEpoch = value.snapshot_epoch !== undefined;
+    const hasSnapshotSequence = value.snapshot_sequence !== undefined;
     const queuedRequestIds = value.queued_request_ids === undefined
       ? []
       : value.queued_request_ids;
@@ -850,6 +861,9 @@ export function parseAgentServerEvent(
         : value.cancelled_queued_request_ids;
     if (
       !Array.isArray(value.messages)
+      || hasSnapshotEpoch !== hasSnapshotSequence
+      || (hasSnapshotEpoch && !safeInteger(value.snapshot_epoch))
+      || (hasSnapshotSequence && !safeInteger(value.snapshot_sequence))
       || !Array.isArray(queuedRequestIds)
       || queuedRequestIds.length > MAX_QUEUED_TURNS
       || !queuedRequestIds.every(safeId)
@@ -865,6 +879,12 @@ export function parseAgentServerEvent(
     return Object.freeze({
       ...base,
       kind: "session_snapshot",
+      ...(hasSnapshotEpoch
+        ? {
+            snapshot_epoch: value.snapshot_epoch as number,
+            snapshot_sequence: value.snapshot_sequence as number,
+          }
+        : {}),
       messages: Object.freeze(value.messages.map((message) => parseServerMessage(message))),
       run_state: parseAgentRunState(value.run_state),
       queued_request_ids: Object.freeze([...queuedRequestIds]),
@@ -873,13 +893,26 @@ export function parseAgentServerEvent(
     });
   }
   if (value.kind === "assistant_snapshot") {
-    if (!safeId(value.request_id)) {
+    const hasSnapshotEpoch = value.snapshot_epoch !== undefined;
+    const hasSnapshotSequence = value.snapshot_sequence !== undefined;
+    if (
+      !safeId(value.request_id)
+      || hasSnapshotEpoch !== hasSnapshotSequence
+      || (hasSnapshotEpoch && !safeInteger(value.snapshot_epoch))
+      || (hasSnapshotSequence && !safeInteger(value.snapshot_sequence))
+    ) {
       return fail("invalid_server_event", "The assistant snapshot is invalid.");
     }
     return Object.freeze({
       ...base,
       kind: "assistant_snapshot",
       request_id: value.request_id,
+      ...(hasSnapshotEpoch
+        ? {
+            snapshot_epoch: value.snapshot_epoch as number,
+            snapshot_sequence: value.snapshot_sequence as number,
+          }
+        : {}),
       message: parseServerMessage(value.message, "assistant"),
     });
   }

@@ -22,16 +22,15 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
-  ManagedAgentError,
 } from "./AgentConversation";
 import {
   presentAgentError,
-  presentAgentErrorMessage,
   type AgentConversationPresentation,
 } from "./AgentConversationPresentation";
 import {
   groupConsecutiveToolActivity,
   presentAgentTool,
+  presentAgentToolFailure,
   presentAgentToolGroup,
 } from "./AgentToolPresentation";
 import {
@@ -78,6 +77,10 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
 }
 
 const ACTIONABLE_ARTIFACT_TOOLS = new Set(["write", "edit", "multi_edit", "move"]);
+
+function toolPartKey(callId: string): string {
+  return `tool:${callId}`;
+}
 
 type HistoricalTurnSemantics = Readonly<{
   hasVisibleContent: boolean;
@@ -144,10 +147,8 @@ function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["s
   }
 }
 
-function visibleToolError(error: ManagedAgentError | undefined): string | null {
-  return error
-    ? presentAgentErrorMessage(error.message, error.retryable === true)
-    : null;
+function visibleToolError(part: AgentToolPart): string | null {
+  return part.error ? presentAgentToolFailure(part) : null;
 }
 
 function toolDisplayFingerprint(part: AgentToolPart): string {
@@ -164,7 +165,7 @@ function toolDisplayFingerprint(part: AgentToolPart): string {
     location: part.location,
     state: part.state,
     presentation,
-    error: visibleToolError(part.error),
+    error: visibleToolError(part),
     approvalId: approvalInput === undefined ? undefined : part.approvalId,
     approvalInput,
     artifacts,
@@ -317,6 +318,7 @@ export class AgentConversationRenderer extends Component {
     const nextMessageIds = new Set<string>();
     const desiredRows: HTMLElement[] = [];
     let hasInlineEdit = false;
+    let currentTurnId: string | null = null;
     for (let index = 0; index < messages.length;) {
       if (!isCurrent()) return;
       const message = messages[index];
@@ -329,6 +331,9 @@ export class AgentConversationRenderer extends Component {
           index += 1;
         }
       }
+      const anchorMessage = turnMessages[0];
+      if (message.role === "user") currentTurnId = anchorMessage.message_id;
+      const turnId = message.role === "assistant" ? currentTurnId : null;
 
       const presented = turnMessages.map((entry) => {
         const content = presentChatMessage(entry);
@@ -354,7 +359,6 @@ export class AgentConversationRenderer extends Component {
       };
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
       for (const entry of turnMessages) nextMessageIds.add(entry.message_id);
-      const anchorMessage = turnMessages[0];
       const inlineEdit = message.role === "user"
         && this.inlineMessageEdit?.messageId === anchorMessage.message_id
         ? this.inlineMessageEdit
@@ -363,10 +367,17 @@ export class AgentConversationRenderer extends Component {
       const rowKey = JSON.stringify({
         role: message.role,
         messageIds: turnMessages.map((entry) => entry.message_id),
+        ...(turnId ? { turnId } : {}),
       });
+      // While the live run container is still mounted for the same turn it
+      // owns the cancelled tail; history takes over once activity moves on.
+      const restoredCancelledTail = message.role === "assistant"
+        && turnMessages.some((entry) => entry.terminalOutcome === "cancelled")
+        && (turnId === null || this.activeTurnId !== turnId);
       const fingerprint = JSON.stringify({
         messages: turnMessages,
         inlineEdit,
+        restoredCancelledTail,
       });
       const existing = this.historyRows.get(rowKey);
       if (existing?.fingerprint === fingerprint) {
@@ -386,6 +397,7 @@ export class AgentConversationRenderer extends Component {
           ...(turnMessages.length > 1
             ? { "data-message-ids": turnMessages.map((entry) => entry.message_id).join(" ") }
             : {}),
+          ...(turnId ? { "data-turn-id": turnId } : {}),
           ...(message.role === "assistant" ? { "aria-label": "SystemSculpt response" } : {}),
         },
       });
@@ -402,6 +414,7 @@ export class AgentConversationRenderer extends Component {
         });
         await this.renderHistoricalParts(body, turnParts);
         if (!isCurrent()) return;
+        if (restoredCancelledTail) this.renderRestoredCancelledTail(body);
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
@@ -424,7 +437,9 @@ export class AgentConversationRenderer extends Component {
       desiredRows.push(row);
     }
     if (!isCurrent()) return;
+    const focusReplacement = this.transferActiveToolPresentationState(desiredRows);
     this.reconcileChildren(this.historyRoot, desiredRows);
+    focusReplacement?.focus();
     this.historyRows = nextRows;
     this.historyMessageIds = nextMessageIds;
     if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
@@ -491,7 +506,11 @@ export class AgentConversationRenderer extends Component {
         await this.renderHistoricalPart(parent, entry.item);
         continue;
       }
-      const node = parent.createDiv({ cls: "systemsculpt-agent-part is-tool" });
+      const first = entry.tools[0];
+      const node = parent.createDiv({
+        cls: "systemsculpt-agent-part is-tool",
+        attr: { "data-part-key": toolPartKey(first.callId) },
+      });
       await this.renderTool(node, entry.tools);
     }
   }
@@ -506,6 +525,7 @@ export class AgentConversationRenderer extends Component {
       this.renderingEnabled && lifecycleGeneration === this.lifecycleGeneration;
     this.element.setAttribute("aria-busy", String(presentation.busy));
     const body = this.ensureActiveTurn(snapshot.turnId);
+    this.activeTurn?.toggleClass("is-active", presentation.busy);
     const wantedParts = new Set<string>();
     const orderedParts = presentation.visibleParts
       .map((part) => terminalToolPresentation(part, presentation))
@@ -532,10 +552,8 @@ export class AgentConversationRenderer extends Component {
     }
     const duplicatesTerminalError = (part: AgentToolPart): boolean =>
       Boolean(part.error && terminalErrors.some((terminal) =>
-        visibleToolError(part.error) === presentAgentError(
-          terminal.error,
-          terminal.retryable,
-        ).message));
+        terminal.error.code === part.error?.code
+        && terminal.error.message === part.error.message));
     const lanes: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
     let firstRenderError: unknown;
 
@@ -565,7 +583,7 @@ export class AgentConversationRenderer extends Component {
         continue;
       }
       const first = entry.tools[0];
-      const key = `tool:${first.callId}`;
+      const key = toolPartKey(first.callId);
       wantedParts.add(key);
       try {
         const node = await this.renderActiveToolGroup(
@@ -691,6 +709,25 @@ export class AgentConversationRenderer extends Component {
     );
   }
 
+  /**
+   * A restored turn that ended cancelled keeps a static "Stopped" marker so
+   * an interrupted response never reads as silently complete.
+   */
+  private renderRestoredCancelledTail(body: HTMLElement): void {
+    const status = body.createDiv({
+      cls: "systemsculpt-agent-tail-status is-cancelled",
+      attr: {
+        role: "status",
+        "aria-label": "Agent status: Stopped",
+        "data-status": "Stopped",
+      },
+    });
+    const icon = status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
+    setIcon(icon, "circle-stop");
+    icon.dataset.iconState = "circle-stop";
+    status.createSpan({ cls: "systemsculpt-agent-tail-status-label", text: "Stopped" });
+  }
+
   private ensureActiveTurn(turnId: string | null): HTMLElement {
     if (this.activeTurn && this.activeBody && this.activeTurnId === turnId) return this.activeBody;
     this.clearActive();
@@ -776,6 +813,48 @@ export class AgentConversationRenderer extends Component {
       cursor.remove();
       cursor = next;
     }
+  }
+
+  /**
+   * The committed transcript replaces the live projection with authoritative
+   * DOM. Carry presentation-only disclosure/focus state across that replacement
+   * while canonical data-part-key identity lets diagnostics follow the same
+   * tool call instead of inventing a second lifecycle record.
+   */
+  private transferActiveToolPresentationState(
+    desiredRows: readonly HTMLElement[],
+  ): HTMLElement | null {
+    const focused = this.element.ownerDocument.activeElement;
+    const focusedElement = focused?.nodeType === 1 ? focused as HTMLElement : null;
+    let focusReplacement: HTMLElement | null = null;
+    for (const row of desiredRows) {
+      for (const historical of row.querySelectorAll<HTMLElement>(
+        ".systemsculpt-agent-part.is-tool[data-part-key]",
+      )) {
+        // The selector above guarantees the attribute exists. An empty value
+        // cannot match a canonical active-node key, so the map lookup already
+        // provides the same safe miss without a second lifecycle branch.
+        const active = this.activeNodes.get(historical.dataset.partKey!);
+        if (!active || active === historical) continue;
+
+        const activeDetails = Array.from(active.querySelectorAll<HTMLDetailsElement>("details"));
+        const historicalDetails = Array.from(
+          historical.querySelectorAll<HTMLDetailsElement>("details"),
+        );
+        activeDetails.forEach((details, index) => {
+          const replacement = historicalDetails[index];
+          if (replacement) replacement.open = details.open;
+        });
+
+        if (!focusedElement || !active.contains(focusedElement)) continue;
+        const focusKey = focusedElement.dataset.focusKey;
+        focusReplacement = focusKey
+          ? Array.from(historical.querySelectorAll<HTMLElement>("[data-focus-key]"))
+            .find((candidate) => candidate.dataset.focusKey === focusKey) ?? null
+          : historical;
+      }
+    }
+    return focusReplacement;
   }
 
   public clearActive(): void {
@@ -1096,10 +1175,7 @@ export class AgentConversationRenderer extends Component {
     if (parts.length === 1 && part.error && !suppressToolError) {
       support.createDiv({
         cls: "systemsculpt-agent-tool-error",
-        text: presentAgentErrorMessage(
-          part.error.message,
-          part.error.retryable === true,
-        ),
+        text: visibleToolError(part) ?? "This action could not be completed.",
         attr: { role: "alert" },
       });
     }
@@ -1234,8 +1310,12 @@ export class AgentConversationRenderer extends Component {
   }
 
   private async renderHistoricalTool(parent: HTMLElement, tool: ToolCall): Promise<void> {
-    const node = parent.createDiv({ cls: "systemsculpt-agent-part is-tool" });
-    await this.renderTool(node, this.historicalToolPart(tool));
+    const part = this.historicalToolPart(tool);
+    const node = parent.createDiv({
+      cls: "systemsculpt-agent-part is-tool",
+      attr: { "data-part-key": toolPartKey(part.callId) },
+    });
+    await this.renderTool(node, part);
   }
 
   private renderMessageActions(row: HTMLElement, message: ChatMessage, text: string): void {

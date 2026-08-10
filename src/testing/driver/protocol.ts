@@ -34,9 +34,11 @@ export interface TestDriverHello {
   token: string;
   serverId: string;
   marker: typeof TEST_DRIVER_MARKER;
+  artifactId: string;
   vault: string;
   pluginVersion: string;
   buildStamp: string;
+  apiBaseUrl: string;
 }
 
 export interface TestDriverActionRequest {
@@ -46,12 +48,52 @@ export interface TestDriverActionRequest {
   params?: Record<string, unknown>;
 }
 
+export interface TestDriverActionCancel {
+  type: "cancel";
+  id: number;
+}
+
+export type TestDriverClientMessage =
+  | TestDriverActionRequest
+  | TestDriverActionCancel;
+
 export interface TestDriverActionResult {
   type: "result";
   id: number;
   ok: boolean;
   result?: unknown;
   error?: { message: string };
+}
+
+export function parseTestDriverClientMessage(
+  raw: string,
+): TestDriverClientMessage | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const value = parsed as Record<string, unknown>;
+  if (value.type === "cancel" && typeof value.id === "number") {
+    return { type: "cancel", id: value.id };
+  }
+  if (
+    value.type !== "action"
+    || typeof value.id !== "number"
+    || typeof value.action !== "string"
+  ) return null;
+  return {
+    type: "action",
+    id: value.id,
+    action: value.action,
+    params: typeof value.params === "object"
+      && value.params !== null
+      && !Array.isArray(value.params)
+      ? value.params as Record<string, unknown>
+      : {},
+  };
 }
 
 export function parseHandshake(raw: string): TestDriverHandshake | null {

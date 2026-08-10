@@ -126,31 +126,31 @@ describe("LicenseManager", () => {
     });
   });
 
-  describe("validateLicenseKey", () => {
+  describe("validateLicenseKeyDetailed", () => {
     it("returns the result owned by LicenseService without a redundant settings write", async () => {
       mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "valid", isValid: true });
 
-      const result = await manager.validateLicenseKey();
+      const result = await manager.validateLicenseKeyDetailed();
 
-      expect(result).toBe(true);
+      expect(result.isValid).toBe(true);
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
     it("returns a LicenseService rejection without a redundant settings write", async () => {
       mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid" });
 
-      const result = await manager.validateLicenseKey();
+      const result = await manager.validateLicenseKeyDetailed();
 
-      expect(result).toBe(false);
+      expect(result.isValid).toBe(false);
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
     it("returns false when no license key exists", async () => {
       mockPlugin.settings.licenseKey = "";
 
-      const result = await manager.validateLicenseKey();
+      const result = await manager.validateLicenseKeyDetailed();
 
-      expect(result).toBe(false);
+      expect(result.isValid).toBe(false);
       expect(mockPlugin.aiService.validateLicenseDetailed).not.toHaveBeenCalled();
     });
 
@@ -160,22 +160,16 @@ describe("LicenseManager", () => {
         new Error("Network error")
       );
 
-      const result = await manager.validateLicenseKey();
+      const result = await manager.validateLicenseKeyDetailed();
 
-      expect(result).toBe(true);
+      expect(result.isValid).toBe(true);
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
-    it("passes force parameter to aiService", async () => {
-      await manager.validateLicenseKey(true);
+    it("delegates to the service without extra arguments", async () => {
+      await manager.validateLicenseKeyDetailed();
 
-      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith(true);
-    });
-
-    it("passes default force=false to aiService", async () => {
-      await manager.validateLicenseKey();
-
-      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith(false);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith();
     });
   });
 

@@ -147,6 +147,42 @@ describe("AgentConversationRenderer tail status", () => {
     render.mockRestore();
   });
 
+  it("renders a static Stopped tail for a restored cancelled turn", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    await renderer.renderHistory([
+      {
+        role: "user",
+        message_id: "user-cancel-restored",
+        content: "Stream a long response",
+      },
+      {
+        role: "assistant",
+        message_id: "assistant-cancel-restored",
+        content: "PARTIAL-STREAM-START",
+        terminalOutcome: "cancelled",
+      },
+      { role: "user", message_id: "user-cancel-follow-up", content: "Continue" },
+      { role: "assistant", message_id: "assistant-cancel-complete", content: "Done." },
+    ]);
+
+    const tails = parent.querySelectorAll(".systemsculpt-agent-tail-status.is-cancelled");
+    expect(tails).toHaveLength(1);
+    const tail = tails[0]!;
+    expect(tail.textContent).toBe("Stopped");
+    expect(tail.closest(".systemsculpt-agent-turn")?.getAttribute("data-message-id"))
+      .toBe("assistant-cancel-restored");
+    expect(setIcon).toHaveBeenCalledWith(expect.anything(), "circle-stop");
+    renderer.unload();
+  });
+
   it("falls back to cancelling an inline edit when Escape keyup is lost", async () => {
     jest.useFakeTimers();
     const parent = document.body.createDiv();

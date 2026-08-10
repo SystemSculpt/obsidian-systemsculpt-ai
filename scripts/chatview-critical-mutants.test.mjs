@@ -9,9 +9,47 @@ import {
   buildJestInvocation,
   copyMutationMirror,
   createMutationEvidence,
+  locateMutationSpan,
   repositoryRelativePath,
   writeMutationEvidence,
 } from "./chatview-critical-mutants.mjs";
+
+test("mutation anchors follow semantic scope instead of source line position", () => {
+  const source = `${"\n".repeat(200)}class Example {
+  intended() {
+    this.failClosed("collision");
+  }
+
+  unrelated() {
+    this.failClosed("collision");
+  }
+}\n`;
+  const span = locateMutationSpan(source, "example.ts", {
+    id: "semantic-anchor",
+    anchorScope: "Example.intended",
+    anchorText: 'this.failClosed("collision");',
+  });
+
+  assert.equal(span.scope, "Example.intended");
+  assert.equal(source.slice(span.start, span.end), 'this.failClosed("collision");');
+});
+
+test("mutation anchors fail closed when their semantic scope disappears", () => {
+  const source = `class Example {
+  moved() {
+    this.failClosed("collision");
+  }
+}\n`;
+
+  assert.throws(
+    () => locateMutationSpan(source, "example.ts", {
+      id: "semantic-anchor",
+      anchorScope: "Example.intended",
+      anchorText: 'this.failClosed("collision");',
+    }),
+    /expected one AST anchor in Example\.intended/u,
+  );
+});
 
 test("mutation evidence records structured status in the shared CI evidence directory", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-mutant-evidence-"));
