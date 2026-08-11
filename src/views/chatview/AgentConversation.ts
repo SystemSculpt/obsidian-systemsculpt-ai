@@ -43,6 +43,8 @@ export type ManagedAgentError = Readonly<{
   requestId?: string;
   retryable?: boolean;
   retryAfterSeconds?: number;
+  /** Server-issued support id from the failed terminal (incident_<32 hex>). */
+  incidentId?: string;
 }>;
 
 export type ToolResultSummary = Readonly<{

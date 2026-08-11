@@ -16,7 +16,11 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: "Response interrupted" | "Could not finish" | "Not enough credits" | "Out of credits";
   message: string;
+  /** Server-issued support id, shown so a user can quote it when reporting. */
+  reportId?: string;
 }>;
+
+const REPORT_ID = /^incident_[a-f0-9]{32}$/;
 
 export function presentAgentErrorMessage(
   _message: string,
@@ -58,9 +62,16 @@ export function presentAgentError(
     INTERRUPTED_ERROR_CODE.test(error.code)
     || INTERRUPTED_UI_WORDING.test(error.message)
   );
+  // The report id is the only service-issued identity allowed through this
+  // boundary: it is minted for support lookup and carries no provider or
+  // implementation identity. Interrupted turns omit it; retrying is the fix.
+  const reportId = !interrupted && error.incidentId && REPORT_ID.test(error.incidentId)
+    ? error.incidentId
+    : undefined;
   return {
     heading: interrupted ? "Response interrupted" : "Could not finish",
     message: presentAgentErrorMessage(error.message, interrupted),
+    ...(reportId ? { reportId } : {}),
   };
 }
 

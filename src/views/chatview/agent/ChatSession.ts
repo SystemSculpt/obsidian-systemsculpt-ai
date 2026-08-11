@@ -412,6 +412,7 @@ function terminalError(terminal: Extract<ThinAgentRunTerminalData, { outcome: "f
     ),
     requestId: terminal.incident_id,
     retryable: terminal.retryable,
+    incidentId: terminal.incident_id,
   };
 }
 

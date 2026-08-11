@@ -940,6 +940,12 @@ export class AgentConversationRenderer extends Component {
           cls: "systemsculpt-agent-error-message",
           text: presented.message,
         });
+        if (presented.reportId) {
+          copy.createDiv({
+            cls: "systemsculpt-agent-error-report",
+            text: `Report ID: ${presented.reportId}`,
+          });
+        }
         if (part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
           const retry = createUiAction(copy, {
             label: "Retry",

@@ -48,6 +48,15 @@
   line-height: 1.5;
 }
 
+.systemsculpt-agent-error-report {
+  overflow-wrap: anywhere;
+  color: var(--ss-ink-faint);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  line-height: 1.5;
+  user-select: text;
+}
+
 .systemsculpt-agent-tool {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);

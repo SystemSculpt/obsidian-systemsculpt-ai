@@ -79,6 +79,52 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     );
   });
 
+  it("surfaces a valid server report id on a final failure", () => {
+    expect(presentAgentError({
+      code: "agent_turn_failed",
+      message: "Provider detail that must stay hidden.",
+      incidentId: "incident_0123456789abcdef0123456789abcdef",
+    }, false)).toEqual({
+      heading: "Could not finish",
+      message: "SystemSculpt could not complete the response.",
+      reportId: "incident_0123456789abcdef0123456789abcdef",
+    });
+  });
+
+  it("drops a malformed report id instead of rendering it", () => {
+    expect(presentAgentError({
+      code: "agent_turn_failed",
+      message: "failed",
+      incidentId: "openrouter-request-778899",
+    }, false)).toEqual({
+      heading: "Could not finish",
+      message: "SystemSculpt could not complete the response.",
+    });
+  });
+
+  it("omits the report id when a retry is the fix", () => {
+    expect(presentAgentError({
+      code: "agent_connection_closed",
+      message: "The agent connection ticket is invalid.",
+      incidentId: "incident_0123456789abcdef0123456789abcdef",
+      retryable: true,
+    }, true)).toEqual({
+      heading: "Response interrupted",
+      message: "Retry this message to continue.",
+    });
+  });
+
+  it("omits the report id on credits errors", () => {
+    expect(presentAgentError({
+      code: "out_of_credits",
+      message: "failed",
+      incidentId: "incident_0123456789abcdef0123456789abcdef",
+    }, false)).toEqual({
+      heading: "Out of credits",
+      message: "You have no credits left. Add credits to continue using Chat.",
+    });
+  });
+
   it("uses natural terminal headings with fixed first-party copy", () => {
     expect(presentAgentError({
       code: "vault_failed",
