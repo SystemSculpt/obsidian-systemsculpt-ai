@@ -1802,15 +1802,17 @@ export class AgentChatView extends ItemView {
         return;
       }
       if (!this.isCurrentSubmissionOperation(operation)) return;
-      await this.workspace?.setHistory(
+      // Both calls enqueue onto the workspace's serial render queue, so the
+      // history baseline still lands before the projection clear. Neither is
+      // awaited: holding the submit behind the coalesced (32ms-debounced)
+      // render taxes time-to-first-token, and the queue itself guarantees
+      // the cleared projection can never duplicate the previous answer once
+      // the next run publishes. Later isCurrentSubmissionOperation guards
+      // still fence conversation switches.
+      void this.workspace?.setHistory(
         this.transcript.snapshot().messages as readonly ChatMessage[],
-      );
-      if (!this.isCurrentSubmissionOperation(operation)) return;
-      // The completed run remains as the live projection until the durable
-      // assistant turn enters history. Clear it before admission so a denied
-      // or slow next request never duplicates the previous answer.
-      await this.workspace?.setAgentSnapshot(null);
-      if (!this.isCurrentSubmissionOperation(operation)) return;
+      ).catch(() => {});
+      void this.workspace?.setAgentSnapshot(null).catch(() => {});
 
       const attachmentMetadata = composeAttachmentMetadata(
         prepared.text,
@@ -1928,6 +1930,9 @@ export class AgentChatView extends ItemView {
           if (!this.isCurrentSubmissionOperation(operation)) {
             throw new Error("This chat changed before the request was admitted.");
           }
+          // No sources means there is nothing to stage; context_ref is
+          // optional on the wire, so skip the staging round trip entirely.
+          if (contextSources.length === 0) return undefined;
           const staged = await this.agent.stageContext(
             admittedUserMessage.message_id,
             contextSources,

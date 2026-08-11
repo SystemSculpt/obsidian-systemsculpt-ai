@@ -265,8 +265,129 @@ function frozenMessages<TMessage>(messages: readonly TMessage[]): readonly TMess
   return Object.freeze(messages.map((message) => cloneAndFreeze(message)));
 }
 
+/**
+ * Freeze a delta-patched message without structuredClone. A delta patch
+ * creates exactly three new layers — the message wrapper, the parts array,
+ * and the patched or appended text part — and reuses every other reachable
+ * object by reference from the previous message, which is already deeply
+ * frozen. Shallow-freezing the new layers therefore leaves the whole message
+ * deeply frozen at per-token cost proportional to the part count instead of
+ * the accumulated message size.
+ */
+function frozenDeltaPatchedMessage<TValue extends object>(
+  message: TValue,
+): TValue {
+  const parts = (message as Record<string, unknown>).parts;
+  if (Array.isArray(parts)) {
+    for (const part of parts) {
+      if (part !== null && typeof part === "object" && !Object.isFrozen(part)) {
+        Object.freeze(part);
+      }
+    }
+    Object.freeze(parts);
+  }
+  return Object.freeze(message);
+}
+
 function errorValue(error: unknown): Error {
   return error instanceof Error ? error : new Error("The client command failed.");
+}
+
+type AssistantDeltaFrame = Extract<AgentServerEvent, { kind: "assistant_delta" }>;
+
+function streamedTextPart(value: unknown): Readonly<
+  Record<string, unknown> & { type: "text" | "reasoning" }
+> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const part = value as Record<string, unknown>;
+  return part.type === "text" || part.type === "reasoning"
+    ? part as Record<string, unknown> & { type: "text" | "reasoning" }
+    : null;
+}
+
+/**
+ * Apply one live delta to a parts array. The delta targets the
+ * `part_ordinal`-th part of its kind and applies only when the local text
+ * length equals the delta offset exactly; a brand-new part may be created only
+ * as the next part of that kind at offset zero. Any other shape returns null
+ * and the delta is dropped — the next assistant snapshot heals the gap.
+ */
+function partsWithAppliedDelta(
+  parts: readonly unknown[],
+  frame: AssistantDeltaFrame,
+): unknown[] | null {
+  let ordinal = -1;
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = streamedTextPart(parts[index]);
+    if (!part || part.type !== frame.part_kind) continue;
+    ordinal += 1;
+    if (ordinal !== frame.part_ordinal) continue;
+    const text = part.text;
+    if (typeof text !== "string" || text.length !== frame.offset) return null;
+    const next = [...parts];
+    next[index] = { ...part, text: text + frame.delta };
+    return next;
+  }
+  return frame.part_ordinal === ordinal + 1 && frame.offset === 0
+    ? [...parts, { type: frame.part_kind, text: frame.delta }]
+    : null;
+}
+
+function patchedAssistantMessage(
+  message: AgentMessageBase,
+  frame: AssistantDeltaFrame,
+): Record<string, unknown> | null {
+  const parts = (message as Record<string, unknown>).parts;
+  if (!Array.isArray(parts)) return null;
+  const nextParts = partsWithAppliedDelta(parts, frame);
+  return nextParts === null
+    ? null
+    : { ...(message as Record<string, unknown>), parts: nextParts };
+}
+
+/**
+ * Reconcile a cumulative assistant snapshot against locally streamed live
+ * text. Deltas legitimately outrun persist-delayed snapshots, so when the
+ * snapshot text is a strict prefix of the live text the longer live text is
+ * kept; any non-prefix snapshot is an authoritative rewrite and wins as-is.
+ */
+function snapshotKeepingLiveTail<TMessage extends AgentMessageBase>(
+  snapshot: TMessage,
+  live: TMessage,
+  isAuthoritativeMessage: (value: unknown) => value is TMessage,
+): TMessage {
+  const snapshotParts = (snapshot as Record<string, unknown>).parts;
+  const liveParts = (live as Record<string, unknown>).parts;
+  if (!Array.isArray(snapshotParts) || !Array.isArray(liveParts)) return snapshot;
+  const liveText = new Map<string, string>();
+  const liveOrdinals = { text: 0, reasoning: 0 };
+  for (const candidate of liveParts) {
+    const part = streamedTextPart(candidate);
+    if (!part) continue;
+    const ordinal = liveOrdinals[part.type];
+    liveOrdinals[part.type] = ordinal + 1;
+    if (typeof part.text === "string") {
+      liveText.set(`${part.type}:${ordinal}`, part.text);
+    }
+  }
+  const ordinals = { text: 0, reasoning: 0 };
+  let keptLiveTail = false;
+  const mergedParts = snapshotParts.map((candidate) => {
+    const part = streamedTextPart(candidate);
+    if (!part) return candidate;
+    const ordinal = ordinals[part.type];
+    ordinals[part.type] = ordinal + 1;
+    const local = liveText.get(`${part.type}:${ordinal}`);
+    if (typeof part.text !== "string" || typeof local !== "string") return candidate;
+    if (local.length <= part.text.length || !local.startsWith(part.text)) {
+      return candidate;
+    }
+    keptLiveTail = true;
+    return { ...part, text: local };
+  });
+  if (!keptLiveTail) return snapshot;
+  const merged = { ...(snapshot as Record<string, unknown>), parts: mergedParts };
+  return isAuthoritativeMessage(merged) ? merged : snapshot;
 }
 
 function currentDelivery(pending: PendingSubmit): PendingSubmit["delivery"] {
@@ -518,6 +639,8 @@ export class AgentSession<
     }
     if (parsed.kind === "assistant_snapshot") {
       this.handleAssistantSnapshot(parsed);
+    } else if (parsed.kind === "assistant_delta") {
+      this.handleAssistantDelta(parsed);
     } else if (parsed.kind === "run_state") {
       this.handleRunState(parsed.run_state);
     } else if (parsed.kind === "terminal") {
@@ -611,15 +734,53 @@ export class AgentSession<
       this.protocolError("The assistant snapshot does not match the active run.");
       return;
     }
-    const message = cloneAndFreeze(frame.message);
-    const existingIndex = this.messages.findIndex((candidate) => candidate.id === message.id);
-    if (existingIndex >= 0 && this.messages[existingIndex]?.role !== "assistant") {
+    const existingIndex = this.messages.findIndex((candidate) =>
+      candidate.id === frame.message.id);
+    const existing = existingIndex < 0 ? null : this.messages[existingIndex];
+    if (existing && existing.role !== "assistant") {
       this.protocolError("The assistant snapshot reuses a non-assistant message identity.");
       return;
     }
+    const message = cloneAndFreeze(existing
+      ? snapshotKeepingLiveTail(
+          frame.message,
+          existing,
+          this.options.isAuthoritativeMessage,
+        )
+      : frame.message);
     if (incomingOrder !== null) {
       this.latestSnapshotOrder = incomingOrder;
     }
+    this.messages = Object.freeze(existingIndex < 0
+      ? [...this.messages, message]
+      : this.messages.map((candidate, index) => index === existingIndex ? message : candidate));
+    this.publish();
+  }
+
+  /**
+   * Live deltas are render hints without snapshot authority: any delta that
+   * does not fit the local state exactly is dropped silently, because the
+   * next cumulative assistant snapshot always heals the message.
+   */
+  private handleAssistantDelta(frame: AssistantDeltaFrame): void {
+    const active = this.authoritativeRunState;
+    if (!active || active.state === "idle"
+      || active.request_id !== frame.request_id) return;
+    const existingIndex = this.messages.findIndex((candidate) =>
+      candidate.id === frame.message_id);
+    const existing = existingIndex < 0 ? null : this.messages[existingIndex];
+    if (existing && existing.role !== "assistant") return;
+    const patched = existing
+      ? patchedAssistantMessage(existing, frame)
+      : frame.part_ordinal === 0 && frame.offset === 0
+        ? {
+            id: frame.message_id,
+            role: "assistant",
+            parts: [{ type: frame.part_kind, text: frame.delta }],
+          }
+        : null;
+    if (patched === null || !this.options.isAuthoritativeMessage(patched)) return;
+    const message = frozenDeltaPatchedMessage(patched);
     this.messages = Object.freeze(existingIndex < 0
       ? [...this.messages, message]
       : this.messages.map((candidate, index) => index === existingIndex ? message : candidate));

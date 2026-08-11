@@ -171,6 +171,43 @@ describe("thin-agent protocol parsing", () => {
     }
   });
 
+  it("accepts a live assistant delta and rejects malformed delta frames", () => {
+    const delta = {
+      request_id: "request_live",
+      message_id: "assistant_live",
+      part_kind: "text",
+      part_ordinal: 0,
+      offset: 12,
+      delta: " another streamed token",
+    };
+    const parsed = parseAgentServerEvent(
+      event("assistant_delta", delta),
+      CONVERSATION_ID,
+    );
+
+    expect(parsed).toMatchObject({ kind: "assistant_delta", ...delta });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    for (const invalid of [
+      { part_kind: "tool" },
+      { part_ordinal: -1 },
+      { part_ordinal: 1.5 },
+      { offset: -1 },
+      { offset: Number.MAX_SAFE_INTEGER + 1 },
+      { delta: "" },
+      { delta: 42 },
+      { message_id: "" },
+      { request_id: undefined },
+    ]) {
+      expect(() => parseAgentServerEvent(
+        event("assistant_delta", { ...delta, ...invalid }),
+        CONVERSATION_ID,
+      )).toThrow(expect.objectContaining({
+        name: "AgentProtocolError",
+        code: "invalid_server_event",
+      } satisfies Partial<AgentProtocolError>));
+    }
+  });
+
   it("accepts only a complete non-negative full snapshot order", () => {
     const valid = parseAgentServerEvent(event("session_snapshot", {
       snapshot_epoch: 7,

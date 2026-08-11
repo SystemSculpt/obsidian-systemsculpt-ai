@@ -1604,6 +1604,7 @@ export class AgentChatSession {
   private pendingReconcile: Promise<void> = Promise.resolve();
   private pendingFinalization: Promise<void> = Promise.resolve();
   private reconciledKey: string | null = null;
+  private reconciledMessages: readonly WireMessage[] | null = null;
   private generation = 0;
   private openEpoch = 0;
   private resynchronizationTimer: number | null = null;
@@ -1722,7 +1723,14 @@ export class AgentChatSession {
           : {}),
       });
       try {
-        await this.transport.connect();
+        // A warm same-conversation start whose previous stream delivered a
+        // settled idle run state already holds current authority; the
+        // snapshot round trip would be pure pre-send latency. Any other run
+        // state (active, unknown, missed idle frame) needs the full
+        // resynchronizing connect to repair authority before dispatch.
+        await this.transport.connect({
+          reuseWarmAuthority: this.session.current.runState.state === "idle",
+        });
         this.recordLifecycle({
           code: "response_prepare_completed",
           phase: "start",
@@ -2373,6 +2381,7 @@ export class AgentChatSession {
     this.authoritativeMessages = Object.freeze([]);
     this.presentationMessages = Object.freeze([]);
     this.reconciledKey = null;
+    this.reconciledMessages = null;
     this.pendingRegenerate = null;
     this.pendingDeliveries.clear();
     this.pendingApprovalDeliveries.clear();
@@ -4415,14 +4424,21 @@ export class AgentChatSession {
   }
 
   private scheduleSnapshot(snapshot: AgentConversationSnapshot): void {
-    this.pendingSnapshot = snapshot;
-    if (this.renderTimer !== null) return;
+    if (this.renderTimer !== null) {
+      this.pendingSnapshot = snapshot;
+      return;
+    }
+    // Leading-edge throttle: the first snapshot of a burst paints with no
+    // added latency and the timer stays armed purely as the coalescing
+    // window for followers. A trailing debounce here would hold every first
+    // streamed token for a frame before anything reached the renderer.
     this.renderTimer = window.setTimeout(() => {
       this.renderTimer = null;
       const next = this.pendingSnapshot;
       this.pendingSnapshot = null;
-      if (next) this.commitSnapshot(next);
+      if (next) this.dispatchSnapshot(next);
     }, 16);
+    this.dispatchSnapshot(snapshot);
   }
 
   private commitSnapshot(snapshot: AgentConversationSnapshot): void {
@@ -4431,6 +4447,10 @@ export class AgentChatSession {
       window.clearTimeout(this.renderTimer);
       this.renderTimer = null;
     }
+    this.dispatchSnapshot(snapshot);
+  }
+
+  private dispatchSnapshot(snapshot: AgentConversationSnapshot): void {
     this.currentSnapshot = snapshot;
     for (const listener of [...this.listeners]) {
       try { listener(snapshot); }
@@ -4471,9 +4491,25 @@ export class AgentChatSession {
     // An empty fresh or fork snapshot is not an instruction to erase a local
     // cache. Wait until the server has published an authoritative root.
     if (messages.length === 0) return Promise.resolve();
+    // Authoritative messages are frozen and reused by reference across
+    // publishes, so during streaming the reconciled prefix repeats with
+    // identical elements on every delta. The reference comparison dedupes
+    // those without serializing the whole history per frame; the serialized
+    // key remains the authority when references differ (a session snapshot
+    // legitimately replaces every message object with equal content).
+    const previous = this.reconciledMessages;
+    if (
+      previous
+      && previous.length === messages.length
+      && messages.every((message, index) => message === previous[index])
+    ) return this.pendingReconcile;
     const key = JSON.stringify(messages);
-    if (key === this.reconciledKey) return this.pendingReconcile;
+    if (key === this.reconciledKey) {
+      this.reconciledMessages = messages;
+      return this.pendingReconcile;
+    }
     this.reconciledKey = key;
+    this.reconciledMessages = messages;
     const durable = durableServerHistory(messages, this.now());
     const correlation = this.createHistorySyncCorrelation(historySyncKind);
     const task = this.pendingReconcile.then(() => {
@@ -4485,7 +4521,10 @@ export class AgentChatSession {
         this.recordHistorySyncLifecycle("history_sync_completed", correlation);
       },
       (error) => {
-        if (this.reconciledKey === key) this.reconciledKey = null;
+        if (this.reconciledKey === key) {
+          this.reconciledKey = null;
+          this.reconciledMessages = null;
+        }
         this.recordHistorySyncLifecycle("history_sync_failed", correlation);
         this.reportLocalIssue(error);
       },

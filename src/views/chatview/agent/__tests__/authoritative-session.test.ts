@@ -1252,4 +1252,256 @@ describe("AgentSession server authority", () => {
     expect(connection.sendSubmit).not.toHaveBeenCalled();
     session.dispose();
   });
+
+  describe("live assistant deltas", () => {
+    function liveDelta(fields: Readonly<{
+      offset: number;
+      delta: string;
+      requestId?: string;
+      messageId?: string;
+      partOrdinal?: number;
+      partKind?: "text" | "reasoning";
+    }>) {
+      return event("assistant_delta", {
+        request_id: fields.requestId ?? "request_active",
+        message_id: fields.messageId ?? "assistant_live",
+        part_kind: fields.partKind ?? "text",
+        part_ordinal: fields.partOrdinal ?? 0,
+        offset: fields.offset,
+        delta: fields.delta,
+      });
+    }
+
+    it("builds streamed text from exact-offset deltas and drops the rest", () => {
+      const protocolErrors: Error[] = [];
+      const { connection, session } = createSession({
+        onProtocolError: (error) => protocolErrors.push(error),
+      });
+      connection.emit(event("session_snapshot", {
+        messages: [message("user_active", "user", "Stream it")],
+        run_state: active(1, "running"),
+      }));
+
+      connection.emit(liveDelta({ offset: 0, delta: "Hello" }));
+      connection.emit(liveDelta({ offset: 5, delta: " world" }));
+      // Replay of an already-applied run and a gap beyond the local text are
+      // both render hints that no longer fit; each is dropped silently.
+      connection.emit(liveDelta({ offset: 5, delta: " world" }));
+      connection.emit(liveDelta({ offset: 99, delta: "lost" }));
+      // A delta for a different run or a non-assistant identity never applies.
+      connection.emit(liveDelta({
+        offset: 11,
+        delta: "!",
+        requestId: "request_other",
+      }));
+      connection.emit(liveDelta({
+        offset: 0,
+        delta: "not yours",
+        messageId: "user_active",
+      }));
+
+      const assistant = session.current.messages.find(
+        (candidate) => candidate.id === "assistant_live",
+      );
+      expect(assistant).toMatchObject({
+        role: "assistant",
+        parts: [{ type: "text", text: "Hello world" }],
+      });
+      expect(Object.isFrozen(assistant)).toBe(true);
+      expect(session.current.messages).toHaveLength(2);
+      expect(protocolErrors).toEqual([]);
+      session.dispose();
+    });
+
+    it("creates a following part only as the next part of its kind", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(liveDelta({ offset: 0, delta: "First part." }));
+      // Ordinal 2 would skip a part; it must not create anything.
+      connection.emit(liveDelta({ offset: 0, delta: "skipped", partOrdinal: 2 }));
+      connection.emit(liveDelta({ offset: 0, delta: "Second part.", partOrdinal: 1 }));
+
+      expect(session.current.messages).toEqual([{
+        id: "assistant_live",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "First part." },
+          { type: "text", text: "Second part." },
+        ],
+      }]);
+      session.dispose();
+    });
+
+    it("keeps the longer live text when a delayed snapshot is a strict prefix", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(liveDelta({ offset: 0, delta: "Hello" }));
+      connection.emit(liveDelta({ offset: 5, delta: " world" }));
+
+      // The durable snapshot cadence legitimately trails the delta stream.
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: message("assistant_live", "assistant", "Hello"),
+      }));
+      expect(session.current.messages[0]?.parts).toEqual([
+        { type: "text", text: "Hello world" },
+      ]);
+
+      // A non-prefix snapshot is an authoritative rewrite and always wins.
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: message("assistant_live", "assistant", "Rewritten answer"),
+      }));
+      expect(session.current.messages[0]?.parts).toEqual([
+        { type: "text", text: "Rewritten answer" },
+      ]);
+
+      // Later deltas continue from the rewrite's exact tail offset.
+      connection.emit(liveDelta({ offset: 16, delta: " continues" }));
+      expect(session.current.messages[0]?.parts).toEqual([
+        { type: "text", text: "Rewritten answer continues" },
+      ]);
+      session.dispose();
+    });
+
+    it("addresses parts by ordinal within their own kind", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(liveDelta({
+        offset: 0,
+        delta: "Think",
+        partKind: "reasoning",
+      }));
+      connection.emit(liveDelta({ offset: 0, delta: "Answer" }));
+      connection.emit(liveDelta({
+        offset: 5,
+        delta: "ing",
+        partKind: "reasoning",
+      }));
+      connection.emit(liveDelta({ offset: 6, delta: " done" }));
+
+      expect(session.current.messages).toEqual([{
+        id: "assistant_live",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "Thinking" },
+          { type: "text", text: "Answer done" },
+        ],
+      }]);
+      session.dispose();
+    });
+
+    it("never creates a message from a mid-stream delta", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      // A first observable delta must be the exact start of the message;
+      // anything else waits for the healing assistant snapshot instead.
+      connection.emit(liveDelta({ offset: 3, delta: "late tail" }));
+      connection.emit(liveDelta({ offset: 0, delta: "late part", partOrdinal: 1 }));
+
+      expect(session.current.messages).toEqual([]);
+      session.dispose();
+    });
+
+    it("keeps live tails of both part kinds through a delayed snapshot", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(liveDelta({
+        offset: 0,
+        delta: "Thinking hard",
+        partKind: "reasoning",
+      }));
+      connection.emit(liveDelta({ offset: 0, delta: "Answer text" }));
+
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: {
+          id: "assistant_live",
+          role: "assistant",
+          parts: [
+            { type: "reasoning", text: "Thinking" },
+            { type: "text", text: "Answer" },
+          ],
+        },
+      }));
+
+      expect(session.current.messages).toEqual([{
+        id: "assistant_live",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "Thinking hard" },
+          { type: "text", text: "Answer text" },
+        ],
+      }]);
+      session.dispose();
+    });
+
+    it("lets a snapshot rewrite a live part that carries no text", () => {
+      const { connection, session } = createSession();
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      // Additive part shapes without text are legal on the wire; they must
+      // pass through the live-tail merge untouched.
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: {
+          id: "assistant_live",
+          role: "assistant",
+          parts: [{ type: "text" }],
+        },
+      }));
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: {
+          id: "assistant_live",
+          role: "assistant",
+          parts: [{ type: "text", text: "Full answer" }],
+        },
+      }));
+
+      expect(session.current.messages).toEqual([{
+        id: "assistant_live",
+        role: "assistant",
+        parts: [{ type: "text", text: "Full answer" }],
+      }]);
+      session.dispose();
+    });
+
+    it("never applies deltas before session authority or after the run ends", () => {
+      const protocolErrors: Error[] = [];
+      const { connection, session } = createSession({
+        onProtocolError: (error) => protocolErrors.push(error),
+      });
+      connection.emit(liveDelta({ offset: 0, delta: "too early" }));
+      expect(protocolErrors).toHaveLength(1);
+
+      connection.emit(event("session_snapshot", {
+        messages: [],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(event("run_state", { run_state: idle(2) }));
+      connection.emit(liveDelta({ offset: 0, delta: "too late" }));
+
+      expect(session.current.messages).toEqual([]);
+      expect(protocolErrors).toHaveLength(1);
+      session.dispose();
+    });
+  });
 });

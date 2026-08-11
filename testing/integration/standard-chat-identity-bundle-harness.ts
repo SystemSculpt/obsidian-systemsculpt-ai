@@ -266,30 +266,31 @@ export async function exerciseBuiltStandardChatIdentity(
     conversation_id: expect.stringMatching(/^conversation_[a-f0-9]{32}$/),
     plugin_build_id: `sha256:${"a".repeat(64)}`,
   }));
-  for (const request of [snapshotRequest, contextRequest, turnRequest]) {
+  // Staging an empty artifact is a wasted round trip: the server treats an
+  // absent context_ref as the empty staged artifact, so a turn with no
+  // pinned sources must not call the context endpoint at all.
+  expect(contextRequest).toBeUndefined();
+  for (const request of [snapshotRequest, turnRequest]) {
     const requestUrl = new URL(request!.url);
     expect([...requestUrl.searchParams.keys()]).toEqual([]);
     expect(new Headers(request!.headers).get("Authorization")).toBe(
       "Bearer fixture.access.signature",
     );
   }
-  expect(contextRequest?.body).toEqual(expect.objectContaining({
-    root_message_id: expect.stringMatching(/^user-[a-f0-9-]{36}$/),
-    context_sources: [],
-  }));
-  expect(submittedCommand).toEqual(expect.objectContaining({
+  const submitted = submittedCommand as Record<string, any> | null;
+  expect(submitted).toEqual(expect.objectContaining({
     type: "systemsculpt.agent.command.v1",
     version: 1,
     kind: "submit",
     // The request identity is the root user message identity, which keeps
     // resubmits of the same turn idempotent on the server.
-    request_id: contextRequest?.body.root_message_id,
+    request_id: expect.stringMatching(/^user-[a-f0-9-]{36}$/),
     user_message: expect.objectContaining({
-      id: contextRequest?.body.root_message_id,
+      id: submitted?.request_id,
       role: "user",
     }),
-    context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   }));
+  expect(submittedCommand).not.toHaveProperty("context_ref");
   expect(submittedCommand).not.toHaveProperty("messages");
   expect(submittedCommand).not.toHaveProperty("preferences");
   expect(submittedCommand).not.toHaveProperty("runtime");

@@ -4,8 +4,10 @@ import {
   type PlatformResponseDeliveryMode,
 } from "../../../services/PlatformRequestClient";
 import {
+  THIN_AGENT_ACCEPT_EVENTS_HEADER,
   THIN_AGENT_BOOTSTRAP_PATH,
   THIN_AGENT_CONNECTIVITY_PATH,
+  THIN_AGENT_LIVE_DELTA_EVENT_KIND,
   THIN_AGENT_MESSAGES_PATH,
   THIN_AGENT_TURN_PATH,
   parseThinAgentBootstrapResponse,
@@ -86,6 +88,9 @@ type BootstrapAccess = Readonly<{
 }>;
 
 const ACCESS_REFRESH_MARGIN_MS = 5_000;
+// A ticket inside this window at a turn boundary is refreshed in the
+// background so the likely follow-up send starts with fresh access.
+const ACCESS_BACKGROUND_REFRESH_WINDOW_MS = 20_000;
 const MAX_BOOTSTRAP_RESPONSE_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_EVENT_BYTES = 64 * 1024 * 1024;
@@ -183,6 +188,12 @@ function trailingBoundaryPrefixLength(value: string): number {
   return 0;
 }
 
+/**
+ * Classify a frame for latency milestones by structural peek instead of a
+ * full protocol parse. Milestones are observational diagnostics only — the
+ * session re-validates every frame before it becomes authority — so reading
+ * the discriminant fields directly keeps this off the per-token hot path.
+ */
 function segmentFrameKind(
   frame: unknown,
   conversationId: string,
@@ -192,29 +203,22 @@ function segmentFrameKind(
     toolCallId?: string;
   }>,
 ): "assistant_snapshot" | "command_ack" | "terminal" | null {
-  let parsed: AgentServerEvent;
-  try {
-    parsed = parseAgentServerEvent(frame, conversationId);
-  } catch {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return null;
+  const record = frame as Record<string, unknown>;
+  if (record.conversation_id !== conversationId
+    || record.request_id !== command.requestId) return null;
+  const kind = record.kind;
+  if (kind === "assistant_snapshot" || kind === "assistant_delta") {
+    return "assistant_snapshot";
+  }
+  if (kind === "terminal") return "terminal";
+  if (kind !== "command_ack" || record.command_kind !== command.commandKind) {
     return null;
   }
   if (
-    parsed.kind === "assistant_snapshot"
-    && parsed.request_id === command.requestId
-  ) return "assistant_snapshot";
-  if (
-    parsed.kind === "terminal"
-    && parsed.request_id === command.requestId
-  ) return "terminal";
-  if (
-    parsed.kind !== "command_ack"
-    || parsed.request_id !== command.requestId
-    || parsed.command_kind !== command.commandKind
-  ) return null;
-  if (
-    (parsed.command_kind === "client_tool_result"
-      || parsed.command_kind === "client_tool_approval")
-    && parsed.tool_call_id !== command.toolCallId
+    (record.command_kind === "client_tool_result"
+      || record.command_kind === "client_tool_approval")
+    && record.tool_call_id !== command.toolCallId
   ) return null;
   return "command_ack";
 }
@@ -275,10 +279,26 @@ implements AgentConnectionPort {
    * dispatch, and it rejects every other frame as arriving out of order. The
    * transport reads that snapshot over HTTP.
    */
-  public async connect(): Promise<void> {
+  public async connect(options?: Readonly<{
+    /**
+     * Skip the snapshot round trip when this transport is already open with
+     * no in-flight streams. Only a caller that has independently confirmed
+     * its session holds settled terminal authority (an idle run state
+     * delivered on the previous stream) may pass this: connect() is also the
+     * resynchronization primitive and the fence that supersedes wedged
+     * in-flight readers, so an unconditional shortcut would break stall and
+     * disconnect recovery.
+     */
+    reuseWarmAuthority?: boolean;
+  }>): Promise<void> {
     if (this.disposed) {
       throw new Error("This chat connection is closed.");
     }
+    if (
+      options?.reuseWarmAuthority
+      && this.connectionState === "open"
+      && this.inFlight.size === 0
+    ) return;
     const generation = ++this.connectGeneration;
     this.setState("connecting");
     try {
@@ -458,6 +478,23 @@ implements AgentConnectionPort {
     }
   }
 
+  /**
+   * Refreshes access at the turn boundary when a long stream consumed most of
+   * the ticket lifetime, so a prompt follow-up send never pays the bootstrap
+   * round trip inside its critical path. Tied to turn completion rather than
+   * a timer: an idle chat must not poll the licensed bootstrap route.
+   */
+  private refreshExpiringAccessInBackground(): void {
+    if (this.disposed) return;
+    const current = this.access;
+    if (
+      current
+      && current.expiresAt - Date.now() > ACCESS_BACKGROUND_REFRESH_WINDOW_MS
+    ) return;
+    this.access = null;
+    void this.ensureBootstrap().catch(() => {});
+  }
+
   private async prewarmStreamingTransport(): Promise<void> {
     const prewarm = this.options.requestClient.prewarmStreamingFetch;
     if (!prewarm) return;
@@ -547,7 +584,10 @@ implements AgentConnectionPort {
       const response = await this.options.requestClient.request({
         url: `${this.options.baseUrl}${THIN_AGENT_TURN_PATH}`,
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          [THIN_AGENT_ACCEPT_EVENTS_HEADER]: THIN_AGENT_LIVE_DELTA_EVENT_KIND,
+        },
         // stream selects the direct-fetch transport, which is the only one
         // that delivers frames as they are produced rather than buffering the
         // whole turn. The request client serializes the body itself; handing
@@ -628,6 +668,7 @@ implements AgentConnectionPort {
           : undefined,
         bootstrap.conversation_id,
       );
+      this.refreshExpiringAccessInBackground();
     } catch (error) {
       if (!this.disposed && generation !== this.connectGeneration) {
         // A newer authoritative synchronization owns the connection now.
@@ -668,7 +709,9 @@ implements AgentConnectionPort {
     const encoder = new TextEncoder();
     const eventBoundary = /\r?\n\r?\n/gu;
     let boundaryPrefix = "";
+    let eventUnits = 0;
     let eventBytes = 0;
+    let measuringExactBytes = false;
     let fragments: string[] = [];
     let fragmentBatch: string[] = [];
     let firstRawChunkObserved = false;
@@ -743,9 +786,24 @@ implements AgentConnectionPort {
 
     const appendEventText = (text: string): void => {
       if (!text) return;
-      eventBytes += encoder.encode(text).byteLength;
-      if (eventBytes > MAX_EVENT_BYTES) {
-        throw new Error("SystemSculpt returned an oversized session event.");
+      // UTF-8 never encodes fewer bytes than the UTF-16 unit count and never
+      // more than three per unit, so unit counting bounds the event without
+      // allocating an encoded copy of every fragment. Exact byte tracking
+      // starts only once the cheap bound could disagree with the byte cap.
+      eventUnits += text.length;
+      if (!measuringExactBytes && eventUnits * 3 > MAX_EVENT_BYTES) {
+        measuringExactBytes = true;
+        if (fragmentBatch.length > 0) {
+          fragments.push(fragmentBatch.join(""));
+          fragmentBatch = [];
+        }
+        eventBytes = encoder.encode(fragments.join("")).byteLength;
+      }
+      if (measuringExactBytes) {
+        eventBytes += encoder.encode(text).byteLength;
+        if (eventBytes > MAX_EVENT_BYTES) {
+          throw new Error("SystemSculpt returned an oversized session event.");
+        }
       }
       fragmentBatch.push(text);
       if (fragmentBatch.length >= SSE_FRAGMENT_FLUSH_COUNT) {
@@ -758,7 +816,9 @@ implements AgentConnectionPort {
       const event = fragments.join("");
       fragments = [];
       fragmentBatch = [];
+      eventUnits = 0;
       eventBytes = 0;
+      measuringExactBytes = false;
       return event;
     };
     const consumeDecodedText = (text: string): void => {
@@ -816,7 +876,7 @@ implements AgentConnectionPort {
       consumeDecodedText(decoder.decode());
       appendEventText(boundaryPrefix);
       boundaryPrefix = "";
-      if (eventBytes > 0) {
+      if (eventUnits > 0) {
         const finalEvent = takeEventText();
         if (finalEvent.trim()
           && !this.emit(

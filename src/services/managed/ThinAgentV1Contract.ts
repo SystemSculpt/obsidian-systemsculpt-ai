@@ -11,6 +11,14 @@ export const THIN_AGENT_MESSAGES_PATH =
   "/api/plugin/agent/connect/get-messages" as const;
 export const THIN_AGENT_TURN_PATH =
   "/api/plugin/agent/turn" as const;
+/**
+ * Additive per-connection negotiation: a turn request lists the optional
+ * server event kinds this client can render. Servers that predate the header
+ * ignore it and stream the unchanged snapshot-only protocol.
+ */
+export const THIN_AGENT_ACCEPT_EVENTS_HEADER =
+  "x-systemsculpt-agent-accept-events" as const;
+export const THIN_AGENT_LIVE_DELTA_EVENT_KIND = "assistant_delta" as const;
 
 const THIN_AGENT_COMMAND_KINDS = Object.freeze([
   "submit",

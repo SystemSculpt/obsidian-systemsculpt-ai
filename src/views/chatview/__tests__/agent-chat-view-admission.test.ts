@@ -1394,9 +1394,11 @@ describe("AgentChatView composer admission", () => {
     harness.runGate.resolve();
     await harness.runFinished.promise;
 
-    expect(harness.builtBodies).toEqual([{
-      context_ref: "ctx1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    }]);
+    // With nothing pinned there is nothing to stage: the turn body omits
+    // context_ref entirely (and never carries web-search preferences), and
+    // the staging round trip is skipped.
+    expect(harness.builtBodies).toEqual([undefined]);
+    expect(harness.agent.stageContext).not.toHaveBeenCalled();
     harness.composer.unload();
   });
 

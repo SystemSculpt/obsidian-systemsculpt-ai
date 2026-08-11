@@ -92,6 +92,9 @@ type LiveMarkdownState = {
   committedRevision: number;
   committedMarkdown: string | null;
   committedFinal: boolean;
+  // The markdown whose content the live DOM currently displays: the last
+  // committed parse plus any tail runs painted directly between parses.
+  paintedMarkdown: string | null;
   leases: Set<Component>;
   failedRevision: number | null;
   lastStartedAt: number;
@@ -591,7 +594,48 @@ export class LiveMarkdownRenderer extends Component {
       return;
     }
     if (state.committedRevision === 0) this.showFallback(state);
+    else this.paintAppendedTail(state, markdown);
     this.schedule(state, false);
+  }
+
+  /**
+   * Paint a newly appended run of prose into the committed DOM without
+   * waiting for the throttled Markdown parse. This is a visual fast path
+   * only: it applies when no parse is in flight (so every later commit
+   * already contains the painted text), the update purely appends a single
+   * line to what the DOM currently displays, and the DOM tail is an ordinary
+   * text node outside interactive or code content. The next full parse
+   * renders the same content authoritatively and heals any styling drift.
+   */
+  private paintAppendedTail(
+    state: LiveMarkdownState,
+    markdown: string,
+  ): void {
+    const painted = state.paintedMarkdown;
+    if (
+      state.inFlight
+      || state.fallbackVisible
+      || painted === null
+      || markdown.length <= painted.length
+      || !markdown.startsWith(painted)
+    ) return;
+    const suffix = markdown.slice(painted.length);
+    if (suffix.includes("\n") || suffix.includes("\r")) return;
+    let node: Node = state.target;
+    while (node.lastChild) node = node.lastChild;
+    if (node === state.target || node.nodeType !== Node.TEXT_NODE) return;
+    const container = node.parentElement;
+    if (
+      !container
+      || container.closest(
+        "a, button, code, input, select, textarea, .systemsculpt-agent-code-copy",
+      )
+    ) return;
+    // appendData splices at the end of the node, so an existing user
+    // selection or caret earlier in the text keeps its boundary points; a
+    // full `data` assignment would collapse them.
+    (node as Text).appendData(suffix);
+    state.paintedMarkdown = markdown;
   }
 
   public settle(target: HTMLElement, markdown: string): Promise<void> {
@@ -659,6 +703,7 @@ export class LiveMarkdownRenderer extends Component {
         committedRevision: 0,
         committedMarkdown: null,
         committedFinal: false,
+        paintedMarkdown: null,
         leases: new Set(),
         failedRevision: null,
         lastStartedAt: Number.NEGATIVE_INFINITY,
@@ -685,6 +730,7 @@ export class LiveMarkdownRenderer extends Component {
     reconcileLiveMarkdownDom(state.target, staging);
     state.target.classList.add("is-live-markdown-fallback");
     state.committedFinal = false;
+    state.paintedMarkdown = null;
     state.fallbackVisible = true;
   }
 
@@ -699,6 +745,7 @@ export class LiveMarkdownRenderer extends Component {
     replaceLiveMarkdownDom(state.target, staging);
     state.target.classList.add("is-live-markdown-fallback");
     state.committedFinal = false;
+    state.paintedMarkdown = null;
     state.fallbackVisible = true;
   }
 
@@ -801,6 +848,7 @@ export class LiveMarkdownRenderer extends Component {
         state.committedMarkdown = markdown;
         state.committedRevision = revision;
         state.committedFinal = final;
+        state.paintedMarkdown = markdown;
         state.target.classList.remove("is-live-markdown-fallback");
         state.fallbackVisible = false;
         return { status: "committed" };

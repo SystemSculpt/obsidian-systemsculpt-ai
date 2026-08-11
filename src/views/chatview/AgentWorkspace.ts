@@ -117,6 +117,7 @@ export class AgentWorkspace extends Component {
   private activeSnapshotRenderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
   private snapshotRenderTimer: number | null = null;
   private resolveSnapshotRenderDelay: (() => void) | null = null;
+  private lastSnapshotRenderAt: number | null = null;
   private followedTurnId: string | null = null;
   private unloaded = false;
   private lifecycleGeneration = 0;
@@ -637,17 +638,27 @@ export class AgentWorkspace extends Component {
     let renderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
     this.snapshotRenderPromise = this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
-      await new Promise<void>((resolve) => {
-        const finishDelay = (): void => {
-          this.snapshotRenderTimer = null;
-          this.resolveSnapshotRenderDelay = null;
-          resolve();
-        };
-        this.resolveSnapshotRenderDelay = finishDelay;
-        this.snapshotRenderTimer = getSurfaceOwnerWindow(this.element)
-          .setTimeout(finishDelay, 32);
-      });
-      if (!this.isLifecycleCurrent(generation)) return;
+      // Leading-edge pacing: the first snapshot after a quiet period renders
+      // with no delay; only renders inside the 32ms window since the last
+      // one wait out the remainder so a streaming burst still coalesces.
+      const sinceLastRender = this.lastSnapshotRenderAt === null
+        ? Number.POSITIVE_INFINITY
+        : Date.now() - this.lastSnapshotRenderAt;
+      const renderDelay = Math.max(0, 32 - sinceLastRender);
+      if (renderDelay > 0) {
+        await new Promise<void>((resolve) => {
+          const finishDelay = (): void => {
+            this.snapshotRenderTimer = null;
+            this.resolveSnapshotRenderDelay = null;
+            resolve();
+          };
+          this.resolveSnapshotRenderDelay = finishDelay;
+          this.snapshotRenderTimer = getSurfaceOwnerWindow(this.element)
+            .setTimeout(finishDelay, renderDelay);
+        });
+        if (!this.isLifecycleCurrent(generation)) return;
+      }
+      this.lastSnapshotRenderAt = Date.now();
       renderWaiters = this.snapshotRenderWaiters.splice(0);
       this.activeSnapshotRenderWaiters = renderWaiters;
       const snapshot = this.pendingSnapshotRender;
