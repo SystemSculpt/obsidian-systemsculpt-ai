@@ -37,6 +37,7 @@ const MAX_JSON_NODES = 100_000;
 const MAX_JSON_COLLECTION_ENTRIES = 2_048;
 const MAX_SERVER_MESSAGE_PARTS = 2_048;
 const MAX_QUEUED_TURNS = 256;
+const MAX_ASSISTANT_DELTA_CHARS = 1_000_000;
 const INVALID_JSON_VALUE = Symbol("invalid-json-value");
 const runStateCanonicals = new WeakMap<object, string>();
 
@@ -168,6 +169,22 @@ export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
   message: Readonly<Record<string, unknown>>;
 }>;
 
+/**
+ * One appended run of streamed assistant text between cumulative snapshots.
+ * Deltas are render hints without authority: they apply only when the offset
+ * matches the local part text exactly, and any missed or dropped delta is
+ * healed by the next assistant snapshot.
+ */
+export type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
+  kind: "assistant_delta";
+  request_id: string;
+  message_id: string;
+  part_kind: "text" | "reasoning";
+  part_ordinal: number;
+  offset: number;
+  delta: string;
+}>;
+
 export type AgentRunStateEvent = ServerEventBase & Readonly<{
   kind: "run_state";
   run_state: AgentRunState;
@@ -225,6 +242,7 @@ export type AgentUnknownEvent = ServerEventBase & Readonly<{
 export type AgentServerEvent =
   | AgentSessionSnapshotEvent
   | AgentAssistantSnapshotEvent
+  | AgentAssistantDeltaEvent
   | AgentRunStateEvent
   | AgentTerminalEvent
   | AgentQueueSnapshotEvent
@@ -914,6 +932,32 @@ export function parseAgentServerEvent(
           }
         : {}),
       message: parseServerMessage(value.message, "assistant"),
+    });
+  }
+  if (value.kind === "assistant_delta") {
+    if (
+      !safeId(value.request_id)
+      || !safeId(value.message_id)
+      || (value.part_kind !== "text" && value.part_kind !== "reasoning")
+      || !safeInteger(value.part_ordinal)
+      || (value.part_ordinal as number) < 0
+      || !safeInteger(value.offset)
+      || (value.offset as number) < 0
+      || typeof value.delta !== "string"
+      || value.delta.length < 1
+      || value.delta.length > MAX_ASSISTANT_DELTA_CHARS
+    ) {
+      return fail("invalid_server_event", "The assistant delta is invalid.");
+    }
+    return Object.freeze({
+      ...base,
+      kind: "assistant_delta",
+      request_id: value.request_id,
+      message_id: value.message_id,
+      part_kind: value.part_kind,
+      part_ordinal: value.part_ordinal as number,
+      offset: value.offset as number,
+      delta: value.delta,
     });
   }
   if (value.kind === "run_state") {

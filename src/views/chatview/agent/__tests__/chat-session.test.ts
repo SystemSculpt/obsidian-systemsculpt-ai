@@ -2136,15 +2136,26 @@ describe("AgentChatSession", () => {
     }])));
     await tick();
 
-    expect(presented.length).toBeLessThanOrEqual(1);
-    await waitFor(() => presented.length === 1);
-    expect(presented).toHaveLength(1);
+    // Leading-edge presentation: the first streamed snapshot paints
+    // immediately and follow-ups inside the 16ms window coalesce. Under load
+    // a window can expire mid-burst, so pin the leading paint and the final
+    // frame rather than an exact frame count.
+    await waitFor(() => presented.length >= 1);
     expect(presented[0]).toMatchObject({
       status: "running",
       phase: "working",
       messages: [{ id: "assistant_new", role: "assistant" }],
     });
-    expect(presented[0]!.parts).toEqual([
+    await waitFor(() =>
+      presented[presented.length - 1]!.parts.length === 4);
+    expect(presented.length).toBeLessThanOrEqual(3);
+    const settled = presented[presented.length - 1]!;
+    expect(settled).toMatchObject({
+      status: "running",
+      phase: "working",
+      messages: [{ id: "assistant_new", role: "assistant" }],
+    });
+    expect(settled.parts).toEqual([
       expect.objectContaining({
         kind: "reasoning",
         summary: "Checked trusted sources",

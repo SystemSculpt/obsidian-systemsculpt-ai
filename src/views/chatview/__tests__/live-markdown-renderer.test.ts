@@ -96,6 +96,46 @@ describe("LiveMarkdownRenderer", () => {
     live.unload();
   });
 
+  it("paints appended single-line prose into the committed tail between parses", async () => {
+    let now = 0;
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({
+      render,
+      throttleMs: 48,
+      now: () => now,
+    });
+    live.load();
+
+    live.stream(target, "Hello");
+    await live.flush(target);
+    expect(target.textContent).toBe("rendered:Hello");
+
+    // Inside the throttle window an appended token paints immediately from
+    // the committed DOM tail, without waiting for another Markdown parse.
+    now = 10;
+    live.stream(target, "Hello world");
+    expect(target.textContent).toBe("rendered:Hello world");
+    now = 20;
+    live.stream(target, "Hello world again");
+    expect(target.textContent).toBe("rendered:Hello world again");
+    expect(render).toHaveBeenCalledTimes(1);
+
+    // A structural suffix waits for the authoritative parse instead.
+    now = 30;
+    live.stream(target, "Hello world again\n\nNext");
+    expect(target.textContent).toBe("rendered:Hello world again");
+
+    await live.flush(target);
+    expect(target.textContent).toBe("rendered:Hello world again\n\nNext");
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(render.mock.calls[render.mock.calls.length - 1]?.[0])
+      .toBe("Hello world again\n\nNext");
+    live.unload();
+  });
+
   it("reconciles ordinary streamed Markdown in place and installs one authoritative final lease", async () => {
     const target = document.body.createDiv();
     const cleanups: jest.Mock[] = [];

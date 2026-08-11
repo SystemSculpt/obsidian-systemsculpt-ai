@@ -4505,7 +4505,22 @@ describe("AgentWorkspace", () => {
       onOpenSettings: jest.fn(),
     });
     workspace.load();
-    const renderActive = jest.spyOn(workspace.renderer, "renderActive");
+    const renderActive = jest.spyOn(workspace.renderer, "renderActive")
+      .mockResolvedValue();
+
+    // Prime the pacing window: the first snapshot renders leading-edge with
+    // no timer. The follow-up inside the 32ms window becomes the queued
+    // frame this test cancels.
+    await workspace.setAgentSnapshot({
+      runId: "run-unload",
+      turnId: "user-unload",
+      status: "running",
+      phase: "working",
+      messages: [],
+      parts: [],
+    });
+    expect(renderActive).toHaveBeenCalledTimes(1);
+    renderActive.mockClear();
 
     const completion = workspace.setAgentSnapshot({
       runId: "run-unload",
@@ -4526,7 +4541,9 @@ describe("AgentWorkspace", () => {
         order: 0,
       }],
     });
-    await Promise.resolve();
+    // The queued frame re-arms through the previous render's settlement
+    // chain, which spans several microtasks.
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
     expect((workspace as any).snapshotRenderTimer).not.toBeNull();
 
     workspace.unload();

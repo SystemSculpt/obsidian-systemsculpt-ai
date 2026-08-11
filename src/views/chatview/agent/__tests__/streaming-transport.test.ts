@@ -1323,6 +1323,111 @@ describe("AgentStreamingTransport", () => {
     expect(seen).toEqual([]);
   });
 
+  it("does not classify mismatched acknowledgements as command milestones", async () => {
+    const requestId = "user_ack_mismatch";
+    const toolCallId = "call_ack_mismatch";
+    const timingEvents: AgentTransportTimingEvent[] = [];
+    const wrongKindAck = {
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "command_ack",
+      conversation_id: CONVERSATION_ID,
+      request_id: requestId,
+      command_kind: "cancel",
+      status: "accepted",
+    };
+    const wrongToolAck = {
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "command_ack",
+      conversation_id: CONVERSATION_ID,
+      request_id: requestId,
+      command_kind: "client_tool_result",
+      tool_call_id: "call_someone_else",
+      status: "accepted",
+    };
+    const { transport } = harness([wrongKindAck, wrongToolAck], undefined, undefined, {
+      monotonicNow: () => 7,
+      onTiming: (event) => timingEvents.push(event),
+    });
+    await transport.connect();
+
+    await transport.sendToolResult(toolResult(requestId, toolCallId));
+
+    expect(timingEvents.some((event) =>
+      event.milestone === "command_ack_sse_frame")).toBe(false);
+  });
+
+  it("refreshes near-expiry access in the background after a clean turn", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const request = jest.fn(async (input: Record<string, unknown>) => {
+      calls.push(input);
+      const url = String(input.url);
+      if (url.includes("/agent/bootstrap")) {
+        return new Response(JSON.stringify({
+          contract_version: "thin-agent-v1",
+          conversation_id: CONVERSATION_ID,
+          session: { id: `session_${"c".repeat(32)}` },
+          access: {
+            token: "access_token_near_expiry",
+            // Inside the 20s background-refresh window.
+            expires_at: new Date(Date.now() + 5_000).toISOString(),
+          },
+          accepted_capabilities: [{ id: "obsidian.vault", version: 1 }],
+          client_input_limits: {
+            image_mime_types: ["image/png", "image/jpeg", "image/webp"],
+            max_content_blocks_per_message: 16,
+            max_images_per_turn: 6,
+            max_image_bytes: 6_291_456,
+            max_total_image_bytes: 16_777_216,
+            max_text_bytes_per_block: 1_048_576,
+            max_total_text_bytes: 2_097_152,
+            max_document_bytes: 26_214_400,
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/get-messages")) return snapshotResponse();
+      return sseResponse([]);
+    });
+    const transport = new AgentStreamingTransport({
+      baseUrl: "https://systemsculpt.test",
+      licenseKey: () => "license_test",
+      pluginVersion: "6.2.7",
+      bootstrapRequest,
+      requestClient: { request } as never,
+    });
+    await transport.connect();
+
+    await transport.sendSubmit(submit("user_near_expiry"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls.filter((call) =>
+      String(call.url).includes("/agent/bootstrap")).length)
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  it("rejects an oversized multi-byte session event by exact encoded size", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    // 23M "€" runs to 69MB of UTF-8 — over the 64MB event cap — while the
+    // cheap UTF-16 unit count alone (23M) stays far under it, forcing the
+    // exact byte-accounting fallback.
+    const oversized = "€".repeat(23_000_000);
+    request.mockResolvedValueOnce(new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(`data: ${oversized}\n\n`));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ));
+
+    await expect(transport.sendSubmit(submit("user_oversized_event")))
+      .rejects.toThrow("oversized session event");
+  });
+
   it("rejects a command of the wrong kind for each sender", async () => {
     const { transport } = harness([]);
     await transport.connect();
