@@ -112,6 +112,28 @@ describe("PluginUpdateService", () => {
     expect(notify).toHaveBeenCalledWith("Update check is temporarily unavailable. Try again.", 6_000);
   });
 
+  it("adds manual feedback to an in-flight background check", async () => {
+    const plugin = createPlugin();
+    const notify = jest.fn();
+    let resolveRequest!: (value: unknown) => void;
+    const request = jest.fn(() => new Promise<unknown>((resolve) => {
+      resolveRequest = resolve;
+    }));
+    const service = new PluginUpdateService(plugin, { request, notify });
+
+    const backgroundCheck = service.checkForUpdates();
+    const manualCheck = service.checkForUpdates({ manual: true });
+    resolveRequest(releaseBody("6.6.1"));
+
+    await expect(Promise.all([backgroundCheck, manualCheck])).resolves.toEqual([
+      expect.objectContaining({ outcome: "up_to_date" }),
+      expect.objectContaining({ outcome: "up_to_date" }),
+    ]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("SystemSculpt 6.6.1 is current.", 5_000);
+  });
+
   it("works on mobile without creating a status-bar action", async () => {
     (Platform as any).isDesktopApp = false;
     (Platform as any).isMobile = true;

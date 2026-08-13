@@ -81,6 +81,7 @@ export class PluginUpdateService {
   private lastCheckAt = 0;
   private announcedVersion = "";
   private pendingCheck: Promise<PluginUpdateCheckResult> | null = null;
+  private pendingManualFeedback = false;
 
   private readonly handleReturnToApp = (): void => {
     if (typeof document !== "undefined" && document.hidden) return;
@@ -134,19 +135,22 @@ export class PluginUpdateService {
     }
     this.started = false;
     this.pendingCheck = null;
+    this.pendingManualFeedback = false;
   }
 
   public async checkForUpdates(options: { manual?: boolean } = {}): Promise<PluginUpdateCheckResult> {
+    if (options.manual === true) this.pendingManualFeedback = true;
     if (this.pendingCheck) return this.pendingCheck;
-    this.pendingCheck = this.performCheck(options.manual === true);
+    this.pendingCheck = this.performCheck();
     try {
       return await this.pendingCheck;
     } finally {
       this.pendingCheck = null;
+      this.pendingManualFeedback = false;
     }
   }
 
-  private async performCheck(manual: boolean): Promise<PluginUpdateCheckResult> {
+  private async performCheck(): Promise<PluginUpdateCheckResult> {
     this.lastCheckAt = this.now();
     try {
       const release = parsePluginReleaseInfo(await this.request());
@@ -154,7 +158,7 @@ export class PluginUpdateService {
 
       if (compareNumericVersions(release.latestVersion, this.plugin.manifest.version) > 0) {
         this.showUpdateAction(release.latestVersion);
-        if (manual || this.announcedVersion !== release.latestVersion) {
+        if (this.pendingManualFeedback || this.announcedVersion !== release.latestVersion) {
           this.notify(
             `SystemSculpt ${release.latestVersion} is ready. Open Community Plugins to update.`,
             12_000,
@@ -165,10 +169,14 @@ export class PluginUpdateService {
       }
 
       this.hideUpdateAction();
-      if (manual) this.notify(`SystemSculpt ${this.plugin.manifest.version} is current.`, 5_000);
+      if (this.pendingManualFeedback) {
+        this.notify(`SystemSculpt ${this.plugin.manifest.version} is current.`, 5_000);
+      }
       return { outcome: "up_to_date", release };
     } catch {
-      if (manual) this.notify("Update check is temporarily unavailable. Try again.", 6_000);
+      if (this.pendingManualFeedback) {
+        this.notify("Update check is temporarily unavailable. Try again.", 6_000);
+      }
       return { outcome: "unavailable" };
     }
   }
