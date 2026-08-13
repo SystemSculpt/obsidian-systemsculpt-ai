@@ -1,8 +1,7 @@
 import {
-  groupConsecutiveToolActivity,
   presentAgentTool,
+  presentAgentToolDetails,
   presentAgentToolFailure,
-  presentAgentToolGroup,
 } from "../AgentToolPresentation";
 import type { AgentToolPart } from "../AgentConversation";
 
@@ -142,20 +141,47 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part())).toMatchObject({
       canonicalName: "read",
       label: "Read 1 file",
-      stateLabel: "Working",
-      icon: "loader-circle",
-      animated: true,
+      actionIcon: "file-text",
+      icon: "minus",
       summary: "Projects/Plan.md",
-      itemCount: 1,
     });
   });
+
+  it.each([
+    ["input-streaming", "minus"],
+    ["input-ready", "minus"],
+    ["approved", "minus"],
+    ["running", "minus"],
+    ["succeeded", "check"],
+  ] as const)(
+    "omits routine state text for %s while preserving its static mark",
+    (state, icon) => {
+      expect(presentAgentTool(part({ state }))).toMatchObject({
+        icon,
+      });
+    },
+  );
+
+  it.each([
+    ["approval-required", "minus"],
+    ["failed", "x"],
+    ["denied", "x"],
+    ["cancelled", "x"],
+    ["outcome-unknown", "x"],
+  ] as const)(
+    "uses a static mark without visible state text for %s",
+    (state, icon) => {
+      expect(presentAgentTool(part({ state }))).toMatchObject({
+        icon,
+      });
+    },
+  );
 
   it("prefers the result summary and truncates it for the single-line row", () => {
     const presentation = presentAgentTool(part({
       state: "succeeded",
       output: { summary: `Updated ${"very ".repeat(30)}long.md` },
     }));
-    expect(presentation.stateLabel).toBe("Done");
     expect(presentation.summary?.length).toBeLessThanOrEqual(96);
     expect(presentation.summary).toMatch(/…$/);
   });
@@ -164,12 +190,21 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({
       state: "failed",
       error: { code: "failed", message: "Could not read the file." },
-    }))).toMatchObject({ stateLabel: "Failed", icon: "circle-x" });
+    }))).toMatchObject({ icon: "x" });
   });
 
   it("presents canonical tool names", () => {
     expect(presentAgentTool(part({ name: "write", input: { path: "Note.md" } })))
-      .toMatchObject({ canonicalName: "write", label: "Write file", summary: "Note.md" });
+      .toMatchObject({
+        canonicalName: "write",
+        label: "Write file",
+        actionIcon: "file-plus-2",
+        summary: "Note.md",
+      });
+    expect(presentAgentTool(part({ name: "future_tool" }))).toMatchObject({
+      canonicalName: "future_tool",
+      actionIcon: "wrench",
+    });
   });
 
   it("names context-tool rows by the actual pinning action", () => {
@@ -197,71 +232,98 @@ describe("presentAgentTool", () => {
     });
   });
 
-  it("shows only a completed, privacy-approved web search query", () => {
-    expect(presentAgentTool(part({
-      name: "web_search",
-      location: "server",
-      input: {},
-      state: "succeeded",
-      output: {
-        data: { query: "Obsidian agent plugins" },
-        title: "Cloudflare search",
-        summary: "OpenRouter web search completed",
-      },
-    }))).toMatchObject({
-      canonicalName: "web_search",
-      label: "Search the web",
-      summary: null,
-      itemCount: null,
-      queries: ["Obsidian agent plugins"],
-    });
-    expect(presentAgentTool(part({
+  it("exposes only a completed public web query in tool details", () => {
+    expect(presentAgentToolDetails(part({
       name: "web_search",
       location: "server",
       input: { query: "Private model-authored query" },
       state: "running",
-    })).queries).toEqual([null]);
-  });
-
-  it("groups an adjacent web-search batch and preserves every query in order", () => {
-    const search = (
-      id: string,
-      query: string,
-      state: AgentToolPart["state"] = "succeeded",
-    ): AgentToolPart => part({
-      id,
-      callId: id,
+    }))).toEqual([]);
+    expect(presentAgentToolDetails(part({
       name: "web_search",
       location: "server",
-      input: {},
-      state,
-      ...(state === "succeeded" ? { output: { data: { query } } } : {}),
-    });
-    const activities = [
-      search("search-1", "Blaxel funding"),
-      search("search-2", "site:blaxel.ai seed round"),
-      search("search-3", "Blaxel First Round", "running"),
-    ];
-    const [entry] = groupConsecutiveToolActivity(
-      activities,
-      (tool) => tool,
-      false,
-    );
+      input: { query: "Completed public query" },
+      state: "succeeded",
+    }))).toEqual([{ label: "Query", value: "Completed public query" }]);
+  });
 
-    expect(entry.kind).toBe("tools");
-    if (entry.kind !== "tools") throw new Error("Expected a web-search group.");
-    expect(entry.tools).toHaveLength(3);
-    expect(presentAgentToolGroup(entry.tools)).toMatchObject({
-      label: "Search the web (3)",
-      displayState: "running",
-      stateLabel: "Working",
-      itemCount: 3,
-      queries: [
-        "Blaxel funding",
-        "site:blaxel.ai seed round",
-        null,
-      ],
-    });
+  it("presents capped, known vault details without exposing file or edit content", () => {
+    const secret = "private edit text sentinel";
+    const details = presentAgentToolDetails(part({
+      name: "multi_edit",
+      input: {
+        files: Array.from({ length: 10 }, (_, index) => ({
+          path: `Projects/${index}-${"long".repeat(80)}.md`,
+          edits: [{ oldText: secret, newText: secret }],
+        })),
+      },
+      state: "succeeded",
+      output: { summary: "Updated project files." },
+    }));
+
+    expect(details).toHaveLength(8);
+    expect(details.at(-1)).toEqual({ label: "More", value: "3 more items" });
+    expect(details.every((detail) => detail.value.length <= 240)).toBe(true);
+    expect(JSON.stringify(details)).not.toContain(secret);
+  });
+
+  it("shows only successful artifacts for a partial vault result", () => {
+    const details = presentAgentToolDetails(part({
+      name: "multi_edit",
+      input: {
+        files: ["Completed.md", "Failed.md"].map((path) => ({
+          path,
+          edits: [{ oldText: "before", newText: "after" }],
+        })),
+      },
+      state: "failed",
+      output: {
+        summary: "Failed.md could not be edited.",
+        data: batchToolOutput("multi_edit", ["succeeded", "failed"]),
+        artifacts: [{
+          id: "completed-artifact",
+          kind: "vault_file",
+          title: "Completed.md",
+          path: "Completed.md",
+        }],
+      },
+      error: {
+        code: "TOOL_PARTIAL_FAILURE",
+        message: PRIVATE_FAILURE_SENTINEL,
+      },
+    }));
+
+    expect(details).toEqual([{ label: "Path", value: "Completed.md" }]);
+    expect(JSON.stringify(details)).not.toContain("Failed.md");
+  });
+
+  it("omits a result that repeats the visible summary or a detail path", () => {
+    expect(presentAgentToolDetails(part({
+      state: "succeeded",
+      input: { paths: ["Projects/Plan.md"] },
+      output: { summary: "Projects/Plan.md" },
+    }))).toEqual([{ label: "Path", value: "Projects/Plan.md" }]);
+  });
+
+  it("does not expose unknown server input or output as tool details", () => {
+    const secret = "private provider detail sentinel";
+    expect(presentAgentToolDetails(part({
+      name: "provider_action",
+      location: "server",
+      input: { query: secret, path: secret },
+      state: "succeeded",
+      output: { title: secret, summary: secret, data: { value: secret } },
+    }))).toEqual([]);
+  });
+
+  it("does not expose unknown vault input or output as tool details", () => {
+    const secret = "private additive vault detail sentinel";
+    expect(presentAgentToolDetails(part({
+      name: "future_vault_tool",
+      input: { path: secret },
+      state: "succeeded",
+      output: { title: secret, summary: secret, data: { value: secret } },
+    }))).toEqual([]);
   });
 
   it("never derives visible copy from an additive server tool name or payload", () => {
@@ -278,8 +340,8 @@ describe("presentAgentTool", () => {
     expect(presentation).toMatchObject({
       canonicalName: "server_action",
       label: "SystemSculpt action",
+      actionIcon: "wand-sparkles",
       summary: null,
-      itemCount: null,
     });
     expect(JSON.stringify(presentation)).not.toMatch(
       /cf_agent|provider|cloudflare|retry/i,
@@ -291,29 +353,6 @@ describe("presentAgentTool", () => {
     }))).toMatchObject({
       label: "SystemSculpt action",
       summary: null,
-      itemCount: null,
-    });
-    expect(presentAgentToolGroup([
-      part({
-        id: "server-read-1",
-        callId: "server-read-1",
-        name: "read",
-        location: "server",
-        input: { paths: ["Private provider path 1"] },
-        state: "succeeded",
-      }),
-      part({
-        id: "server-read-2",
-        callId: "server-read-2",
-        name: "read",
-        location: "server",
-        input: { paths: ["Private provider path 2"] },
-        state: "succeeded",
-      }),
-    ])).toMatchObject({
-      label: "SystemSculpt action",
-      summary: null,
-      itemCount: null,
     });
   });
 
@@ -326,8 +365,7 @@ describe("presentAgentTool", () => {
     }))).toMatchObject({
       canonicalName: "server_action",
       label: "SystemSculpt action",
-      stateLabel: "Working",
-      animated: true,
+      icon: "minus",
     });
   });
 
@@ -365,91 +403,7 @@ describe("presentAgentTool", () => {
     })).label).toBe("Search 1 text pattern");
   });
 
-  it("groups adjacent successful reads and counts files rather than calls", () => {
-    const tools = [
-      part({
-        id: "read-1",
-        callId: "read-1",
-        state: "succeeded",
-        input: { paths: Array.from({ length: 10 }, (_, index) => `Batch A/${index}.md`) },
-      }),
-      part({
-        id: "read-2",
-        callId: "read-2",
-        state: "succeeded",
-        input: { paths: Array.from({ length: 10 }, (_, index) => `Batch B/${index}.md`) },
-      }),
-      part({
-        id: "read-3",
-        callId: "read-3",
-        state: "succeeded",
-        input: { paths: Array.from({ length: 10 }, (_, index) => `Batch C/${index}.md`) },
-      }),
-    ];
-    const [entry] = groupConsecutiveToolActivity(tools, (tool) => tool);
-
-    expect(entry.kind).toBe("tools");
-    if (entry.kind !== "tools") throw new Error("Expected a tool group.");
-    expect(entry.tools).toHaveLength(3);
-    expect(presentAgentToolGroup(entry.tools)).toMatchObject({
-      label: "Read 30 files",
-      itemCount: 30,
-      summary: "Batch A/0.md, Batch A/1.md, +28 more",
-    });
-  });
-
-  it("keeps chronology, state, failure, location, duplicate-scope, and tool-kind boundaries", () => {
-    type Activity = AgentToolPart | Readonly<{ kind: "reasoning" | "text"; id: string }>;
-    const read = (
-      id: string,
-      overrides: Partial<AgentToolPart> = {},
-    ): AgentToolPart => part({
-      id,
-      callId: id,
-      state: "succeeded",
-      input: { paths: [`${id}.md`] },
-      ...overrides,
-    });
-    const activities: Activity[] = [
-      read("first"),
-      read("second"),
-      { kind: "reasoning", id: "reasoning" },
-      read("third"),
-      read("open", { name: "open", input: { files: [{ path: "Open.md" }] } }),
-      read("server", { location: "server" }),
-      read("failed", {
-        state: "failed",
-        error: { code: "READ_FAILED", message: "Could not read Failed.md." },
-      }),
-      read("approval", { state: "approval-required", approvalId: "approval-1" }),
-      read("duplicate-a", { input: { paths: ["Same.md"] } }),
-      read("duplicate-b", { input: { paths: ["Same.md"] } }),
-      { kind: "text", id: "text" },
-      read("after-text"),
-    ];
-    const entries = groupConsecutiveToolActivity(
-      activities,
-      (activity) => "callId" in activity ? activity : null,
-    );
-
-    expect(entries.map((entry) => entry.kind === "tools"
-      ? entry.tools.map((tool) => tool.id)
-      : entry.item.kind)).toEqual([
-      ["first", "second"],
-      "reasoning",
-      ["third"],
-      ["open"],
-      ["server"],
-      ["failed"],
-      ["approval"],
-      ["duplicate-a"],
-      ["duplicate-b"],
-      "text",
-      ["after-text"],
-    ]);
-  });
-
-  it("does not group an item-level partial failure", () => {
+  it("presents an item-level partial failure independently", () => {
     const successful = part({
       id: "read-ok",
       callId: "read-ok",
@@ -470,9 +424,8 @@ describe("presentAgentTool", () => {
         },
       },
     });
-    const entries = groupConsecutiveToolActivity([successful, partial], (tool) => tool);
-
-    expect(entries).toHaveLength(2);
+    expect([successful, partial].map((tool) => presentAgentTool(tool).displayState))
+      .toEqual(["succeeded", "partial"]);
   });
 
   it.each(BATCH_TOOL_NAMES)(
@@ -487,8 +440,7 @@ describe("presentAgentTool", () => {
       });
       expect(presentAgentTool(successful)).toMatchObject({
         displayState: "succeeded",
-        stateLabel: "Done",
-        icon: "circle-check",
+        icon: "check",
       });
 
       const mixed = part({
@@ -505,9 +457,8 @@ describe("presentAgentTool", () => {
       const mixedFailure = presentAgentToolFailure(mixed);
       expect(mixedPresentation).toMatchObject({
         displayState: "partial",
-        stateLabel: "Partial",
         summary: "1 completed, 1 failed",
-        icon: "circle-alert",
+        icon: "x",
       });
       expect(mixedFailure)
         .toBe("Some requested items failed; successful items were kept.");
@@ -529,9 +480,8 @@ describe("presentAgentTool", () => {
       const failedCopy = presentAgentToolFailure(failed);
       expect(failedPresentation).toMatchObject({
         displayState: "failed",
-        stateLabel: "Failed",
         summary: "0 completed, 2 failed",
-        icon: "circle-x",
+        icon: "x",
       });
       expect(failedCopy).toBe("This vault action could not be completed.");
       expect(JSON.stringify({ failedPresentation, failedCopy }))
@@ -557,7 +507,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       displayState: "partial",
-      stateLabel: "Partial",
+      icon: "x",
       summary: "1 completed, 1 failed",
     });
     expect(JSON.stringify(presentation)).not.toContain(PRIVATE_FAILURE_SENTINEL);

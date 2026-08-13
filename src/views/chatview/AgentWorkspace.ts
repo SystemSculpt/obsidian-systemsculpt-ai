@@ -2,9 +2,12 @@ import { App, Component, setIcon } from "obsidian";
 import {
   applyPluginSurface,
   createUiAction,
-  getSurfaceOwnerWindow,
   updateUiAction,
 } from "../../core/ui/surface";
+import {
+  cancelSurfaceAnimationFrame,
+  requestSurfaceAnimationFrame,
+} from "../../core/ui/surface/SurfaceDomContext";
 import type { ChatMessage } from "../../types";
 import { AnchoredScroller } from "./AnchoredScroller";
 import {
@@ -86,9 +89,15 @@ const PENDING_AGENT_SNAPSHOT: AgentConversationSnapshot = Object.freeze({
   turnId: null,
   status: "running",
   phase: "submitted",
+  elapsedMs: 0,
   messages: Object.freeze([]),
   parts: Object.freeze([]),
 });
+
+type SnapshotRenderWaiter = Readonly<{
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}>;
 
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
@@ -112,13 +121,19 @@ export class AgentWorkspace extends Component {
   private pendingTurnId: string | null = null;
   private rendering: Promise<void> = Promise.resolve();
   private pendingSnapshotRender: AgentConversationSnapshot | null | undefined;
-  private snapshotRenderPromise: Promise<void> | null = null;
-  private snapshotRenderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
-  private activeSnapshotRenderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
-  private snapshotRenderTimer: number | null = null;
-  private resolveSnapshotRenderDelay: (() => void) | null = null;
-  private lastSnapshotRenderAt: number | null = null;
+  private snapshotRenderWaiters: SnapshotRenderWaiter[] = [];
+  private readonly activeSnapshotRenderWaiters = new Set<SnapshotRenderWaiter>();
+  private snapshotRenderFrame: number | null = null;
+  private snapshotRenderTaskCount = 0;
+  private registeredActiveResponse: Readonly<{
+    turnId: string;
+    row: HTMLElement;
+  }> | null = null;
   private followedTurnId: string | null = null;
+  private submittedPromptTurnId: string | null = null;
+  private pendingDisclosureLayoutMutation: Readonly<{
+    cancel: () => void;
+  }> | null = null;
   private unloaded = false;
   private lifecycleGeneration = 0;
 
@@ -173,6 +188,11 @@ export class AgentWorkspace extends Component {
       app: options.app,
       sourcePath: options.sourcePath,
       labelledBy: titleId,
+      beginLayoutMutation: (disclosureControl, mutationTarget) => this.unloaded
+        ? undefined
+        : disclosureControl
+          ? this.scroller.beginDisclosureLayoutMutation(disclosureControl)
+          : this.scroller.beginLayoutMutation(mutationTarget),
       onApprove: options.onApprove,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
@@ -201,6 +221,9 @@ export class AgentWorkspace extends Component {
       labelledBy: titleId,
     });
     this.register(() => this.scroller.destroy());
+    this.registerDomEvent(this.renderer.element, "click", this.handleDisclosureActivation, true);
+    this.registerDomEvent(this.renderer.element, "keydown", this.handleDisclosureActivation, true);
+    this.registerDomEvent(this.renderer.element, "keyup", this.handleDisclosureActivation, true);
 
     this.queueElement = this.element.createDiv({
       cls: "systemsculpt-agent-queue",
@@ -431,6 +454,14 @@ export class AgentWorkspace extends Component {
   }
 
   public setHistory(messages: readonly ChatMessage[]): Promise<void> {
+    if (
+      this.submittedPromptTurnId
+      && !messages.some((message) =>
+        message.role === "user" && message.message_id === this.submittedPromptTurnId)
+    ) {
+      this.submittedPromptTurnId = null;
+      this.scroller.clearSubmittedPromptAnchor();
+    }
     const fingerprint = JSON.stringify(messages);
     this.history = messages;
     if (fingerprint === this.historyFingerprint) return Promise.resolve();
@@ -463,11 +494,17 @@ export class AgentWorkspace extends Component {
     const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
-      const anchor = this.scroller.capturePrependAnchor();
-      await this.renderer.renderHistory(this.history);
+      const finishLayoutMutation = this.scroller.beginLayoutMutation();
+      try {
+        await this.renderer.renderHistory(this.history);
+      } finally {
+        try {
+          if (this.isLifecycleCurrent(generation)) this.syncRows();
+        } finally {
+          finishLayoutMutation();
+        }
+      }
       if (!this.isLifecycleCurrent(generation)) return;
-      this.syncRows();
-      this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
       this.followActiveTurn();
       this.syncEmpty();
       if (focusEditor) this.renderer.focusInlineMessageEdit();
@@ -479,6 +516,7 @@ export class AgentWorkspace extends Component {
 
   /** Atomically replaces the live run with its newly committed transcript. */
   public settleCompletedRun(messages: readonly ChatMessage[]): Promise<void> {
+    const completedTurnId = this.snapshot?.turnId ?? null;
     this.snapshot = null;
     // A queued final frame stays queued: the render chain runs it before the
     // settle below, giving the streamed text its settled in-place render so
@@ -487,7 +525,7 @@ export class AgentWorkspace extends Component {
     // last markdown delta — and the debounced task must then leave the DOM
     // alone rather than paint the empty pending placeholder over the still
     // mounted turn.
-    return this.settleRun(messages, null);
+    return this.settleRun(messages, null, completedTurnId);
   }
 
   /**
@@ -504,15 +542,21 @@ export class AgentWorkspace extends Component {
   private settleRun(
     messages: readonly ChatMessage[],
     retainedSnapshot: AgentConversationSnapshot | null,
+    completedTurnId: string | null = null,
   ): Promise<void> {
+    this.flushPendingSnapshotRender();
     this.history = messages;
     const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
-      const anchor = this.scroller.capturePrependAnchor();
+      const finishLayoutMutation = this.scroller.beginLayoutMutation();
       let renderedHistory = false;
       try {
-        await this.renderer.renderHistory(messages);
+        if (completedTurnId) {
+          await this.renderer.settleHistory(messages, completedTurnId);
+        } else {
+          await this.renderer.renderHistory(messages);
+        }
         if (!this.isLifecycleCurrent(generation)) return;
         renderedHistory = true;
         this.historyFingerprint = JSON.stringify(messages);
@@ -532,20 +576,25 @@ export class AgentWorkspace extends Component {
                 retainedSnapshot,
                 presentAgentConversation(retainedSnapshot, false),
               ).catch(() => undefined);
-            } else {
+            } else if (!completedTurnId) {
               this.renderer.clearActive();
             }
           }
         }
         if (this.isLifecycleCurrent(generation)) {
-          this.syncRows();
-          this.scroller.restorePrependAnchor(anchor && this.registeredRows.has(anchor.rowId) ? anchor : null);
-          this.scroller.notifyContentChanged({ streaming: false });
+          try {
+            this.syncRows();
+          } finally {
+            finishLayoutMutation();
+          }
+          this.scroller.setStreaming(false);
           this.syncEmpty();
           this.followedTurnId = null;
           if (!retainedSnapshot) {
             for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
           }
+        } else {
+          finishLayoutMutation();
         }
       }
     });
@@ -559,7 +608,13 @@ export class AgentWorkspace extends Component {
       // active turn immediately. The scheduled render can coalesce, delay, or
       // bail on a superseded generation, which would otherwise strand the
       // previous conversation's pending turn in an empty chat.
-      this.renderer.clearActive();
+      const finishLayoutMutation = this.scroller.beginLayoutMutation();
+      try {
+        this.renderer.clearActive();
+        this.syncRows();
+      } finally {
+        finishLayoutMutation();
+      }
     }
     this.pendingSnapshotRender = snapshot;
     const completion = new Promise<void>((resolve, reject) => {
@@ -569,10 +624,22 @@ export class AgentWorkspace extends Component {
     return completion;
   }
 
-  public setRunPending(pending: boolean, turnId?: string): void {
+  public setRunPending(
+    pending: boolean,
+    turnId?: string,
+    options: Readonly<{ anchorSubmittedPrompt?: boolean }> = {},
+  ): void {
+    if (pending && turnId) {
+      this.submittedPromptTurnId = options.anchorSubmittedPrompt === true
+        ? turnId
+        : this.submittedPromptTurnId === turnId
+          ? this.submittedPromptTurnId
+          : null;
+    }
     this.runPending = pending;
     this.pendingTurnId = pending ? turnId ?? this.pendingTurnId : null;
     this.composer.setRunning(presentAgentConversation(this.snapshot, pending).composerRunning);
+    this.syncEmpty();
     if (!this.snapshot) {
       this.pendingSnapshotRender = null;
       this.ensureSnapshotRender();
@@ -596,13 +663,35 @@ export class AgentWorkspace extends Component {
   }
 
   private syncRows(): void {
-    const discovered = new Set<string>();
-    const rows = this.renderer.element.querySelectorAll<HTMLElement>(".systemsculpt-agent-turn[data-message-id]");
+    const discovered = new Map<string, Readonly<{
+      priority: number;
+      row: HTMLElement;
+    }>>();
+    const rows = this.renderer.element.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-turn",
+    );
     for (const row of Array.from(rows)) {
+      const responseTurnId = row.classList.contains("is-assistant")
+        ? row.dataset.turnId?.trim()
+        : undefined;
+      const activeResponse = Boolean(
+        responseTurnId && row.closest(".systemsculpt-agent-active-run"),
+      );
+      if (activeResponse) row.dataset.messageId = responseTurnId;
       const messageId = row.dataset.messageId?.trim();
-      if (!messageId) continue;
-      const id = `message:${messageId}`;
-      discovered.add(id);
+      const id = responseTurnId
+        ? `response:${responseTurnId}`
+        : messageId
+          ? `message:${messageId}`
+          : null;
+      if (!id) continue;
+      const priority = activeResponse ? 2 : responseTurnId ? 1 : 0;
+      const existingCandidate = discovered.get(id);
+      if (!existingCandidate || priority > existingCandidate.priority) {
+        discovered.set(id, { priority, row });
+      }
+    }
+    for (const [id, { row }] of discovered) {
       const registered = this.registeredRows.get(id);
       if (registered !== row) {
         if (registered) this.scroller.unregisterRow(id);
@@ -616,6 +705,83 @@ export class AgentWorkspace extends Component {
         this.registeredRows.delete(id);
       }
     }
+    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
+    );
+    const activeTurnId = activeResponse?.dataset.turnId?.trim();
+    this.registeredActiveResponse = activeResponse && activeTurnId
+      ? { turnId: activeTurnId, row: activeResponse }
+      : null;
+  }
+
+  private syncActiveResponseRow(): void {
+    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
+      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
+    );
+    const turnId = activeResponse?.dataset.turnId?.trim();
+    if (!activeResponse || !turnId) {
+      if (this.registeredActiveResponse) this.syncRows();
+      return;
+    }
+    if (
+      this.registeredActiveResponse?.turnId === turnId
+      && this.registeredActiveResponse.row === activeResponse
+      && this.registeredRows.get(`response:${turnId}`) === activeResponse
+    ) {
+      return;
+    }
+    this.syncRows();
+  }
+
+  private readonly handleDisclosureActivation = (event: Event): void => {
+    if (event.defaultPrevented || this.unloaded) return;
+    if (event.type === "keydown") {
+      const key = (event as KeyboardEvent).key;
+      if (key !== "Enter") return;
+    } else if (event.type === "keyup") {
+      if ((event as KeyboardEvent).key !== " ") return;
+    } else if (event.type === "click" && (event as MouseEvent).button !== 0) {
+      return;
+    }
+    const target = event.target as (Element & {
+      closest?: (selectors: string) => Element | null;
+    }) | null;
+    if (typeof target?.closest !== "function") return;
+    const summary = target.closest("summary") as HTMLElement | null;
+    if (!summary || !this.renderer.element.contains(summary)) return;
+    if (event.type === "keydown" && target !== summary) return;
+    const nestedControl = target.closest(
+      "a[href], button, input, select, textarea, [contenteditable='true'], [role='button']",
+    );
+    if (nestedControl && nestedControl !== summary) return;
+    const details = summary.parentElement as HTMLDetailsElement | null;
+    if (details?.tagName !== "DETAILS") return;
+    this.beginDisclosureLayoutMutation(summary);
+  };
+
+  private beginDisclosureLayoutMutation(control: HTMLElement): void {
+    if (this.pendingDisclosureLayoutMutation) return;
+    const finishLayoutMutation = this.scroller.beginDisclosureLayoutMutation(control);
+    let frame: number | null = null;
+    let finished = false;
+    const complete = (): void => {
+      if (finished) return;
+      finished = true;
+      frame = null;
+      this.pendingDisclosureLayoutMutation = null;
+      finishLayoutMutation();
+    };
+    const cancel = (): void => {
+      if (finished) return;
+      finished = true;
+      if (frame !== null) {
+        cancelSurfaceAnimationFrame(this.renderer.element, frame);
+        frame = null;
+      }
+      this.pendingDisclosureLayoutMutation = null;
+    };
+    this.pendingDisclosureLayoutMutation = { cancel };
+    frame = requestSurfaceAnimationFrame(this.renderer.element, complete);
   }
 
   private syncEmpty(): void {
@@ -633,64 +799,62 @@ export class AgentWorkspace extends Component {
   }
 
   private ensureSnapshotRender(): void {
-    if (this.unloaded || this.snapshotRenderPromise) return;
+    if (
+      this.unloaded
+      || this.snapshotRenderFrame !== null
+      || this.snapshotRenderTaskCount > 0
+      || typeof this.pendingSnapshotRender === "undefined"
+    ) {
+      return;
+    }
     const generation = this.lifecycleGeneration;
-    let renderWaiters: Array<Readonly<{ resolve: () => void; reject: (error: unknown) => void }>> = [];
-    this.snapshotRenderPromise = this.scheduleRender(async () => {
+    this.snapshotRenderFrame = requestSurfaceAnimationFrame(this.element, () => {
+      this.snapshotRenderFrame = null;
       if (!this.isLifecycleCurrent(generation)) return;
-      // Leading-edge pacing: the first snapshot after a quiet period renders
-      // with no delay; only renders inside the 32ms window since the last
-      // one wait out the remainder so a streaming burst still coalesces.
-      const sinceLastRender = this.lastSnapshotRenderAt === null
-        ? Number.POSITIVE_INFINITY
-        : Date.now() - this.lastSnapshotRenderAt;
-      const renderDelay = Math.max(0, 32 - sinceLastRender);
-      if (renderDelay > 0) {
-        await new Promise<void>((resolve) => {
-          const finishDelay = (): void => {
-            this.snapshotRenderTimer = null;
-            this.resolveSnapshotRenderDelay = null;
-            resolve();
-          };
-          this.resolveSnapshotRenderDelay = finishDelay;
-          this.snapshotRenderTimer = getSurfaceOwnerWindow(this.element)
-            .setTimeout(finishDelay, renderDelay);
-        });
-        if (!this.isLifecycleCurrent(generation)) return;
-      }
-      this.lastSnapshotRenderAt = Date.now();
-      renderWaiters = this.snapshotRenderWaiters.splice(0);
-      this.activeSnapshotRenderWaiters = renderWaiters;
-      const snapshot = this.pendingSnapshotRender;
-      // A reset can withdraw the queued snapshot while this task waits out
-      // its debounce. Rendering anyway would paint the pending placeholder —
-      // which has no parts — stripping any still-mounted live turn just
-      // before its replacement render: a visible empty flash. Withdrawn
-      // means another owner has the surface now; leave the DOM alone.
-      if (typeof snapshot === "undefined") return;
-      this.pendingSnapshotRender = undefined;
-      const presentation = presentAgentConversation(snapshot ?? null, this.runPending);
-      // Terminal protocol truth must update controls even if rendering the
-      // final Markdown frame or a postprocessor later fails.
+      this.queuePendingSnapshotRender(generation);
+    });
+  }
+
+  private queuePendingSnapshotRender(generation: number): void {
+    if (!this.isLifecycleCurrent(generation)) return;
+    const snapshot = this.pendingSnapshotRender;
+    if (typeof snapshot === "undefined") return;
+    this.pendingSnapshotRender = undefined;
+    this.snapshotRenderTaskCount += 1;
+    const renderWaiters = this.snapshotRenderWaiters.splice(0);
+    for (const waiter of renderWaiters) this.activeSnapshotRenderWaiters.add(waiter);
+    const rendering = this.scheduleRender(async () => {
+      if (!this.isLifecycleCurrent(generation)) return;
+      const presentation = presentAgentConversation(snapshot, this.runPending);
       this.composer.setRunning(presentation.composerRunning);
       this.syncEmpty();
-      if (snapshot) {
-        await this.renderer.renderActive(snapshot, presentation);
-        if (!this.isLifecycleCurrent(generation)) return;
-      } else if (presentation.busy) {
-        await this.renderer.renderActive({
-          ...PENDING_AGENT_SNAPSHOT,
-          turnId: this.pendingTurnId,
-        }, presentation);
-        if (!this.isLifecycleCurrent(generation)) return;
-      } else {
-        this.renderer.clearActive();
+      const activeRun = this.renderer.element.querySelector<HTMLElement>(
+        ":scope > .systemsculpt-agent-active-run",
+      );
+      const finishLayoutMutation = this.scroller.beginLayoutMutation(activeRun ?? undefined);
+      try {
+        if (snapshot) {
+          await this.renderer.renderActive(snapshot, presentation);
+        } else if (presentation.busy) {
+          await this.renderer.renderActive({
+            ...PENDING_AGENT_SNAPSHOT,
+            turnId: this.pendingTurnId,
+          }, presentation);
+        } else {
+          this.renderer.clearActive();
+        }
+      } finally {
+        try {
+          if (this.isLifecycleCurrent(generation)) this.syncActiveResponseRow();
+        } finally {
+          finishLayoutMutation();
+        }
       }
       if (!this.isLifecycleCurrent(generation)) return;
-      this.followActiveTurn(snapshot ?? null);
-      this.scroller.notifyContentChanged({ streaming: presentation.busy });
+      this.followActiveTurn(snapshot);
+      this.scroller.setStreaming(presentation.busy);
     });
-    void this.snapshotRenderPromise.then(
+    void rendering.then(
       () => {
         for (const waiter of renderWaiters) waiter.resolve();
       },
@@ -698,14 +862,22 @@ export class AgentWorkspace extends Component {
         for (const waiter of renderWaiters) waiter.reject(error);
       },
     ).finally(() => {
-      if (this.activeSnapshotRenderWaiters === renderWaiters) {
-        this.activeSnapshotRenderWaiters = [];
-      }
-      this.snapshotRenderPromise = null;
+      for (const waiter of renderWaiters) this.activeSnapshotRenderWaiters.delete(waiter);
+      this.snapshotRenderTaskCount = Math.max(0, this.snapshotRenderTaskCount - 1);
       if (!this.unloaded && typeof this.pendingSnapshotRender !== "undefined") {
         this.ensureSnapshotRender();
       }
     });
+  }
+
+  private flushPendingSnapshotRender(): void {
+    if (this.snapshotRenderFrame !== null) {
+      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
+      this.snapshotRenderFrame = null;
+    }
+    if (typeof this.pendingSnapshotRender !== "undefined") {
+      this.queuePendingSnapshotRender(this.lifecycleGeneration);
+    }
   }
 
   private followActiveTurn(snapshot: AgentConversationSnapshot | null = this.snapshot): void {
@@ -715,9 +887,22 @@ export class AgentWorkspace extends Component {
       return;
     }
     if (this.followedTurnId === turnId) return;
-    const rowId = `message:${turnId}`;
+    const durableUserRow = Array.from(
+      this.renderer.element.querySelectorAll<HTMLElement>(
+        ".systemsculpt-agent-history .systemsculpt-agent-turn.is-user[data-message-id]",
+      ),
+    ).find((row) => row.dataset.messageId === turnId);
+    if (!durableUserRow) return;
+    const rowId = `response:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
-    this.scroller.notifyTurnStarted();
+    if (this.submittedPromptTurnId === turnId) {
+      this.scroller.notifyTurnStarted({
+        submittedPromptRowId: `message:${turnId}`,
+        submittedPromptOffset: 16,
+      });
+    } else {
+      this.scroller.notifyTurnStarted();
+    }
     this.followedTurnId = turnId;
   }
 
@@ -727,18 +912,17 @@ export class AgentWorkspace extends Component {
   }
 
   public override onunload(): void {
+    this.pendingDisclosureLayoutMutation?.cancel();
     this.unloaded = true;
     this.lifecycleGeneration += 1;
-    if (this.snapshotRenderTimer !== null) {
-      getSurfaceOwnerWindow(this.element).clearTimeout(this.snapshotRenderTimer);
-      this.snapshotRenderTimer = null;
+    if (this.snapshotRenderFrame !== null) {
+      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
+      this.snapshotRenderFrame = null;
     }
-    const resolveDelay = this.resolveSnapshotRenderDelay;
-    this.resolveSnapshotRenderDelay = null;
-    resolveDelay?.();
     this.pendingSnapshotRender = undefined;
     for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
-    for (const waiter of this.activeSnapshotRenderWaiters.splice(0)) waiter.resolve();
+    for (const waiter of this.activeSnapshotRenderWaiters) waiter.resolve();
+    this.activeSnapshotRenderWaiters.clear();
   }
 
   private isLifecycleCurrent(generation: number): boolean {

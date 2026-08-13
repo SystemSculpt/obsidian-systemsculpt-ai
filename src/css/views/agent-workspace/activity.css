@@ -1,0 +1,242 @@
+/**
+ * Agent workspace Working status, completed activity, and overflow folds.
+ */
+
+.systemsculpt-agent-part {
+  min-width: 0;
+}
+
+/* Flat work rows use one compact rhythm instead of prose-sized lane gaps. */
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body {
+  gap: var(--ss-space-1);
+}
+
+/* Live turns keep their work visible and end with one quiet timer row. */
+.systemsculpt-agent-tail-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+}
+
+.systemsculpt-agent-tail-status-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: var(--ss-icon-size-sm);
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-tail-status-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-tail-status-icon.is-animated {
+  position: relative;
+  width: 4px;
+  height: 4px;
+  margin-inline: 7px;
+  border-radius: var(--ss-radius-round);
+  background-color: color-mix(in srgb, currentcolor 30%, transparent);
+  animation: ss-agent-working-dot 1.2s var(--ss-ease) 200ms infinite;
+}
+
+.systemsculpt-agent-tail-status-icon.is-animated::before,
+.systemsculpt-agent-tail-status-icon.is-animated::after {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--ss-radius-round);
+  background-color: color-mix(in srgb, currentcolor 30%, transparent);
+  content: "";
+  animation: ss-agent-working-dot 1.2s var(--ss-ease) infinite;
+}
+
+.systemsculpt-agent-tail-status-icon.is-animated::before {
+  left: -7px;
+}
+
+.systemsculpt-agent-tail-status-icon.is-animated::after {
+  right: -7px;
+  animation-delay: 400ms;
+}
+
+.systemsculpt-agent-tail-status-icon.is-animated svg {
+  display: none;
+}
+
+.systemsculpt-agent-tail-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-workspace [data-agent-working-duration] {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes ss-agent-working-dot {
+  0%,
+  100% {
+    background-color: color-mix(in srgb, currentcolor 30%, transparent);
+  }
+
+  50% {
+    background-color: color-mix(in srgb, currentcolor 68%, transparent);
+  }
+}
+
+/* A completed turn has one closed Worked fold. Live turns have no outer fold. */
+details.systemsculpt-agent-activity {
+  min-width: 0;
+  padding: var(--ss-space-0) 0 0;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: 20px;
+}
+
+summary.systemsculpt-agent-activity-header,
+button.systemsculpt-agent-activity-overflow-header {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  width: 100%;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  background: transparent;
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+  font-size: var(--ss-text-sm);
+  line-height: 20px;
+  list-style: none;
+  user-select: none;
+  transition: var(--ss-transition-colors);
+}
+
+summary.systemsculpt-agent-activity-header {
+  width: 100%;
+  border-bottom: 1px solid var(--ss-line);
+}
+
+button.systemsculpt-agent-activity-overflow-header {
+  border: 0;
+  font-family: inherit;
+  text-align: left;
+  appearance: none;
+}
+
+summary.systemsculpt-agent-activity-header::marker {
+  content: "";
+}
+
+summary.systemsculpt-agent-activity-header::-webkit-details-marker {
+  display: none;
+}
+
+details.systemsculpt-agent-activity > summary.systemsculpt-agent-activity-header:hover,
+button.systemsculpt-agent-activity-overflow-header:hover {
+  color: var(--ss-ink);
+}
+
+summary.systemsculpt-agent-activity-header:focus-visible,
+button.systemsculpt-agent-activity-overflow-header:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-activity-disclosure,
+.systemsculpt-agent-activity-overflow-disclosure {
+  display: inline-flex;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--ss-ink-faint);
+}
+
+.systemsculpt-agent-activity-disclosure,
+.systemsculpt-agent-activity-overflow-disclosure {
+  opacity: 0.72;
+  transition:
+    opacity var(--ss-dur-fast) var(--ss-ease),
+    transform var(--ss-dur-fast) var(--ss-ease);
+}
+
+details.systemsculpt-agent-activity[open]
+  > summary.systemsculpt-agent-activity-header
+  .systemsculpt-agent-activity-disclosure {
+  transform: rotate(90deg);
+}
+
+button.systemsculpt-agent-activity-overflow[aria-expanded="true"]
+  .systemsculpt-agent-activity-overflow-disclosure {
+  transform: rotate(180deg);
+}
+
+summary.systemsculpt-agent-activity-header:hover .systemsculpt-agent-activity-disclosure,
+button.systemsculpt-agent-activity-overflow-header:hover .systemsculpt-agent-activity-overflow-disclosure {
+  opacity: 1;
+}
+
+summary.systemsculpt-agent-activity-header svg,
+button.systemsculpt-agent-activity-overflow-header svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+strong.systemsculpt-agent-activity-label,
+strong.systemsculpt-agent-activity-overflow-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--ss-text-sm);
+  font-weight: 400;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+strong.systemsculpt-agent-activity-label {
+  flex: 0 1 auto;
+}
+
+strong.systemsculpt-agent-activity-overflow-label {
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-activity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin: 0;
+  padding: var(--ss-space-0) 0 var(--ss-space-1);
+}
+
+details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-body {
+  display: none;
+}
+
+/* Older adjacent work rows are normal timeline siblings behind one collapsed toggle row. */
+button.systemsculpt-agent-activity-overflow {
+  min-width: 0;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: 20px;
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-agent-tail-status {
+    min-height: 28px;
+  }
+}

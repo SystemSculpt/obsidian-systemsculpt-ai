@@ -24,6 +24,7 @@
     "bulk-transcribe.progress.stop",
     "bulk-transcribe.skip-all",
     "chat-settings.done",
+    "chat.activity.previous-tools",
     "chat.approval.allow-for-chat",
     "chat.approval.allow-once",
     "chat.approval.deny",

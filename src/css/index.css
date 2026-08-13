@@ -41,6 +41,7 @@
 /* Agent workspace: ordered from shell through responsive composer states. */
 @import 'views/agent-workspace/shell.css';
 @import 'views/agent-workspace/conversation.css';
+@import 'views/agent-workspace/activity.css';
 @import 'views/agent-workspace/reasoning.css';
 @import 'views/agent-workspace/tools.css';
 @import 'views/agent-workspace/states.css';

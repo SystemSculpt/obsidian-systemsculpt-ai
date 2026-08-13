@@ -378,6 +378,24 @@ describe("AgentTranscriptRepository", () => {
     expect(records.get(accepted.chatId).version).toBe(2);
   });
 
+  it("preserves local response duration when authoritative history omits it", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const localHistory = projectedServerHistory(100);
+    localHistory[1].responseDurationMs = 2_702_000;
+    await repository.persistAssistant(localHistory[1]);
+
+    const reconciled = await repository.reconcileServerHistory(
+      projectedServerHistory(10_000),
+    );
+
+    expect(reconciled.messages[1].responseDurationMs).toBe(2_702_000);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+  });
+
   it("does not rewrite history when the projected echo only reorders message keys", async () => {
     const { repository, storage } = createHarness();
     // The locally committed user row serializes as {role, content, message_id}.

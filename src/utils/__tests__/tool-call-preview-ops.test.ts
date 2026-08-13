@@ -31,12 +31,25 @@ describe('Operations preview (grouping + dedup)', () => {
     expect(li).toBeTruthy();
     // Expect label
     expect(li!.textContent?.startsWith('Create folders:')).toBe(true);
-    const codes = Array.from(li!.querySelectorAll('code')).map(c => ({ txt: c.textContent, title: c.getAttribute('title') }));
-    expect(codes.map(c => c.txt)).toEqual(['personal', 'business', 'knowledge']);
-    expect(codes.map(c => c.title)).toEqual(['projects/personal', 'business', 'notes/knowledge']);
+    const codes = Array.from(li!.querySelectorAll('code'));
+    expect(codes.map(c => c.textContent)).toEqual(['projects/personal', 'business', 'notes/knowledge']);
+    expect(codes.every(c => !c.hasAttribute('title'))).toBe(true);
     // Expect comma separators as text nodes between codes
     const text = li!.textContent || '';
-    expect(text).toContain('Create folders: personal, business, knowledge');
+    expect(text).toContain('Create folders: projects/personal, business, notes/knowledge');
+  });
+
+  test('renderOperationsInlinePreview distinguishes same-name folders without tooltips', async () => {
+    const host = document.createElement('div');
+    const tc = createTC('same-name-folders', 'create_folders', {
+      paths: ['projects/personal', 'archive/personal'],
+    });
+
+    await renderOperationsInlinePreview(host, tc);
+
+    const codes = Array.from(host.querySelectorAll<HTMLElement>('.systemsculpt-inline-ops code'));
+    expect(codes.map(c => c.textContent)).toEqual(['projects/personal', 'archive/personal']);
+    expect(codes.every(c => !c.hasAttribute('title'))).toBe(true);
   });
 
   test('renderOperationsInlinePreview groups trash into one line', async () => {
@@ -61,10 +74,7 @@ describe('Operations preview (grouping + dedup)', () => {
     const text = li!.textContent || '';
     expect(text).toBe('Move: docs/old/a.md → docs/new/a.md, notes/x.txt → archive/x.txt');
     const codes = Array.from(li!.querySelectorAll('code'));
-    // titles mirror full paths in order: src1, dst1, src2, dst2
-    expect(codes.map(c => c.getAttribute('title'))).toEqual([
-      'docs/old/a.md', 'docs/new/a.md', 'notes/x.txt', 'archive/x.txt'
-    ]);
+    expect(codes.every(c => !c.hasAttribute('title'))).toBe(true);
   });
 
   test('renders every preview node in the host document for Obsidian popouts', async () => {

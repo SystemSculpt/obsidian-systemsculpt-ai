@@ -149,16 +149,20 @@ function canPreserveProjectedPartTimestamps(
   return true;
 }
 
-function preserveProjectedAssistantTimestamps(
+function preserveProjectedAssistantMetadata(
   incoming: ChatMessage,
   local: ChatMessage | undefined,
 ): ChatMessage {
   if (incoming.role !== "assistant" || local?.role !== "assistant") return incoming;
+  const restoredIncoming = incoming.responseDurationMs === undefined
+    && local.responseDurationMs !== undefined
+    ? { ...incoming, responseDurationMs: local.responseDurationMs }
+    : incoming;
 
   const localParts = local.messageParts ?? [];
-  const incomingParts = incoming.messageParts ?? [];
+  const incomingParts = restoredIncoming.messageParts ?? [];
   const preserveSharedChronology = canPreserveProjectedPartTimestamps(localParts, incomingParts);
-  if (!preserveSharedChronology) return incoming;
+  if (!preserveSharedChronology) return restoredIncoming;
 
   const localPartsById = new Map(localParts.map((part) => [part.id, part]));
   const preservedParts = incomingParts.map((part) => {
@@ -207,7 +211,7 @@ function preserveProjectedAssistantTimestamps(
       : []),
   );
   const localToolsById = new Map((local.tool_calls ?? []).map((tool) => [tool.id, tool]));
-  const preservedTools = incoming.tool_calls?.map((tool) => {
+  const preservedTools = restoredIncoming.tool_calls?.map((tool) => {
     const previous = localToolsById.get(tool.id);
     return {
       ...tool,
@@ -218,9 +222,9 @@ function preserveProjectedAssistantTimestamps(
   });
 
   return {
-    ...incoming,
-    ...(incoming.messageParts ? { messageParts: preservedParts } : {}),
-    ...(incoming.tool_calls ? { tool_calls: preservedTools } : {}),
+    ...restoredIncoming,
+    ...(restoredIncoming.messageParts ? { messageParts: preservedParts } : {}),
+    ...(restoredIncoming.tool_calls ? { tool_calls: preservedTools } : {}),
   };
 }
 
@@ -374,7 +378,7 @@ export class AgentTranscriptRepository {
       const next = incoming.map((message) => {
         const local = localById.get(message.message_id);
         if (message.role === "assistant") {
-          return preserveProjectedAssistantTimestamps(message, local);
+          return preserveProjectedAssistantMetadata(message, local);
         }
         if (local?.role === "user" && local.attachmentMetadata?.length) {
           return {

@@ -4,12 +4,15 @@
 
 import { App } from "obsidian";
 import { normalizeLocalToolOutcome } from "../../../services/SystemSculptService";
+import type { ChatMessage } from "../../../types";
+import type { ToolCall } from "../../../types/toolCalls";
 import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
 } from "../AgentConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
+import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { CHAT_1450_REGRESSION_FIXTURE as fixture } from "./fixtures/chat-1450-regression.fixture";
 
 const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
@@ -33,6 +36,39 @@ function workspace(parent: HTMLElement): AgentWorkspace {
   return value;
 }
 
+async function hydrateRestoredWorked(
+  renderer: AgentConversationRenderer,
+  worked: HTMLDetailsElement | null,
+): Promise<void> {
+  if (!worked) return;
+  const state = (renderer as unknown as {
+    historicalActivityHydrationStates: Map<
+      HTMLDetailsElement,
+      { hydration: Promise<void> | null }
+    >;
+  }).historicalActivityHydrationStates.get(worked);
+  if (!state) return;
+  worked.open = true;
+  worked.dispatchEvent(new Event("toggle"));
+  await state.hydration;
+  worked.open = false;
+  worked.dispatchEvent(new Event("toggle"));
+}
+
+async function expandHistoricalOverflow(
+  renderer: AgentConversationRenderer,
+  overflow: HTMLButtonElement,
+): Promise<void> {
+  overflow.click();
+  const state = (renderer as unknown as {
+    historicalOverflowHydrationStates: Map<
+      HTMLButtonElement,
+      { hydration: Promise<void> | null }
+    >;
+  }).historicalOverflowHydrationStates.get(overflow);
+  await state?.hydration;
+}
+
 function legacyReadPart(
   id: string,
   order: number,
@@ -52,6 +88,28 @@ function legacyReadPart(
     // Preserve the stale response-wide code present in the regression shape.
     // Item-level outcomes must remain authoritative for display state.
     error: call.result.error,
+  };
+}
+
+function durableReadCall(part: AgentToolPart): ToolCall {
+  return {
+    id: part.callId,
+    messageId: part.messageId,
+    request: {
+      id: part.callId,
+      type: "function",
+      function: {
+        name: part.name,
+        arguments: JSON.stringify(part.input),
+      },
+    },
+    state: "failed",
+    timestamp: part.order,
+    result: {
+      success: false,
+      data: part.output?.data,
+      ...(part.error ? { error: part.error } : {}),
+    },
   };
 }
 
@@ -97,21 +155,52 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
     };
 
     try {
+      const expectToolOutcomes = (): HTMLElement[] => {
+        const tools = [...parent.querySelectorAll<HTMLElement>(
+          ".systemsculpt-agent-part.is-tool",
+        )];
+        expect(tools).toHaveLength(2);
+        const mixedTool = tools.find((tool) =>
+          tool.dataset.partKey === `tool:${mixed.callId}`);
+        const failedTool = tools.find((tool) =>
+          tool.dataset.partKey === `tool:${failed.callId}`);
+        expect(mixedTool?.classList).toContain("is-partial");
+        expect(mixedTool?.querySelector<HTMLElement>(
+          ".systemsculpt-agent-tool-state-icon",
+        )?.dataset.iconState).toBe("x");
+        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+          .toBe("2 completed, 1 failed");
+        expect(failedTool?.classList).toContain("is-failed");
+        expect(failedTool?.querySelector<HTMLElement>(
+          ".systemsculpt-agent-tool-state-icon",
+        )?.dataset.iconState).toBe("x");
+        expect(failedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
+          .toBe("0 completed, 2 failed");
+        return tools;
+      };
+
+      const expandPreviousToolCalls = async (): Promise<void> => {
+        await hydrateRestoredWorked(
+          view.renderer,
+          parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]"),
+        );
+        const visibleTools = [...parent.querySelectorAll<HTMLElement>(
+          ".systemsculpt-agent-part.is-tool",
+        )];
+        expect(visibleTools).toHaveLength(1);
+        expect(visibleTools[0]?.dataset.partKey).toBe(`tool:${failed.callId}`);
+        const overflow = parent.querySelector<HTMLButtonElement>(
+          "button[data-agent-activity-overflow]",
+        );
+        expect(overflow).not.toBeNull();
+        expect(overflow?.getAttribute("aria-expanded")).toBe("false");
+        if (overflow) await expandHistoricalOverflow(view.renderer, overflow);
+        expect(overflow?.getAttribute("aria-expanded")).toBe("true");
+      };
+
       await view.setAgentSnapshot(snapshot);
-      const tools = [...parent.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-part.is-tool",
-      )];
-      expect(tools).toHaveLength(2);
-      expect(tools[0].classList).toContain("is-partial");
-      expect(tools[0].querySelector(".systemsculpt-agent-tool-state")?.textContent)
-        .toBe("Partial");
-      expect(tools[0].querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-        .toBe("2 completed, 1 failed");
-      expect(tools[1].classList).toContain("is-failed");
-      expect(tools[1].querySelector(".systemsculpt-agent-tool-state")?.textContent)
-        .toBe("Failed");
-      expect(tools[1].querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-        .toBe("0 completed, 2 failed");
+      await expandPreviousToolCalls();
+      const tools = expectToolOutcomes();
       expect(parent.querySelectorAll(".systemsculpt-agent-tool-icon.is-animated"))
         .toHaveLength(0);
       expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error"))
@@ -126,6 +215,32 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
       ))).toBe(true);
       expect(parent.textContent).not.toContain(fixture.mixedRead.result.error.message);
       expect(parent.textContent).not.toContain(fixture.allFailedRead.result.error.message);
+
+      const durableCalls = [mixed, failed].map(durableReadCall);
+      const restoredHistory: ChatMessage[] = [{
+        role: "assistant",
+        message_id: "assistant-sanitized-1450",
+        content: fixture.continuationMarker,
+        tool_calls: durableCalls,
+        messageParts: [
+          ...durableCalls.map((call, index) => ({
+            id: index === 0 ? mixed.id : failed.id,
+            type: "tool_call" as const,
+            timestamp: index,
+            data: call,
+          })),
+          {
+            id: continuation.id,
+            type: "content",
+            timestamp: 2,
+            data: fixture.continuationMarker,
+          },
+        ],
+      }];
+      await view.setAgentSnapshot(null);
+      await view.setHistory(restoredHistory);
+      await expandPreviousToolCalls();
+      expectToolOutcomes();
     } finally {
       view.unload();
     }
@@ -141,9 +256,9 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
       kind: "tool",
       messageId: "assistant-duplicate-terminal",
       callId: "call-duplicate-terminal",
-      name: "read",
-      location: "vault",
-      input: { paths: ["Fixture/unavailable.md"] },
+      name: "unknown_server_action",
+      location: "server",
+      input: {},
       state: "failed",
       error: duplicate,
     };
@@ -174,6 +289,8 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
       expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error"))
         .toHaveLength(1);
       expect(parent.querySelector(".systemsculpt-agent-tool-error")).toBeNull();
+      expect(parent.querySelector("details.systemsculpt-agent-tool")?.classList)
+        .not.toContain("is-disclosure");
       expect(parent.textContent?.match(
         /SystemSculpt could not complete the response\./g,
       )).toHaveLength(1);

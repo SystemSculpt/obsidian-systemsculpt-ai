@@ -281,6 +281,41 @@ describe("ChatMarkdownSerializer", () => {
       expect(String(parsed?.messages[1]?.content)).toContain("PARTIAL-STREAM-START");
     });
 
+    it("round-trips a bounded assistant response duration as additive metadata", () => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Finished",
+        message_id: "asst-duration",
+        responseDurationMs: 2_702_000,
+      }]);
+
+      expect(serialized).toContain('response-duration-ms="2702000"');
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-duration\n---\n\n${serialized}`,
+      )?.messages[0]).toMatchObject({ responseDurationMs: 2_702_000 });
+    });
+
+    it("ignores invalid response durations without rejecting message content", () => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Still valid",
+        message_id: "asst-invalid-duration",
+        responseDurationMs: Number.MAX_SAFE_INTEGER,
+      }]);
+      const injected = serialized.replace(
+        'message-id="asst-invalid-duration"',
+        'message-id="asst-invalid-duration" response-duration-ms="9007199254740991"',
+      );
+
+      expect(serialized).not.toContain("response-duration-ms=");
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-invalid-duration\n---\n\n${injected}`,
+      )?.messages[0]).toMatchObject({ content: expect.stringContaining("Still valid") });
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-invalid-duration\n---\n\n${injected}`,
+      )?.messages[0].responseDurationMs).toBeUndefined();
+    });
+
     it("never restores an unknown terminal outcome value", () => {
       const content = [
         "---",

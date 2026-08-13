@@ -389,6 +389,8 @@ export interface ChatMessage {
   role: ChatRole;
   content: string | MultiPartContent[] | null;
   message_id: string;
+  // Local presentation metadata for the completed assistant turn.
+  responseDurationMs?: number;
   /**
    * Presentation/retry metadata only. Model transports intentionally read the
    * content parts and never send this local descriptor.

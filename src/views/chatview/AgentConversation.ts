@@ -110,6 +110,7 @@ export type AgentConversationSnapshot = Readonly<{
   runId: string | null;
   turnId: string | null;
   status: AgentRunStatus;
+  elapsedMs?: number;
   phase?: AgentRunPhase;
   statusLabel?: string;
   waitingReason?: "approval" | "local_tool";

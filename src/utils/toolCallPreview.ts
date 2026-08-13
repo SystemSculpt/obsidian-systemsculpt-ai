@@ -386,11 +386,9 @@ export async function renderOperationsInlinePreview(hostElement: HTMLElement, to
     preview.items.forEach((it, idx) => {
       const src = li.createEl("code", { cls: "ss-modal__inline-code" });
       src.textContent = it.source;
-      src.setAttribute("title", it.source);
       li.createSpan({ text: " → " });
       const dst = li.createEl("code", { cls: "ss-modal__inline-code" });
       dst.textContent = it.destination;
-      dst.setAttribute("title", it.destination);
       if (idx < preview.items.length - 1) li.appendChild(li.ownerDocument.createTextNode(", "));
     });
   } else if (preview.type === "trash") {
@@ -403,15 +401,12 @@ export async function renderOperationsInlinePreview(hostElement: HTMLElement, to
       if (idx < preview.items.length - 1) li.appendChild(li.ownerDocument.createTextNode(", "));
     });
   } else if (preview.type === "create_folders") {
-    // Render as a single compact line: "Create folders: personal, business, knowledge"
+    // Keep full paths visible so folders with the same base name stay distinct.
     const li = list.createEl("li");
     li.createSpan({ text: "Create folders: " });
-    // Show base folder names for readability, but keep full path in title
-    const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
     preview.items.forEach((it, idx) => {
       const code = li.createEl("code", { cls: "ss-modal__inline-code" });
-      code.textContent = baseName(it.path);
-      code.setAttribute("title", it.path);
+      code.textContent = it.path;
       if (idx < preview.items.length - 1) li.appendChild(li.ownerDocument.createTextNode(", "));
     });
   }

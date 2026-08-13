@@ -24,14 +24,21 @@ import type {
   AgentToolPart,
 } from "./AgentConversation";
 import {
+  formatAgentActivityDuration,
+  formatAgentWorkingDuration,
+  finalAgentAnswerPartIds,
+  groupAdjacentAgentActivity,
+  isAgentActivityPart,
+  splitPreviousAgentActivity,
+} from "./AgentActivityPresentation";
+import {
   presentAgentError,
   type AgentConversationPresentation,
 } from "./AgentConversationPresentation";
 import {
-  groupConsecutiveToolActivity,
   presentAgentTool,
+  presentAgentToolDetails,
   presentAgentToolFailure,
-  presentAgentToolGroup,
 } from "./AgentToolPresentation";
 import {
   presentChatMessage,
@@ -40,11 +47,16 @@ import {
   type PresentedMessageContent,
 } from "./ChatMessagePresentation";
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
+import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
 export type AgentConversationRendererOptions = Readonly<{
   app: App;
   sourcePath: () => string;
   labelledBy?: string;
+  beginLayoutMutation?: (
+    disclosureControl?: HTMLElement,
+    mutationTarget?: HTMLElement,
+  ) => (() => void) | undefined;
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
@@ -82,12 +94,123 @@ function toolPartKey(callId: string): string {
   return `tool:${callId}`;
 }
 
+function isNativeSourcesPart(part: MessagePart): boolean {
+  if (part.type !== "content") return false;
+  if (part.id.startsWith("sources:")) return true;
+  const markdown = presentMessageContent(part.data).markdown.trim();
+  const lines = markdown.split(/\r?\n/);
+  return lines.length >= 3
+    && lines[0] === "### Sources"
+    && lines[1] === ""
+    && lines.slice(2).every((line) =>
+      /^- \[(?:\\.|[^\]])+\]\(<https?:\/\/[^<>\s]+>\)$/.test(line));
+}
+
+function historicalPartKey(part: MessagePart): string {
+  return part.type === "tool_call" ? toolPartKey(part.data.id) : part.id;
+}
+
 type HistoricalTurnSemantics = Readonly<{
   hasVisibleContent: boolean;
   hasTools: boolean;
   isToolOnly: boolean;
   copyText: string;
 }>;
+
+type HistoricalPartPartition = Readonly<{
+  workParts: readonly MessagePart[];
+  finalAnswers: readonly MessagePart[];
+  hasActivity: boolean;
+}>;
+
+type HistoricalActivityHydrationState = {
+  element: HTMLDetailsElement;
+  summary: HTMLElement;
+  body: HTMLElement;
+  parts: readonly MessagePart[];
+  status: "cold" | "hydrating" | "hydrated" | "disposed";
+  staging: HTMLElement | null;
+  hydration: Promise<void> | null;
+};
+
+type HistoricalOverflowHydrationState = {
+  parts: readonly MessagePart[];
+  status: "cold" | "hydrating" | "hydrated" | "disposed";
+  staging: HTMLElement | null;
+  hydration: Promise<void> | null;
+};
+
+type ToolApprovalPreviewHydrationState = {
+  approval: HTMLElement;
+  preview: HTMLElement;
+  fingerprint: string;
+  toolCall: ToolCall;
+  lifecycleGeneration: number;
+  toolRenderEpoch: number;
+  hydration: Promise<void> | null;
+};
+
+type HistoricalRowState = Readonly<{
+  fingerprint: string;
+  node: HTMLElement;
+  partFingerprints: ReadonlyMap<string, string>;
+}>;
+
+type HistoricalDisclosureSnapshot = Readonly<{
+  workedOpen: boolean;
+  hydrateWorked: boolean;
+  overflowOpen: ReadonlyMap<string, boolean>;
+  reasoningOpen: ReadonlyMap<string, boolean>;
+  toolOpen: ReadonlyMap<string, boolean>;
+}>;
+
+type HistoricalRowReplacement = Readonly<{
+  previous: HistoricalRowState;
+  next: HistoricalRowState;
+  disclosure: HistoricalDisclosureSnapshot;
+}>;
+
+type HistoricalFocusLocator =
+  | Readonly<{ kind: "part"; key: string; focusKey: string | null }>
+  | Readonly<{ kind: "overflow"; key: string; focusKey: string | null }>
+  | Readonly<{ kind: "worked"; focusKey: string | null }>;
+
+type PreservedDomSelection = Readonly<{
+  anchorNode: Node;
+  anchorOffset: number;
+  focusNode: Node;
+  focusOffset: number;
+}>;
+
+type HistoricalReplacementInteraction = Readonly<{
+  focusElement: HTMLElement | null;
+  focusLocator: HistoricalFocusLocator | null;
+  focusRow: HTMLElement;
+  selection: PreservedDomSelection | null;
+}>;
+
+function isVisibleHistoricalPart(part: MessagePart): boolean {
+  if (part.type === "reasoning") return part.data.trim().length > 0;
+  if (part.type === "tool_call") return true;
+  const content = presentMessageContent(part.data);
+  return content.markdown.trim().length > 0 || content.attachments.length > 0;
+}
+
+function partitionHistoricalParts(
+  parts: readonly MessagePart[],
+  finalAnswerPartIds: ReadonlySet<string>,
+): HistoricalPartPartition {
+  const visibleParts = parts.filter(isVisibleHistoricalPart);
+  const workParts = visibleParts.filter((part) => !finalAnswerPartIds.has(part.id));
+  const finalAnswers = visibleParts.filter((part) =>
+    part.type === "content" && finalAnswerPartIds.has(part.id));
+  return {
+    workParts,
+    finalAnswers,
+    hasActivity: workParts.some((part) =>
+      part.type === "reasoning" || part.type === "tool_call"),
+  };
+}
 
 function classifyHistoricalTurn(
   message: ChatMessage,
@@ -165,6 +288,7 @@ function toolDisplayFingerprint(part: AgentToolPart): string {
     location: part.location,
     state: part.state,
     presentation,
+    details: presentAgentToolDetails(part),
     error: visibleToolError(part),
     approvalId: approvalInput === undefined ? undefined : part.approvalId,
     approvalInput,
@@ -172,8 +296,13 @@ function toolDisplayFingerprint(part: AgentToolPart): string {
   });
 }
 
-function agentPartsEqual(left: AgentPart | undefined, right: AgentPart): boolean {
-  if (left === right) return true;
+function agentPartsEqual(
+  left: AgentPart | undefined,
+  right: AgentPart,
+  committedToolFingerprint?: string,
+  incomingToolFingerprint?: string,
+): boolean {
+  if (left === right && right.kind !== "tool") return true;
   if (!left || left.kind !== right.kind || left.id !== right.id || left.order !== right.order) {
     return false;
   }
@@ -198,7 +327,7 @@ function agentPartsEqual(left: AgentPart | undefined, right: AgentPart): boolean
       return left.kind === "tool"
         && left.messageId === right.messageId
         && left.callId === right.callId
-        && toolDisplayFingerprint(left) === toolDisplayFingerprint(right);
+        && committedToolFingerprint === incomingToolFingerprint;
   }
 }
 
@@ -235,15 +364,43 @@ export class AgentConversationRenderer extends Component {
   private readonly historyRoot: HTMLElement;
   private readonly activeRoot: HTMLElement;
   private readonly activeNodes = new Map<string, HTMLElement>();
+  private readonly activeOverflowNodes = new Map<string, HTMLButtonElement>();
+  private readonly activityOverflowStates = new WeakMap<HTMLButtonElement, {
+    label: HTMLElement;
+    latestNode: HTMLElement | null;
+    previousNodes: HTMLElement[];
+  }>();
+  private readonly historicalOverflowHydrationStates = new Map<
+    HTMLButtonElement,
+    HistoricalOverflowHydrationState
+  >();
+  private readonly reasoningDisclosureStates = new WeakMap<HTMLDetailsElement, {
+    body: HTMLElement;
+    summary: string;
+    streaming: boolean;
+    dirty: boolean;
+    revision: number;
+  }>();
+  private readonly historicalActivityHydrationStates = new Map<
+    HTMLDetailsElement,
+    HistoricalActivityHydrationState
+  >();
   private readonly activePartRefs = new Map<string, AgentPart>();
-  private readonly activeToolGroupRefs = new Map<string, readonly AgentToolPart[]>();
+  private readonly activeToolDisplayFingerprints = new Map<string, string>();
   private readonly activeToolErrorSuppression = new Map<string, boolean>();
+  private readonly toolApprovalPreviewHydrationStates = new WeakMap<
+    HTMLElement,
+    ToolApprovalPreviewHydrationState
+  >();
+  private toolRenderEpoch = 0;
   private activeTailStatus: HTMLElement | null = null;
-  private historyRows = new Map<string, Readonly<{
-    fingerprint: string;
-    node: HTMLElement;
-  }>>();
+  private activeCompletedFold: HTMLDetailsElement | null = null;
+  private activeCompletedFoldBody: HTMLElement | null = null;
+  private activeWorkingTimer: number | null = null;
+  private activeElapsedBaseline: Readonly<{ elapsedMs: number; observedAt: number }> | null = null;
+  private historyRows = new Map<string, HistoricalRowState>();
   private historyMessageIds: ReadonlySet<string> = new Set<string>();
+  private committedCancelledMessageIds: ReadonlySet<string> = new Set<string>();
   private inlineMessageEdit: AgentInlineMessageEdit | null = null;
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
@@ -257,6 +414,7 @@ export class AgentConversationRenderer extends Component {
   private renderGeneration = 0;
   private lifecycleGeneration = 0;
   private renderingEnabled = true;
+  private adoptingTurnId: string | null = null;
 
   constructor(parent: HTMLElement, private readonly options: AgentConversationRendererOptions) {
     super();
@@ -265,9 +423,7 @@ export class AgentConversationRenderer extends Component {
       attr: {
         "data-testid": "chat.scroller",
         role: "log",
-        ...(options.labelledBy
-          ? { "aria-labelledby": options.labelledBy }
-          : { "aria-label": "Messages" }),
+        ...(options.labelledBy ? { "aria-labelledby": options.labelledBy } : {}),
         "aria-live": "polite",
         "aria-relevant": "additions",
         "aria-atomic": "false",
@@ -281,6 +437,7 @@ export class AgentConversationRenderer extends Component {
     this.element.addEventListener("keyup", containEditorKeyup, true);
     this.register(() => this.element.removeEventListener("keyup", containEditorKeyup, true));
     this.liveMarkdown = new LiveMarkdownRenderer({
+      beginDomCommit: (target) => this.options.beginLayoutMutation?.(undefined, target),
       render: async (markdown, staging, component) => {
         await MarkdownRenderer.render(
           this.options.app,
@@ -297,6 +454,7 @@ export class AgentConversationRenderer extends Component {
 
   public async renderHistory(messages: readonly ChatMessage[]): Promise<void> {
     if (!this.renderingEnabled) return;
+    const adoptionState = this.captureActiveAdoptionState();
     const lifecycleGeneration = this.lifecycleGeneration;
     const generation = ++this.renderGeneration;
     const isCurrent = (): boolean =>
@@ -311,16 +469,18 @@ export class AgentConversationRenderer extends Component {
       this.inlineMessageEdit = null;
     }
     const nextHistory = createSurfaceElement(this.historyRoot.ownerDocument, "div");
-    const nextRows = new Map<string, Readonly<{
-      fingerprint: string;
-      node: HTMLElement;
-    }>>();
+    const nextRows = new Map<string, HistoricalRowState>();
     const nextMessageIds = new Set<string>();
+    const nextDurableCancelledMessageIds = new Set<string>();
     const desiredRows: HTMLElement[] = [];
+    const rowReplacements: HistoricalRowReplacement[] = [];
     let hasInlineEdit = false;
     let currentTurnId: string | null = null;
     for (let index = 0; index < messages.length;) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) {
+        this.forgetMarkdown(nextHistory);
+        return;
+      }
       const message = messages[index];
       index += 1;
       if (message.role !== "user" && message.role !== "assistant") continue;
@@ -358,7 +518,12 @@ export class AgentConversationRenderer extends Component {
         copyText,
       };
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
-      for (const entry of turnMessages) nextMessageIds.add(entry.message_id);
+      for (const entry of turnMessages) {
+        nextMessageIds.add(entry.message_id);
+        if (entry.role === "assistant" && entry.terminalOutcome === "cancelled") {
+          nextDurableCancelledMessageIds.add(entry.message_id);
+        }
+      }
       const inlineEdit = message.role === "user"
         && this.inlineMessageEdit?.messageId === anchorMessage.message_id
         ? this.inlineMessageEdit
@@ -369,15 +534,12 @@ export class AgentConversationRenderer extends Component {
         messageIds: turnMessages.map((entry) => entry.message_id),
         ...(turnId ? { turnId } : {}),
       });
-      // While the live run container is still mounted for the same turn it
-      // owns the cancelled tail; history takes over once activity moves on.
-      const restoredCancelledTail = message.role === "assistant"
-        && turnMessages.some((entry) => entry.terminalOutcome === "cancelled")
-        && (turnId === null || this.activeTurnId !== turnId);
+      const cancelledTurn = message.role === "assistant"
+        && turnMessages.some((entry) => entry.terminalOutcome === "cancelled");
       const fingerprint = JSON.stringify({
         messages: turnMessages,
         inlineEdit,
-        restoredCancelledTail,
+        cancelledTurn,
       });
       const existing = this.historyRows.get(rowKey);
       if (existing?.fingerprint === fingerprint) {
@@ -385,43 +547,91 @@ export class AgentConversationRenderer extends Component {
         desiredRows.push(existing.node);
         continue;
       }
-      const row = nextHistory.createDiv({
-        cls: [
-          "systemsculpt-agent-turn",
-          `is-${message.role}`,
-          semantics.isToolOnly ? "is-tool-only" : "",
-          inlineEdit ? "is-editing" : "",
-        ].filter(Boolean).join(" "),
-        attr: {
-          "data-message-id": anchorMessage.message_id,
-          ...(turnMessages.length > 1
-            ? { "data-message-ids": turnMessages.map((entry) => entry.message_id).join(" ") }
-            : {}),
-          ...(turnId ? { "data-turn-id": turnId } : {}),
-          ...(message.role === "assistant" ? { "aria-label": "SystemSculpt response" } : {}),
-        },
-      });
-      const body = row.createDiv({ cls: "systemsculpt-agent-turn-body" });
+      const adoptActive = message.role === "assistant"
+        && turnId === this.adoptingTurnId
+        && this.activeTurn !== null
+        && this.activeBody !== null;
+      const row = adoptActive ? this.activeTurn! : nextHistory.createDiv();
+      row.className = [
+        "systemsculpt-agent-turn",
+        `is-${message.role}`,
+        semantics.isToolOnly ? "is-tool-only" : "",
+        inlineEdit ? "is-editing" : "",
+      ].filter(Boolean).join(" ");
+      row.dataset.messageId = anchorMessage.message_id;
+      if (turnMessages.length > 1) {
+        row.dataset.messageIds = turnMessages.map((entry) => entry.message_id).join(" ");
+      } else {
+        delete row.dataset.messageIds;
+      }
+      if (turnId) row.dataset.turnId = turnId;
+      else delete row.dataset.turnId;
+      const body = adoptActive
+        ? this.activeBody!
+        : row.createDiv({ cls: "systemsculpt-agent-turn-body" });
+      let partFingerprints: ReadonlyMap<string, string> = new Map<string, string>();
       if (message.role === "assistant") {
-        const turnParts = presented.flatMap((entry, entryIndex): MessagePart[] => {
-          if (entry.orderedParts.length > 0) return entry.orderedParts;
-          return [{
+        const ownedTurnParts = presented.flatMap((entry, entryIndex) => {
+          const parts: MessagePart[] = entry.orderedParts.length > 0
+            ? entry.orderedParts
+            : [{
             id: `${entry.message.message_id}:content`,
             type: "content",
             timestamp: entryIndex,
             data: entry.message.content ?? "",
           }];
+          return parts.map((part) => ({ part, messageId: entry.message.message_id }));
         });
-        await this.renderHistoricalParts(body, turnParts);
-        if (!isCurrent()) return;
-        if (restoredCancelledTail) this.renderRestoredCancelledTail(body);
+        const turnParts = ownedTurnParts.map(({ part }) => part);
+        partFingerprints = new Map(turnParts.map((part) => [
+          historicalPartKey(part),
+          this.historicalPartDisplayFingerprint(part),
+        ]));
+        const finalAnswerPartIds = this.finalHistoricalAnswerPartIds(ownedTurnParts);
+        const foldedCancelledActivity = adoptActive
+          ? await this.adoptHistoricalParts(
+            body,
+            turnParts,
+            turnMessages[turnMessages.length - 1]?.responseDurationMs,
+            finalAnswerPartIds,
+            cancelledTurn,
+          )
+          : await (async (): Promise<boolean> => {
+          try {
+            return await this.renderHistoricalParts(
+              body,
+              turnParts,
+              turnMessages[turnMessages.length - 1]?.responseDurationMs,
+              finalAnswerPartIds,
+              cancelledTurn,
+            );
+          } catch (error) {
+            this.forgetMarkdown(nextHistory);
+            throw error;
+          }
+          })();
+        if (!isCurrent()) {
+          this.forgetMarkdown(nextHistory);
+          return;
+        }
+        if (cancelledTurn && !foldedCancelledActivity) {
+          this.renderDurableCancelledTail(body);
+        }
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
           this.renderInlineMessageEditor(body, inlineEdit);
         } else if (content.markdown.trim()) {
-          await this.renderMarkdown(content.markdown, body);
-          if (!isCurrent()) return;
+          try {
+            await this.renderMarkdown(content.markdown, body);
+          } catch (error) {
+            this.forgetMarkdown(nextHistory);
+            throw error;
+          }
+          if (!isCurrent()) {
+            this.forgetMarkdown(nextHistory);
+            return;
+          }
         }
         if (content.attachments.length > 0) this.renderMessageAttachments(body, content.attachments);
       }
@@ -432,17 +642,140 @@ export class AgentConversationRenderer extends Component {
           semantics.copyText,
         );
       }
-      const rendered = { fingerprint, node: row };
+      const rendered: HistoricalRowState = { fingerprint, node: row, partFingerprints };
       nextRows.set(rowKey, rendered);
       desiredRows.push(row);
+      if (existing && !adoptActive) {
+        rowReplacements.push({
+          previous: existing,
+          next: rendered,
+          disclosure: this.captureHistoricalDisclosureState(existing.node),
+        });
+      }
+      if (adoptActive) this.releaseAdoptedActiveTurn();
     }
-    if (!isCurrent()) return;
-    const focusReplacement = this.transferActiveToolPresentationState(desiredRows);
+    for (const replacement of rowReplacements) {
+      await this.prepareHistoricalRowReplacement(replacement);
+      if (!isCurrent()) {
+        this.forgetMarkdown(nextHistory);
+        return;
+      }
+    }
+    if (!isCurrent()) {
+      this.forgetMarkdown(nextHistory);
+      return;
+    }
+    let historicalInteraction: HistoricalReplacementInteraction | null = null;
+    for (const replacement of rowReplacements) {
+      historicalInteraction ??= this.captureHistoricalReplacementInteraction(
+        replacement.previous.node,
+        replacement.next.node,
+      );
+      this.commitHistoricalRowReplacement(replacement);
+    }
+    const focusReplacement = this.transferActivePresentationState(desiredRows);
+    const desiredRowSet = new Set(desiredRows);
+    for (const { node } of this.historyRows.values()) {
+      if (!desiredRowSet.has(node)) this.forgetMarkdown(node);
+    }
     this.reconcileChildren(this.historyRoot, desiredRows);
-    focusReplacement?.focus();
+    const historicalFocus = historicalInteraction?.focusElement;
+    const restoredHistoricalFocus = historicalFocus?.isConnected
+      ? historicalFocus
+      : historicalInteraction
+        ? this.resolveHistoricalFocus(
+          historicalInteraction.focusRow,
+          historicalInteraction.focusLocator,
+        )
+        : null;
+    const preservedFocus = adoptionState?.focusElement;
+    if (restoredHistoricalFocus) restoredHistoricalFocus.focus({ preventScroll: true });
+    else if (preservedFocus?.isConnected) preservedFocus.focus({ preventScroll: true });
+    else focusReplacement?.focus({ preventScroll: true });
+    this.restoreDomSelection(
+      historicalInteraction?.selection ?? adoptionState?.selection ?? null,
+    );
     this.historyRows = nextRows;
     this.historyMessageIds = nextMessageIds;
+    this.committedCancelledMessageIds = nextDurableCancelledMessageIds;
     if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
+  }
+
+  /**
+   * Commits a completed turn while reusing its live row and keyed part nodes.
+   * This keeps Markdown, selection, focus, and disclosure identity intact.
+   */
+  public async settleHistory(messages: readonly ChatMessage[], turnId: string): Promise<void> {
+    if (!this.activeTurn || this.activeTurnId !== turnId) {
+      await this.renderHistory(messages);
+      this.clearActive();
+      return;
+    }
+    this.adoptingTurnId = turnId;
+    try {
+      await this.renderHistory(messages);
+    } finally {
+      this.adoptingTurnId = null;
+    }
+  }
+
+  private captureActiveAdoptionState(): Readonly<{
+    focusElement: HTMLElement | null;
+    selection: Readonly<{
+      anchorNode: Node;
+      anchorOffset: number;
+      focusNode: Node;
+      focusOffset: number;
+    }> | null;
+  }> | null {
+    if (!this.adoptingTurnId || !this.activeTurn) return null;
+    const activeElement = this.activeTurn.ownerDocument.activeElement;
+    const focusElement = activeElement?.nodeType === 1
+      && this.activeTurn.contains(activeElement)
+      ? activeElement as HTMLElement
+      : null;
+    const selection = this.activeTurn.ownerDocument.getSelection();
+    const preservedSelection = selection?.anchorNode
+      && selection.focusNode
+      && this.activeTurn.contains(selection.anchorNode)
+      && this.activeTurn.contains(selection.focusNode)
+      ? {
+          anchorNode: selection.anchorNode,
+          anchorOffset: selection.anchorOffset,
+          focusNode: selection.focusNode,
+          focusOffset: selection.focusOffset,
+        }
+      : null;
+    return { focusElement, selection: preservedSelection };
+  }
+
+  private restoreDomSelection(selection: PreservedDomSelection | null): void {
+    if (!selection || !selection.anchorNode.isConnected || !selection.focusNode.isConnected) return;
+    const current = this.element.ownerDocument.getSelection();
+    if (!current) return;
+    const maximumOffset = (node: Node): number => node.nodeType === Node.TEXT_NODE
+      ? node.nodeValue?.length ?? 0
+      : node.childNodes.length;
+    const anchorOffset = Math.min(selection.anchorOffset, maximumOffset(selection.anchorNode));
+    const focusOffset = Math.min(selection.focusOffset, maximumOffset(selection.focusNode));
+    try {
+      current.removeAllRanges();
+      if (typeof current.setBaseAndExtent === "function") {
+        current.setBaseAndExtent(
+          selection.anchorNode,
+          anchorOffset,
+          selection.focusNode,
+          focusOffset,
+        );
+        return;
+      }
+      const range = this.element.ownerDocument.createRange();
+      range.setStart(selection.anchorNode, anchorOffset);
+      range.setEnd(selection.focusNode, focusOffset);
+      current.addRange(range);
+    } catch {
+      current.removeAllRanges();
+    }
   }
 
   public setInlineMessageEdit(edit: AgentInlineMessageEdit | null): void {
@@ -468,51 +801,393 @@ export class AgentConversationRenderer extends Component {
   /** Durable message parts are the chronology source for managed chats. */
   private orderedDurableParts(message: ChatMessage): MessagePart[] {
     if (!message.messageParts?.length) return [];
-    return message.messageParts
-      .map((part, index) => ({ part, index }))
-      .filter(({ part }) => ["reasoning", "content", "tool_call"].includes(part.type))
-      .sort((left, right) => left.part.timestamp - right.part.timestamp || left.index - right.index)
-      .map(({ part }) => part);
+    return MessagePartNormalizer.toParts(message)
+      .filter((part) => ["reasoning", "content", "tool_call"].includes(part.type));
+  }
+
+  /** Fingerprint only the projection that can change a rendered part node. */
+  private historicalPartDisplayFingerprint(part: MessagePart): string {
+    if (part.type === "reasoning") {
+      return JSON.stringify({ type: part.type, summary: part.data });
+    }
+    if (part.type === "tool_call") {
+      return toolDisplayFingerprint(this.historicalToolPart(part.data));
+    }
+    return JSON.stringify({ type: part.type, content: presentMessageContent(part.data) });
+  }
+
+  private finalHistoricalAnswerPartIds(
+    parts: readonly Readonly<{ part: MessagePart; messageId: string }>[],
+  ): ReadonlySet<string> {
+    return finalAgentAnswerPartIds(parts.map(({ part, messageId }) => ({
+      id: part.id,
+      messageId,
+      visible: isVisibleHistoricalPart(part),
+      kind: part.type !== "content"
+        ? "activity" as const
+        : isNativeSourcesPart(part)
+          ? "sources" as const
+          : "content" as const,
+    })));
   }
 
   private async renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void> {
     if (part.type === "reasoning") {
       if (!part.data.trim()) return;
-      const node = parent.createDiv({ cls: "systemsculpt-agent-part is-reasoning" });
+      const node = parent.createDiv({
+        cls: "systemsculpt-agent-part is-reasoning",
+        attr: {
+          "data-part-key": part.id,
+          "data-agent-activity-row": "",
+          "data-activity-kind": "reasoning",
+        },
+      });
       await this.renderReasoning(node, part.data, false);
       return;
     }
     if (part.type === "tool_call") {
-      await this.renderHistoricalTool(parent, part.data);
+      const tool = this.historicalToolPart(part.data);
+      const node = parent.createDiv({
+        cls: "systemsculpt-agent-part is-tool",
+        attr: {
+          "data-part-key": toolPartKey(tool.callId),
+          "data-agent-activity-row": "",
+          "data-activity-kind": "tool",
+        },
+      });
+      await this.renderTool(node, tool);
       return;
     }
     if (part.type !== "content") return;
     const content = presentMessageContent(part.data);
     if (content.markdown.trim()) {
-      const node = parent.createDiv({ cls: "systemsculpt-agent-part is-text" });
+      const node = parent.createDiv({
+        cls: "systemsculpt-agent-part is-text",
+        attr: { "data-part-key": part.id },
+      });
       await this.renderMarkdown(content.markdown, node);
     }
     if (content.attachments.length > 0) this.renderMessageAttachments(parent, content.attachments);
   }
 
-  private async renderHistoricalParts(parent: HTMLElement, parts: readonly MessagePart[]): Promise<void> {
-    const timelineEntries = groupConsecutiveToolActivity(
+  private async renderHistoricalParts(
+    parent: HTMLElement,
+    parts: readonly MessagePart[],
+    elapsedMs?: number,
+    finalAnswerPartIds: ReadonlySet<string> = new Set<string>(),
+    cancelled = false,
+  ): Promise<boolean> {
+    const { workParts, finalAnswers, hasActivity } = partitionHistoricalParts(
       parts,
-      (part) => part.type === "tool_call" ? this.historicalToolPart(part.data) : null,
+      finalAnswerPartIds,
     );
+    if (hasActivity) {
+      const activity = this.createCompletedActivity(parent, elapsedMs, cancelled);
+      if (workParts.some((part) => this.hasActiveHistoricalPart(part))) {
+        await this.renderHistoricalTimeline(activity.body, workParts);
+      } else {
+        this.deferHistoricalActivityHydration(activity, workParts);
+      }
+    } else {
+      for (const part of workParts) await this.renderHistoricalPart(parent, part);
+    }
+    for (const finalAnswer of finalAnswers) await this.renderHistoricalPart(parent, finalAnswer);
+    return hasActivity;
+  }
 
-    for (const entry of timelineEntries) {
+  private hasActiveHistoricalPart(part: MessagePart): boolean {
+    const key = part.type === "tool_call" ? toolPartKey(part.data.id) : part.id;
+    return this.activeNodes.has(key);
+  }
+
+  private async renderHistoricalTimeline(
+    parent: HTMLElement,
+    parts: readonly MessagePart[],
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> {
+    const timeline = groupAdjacentAgentActivity(
+      parts,
+      (part) => part.type === "reasoning" || part.type === "tool_call",
+    );
+    for (const entry of timeline) {
+      if (!isCurrent()) return false;
       if (entry.kind === "item") {
         await this.renderHistoricalPart(parent, entry.item);
+        if (!isCurrent()) return false;
         continue;
       }
-      const first = entry.tools[0];
-      const node = parent.createDiv({
-        cls: "systemsculpt-agent-part is-tool",
-        attr: { "data-part-key": toolPartKey(first.callId) },
-      });
-      await this.renderTool(node, entry.tools);
+      const split = splitPreviousAgentActivity(entry.items);
+      if (split.previous.length > 0) {
+        if (split.latest) {
+          await this.renderHistoricalPart(parent, split.latest);
+          if (!isCurrent()) return false;
+        }
+        const latestNode = parent.lastElementChild as HTMLElement | null;
+        const overflow = this.createActivityOverflow(
+          parent,
+          split.previous.length,
+          `overflow:${historicalPartKey(split.previous[0]!)}`,
+        );
+        this.setActivityOverflowItems(
+          overflow.element,
+          latestNode,
+          [],
+        );
+        this.deferHistoricalOverflowHydration(overflow.element, split.previous);
+        continue;
+      }
+      if (split.latest) {
+        await this.renderHistoricalPart(parent, split.latest);
+        if (!isCurrent()) return false;
+      }
     }
+    return true;
+  }
+
+  private deferHistoricalOverflowHydration(
+    element: HTMLButtonElement,
+    parts: readonly MessagePart[],
+  ): void {
+    this.historicalOverflowHydrationStates.set(element, {
+      parts,
+      status: "cold",
+      staging: null,
+      hydration: null,
+    });
+  }
+
+  private startHistoricalOverflowHydration(
+    element: HTMLButtonElement,
+  ): Promise<void> | null {
+    const state = this.historicalOverflowHydrationStates.get(element);
+    if (!state || state.status === "hydrated" || state.status === "disposed") return null;
+    if (state.hydration) return state.hydration;
+
+    state.status = "hydrating";
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const staging = createSurfaceElement(element.ownerDocument, "div");
+    state.staging = staging;
+    const isCurrent = (): boolean =>
+      this.renderingEnabled
+      && lifecycleGeneration === this.lifecycleGeneration
+      && state.status !== "disposed"
+      && this.historicalOverflowHydrationStates.get(element) === state;
+    const discardStaging = (): void => {
+      this.forgetMarkdown(staging);
+      if (
+        state.status !== "disposed"
+        && this.historicalOverflowHydrationStates.get(element) === state
+      ) {
+        state.status = "cold";
+      }
+    };
+    let hydration!: Promise<void>;
+    hydration = (async (): Promise<void> => {
+      try {
+        for (const part of state.parts) {
+          if (!isCurrent()) {
+            discardStaging();
+            return;
+          }
+          await this.renderHistoricalPart(staging, part);
+        }
+        if (!isCurrent()) {
+          discardStaging();
+          return;
+        }
+        const overflow = this.activityOverflowStates.get(element);
+        if (!overflow) {
+          this.disposeHistoricalOverflowHydration(element);
+          return;
+        }
+        overflow.previousNodes = Array.from(staging.children) as HTMLElement[];
+        state.staging = null;
+        state.status = "hydrated";
+        this.applyActivityOverflowLayout(element);
+      } catch (error) {
+        discardStaging();
+        throw error;
+      } finally {
+        if (state.staging === staging) state.staging = null;
+        if (state.hydration === hydration) state.hydration = null;
+      }
+    })();
+    state.hydration = hydration;
+    return hydration;
+  }
+
+  private deferHistoricalActivityHydration(
+    activity: Readonly<{
+      element: HTMLDetailsElement;
+      summary: HTMLElement;
+      body: HTMLElement;
+    }>,
+    parts: readonly MessagePart[],
+  ): void {
+    const state: HistoricalActivityHydrationState = {
+      ...activity,
+      parts,
+      status: "cold",
+      staging: null,
+      hydration: null,
+    };
+    this.historicalActivityHydrationStates.set(activity.element, state);
+    activity.element.addEventListener("toggle", () => {
+      if (!activity.element.open) return;
+      void this.hydrateHistoricalActivity(state).catch(() => undefined);
+    });
+  }
+
+  private hydrateHistoricalActivity(
+    state: HistoricalActivityHydrationState,
+  ): Promise<void> {
+    if (state.status === "hydrated" || state.status === "disposed") {
+      return Promise.resolve();
+    }
+    if (state.hydration) return state.hydration;
+    state.status = "hydrating";
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const staging = createSurfaceElement(state.body.ownerDocument, "div");
+    state.staging = staging;
+    const isCurrent = (): boolean =>
+      this.renderingEnabled
+      && lifecycleGeneration === this.lifecycleGeneration
+      && state.status !== "disposed"
+      && this.historicalActivityHydrationStates.get(state.element) === state;
+    let hydration!: Promise<void>;
+    hydration = (async (): Promise<void> => {
+      try {
+        const rendered = await this.renderHistoricalTimeline(staging, state.parts, isCurrent);
+        if (!rendered || !isCurrent()) {
+          this.forgetMarkdown(staging);
+          return;
+        }
+        const finishLayoutMutation = this.options.beginLayoutMutation?.(
+          state.summary.isConnected ? state.summary : undefined,
+          state.body,
+        );
+        try {
+          if (!isCurrent()) {
+            this.forgetMarkdown(staging);
+            return;
+          }
+          state.body.replaceChildren(...Array.from(staging.childNodes));
+          state.staging = null;
+          state.status = "hydrated";
+        } finally {
+          finishLayoutMutation?.();
+        }
+      } catch (error) {
+        this.forgetMarkdown(staging);
+        if (isCurrent()) state.status = "cold";
+        throw error;
+      } finally {
+        if (state.staging === staging) state.staging = null;
+        if (state.hydration === hydration) state.hydration = null;
+      }
+    })();
+    state.hydration = hydration;
+    return hydration;
+  }
+
+  private async adoptHistoricalParts(
+    parent: HTMLElement,
+    parts: readonly MessagePart[],
+    elapsedMs: number | undefined,
+    finalAnswerPartIds: ReadonlySet<string>,
+    cancelled = false,
+  ): Promise<boolean> {
+    const { workParts, finalAnswers, hasActivity } = partitionHistoricalParts(
+      parts,
+      finalAnswerPartIds,
+    );
+    const work = await this.adoptHistoricalLanes(workParts, parent);
+    const desired: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
+    if (hasActivity) {
+      if (!this.activeCompletedFold || !this.activeCompletedFoldBody) {
+        const created = this.createCompletedActivity(parent, elapsedMs, cancelled);
+        this.activeCompletedFold = created.element;
+        this.activeCompletedFoldBody = created.body;
+      } else {
+        this.activeCompletedFold.querySelector<HTMLElement>(
+          ":scope > .systemsculpt-agent-activity-header > .systemsculpt-agent-activity-label",
+        )?.setText(this.workedLabel(elapsedMs, cancelled));
+      }
+      const grouped = this.groupActiveTimeline(
+        this.activeCompletedFoldBody,
+        work.map(({ key, node }) => ({ key, node })),
+        work.map(({ part }) => part),
+      );
+      this.reconcileChildren(this.activeCompletedFoldBody, grouped.map(({ node }) => node));
+      desired.push({ key: "turn-fold", node: this.activeCompletedFold });
+    } else {
+      desired.push(...work.map(({ key, node }) => ({ key, node })));
+    }
+    const final = await this.adoptHistoricalLanes(finalAnswers, parent);
+    desired.push(...final.map(({ key, node }) => ({ key, node })));
+    this.reconcileChildren(parent, desired.map(({ node }) => node));
+    return hasActivity;
+  }
+
+  private async adoptHistoricalLanes(
+    parts: readonly MessagePart[],
+    insertionParent: HTMLElement,
+  ): Promise<Array<Readonly<{ key: string; node: HTMLElement; part: AgentPart }>>> {
+    const lanes: Array<Readonly<{ key: string; node: HTMLElement; part: AgentPart }>> = [];
+    for (const messagePart of parts) {
+      const part = this.historicalAgentPart(messagePart);
+      if (!part) continue;
+      const key = part.kind === "tool" ? toolPartKey(part.callId) : part.id;
+      const node = await this.renderActivePart(part, key, false, insertionParent);
+      if (messagePart.type === "content") {
+        const content = presentMessageContent(messagePart.data);
+        node.querySelectorAll(":scope > .systemsculpt-agent-message-attachments")
+          .forEach((attachment) => attachment.remove());
+        if (content.attachments.length > 0) this.renderMessageAttachments(node, content.attachments);
+      }
+      lanes.push({ key, node, part });
+    }
+    return lanes;
+  }
+
+  private historicalAgentPart(part: MessagePart): AgentPart | null {
+    if (part.type === "reasoning") {
+      return {
+        id: part.id,
+        order: part.timestamp,
+        kind: "reasoning",
+        messageId: "",
+        state: "complete",
+        summary: part.data,
+      };
+    }
+    if (part.type === "tool_call") return this.historicalToolPart(part.data);
+    const content = presentMessageContent(part.data);
+    return {
+      id: part.id,
+      order: part.timestamp,
+      kind: "text",
+      messageId: "",
+      state: "complete",
+      markdown: content.markdown,
+    };
+  }
+
+  private releaseAdoptedActiveTurn(): void {
+    this.activeTailStatus?.remove();
+    this.stopWorkingTimer();
+    this.activeTurn = null;
+    this.activeBody = null;
+    this.activeTurnId = null;
+    this.activeTailStatus = null;
+    this.activeCompletedFold = null;
+    this.activeCompletedFoldBody = null;
+    this.activeOverflowNodes.clear();
+    this.activeNodes.clear();
+    this.activePartRefs.clear();
+    this.activeToolDisplayFingerprints.clear();
+    this.activeToolErrorSuppression.clear();
+    this.element.setAttribute("aria-busy", "false");
   }
 
   public async renderActive(
@@ -538,163 +1213,264 @@ export class AgentConversationRenderer extends Component {
       // would show the same content twice; only parts history cannot carry
       // (the terminal error and its Retry affordance) may stay.
       .filter((part) =>
-        part.kind === "error" || !this.historyMessageIds.has(part.messageId));
+        part.kind === "error" || !this.historyMessageIds.has(part.messageId))
+      .filter((part) =>
+        presentation.phase !== "completed"
+        || part.kind !== "reasoning"
+        || part.summary.trim().length > 0);
     const terminalErrors = orderedParts.filter(
       (part): part is Extract<AgentPart, { kind: "error" }> => part.kind === "error",
     );
+    const hasCommittedCancelledProjection = presentation.phase === "cancelled"
+      && snapshot.messages.some((message) =>
+        this.committedCancelledMessageIds.has(message.id));
     const showTerminalStatus = presentation.phase === "cancelled"
-      || (presentation.phase === "failed" && terminalErrors.length === 0);
-    if (presentation.busy || showTerminalStatus) {
-      this.ensureTailStatus(presentation);
-    } else if (this.activeTailStatus) {
+      ? !hasCommittedCancelledProjection
+      : presentation.phase === "failed" && terminalErrors.length === 0;
+    const tailStatus = presentation.busy || showTerminalStatus
+      ? this.ensureTailStatus(presentation, snapshot.elapsedMs)
+      : null;
+    if (!tailStatus && this.activeTailStatus) {
       this.activeTailStatus.remove();
       this.activeTailStatus = null;
+      this.stopWorkingTimer();
     }
     const duplicatesTerminalError = (part: AgentToolPart): boolean =>
       Boolean(part.error && terminalErrors.some((terminal) =>
         terminal.error.code === part.error?.code
         && terminal.error.message === part.error.message));
     const lanes: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
-    let firstRenderError: unknown;
-
-    const timelineEntries = groupConsecutiveToolActivity(
-      orderedParts,
-      (part) => part.kind === "tool" ? part : null,
-      presentation.phase === "completed",
-    );
-
-    for (const entry of timelineEntries) {
-      if (entry.kind === "item") {
-        const key = `${entry.item.kind}:${entry.item.id}`;
-        wantedParts.add(key);
-        try {
-          const node = await this.renderActivePart(entry.item, key);
-          if (!isCurrent()) return;
-          lanes.push({
-            key,
-            node,
-          });
-        } catch (error) {
-          if (!isCurrent()) return;
-          firstRenderError ??= error;
-          const node = this.activeNodes.get(key);
-          if (node) lanes.push({ key, node });
-        }
-        continue;
-      }
-      const first = entry.tools[0];
-      const key = toolPartKey(first.callId);
+    const renderErrors: unknown[] = [];
+    for (const part of orderedParts) {
+      const key = part.kind === "tool" ? toolPartKey(part.callId) : part.id;
       wantedParts.add(key);
       try {
-        const node = await this.renderActiveToolGroup(
-          entry.tools,
+        const node = await this.renderActivePart(
+          part,
           key,
-          entry.tools.some(duplicatesTerminalError),
+          part.kind === "tool" && duplicatesTerminalError(part),
         );
         if (!isCurrent()) return;
-        lanes.push({
-          key,
-          node,
-        });
+        lanes.push({ key, node });
       } catch (error) {
         if (!isCurrent()) return;
-        firstRenderError ??= error;
+        renderErrors.push(error);
         const node = this.activeNodes.get(key);
         if (node) lanes.push({ key, node });
       }
     }
     if (!isCurrent()) return;
-    if (presentation.busy || showTerminalStatus) {
-      lanes.push({
+    const finalAnswerPartIds = presentation.phase === "completed"
+      ? finalAgentAnswerPartIds(orderedParts.flatMap((part) => part.kind === "error" ? [] : [{
+        id: part.id,
+        messageId: part.messageId,
+        visible: part.kind === "text"
+          ? part.markdown.trim().length > 0
+          : part.kind !== "reasoning" || part.summary.trim().length > 0,
+        kind: isAgentActivityPart(part)
+          ? "activity" as const
+          : part.id.startsWith("sources:")
+            ? "sources" as const
+            : "content" as const,
+      }]))
+      : new Set<string>();
+    const visibleLanes = presentation.phase === "completed"
+      ? this.completedActiveLanes(
+        body,
+        lanes,
+        orderedParts,
+        finalAnswerPartIds,
+        snapshot.elapsedMs,
+      )
+      : this.groupActiveTimeline(body, lanes, orderedParts);
+    if (tailStatus) {
+      visibleLanes.push({
         key: "tail-status",
-        node: this.ensureTailStatus(presentation),
+        node: tailStatus,
       });
     }
 
-    this.reconcileChildren(body, lanes.map((lane) => lane.node));
+    this.reconcileChildren(body, visibleLanes.map((lane) => lane.node));
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
-        this.liveMarkdown.forget(node);
+        this.forgetMarkdown(node);
         node.remove();
         this.activeNodes.delete(key);
         this.activePartRefs.delete(key);
-        this.activeToolGroupRefs.delete(key);
+        this.activeToolDisplayFingerprints.delete(key);
         this.activeToolErrorSuppression.delete(key);
       }
     }
-    if (typeof firstRenderError !== "undefined") throw firstRenderError;
+    if (renderErrors.length > 0) throw renderErrors[0];
+  }
+
+  private completedActiveLanes(
+    body: HTMLElement,
+    lanes: Array<Readonly<{ key: string; node: HTMLElement }>>,
+    parts: readonly AgentPart[],
+    finalAnswerPartIds: ReadonlySet<string>,
+    elapsedMs?: number,
+  ): Array<Readonly<{ key: string; node: HTMLElement }>> {
+    const finalAnswers = lanes.filter((_, index) => finalAnswerPartIds.has(parts[index]!.id));
+    const workLanes = lanes.filter((_, index) => !finalAnswerPartIds.has(parts[index]!.id));
+    const workParts = parts.filter((part) => !finalAnswerPartIds.has(part.id));
+    const hasActivity = workParts.some(isAgentActivityPart);
+    if (!hasActivity) return lanes;
+    const focused = body.ownerDocument.activeElement;
+    const focusedElement = focused?.nodeType === 1 ? focused as HTMLElement : null;
+    const moveFocusToFold = focusedElement !== null
+      && workLanes.some(({ node }) => node.contains(focusedElement));
+    if (!this.activeCompletedFold || !this.activeCompletedFoldBody) {
+      const created = this.createCompletedActivity(body, elapsedMs);
+      this.activeCompletedFold = created.element;
+      this.activeCompletedFoldBody = created.body;
+    } else {
+      this.activeCompletedFold.querySelector<HTMLElement>(
+        ":scope > .systemsculpt-agent-activity-header > .systemsculpt-agent-activity-label",
+      )?.setText(this.workedLabel(elapsedMs));
+    }
+    const rendered = this.groupActiveTimeline(this.activeCompletedFoldBody, workLanes, workParts);
+    this.reconcileChildren(this.activeCompletedFoldBody, rendered.map(({ node }) => node));
+    if (moveFocusToFold) {
+      this.activeCompletedFold.querySelector<HTMLElement>(
+        ":scope > .systemsculpt-agent-activity-header",
+      )?.focus({ preventScroll: true });
+    }
+    return [
+      { key: "turn-fold", node: this.activeCompletedFold },
+      ...finalAnswers,
+    ];
+  }
+
+  private groupActiveTimeline(
+    parent: HTMLElement,
+    lanes: readonly Readonly<{ key: string; node: HTMLElement }>[],
+    parts: readonly AgentPart[],
+  ): Array<Readonly<{ key: string; node: HTMLElement }>> {
+    const result: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
+    const timeline = groupAdjacentAgentActivity(
+      lanes.map((lane, index) => ({ lane, part: parts[index]! })),
+      ({ part }) => isAgentActivityPart(part),
+    );
+    const wantedOverflowKeys = new Set<string>();
+    for (const entry of timeline) {
+      if (entry.kind === "item") {
+        result.push(entry.item.lane);
+        continue;
+      }
+      const split = splitPreviousAgentActivity(entry.items);
+      if (split.previous.length > 0) {
+        const first = split.previous[0]!;
+        const key = `overflow:${first.lane.key}`;
+        wantedOverflowKeys.add(key);
+        let overflow = this.activeOverflowNodes.get(key);
+        if (!overflow) {
+          overflow = this.createActivityOverflow(parent, split.previous.length, key).element;
+          this.activeOverflowNodes.set(key, overflow);
+        } else {
+          this.updateActivityOverflow(overflow, split.previous.length);
+        }
+        const previousLanes = split.previous.map(({ lane }) => lane);
+        this.setActivityOverflowItems(
+          overflow,
+          split.latest?.lane.node ?? null,
+          previousLanes.map(({ node }) => node),
+        );
+        if (this.activityOverflowExpanded(overflow)) result.push(...previousLanes);
+        if (split.latest) result.push(split.latest.lane);
+        result.push({ key, node: overflow });
+        continue;
+      }
+      if (split.latest) result.push(split.latest.lane);
+    }
+    for (const [key, overflow] of this.activeOverflowNodes) {
+      if (wantedOverflowKeys.has(key)) continue;
+      overflow.remove();
+      this.activeOverflowNodes.delete(key);
+      this.activityOverflowStates.delete(overflow);
+    }
+    return result;
   }
 
   private async renderActivePart(
     part: AgentPart,
     key: string,
     suppressToolError = false,
+    insertionParent?: HTMLElement,
   ): Promise<HTMLElement> {
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const renderEpoch = this.toolRenderEpoch;
     let node = this.activeNodes.get(key);
+    const createdNode = !node;
     if (!node) {
       node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
       node.addClass("systemsculpt-agent-part", `is-${part.kind}`);
       node.dataset.partKey = key;
+      if (isAgentActivityPart(part)) {
+        node.dataset.agentActivityRow = "";
+        node.dataset.activityKind = part.kind;
+      }
       this.activeNodes.set(key, node);
-      this.insertActiveNode(node);
     }
+    const needsInsertion = node.parentElement === null;
     const candidate = node.ownerDocument.activeElement;
     const activeElement = candidate?.nodeType === 1 ? candidate as HTMLElement : null;
     const preservedFocusKey = activeElement && node.contains(activeElement)
       ? activeElement.dataset.focusKey
       : undefined;
+    const incomingToolFingerprint = part.kind === "tool"
+      ? toolDisplayFingerprint(part)
+      : undefined;
     const suppressionChanged = part.kind === "tool"
       && this.activeToolErrorSuppression.get(key) !== suppressToolError;
     if (
-      !agentPartsEqual(this.activePartRefs.get(key), part)
-      || this.activeToolGroupRefs.has(key)
+      !agentPartsEqual(
+        this.activePartRefs.get(key),
+        part,
+        this.activeToolDisplayFingerprints.get(key),
+        incomingToolFingerprint,
+      )
       || suppressionChanged
     ) {
-      await this.renderPart(
+      const committed = await this.renderPart(
         node,
         part,
         this.activePartRefs.get(key),
         suppressToolError,
       );
-      this.activePartRefs.set(key, part);
-      this.activeToolGroupRefs.delete(key);
-      if (part.kind === "tool") {
-        this.activeToolErrorSuppression.set(key, suppressToolError);
-      } else {
-        this.activeToolErrorSuppression.delete(key);
+      if (
+        !this.renderingEnabled
+        || lifecycleGeneration !== this.lifecycleGeneration
+        || renderEpoch !== this.toolRenderEpoch
+      ) {
+        if (createdNode && this.activeNodes.get(key) === node) {
+          this.forgetMarkdown(node);
+          node.remove();
+          this.activeNodes.delete(key);
+          this.activePartRefs.delete(key);
+          this.activeToolDisplayFingerprints.delete(key);
+          this.activeToolErrorSuppression.delete(key);
+        }
+        return node;
+      }
+      if (committed) {
+        this.activePartRefs.set(key, part);
+        if (part.kind === "tool") {
+          this.activeToolDisplayFingerprints.set(key, incomingToolFingerprint!);
+          this.activeToolErrorSuppression.set(key, suppressToolError);
+        } else {
+          this.activeToolDisplayFingerprints.delete(key);
+          this.activeToolErrorSuppression.delete(key);
+        }
+        if (needsInsertion) {
+          if (insertionParent) insertionParent.appendChild(node);
+          else this.insertActiveNode(node);
+        }
+        if (part.kind === "tool") this.startToolApprovalPreviewHydration(node);
       }
     }
     if (preservedFocusKey) {
       node.querySelector<HTMLElement>(`[data-focus-key="${preservedFocusKey}"]`)?.focus();
-    }
-    return node;
-  }
-
-  private async renderActiveToolGroup(
-    parts: readonly AgentToolPart[],
-    key: string,
-    suppressToolError: boolean,
-  ): Promise<HTMLElement> {
-    if (parts.length === 1) {
-      return this.renderActivePart(parts[0], key, suppressToolError);
-    }
-    let node = this.activeNodes.get(key);
-    if (!node) {
-      node = createSurfaceElement(this.activeRoot.ownerDocument, "div");
-      node.dataset.partKey = key;
-      this.activeNodes.set(key, node);
-      this.insertActiveNode(node);
-    }
-    const previous = this.activeToolGroupRefs.get(key);
-    const unchanged = previous?.length === parts.length
-      && previous.every((part, index) => agentPartsEqual(part, parts[index]));
-    const suppressionChanged =
-      this.activeToolErrorSuppression.get(key) !== suppressToolError;
-    if (!unchanged || suppressionChanged) {
-      await this.renderTool(node, parts, suppressToolError);
-      this.activePartRefs.delete(key);
-      this.activeToolGroupRefs.set(key, parts);
-      this.activeToolErrorSuppression.set(key, suppressToolError);
     }
     return node;
   }
@@ -709,16 +1485,184 @@ export class AgentConversationRenderer extends Component {
     );
   }
 
+  private createCompletedActivity(
+    parent: HTMLElement,
+    elapsedMs?: number,
+    cancelled = false,
+  ): Readonly<{
+    element: HTMLDetailsElement;
+    summary: HTMLElement;
+    body: HTMLElement;
+  }> {
+    const element = parent.createEl("details", {
+      cls: "systemsculpt-agent-activity is-settled",
+      attr: {
+        "data-agent-turn-fold": "",
+        "data-activity-state": "settled",
+      },
+    }) as HTMLDetailsElement;
+    const header = element.createEl("summary", {
+      cls: "systemsculpt-agent-activity-header",
+      attr: {
+        "data-focus-key": "activity-summary",
+        tabindex: "0",
+      },
+    });
+    header.createEl("strong", {
+      cls: "systemsculpt-agent-activity-label",
+      text: this.workedLabel(elapsedMs, cancelled),
+    });
+    const disclosure = header.createSpan({
+      cls: "systemsculpt-agent-activity-disclosure",
+    });
+    setIcon(disclosure, "chevron-right");
+    const body = element.createDiv({
+      cls: "systemsculpt-agent-activity-body",
+      attr: { "data-agent-turn-fold-body": "" },
+    });
+    element.open = false;
+    return { element, summary: header, body };
+  }
+
+  private createActivityOverflow(
+    parent: HTMLElement,
+    hiddenCount: number,
+    key: string,
+  ): Readonly<{ element: HTMLButtonElement }> {
+    const element = parent.createEl("button", {
+      cls: "systemsculpt-agent-activity-overflow systemsculpt-agent-activity-overflow-header",
+      attr: {
+        type: "button",
+        "aria-expanded": "false",
+        "data-testid": "chat.activity.previous-tools",
+        "data-agent-activity-overflow": "",
+        "data-agent-activity-overflow-key": key,
+        "data-focus-key": "activity-overflow-summary",
+      },
+    });
+    const disclosure = element.createSpan({
+      cls: "systemsculpt-agent-activity-overflow-disclosure",
+    });
+    setIcon(disclosure, "chevron-down");
+    const label = element.createEl("strong", {
+      cls: "systemsculpt-agent-activity-overflow-label",
+      text: this.activityOverflowLabel(hiddenCount),
+    });
+    this.activityOverflowStates.set(element, {
+      label,
+      latestNode: null,
+      previousNodes: [],
+    });
+    element.onclick = () => {
+      const finishLayoutMutation = this.options.beginLayoutMutation?.(element);
+      const expanded = !this.activityOverflowExpanded(element);
+      element.setAttribute("aria-expanded", String(expanded));
+      this.applyActivityOverflowLayout(element);
+      const hydration = expanded
+        ? this.startHistoricalOverflowHydration(element)
+        : null;
+      if (!hydration) {
+        finishLayoutMutation?.();
+        return;
+      }
+      void hydration.catch(() => undefined).finally(() => finishLayoutMutation?.());
+    };
+    this.updateActivityOverflow(element, hiddenCount);
+    return { element };
+  }
+
+  private setActivityOverflowItems(
+    element: HTMLButtonElement,
+    latestNode: HTMLElement | null,
+    previousNodes: readonly HTMLElement[],
+  ): void {
+    const state = this.activityOverflowStates.get(element);
+    if (!state) return;
+    if (
+      state.latestNode === latestNode
+      && state.previousNodes.length === previousNodes.length
+      && state.previousNodes.every((node, index) => node === previousNodes[index])
+    ) return;
+    const wanted = new Set(previousNodes);
+    for (const node of state.previousNodes) {
+      if (!wanted.has(node)) node.remove();
+    }
+    state.latestNode = latestNode;
+    state.previousNodes = [...previousNodes];
+    this.applyActivityOverflowLayout(element);
+  }
+
+  private activityOverflowExpanded(element: HTMLButtonElement): boolean {
+    return element.getAttribute("aria-expanded") === "true";
+  }
+
+  private applyActivityOverflowLayout(element: HTMLButtonElement): void {
+    const state = this.activityOverflowStates.get(element);
+    if (!state) return;
+    const count = Number(element.dataset.hiddenCount);
+    const expanded = this.activityOverflowExpanded(element);
+    state.label.setText(expanded
+      ? "Show fewer tool calls"
+      : this.activityOverflowLabel(Number.isFinite(count) ? count : 0));
+    const parent = state.latestNode?.parentElement ?? element.parentElement;
+    if (!parent || state.latestNode?.parentElement !== parent) return;
+    if (!expanded) {
+      for (const node of state.previousNodes) node.remove();
+    }
+    const desired = expanded
+      ? [...state.previousNodes, state.latestNode, element]
+      : [state.latestNode, element];
+    this.reconcileTimelineSegment(parent, desired);
+  }
+
+  private reconcileTimelineSegment(
+    parent: HTMLElement,
+    desired: readonly HTMLElement[],
+  ): void {
+    const last = desired[desired.length - 1];
+    if (!last) return;
+    const cursorAfterSegment = last.parentElement === parent ? last.nextElementSibling : null;
+    let cursor: Element | null = cursorAfterSegment;
+    for (let index = desired.length - 1; index >= 0; index -= 1) {
+      const node = desired[index]!;
+      if (node.nextElementSibling !== cursor || node.parentElement !== parent) {
+        parent.insertBefore(node, cursor);
+      }
+      cursor = node;
+    }
+  }
+
+  private updateActivityOverflow(element: HTMLButtonElement, hiddenCount: number): void {
+    element.dataset.hiddenCount = String(hiddenCount);
+    const state = this.activityOverflowStates.get(element);
+    state?.label.setText(this.activityOverflowExpanded(element)
+      ? "Show fewer tool calls"
+      : this.activityOverflowLabel(hiddenCount));
+  }
+
+  private activityOverflowLabel(count: number): string {
+    return `+${count} previous tool call${count === 1 ? "" : "s"}`;
+  }
+
+  private workedLabel(elapsedMs?: number, cancelled = false): string {
+    const duration = formatAgentActivityDuration(elapsedMs);
+    if (cancelled) {
+      return duration ? `You stopped after ${duration}` : "You stopped this response";
+    }
+    return duration ? `Worked for ${duration}` : "Worked";
+  }
+
   /**
-   * A restored turn that ended cancelled keeps a static "Stopped" marker so
-   * an interrupted response never reads as silently complete.
+   * A durable cancelled turn without activity keeps a static "Stopped"
+   * marker so an interrupted response never reads as silently complete.
    */
-  private renderRestoredCancelledTail(body: HTMLElement): void {
+  private renderDurableCancelledTail(body: HTMLElement): void {
     const status = body.createDiv({
       cls: "systemsculpt-agent-tail-status is-cancelled",
       attr: {
         role: "status",
-        "aria-label": "Agent status: Stopped",
+        "aria-live": "polite",
+        "aria-atomic": "true",
         "data-status": "Stopped",
       },
     });
@@ -736,7 +1680,6 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-turn is-assistant is-active",
       attr: {
         ...(turnId ? { "data-turn-id": turnId } : {}),
-        "aria-label": "SystemSculpt response",
       },
     });
     this.activeBody = this.activeTurn.createDiv({ cls: "systemsculpt-agent-turn-body" });
@@ -745,16 +1688,12 @@ export class AgentConversationRenderer extends Component {
 
   private ensureTailStatus(
     presentation: AgentConversationPresentation,
+    elapsedMs?: number,
   ): HTMLElement {
     let status = this.activeTailStatus;
     if (!status) {
       status = this.activeRoot.createDiv({
         cls: "systemsculpt-agent-tail-status",
-        attr: {
-          role: "status",
-          "aria-live": "polite",
-          "aria-atomic": "true",
-        },
       });
       status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
       status.createSpan({ cls: "systemsculpt-agent-tail-status-label" });
@@ -762,17 +1701,25 @@ export class AgentConversationRenderer extends Component {
     }
     status.className =
       `systemsculpt-agent-tail-status is-${presentation.phase}`;
-    const statusChanged =
-      status.dataset.status !== presentation.activityStatus;
+    const workingElapsedMs = presentation.busy
+      ? this.startWorkingTimer(status, elapsedMs)
+      : undefined;
+    const workingDuration = formatAgentWorkingDuration(workingElapsedMs);
+    const displayStatus = presentation.busy
+      ? (workingDuration ? `Working for ${workingDuration}` : "Working")
+      : presentation.activityStatus;
+    const statusChanged = status.dataset.status !== displayStatus;
     if (statusChanged) {
-      status.dataset.status = presentation.activityStatus;
-      status.setAttribute(
-        "aria-label",
-        `Agent status: ${presentation.activityStatus}`,
+      status.dataset.status = displayStatus;
+      this.setTextNode(
+        status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label"),
+        displayStatus,
       );
-      status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label")
-        ?.setText(presentation.activityStatus);
     }
+    status.toggleAttribute("data-agent-working-timer", presentation.busy);
+    const label = status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label");
+    label?.toggleAttribute("data-agent-working-duration", presentation.busy);
+    if (!presentation.busy) this.stopWorkingTimer();
     const icon = status.querySelector<HTMLElement>(
       ".systemsculpt-agent-tail-status-icon",
     );
@@ -791,15 +1738,81 @@ export class AgentConversationRenderer extends Component {
       "is-animated",
       presentation.busy && presentation.phase !== "awaiting-approval",
     );
-    status.setAttribute(
-      "role",
-      presentation.phase === "failed" ? "alert" : "status",
-    );
-    status.setAttribute(
-      "aria-live",
-      presentation.phase === "failed" ? "assertive" : "polite",
-    );
+    if (presentation.busy) {
+      status.removeAttribute("role");
+      status.removeAttribute("aria-live");
+      status.removeAttribute("aria-atomic");
+    } else {
+      status.setAttribute(
+        "role",
+        presentation.phase === "failed" ? "alert" : "status",
+      );
+      status.setAttribute(
+        "aria-live",
+        presentation.phase === "failed" ? "assertive" : "polite",
+      );
+      status.setAttribute("aria-atomic", "true");
+    }
     return status;
+  }
+
+  private startWorkingTimer(
+    status: HTMLElement,
+    elapsedMs: number | undefined,
+  ): number | undefined {
+    if (elapsedMs === undefined || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+      this.stopWorkingTimer();
+      return undefined;
+    }
+    const observedAt = this.monotonicNow(status);
+    const projectedElapsedMs = this.activeElapsedBaseline
+      ? this.activeElapsedBaseline.elapsedMs
+        + Math.max(0, observedAt - this.activeElapsedBaseline.observedAt)
+      : elapsedMs;
+    const rebasedElapsedMs = Math.max(elapsedMs, projectedElapsedMs);
+    this.activeElapsedBaseline = {
+      elapsedMs: rebasedElapsedMs,
+      observedAt,
+    };
+    if (this.activeWorkingTimer !== null) return rebasedElapsedMs;
+    const ownerWindow = getSurfaceOwnerWindow(status);
+    this.activeWorkingTimer = ownerWindow.setInterval(() => {
+      if (!status.isConnected || !this.activeElapsedBaseline) {
+        this.stopWorkingTimer();
+        return;
+      }
+      const current = this.activeElapsedBaseline.elapsedMs
+        + Math.max(0, this.monotonicNow(status) - this.activeElapsedBaseline.observedAt);
+      const text = `Working for ${formatAgentWorkingDuration(current) ?? "0s"}`;
+      if (status.dataset.status === text) return;
+      status.dataset.status = text;
+      this.setTextNode(
+        status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label"),
+        text,
+      );
+    }, 1_000);
+    return rebasedElapsedMs;
+  }
+
+  private monotonicNow(element: HTMLElement): number {
+    return getSurfaceOwnerWindow(element).performance?.now?.() ?? Date.now();
+  }
+
+  private setTextNode(element: HTMLElement | null, text: string): void {
+    if (!element) return;
+    if (element.childNodes.length === 1 && element.firstChild!.nodeType === Node.TEXT_NODE) {
+      element.firstChild!.nodeValue = text;
+      return;
+    }
+    element.replaceChildren(element.ownerDocument.createTextNode(text));
+  }
+
+  private stopWorkingTimer(): void {
+    if (this.activeWorkingTimer !== null) {
+      getSurfaceOwnerWindow(this.element).clearInterval(this.activeWorkingTimer);
+      this.activeWorkingTimer = null;
+    }
+    this.activeElapsedBaseline = null;
   }
 
   private reconcileChildren(parent: HTMLElement, desired: readonly HTMLElement[]): void {
@@ -815,13 +1828,305 @@ export class AgentConversationRenderer extends Component {
     }
   }
 
+  private disposeHistoricalActivityHydrationWithin(target: HTMLElement): void {
+    for (const [element, state] of this.historicalActivityHydrationStates) {
+      if (element !== target && !target.contains(element)) continue;
+      state.status = "disposed";
+      if (state.staging) this.forgetMarkdown(state.staging);
+      state.staging = null;
+      this.historicalActivityHydrationStates.delete(element);
+    }
+  }
+
+  private disposeHistoricalOverflowHydration(element: HTMLButtonElement): void {
+    const state = this.historicalOverflowHydrationStates.get(element);
+    if (!state) return;
+    state.status = "disposed";
+    if (state.staging) this.forgetMarkdown(state.staging);
+    state.staging = null;
+    this.historicalOverflowHydrationStates.delete(element);
+  }
+
+  private disposeHistoricalOverflowHydrationWithin(target: HTMLElement): void {
+    for (const element of this.historicalOverflowHydrationStates.keys()) {
+      if (element !== target && !target.contains(element)) continue;
+      this.disposeHistoricalOverflowHydration(element);
+    }
+  }
+
+  private captureHistoricalDisclosureState(row: HTMLElement): HistoricalDisclosureSnapshot {
+    const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]");
+    const workedBody = worked?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-activity-body",
+    ) ?? null;
+    const hydration = worked
+      ? this.historicalActivityHydrationStates.get(worked)
+      : undefined;
+    const overflowOpen = new Map<string, boolean>();
+    for (const overflow of row.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow-key]",
+    )) {
+      const key = overflow.dataset.agentActivityOverflowKey;
+      if (key) overflowOpen.set(key, this.activityOverflowExpanded(overflow));
+    }
+    const reasoningOpen = new Map<string, boolean>();
+    const toolOpen = new Map<string, boolean>();
+    for (const [key, part] of this.collectHistoricalPartNodes(row)) {
+      const reasoning = part.querySelector<HTMLDetailsElement>(
+        ":scope > .systemsculpt-agent-reasoning-details",
+      );
+      if (reasoning) reasoningOpen.set(key, reasoning.open);
+      const tool = part.querySelector<HTMLDetailsElement>(
+        ":scope > details.systemsculpt-agent-tool",
+      );
+      if (tool) toolOpen.set(key, tool.open);
+    }
+    return {
+      workedOpen: worked?.open ?? false,
+      hydrateWorked: Boolean(
+        worked
+        && (
+          worked.open
+          || hydration?.status === "hydrated"
+          || (workedBody?.childElementCount ?? 0) > 0
+        )
+      ),
+      overflowOpen,
+      reasoningOpen,
+      toolOpen,
+    };
+  }
+
+  private async prepareHistoricalRowReplacement(
+    replacement: HistoricalRowReplacement,
+  ): Promise<void> {
+    const nextWorked = replacement.next.node.querySelector<HTMLDetailsElement>(
+      "details[data-agent-turn-fold]",
+    );
+    if (replacement.disclosure.hydrateWorked && nextWorked) {
+      const hydration = this.historicalActivityHydrationStates.get(nextWorked);
+      if (hydration) await this.hydrateHistoricalActivity(hydration);
+    }
+    if (nextWorked) nextWorked.open = replacement.disclosure.workedOpen;
+
+    const previousOverflows = new Map<string, HTMLButtonElement>();
+    for (const overflow of replacement.previous.node.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow-key]",
+    )) {
+      const key = overflow.dataset.agentActivityOverflowKey;
+      if (key) previousOverflows.set(key, overflow);
+    }
+    for (const overflow of replacement.next.node.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow-key]",
+    )) {
+      const key = overflow.dataset.agentActivityOverflowKey;
+      if (!key) continue;
+      const expanded = replacement.disclosure.overflowOpen.get(key) === true;
+      const previous = previousOverflows.get(key);
+      const previousWasHydrated = previous
+        ? (this.activityOverflowStates.get(previous)?.previousNodes.length ?? 0) > 0
+        : false;
+      if (!expanded && !previousWasHydrated) continue;
+      overflow.setAttribute("aria-expanded", String(expanded));
+      const hydration = this.startHistoricalOverflowHydration(overflow);
+      if (hydration) await hydration;
+    }
+
+    const previousParts = this.collectHistoricalPartNodes(replacement.previous.node);
+    const nextParts = this.collectHistoricalPartNodes(replacement.next.node);
+    for (const [key, open] of replacement.disclosure.reasoningOpen) {
+      if (!open) continue;
+      const previousPart = previousParts.get(key);
+      const nextPart = nextParts.get(key);
+      const exactNodeWillMove = Boolean(
+        previousPart
+        && nextPart
+        && replacement.previous.partFingerprints.get(key)
+          === replacement.next.partFingerprints.get(key),
+      );
+      const part = exactNodeWillMove ? previousPart : nextPart;
+      const details = part?.querySelector<HTMLDetailsElement>(
+        ":scope > .systemsculpt-agent-reasoning-details",
+      );
+      if (!details) continue;
+      details.open = true;
+      await this.renderReasoningDisclosure(details);
+    }
+  }
+
+  private captureHistoricalReplacementInteraction(
+    previousRow: HTMLElement,
+    nextRow: HTMLElement,
+  ): HistoricalReplacementInteraction | null {
+    const candidate = previousRow.ownerDocument.activeElement;
+    const focusElement = candidate?.nodeType === 1
+      && previousRow.contains(candidate)
+      ? candidate as HTMLElement
+      : null;
+    const selection = previousRow.ownerDocument.getSelection();
+    const preservedSelection = selection?.anchorNode
+      && selection.focusNode
+      && previousRow.contains(selection.anchorNode)
+      && previousRow.contains(selection.focusNode)
+      ? {
+          anchorNode: selection.anchorNode,
+          anchorOffset: selection.anchorOffset,
+          focusNode: selection.focusNode,
+          focusOffset: selection.focusOffset,
+        }
+      : null;
+    if (!focusElement && !preservedSelection) return null;
+
+    const keyedFocus = focusElement?.closest<HTMLElement>("[data-focus-key]") ?? null;
+    const focusKey = keyedFocus?.dataset.focusKey ?? null;
+    const part = focusElement?.closest<HTMLElement>("[data-part-key]") ?? null;
+    let focusLocator: HistoricalFocusLocator | null = null;
+    if (part && previousRow.contains(part) && part.dataset.partKey) {
+      focusLocator = { kind: "part", key: part.dataset.partKey, focusKey };
+    } else {
+      const overflow = focusElement?.closest<HTMLButtonElement>(
+        "button[data-agent-activity-overflow-key]",
+      ) ?? null;
+      if (overflow?.dataset.agentActivityOverflowKey) {
+        focusLocator = {
+          kind: "overflow",
+          key: overflow.dataset.agentActivityOverflowKey,
+          focusKey,
+        };
+      } else if (focusElement?.closest("details[data-agent-turn-fold]")) {
+        focusLocator = { kind: "worked", focusKey };
+      }
+    }
+    return {
+      focusElement,
+      focusLocator,
+      focusRow: nextRow,
+      selection: preservedSelection,
+    };
+  }
+
+  private commitHistoricalRowReplacement(replacement: HistoricalRowReplacement): void {
+    const previousParts = this.collectHistoricalPartNodes(replacement.previous.node);
+    const nextParts = this.collectHistoricalPartNodes(replacement.next.node);
+    for (const [key, fingerprint] of replacement.next.partFingerprints) {
+      if (replacement.previous.partFingerprints.get(key) !== fingerprint) continue;
+      const previousPart = previousParts.get(key);
+      const nextPart = nextParts.get(key);
+      if (!previousPart || !nextPart || previousPart === nextPart) continue;
+      this.moveExactHistoricalPart(
+        replacement.previous.node,
+        replacement.next.node,
+        previousPart,
+        nextPart,
+      );
+    }
+
+    const nextWorked = replacement.next.node.querySelector<HTMLDetailsElement>(
+      "details[data-agent-turn-fold]",
+    );
+    if (nextWorked) nextWorked.open = replacement.disclosure.workedOpen;
+
+    const transferredParts = this.collectHistoricalPartNodes(replacement.next.node);
+    for (const [key, open] of replacement.disclosure.reasoningOpen) {
+      const details = transferredParts.get(key)?.querySelector<HTMLDetailsElement>(
+        ":scope > .systemsculpt-agent-reasoning-details",
+      );
+      if (details) details.open = open;
+    }
+    for (const [key, open] of replacement.disclosure.toolOpen) {
+      const details = transferredParts.get(key)?.querySelector<HTMLDetailsElement>(
+        ":scope > details.systemsculpt-agent-tool",
+      );
+      if (details) details.open = open;
+    }
+    for (const overflow of replacement.next.node.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow-key]",
+    )) {
+      const key = overflow.dataset.agentActivityOverflowKey;
+      const open = key ? replacement.disclosure.overflowOpen.get(key) : undefined;
+      if (open === undefined) continue;
+      overflow.setAttribute("aria-expanded", String(open));
+      this.applyActivityOverflowLayout(overflow);
+    }
+  }
+
+  private collectHistoricalPartNodes(row: HTMLElement): Map<string, HTMLElement> {
+    const parts = new Map<string, HTMLElement>();
+    const remember = (node: HTMLElement | null): void => {
+      if (!node) return;
+      if (node.dataset.partKey) parts.set(node.dataset.partKey, node);
+      for (const child of node.querySelectorAll<HTMLElement>("[data-part-key]")) {
+        if (child.dataset.partKey) parts.set(child.dataset.partKey, child);
+      }
+    };
+    remember(row);
+    for (const overflow of row.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow]",
+    )) {
+      const state = this.activityOverflowStates.get(overflow);
+      if (!state) continue;
+      remember(state.latestNode);
+      for (const node of state.previousNodes) remember(node);
+    }
+    return parts;
+  }
+
+  private moveExactHistoricalPart(
+    previousRow: HTMLElement,
+    nextRow: HTMLElement,
+    previousPart: HTMLElement,
+    nextPart: HTMLElement,
+  ): void {
+    for (const overflow of previousRow.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow]",
+    )) {
+      const state = this.activityOverflowStates.get(overflow);
+      if (!state) continue;
+      if (state.latestNode === previousPart) state.latestNode = null;
+      state.previousNodes = state.previousNodes.filter((node) => node !== previousPart);
+    }
+    for (const overflow of nextRow.querySelectorAll<HTMLButtonElement>(
+      "button[data-agent-activity-overflow]",
+    )) {
+      const state = this.activityOverflowStates.get(overflow);
+      if (!state) continue;
+      if (state.latestNode === nextPart) state.latestNode = previousPart;
+      state.previousNodes = state.previousNodes.map((node) =>
+        node === nextPart ? previousPart : node);
+    }
+    this.forgetMarkdown(nextPart);
+    if (nextPart.parentElement) nextPart.replaceWith(previousPart);
+    else previousPart.remove();
+  }
+
+  private resolveHistoricalFocus(
+    row: HTMLElement,
+    locator: HistoricalFocusLocator | null,
+  ): HTMLElement | null {
+    if (!locator) return null;
+    let root: HTMLElement | null = null;
+    if (locator.kind === "part") {
+      root = this.collectHistoricalPartNodes(row).get(locator.key) ?? null;
+    } else if (locator.kind === "overflow") {
+      root = Array.from(row.querySelectorAll<HTMLButtonElement>(
+        "button[data-agent-activity-overflow-key]",
+      )).find((candidate) =>
+        candidate.dataset.agentActivityOverflowKey === locator.key) ?? null;
+    } else {
+      root = row.querySelector<HTMLElement>("details[data-agent-turn-fold]");
+    }
+    if (!root || !locator.focusKey) return root;
+    if (root.dataset.focusKey === locator.focusKey) return root;
+    return Array.from(root.querySelectorAll<HTMLElement>("[data-focus-key]"))
+      .find((candidate) => candidate.dataset.focusKey === locator.focusKey) ?? root;
+  }
+
   /**
    * The committed transcript replaces the live projection with authoritative
-   * DOM. Carry presentation-only disclosure/focus state across that replacement
-   * while canonical data-part-key identity lets diagnostics follow the same
-   * tool call instead of inventing a second lifecycle record.
+   * DOM. Carry activity and tool disclosure state across that replacement while
+   * canonical keys let diagnostics follow the same lifecycle records.
    */
-  private transferActiveToolPresentationState(
+  private transferActivePresentationState(
     desiredRows: readonly HTMLElement[],
   ): HTMLElement | null {
     const focused = this.element.ownerDocument.activeElement;
@@ -829,7 +2134,7 @@ export class AgentConversationRenderer extends Component {
     let focusReplacement: HTMLElement | null = null;
     for (const row of desiredRows) {
       for (const historical of row.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-part.is-tool[data-part-key]",
+        ".systemsculpt-agent-part[data-part-key]",
       )) {
         // The selector above guarantees the attribute exists. An empty value
         // cannot match a canonical active-node key, so the map lookup already
@@ -858,15 +2163,20 @@ export class AgentConversationRenderer extends Component {
   }
 
   public clearActive(): void {
-    this.liveMarkdown.clear();
+    this.toolRenderEpoch += 1;
+    this.forgetMarkdown(this.activeRoot);
     this.activeRoot.empty();
     this.activeTurn = null;
     this.activeBody = null;
     this.activeTurnId = null;
     this.activeTailStatus = null;
+    this.activeCompletedFold = null;
+    this.activeCompletedFoldBody = null;
+    this.stopWorkingTimer();
+    this.activeOverflowNodes.clear();
     this.activeNodes.clear();
     this.activePartRefs.clear();
-    this.activeToolGroupRefs.clear();
+    this.activeToolDisplayFingerprints.clear();
     this.activeToolErrorSuppression.clear();
     this.element.setAttribute("aria-busy", "false");
   }
@@ -893,28 +2203,28 @@ export class AgentConversationRenderer extends Component {
     part: AgentPart,
     previousPart?: AgentPart,
     suppressToolError = false,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (part.kind === "text") {
       node.className = "systemsculpt-agent-part is-text";
       node.classList.toggle("is-streaming", part.state === "streaming");
       if (part.state === "streaming") {
         this.liveMarkdown.stream(node, part.markdown);
-        return;
+        return true;
       }
       await this.liveMarkdown.settle(node, part.markdown);
-      return;
+      return true;
     }
     if (
       part.kind === "reasoning"
       && previousPart?.kind === "reasoning"
       && await this.updateReasoning(node, part)
     ) {
-      return;
+      return true;
     }
     if (part.kind === "tool") {
-      await this.renderTool(node, part, suppressToolError);
-      return;
+      return this.renderTool(node, part, suppressToolError);
     }
+    this.forgetMarkdown(node);
     node.empty();
     node.className = `systemsculpt-agent-part is-${part.kind}`;
     switch (part.kind) {
@@ -924,7 +2234,7 @@ export class AgentConversationRenderer extends Component {
           part.summary,
           part.state === "streaming",
         );
-        return;
+        return true;
       }
       case "error": {
         node.setAttrs({ role: "alert", "aria-live": "assertive" });
@@ -956,10 +2266,10 @@ export class AgentConversationRenderer extends Component {
           retry.addClass("systemsculpt-agent-error-retry");
           retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
         }
-        return;
+        return true;
       }
       default:
-        return;
+        return true;
     }
   }
 
@@ -967,12 +2277,19 @@ export class AgentConversationRenderer extends Component {
     this.renderingEnabled = false;
     this.lifecycleGeneration += 1;
     this.renderGeneration += 1;
+    this.toolRenderEpoch += 1;
+    this.disposeHistoricalActivityHydrationWithin(this.element);
+    for (const element of Array.from(this.historicalOverflowHydrationStates.keys())) {
+      this.disposeHistoricalOverflowHydration(element);
+    }
     this.liveMarkdown.clear();
     const ownerWindow = getSurfaceOwnerWindow(this.element);
+    this.stopWorkingTimer();
     for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
     this.copyFeedbackTimers.clear();
     this.historyRows.clear();
     this.historyMessageIds = new Set<string>();
+    this.committedCancelledMessageIds = new Set<string>();
     this.clearInlineEditorShortcutGuard();
     this.clearSuppressedEditorKeyup();
   }
@@ -989,30 +2306,46 @@ export class AgentConversationRenderer extends Component {
     preservedOpen?: boolean,
   ): Promise<void> {
     node.classList.toggle("is-streaming", streaming);
-    const details = node.createEl("details", { cls: "systemsculpt-agent-reasoning-details" });
-    details.open = preservedOpen ?? streaming;
+    const details = node.createEl("details", {
+      cls: "systemsculpt-agent-reasoning-details",
+      attr: {
+        "data-agent-part-disclosure": "",
+        "data-activity-kind": "reasoning",
+      },
+    });
+    details.open = preservedOpen ?? false;
     const header = details.createEl("summary", {
       cls: "systemsculpt-agent-reasoning-header",
       attr: {
-        "aria-label": streaming ? "Thinking summary" : "Reasoning summary",
         "data-focus-key": "reasoning-summary",
         tabindex: "0",
       },
     });
     header.tabIndex = 0;
-    const disclosure = header.createSpan({ cls: "systemsculpt-agent-reasoning-disclosure" });
-    setIcon(disclosure, "chevron-right");
     const icon = header.createSpan({ cls: "systemsculpt-agent-reasoning-icon" });
     setIcon(icon, streaming ? "loader-circle" : "sparkles");
     icon.dataset.iconState = streaming ? "streaming" : "complete";
     icon.classList.toggle("is-animated", streaming);
-    header.createEl("strong", { text: streaming ? "Thinking" : "Reasoning" });
+    const labelText = streaming ? "Thinking" : "Reasoning";
+    header.createEl("strong", { text: labelText });
+    const disclosure = header.createSpan({ cls: "systemsculpt-agent-reasoning-disclosure" });
+    setIcon(disclosure, "chevron-right");
     const body = details.createDiv({ cls: "systemsculpt-agent-reasoning-body" });
-    if (streaming) {
-      this.liveMarkdown.stream(body, summary);
-      return;
-    }
-    if (summary.trim()) await this.renderMarkdown(summary, body);
+    this.reasoningDisclosureStates.set(details, {
+      body,
+      summary,
+      streaming,
+      dirty: true,
+      revision: 0,
+    });
+    details.addEventListener("toggle", () => {
+      if (!details.open) {
+        this.pauseReasoningDisclosure(details);
+        return;
+      }
+      void this.renderReasoningDisclosure(details).catch(() => undefined);
+    });
+    if (details.open) await this.renderReasoningDisclosure(details);
   }
 
   private async updateReasoning(
@@ -1027,117 +2360,250 @@ export class AgentConversationRenderer extends Component {
     if (!details || !header || !icon || !label || !body) return false;
 
     const streaming = current.state === "streaming";
+    const labelText = streaming ? "Thinking" : "Reasoning";
     node.className = "systemsculpt-agent-part is-reasoning";
     node.classList.toggle("is-streaming", streaming);
-    header.setAttribute("aria-label", streaming ? "Thinking summary" : "Reasoning summary");
-    label.setText(streaming ? "Thinking" : "Reasoning");
+    label.setText(labelText);
     const iconState = streaming ? "streaming" : "complete";
     if (icon.dataset.iconState !== iconState) {
       setIcon(icon, streaming ? "loader-circle" : "sparkles");
       icon.dataset.iconState = iconState;
     }
     icon.classList.toggle("is-animated", streaming);
-    if (current.state === "streaming") {
-      this.liveMarkdown.stream(body, current.summary);
-      return true;
+    const state = this.reasoningDisclosureStates.get(details);
+    if (!state || state.body !== body) return false;
+    if (state.summary !== current.summary || state.streaming !== streaming) {
+      state.summary = current.summary;
+      state.streaming = streaming;
+      state.dirty = true;
+      state.revision += 1;
     }
-    await this.liveMarkdown.settle(body, current.summary);
+    if (!details.open) return true;
+    await this.renderReasoningDisclosure(details);
     return true;
   }
 
-  private async renderTool(
-    node: HTMLElement,
-    partOrParts: AgentToolPart | readonly AgentToolPart[],
-    suppressToolError = false,
-  ): Promise<void> {
-    const parts = Array.isArray(partOrParts) ? partOrParts : [partOrParts];
-    const part = parts[0];
-    if (!part) return;
-    const presentation = presentAgentToolGroup(parts);
-    node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
-    node.classList.toggle("is-grouped", parts.length > 1);
-    if (parts.length > 1) {
-      node.dataset.toolCount = String(parts.length);
-    } else {
-      delete node.dataset.toolCount;
+  private pauseReasoningDisclosure(details: HTMLDetailsElement): void {
+    const state = this.reasoningDisclosureStates.get(details);
+    if (!state) return;
+    state.dirty = true;
+    state.revision += 1;
+    this.forgetMarkdown(state.body);
+  }
+
+  private async renderReasoningDisclosure(details: HTMLDetailsElement): Promise<void> {
+    const state = this.reasoningDisclosureStates.get(details);
+    if (!state || !details.open || !state.dirty) return;
+    const revision = state.revision;
+    const summary = state.summary;
+    const streaming = state.streaming;
+    state.dirty = false;
+    if (!summary.trim()) {
+      this.liveMarkdown.forget(state.body);
+      state.body.empty();
+      return;
     }
-    const webSearchDisclosure = presentation.canonicalName === "web_search";
+    if (streaming) {
+      this.liveMarkdown.stream(state.body, summary);
+      return;
+    }
+    try {
+      await this.liveMarkdown.settle(state.body, summary);
+    } catch (error) {
+      if (details.open && state.revision === revision) state.dirty = true;
+      throw error;
+    }
+    if (!details.open || state.revision !== revision) state.dirty = true;
+  }
+
+  private renderTool(
+    node: HTMLElement,
+    part: AgentToolPart,
+    suppressToolError = false,
+  ): boolean {
+    const presentation = presentAgentTool(part);
+    const detailRows = presentAgentToolDetails(part);
+    const actionableArtifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
+      ? part.output?.artifacts ?? []
+      : [];
+    const toolError = part.error && !suppressToolError
+      ? visibleToolError(part) ?? "This action could not be completed."
+      : null;
+    const hasDetail = detailRows.length > 0 || Boolean(toolError) || actionableArtifacts.length > 0;
+    const supportFingerprint = JSON.stringify({
+      detailRows,
+      toolError,
+      actionableArtifacts,
+      suppressToolError,
+    });
+    const supportNeedsRender = node.dataset.toolSupportFingerprint !== supportFingerprint
+      || !node.querySelector(":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support")
+      || !node.querySelector(
+        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-state-icon",
+      );
+
+    const stagedSupport = createSurfaceElement(node.ownerDocument, "div");
+    stagedSupport.className = "systemsculpt-agent-tool-support";
+    if (supportNeedsRender && detailRows.length > 0) {
+      const detailsList = stagedSupport.createEl("pre", {
+        cls: "systemsculpt-agent-tool-details",
+      });
+      for (const detail of detailRows) {
+        const row = detailsList.createSpan({ cls: "systemsculpt-agent-tool-detail" });
+        row.createSpan({ cls: "systemsculpt-agent-tool-detail-label", text: detail.label });
+        row.appendText(": ");
+        row.createSpan({ cls: "systemsculpt-agent-tool-detail-value", text: detail.value });
+      }
+    }
+    if (supportNeedsRender && toolError) {
+      stagedSupport.createDiv({
+        cls: "systemsculpt-agent-tool-error",
+        text: toolError,
+        attr: { role: "alert" },
+      });
+    }
+    if (supportNeedsRender) {
+      for (const artifact of actionableArtifacts) {
+        this.renderArtifact(stagedSupport, artifact);
+      }
+    }
+
+    const approvalRequired = part.location === "vault"
+      && part.state === "approval-required"
+      && Boolean(part.approvalId);
+    const approvalFingerprint = approvalRequired
+      ? JSON.stringify({
+        approvalId: part.approvalId,
+        canonicalName: presentation.canonicalName,
+        input: part.input,
+      })
+      : null;
+    const existingApproval = node.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-approval",
+    );
+    const reusableApproval = approvalFingerprint
+      && existingApproval?.dataset.approvalFingerprint === approvalFingerprint
+      ? existingApproval
+      : null;
+    const stagedApproval = approvalRequired && !reusableApproval
+      ? this.createDetachedToolApproval(
+        node.ownerDocument,
+        part,
+        presentation.canonicalName,
+      )
+      : null;
+    if (stagedApproval && approvalFingerprint) {
+      stagedApproval.dataset.approvalFingerprint = approvalFingerprint;
+    }
+    node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
+    node.dataset.agentActivityRow = "";
+    node.dataset.activityKind = "tool";
+    delete node.dataset.toolCount;
     let shell = node.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
     let header = shell?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-header",
     ) ?? null;
+    let copy = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-copy",
+    ) ?? null;
+    let controls = header?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool-controls",
+    ) ?? null;
     let disclosureIcon = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-disclosure",
+      ".systemsculpt-agent-tool-disclosure",
     ) ?? null;
     let icon = header?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-icon",
     ) ?? null;
     let label = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-label",
+      ".systemsculpt-agent-tool-label",
     ) ?? null;
     let summary = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-summary",
+      ".systemsculpt-agent-tool-summary",
     ) ?? null;
-    let state = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-state",
+    let stateIcon = header?.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tool-state-icon",
     ) ?? null;
     let support = shell?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-tool-support",
     ) ?? null;
-    const wrongShellType = shell
-      ? (shell.tagName === "DETAILS") !== webSearchDisclosure
+    const preservedOpen = shell?.instanceOf(HTMLDetailsElement) === true
+      ? shell.open
       : false;
+    let rebuiltShell = false;
     if (
       !shell
-      || wrongShellType
+      || !shell.instanceOf(HTMLDetailsElement)
       || !header
-      || (webSearchDisclosure && !disclosureIcon)
+      || !copy
+      || !controls
+      || !disclosureIcon
       || !icon
       || !label
       || !summary
-      || !state
+      || !stateIcon
       || !support
     ) {
       node.empty();
-      shell = webSearchDisclosure
-        ? node.createEl("details", { cls: "systemsculpt-agent-tool is-disclosure" })
-        : node.createDiv({ cls: "systemsculpt-agent-tool" });
-      header = webSearchDisclosure
-        ? shell.createEl("summary", { cls: "systemsculpt-agent-tool-header" })
-        : shell.createDiv({ cls: "systemsculpt-agent-tool-header" });
-      if (webSearchDisclosure) {
-        disclosureIcon = header.createSpan({
-          cls: "systemsculpt-agent-tool-disclosure",
-        });
-        setIcon(disclosureIcon, "chevron-right");
-        header.dataset.focusKey = "web-search-summary";
-      } else {
-        disclosureIcon = null;
-      }
+      rebuiltShell = true;
+      shell = node.createEl("details", {
+        cls: "systemsculpt-agent-tool",
+        attr: {
+          "data-agent-part-disclosure": "",
+          "data-activity-kind": "tool",
+        },
+      });
+      header = shell.createEl("summary", { cls: "systemsculpt-agent-tool-header" });
       icon = header.createSpan({ cls: "systemsculpt-agent-tool-icon" });
-      label = header.createEl("strong", {
+      copy = header.createSpan({ cls: "systemsculpt-agent-tool-copy" });
+      label = copy.createEl("strong", {
         cls: "systemsculpt-agent-tool-label",
       });
-      summary = header.createSpan({
+      summary = copy.createSpan({
         cls: "systemsculpt-agent-tool-summary",
       });
-      state = header.createSpan({ cls: "systemsculpt-agent-tool-state" });
+      controls = header.createSpan({ cls: "systemsculpt-agent-tool-controls" });
+      disclosureIcon = controls.createSpan({
+        cls: "systemsculpt-agent-tool-disclosure",
+      });
+      disclosureIcon.setAttribute("aria-hidden", "true");
+      stateIcon = controls.createSpan({ cls: "systemsculpt-agent-tool-state-icon" });
+      stateIcon.setAttribute("aria-hidden", "true");
+      header.dataset.focusKey = "tool-summary";
+      const createdShell = shell as HTMLDetailsElement;
+      header.addEventListener("click", (event) => {
+        if (!createdShell.classList.contains("is-disclosure")) event.preventDefault();
+      });
       support = shell.createDiv({ cls: "systemsculpt-agent-tool-support" });
+      createdShell.open = preservedOpen && hasDetail;
     }
 
-    const ariaLabel = [
-      presentation.label,
-      presentation.summary,
-      presentation.stateLabel,
-    ].filter(Boolean).join(", ");
-    if (header.getAttribute("aria-label") !== ariaLabel) {
-      header.setAttribute("aria-label", ariaLabel);
+    shell.classList.toggle("is-disclosure", hasDetail);
+    if (!hasDetail && (shell as HTMLDetailsElement).open) {
+      (shell as HTMLDetailsElement).open = false;
     }
-    if (icon.dataset.iconState !== presentation.icon) {
-      setIcon(icon, presentation.icon);
-      icon.dataset.iconState = presentation.icon;
+    if (hasDetail) {
+      if (disclosureIcon.dataset.iconName !== "chevron-down") {
+        setIcon(disclosureIcon, "chevron-down");
+        disclosureIcon.dataset.iconName = "chevron-down";
+      }
+    } else if (disclosureIcon.hasChildNodes()) {
+      disclosureIcon.empty();
+      delete disclosureIcon.dataset.iconName;
     }
-    icon.classList.toggle("is-animated", presentation.animated);
+    const accessibleState = presentation.displayState === "succeeded" ? "Done" : "";
+    header.removeAttribute("aria-label");
+    if (accessibleState) header.setAttribute("aria-description", accessibleState);
+    else header.removeAttribute("aria-description");
+    const actionIcon = presentation.actionIcon;
+    if (icon.dataset.iconName !== actionIcon) {
+      setIcon(icon, actionIcon);
+      icon.dataset.iconName = actionIcon;
+    }
+    if (stateIcon.dataset.iconState !== presentation.icon) {
+      setIcon(stateIcon, presentation.icon);
+      stateIcon.dataset.iconState = presentation.icon;
+    }
     if (label.textContent !== presentation.label) label.setText(presentation.label);
     if (presentation.summary) {
       if (summary.textContent !== presentation.summary) summary.setText(presentation.summary);
@@ -1146,103 +2612,166 @@ export class AgentConversationRenderer extends Component {
       if (summary.textContent) summary.setText("");
       summary.toggleAttribute("hidden", true);
     }
-    if (state.textContent !== presentation.stateLabel) state.setText(presentation.stateLabel);
-
-    support.empty();
-    if (webSearchDisclosure) {
-      const queryPanel = support.createDiv({
-        cls: "systemsculpt-agent-web-search",
-        attr: {
-          role: "group",
-          "aria-label": presentation.queries.length === 1
-            ? "Web search query"
-            : "Web search queries",
-        },
-      });
-      queryPanel.createDiv({
-        cls: "systemsculpt-agent-web-search-label",
-        text: presentation.queries.length === 1 ? "Query" : "Queries",
-      });
-      const queryList = queryPanel.createEl("ol", {
-        cls: "systemsculpt-agent-web-search-queries",
-      });
-      for (const query of presentation.queries) {
-        const item = queryList.createEl("li");
-        item.setText(query ?? (
-          presentation.animated
-            ? "Query details will appear when this search finishes."
-            : "Query details unavailable."
-        ));
-        item.classList.toggle("is-placeholder", query === null);
-      }
-    }
-    node.querySelectorAll(":scope > .systemsculpt-agent-approval")
-      .forEach((approval) => approval.remove());
-    if (parts.length === 1 && part.error && !suppressToolError) {
-      support.createDiv({
-        cls: "systemsculpt-agent-tool-error",
-        text: visibleToolError(part) ?? "This action could not be completed.",
-        attr: { role: "alert" },
-      });
-    }
-    if (
-      parts.length === 1
-      && part.location === "vault"
-      && part.state === "approval-required"
-      && part.approvalId
-    ) {
-      const approval = node.createDiv({
-        cls: "systemsculpt-agent-approval",
-        attr: {
-          role: "group",
-          "aria-label": "Vault change approval",
-          "aria-live": "polite",
-          "aria-atomic": "true",
-        },
-      });
-      approval.createDiv({ cls: "systemsculpt-agent-approval-copy", text: "Allow this change in your vault?" });
-      const actions = approval.createDiv({ cls: "systemsculpt-agent-approval-actions" });
-      const deny = createUiAction(actions, {
-        label: "Deny",
-        testId: "chat.approval.deny",
-        size: "small",
-      });
-      deny.setAttr("data-focus-key", "tool-deny");
-      const approve = createUiAction(actions, {
-        label: "Allow once",
-        testId: "chat.approval.allow-once",
-        tone: "primary",
-        size: "small",
-      });
-      approve.setAttr("data-focus-key", "tool-allow-once");
-      deny.onclick = () => void this.options.onApprove(part.approvalId!, false);
-      approve.onclick = () => void this.options.onApprove(part.approvalId!, true);
-      if (presentation.canonicalName !== "trash") {
-        const allowForChat = createUiAction(actions, {
-          label: "Allow for chat",
-          testId: "chat.approval.allow-for-chat",
-          size: "small",
-        });
-        allowForChat.setAttr("data-focus-key", "tool-allow-chat");
-        allowForChat.onclick = () => void this.options.onApprove(part.approvalId!, true, true);
-      }
-      const preview = approval.createDiv({
-        cls: "systemsculpt-agent-approval-preview",
-        attr: { "aria-label": "Proposed vault changes" },
-      });
-      const toolCall = toolCallForPart(part);
-      try {
-        const diff = await renderWriteEditInlineDiff(this.options.app, preview, toolCall);
-        if (!diff) await renderOperationsInlinePreview(preview, toolCall);
-        preview.toggleAttribute("hidden", !preview.hasChildNodes());
-      } catch {
-        preview.toggleAttribute("hidden", true);
-      }
-    }
-    if (parts.length === 1 && ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)) {
-      for (const artifact of part.output?.artifacts ?? []) this.renderArtifact(support, artifact);
+    if (supportNeedsRender || rebuiltShell) {
+      support.replaceChildren(...Array.from(stagedSupport.childNodes));
+      node.dataset.toolSupportFingerprint = supportFingerprint;
     }
     support.toggleAttribute("hidden", !support.hasChildNodes());
+    const currentApproval = node.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-approval",
+    );
+    const desiredApproval = reusableApproval ?? stagedApproval;
+    if (desiredApproval) {
+      if (currentApproval && currentApproval !== desiredApproval) {
+        currentApproval.replaceWith(desiredApproval);
+      } else if (desiredApproval.parentElement !== node) {
+        node.appendChild(desiredApproval);
+      }
+    } else {
+      currentApproval?.remove();
+    }
+    if (desiredApproval && approvalFingerprint) {
+      this.prepareToolApprovalPreviewHydration(
+        node,
+        desiredApproval,
+        approvalFingerprint,
+        toolCallForPart(part),
+      );
+    } else {
+      this.toolApprovalPreviewHydrationStates.delete(node);
+    }
+    return true;
+  }
+
+  private createDetachedToolApproval(
+    ownerDocument: Document,
+    part: AgentToolPart,
+    canonicalName: string,
+  ): HTMLElement {
+    const approval = createSurfaceElement(ownerDocument, "div");
+    approval.className = "systemsculpt-agent-approval";
+    approval.setAttrs({
+      role: "group",
+      "aria-live": "polite",
+      "aria-atomic": "true",
+    });
+    approval.createDiv({
+      cls: "systemsculpt-agent-approval-copy",
+      text: "Allow this change in your vault?",
+    });
+    const actions = approval.createDiv({ cls: "systemsculpt-agent-approval-actions" });
+    const deny = createUiAction(actions, {
+      label: "Deny",
+      testId: "chat.approval.deny",
+      size: "small",
+    });
+    deny.setAttr("data-focus-key", "tool-deny");
+    const approve = createUiAction(actions, {
+      label: "Allow once",
+      testId: "chat.approval.allow-once",
+      tone: "primary",
+      size: "small",
+    });
+    approve.setAttr("data-focus-key", "tool-allow-once");
+    deny.onclick = () => void this.options.onApprove(part.approvalId!, false);
+    approve.onclick = () => void this.options.onApprove(part.approvalId!, true);
+    if (canonicalName !== "trash") {
+      const allowForChat = createUiAction(actions, {
+        label: "Allow for chat",
+        testId: "chat.approval.allow-for-chat",
+        size: "small",
+      });
+      allowForChat.setAttr("data-focus-key", "tool-allow-chat");
+      allowForChat.onclick = () => void this.options.onApprove(part.approvalId!, true, true);
+    }
+    approval.createDiv({
+      cls: "systemsculpt-agent-approval-preview",
+      attr: { hidden: "" },
+    });
+    return approval;
+  }
+
+  private prepareToolApprovalPreviewHydration(
+    node: HTMLElement,
+    approval: HTMLElement,
+    fingerprint: string,
+    toolCall: ToolCall,
+  ): void {
+    const existing = this.toolApprovalPreviewHydrationStates.get(node);
+    if (
+      existing
+      && existing.approval === approval
+      && existing.fingerprint === fingerprint
+    ) {
+      return;
+    }
+    const preview = approval.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-approval-preview",
+    );
+    if (!preview) return;
+    this.toolApprovalPreviewHydrationStates.set(node, {
+      approval,
+      preview,
+      fingerprint,
+      toolCall,
+      lifecycleGeneration: this.lifecycleGeneration,
+      toolRenderEpoch: this.toolRenderEpoch,
+      hydration: null,
+    });
+  }
+
+  private startToolApprovalPreviewHydration(
+    node: HTMLElement,
+  ): Promise<void> | null {
+    const state = this.toolApprovalPreviewHydrationStates.get(node);
+    if (!state) return null;
+    if (state.hydration) return state.hydration;
+    state.hydration = this.hydrateToolApprovalPreview(node, state).catch(() => undefined);
+    return state.hydration;
+  }
+
+  private async hydrateToolApprovalPreview(
+    node: HTMLElement,
+    state: ToolApprovalPreviewHydrationState,
+  ): Promise<void> {
+    const staging = createSurfaceElement(state.preview.ownerDocument, "div");
+    try {
+      const diff = await renderWriteEditInlineDiff(
+        this.options.app,
+        staging,
+        state.toolCall,
+      );
+      if (!diff) await renderOperationsInlinePreview(staging, state.toolCall);
+    } catch {
+      return;
+    }
+    if (!this.isCurrentToolApprovalPreview(node, state)) return;
+    const finishLayoutMutation = this.options.beginLayoutMutation?.(
+      undefined,
+      state.preview,
+    );
+    try {
+      if (!this.isCurrentToolApprovalPreview(node, state)) return;
+      state.preview.replaceChildren(...Array.from(staging.childNodes));
+      state.preview.toggleAttribute("hidden", !state.preview.hasChildNodes());
+    } finally {
+      finishLayoutMutation?.();
+    }
+  }
+
+  private isCurrentToolApprovalPreview(
+    node: HTMLElement,
+    state: ToolApprovalPreviewHydrationState,
+  ): boolean {
+    return this.renderingEnabled
+      && state.lifecycleGeneration === this.lifecycleGeneration
+      && state.toolRenderEpoch === this.toolRenderEpoch
+      && this.toolApprovalPreviewHydrationStates.get(node) === state
+      && node.isConnected
+      && state.approval.isConnected
+      && state.approval.dataset.approvalFingerprint === state.fingerprint
+      && state.approval.contains(state.preview)
+      && node.querySelector(":scope > .systemsculpt-agent-approval") === state.approval;
   }
 
   private renderArtifact(parent: HTMLElement, artifact: AgentArtifact): void {
@@ -1315,15 +2844,6 @@ export class AgentConversationRenderer extends Component {
     };
   }
 
-  private async renderHistoricalTool(parent: HTMLElement, tool: ToolCall): Promise<void> {
-    const part = this.historicalToolPart(tool);
-    const node = parent.createDiv({
-      cls: "systemsculpt-agent-part is-tool",
-      attr: { "data-part-key": toolPartKey(part.callId) },
-    });
-    await this.renderTool(node, part);
-  }
-
   private renderMessageActions(row: HTMLElement, message: ChatMessage, text: string): void {
     const canCopy = text.length > 0 && Boolean(this.options.onCopyText);
     const canRetry = message.role === "user" && Boolean(this.options.onRetryMessage);
@@ -1360,7 +2880,6 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-message-editor",
       attr: {
         role: "group",
-        "aria-label": "Edit message",
       },
     });
     const input = editor.createEl("textarea", {
@@ -1538,7 +3057,7 @@ export class AgentConversationRenderer extends Component {
   private renderMessageAttachments(parent: HTMLElement, attachments: readonly PresentedMessageAttachment[]): void {
     const list = parent.createDiv({
       cls: "systemsculpt-agent-message-attachments",
-      attr: { role: "list", "aria-label": "Message attachments" },
+      attr: { role: "list" },
     });
     for (const attachment of attachments) {
       const item = list.createDiv({
@@ -1561,17 +3080,26 @@ export class AgentConversationRenderer extends Component {
   }
 
   private async renderMarkdown(markdown: string, parent: HTMLElement): Promise<void> {
-    const lifecycleGeneration = this.lifecycleGeneration;
-    const staging = createSurfaceElement(parent.ownerDocument, "div");
-    await MarkdownRenderer.render(this.options.app, markdown, staging, this.options.sourcePath(), this);
-    if (
-      !this.renderingEnabled
-      || lifecycleGeneration !== this.lifecycleGeneration
-    ) {
-      return;
+    await this.liveMarkdown.settle(parent, markdown);
+  }
+
+  private forgetMarkdown(target: HTMLElement): void {
+    this.disposeHistoricalActivityHydrationWithin(target);
+    this.disposeHistoricalOverflowHydrationWithin(target);
+    const overflows = target.matches("button[data-agent-activity-overflow]")
+      ? [target as HTMLButtonElement]
+      : Array.from(target.querySelectorAll<HTMLButtonElement>(
+        "button[data-agent-activity-overflow]",
+      ));
+    for (const overflow of overflows) {
+      const state = this.activityOverflowStates.get(overflow);
+      if (!state) continue;
+      for (const node of state.previousNodes) {
+        if (!target.contains(node)) this.liveMarkdown.forget(node);
+      }
+      this.activityOverflowStates.delete(overflow);
     }
-    this.enhanceCodeBlocks(staging);
-    parent.replaceChildren(...Array.from(staging.childNodes));
+    this.liveMarkdown.forget(target);
   }
 
   private enhanceCodeBlocks(parent: HTMLElement): void {

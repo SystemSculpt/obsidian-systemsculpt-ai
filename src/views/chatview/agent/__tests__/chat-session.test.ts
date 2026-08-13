@@ -734,16 +734,23 @@ describe("AgentChatSession", () => {
   });
 
   it("preserves the server failure classifier for safe support diagnostics", async () => {
-    const harness = createHarness();
+    let now = 1_000;
+    const harness = trackedHarness({ monotonicNow: () => now });
     const server = await harness.open();
     const turnId = "user_classified_failure";
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
       message: userMessage(turnId, "Classify this failure"),
+      clientStartedAtMonotonicMs: 900,
     });
     await waitFor(() => harness.commands().some((command) => command.kind === "submit"));
     server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_classified_failure", "Partial failed response"),
+    ));
+    now = 1_750;
     server.serverMessage(failedTerminal(
       turnId,
       turnId,
@@ -764,6 +771,11 @@ describe("AgentChatSession", () => {
       failureCode: "response_capacity_unavailable",
       incidentId: `incident_${"f".repeat(32)}`,
     }));
+    const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
+      readonly ChatMessage[];
+    expect(reconciled.find((message) =>
+      message.message_id === "assistant_classified_failure"))
+      .toMatchObject({ responseDurationMs: 850 });
   });
 
   it("releases a fast failure terminal before running is observed and admits the next turn", async () => {
@@ -1297,13 +1309,15 @@ describe("AgentChatSession", () => {
   });
 
   it("keeps the cancelled partial in durable history when the post-cancel snapshot omits it", async () => {
-    const harness = trackedHarness();
+    let now = 1_000;
+    const harness = trackedHarness({ monotonicNow: () => now });
     const server = await harness.open();
     const turnId = "user_cancel_partial_snapshot_race";
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
       message: userMessage(turnId, "Stream a long response"),
+      clientStartedAtMonotonicMs: 900,
     });
     await waitFor(() => harness.commands().some((command) =>
       command.kind === "submit"));
@@ -1322,6 +1336,7 @@ describe("AgentChatSession", () => {
       [wireUser(turnId, "Stream a long response")],
       active(2, turnId, turnId),
     ));
+    now = 1_750;
     server.serverMessage(cancelledTerminal(turnId, turnId));
     server.endTurn();
 
@@ -1335,6 +1350,7 @@ describe("AgentChatSession", () => {
       && String(message.content).includes("PARTIAL-STREAM-START"));
     expect(restored).toBeDefined();
     expect(restored?.terminalOutcome).toBe("cancelled");
+    expect(restored?.responseDurationMs).toBe(850);
   });
 
   it("never rewrites durable history to a bare prefix while the run is finalizing", async () => {
@@ -1841,6 +1857,205 @@ describe("AgentChatSession", () => {
     expect(records.filter((record) => "clientMonotonicOffsetMs" in record)
       .every((record) => record.clientClockDomain === "client_turn_monotonic"))
       .toBe(true);
+  });
+
+  it("projects elapsed response time and freezes it when the terminal arrives", async () => {
+    let now = 1_000;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    const turnId = "user_response_duration";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Measure the complete response"),
+      clientStartedAtMonotonicMs: 900,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    now = 1_200;
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    await waitFor(() => harness.agent.getSnapshot().elapsedMs === 300);
+    expect(harness.agent.getSnapshot().elapsedMs).toBe(300);
+
+    now = 1_500;
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_response_duration", "Measured answer"),
+    ));
+    await waitFor(() => harness.agent.getSnapshot().elapsedMs === 600);
+    expect(harness.agent.getSnapshot().elapsedMs).toBe(600);
+
+    now = 1_750;
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    const result = await run;
+    expect(result.snapshot.elapsedMs).toBe(850);
+    expect(harness.persistAssistant).toHaveBeenCalledWith(expect.objectContaining({
+      responseDurationMs: 850,
+    }));
+
+    now = 9_000;
+    expect(harness.agent.getSnapshot().elapsedMs).toBe(850);
+  });
+
+  it("omits an invalid retained response clock and keeps the terminal value frozen", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_non_finite_response_duration";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Ignore an invalid response clock"),
+      clientStartedAtMonotonicMs: 900,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_non_finite_duration", "Answer without a duration"),
+    ));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "text"));
+    const internals = harness.agent as any;
+    const activeRun = internals.active;
+    activeRun.elapsedMs = null;
+    internals.clientLatency.get(turnId).startedAtMonotonicMs = Number.POSITIVE_INFINITY;
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    const result = await run;
+    expect(result.snapshot.elapsedMs).toBeUndefined();
+    const persisted = harness.persistAssistant.mock.calls.at(-1)?.[0];
+    expect(persisted?.responseDurationMs).toBeUndefined();
+
+    internals.updateActiveElapsed(activeRun);
+    expect(activeRun.elapsedMs).toBeNull();
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "reconciles duration for a locally %s turn only after durable partial work exists",
+    async (outcome) => {
+      let now = 1_000;
+      const harness = trackedHarness({ monotonicNow: () => now });
+      const server = await harness.open();
+      const turnId = `user_local_duration_${outcome}`;
+      const assistantId = `assistant_local_duration_${outcome}`;
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Keep the partial work duration"),
+        clientStartedAtMonotonicMs: 900,
+      });
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "submit"));
+      server.serverMessage(runState(active(1, turnId, turnId)));
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [{
+        type: "reasoning",
+        text: "Durable partial reasoning",
+        state: "done",
+      }])));
+      await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+        part.kind === "reasoning"));
+      await tick();
+      harness.reconcileHistory.mockClear();
+
+      now = 1_750;
+      const internals = harness.agent as any;
+      const activeRun = internals.active;
+      if (outcome === "failed") {
+        internals.finishLocalFailure(activeRun, {
+          code: "local_duration_failure",
+          message: "The local response stopped.",
+          retryable: false,
+        });
+      } else {
+        internals.finishLocalCancellation(activeRun);
+      }
+      expect(internals.active).toBeNull();
+      server.endTurn();
+      await expect(run).resolves.toMatchObject({ kind: outcome });
+      await waitFor(() => harness.reconcileHistory.mock.calls.length > 0);
+
+      const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
+        readonly ChatMessage[];
+      expect(reconciled.find((message) => message.message_id === assistantId))
+        .toMatchObject({ responseDurationMs: 850 });
+    },
+  );
+
+  it("does not reconcile local terminal duration for an empty assistant placeholder", async () => {
+    let now = 1_000;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    const turnId = "user_empty_local_duration";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Do not persist an empty response"),
+      clientStartedAtMonotonicMs: 900,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_empty_local_duration", [{
+        type: "text",
+        text: "",
+        state: "streaming",
+      }]),
+    ));
+    await tick();
+    await tick();
+    harness.reconcileHistory.mockClear();
+
+    now = 1_750;
+    const internals = harness.agent as any;
+    internals.finishLocalFailure(internals.active, {
+      code: "local_empty_failure",
+      message: "The local response stopped.",
+      retryable: false,
+    });
+    server.endTurn();
+    await expect(run).resolves.toMatchObject({ kind: "failed" });
+    await tick();
+
+    expect(harness.reconcileHistory).not.toHaveBeenCalled();
+  });
+
+  it("reconciles partial-work duration before detach releases the conversation", async () => {
+    let now = 1_000;
+    const harness = trackedHarness({ monotonicNow: () => now });
+    const server = await harness.open();
+    const turnId = "user_detach_duration";
+    const assistantId = "assistant_detach_duration";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Keep work when this chat detaches"),
+      clientStartedAtMonotonicMs: 900,
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant(assistantId, [{
+      type: "reasoning",
+      text: "Partial work before detach",
+      state: "done",
+    }])));
+    await waitFor(() => harness.agent.getSnapshot().parts.some((part) =>
+      part.kind === "reasoning"));
+    await tick();
+    harness.reconcileHistory.mockClear();
+
+    now = 1_750;
+    await harness.agent.detach();
+    await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+
+    const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
+      readonly ChatMessage[];
+    expect(reconciled.find((message) => message.message_id === assistantId))
+      .toMatchObject({ responseDurationMs: 850 });
   });
 
   it("keeps a cold response preparation failure on the original request clock", async () => {
@@ -2622,7 +2837,8 @@ describe("AgentChatSession", () => {
         expectedToolState: ToolCall["state"];
         expectedProjectedState: AgentToolPart["state"];
         expectedDisplayState: ReturnType<typeof presentAgentTool>["displayState"];
-        expectedStateLabel: string;
+        expectedIcon: string;
+        expectedSummary: string;
       }>[] = [
         {
           label: "success",
@@ -2651,7 +2867,8 @@ describe("AgentChatSession", () => {
           expectedToolState: "completed",
           expectedProjectedState: "succeeded",
           expectedDisplayState: "succeeded",
-          expectedStateLabel: "Done",
+          expectedIcon: "check",
+          expectedSummary: "Notes/First.md, Notes/Second.md",
         },
         {
           label: "mixed-partial",
@@ -2695,7 +2912,8 @@ describe("AgentChatSession", () => {
           expectedToolState: "failed",
           expectedProjectedState: "failed",
           expectedDisplayState: "partial",
-          expectedStateLabel: "Partial",
+          expectedIcon: "x",
+          expectedSummary: "1 completed, 1 failed",
         },
         {
           label: "all-failed",
@@ -2749,7 +2967,8 @@ describe("AgentChatSession", () => {
           expectedToolState: "failed",
           expectedProjectedState: "failed",
           expectedDisplayState: "failed",
-          expectedStateLabel: "Failed",
+          expectedIcon: "x",
+          expectedSummary: "0 completed, 2 failed",
         },
       ];
 
@@ -2882,7 +3101,8 @@ describe("AgentChatSession", () => {
         });
         expect(presentAgentTool(projected)).toMatchObject({
           displayState: outcome.expectedDisplayState,
-          stateLabel: outcome.expectedStateLabel,
+          icon: outcome.expectedIcon,
+          summary: outcome.expectedSummary,
         });
       }
     },
@@ -3053,7 +3273,7 @@ describe("AgentChatSession", () => {
       ],
       resultCode: "TOOL_PARTIAL_FAILURE",
       expectedDisplayState: "partial",
-      expectedStateLabel: "Partial",
+      expectedIcon: "x",
       expectedSummary: "1 completed, 1 failed",
       expectedFailureCopy: "Some requested items failed; successful items were kept.",
     },
@@ -3076,7 +3296,7 @@ describe("AgentChatSession", () => {
       ],
       resultCode: "TOOL_OPERATION_FAILED",
       expectedDisplayState: "failed",
-      expectedStateLabel: "Failed",
+      expectedIcon: "x",
       expectedSummary: "0 completed, 2 failed",
       expectedFailureCopy: "This vault action could not be completed.",
     },
@@ -3088,7 +3308,7 @@ describe("AgentChatSession", () => {
       results,
       resultCode,
       expectedDisplayState,
-      expectedStateLabel,
+      expectedIcon,
       expectedSummary,
       expectedFailureCopy,
     }) => {
@@ -3154,7 +3374,7 @@ describe("AgentChatSession", () => {
       const presentation = presentAgentTool(projectedTool!);
       expect(presentation).toMatchObject({
         displayState: expectedDisplayState,
-        stateLabel: expectedStateLabel,
+        icon: expectedIcon,
         summary: expectedSummary,
       });
       expect(presentAgentToolFailure(projectedTool!)).toBe(expectedFailureCopy);
@@ -3194,7 +3414,7 @@ describe("AgentChatSession", () => {
       expect(completedTool).toBeDefined();
       expect(presentAgentTool(completedTool!)).toMatchObject({
         displayState: expectedDisplayState,
-        stateLabel: expectedStateLabel,
+        icon: expectedIcon,
         summary: expectedSummary,
       });
     },

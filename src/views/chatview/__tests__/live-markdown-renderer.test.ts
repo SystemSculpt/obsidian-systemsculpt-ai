@@ -36,27 +36,63 @@ describe("LiveMarkdownRenderer", () => {
     document.body.empty();
   });
 
-  it("shows the newest raw snapshot immediately, then commits detached Markdown", async () => {
+  it("keeps raw Markdown hidden until detached parsing commits", async () => {
     const gate = deferred();
     const target = document.body.createDiv();
     const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
       await gate.promise;
-      renderParagraph(markdown, staging);
+      expect(markdown).toBe("**Hello**");
+      const paragraph = staging.createEl("p");
+      paragraph.createEl("strong", { text: "Hello" });
     });
     const live = new LiveMarkdownRenderer({ render });
     live.load();
 
     live.stream(target, "**Hello**");
-    expect(target.textContent).toBe("**Hello**");
-    expect(target.classList).toContain("is-live-markdown-fallback");
+    expect(target.childNodes).toHaveLength(0);
+    expect(target.classList).not.toContain("is-live-markdown-fallback");
     expect(render).toHaveBeenCalledTimes(1);
 
     const completion = live.flush(target);
     gate.resolve();
     await completion;
 
-    expect(target.innerHTML).toBe("<p>rendered:**Hello**</p>");
+    expect(target.innerHTML).toBe("<p><strong>Hello</strong></p>");
     expect(target.classList).not.toContain("is-live-markdown-fallback");
+    live.unload();
+  });
+
+  it("brackets a delayed connected DOM commit after detached parsing finishes", async () => {
+    const gate = deferred();
+    const target = document.body.createDiv();
+    const commitEvents: string[] = [];
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      expect(staging.isConnected).toBe(false);
+      await gate.promise;
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({
+      render,
+      beginDomCommit: (current) => {
+        commitEvents.push(`begin:${current.innerHTML}`);
+        return () => commitEvents.push(`end:${current.innerHTML}`);
+      },
+    });
+    live.load();
+
+    live.stream(target, "Delayed");
+    expect(target.childNodes).toHaveLength(0);
+    expect(commitEvents).toEqual([]);
+
+    const completion = live.flush(target);
+    gate.resolve();
+    await completion;
+
+    expect(commitEvents).toEqual([
+      "begin:",
+      "end:<p>rendered:Delayed</p>",
+    ]);
+    expect(target.innerHTML).toBe("<p>rendered:Delayed</p>");
     live.unload();
   });
 
@@ -96,7 +132,7 @@ describe("LiveMarkdownRenderer", () => {
     live.unload();
   });
 
-  it("paints appended single-line prose into the committed tail between parses", async () => {
+  it("keeps the last parsed frame visible until the newest snapshot parses", async () => {
     let now = 0;
     const target = document.body.createDiv();
     const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
@@ -112,33 +148,86 @@ describe("LiveMarkdownRenderer", () => {
     live.stream(target, "Hello");
     await live.flush(target);
     expect(target.textContent).toBe("rendered:Hello");
+    const parsedText = target.querySelector("p")?.firstChild;
 
-    // Inside the throttle window an appended token paints immediately from
-    // the committed DOM tail, without waiting for another Markdown parse.
     now = 10;
     live.stream(target, "Hello world");
-    expect(target.textContent).toBe("rendered:Hello world");
+    expect(target.textContent).toBe("rendered:Hello");
+    expect(target.querySelector("p")?.firstChild).toBe(parsedText);
     now = 20;
     live.stream(target, "Hello world again");
-    expect(target.textContent).toBe("rendered:Hello world again");
+    expect(target.textContent).toBe("rendered:Hello");
     expect(render).toHaveBeenCalledTimes(1);
 
-    // A structural suffix waits for the authoritative parse instead.
     now = 30;
     live.stream(target, "Hello world again\n\nNext");
-    expect(target.textContent).toBe("rendered:Hello world again");
+    expect(target.textContent).toBe("rendered:Hello");
 
     await live.flush(target);
     expect(target.textContent).toBe("rendered:Hello world again\n\nNext");
+    expect(target.querySelector("p")?.childNodes).toHaveLength(1);
     expect(render).toHaveBeenCalledTimes(2);
     expect(render.mock.calls[render.mock.calls.length - 1]?.[0])
       .toBe("Hello world again\n\nNext");
     live.unload();
   });
 
-  it("reconciles ordinary streamed Markdown in place and installs one authoritative final lease", async () => {
+  it("does not serialize top-level blocks for lease-free Markdown frames", async () => {
+    const target = document.body.createDiv();
+    const outerHtml = jest.spyOn(Element.prototype, "outerHTML", "get");
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({ render, throttleMs: 0 });
+    live.load();
+
+    try {
+      live.stream(target, "one");
+      await live.flush(target);
+      live.stream(target, "two");
+      await live.flush(target);
+      await live.settle(target, "two");
+
+      expect(render).toHaveBeenCalledTimes(3);
+      expect(target.textContent).toBe("rendered:two");
+      expect(outerHtml).not.toHaveBeenCalled();
+    } finally {
+      outerHtml.mockRestore();
+      live.unload();
+    }
+  });
+
+  it("does not retain serialized rich blocks after final settlement", async () => {
+    const target = document.body.createDiv();
+    const outerHtml = jest.spyOn(Element.prototype, "outerHTML", "get");
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (markdown, staging) => {
+        staging.createEl("a", { href: "#result", text: markdown });
+      },
+    });
+    live.load();
+
+    try {
+      live.stream(target, "result");
+      await live.flush(target);
+      expect(outerHtml).toHaveBeenCalled();
+
+      outerHtml.mockClear();
+      await live.settle(target, "result");
+
+      expect(target.textContent).toBe("result");
+      expect(outerHtml).not.toHaveBeenCalled();
+    } finally {
+      outerHtml.mockRestore();
+      live.unload();
+    }
+  });
+
+  it("installs actual final staging and keeps its matching lease", async () => {
     const target = document.body.createDiv();
     const cleanups: jest.Mock[] = [];
+    const renderedParagraphs: HTMLParagraphElement[] = [];
     const render = jest.fn(async (
       markdown: string,
       staging: HTMLElement,
@@ -149,7 +238,9 @@ describe("LiveMarkdownRenderer", () => {
       const child = new Component();
       child.register(cleanup);
       component.addChild(child);
-      renderParagraph(markdown, staging);
+      renderedParagraphs.push(staging.createEl("p", {
+        text: `rendered:${markdown}`,
+      }));
     });
     const live = new LiveMarkdownRenderer({ render });
     live.load();
@@ -169,6 +260,7 @@ describe("LiveMarkdownRenderer", () => {
 
     await live.settle(target, "two");
     expect(target.querySelector("p")).not.toBe(paragraph);
+    expect(target.querySelector("p")).toBe(renderedParagraphs[2]);
     expect(render).toHaveBeenCalledTimes(3);
     expect(cleanups[2]).not.toHaveBeenCalled();
 
@@ -176,8 +268,81 @@ describe("LiveMarkdownRenderer", () => {
     expect(cleanups[2]).toHaveBeenCalledTimes(1);
   });
 
-  it("reconciles interactive streamed Markdown without replacing its live node", async () => {
+  it("settles an already committed snapshot without waiting for or applying an older flight", async () => {
+    const gate = deferred();
     const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      if (markdown === "other") await gate.promise;
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({ render, throttleMs: 0 });
+    live.load();
+
+    live.stream(target, "ready");
+    await live.flush(target);
+    const paragraph = target.querySelector("p");
+
+    live.stream(target, "other");
+    const completion = live.settle(target, "ready");
+    expect(target.querySelector("p")).toBe(paragraph);
+    expect(target.textContent).toBe("rendered:ready");
+    expect(render).toHaveBeenCalledTimes(2);
+
+    gate.resolve();
+    await completion;
+    expect(target.querySelector("p")).not.toBe(paragraph);
+    expect(target.textContent).toBe("rendered:ready");
+    expect(render.mock.calls.map(([markdown]) => markdown)).toEqual([
+      "ready",
+      "other",
+      "ready",
+    ]);
+    live.unload();
+  });
+
+  it("restores disclosure and focus state after installing final staging", async () => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      const details = staging.createEl("details");
+      details.createEl("summary", {
+        text: "Details",
+        attr: { "data-focus-key": "details-summary" },
+      });
+      details.createEl("p", { text: `rendered:${markdown}` });
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+
+    live.stream(target, "draft");
+    await live.flush(target);
+    const details = target.querySelector<HTMLDetailsElement>("details")!;
+    const summary = target.querySelector<HTMLElement>("summary")!;
+    const paragraph = target.querySelector<HTMLParagraphElement>("p")!;
+    const text = paragraph.firstChild;
+    details.open = true;
+    summary.focus();
+
+    await live.settle(target, "final");
+
+    const finalDetails = target.querySelector<HTMLDetailsElement>("details")!;
+    const finalSummary = target.querySelector<HTMLElement>("summary")!;
+    expect(finalDetails).not.toBe(details);
+    expect(finalSummary).not.toBe(summary);
+    expect(target.querySelector("p")).not.toBe(paragraph);
+    expect(target.querySelector("p")?.firstChild).not.toBe(text);
+    expect(target.textContent).toBe("Detailsrendered:final");
+    expect(finalDetails.open).toBe(true);
+    expect(document.activeElement).toBe(finalSummary);
+    expect(render.mock.calls.map(([markdown]) => markdown)).toEqual([
+      "draft",
+      "final",
+    ]);
+    live.unload();
+  });
+
+  it("replaces interactive stream nodes so callbacks match the newest snapshot", async () => {
+    const target = document.body.createDiv();
+    const activations: string[] = [];
     const cleanups: jest.Mock[] = [];
     const live = new LiveMarkdownRenderer({
       render: async (
@@ -185,8 +350,13 @@ describe("LiveMarkdownRenderer", () => {
         staging: HTMLElement,
         component: Component,
       ) => {
-        staging.createEl("a", { text: markdown, href: "#target" });
-        const cleanup = jest.fn();
+        const link = staging.createEl("a", { text: markdown, href: "#target" });
+        const activate = (event: Event) => {
+          event.preventDefault();
+          activations.push(markdown);
+        };
+        link.addEventListener("click", activate);
+        const cleanup = jest.fn(() => link.removeEventListener("click", activate));
         cleanups.push(cleanup);
         const child = new Component();
         child.register(cleanup);
@@ -197,21 +367,519 @@ describe("LiveMarkdownRenderer", () => {
 
     live.stream(target, "one");
     await live.flush(target);
-    const first = target.querySelector("a");
+    const first = target.querySelector<HTMLAnchorElement>("a")!;
     expect(cleanups[0]).not.toHaveBeenCalled();
+    first.click();
+    expect(activations).toEqual(["one"]);
 
     live.stream(target, "two");
     await live.flush(target);
-    expect(target.querySelector("a")).toBe(first);
+    const second = target.querySelector<HTMLAnchorElement>("a")!;
+    expect(second).not.toBe(first);
     expect(target.textContent).toBe("two");
-    expect(cleanups[0]).not.toHaveBeenCalled();
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    first.click();
+    second.click();
+    expect(activations).toEqual(["one", "two"]);
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    live.unload();
     expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a stable linked block mounted while a trailing paragraph grows", async () => {
+    const target = document.body.createDiv();
+    const activations: string[] = [];
+    const cleanups: jest.Mock[] = [];
+    const prefix = "[Docs](#docs)\n\nTail";
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        const linked = staging.createEl("p");
+        const link = linked.createEl("a", { text: "Docs", href: "#docs" });
+        staging.createEl("p", {
+          cls: "plain-tail",
+          text: markdown.slice("[Docs](#docs)\n\n".length),
+        });
+        const activate = (event: Event) => {
+          event.preventDefault();
+          activations.push("docs");
+        };
+        link.addEventListener("click", activate);
+        const cleanup = jest.fn(() => link.removeEventListener("click", activate));
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    let markdown = prefix;
+    live.stream(target, markdown);
+    await live.flush(target);
+    const linked = target.children[0];
+    const link = target.querySelector<HTMLAnchorElement>("a")!;
+    const tail = target.querySelector<HTMLParagraphElement>(".plain-tail")!;
+    const tailText = tail.firstChild;
+
+    for (const suffix of [" grows", " smoothly", " in place", "."]) {
+      markdown += suffix;
+      live.stream(target, markdown);
+      await live.flush(target);
+      expect(target.children[0]).toBe(linked);
+      expect(target.querySelector("a")).toBe(link);
+      expect(target.querySelector(".plain-tail")).toBe(tail);
+      expect(tail.firstChild).toBe(tailText);
+      expect(tail.textContent).toBe(markdown.slice("[Docs](#docs)\n\n".length));
+      expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+    }
+
+    expect(cleanups[0]).not.toHaveBeenCalled();
+    for (const cleanup of cleanups.slice(1)) {
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    }
+    link.click();
+    expect(activations).toEqual(["docs"]);
 
     live.unload();
     expect(cleanups[0]).toHaveBeenCalledTimes(1);
   });
 
-  it("grows a leased code fence without losing node, selection, focus, scroll, or copy state", async () => {
+  it("keeps unrelated rich blocks and reader state mounted during plain tail updates", async () => {
+    const target = document.body.createDiv();
+    const copied: string[] = [];
+    const cleanups: jest.Mock[] = [];
+    const sourcePrefix = "Rich blocks\n\n";
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        const details = staging.createEl("details");
+        details.createEl("summary", {
+          text: "Context",
+          attr: { "data-focus-key": "context" },
+        });
+        const callout = details.createDiv({ cls: "callout" });
+        callout.createDiv({
+          cls: "callout-title",
+          text: "Note",
+          attr: { "aria-expanded": "true" },
+        });
+        callout.createEl("p", { text: "Stable callout" });
+        const pre = staging.createEl("pre", {
+          cls: "systemsculpt-agent-code-block",
+        });
+        pre.createEl("code", { text: "stable code" });
+        const copy = pre.createEl("button", {
+          cls: "systemsculpt-agent-code-copy",
+          text: "Copy",
+          attr: {
+            "aria-label": "Copy code",
+            "data-focus-key": "copy-code",
+          },
+        });
+        staging.createEl("img", {
+          attr: {
+            alt: "Stable preview",
+            src: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+          },
+        });
+        staging.createEl("p", {
+          cls: "plain-tail",
+          text: markdown.slice(sourcePrefix.length),
+        });
+        const activate = () => copied.push("stable code");
+        copy.addEventListener("click", activate);
+        const cleanup = jest.fn(() => copy.removeEventListener("click", activate));
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, `${sourcePrefix}Tail`);
+    await live.flush(target);
+    const details = target.querySelector<HTMLDetailsElement>("details")!;
+    const callout = target.querySelector<HTMLElement>(".callout")!;
+    const title = target.querySelector<HTMLElement>(".callout-title")!;
+    const pre = target.querySelector<HTMLPreElement>("pre")!;
+    const code = target.querySelector<HTMLElement>("code")!;
+    const codeText = code.firstChild!;
+    const copy = target.querySelector<HTMLButtonElement>("button")!;
+    const image = target.querySelector<HTMLImageElement>("img")!;
+    const tail = target.querySelector<HTMLParagraphElement>(".plain-tail")!;
+    const tailText = tail.firstChild;
+    details.open = true;
+    callout.classList.add("is-collapsed");
+    title.setAttribute("aria-expanded", "false");
+    pre.scrollTop = 37;
+    pre.scrollLeft = 11;
+    copy.classList.add("is-copied");
+    copy.setText("Copied");
+    copy.setAttribute("aria-label", "Copied");
+    copy.dataset.copyAttempt = "stable code";
+    copy.focus();
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.setStart(codeText, 0);
+    range.setEnd(codeText, 6);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    live.stream(target, `${sourcePrefix}Tail grows smoothly`);
+    await live.flush(target);
+
+    expect(target.querySelector("details")).toBe(details);
+    expect(target.querySelector(".callout")).toBe(callout);
+    expect(target.querySelector(".callout-title")).toBe(title);
+    expect(target.querySelector("pre")).toBe(pre);
+    expect(target.querySelector("code")).toBe(code);
+    expect(code.firstChild).toBe(codeText);
+    expect(target.querySelector("button")).toBe(copy);
+    expect(target.querySelector("img")).toBe(image);
+    expect(target.querySelector(".plain-tail")).toBe(tail);
+    expect(tail.firstChild).toBe(tailText);
+    expect(tail.textContent).toBe("Tail grows smoothly");
+    expect(details.open).toBe(true);
+    expect(callout.classList).toContain("is-collapsed");
+    expect(title.getAttribute("aria-expanded")).toBe("false");
+    expect(pre.scrollTop).toBe(37);
+    expect(pre.scrollLeft).toBe(11);
+    expect(copy.classList).toContain("is-copied");
+    expect(copy.textContent).toBe("Copied");
+    expect(copy.getAttribute("aria-label")).toBe("Copied");
+    expect(copy.dataset.copyAttempt).toBe("stable code");
+    expect(document.activeElement).toBe(copy);
+    expect(selection.toString()).toBe("stable");
+    expect(selection.anchorNode).toBe(codeText);
+    expect(cleanups[0]).not.toHaveBeenCalled();
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    copy.click();
+    expect(copied).toEqual(["stable code"]);
+
+    live.unload();
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces an append-only rich change so its callbacks stay current", async () => {
+    const target = document.body.createDiv();
+    const activations: string[] = [];
+    const cleanups: jest.Mock[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        const link = staging.createEl("a", {
+          text: markdown,
+          href: `#${markdown}`,
+        });
+        const activate = (event: Event) => {
+          event.preventDefault();
+          activations.push(markdown);
+        };
+        link.addEventListener("click", activate);
+        const cleanup = jest.fn(() => link.removeEventListener("click", activate));
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, "phase");
+    await live.flush(target);
+    const first = target.querySelector<HTMLAnchorElement>("a")!;
+    first.click();
+
+    live.stream(target, "phase-two");
+    await live.flush(target);
+    const second = target.querySelector<HTMLAnchorElement>("a")!;
+    expect(second).not.toBe(first);
+    expect(second.textContent).toBe("phase-two");
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    first.click();
+    second.click();
+    expect(activations).toEqual(["phase", "phase-two"]);
+
+    live.unload();
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not commit a delayed rich-tail frame after unload", async () => {
+    const gate = deferred();
+    const lateRenderFinished = deferred();
+    const target = document.body.createDiv();
+    const cleanups: jest.Mock[] = [];
+    let commits = 0;
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      beginDomCommit: () => {
+        commits += 1;
+        return undefined;
+      },
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        const linked = staging.createEl("p");
+        const link = linked.createEl("a", { text: "Docs", href: "#docs" });
+        staging.createEl("p", { text: markdown });
+        const activate = (event: Event) => event.preventDefault();
+        link.addEventListener("click", activate);
+        const cleanup = jest.fn(() => link.removeEventListener("click", activate));
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+        if (markdown.endsWith(" grows")) {
+          await gate.promise;
+          lateRenderFinished.resolve();
+        }
+      },
+    });
+    live.load();
+
+    live.stream(target, "Tail");
+    await live.flush(target);
+    const originalHtml = target.innerHTML;
+    const originalLink = target.querySelector("a");
+    expect(commits).toBe(1);
+
+    live.stream(target, "Tail grows");
+    const pending = live.flush(target);
+    expect(cleanups).toHaveLength(2);
+    live.unload();
+    await pending;
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+
+    gate.resolve();
+    await lateRenderFinished.promise;
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(target.innerHTML).toBe(originalHtml);
+    expect(target.querySelector("a")).toBe(originalLink);
+    expect(commits).toBe(1);
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    expect(
+      (live as unknown as { states: Map<HTMLElement, unknown> }).states.size,
+    ).toBe(0);
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(0);
+  });
+
+  it("promotes an exact committed action and its live lease on settlement", async () => {
+    const target = document.body.createDiv();
+    const activations: string[] = [];
+    const buttons: HTMLButtonElement[] = [];
+    const cleanups: jest.Mock[] = [];
+    const liveButtonAtCleanup: Array<HTMLButtonElement | null> = [];
+    const render = jest.fn(async (
+      markdown: string,
+      staging: HTMLElement,
+      component: Component,
+    ) => {
+      const button = staging.createEl("button", {
+        text: markdown,
+        attr: { "data-focus-key": "managed-action" },
+      });
+      const index = buttons.length;
+      buttons.push(button);
+      const activate = () => activations.push(markdown);
+      button.addEventListener("click", activate);
+      const cleanup = jest.fn(() => {
+        liveButtonAtCleanup[index] = target.querySelector("button");
+        button.removeEventListener("click", activate);
+      });
+      cleanups.push(cleanup);
+      const child = new Component();
+      child.register(cleanup);
+      component.addChild(child);
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+
+    live.stream(target, "draft");
+    await live.flush(target);
+    const draftButton = target.querySelector<HTMLButtonElement>("button")!;
+
+    live.stream(target, "final");
+    await live.flush(target);
+    const streamedButton = target.querySelector<HTMLButtonElement>("button")!;
+    expect(streamedButton).not.toBe(draftButton);
+    expect(streamedButton.textContent).toBe("final");
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    streamedButton.focus();
+
+    await live.settle(target, "final");
+    const finalButton = target.querySelector<HTMLButtonElement>("button")!;
+    expect(finalButton).toBe(streamedButton);
+    expect(document.activeElement).toBe(finalButton);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    expect(liveButtonAtCleanup[1]).toBeUndefined();
+    expect(render.mock.calls.map(([markdown]) => markdown)).toEqual([
+      "draft",
+      "final",
+    ]);
+
+    draftButton.click();
+    finalButton.click();
+    expect(activations).toEqual(["final"]);
+
+    await live.settle(target, "final");
+    expect(target.querySelector("button")).toBe(finalButton);
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    live.unload();
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("promotes an identical in-flight action render to the authoritative final subtree", async () => {
+    const gate = deferred();
+    const target = document.body.createDiv();
+    const activations: string[] = [];
+    const cleanup = jest.fn();
+    const render = jest.fn(async (
+      markdown: string,
+      staging: HTMLElement,
+      component: Component,
+    ) => {
+      await gate.promise;
+      const button = staging.createEl("button", { text: markdown });
+      const activate = () => activations.push(markdown);
+      button.addEventListener("click", activate);
+      const child = new Component();
+      child.register(() => {
+        button.removeEventListener("click", activate);
+        cleanup();
+      });
+      component.addChild(child);
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+
+    live.stream(target, "final");
+    const completion = live.settle(target, "final");
+    expect(render).toHaveBeenCalledTimes(1);
+
+    gate.resolve();
+    await completion;
+    const button = target.querySelector<HTMLButtonElement>("button")!;
+    button.click();
+    expect(activations).toEqual(["final"]);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(cleanup).not.toHaveBeenCalled();
+
+    await live.settle(target, "final");
+    expect(target.querySelector("button")).toBe(button);
+    expect(render).toHaveBeenCalledTimes(1);
+
+    live.unload();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("installs selector-free final behavior with its matching lease", async () => {
+    const target = document.body.createDiv();
+    const activations: string[] = [];
+    const rendered: HTMLDivElement[] = [];
+    const cleanups: jest.Mock[] = [];
+    const live = new LiveMarkdownRenderer({
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        const managed = staging.createDiv({
+          cls: "custom-postprocessor-node",
+          text: markdown,
+        });
+        rendered.push(managed);
+        const activate = () => activations.push(markdown);
+        managed.addEventListener("custom-activate", activate);
+        const cleanup = jest.fn(() => {
+          managed.removeEventListener("custom-activate", activate);
+        });
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, "final");
+    await live.flush(target);
+    expect(target.querySelector(".custom-postprocessor-node")).not.toBe(rendered[0]);
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+
+    await live.settle(target, "final");
+    const finalNode = target.querySelector<HTMLDivElement>(
+      ".custom-postprocessor-node",
+    )!;
+    expect(finalNode).toBe(rendered[1]);
+    expect(cleanups[1]).not.toHaveBeenCalled();
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    finalNode.dispatchEvent(new Event("custom-activate"));
+    expect(activations).toEqual(["final"]);
+
+    live.unload();
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps interactive stream leases bounded across many snapshots", async () => {
+    const target = document.body.createDiv();
+    const cleanups: jest.Mock[] = [];
+    const live = new LiveMarkdownRenderer({
+      render: async (
+        markdown: string,
+        staging: HTMLElement,
+        component: Component,
+      ) => {
+        staging.createEl("button", { text: markdown });
+        const cleanup = jest.fn();
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    for (let revision = 1; revision <= 20; revision += 1) {
+      live.stream(target, String(revision));
+      await live.flush(target);
+      expect(target.textContent).toBe(String(revision));
+      expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+      expect(cleanups[revision - 1]).not.toHaveBeenCalled();
+      if (revision > 1) {
+        expect(cleanups[revision - 2]).toHaveBeenCalledTimes(1);
+      }
+    }
+
+    live.unload();
+    expect(cleanups[19]).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes code behavior while preserving selection, focus, scroll, and copy state", async () => {
     const target = document.body.createDiv();
     const copied: string[] = [];
     const cleanups: jest.Mock[] = [];
@@ -270,28 +938,32 @@ describe("LiveMarkdownRenderer", () => {
     live.stream(target, finalMarkdown);
     await live.flush(target);
 
-    expect(target.querySelector("pre")).toBe(pre);
-    expect(target.querySelector("code")).toBe(code);
-    expect(code.firstChild).toBe(codeText);
-    expect(target.querySelector("button")).toBe(button);
-    expect(code.textContent).toBe(finalMarkdown);
+    const streamedPre = target.querySelector<HTMLPreElement>("pre")!;
+    const streamedCode = target.querySelector<HTMLElement>("code")!;
+    const streamedCodeText = streamedCode.firstChild!;
+    const streamedButton = target.querySelector<HTMLButtonElement>("button")!;
+    expect(streamedPre).not.toBe(pre);
+    expect(streamedCode).not.toBe(code);
+    expect(streamedCodeText).not.toBe(codeText);
+    expect(streamedButton).not.toBe(button);
+    expect(streamedCode.textContent).toBe(finalMarkdown);
     expect(selection.toString()).toBe("const");
-    expect(selection.anchorNode).toBe(codeText);
-    expect(document.activeElement).toBe(button);
-    expect(pre.scrollTop).toBe(31);
-    expect(pre.scrollLeft).toBe(9);
-    expect(button.classList).toContain("is-copied");
-    expect(button.textContent).toBe("Copied");
-    button.click();
+    expect(selection.anchorNode).toBe(streamedCodeText);
+    expect(document.activeElement).toBe(streamedButton);
+    expect(streamedPre.scrollTop).toBe(31);
+    expect(streamedPre.scrollLeft).toBe(9);
+    expect(streamedButton.classList).toContain("is-copied");
+    expect(streamedButton.textContent).toBe("Copied");
+    streamedButton.click();
     expect(copied).toEqual([finalMarkdown]);
-    expect(cleanups[0]).not.toHaveBeenCalled();
-    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).not.toHaveBeenCalled();
 
     const expected = document.createElement("div");
     buildCodeFence(finalMarkdown, expected);
     await live.settle(target, finalMarkdown);
     const finalButton = target.querySelector<HTMLButtonElement>("button")!;
-    expect(finalButton).not.toBe(button);
+    expect(finalButton).toBe(streamedButton);
     expect(finalButton.classList).toContain("is-copied");
     expect(finalButton.textContent).toBe("Copied");
     expect(finalButton.getAttribute("aria-label")).toBe("Copied");
@@ -304,14 +976,13 @@ describe("LiveMarkdownRenderer", () => {
     normalizedButton.setText("Copy");
     normalizedButton.setAttribute("aria-label", "Copy code");
     expect(normalized.innerHTML).toBe(expected.innerHTML);
-    expect(cleanups[0]).toHaveBeenCalledTimes(1);
-    expect(cleanups[2]).not.toHaveBeenCalled();
+    expect(cleanups[1]).not.toHaveBeenCalled();
 
     live.unload();
-    expect(cleanups[2]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
   });
 
-  it("grows linked task and callout content without remounting prior interactive nodes", async () => {
+  it("refreshes linked callout behavior while preserving reader state", async () => {
     const target = document.body.createDiv();
     const activations: string[] = [];
     const cleanups: jest.Mock[] = [];
@@ -398,49 +1069,62 @@ describe("LiveMarkdownRenderer", () => {
     live.stream(target, "2");
     await live.flush(target);
 
-    expect(target.querySelector(".callout")).toBe(callout);
-    expect(target.querySelector(".callout-title")).toBe(title);
-    expect(target.querySelector("ul")).toBe(list);
-    expect(target.querySelector("li")).toBe(firstItem);
-    expect(target.querySelector("input")).toBe(firstTask);
-    expect(target.querySelector("a")).toBe(firstLink);
+    const phaseTwoCallout = target.querySelector<HTMLElement>(".callout")!;
+    const phaseTwoTitle = target.querySelector<HTMLElement>(".callout-title")!;
+    const phaseTwoTask = target.querySelector<HTMLInputElement>("input")!;
+    const phaseTwoFirstLink = target.querySelector<HTMLAnchorElement>("a")!;
+    expect(phaseTwoCallout).not.toBe(callout);
+    expect(phaseTwoTitle).not.toBe(title);
+    expect(target.querySelector("ul")).not.toBe(list);
+    expect(target.querySelector("li")).not.toBe(firstItem);
+    expect(phaseTwoTask).not.toBe(firstTask);
+    expect(phaseTwoFirstLink).not.toBe(firstLink);
     expect(target.querySelectorAll("li")).toHaveLength(2);
-    expect(firstLink.textContent).toBe("Primary 2");
-    expect(firstLink.getAttribute("href")).toBe("#primary-2");
-    expect(firstTask.checked).toBe(true);
-    expect(callout.classList).toContain("is-collapsed");
-    expect(title.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(firstLink);
-    expect(cleanups[0]).not.toHaveBeenCalled();
+    expect(phaseTwoFirstLink.textContent).toBe("Primary 2");
+    expect(phaseTwoFirstLink.getAttribute("href")).toBe("#primary-2");
+    expect(phaseTwoTask.checked).toBe(false);
+    expect(phaseTwoCallout.classList).toContain("is-collapsed");
+    expect(phaseTwoTitle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(phaseTwoFirstLink);
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
     expect(cleanups[1]).not.toHaveBeenCalled();
 
     const secondItem = target.querySelectorAll("li")[1];
     const secondLink = target.querySelectorAll<HTMLAnchorElement>("a")[1];
     live.stream(target, "3");
     await live.flush(target);
-    expect(target.querySelectorAll("li")[1]).toBe(secondItem);
-    expect(target.querySelectorAll("a")[1]).toBe(secondLink);
+    const phaseThreeCallout = target.querySelector<HTMLElement>(".callout")!;
+    const phaseThreeTitle = target.querySelector<HTMLElement>(".callout-title")!;
+    const phaseThreeTask = target.querySelector<HTMLInputElement>("input")!;
+    const phaseThreeLinks = target.querySelectorAll<HTMLAnchorElement>("a");
+    expect(target.querySelectorAll("li")[1]).not.toBe(secondItem);
+    expect(phaseThreeLinks[1]).not.toBe(secondLink);
     firstLink.click();
     secondLink.click();
+    phaseThreeLinks[0]?.click();
+    phaseThreeLinks[1]?.click();
     expect(activations).toEqual(["#primary-3", "#secondary-3"]);
-    expect(cleanups[2]).toHaveBeenCalledTimes(1);
+    expect(cleanups[1]).toHaveBeenCalledTimes(1);
+    expect(cleanups[2]).not.toHaveBeenCalled();
 
-    callout.classList.remove("is-collapsed");
-    title.setAttribute("aria-expanded", "true");
-    firstTask.checked = false;
+    phaseThreeCallout.classList.remove("is-collapsed");
+    phaseThreeTitle.setAttribute("aria-expanded", "true");
+    phaseThreeTask.checked = false;
     const expected = document.createElement("div");
     buildInteractive(3, expected);
     await live.settle(target, "3");
     expect(target.innerHTML).toBe(expected.innerHTML);
+    expect(target.querySelector(".callout")).toBe(phaseThreeCallout);
+    expect(target.querySelector("a")).toBe(phaseThreeLinks[0]);
     expect(cleanups[0]).toHaveBeenCalledTimes(1);
     expect(cleanups[1]).toHaveBeenCalledTimes(1);
-    expect(cleanups[3]).not.toHaveBeenCalled();
+    expect(cleanups[2]).not.toHaveBeenCalled();
 
     live.unload();
-    expect(cleanups[3]).toHaveBeenCalledTimes(1);
+    expect(cleanups[2]).toHaveBeenCalledTimes(1);
   });
 
-  it("commits parsed intermediate frames during continuous input and settles the newest revision", async () => {
+  it("waits for the newest parse when an older first frame finishes", async () => {
     const gates = [deferred(), deferred()];
     const target = document.body.createDiv();
     const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
@@ -453,14 +1137,14 @@ describe("LiveMarkdownRenderer", () => {
 
     live.stream(target, "old");
     live.stream(target, "new");
-    expect(target.textContent).toBe("new");
+    expect(target.childNodes).toHaveLength(0);
 
     const completion = live.flush(target);
     gates[0].resolve();
     await jest.advanceTimersByTimeAsync(0);
 
     expect(render).toHaveBeenCalledTimes(2);
-    expect(target.textContent).toBe("rendered:old");
+    expect(target.childNodes).toHaveLength(0);
 
     gates[1].resolve();
     await completion;
@@ -468,7 +1152,39 @@ describe("LiveMarkdownRenderer", () => {
     live.unload();
   });
 
-  it("does not wait for a quiet token gap before showing parsed Markdown", async () => {
+  it("keeps parsed Markdown visible while a newer appended snapshot renders", async () => {
+    const gates = [deferred(), deferred()];
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      const gate = gates[render.mock.calls.length - 1];
+      await gate.promise;
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+
+    live.stream(target, "Hello");
+    live.stream(target, "Hello world");
+    const completion = live.flush(target);
+
+    gates[0].resolve();
+    await jest.advanceTimersByTimeAsync(0);
+    const paragraph = target.querySelector("p")!;
+    const parsedPrefix = paragraph.firstChild;
+    expect(target.textContent).toBe("rendered:Hello");
+    expect(paragraph.childNodes).toHaveLength(1);
+    expect(render).toHaveBeenCalledTimes(2);
+
+    gates[1].resolve();
+    await completion;
+    expect(target.querySelector("p")).toBe(paragraph);
+    expect(target.querySelector("p")?.firstChild).toBe(parsedPrefix);
+    expect(target.querySelector("p")?.childNodes).toHaveLength(1);
+    expect(target.textContent).toBe("rendered:Hello world");
+    live.unload();
+  });
+
+  it("waits for current parsed frames without exposing raw snapshots", async () => {
     const gates = [deferred(), deferred(), deferred()];
     const target = document.body.createDiv();
     const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
@@ -484,14 +1200,14 @@ describe("LiveMarkdownRenderer", () => {
     gates[0].resolve();
     await jest.advanceTimersByTimeAsync(0);
 
-    expect(target.textContent).toBe("rendered:one");
+    expect(target.childNodes).toHaveLength(0);
     expect(render).toHaveBeenCalledTimes(2);
 
     live.stream(target, "three");
     gates[1].resolve();
     await jest.advanceTimersByTimeAsync(0);
 
-    expect(target.textContent).toBe("rendered:two");
+    expect(target.childNodes).toHaveLength(0);
     expect(render).toHaveBeenCalledTimes(3);
 
     const completion = live.flush(target);
@@ -514,10 +1230,15 @@ describe("LiveMarkdownRenderer", () => {
     await live.settle(target, "ready");
     expect(render).toHaveBeenCalledTimes(1);
 
-    await expect(live.settle(target, "broken")).rejects.toThrow(
+    const broken = live.settle(target, "broken");
+    await expect(broken).rejects.toThrow(
       "postprocessor failed",
     );
     expect(target.textContent).toBe("broken");
+
+    await live.settle(target, "ready");
+    expect(target.textContent).toBe("rendered:ready");
+    expect(render).toHaveBeenCalledTimes(3);
     live.unload();
   });
 
@@ -531,8 +1252,9 @@ describe("LiveMarkdownRenderer", () => {
     live.load();
 
     const completion = live.settle(target, "**Recovered response**");
-    expect(target.textContent).toBe("**Recovered response**");
-    await expect(completion).rejects.toThrow("postprocessor failed");
+    const rejection = expect(completion).rejects.toThrow("postprocessor failed");
+    expect(target.childNodes).toHaveLength(0);
+    await rejection;
     expect(target.textContent).toBe("**Recovered response**");
     expect(target.classList).toContain("is-live-markdown-fallback");
     live.unload();
@@ -562,6 +1284,29 @@ describe("LiveMarkdownRenderer", () => {
     expect(selection.toString()).toBe("Alpha");
     expect(selection.anchorNode).toBe(changedText);
     expect(selection.focusNode).toBe(changedText);
+  });
+
+  it("skips recursive reconciliation for exact-equal top-level blocks", () => {
+    const target = document.body.createDiv();
+    target.innerHTML = [
+      '<section><span data-probe="stable">Static</span></section>',
+      "<p>old tail</p>",
+    ].join("");
+    const staging = document.body.createDiv();
+    staging.innerHTML = [
+      '<section><span data-probe="stable">Static</span></section>',
+      "<p>new tail</p>",
+    ].join("");
+    const stable = target.querySelector<HTMLElement>("section")!;
+    const probe = stable.querySelector<HTMLElement>("[data-probe]")!;
+    const readAttribute = jest.spyOn(probe, "getAttribute");
+
+    reconcileLiveMarkdownDom(target, staging);
+
+    expect(target.querySelector("section")).toBe(stable);
+    expect(readAttribute).not.toHaveBeenCalled();
+    expect(target.textContent).toBe("Staticnew tail");
+    readAttribute.mockRestore();
   });
 
   it("preserves focused code controls, copied state, and code scroll in place", () => {

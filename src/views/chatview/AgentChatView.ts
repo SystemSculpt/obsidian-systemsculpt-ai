@@ -1380,10 +1380,16 @@ export class AgentChatView extends ItemView {
   private beginSubmissionOperation(
     conversationOriginToken: string,
     submission: AgentComposerSubmit,
-    restoreRejectedSubmission = true,
-    clientStartedAtMonotonicMs = this.clientMonotonicNow(),
+    options: Readonly<{
+      restoreRejectedSubmission?: boolean;
+      clientStartedAtMonotonicMs?: number;
+      anchorSubmittedPrompt?: boolean;
+    }> = {},
   ): ActiveSubmissionOperation | null {
     if (this.isSubmissionActive()) return null;
+    const restoreRejectedSubmission = options.restoreRejectedSubmission !== false;
+    const clientStartedAtMonotonicMs = options.clientStartedAtMonotonicMs
+      ?? this.clientMonotonicNow();
     const operation = this.createSubmissionOperation(
       "submission",
       conversationOriginToken,
@@ -1392,7 +1398,15 @@ export class AgentChatView extends ItemView {
       clientStartedAtMonotonicMs,
     );
     this.activeSubmissionOperation = operation;
-    this.workspace?.setRunPending(true, operation.turnId ?? undefined);
+    if (options.anchorSubmittedPrompt === true) {
+      this.workspace?.setRunPending(
+        true,
+        operation.turnId ?? undefined,
+        { anchorSubmittedPrompt: true },
+      );
+    } else {
+      this.workspace?.setRunPending(true, operation.turnId ?? undefined);
+    }
     this.workspace?.setBanner(null);
     this.agent?.recordLifecycle?.({
       code: "submission_admitted",
@@ -1569,8 +1583,11 @@ export class AgentChatView extends ItemView {
     const operation = this.beginSubmissionOperation(
       admissionOriginToken,
       submission,
-      !clearComposerAfterAdmission,
-      clientStartedAtMonotonicMs,
+      {
+        restoreRejectedSubmission: !clearComposerAfterAdmission,
+        clientStartedAtMonotonicMs,
+        anchorSubmittedPrompt: true,
+      },
     );
     if (!operation) {
       if (this.isCurrentConversationOrigin(admissionOriginToken)) {
@@ -1742,6 +1759,7 @@ export class AgentChatView extends ItemView {
       historicalResubmit?: PendingHistoricalResubmit;
       expectedConversationOriginToken?: string;
       activeOperation?: ActiveSubmissionOperation;
+      anchorSubmittedPrompt?: boolean;
     }> = {},
   ): Promise<void> {
     // Composer submissions are externalized at admission; queued attachments
@@ -1767,7 +1785,10 @@ export class AgentChatView extends ItemView {
       const begunOperation = this.beginSubmissionOperation(
         expectedConversationOriginToken,
         prepared,
-        options.restoreRejectedSubmission !== false,
+        {
+          restoreRejectedSubmission: options.restoreRejectedSubmission !== false,
+          anchorSubmittedPrompt: options.anchorSubmittedPrompt === true,
+        },
       );
       if (!begunOperation) {
         if (!options.historicalResubmit) {
@@ -2288,6 +2309,7 @@ export class AgentChatView extends ItemView {
         {
           includeContextFiles: item.includeContextFiles,
           expectedConversationOriginToken,
+          anchorSubmittedPrompt: true,
         },
       );
     } catch (error) {
@@ -2446,6 +2468,7 @@ export class AgentChatView extends ItemView {
     try {
       await this.executeSubmission(rejected.submission, {
         expectedConversationOriginToken,
+        anchorSubmittedPrompt: true,
         ...(historicalResubmit
           ? {
               restoreRejectedSubmission: false,
@@ -2560,7 +2583,10 @@ export class AgentChatView extends ItemView {
     const operation = this.beginSubmissionOperation(
       expectedConversationOriginToken,
       requestedSubmission,
-      false,
+      {
+        restoreRejectedSubmission: false,
+        anchorSubmittedPrompt: true,
+      },
     );
     if (!operation) {
       new Notice("Wait for the current response to finish before resubmitting this message.", 5000);

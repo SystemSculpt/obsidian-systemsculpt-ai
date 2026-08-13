@@ -192,7 +192,6 @@ function existingChatAttachmentRoundTripSteps(context) {
         text: baselineMarker,
         textMode: "contains",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
       },
@@ -272,7 +271,6 @@ function exactWriteSteps({ prefix, filePath, fileContent, completionMarker }) {
         text: completionMarker,
         textMode: "contains",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
       },
@@ -316,7 +314,6 @@ function mixedPartialReadSteps({ existingPaths, missingPaths, completionMarker }
         text: completionMarker,
         textMode: "contains",
         expectedState: "partial",
-        expectedStateLabel: "Partial",
         requireCommandAck: true,
         timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
       },
@@ -327,17 +324,6 @@ function mixedPartialReadSteps({ existingPaths, missingPaths, completionMarker }
       params: {
         target: "chat:.systemsculpt-agent-part.is-tool.is-partial:not(.is-failed):not(.is-error)",
         state: "visible",
-        timeoutMs: 5000,
-      },
-    },
-    {
-      label: "partial read state is exact",
-      action: "waitFor",
-      params: {
-        target: "chat:.systemsculpt-agent-part.is-tool.is-partial "
-          + ".systemsculpt-agent-tool-state",
-        state: "textEquals",
-        text: "Partial",
         timeoutMs: 5000,
       },
     },
@@ -382,17 +368,6 @@ function reopenedMixedPartialReadSteps(completionMarker) {
       params: {
         target: "chat:.systemsculpt-agent-part.is-tool.is-partial:not(.is-failed):not(.is-error)",
         state: "visible",
-        timeoutMs: 5000,
-      },
-    },
-    {
-      label: "reopened partial state is exact",
-      action: "waitFor",
-      params: {
-        target: "chat:.systemsculpt-agent-part.is-tool.is-partial "
-          + ".systemsculpt-agent-tool-state",
-        state: "textEquals",
-        text: "Partial",
         timeoutMs: 5000,
       },
     },
@@ -458,7 +433,6 @@ function failedReadRecoverySteps({ missingPaths, completionMarker }) {
         text: completionMarker,
         textMode: "contains",
         expectedState: "failed",
-        expectedStateLabel: "Failed",
         requireCommandAck: true,
         timeoutMs: TOOL_SETTLEMENT_TIMEOUT_MS,
       },
@@ -469,17 +443,6 @@ function failedReadRecoverySteps({ missingPaths, completionMarker }) {
       params: {
         target: "chat:.systemsculpt-agent-part.is-tool.is-failed",
         state: "visible",
-        timeoutMs: 5000,
-      },
-    },
-    {
-      label: "failed read state is exact",
-      action: "waitFor",
-      params: {
-        target: "chat:.systemsculpt-agent-part.is-tool.is-failed "
-          + ".systemsculpt-agent-tool-state",
-        state: "textEquals",
-        text: "Failed",
         timeoutMs: 5000,
       },
     },
@@ -524,17 +487,6 @@ function reopenedFailedReadRecoverySteps(completionMarker) {
       params: {
         target: "chat:.systemsculpt-agent-part.is-tool.is-failed",
         state: "visible",
-        timeoutMs: 5000,
-      },
-    },
-    {
-      label: "reopened failed read state remains exact",
-      action: "waitFor",
-      params: {
-        target: "chat:.systemsculpt-agent-part.is-tool.is-failed "
-          + ".systemsculpt-agent-tool-state",
-        state: "textEquals",
-        text: "Failed",
         timeoutMs: 5000,
       },
     },

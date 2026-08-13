@@ -10,18 +10,16 @@ type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 export type AgentToolPresentation = Readonly<{
   canonicalName: string;
   label: string;
+  actionIcon: string;
   displayState: AgentToolDisplayState;
-  stateLabel: string;
   icon: string;
-  animated: boolean;
   summary: string | null;
-  itemCount: number | null;
-  queries: readonly (string | null)[];
 }>;
 
-export type AgentToolActivityEntry<T> =
-  | Readonly<{ kind: "item"; item: T }>
-  | Readonly<{ kind: "tools"; items: readonly T[]; tools: readonly AgentToolPart[] }>;
+export type AgentToolDetail = Readonly<{
+  label: string;
+  value: string;
+}>;
 
 const TOOL_LABELS: Readonly<Record<string, string>> = {
   read: "Read files",
@@ -44,40 +42,36 @@ const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
 
 const UNKNOWN_SERVER_TOOL_LABEL = "SystemSculpt action";
 
-const STATE_LABELS: Readonly<Record<AgentToolDisplayState, string>> = {
-  "input-streaming": "Preparing",
-  "input-ready": "Ready",
-  "approval-required": "Needs approval",
-  approved: "Approved",
-  running: "Working",
-  succeeded: "Done",
-  partial: "Partial",
-  failed: "Failed",
-  denied: "Denied",
-  cancelled: "Stopped",
-  "outcome-unknown": "Check required",
+const TOOL_ACTION_ICONS: Readonly<Record<string, string>> = {
+  read: "file-text",
+  write: "file-plus-2",
+  edit: "file-pen-line",
+  multi_edit: "files",
+  create_folders: "folder-plus",
+  list_items: "list-tree",
+  move: "arrow-right-left",
+  trash: "trash-2",
+  find: "file-search",
+  search: "search",
+  open: "folder-open",
+  context: "pin",
+  web_search: "globe-2",
+  server_action: "wand-sparkles",
 };
 
 const STATE_ICONS: Readonly<Record<AgentToolDisplayState, string>> = {
-  "input-streaming": "loader-circle",
-  "input-ready": "loader-circle",
-  "approval-required": "shield-question",
-  approved: "loader-circle",
-  running: "loader-circle",
-  succeeded: "circle-check",
-  partial: "circle-alert",
-  failed: "circle-x",
-  denied: "ban",
-  cancelled: "square",
-  "outcome-unknown": "triangle-alert",
+  "input-streaming": "minus",
+  "input-ready": "minus",
+  "approval-required": "minus",
+  approved: "minus",
+  running: "minus",
+  succeeded: "check",
+  partial: "x",
+  failed: "x",
+  denied: "x",
+  cancelled: "x",
+  "outcome-unknown": "x",
 };
-
-const ANIMATED_STATES = new Set<AgentToolDisplayState>([
-  "input-streaming",
-  "input-ready",
-  "approved",
-  "running",
-]);
 
 type CountedTool = Readonly<{
   verb: string;
@@ -208,11 +202,6 @@ export function presentAgentToolFailure(part: AgentToolPart): string {
     : "This SystemSculpt action could not be completed.";
 }
 
-function toolScope(part: AgentToolPart): CountedTool | null {
-  const { canonicalName } = splitToolName(part.name);
-  return countedTool(canonicalName, record(part.input));
-}
-
 function isWebSearchTool(part: AgentToolPart): boolean {
   return part.location === "server"
     && splitToolName(part.name).canonicalName === "web_search";
@@ -235,64 +224,6 @@ function displayedToolState(part: AgentToolPart): AgentToolPart["state"] {
   )
     ? "running"
     : part.state;
-}
-
-function webSearchGroupState(
-  parts: readonly AgentToolPart[],
-): AgentToolPart["state"] {
-  const states = parts.map(displayedToolState);
-  if (states.some((state) => ANIMATED_STATES.has(state))) return "running";
-  for (const state of [
-    "failed",
-    "outcome-unknown",
-    "denied",
-    "cancelled",
-  ] as const) {
-    if (states.includes(state)) return state;
-  }
-  return states.every((state) => state === "succeeded")
-    ? "succeeded"
-    : states[states.length - 1] ?? "running";
-}
-
-function canAppendWebSearch(
-  group: readonly AgentToolPart[],
-  candidate: AgentToolPart,
-): boolean {
-  return isWebSearchTool(candidate) && group.every(isWebSearchTool);
-}
-
-function normalizedScopeItem(value: string): string {
-  return value.replace(/\\/g, "/").replace(/\/+/g, "/").trim().toLocaleLowerCase();
-}
-
-function canAppendTool(
-  group: readonly AgentToolPart[],
-  candidate: AgentToolPart,
-): boolean {
-  const previous = group[group.length - 1];
-  if (!previous || previous.state !== "succeeded" || candidate.state !== "succeeded") return false;
-  if (previous.location !== candidate.location) return false;
-  const previousName = splitToolName(previous.name).canonicalName;
-  const candidateName = splitToolName(candidate.name).canonicalName;
-  if (previousName !== candidateName) return false;
-
-  const existingScopes = group.map(toolScope);
-  const candidateScope = toolScope(candidate);
-  if (existingScopes.some((scope) => !scope) || !candidateScope) return false;
-  if (group.some((part) => toolOutcomeCounts(part, previousName).failed > 0)) return false;
-  if (toolOutcomeCounts(candidate, candidateName).failed > 0) return false;
-
-  const seen = new Set(existingScopes.flatMap((scope) =>
-    scope!.items.map(normalizedScopeItem)));
-  return candidateScope.items.every((item) => !seen.has(normalizedScopeItem(item)));
-}
-
-function compactScope(items: readonly string[]): string | null {
-  if (items.length === 0) return null;
-  const visible = items.slice(0, 2);
-  const remaining = items.length - visible.length;
-  return compact(`${visible.join(", ")}${remaining > 0 ? `, +${remaining} more` : ""}`);
 }
 
 function inputSummary(canonicalName: string, input: Record<string, unknown>): string | null {
@@ -321,6 +252,167 @@ function contextToolLabel(input: Record<string, unknown>): string {
   return TOOL_LABELS.context;
 }
 
+const MAX_TOOL_DETAIL_ROWS = 8;
+const MAX_TOOL_DETAIL_VALUE_LENGTH = 240;
+const VAULT_TOOLS_WITH_SAFE_DETAILS: ReadonlySet<string> = new Set([
+  "read",
+  "write",
+  "edit",
+  "multi_edit",
+  "create_folders",
+  "list_items",
+  "move",
+  "trash",
+  "find",
+  "search",
+  "open",
+  "context",
+]);
+
+function detailValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= MAX_TOOL_DETAIL_VALUE_LENGTH
+    ? normalized
+    : `${normalized.slice(0, MAX_TOOL_DETAIL_VALUE_LENGTH - 1).trimEnd()}…`;
+}
+
+function addDetail(
+  details: AgentToolDetail[],
+  label: string,
+  value: unknown,
+): void {
+  const visibleValue = detailValue(value);
+  if (visibleValue) details.push({ label, value: visibleValue });
+}
+
+function addDetails(
+  details: AgentToolDetail[],
+  label: string,
+  values: readonly string[],
+): void {
+  for (const value of values) addDetail(details, label, value);
+}
+
+function limitToolDetails(details: readonly AgentToolDetail[]): readonly AgentToolDetail[] {
+  if (details.length <= MAX_TOOL_DETAIL_ROWS) return details;
+  const result = details[details.length - 1]?.label === "Result"
+    ? details[details.length - 1]
+    : null;
+  const visibleCount = result ? MAX_TOOL_DETAIL_ROWS - 2 : MAX_TOOL_DETAIL_ROWS - 1;
+  const omittedCount = details.length - visibleCount - (result ? 1 : 0);
+  return [
+    ...details.slice(0, visibleCount),
+    { label: "More", value: `${omittedCount} more item${omittedCount === 1 ? "" : "s"}` },
+    ...(result ? [result] : []),
+  ];
+}
+
+/**
+ * Returns only known, useful tool details. It never exposes raw JSON, file
+ * contents, edit text, unknown server input, or provider-owned output data.
+ */
+export function presentAgentToolDetails(
+  part: AgentToolPart,
+): readonly AgentToolDetail[] {
+  const { canonicalName } = splitToolName(part.name);
+  if (part.location === "server") {
+    if (canonicalName !== "web_search") return [];
+    const query = webSearchQuery(part);
+    return query ? [{ label: "Query", value: detailValue(query)! }] : [];
+  }
+  if (!VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName)) return [];
+
+  const input = record(part.input);
+  const details: AgentToolDetail[] = [];
+  const paths = (): string[] => [...strings(input.paths), ...strings(input.path)];
+  const outcomeCounts = toolOutcomeCounts(part, canonicalName);
+  const useSuccessfulArtifacts = outcomeCounts.failed > 0 || [
+    "failed",
+    "denied",
+    "cancelled",
+    "outcome-unknown",
+  ].includes(part.state);
+  if (useSuccessfulArtifacts) {
+    addDetails(
+      details,
+      "Path",
+      part.output?.artifacts?.flatMap((artifact) => strings(artifact.path)) ?? [],
+    );
+  } else {
+    switch (canonicalName) {
+      case "read":
+      case "create_folders":
+      case "list_items":
+      case "trash":
+        addDetails(details, "Path", paths());
+        break;
+      case "write":
+      case "edit":
+        addDetails(details, "Path", strings(input.path));
+        break;
+      case "multi_edit":
+        addDetails(details, "Path", objectStrings(input.files, "path"));
+        break;
+      case "open":
+        addDetails(details, "Path", [
+          ...objectStrings(input.files, "path"),
+          ...strings(input.path),
+        ]);
+        break;
+      case "context": {
+        const action = firstString(input.action)?.toLowerCase();
+        if (action === "add") addDetail(details, "Action", "Pin files");
+        if (action === "remove") addDetail(details, "Action", "Unpin files");
+        addDetails(details, "Path", paths());
+        break;
+      }
+      case "find":
+        addDetails(details, "Pattern", [
+          ...strings(input.patterns),
+          ...strings(input.pattern),
+        ]);
+        addDetails(details, "Scope", paths());
+        break;
+      case "search":
+        addDetails(details, "Query", [
+          ...strings(input.patterns),
+          ...strings(input.query),
+          ...strings(input.pattern),
+        ]);
+        addDetails(details, "Scope", paths());
+        break;
+      case "move": {
+        addDetails(details, "Source", [
+          ...objectStrings(input.items, "source"),
+          ...strings(input.sources),
+        ]);
+        addDetails(details, "Destination", [
+          ...objectStrings(input.items, "destination"),
+          ...strings(input.destination),
+        ]);
+        break;
+      }
+      default:
+        return [];
+    }
+  }
+
+  const result = useSuccessfulArtifacts
+    ? null
+    : detailValue(part.output?.summary ?? part.output?.title);
+  const visibleSummary = detailValue(presentAgentTool(part).summary);
+  if (
+    result
+    && result !== visibleSummary
+    && !details.some((detail) => detail.value === result)
+  ) {
+    details.push({ label: "Result", value: result });
+  }
+  return limitToolDetails(details);
+}
+
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const { canonicalName } = splitToolName(part.name);
   const outcomeCounts = toolOutcomeCounts(part, canonicalName);
@@ -346,9 +438,9 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const summary = serverTool
     ? null
     : partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
-  const query = webSearchQuery(part);
+  const presentedName = unknownServerTool ? "server_action" : canonicalName;
   return {
-    canonicalName: unknownServerTool ? "server_action" : canonicalName,
+    canonicalName: presentedName,
     label: part.location === "server"
       ? serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL
       : counted
@@ -358,85 +450,9 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
           : TOOL_LABELS[canonicalName] || canonicalName
           .replace(/[_-]+/g, " ")
           .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
-    stateLabel: STATE_LABELS[displayState],
     icon: STATE_ICONS[displayState],
-    animated: ANIMATED_STATES.has(displayState),
     summary,
-    itemCount: counted?.items.length ?? null,
-    queries: canonicalName === "web_search" && serverTool ? [query] : [],
   };
-}
-
-export function presentAgentToolGroup(
-  parts: readonly AgentToolPart[],
-): AgentToolPresentation {
-  const first = parts[0];
-  if (!first) {
-    throw new Error("A tool presentation group must contain at least one tool.");
-  }
-  const base = presentAgentTool(first);
-  if (parts.length === 1) return base;
-  if (base.canonicalName === "web_search") {
-    const displayState = webSearchGroupState(parts);
-    return {
-      ...base,
-      label: `Search the web (${parts.length})`,
-      displayState,
-      stateLabel: STATE_LABELS[displayState],
-      icon: STATE_ICONS[displayState],
-      animated: ANIMATED_STATES.has(displayState),
-      summary: null,
-      itemCount: parts.length,
-      queries: parts.map(webSearchQuery),
-    };
-  }
-  if (first.location === "server") return base;
-  const scopes = parts.map(toolScope);
-  if (scopes.some((scope) => !scope)) return base;
-  const items = scopes.flatMap((scope) => scope!.items);
-  const counted = { ...scopes[0]!, items };
-  return {
-    ...base,
-    label: countedLabel(counted),
-    summary: compactScope(items),
-    itemCount: items.length,
-  };
-}
-
-/**
- * Groups adjacent web searches from one uninterrupted batch. It also groups
- * terminal read-only vault activity with explicit, non-overlapping scope.
- * Any non-tool item remains a chronology boundary.
- */
-export function groupConsecutiveToolActivity<T>(
-  items: readonly T[],
-  toolFor: (item: T) => AgentToolPart | null,
-  enabled = true,
-): readonly AgentToolActivityEntry<T>[] {
-  const result: AgentToolActivityEntry<T>[] = [];
-  for (const item of items) {
-    const tool = toolFor(item);
-    if (!tool) {
-      result.push({ kind: "item", item });
-      continue;
-    }
-    const previous = result[result.length - 1];
-    if (
-      previous?.kind === "tools"
-      && (
-        canAppendWebSearch(previous.tools, tool)
-        || (enabled && canAppendTool(previous.tools, tool))
-      )
-    ) {
-      result[result.length - 1] = {
-        kind: "tools",
-        items: [...previous.items, item],
-        tools: [...previous.tools, tool],
-      };
-      continue;
-    }
-    result.push({ kind: "tools", items: [item], tools: [tool] });
-  }
-  return result;
 }

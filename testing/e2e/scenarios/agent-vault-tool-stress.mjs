@@ -61,7 +61,6 @@ export default function makeAgentVaultToolStress(now = Date.now()) {
           text: seedCompletionMarker,
           textMode: "contains",
           expectedState: "succeeded",
-          expectedStateLabel: "Done",
           requireCommandAck: true,
           requireAllToolResultAcks: true,
           expectedAllToolResultState: "succeeded",

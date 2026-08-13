@@ -961,8 +961,7 @@ describe("AgentChatView composer admission", () => {
     const operation = (view as any).beginSubmissionOperation(
       "origin-unlock",
       { text: privateSentinel, mode: "send" },
-      true,
-      100,
+      { clientStartedAtMonotonicMs: 100 },
     );
     const serverRunId = `run_${"d".repeat(32)}`;
     agent.getSnapshot = jest.fn(() => ({
@@ -1352,6 +1351,7 @@ describe("AgentChatView composer admission", () => {
     expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(
       true,
       secondInput.turnId,
+      { anchorSubmittedPrompt: true },
     );
 
     // Completing the older render and its finally block must not clear the
@@ -1363,6 +1363,7 @@ describe("AgentChatView composer admission", () => {
     expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(
       true,
       secondInput.turnId,
+      { anchorSubmittedPrompt: true },
     );
     expect(harness.durableMessages).toHaveLength(2);
 
@@ -1777,11 +1778,72 @@ describe("AgentChatView composer admission", () => {
       },
       {
         expectedConversationOriginToken: "origin-retry",
+        anchorSubmittedPrompt: true,
       },
     );
     expect(inputText).toBe("Newer draft typed while saving");
     expect(messageAttachments).toEqual([NEWER_ATTACHMENT]);
     expect(handleError).not.toHaveBeenCalled();
+  });
+
+  it("uses the named prompt anchor only when executeSubmission opts in", async () => {
+    const anchored = createHarness("before-commit");
+    const anchoredExecution = (anchored.view as any).executeSubmission(
+      { text: "Anchor this prompt", mode: "send" },
+      {
+        expectedConversationOriginToken: "origin-admission",
+        anchorSubmittedPrompt: true,
+      },
+    );
+    const anchoredInput = await anchored.runStarted.promise;
+    expect(anchored.workspace.setRunPending).toHaveBeenCalledWith(
+      true,
+      anchoredInput.turnId,
+      { anchorSubmittedPrompt: true },
+    );
+    anchored.runGate.resolve();
+    await anchoredExecution;
+    anchored.composer.unload();
+
+    const passive = createHarness("before-commit");
+    const passiveExecution = (passive.view as any).executeSubmission(
+      { text: "Follow the current end", mode: "send" },
+      { expectedConversationOriginToken: "origin-admission" },
+    );
+    const passiveInput = await passive.runStarted.promise;
+    expect(passive.workspace.setRunPending).toHaveBeenCalledWith(true, passiveInput.turnId);
+    expect(passive.workspace.setRunPending).not.toHaveBeenCalledWith(
+      true,
+      passiveInput.turnId,
+      { anchorSubmittedPrompt: true },
+    );
+    passive.runGate.resolve();
+    await passiveExecution;
+    passive.composer.unload();
+  });
+
+  it("keeps automation submissions on the passive scroll path", async () => {
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    const executeSubmission = jest.fn(async () => undefined);
+    const focusInput = jest.fn();
+    Object.assign(view, {
+      legacyHistoryViewOnly: false,
+      conversationOriginToken: "origin-automation",
+      automationApprovalMode: "interactive",
+      executeSubmission,
+      focusInput,
+    });
+
+    await view.sendAutomationMessage({ message: "Run automation", focusAfterSend: false });
+
+    expect(executeSubmission).toHaveBeenCalledWith(
+      { text: "Run automation", mode: "send" },
+      {
+        includeContextFiles: true,
+        expectedConversationOriginToken: "origin-automation",
+      },
+    );
+    expect(focusInput).not.toHaveBeenCalled();
   });
 
   it("consumes an exact text-only rejected draft before retrying it", async () => {
@@ -1826,6 +1888,7 @@ describe("AgentChatView composer admission", () => {
       },
       {
         expectedConversationOriginToken: "origin-retry",
+        anchorSubmittedPrompt: true,
       },
     );
     expect(inputText).toBe("");
@@ -2053,7 +2116,11 @@ describe("AgentChatView composer admission", () => {
 
     (view as any).acceptComposerSubmission(first);
     expect((view as any).activeSubmissionOperation).toBeTruthy();
-    expect(setRunPending).toHaveBeenCalledWith(true, expect.stringMatching(/^user-/));
+    expect(setRunPending).toHaveBeenCalledWith(
+      true,
+      expect.stringMatching(/^user-/),
+      { anchorSubmittedPrompt: true },
+    );
     await expect(view.setApprovalMode("full-access")).rejects.toThrow(
       "Tool access cannot change while SystemSculpt is working.",
     );
@@ -2976,6 +3043,7 @@ describe("AgentChatView controls", () => {
       {
         includeContextFiles: false,
         expectedConversationOriginToken: "origin-run-now",
+        anchorSubmittedPrompt: true,
       },
     );
     expect((view as any).queuedFollowUps).toEqual([]);
@@ -3038,6 +3106,7 @@ describe("AgentChatView controls", () => {
       {
         includeContextFiles: false,
         expectedConversationOriginToken: "origin-supersede",
+        anchorSubmittedPrompt: true,
       },
     );
     expect(restoreRejectedSubmission).toHaveBeenCalledTimes(1);
@@ -3179,6 +3248,7 @@ describe("AgentChatView controls", () => {
       {
         includeContextFiles: false,
         expectedConversationOriginToken: "origin-takeover",
+        anchorSubmittedPrompt: true,
       },
     );
     expect((view as any).queuedFollowUps).toEqual([remaining]);

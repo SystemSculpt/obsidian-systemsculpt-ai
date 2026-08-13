@@ -235,6 +235,7 @@ type ActiveRun = {
   serverAdmissionPossible: boolean;
   serverQueued: boolean;
   streamSupersededByRecovery: boolean;
+  elapsedMs: number | null;
   // The turn's streamed assistant messages as last observed before a durable
   // session snapshot replaced the projection. A snapshot built before the
   // terminal fold can momentarily omit the streamed content of a run that is
@@ -1087,6 +1088,7 @@ function projectRun(
     runId: active.serverRunId,
     turnId: active.turnId,
     status,
+    ...(active.elapsedMs === null ? {} : { elapsedMs: active.elapsedMs }),
     phase,
     ...(label ? { statusLabel: label } : {}),
     ...(waitingReason ? { waitingReason } : {}),
@@ -1271,6 +1273,7 @@ function durableAssistantMessage(
   sequence: readonly WireMessage[],
   now: number,
   appendSources: boolean,
+  responseDurationMs?: number,
 ): ChatMessage | null {
   const targets = collectClientToolTargets(sequence);
   const tools = canonicalTools(sequence, targets);
@@ -1340,6 +1343,7 @@ function durableAssistantMessage(
     role: "assistant",
     message_id: message.id,
     content,
+    ...(responseDurationMs === undefined ? {} : { responseDurationMs }),
     ...(messageParts.length > 0 ? { messageParts } : {}),
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
   };
@@ -1366,12 +1370,23 @@ function sequenceTerminalOutcome(
   return null;
 }
 
-function durableServerHistory(messages: readonly WireMessage[], now: number): ChatMessage[] {
+type DurableTurnPresentation = Readonly<{
+  rootMessageId: string;
+  responseDurationMs: number;
+}>;
+
+function durableServerHistory(
+  messages: readonly WireMessage[],
+  now: number,
+  turnPresentation?: DurableTurnPresentation,
+): ChatMessage[] {
   const output: ChatMessage[] = [];
+  let rootMessageId: string | null = null;
   for (let index = 0; index < messages.length;) {
     const message = messages[index]!;
     if (message.role === "user") {
       output.push(durableUserMessage(message));
+      rootMessageId = message.id;
       index += 1;
       continue;
     }
@@ -1393,8 +1408,39 @@ function durableServerHistory(messages: readonly WireMessage[], now: number): Ch
       const tail = output[output.length - 1]!;
       output[output.length - 1] = { ...tail, terminalOutcome: "cancelled" };
     }
+    if (
+      turnPresentation
+      && rootMessageId === turnPresentation.rootMessageId
+      && output.length > sequenceStart
+    ) {
+      const tail = output[output.length - 1]!;
+      output[output.length - 1] = {
+        ...tail,
+        responseDurationMs: turnPresentation.responseDurationMs,
+      };
+    }
   }
   return output;
+}
+
+function hasDurableAssistantContent(
+  messages: readonly ChatMessage[],
+  rootMessageId: string,
+): boolean {
+  // durableServerHistory emits only user and assistant messages. It mirrors
+  // tool parts into tool_calls and text parts into the string content field.
+  const rootIndex = messages.findIndex((message) =>
+    message.role === "user" && message.message_id === rootMessageId);
+  if (rootIndex < 0) return false;
+  for (let index = rootIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    if (message.role === "user") break;
+    if ((message.tool_calls?.length ?? 0) > 0) return true;
+    if (message.messageParts?.some((part) =>
+      part.type === "reasoning" && part.data.trim().length > 0)) return true;
+    if (typeof message.content === "string" && message.content.trim().length > 0) return true;
+  }
+  return false;
 }
 
 /**
@@ -2338,6 +2384,7 @@ export class AgentChatSession {
     const toolTasks = active ? [...active.toolTasks.values()] : [];
     if (active && !active.terminal) {
       active.abort.abort();
+      this.updateActiveElapsed(active);
       active.terminal = {
         version: 1,
         run_id: active.serverRunId ?? `run_${"0".repeat(32)}`,
@@ -2345,6 +2392,7 @@ export class AgentChatSession {
         outcome: "cancelled",
         code: "cancelled",
       };
+      this.reconcileLocalTerminalDuration(active);
       const snapshot = projectRun(
         active,
         this.authoritativeMessages,
@@ -2433,6 +2481,7 @@ export class AgentChatSession {
       serverAdmissionPossible: input.origin === "recovered",
       serverQueued: false,
       streamSupersededByRecovery: false,
+      elapsedMs: null,
       streamedTurnMessages: Object.freeze([]),
     };
     if (input.origin === "submitted") {
@@ -2487,6 +2536,34 @@ export class AgentChatSession {
     const existing = this.clientLatency.get(input.requestId);
     if (existing?.conversationId === input.conversationId) return;
     this.retainClientLatency(input);
+  }
+
+  private updateActiveElapsed(active: ActiveRun): void {
+    if (active.terminal) return;
+    const context = this.clientLatency.get(active.requestId);
+    if (!context || context.conversationId !== active.conversationId) return;
+    const elapsedMs = this.monotonicNow() - context.startedAtMonotonicMs;
+    if (!Number.isFinite(elapsedMs)) return;
+    active.elapsedMs = Math.max(0, Math.round(elapsedMs));
+  }
+
+  private reconcileLocalTerminalDuration(active: ActiveRun): void {
+    if (active.elapsedMs === null || !this.options.reconcileHistory) return;
+    const turnPresentation: DurableTurnPresentation = {
+      rootMessageId: active.turnId,
+      responseDurationMs: active.elapsedMs,
+    };
+    const durable = durableServerHistory(
+      this.presentationMessages,
+      this.now(),
+      turnPresentation,
+    );
+    if (!hasDurableAssistantContent(durable, active.turnId)) return;
+    void this.reconcileMessages(
+      this.presentationMessages,
+      "terminal",
+      turnPresentation,
+    ).catch(() => undefined);
   }
 
   private ensureToolExecutionOrdinal(
@@ -4124,6 +4201,7 @@ export class AgentChatSession {
       || terminal.root_message_id !== active.turnId
       || (active.serverRunId && terminal.run_id !== active.serverRunId)
     ) return;
+    this.updateActiveElapsed(active);
     active.serverRunId = terminal.run_id;
     active.terminal = terminal;
     active.phase = terminal.outcome === "succeeded" ? "settling" : "complete";
@@ -4188,6 +4266,7 @@ export class AgentChatSession {
           turn.filter((message) => message.role === "assistant"),
           this.now(),
           true,
+          active.elapsedMs ?? undefined,
         );
         if (durable) {
           assistantMessage = durable;
@@ -4223,7 +4302,16 @@ export class AgentChatSession {
         }
       }
     }
-    await this.reconcileMessages(durableMessages, "terminal").catch(() => undefined);
+    await this.reconcileMessages(
+      durableMessages,
+      "terminal",
+      active.elapsedMs === null
+        ? undefined
+        : {
+            rootMessageId: active.turnId,
+            responseDurationMs: active.elapsedMs,
+          },
+    ).catch(() => undefined);
     const snapshot = projectRun(
       active,
       this.presentationMessages,
@@ -4306,6 +4394,7 @@ export class AgentChatSession {
 
   private finishLocalCancellation(active: ActiveRun): void {
     if (this.active?.token !== active.token || active.terminal) return;
+    this.updateActiveElapsed(active);
     active.terminal = {
       version: 1,
       run_id: active.serverRunId ?? `run_${"0".repeat(32)}`,
@@ -4313,6 +4402,7 @@ export class AgentChatSession {
       outcome: "cancelled",
       code: "cancelled",
     };
+    this.reconcileLocalTerminalDuration(active);
     const snapshot = projectRun(
       active,
       this.authoritativeMessages,
@@ -4324,6 +4414,7 @@ export class AgentChatSession {
 
   private finishLocalFailure(active: ActiveRun, error: ManagedAgentError): void {
     if (this.active?.token !== active.token || active.terminal) return;
+    this.updateActiveElapsed(active);
     active.terminal = {
       version: 1,
       run_id: active.serverRunId ?? `run_${"0".repeat(32)}`,
@@ -4336,6 +4427,7 @@ export class AgentChatSession {
         : `incident_${"0".repeat(32)}`,
       retryable: error.retryable === true,
     };
+    this.reconcileLocalTerminalDuration(active);
     const snapshot = projectRun(
       active,
       this.presentationMessages,
@@ -4372,6 +4464,7 @@ export class AgentChatSession {
 
   private publishActive(active: ActiveRun, immediate = false): void {
     if (this.active?.token !== active.token) return;
+    this.updateActiveElapsed(active);
     const snapshot = projectRun(
       active,
       this.presentationMessages,
@@ -4487,6 +4580,7 @@ export class AgentChatSession {
   private reconcileMessages(
     messages: readonly WireMessage[],
     historySyncKind: HistorySyncKind,
+    turnPresentation?: DurableTurnPresentation,
   ): Promise<void> {
     if (!this.options.reconcileHistory) return Promise.resolve();
     // An empty fresh or fork snapshot is not an instruction to erase a local
@@ -4500,18 +4594,22 @@ export class AgentChatSession {
     // legitimately replaces every message object with equal content).
     const previous = this.reconciledMessages;
     if (
-      previous
+      !turnPresentation
+      && previous
       && previous.length === messages.length
       && messages.every((message, index) => message === previous[index])
     ) return this.pendingReconcile;
-    const key = JSON.stringify(messages);
+    const messageKey = JSON.stringify(messages);
+    const key = turnPresentation
+      ? `${messageKey}\n${JSON.stringify(turnPresentation)}`
+      : messageKey;
     if (key === this.reconciledKey) {
       this.reconciledMessages = messages;
       return this.pendingReconcile;
     }
     this.reconciledKey = key;
     this.reconciledMessages = messages;
-    const durable = durableServerHistory(messages, this.now());
+    const durable = durableServerHistory(messages, this.now(), turnPresentation);
     const correlation = this.createHistorySyncCorrelation(historySyncKind);
     const task = this.pendingReconcile.then(() => {
       this.recordHistorySyncLifecycle("history_sync_started", correlation);

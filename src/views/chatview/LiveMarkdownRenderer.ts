@@ -82,8 +82,25 @@ type RenderWaiter = Readonly<{
 
 type RenderOutcome =
   | Readonly<{ status: "committed" }>
-  | Readonly<{ status: "failed"; error: unknown }>
+  | Readonly<{
+      status: "failed";
+      error: unknown;
+      revision: number | null;
+    }>
   | Readonly<{ status: "stale" }>;
+
+type RenderedMarkdownBlock = Readonly<{
+  signature: string;
+  leased: boolean;
+  nodeName: string;
+  nodeType: number;
+}>;
+
+type PlainBlockRange = Readonly<{
+  incomingEnd: number;
+  previousEnd: number;
+  start: number;
+}>;
 
 type LiveMarkdownState = {
   target: HTMLElement;
@@ -92,10 +109,8 @@ type LiveMarkdownState = {
   committedRevision: number;
   committedMarkdown: string | null;
   committedFinal: boolean;
-  // The markdown whose content the live DOM currently displays: the last
-  // committed parse plus any tail runs painted directly between parses.
-  paintedMarkdown: string | null;
-  leases: Set<Component>;
+  committedBlocks: readonly RenderedMarkdownBlock[];
+  lease: Component | null;
   failedRevision: number | null;
   lastStartedAt: number;
   timer: number | null;
@@ -113,6 +128,7 @@ export type LiveMarkdownRendererOptions = Readonly<{
     staging: HTMLElement,
     component: Component,
   ) => Promise<void>;
+  beginDomCommit?: (target: HTMLElement) => (() => void) | undefined;
   throttleMs?: number;
   now?: () => number;
 }>;
@@ -431,14 +447,101 @@ function compatibleNode(current: Node, incoming: Node): boolean {
     === incoming.matches(".systemsculpt-agent-code-copy");
 }
 
-function adoptedNodeNeedsLease(node: Node): boolean {
-  const element = isDomInstance(node, getDomRealm(node).Element)
-    ? node
-    : node.parentElement;
-  if (!element) return false;
-  return element.matches(LEASED_STREAM_MARKDOWN_SELECTOR)
-    || element.querySelector(LEASED_STREAM_MARKDOWN_SELECTOR) !== null
-    || (element.parentElement?.closest(OPAQUE_MARKDOWN_SELECTOR) ?? null) !== null;
+function nodeContainsLeasedMarkdown(node: Node): boolean {
+  if (!isDomInstance(node, getDomRealm(node).Element)) return false;
+  return node.matches(LEASED_STREAM_MARKDOWN_SELECTOR)
+    || node.querySelector(LEASED_STREAM_MARKDOWN_SELECTOR) !== null;
+}
+
+function renderedMarkdownBlock(node: Node): RenderedMarkdownBlock {
+  const signature = isDomInstance(node, getDomRealm(node).Element)
+    ? node.outerHTML
+    : `${node.nodeType}:${node.nodeName}:${node.nodeValue ?? ""}`;
+  return {
+    signature,
+    leased: nodeContainsLeasedMarkdown(node),
+    nodeName: node.nodeName,
+    nodeType: node.nodeType,
+  };
+}
+
+function renderedMarkdownBlocks(root: HTMLElement): readonly RenderedMarkdownBlock[] {
+  return Array.from(root.childNodes, renderedMarkdownBlock);
+}
+
+function sameRenderedBlock(
+  left: RenderedMarkdownBlock,
+  right: RenderedMarkdownBlock,
+): boolean {
+  return left.nodeType === right.nodeType
+    && left.nodeName === right.nodeName
+    && left.signature === right.signature;
+}
+
+function stableBlockMatchesLiveNode(
+  block: RenderedMarkdownBlock,
+  node: Node | undefined,
+): boolean {
+  return Boolean(
+    node
+    && node.nodeType === block.nodeType
+    && node.nodeName === block.nodeName
+    && (!block.leased || nodeContainsLeasedMarkdown(node)),
+  );
+}
+
+function plainBlockRange(
+  target: HTMLElement,
+  previousMarkdown: string | null,
+  markdown: string,
+  previous: readonly RenderedMarkdownBlock[],
+  incoming: readonly RenderedMarkdownBlock[],
+  hasRetainedLease: boolean,
+): PlainBlockRange | null {
+  if (
+    !hasRetainedLease
+    || previousMarkdown === null
+    || !markdown.startsWith(previousMarkdown)
+    || target.childNodes.length !== previous.length
+  ) return null;
+
+  let start = 0;
+  while (
+    start < previous.length
+    && start < incoming.length
+    && sameRenderedBlock(previous[start]!, incoming[start]!)
+  ) start += 1;
+
+  let previousEnd = previous.length;
+  let incomingEnd = incoming.length;
+  while (
+    previousEnd > start
+    && incomingEnd > start
+    && sameRenderedBlock(previous[previousEnd - 1]!, incoming[incomingEnd - 1]!)
+  ) {
+    previousEnd -= 1;
+    incomingEnd -= 1;
+  }
+
+  const stableBlocks = [
+    ...previous.slice(0, start),
+    ...previous.slice(previousEnd),
+  ];
+  if (!stableBlocks.some((block) => block.leased)) return null;
+  if (
+    previous.slice(start, previousEnd).some((block) => block.leased)
+    || incoming.slice(start, incomingEnd).some((block) => block.leased)
+  ) return null;
+
+  const live = Array.from(target.childNodes);
+  for (let index = 0; index < start; index += 1) {
+    if (!stableBlockMatchesLiveNode(previous[index]!, live[index])) return null;
+  }
+  for (let offset = 0; offset < previous.length - previousEnd; offset += 1) {
+    const previousIndex = previousEnd + offset;
+    if (!stableBlockMatchesLiveNode(previous[previousIndex]!, live[previousIndex])) return null;
+  }
+  return { start, previousEnd, incomingEnd };
 }
 
 function syncAttributes(current: Element, incoming: Element): void {
@@ -479,53 +582,82 @@ function syncAttributes(current: Element, incoming: Element): void {
   if (input && checked !== undefined) input.checked = checked;
 }
 
-function reconcileCompatibleTree(current: Node, incoming: Node): boolean {
+function reconcileCompatibleTree(current: Node, incoming: Node): void {
   if (current.nodeType === Node.TEXT_NODE && incoming.nodeType === Node.TEXT_NODE) {
     const text = incoming.nodeValue ?? "";
     if (current.nodeValue !== text) current.nodeValue = text;
-    return false;
+    return;
   }
   if (
     !isDomInstance(current, getDomRealm(current).Element)
     || !isDomInstance(incoming, getDomRealm(incoming).Element)
   ) {
-    return false;
+    return;
   }
   if (
     current.matches(".systemsculpt-agent-code-copy")
     && incoming.matches(".systemsculpt-agent-code-copy")
   ) {
-    return false;
+    return;
   }
   syncAttributes(current, incoming);
-  return reconcileChildNodes(current, incoming);
+  reconcileChildNodes(current, incoming);
 }
 
-function reconcileChildNodes(currentParent: Node, incomingParent: Node): boolean {
+function reconcileChildNodes(currentParent: Node, incomingParent: Node): void {
   const current = Array.from(currentParent.childNodes);
   const incoming = Array.from(incomingParent.childNodes);
-  let adoptedLeaseOwnedNodes = false;
   for (let index = 0; index < current.length || index < incoming.length; index += 1) {
     const currentNode = current[index];
     const incomingNode = incoming[index];
     if (!currentNode && incomingNode) {
-      adoptedLeaseOwnedNodes = adoptedNodeNeedsLease(incomingNode)
-        || adoptedLeaseOwnedNodes;
       currentParent.appendChild(incomingNode);
     } else if (currentNode && !incomingNode) {
       currentNode.remove();
     } else if (currentNode && incomingNode) {
+      if (currentNode.isEqualNode(incomingNode)) continue;
       if (compatibleNode(currentNode, incomingNode)) {
-        adoptedLeaseOwnedNodes = reconcileCompatibleTree(currentNode, incomingNode)
-          || adoptedLeaseOwnedNodes;
+        reconcileCompatibleTree(currentNode, incomingNode);
       } else {
-        adoptedLeaseOwnedNodes = adoptedNodeNeedsLease(incomingNode)
-          || adoptedLeaseOwnedNodes;
         currentNode.replaceWith(incomingNode);
       }
     }
   }
-  return adoptedLeaseOwnedNodes;
+}
+
+function reconcilePlainBlockRange(
+  target: HTMLElement,
+  staging: HTMLElement,
+  range: PlainBlockRange,
+): void {
+  const preserved = captureDomState(target);
+  const current = Array.from(target.childNodes);
+  const currentRange = current.slice(range.start, range.previousEnd);
+  const incomingRange = Array.from(staging.childNodes)
+    .slice(range.start, range.incomingEnd)
+    .map((node) => node.cloneNode(true));
+  const suffixAnchor = current[range.previousEnd] ?? null;
+  for (
+    let index = 0;
+    index < currentRange.length || index < incomingRange.length;
+    index += 1
+  ) {
+    const currentNode = currentRange[index];
+    const incomingNode = incomingRange[index];
+    if (!currentNode && incomingNode) {
+      target.insertBefore(incomingNode, suffixAnchor);
+    } else if (currentNode && !incomingNode) {
+      currentNode.remove();
+    } else if (currentNode && incomingNode) {
+      if (currentNode.isEqualNode(incomingNode)) continue;
+      if (compatibleNode(currentNode, incomingNode)) {
+        reconcileCompatibleTree(currentNode, incomingNode);
+      } else {
+        currentNode.replaceWith(incomingNode);
+      }
+    }
+  }
+  restoreDomState(target, preserved);
 }
 
 /**
@@ -536,11 +668,10 @@ function reconcileChildNodes(currentParent: Node, incomingParent: Node): boolean
 export function reconcileLiveMarkdownDom(
   target: HTMLElement,
   staging: HTMLElement,
-): boolean {
+): void {
   const preserved = captureDomState(target);
-  const adoptedLeaseOwnedNodes = reconcileChildNodes(target, staging);
+  reconcileChildNodes(target, staging);
   restoreDomState(target, preserved);
-  return adoptedLeaseOwnedNodes;
 }
 
 function replaceLiveMarkdownDom(
@@ -560,12 +691,15 @@ function cloneRenderedMarkdownDom(staging: HTMLElement): HTMLElement {
 
 /**
  * Coalesces token snapshots into detached Obsidian Markdown renders. Streaming
- * updates never await the parser; final settlement waits for the newest render.
+ * updates never await the parser. Settlement reuses an exact committed render
+ * or waits for the newest snapshot.
  */
 export class LiveMarkdownRenderer extends Component {
   private readonly states = new Map<HTMLElement, LiveMarkdownState>();
   private readonly throttleMs: number;
   private readonly now: () => number;
+  private domCommitDepth = 0;
+  private finishDomCommit: (() => void) | undefined;
   private acceptingRequests = true;
 
   constructor(private readonly options: LiveMarkdownRendererOptions) {
@@ -584,74 +718,22 @@ export class LiveMarkdownRenderer extends Component {
   public stream(target: HTMLElement, markdown: string): void {
     if (!this.acceptingRequests) return;
     const state = this.request(target, markdown, false);
-    if (
-      state.committedMarkdown === markdown
-      && !state.inFlight
-      && state.timer === null
-    ) {
-      state.committedRevision = state.revision;
+    if (this.reuseCommittedMarkdown(state, false)) {
+      this.cancelTimer(state);
       this.resolveWaiters(state);
       return;
     }
-    if (state.committedRevision === 0) this.showFallback(state);
-    else this.paintAppendedTail(state, markdown);
     this.schedule(state, false);
-  }
-
-  /**
-   * Paint a newly appended run of prose into the committed DOM without
-   * waiting for the throttled Markdown parse. This is a visual fast path
-   * only: it applies when no parse is in flight (so every later commit
-   * already contains the painted text), the update purely appends a single
-   * line to what the DOM currently displays, and the DOM tail is an ordinary
-   * text node outside interactive or code content. The next full parse
-   * renders the same content authoritatively and heals any styling drift.
-   */
-  private paintAppendedTail(
-    state: LiveMarkdownState,
-    markdown: string,
-  ): void {
-    const painted = state.paintedMarkdown;
-    if (
-      state.inFlight
-      || state.fallbackVisible
-      || painted === null
-      || markdown.length <= painted.length
-      || !markdown.startsWith(painted)
-    ) return;
-    const suffix = markdown.slice(painted.length);
-    if (suffix.includes("\n") || suffix.includes("\r")) return;
-    let node: Node = state.target;
-    while (node.lastChild) node = node.lastChild;
-    if (node === state.target || node.nodeType !== Node.TEXT_NODE) return;
-    const container = node.parentElement;
-    if (
-      !container
-      || container.closest(
-        "a, button, code, input, select, textarea, .systemsculpt-agent-code-copy",
-      )
-    ) return;
-    // appendData splices at the end of the node, so an existing user
-    // selection or caret earlier in the text keeps its boundary points; a
-    // full `data` assignment would collapse them.
-    (node as Text).appendData(suffix);
-    state.paintedMarkdown = markdown;
   }
 
   public settle(target: HTMLElement, markdown: string): Promise<void> {
     if (!this.acceptingRequests) return Promise.resolve();
     const state = this.request(target, markdown, true);
-    if (
-      state.committedMarkdown === markdown
-      && state.committedFinal
-      && !state.inFlight
-    ) {
+    if (this.reuseCommittedMarkdown(state, true)) {
       this.cancelTimer(state);
-      state.committedRevision = state.revision;
       this.resolveWaiters(state);
       return Promise.resolve();
     }
-    if (state.committedRevision === 0) this.showFallback(state);
     const completion = this.waitForRevision(state, state.revision);
     this.schedule(state, true);
     return completion;
@@ -673,8 +755,8 @@ export class LiveMarkdownRenderer extends Component {
       if (candidate !== target && !target.contains(candidate)) continue;
       state.disposed = true;
       this.cancelTimer(state);
-      this.disposeLeases(state.leases);
-      state.leases.clear();
+      this.disposeLease(state.lease);
+      state.lease = null;
       state.waiters.splice(0).forEach((waiter) => waiter.resolve());
       this.states.delete(candidate);
     }
@@ -703,8 +785,8 @@ export class LiveMarkdownRenderer extends Component {
         committedRevision: 0,
         committedMarkdown: null,
         committedFinal: false,
-        paintedMarkdown: null,
-        leases: new Set(),
+        committedBlocks: [],
+        lease: null,
         failedRevision: null,
         lastStartedAt: Number.NEGATIVE_INFINITY,
         timer: null,
@@ -724,29 +806,23 @@ export class LiveMarkdownRenderer extends Component {
     return state;
   }
 
-  private showFallback(state: LiveMarkdownState): void {
-    const staging = createSurfaceElement(state.target.ownerDocument, "div");
-    staging.append(state.target.ownerDocument.createTextNode(state.markdown));
-    reconcileLiveMarkdownDom(state.target, staging);
-    state.target.classList.add("is-live-markdown-fallback");
-    state.committedFinal = false;
-    state.paintedMarkdown = null;
-    state.fallbackVisible = true;
-  }
-
   private showFinalFallback(
     state: LiveMarkdownState,
     markdown: string,
   ): void {
-    this.disposeLeases(state.leases);
-    state.leases.clear();
     const staging = createSurfaceElement(state.target.ownerDocument, "div");
-    staging.append(state.target.ownerDocument.createTextNode(markdown));
-    replaceLiveMarkdownDom(state.target, staging);
-    state.target.classList.add("is-live-markdown-fallback");
-    state.committedFinal = false;
-    state.paintedMarkdown = null;
-    state.fallbackVisible = true;
+    const fallback = state.target.ownerDocument.createTextNode(markdown);
+    staging.append(fallback);
+    this.commitDom(state.target, () => {
+      const previousLease = state.lease;
+      state.lease = null;
+      replaceLiveMarkdownDom(state.target, staging);
+      this.disposeLease(previousLease);
+      state.target.classList.add("is-live-markdown-fallback");
+      state.committedFinal = false;
+      state.committedBlocks = [];
+      state.fallbackVisible = true;
+    });
   }
 
   private schedule(state: LiveMarkdownState, immediate: boolean): void {
@@ -769,7 +845,7 @@ export class LiveMarkdownRenderer extends Component {
       void this.startRender(state);
       return;
     }
-    const ownerWindow = state.target.ownerDocument.defaultView ?? window;
+    const ownerWindow = getSurfaceOwnerWindow(state.target);
     state.timer = ownerWindow.setTimeout(() => {
       state.timer = null;
       void this.startRender(state);
@@ -780,7 +856,6 @@ export class LiveMarkdownRenderer extends Component {
     if (state.disposed || state.inFlight) return;
     const revision = state.revision;
     const markdown = state.markdown;
-    const final = state.finalRevision === revision;
     state.lastStartedAt = this.now();
     const task = (async (): Promise<RenderOutcome> => {
       const staging = createSurfaceElement(state.target.ownerDocument, "div");
@@ -791,77 +866,88 @@ export class LiveMarkdownRenderer extends Component {
         if (state.disposed) {
           return { status: "stale" };
         }
-        // A continuously arriving token stream can advance `state.revision`
-        // faster than Obsidian's asynchronous Markdown pipeline completes. Do
-        // not discard a valid parsed frame solely because a newer snapshot is
-        // queued: doing so can leave the whole response as raw Markdown until
-        // the stream pauses or finishes. Commit this monotonic intermediate
-        // frame, then schedule the newest revision below.
+        if (revision < state.committedRevision) {
+          return { status: "stale" };
+        }
+        const latestMarkdown = state.markdown;
+        const exactLatestMarkdown = markdown === latestMarkdown;
+        if (
+          !exactLatestMarkdown
+          && !latestMarkdown.startsWith(markdown)
+        ) {
+          return { status: "stale" };
+        }
         const hasLeasedContent = staging.querySelector(
           LEASED_STREAM_MARKDOWN_SELECTOR,
         ) !== null;
-        if (final) {
-          const previousLeases = Array.from(state.leases);
-          // Final settlement installs the exact authoritative render and its
-          // component lease after every streamed frame has remained live.
-          replaceLiveMarkdownDom(state.target, staging);
-          state.leases.clear();
-          state.leases.add(lease);
-          retainedLease = true;
-          this.disposeLeases(previousLeases);
-        } else if (hasLeasedContent) {
-          const previousLeasedNodes = Array.from(
-            state.target.querySelectorAll(LEASED_STREAM_MARKDOWN_SELECTOR),
-          );
-          // Preserve compatible interactive nodes and their original live
-          // lease. Only genuinely inserted or replaced staging nodes require
-          // retaining this render's lease. This avoids remounting links,
-          // tasks, callouts, embeds, and growing code blocks per token.
-          const adoptedLeaseOwnedNodes = reconcileLiveMarkdownDom(
+        // A settle request can arrive while an identical streaming parse is
+        // already in flight. Promote that parse to the final install instead
+        // of scheduling the same Markdown twice.
+        const installFinalRender = exactLatestMarkdown
+          && state.finalRevision !== null;
+        // Final renders install the full tree and never compare block
+        // signatures again. Avoid retaining a serialized copy of rich HTML.
+        const blocks = !installFinalRender && (hasLeasedContent || state.lease !== null)
+          ? renderedMarkdownBlocks(staging)
+          : [];
+        const plainRange = installFinalRender
+          ? null
+          : plainBlockRange(
             state.target,
-            staging,
+            state.committedMarkdown,
+            markdown,
+            state.committedBlocks,
+            blocks,
+            state.lease !== null,
           );
-          const previousLeasedNodeSurvived = previousLeasedNodes.some((node) =>
-            node.isConnected && state.target.contains(node));
-          if (!previousLeasedNodeSurvived) {
-            this.disposeLeases(state.leases);
-            state.leases.clear();
-          }
-          if (adoptedLeaseOwnedNodes) {
-            state.leases.add(lease);
+        this.commitDom(state.target, () => {
+          if (plainRange) {
+            // An append-only plain range can update around unchanged rich
+            // blocks. Their connected nodes keep the lease that created them;
+            // this detached render and its duplicate rich nodes are discarded.
+            reconcilePlainBlockRange(state.target, staging, plainRange);
+          } else if (installFinalRender || hasLeasedContent) {
+            const previousLease = state.lease;
+            // Final renders always install their actual staging tree. Known
+            // changed interactive ranges do the same, so callbacks cannot keep
+            // render-local state from an older snapshot.
+            replaceLiveMarkdownDom(state.target, staging);
+            state.lease = lease;
             retainedLease = true;
+            this.disposeLease(previousLease);
+          } else {
+            // Plain streamed Markdown stays stable through in-place
+            // reconciliation. Its detached render lease is not retained.
+            reconcileLiveMarkdownDom(
+              state.target,
+              cloneRenderedMarkdownDom(staging),
+            );
+            const previousLease = state.lease;
+            state.lease = null;
+            this.disposeLease(previousLease);
           }
-        } else {
-          // Ordinary prose can use a static clone while streaming. That lets us
-          // reconcile paragraphs, headings, lists and emphasis in place, then
-          // safely unload the detached render lease. Final settlement below
-          // always performs one authoritative leased render.
-          reconcileLiveMarkdownDom(
-            state.target,
-            cloneRenderedMarkdownDom(staging),
-          );
-          if (!state.target.querySelector(LEASED_STREAM_MARKDOWN_SELECTOR)) {
-            this.disposeLeases(state.leases);
-            state.leases.clear();
-          }
-        }
-        state.committedMarkdown = markdown;
-        state.committedRevision = revision;
-        state.committedFinal = final;
-        state.paintedMarkdown = markdown;
-        state.target.classList.remove("is-live-markdown-fallback");
-        state.fallbackVisible = false;
+          state.target.classList.remove("is-live-markdown-fallback");
+          state.fallbackVisible = false;
+          state.committedMarkdown = markdown;
+          state.committedRevision = installFinalRender
+            ? state.revision
+            : revision;
+          state.committedFinal = installFinalRender;
+          state.committedBlocks = blocks;
+        });
         return { status: "committed" };
       } catch (error) {
-        if (!state.disposed && revision === state.revision) {
-          state.failedRevision = revision;
-          if (state.finalRevision === revision) {
+        let failedRevision: number | null = null;
+        if (!state.disposed && markdown === state.markdown) {
+          failedRevision = state.revision;
+          state.failedRevision = failedRevision;
+          if (state.finalRevision === failedRevision) {
             // A terminal parser or postprocessor failure must never leave an
             // older streamed revision looking like the final answer.
             this.showFinalFallback(state, markdown);
           }
         }
-        return { status: "failed", error };
+        return { status: "failed", error, revision: failedRevision };
       } finally {
         if (!retainedLease) this.disposeLease(lease);
       }
@@ -872,20 +958,58 @@ export class LiveMarkdownRenderer extends Component {
     if (state.disposed) return;
     if (outcome.status === "committed") {
       this.resolveWaiters(state);
-    } else if (
-      outcome.status === "failed"
-      && revision === state.revision
-    ) {
-      this.rejectWaiters(state, revision, outcome.error);
+    } else if (outcome.status === "failed" && outcome.revision !== null) {
+      this.rejectWaiters(state, outcome.revision, outcome.error);
     }
 
-    const hasNewerRevision = revision < state.revision;
+    const hasNewerRevision = revision < state.revision
+      && state.committedRevision < state.revision
+      && state.failedRevision !== state.revision;
     const forceImmediate = state.renderImmediatelyAfterFlight
       || state.finalRevision !== null
       || outcome.status === "stale";
     state.renderImmediatelyAfterFlight = false;
     if (hasNewerRevision) {
       this.schedule(state, forceImmediate);
+    }
+  }
+
+  private reuseCommittedMarkdown(
+    state: LiveMarkdownState,
+    requireFinal: boolean,
+  ): boolean {
+    if (
+      state.fallbackVisible
+      || state.committedMarkdown !== state.markdown
+    ) return false;
+    if (requireFinal && !state.committedFinal) {
+      if (state.inFlight || !state.lease) return false;
+      state.committedFinal = true;
+    }
+    if (state.target.classList.contains("is-live-markdown-fallback")) {
+      this.commitDom(state.target, () => {
+        state.target.classList.remove("is-live-markdown-fallback");
+      });
+    }
+    state.committedRevision = state.revision;
+    state.fallbackVisible = false;
+    return true;
+  }
+
+  private commitDom<T>(target: HTMLElement, commit: () => T): T {
+    if (!target.isConnected) return commit();
+    const outermost = this.domCommitDepth === 0;
+    if (outermost) this.finishDomCommit = this.options.beginDomCommit?.(target);
+    this.domCommitDepth += 1;
+    try {
+      return commit();
+    } finally {
+      this.domCommitDepth = Math.max(0, this.domCommitDepth - 1);
+      if (outermost) {
+        const finish = this.finishDomCommit;
+        this.finishDomCommit = undefined;
+        finish?.();
+      }
     }
   }
 
@@ -923,7 +1047,7 @@ export class LiveMarkdownRenderer extends Component {
 
   private cancelTimer(state: LiveMarkdownState): void {
     if (state.timer === null) return;
-    const ownerWindow = state.target.ownerDocument.defaultView ?? window;
+    const ownerWindow = getSurfaceOwnerWindow(state.target);
     ownerWindow.clearTimeout(state.timer);
     state.timer = null;
   }
@@ -935,9 +1059,5 @@ export class LiveMarkdownRenderer extends Component {
     } finally {
       this.removeChild(lease);
     }
-  }
-
-  private disposeLeases(leases: Iterable<Component>): void {
-    for (const lease of Array.from(leases)) this.disposeLease(lease);
   }
 }

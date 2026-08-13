@@ -268,7 +268,7 @@ async function renderTerminalGroupedToolTurn(
     `<strong class="systemsculpt-agent-tool-label">Read ${String(options.toolCount)} ${
       options.toolCount === 1 ? "file" : "files"
     }</strong>`,
-    '<span class="systemsculpt-agent-tool-state">Done</span>',
+    '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
   ].join("");
   assistantTurn.append(tool);
   harness.container.append(assistantTurn);
@@ -292,18 +292,19 @@ function exactToolElement(callId: string, state: "running" | "succeeded"): HTMLD
   tool.className = `systemsculpt-agent-part is-tool is-${state}`;
   tool.dataset.partKey = `tool:${callId}`;
   tool.innerHTML = [
-    `<span class="systemsculpt-agent-tool-icon${state === "running" ? " is-animated" : ""}"></span>`,
+    '<span class="systemsculpt-agent-tool-icon"></span>',
     '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-    `<span class="systemsculpt-agent-tool-state">${state === "running" ? "Working" : "Done"}</span>`,
+    `<span class="systemsculpt-agent-tool-state-icon" data-icon-state="${
+      state === "running" ? "minus" : "check"
+    }"></span>`,
   ].join("");
   return tool;
 }
 
 function settleExactTool(tool: HTMLElement): void {
   tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-  tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-  const state = tool.querySelector(".systemsculpt-agent-tool-state");
-  if (state) state.textContent = "Done";
+  const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+  if (stateIcon) stateIcon.dataset.iconState = "check";
 }
 
 async function renderExactSequentialToolTurn(
@@ -311,6 +312,9 @@ async function renderExactSequentialToolTurn(
   diagnostics: SupportDiagnosticEvent[],
   options: Readonly<{
     beforeMarker?: (lifecycles: SupportDiagnosticEvent[][]) => void;
+    collapseFinalSurface?: boolean;
+    collapseFinalReasoning?: boolean;
+    detachSettledBeforeNext?: boolean;
     diagnosticRequestId?: string;
     groupFinalSurface?: boolean;
     marker: string;
@@ -375,6 +379,10 @@ async function renderExactSequentialToolTurn(
       settleExactTool(tool);
       await new Promise((resolve) => window.setTimeout(resolve, 0));
       diagnostics.push(lifecycles[index]![2]!, lifecycles[index]![3]!);
+      if (options.detachSettledBeforeNext && index < options.tools.length - 1) {
+        tool.remove();
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
     }
   }
   options.beforeMarker?.(lifecycles);
@@ -385,6 +393,34 @@ async function renderExactSequentialToolTurn(
     const label = first.querySelector(".systemsculpt-agent-tool-label");
     if (label) label.textContent = `Read ${String(elements.length)} files`;
     for (const tool of elements.slice(1)) tool.remove();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+  if (options.collapseFinalSurface && elements.length > 1) {
+    const latest = elements[elements.length - 1]!;
+    const hiddenNodes: HTMLElement[] = [...elements.slice(0, -1)];
+    if (options.collapseFinalReasoning) {
+      const reasoning = document.createElement("div");
+      reasoning.className = "systemsculpt-agent-part is-reasoning";
+      reasoning.dataset.partKey = `reasoning:${options.turnId}`;
+      reasoning.textContent = "Private reasoning";
+      latest.before(reasoning);
+      hiddenNodes.push(reasoning);
+    }
+    for (const node of hiddenNodes) node.remove();
+    const overflow = document.createElement("button");
+    overflow.dataset.agentActivityOverflow = "";
+    overflow.dataset.hiddenCount = String(hiddenNodes.length);
+    overflow.setAttribute("aria-expanded", "false");
+    overflow.onclick = () => {
+      const expanded = overflow.getAttribute("aria-expanded") === "true";
+      overflow.setAttribute("aria-expanded", String(!expanded));
+      if (expanded) {
+        for (const node of hiddenNodes) node.remove();
+      } else {
+        for (const node of hiddenNodes) latest.before(node);
+      }
+    };
+    latest.after(overflow);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
   turn.classList.remove("is-active");
@@ -768,6 +804,43 @@ describe("guarded development driver actions", () => {
     const latest = outcome.snapshot.turns[outcome.snapshot.turns.length - 1];
     expect(latest?.text).toHaveLength(4000);
     expect(latest?.textCharacters).toBeGreaterThan(4000);
+  });
+
+  it("keeps detecting repeated identical tools through a collapsed activity surface", async () => {
+    const harness = makeDevelopmentHarness();
+    const user = document.createElement("div");
+    user.className = "systemsculpt-agent-turn is-user";
+    user.textContent = "run repeated reads";
+    harness.container.append(user);
+    const assistant = document.createElement("div");
+    assistant.className = "systemsculpt-agent-turn is-assistant is-active";
+    const overflow = document.createElement("button");
+    overflow.dataset.agentActivityOverflow = "";
+    overflow.setAttribute("aria-expanded", "false");
+    overflow.textContent = "+10 previous tool calls";
+    let latest = exactToolElement("repeated-read-10", "succeeded");
+    assistant.append(latest, overflow);
+    harness.container.append(assistant);
+    harness.setRunning(true);
+
+    for (let index = 11; index <= 13; index += 1) {
+      window.setTimeout(() => {
+        const next = exactToolElement(`repeated-read-${String(index)}`, "succeeded");
+        latest.replaceWith(next);
+        latest = next;
+        overflow.textContent = `+${String(index)} previous tool calls`;
+      }, (index - 10) * 70);
+    }
+    window.setTimeout(() => {
+      assistant.classList.remove("is-active");
+      harness.setRunning(false);
+    }, 280);
+
+    await expect(runDriverAction(harness.ctx, "waitForRun", {
+      startMs: 0,
+      timeoutMs: 1000,
+      stallMs: 160,
+    })).resolves.toMatchObject({ finished: true });
   });
 
   it("accepts a submitted turn that completes before the stop button is observed", async () => {
@@ -2078,9 +2151,9 @@ describe("guarded development driver actions", () => {
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<div class="systemsculpt-agent-tool-header">',
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
       "</div>",
       "</div>",
     ].join("");
@@ -2102,10 +2175,17 @@ describe("guarded development driver actions", () => {
     )).rejects.toThrow(/Continuation text appeared.*before its row was visibly settled/);
 
     tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Done";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
     status.dataset.status = "Thinking";
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    await expect(runDriverAction(
+      harness.ctx,
+      "chat.assertLatestToolSettledAfterContinuation",
+      { toolLabel: "Read files", text: "CONTINUATION-MARKER", timeoutMs: 0 },
+    )).rejects.toThrow(/Continuation text appeared.*before its row was visibly settled/);
+
+    if (stateIcon) stateIcon.dataset.iconState = "circle-check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     assistantTurn.remove();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2133,9 +2213,9 @@ describe("guarded development driver actions", () => {
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<div class="systemsculpt-agent-tool-header">',
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
       "</div>",
       "</div>",
     ].join("");
@@ -2147,9 +2227,8 @@ describe("guarded development driver actions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Done";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    if (stateIcon) stateIcon.dataset.iconState = "check";
     status.dataset.status = "Thinking";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
@@ -2167,7 +2246,11 @@ describe("guarded development driver actions", () => {
     )).resolves.toMatchObject({
       settled: true,
       turnId: "run-valid-order",
-      tool: { partKey: "tool-valid-lifecycle", state: "succeeded", animated: false },
+      tool: {
+        partKey: "tool-valid-lifecycle",
+        state: "succeeded",
+        stateIcon: "check",
+      },
       continuationAt: { observedSequence: expect.any(Number) },
       lifecycle: {
         partKey: "tool-valid-lifecycle",
@@ -2199,7 +2282,7 @@ describe("guarded development driver actions", () => {
       '<div class="systemsculpt-agent-tool">',
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 2 files</strong>',
-      '<span class="systemsculpt-agent-tool-state">Failed</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
       "</div>",
     ].join("");
     assistantTurn.append(tool);
@@ -2218,7 +2301,6 @@ describe("guarded development driver actions", () => {
         text: "KEYLESS-TERMINAL-RECOVERED",
         textMode: "equals",
         expectedState: "failed",
-        expectedStateLabel: "Failed",
         timeoutMs: 0,
       },
     )).resolves.toMatchObject({
@@ -2227,8 +2309,7 @@ describe("guarded development driver actions", () => {
       tool: {
         partKey: expect.stringMatching(/^rendered-tool:/),
         state: "failed",
-        stateLabel: "Failed",
-        animated: false,
+        stateIcon: "x",
       },
       continuationAt: { observedSequence: expect.any(Number) },
       lifecycle: {
@@ -2254,7 +2335,6 @@ describe("guarded development driver actions", () => {
         text: "KEYLESS-TERMINAL-RECOVERED",
         textMode: "equals",
         expectedState: "failed",
-        expectedStateLabel: "Failed",
         timeoutMs: 0,
       },
     )).resolves.toMatchObject({
@@ -2274,9 +2354,9 @@ describe("guarded development driver actions", () => {
     const tool = document.createElement("div");
     tool.className = "systemsculpt-agent-part is-tool is-running";
     tool.innerHTML = [
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 2 files</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(tool);
     const continuation = document.createElement("div");
@@ -2287,9 +2367,8 @@ describe("guarded development driver actions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     tool.className = "systemsculpt-agent-part is-tool is-failed";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Failed";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    if (stateIcon) stateIcon.dataset.iconState = "x";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     assistantTurn.remove();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2302,7 +2381,6 @@ describe("guarded development driver actions", () => {
         text: "KEYLESS-EARLY-CONTINUATION",
         textMode: "equals",
         expectedState: "failed",
-        expectedStateLabel: "Failed",
         timeoutMs: 0,
       },
     )).rejects.toThrow(/before its row was visibly settled/);
@@ -2322,9 +2400,9 @@ describe("guarded development driver actions", () => {
     tool.dataset.partKey = "tool-failed-recovery";
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
       "</div>",
     ].join("");
     assistantTurn.append(tool);
@@ -2335,9 +2413,8 @@ describe("guarded development driver actions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     tool.className = "systemsculpt-agent-part is-tool is-failed";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Failed";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    if (stateIcon) stateIcon.dataset.iconState = "x";
     status.dataset.status = "Thinking";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
@@ -2354,7 +2431,6 @@ describe("guarded development driver actions", () => {
         text: "FAILED-TOOL-RECOVERED",
         textMode: "equals",
         expectedState: "failed",
-        expectedStateLabel: "Failed",
         timeoutMs: 0,
       },
     )).resolves.toMatchObject({
@@ -2363,8 +2439,7 @@ describe("guarded development driver actions", () => {
       tool: {
         partKey: "tool-failed-recovery",
         state: "failed",
-        stateLabel: "Failed",
-        animated: false,
+        stateIcon: "x",
       },
       continuationAt: { observedSequence: expect.any(Number) },
     });
@@ -2391,7 +2466,7 @@ describe("guarded development driver actions", () => {
       tool.innerHTML = [
         '<span class="systemsculpt-agent-tool-icon"></span>',
         '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-        '<span class="systemsculpt-agent-tool-state">Done</span>',
+        '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
       ].join("");
       turn.append(tool);
       const continuation = document.createElement("div");
@@ -2433,9 +2508,9 @@ describe("guarded development driver actions", () => {
     running.dataset.partKey = "tool-running-group";
     running.dataset.toolCount = "29";
     running.innerHTML = [
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Search vault</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(running);
     const partial = document.createElement("div");
@@ -2444,7 +2519,7 @@ describe("guarded development driver actions", () => {
     partial.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state">Partial</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
     ].join("");
     assistantTurn.append(partial);
     const status = document.createElement("div");
@@ -2465,15 +2540,15 @@ describe("guarded development driver actions", () => {
         toolLabel: "Read files",
         text: "EARLY-CONTINUATION",
         expectedState: "partial",
-        expectedStateLabel: "Partial",
         timeoutMs: 0,
       },
     )).rejects.toThrow(/before every prior current-run tool was visibly terminal/);
 
     running.className = "systemsculpt-agent-part is-tool is-succeeded";
-    running.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const runningState = running.querySelector(".systemsculpt-agent-tool-state");
-    if (runningState) runningState.textContent = "Done";
+    const runningStateIcon = running.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tool-state-icon",
+    );
+    if (runningStateIcon) runningStateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     await expect(runDriverAction(
       harness.ctx,
@@ -2493,7 +2568,6 @@ describe("guarded development driver actions", () => {
         toolLabel: "Read files",
         text: "LATE-CONTINUATION",
         expectedState: "partial",
-        expectedStateLabel: "Partial",
         timeoutMs: 0,
       },
     )).rejects.toThrow(/before every prior current-run tool was visibly terminal/);
@@ -2532,9 +2606,9 @@ describe("guarded development driver actions", () => {
     tool.className = "systemsculpt-agent-part is-tool is-running";
     tool.dataset.partKey = "tool:early-pollution";
     tool.innerHTML = [
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -2548,9 +2622,8 @@ describe("guarded development driver actions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Done";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    if (stateIcon) stateIcon.dataset.iconState = "check";
     diagnostics.push(lifecycle[2]!);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const expectedText = "EXACT-AFTER-EARLY-CONTINUATION";
@@ -2694,9 +2767,9 @@ describe("guarded development driver actions", () => {
     tool.className = "systemsculpt-agent-part is-tool is-running";
     tool.dataset.partKey = "tool:reverse-same-batch";
     tool.innerHTML = [
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
     ].join("");
     const laterToolWrapper = document.createElement("div");
     laterToolWrapper.className = "systemsculpt-agent-tool-wrapper";
@@ -2705,9 +2778,8 @@ describe("guarded development driver actions", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const state = tool.querySelector(".systemsculpt-agent-tool-state");
-    if (state) state.textContent = "Done";
+    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    if (stateIcon) stateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
     continuation.className = "systemsculpt-agent-part is-text";
@@ -2801,7 +2873,7 @@ describe("guarded development driver actions", () => {
       tool.innerHTML = [
         '<span class="systemsculpt-agent-tool-icon"></span>',
         '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-        '<span class="systemsculpt-agent-tool-state">Done</span>',
+        '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
       ].join("");
       assistantTurn.append(tool);
       tools.push(tool);
@@ -2851,7 +2923,7 @@ describe("guarded development driver actions", () => {
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Done</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -2876,7 +2948,6 @@ describe("guarded development driver actions", () => {
         text: "ACK-BEFORE-CONTINUATION",
         textMode: "equals",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         timeoutMs: 0,
       },
@@ -2911,7 +2982,7 @@ describe("guarded development driver actions", () => {
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Failed</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -2927,7 +2998,6 @@ describe("guarded development driver actions", () => {
       text: "FAILED-RESULT-ACK-CONTINUATION",
       textMode: "equals",
       expectedState: "failed",
-      expectedStateLabel: "Failed",
       requireCommandAck: true,
       timeoutMs: 0,
     };
@@ -3292,18 +3362,19 @@ describe("guarded development driver actions", () => {
     liveTool.className = "systemsculpt-agent-part is-tool is-running";
     liveTool.dataset.partKey = `tool:${callId}`;
     liveTool.innerHTML = [
-      '<span class="systemsculpt-agent-tool-icon is-animated"></span>',
+      '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Working</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
     ].join("");
     liveTurn.append(liveTool);
     harness.container.append(liveTurn);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     liveTool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    liveTool.querySelector(".systemsculpt-agent-tool-icon")?.classList.remove("is-animated");
-    const liveState = liveTool.querySelector(".systemsculpt-agent-tool-state");
-    if (liveState) liveState.textContent = "Done";
+    const liveStateIcon = liveTool.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tool-state-icon",
+    );
+    if (liveStateIcon) liveStateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     diagnostics.push(...toolResultDeliveryDiagnostics(
       callId,
@@ -3320,7 +3391,7 @@ describe("guarded development driver actions", () => {
     historicalTool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Done</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
     ].join("");
     historicalTurn.append(historicalTool);
     const continuation = document.createElement("div");
@@ -3339,7 +3410,6 @@ describe("guarded development driver actions", () => {
         text: "LIVE-HISTORY-REBIND-CONTINUATION",
         textMode: "equals",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         timeoutMs: 0,
       },
@@ -3380,7 +3450,7 @@ describe("guarded development driver actions", () => {
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
       '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state">Done</span>',
+      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -3407,12 +3477,130 @@ describe("guarded development driver actions", () => {
         text: "ACK-AFTER-CONTINUATION",
         textMode: "equals",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         timeoutMs: 0,
       },
     )).rejects.toThrow(/before the matching tool-result command was acknowledged/);
 
+    await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
+  });
+
+  it("proves an exact terminal plan through a collapsed previous-tool surface", async () => {
+    const harness = makeDevelopmentHarness({ chatId: "chat-collapsed-exact-plan" });
+    const diagnostics: SupportDiagnosticEvent[] = [];
+    harness.ctx.readSupportDiagnostics = () => diagnostics;
+    const tools: ExactToolSeed[] = [{
+      callId: "collapsed-exact-1",
+      name: "read",
+      input: { paths: ["QA/one.md"] },
+    }, {
+      callId: "collapsed-exact-2",
+      name: "read",
+      input: { paths: ["QA/two.md"] },
+    }];
+    const marker = "COLLAPSED-EXACT-COMPLETE";
+    await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
+    const rendered = await renderExactSequentialToolTurn(harness, diagnostics, {
+      collapseFinalSurface: true,
+      marker,
+      tools,
+      turnId: "request-collapsed-exact-plan",
+    });
+
+    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+      .toHaveLength(1);
+    expect(rendered.turn.querySelector(
+      'button[data-agent-activity-overflow][aria-expanded="false"]',
+    )).not.toBeNull();
+    await expect(runDriverAction(
+      harness.ctx,
+      "chat.assertExactSequentialToolPlan",
+      exactSequentialPlanParams(tools, marker),
+    )).resolves.toMatchObject({ asserted: true, exactToolCallCount: 2 });
+    await expect(runDriverAction(harness.ctx, "chat.assertToolLifecycle", {
+      minToolCount: 2,
+      requireTerminal: true,
+    })).resolves.toMatchObject({
+      connectedToolRowCount: 1,
+      observedToolIdentityCount: 2,
+      observedToolCallCount: 2,
+      retainedTerminalToolCallCount: 2,
+      terminalToolCallCount: 2,
+      allTerminal: true,
+    });
+    await runDriverAction(harness.ctx, "chat.assertExactToolPlanCleanClose", {});
+    await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
+  });
+
+  it("proves collapsed tools when the hidden activity also includes reasoning", async () => {
+    const harness = makeDevelopmentHarness({ chatId: "chat-collapsed-reasoning-plan" });
+    const diagnostics: SupportDiagnosticEvent[] = [];
+    harness.ctx.readSupportDiagnostics = () => diagnostics;
+    const tools: ExactToolSeed[] = [{
+      callId: "collapsed-reasoning-1",
+      name: "read",
+      input: { paths: ["QA/one.md"] },
+    }, {
+      callId: "collapsed-reasoning-2",
+      name: "read",
+      input: { paths: ["QA/two.md"] },
+    }];
+    const marker = "COLLAPSED-REASONING-COMPLETE";
+    await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
+    const rendered = await renderExactSequentialToolTurn(harness, diagnostics, {
+      collapseFinalReasoning: true,
+      collapseFinalSurface: true,
+      marker,
+      tools,
+      turnId: "request-collapsed-reasoning-plan",
+    });
+
+    const overflow = rendered.turn.querySelector<HTMLButtonElement>(
+      'button[data-agent-activity-overflow][aria-expanded="false"]',
+    );
+    expect(overflow?.dataset.hiddenCount).toBe("2");
+    await expect(runDriverAction(
+      harness.ctx,
+      "chat.assertExactSequentialToolPlan",
+      exactSequentialPlanParams(tools, marker),
+    )).resolves.toMatchObject({ asserted: true, exactToolCallCount: 2 });
+    expect(overflow?.getAttribute("aria-expanded")).toBe("false");
+    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+      .toHaveLength(1);
+    expect(rendered.turn.querySelector(".systemsculpt-agent-part.is-reasoning"))
+      .toBeNull();
+    await runDriverAction(harness.ctx, "chat.assertExactToolPlanCleanClose", {});
+    expect(overflow?.getAttribute("aria-expanded")).toBe("false");
+    await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
+  });
+
+  it("proves collapsed sequential tools retained after earlier rows detach", async () => {
+    const harness = makeDevelopmentHarness({ chatId: "chat-collapsed-retained-plan" });
+    const diagnostics: SupportDiagnosticEvent[] = [];
+    harness.ctx.readSupportDiagnostics = () => diagnostics;
+    const tools: ExactToolSeed[] = [1, 2, 3].map((index) => ({
+      callId: `collapsed-retained-${String(index)}`,
+      name: "read",
+      input: { paths: [`QA/${String(index)}.md`] },
+    }));
+    const marker = "COLLAPSED-RETAINED-COMPLETE";
+    await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
+    const rendered = await renderExactSequentialToolTurn(harness, diagnostics, {
+      collapseFinalSurface: true,
+      detachSettledBeforeNext: true,
+      marker,
+      tools,
+      turnId: "request-collapsed-retained-plan",
+    });
+
+    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+      .toHaveLength(1);
+    await expect(runDriverAction(
+      harness.ctx,
+      "chat.assertExactSequentialToolPlan",
+      exactSequentialPlanParams(tools, marker),
+    )).resolves.toMatchObject({ asserted: true, exactToolCallCount: 3 });
+    await runDriverAction(harness.ctx, "chat.assertExactToolPlanCleanClose", {});
     await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
   });
 
@@ -3476,9 +3664,10 @@ describe("guarded development driver actions", () => {
         mutate: (_harness, rendered) => {
           const tool = rendered.tools[1]!;
           tool.className = "systemsculpt-agent-part is-tool is-running";
-          tool.querySelector(".systemsculpt-agent-tool-icon")?.classList.add("is-animated");
-          const state = tool.querySelector(".systemsculpt-agent-tool-state");
-          if (state) state.textContent = "Working";
+          const stateIcon = tool.querySelector<HTMLElement>(
+            ".systemsculpt-agent-tool-state-icon",
+          );
+          if (stateIcon) stateIcon.dataset.iconState = "minus";
         },
       },
       {

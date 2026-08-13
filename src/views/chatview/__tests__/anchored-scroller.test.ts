@@ -2,10 +2,7 @@
  * @jest-environment jsdom
  */
 
-import {
-  AnchoredScroller,
-  type AnchoredScrollerPrependAnchor,
-} from "../AnchoredScroller";
+import { AnchoredScroller } from "../AnchoredScroller";
 
 type ViewportState = {
   scrollTop: number;
@@ -18,10 +15,36 @@ type RowLayout = {
   height: number;
 };
 
+type PartLayout = {
+  top: number;
+  height: number;
+};
+
 type ScrollCall = {
   top: number;
   behavior: ScrollBehavior;
 };
+
+function bindViewportRect(
+  element: HTMLElement,
+  viewportState: ViewportState,
+  layout: Readonly<{ top: number; height: number }>,
+): void {
+  element.getBoundingClientRect = () => {
+    const top = layout.top - viewportState.scrollTop;
+    return {
+      x: 0,
+      y: top,
+      top,
+      right: 100,
+      bottom: top + layout.height,
+      left: 0,
+      width: 100,
+      height: layout.height,
+      toJSON: () => ({}),
+    };
+  };
+}
 
 function createHarness(options: {
   scrollTop?: number;
@@ -42,6 +65,7 @@ function createHarness(options: {
   };
   const calls: ScrollCall[] = [];
   const rowLayouts = new Map<HTMLElement, RowLayout>();
+  const partLayouts = new Map<HTMLElement, PartLayout>();
 
   Object.defineProperties(viewport, {
     scrollTop: {
@@ -51,7 +75,12 @@ function createHarness(options: {
     },
     scrollHeight: {
       configurable: true,
-      get: () => state.scrollHeight,
+      get: () => {
+        const spacer = content.querySelector<HTMLElement>(
+          "[data-agent-submitted-prompt-space]",
+        );
+        return state.scrollHeight + Number.parseFloat(spacer?.getAttribute("height") || "0");
+      },
     },
     clientHeight: {
       configurable: true,
@@ -104,6 +133,41 @@ function createHarness(options: {
     Object.assign(current, layout);
   };
 
+  const addPart = (
+    row: HTMLElement,
+    key: string,
+    top: number,
+    height = 100,
+  ): HTMLElement => {
+    const part = document.createElement("div");
+    part.dataset.partKey = key;
+    row.appendChild(part);
+    const layout = { top, height };
+    partLayouts.set(part, layout);
+    part.getBoundingClientRect = () => {
+      const current = partLayouts.get(part) ?? { top: 0, height: 0 };
+      const viewportTop = current.top - state.scrollTop;
+      return {
+        x: 0,
+        y: viewportTop,
+        top: viewportTop,
+        right: 100,
+        bottom: viewportTop + current.height,
+        left: 0,
+        width: 100,
+        height: current.height,
+        toJSON: () => ({}),
+      };
+    };
+    return part;
+  };
+
+  const setPartLayout = (part: HTMLElement, layout: Partial<PartLayout>): void => {
+    const current = partLayouts.get(part);
+    if (!current) throw new Error("Unknown part");
+    Object.assign(current, layout);
+  };
+
   const manualScroll = (top: number): void => {
     state.scrollTop = top;
     viewport.dispatchEvent(new Event("scroll"));
@@ -123,9 +187,61 @@ function createHarness(options: {
     calls,
     scroller,
     addRow,
+    addPart,
     setRowLayout,
+    setPartLayout,
     manualScroll,
     cleanup,
+  };
+}
+
+function installResizeObserverHarness(): {
+  notify: (target: Element) => void;
+  flush: () => void;
+  cleanup: () => void;
+} {
+  const originalResizeObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+  let resizeCallback: ResizeObserverCallback | null = null;
+  class TestResizeObserver {
+    public constructor(callback: ResizeObserverCallback) {
+      resizeCallback = callback;
+    }
+
+    public observe = jest.fn();
+    public unobserve = jest.fn();
+    public disconnect = jest.fn();
+  }
+  Object.defineProperty(window, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: TestResizeObserver,
+  });
+  const frames: FrameRequestCallback[] = [];
+  const requestFrame = jest.spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+  const cancelFrame = jest.spyOn(window, "cancelAnimationFrame")
+    .mockImplementation(() => undefined);
+  return {
+    notify: (target) => {
+      resizeCallback?.([{ target } as ResizeObserverEntry], {} as ResizeObserver);
+    },
+    flush: () => {
+      const frame = frames.shift();
+      if (!frame) throw new Error("Expected a pending geometry frame.");
+      frame(0);
+    },
+    cleanup: () => {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+      if (originalResizeObserver) {
+        Object.defineProperty(window, "ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(window, "ResizeObserver");
+      }
+    },
   };
 }
 
@@ -164,8 +280,10 @@ describe("AnchoredScroller", () => {
     const harness = createHarness();
     expect(harness.scroller.isFollowingEnd()).toBe(true);
 
+    const finishEndGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishEndGrowth();
+    harness.scroller.setStreaming(true);
     expect(harness.state.scrollTop).toBe(800);
     expect(harness.calls.at(-1)).toEqual({ top: 800, behavior: "auto" });
     expect(harness.content.getAttribute("aria-busy")).toBe("true");
@@ -174,8 +292,9 @@ describe("AnchoredScroller", () => {
     expect(harness.scroller.getMode()).toBe("manual");
     expect(harness.scrollButton.getAttribute("data-active")).toBe("true");
 
+    const finishManualGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_400;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishManualGrowth();
     expect(harness.state.scrollTop).toBe(120);
     expect(harness.scroller.isFollowingEnd()).toBe(false);
 
@@ -193,8 +312,9 @@ describe("AnchoredScroller", () => {
     expect(harness.scroller.getMode()).toBe("manual");
     expect(harness.state.scrollTop).toBe(120);
 
+    const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 2_000;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishGrowth();
     expect(harness.state.scrollTop).toBe(120);
 
     harness.manualScroll(1_600);
@@ -204,37 +324,532 @@ describe("AnchoredScroller", () => {
     harness.cleanup();
   });
 
-  it("preserves the first visible stable row and its pixel offset when history is prepended", () => {
-    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
-    const first = harness.addRow("first", 200, 100);
-    const second = harness.addRow("second", 300, 100);
-    harness.addRow("third", 400, 100);
-    harness.manualScroll(250);
-    expect(harness.scroller.getMode()).toBe("manual");
+  it("anchors an explicitly submitted prompt 16px below the viewport top", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_200 });
+    const prompt = harness.addRow("prompt", 900, 80);
 
-    const anchor = harness.scroller.capturePrependAnchor();
-    expect(anchor).toEqual({
-      rowId: "first",
-      offsetFromViewportTop: -50,
-      mode: "manual",
+    harness.scroller.notifyTurnStarted({
+      submittedPromptRowId: "prompt",
+      submittedPromptOffset: 16,
     });
 
-    harness.state.scrollHeight = 1_300;
-    harness.setRowLayout(first, { top: 500 });
-    harness.setRowLayout(second, { top: 600 });
-    harness.scroller.restorePrependAnchor(anchor);
-
-    expect(harness.state.scrollTop).toBe(550);
-    expect(harness.scroller.getMode()).toBe("manual");
-    expect((first.offsetTop - harness.state.scrollTop)).toBe(-50);
+    expect(harness.state.scrollTop).toBe(884);
+    expect(prompt.offsetTop - harness.state.scrollTop).toBe(16);
+    expect(harness.calls.at(-1)).toEqual({ top: 884, behavior: "smooth" });
+    expect(harness.content.querySelector<HTMLElement>(
+      "[data-agent-submitted-prompt-space]",
+    )?.getAttribute("height")).toBe("84");
     harness.cleanup();
   });
 
-  it("treats a null prepend anchor as a safe no-op", () => {
-    const harness = createHarness({ scrollTop: 0, scrollHeight: 400, clientHeight: 400 });
-    expect(harness.scroller.capturePrependAnchor()).toBeNull();
-    harness.scroller.restorePrependAnchor(null);
-    expect(harness.state.scrollTop).toBe(0);
+  it("keeps a fitting response below its submitted prompt, then reveals only overflow", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_100 });
+    const prompt = harness.addRow("prompt", 900, 80);
+    harness.scroller.notifyTurnStarted({ submittedPromptRowId: "prompt" });
+    expect(harness.state.scrollTop).toBe(884);
+
+    const finishFittingGrowth = harness.scroller.beginLayoutMutation();
+    harness.state.scrollHeight = 1_150;
+    finishFittingGrowth();
+    expect(harness.state.scrollTop).toBe(884);
+    expect(prompt.offsetTop - harness.state.scrollTop).toBe(16);
+
+    const finishOverflowGrowth = harness.scroller.beginLayoutMutation();
+    harness.state.scrollHeight = 1_400;
+    finishOverflowGrowth();
+    expect(harness.state.scrollTop).toBe(1_000);
+    expect(prompt.offsetTop - harness.state.scrollTop).toBe(-100);
+    expect(harness.calls.at(-1)).toEqual({ top: 1_000, behavior: "auto" });
+    harness.cleanup();
+  });
+
+  it("preserves manual navigation after submitted-prompt anchoring", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_200 });
+    harness.addRow("prompt", 900, 80);
+    harness.scroller.notifyTurnStarted({ submittedPromptRowId: "prompt" });
+    harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -120,
+    }));
+    harness.manualScroll(300);
+    expect(harness.scroller.getMode()).toBe("manual");
+
+    const finishGrowth = harness.scroller.beginLayoutMutation();
+    harness.state.scrollHeight = 1_600;
+    finishGrowth();
+
+    expect(harness.state.scrollTop).toBe(300);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("clears submitted-prompt space when Latest returns to the real end", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_200 });
+    harness.addRow("prompt", 900, 80);
+    harness.scroller.notifyTurnStarted({ submittedPromptRowId: "prompt" });
+
+    harness.scroller.scrollToEnd();
+
+    expect(harness.state.scrollTop).toBe(800);
+    expect(harness.calls.at(-1)).toEqual({ top: 800, behavior: "smooth" });
+    expect(harness.content.querySelector<HTMLElement>(
+      "[data-agent-submitted-prompt-space]",
+    )?.getAttribute("height")).toBe("0");
+    harness.cleanup();
+  });
+
+  it("uses reduced motion and does not restart an unchanged prompt-anchor scroll", () => {
+    const harness = createHarness({
+      scrollTop: 600,
+      scrollHeight: 1_200,
+      reducedMotion: true,
+    });
+    harness.addRow("prompt", 900, 80);
+    harness.viewport.scrollTo = ((options: ScrollToOptions) => {
+      harness.calls.push({
+        top: Number(options.top ?? harness.state.scrollTop),
+        behavior: options.behavior ?? "auto",
+      });
+    }) as typeof harness.viewport.scrollTo;
+
+    harness.scroller.notifyTurnStarted({ submittedPromptRowId: "prompt" });
+    const finishGrowth = harness.scroller.beginLayoutMutation();
+    finishGrowth();
+
+    expect(harness.calls).toEqual([{ top: 884, behavior: "auto" }]);
+    harness.cleanup();
+  });
+
+  it("preserves a visible row and its pixel offset across owned layout mutations", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    harness.addRow("above", 0, 200);
+    const visible = harness.addRow("visible", 200, 200);
+    harness.manualScroll(250);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_300;
+    harness.setRowLayout(visible, { top: 500 });
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(550);
+    expect(visible.offsetTop - harness.state.scrollTop).toBe(-50);
+    expect(harness.scroller.getMode()).toBe("manual");
+
+    harness.setRowLayout(visible, { top: 700 });
+    finishMutation();
+    expect(harness.state.scrollTop).toBe(550);
+    harness.cleanup();
+  });
+
+  it("preserves the first visible keyed part when work above it collapses", () => {
+    const harness = createHarness({
+      scrollTop: 650,
+      scrollHeight: 1_600,
+      clientHeight: 400,
+    });
+    const response = harness.addRow("response", 100, 1_200);
+    harness.addPart(response, "tool:finished", 100, 450);
+    const answer = harness.addPart(response, "answer", 700, 180);
+    harness.addPart(response, "sources", 900, 120);
+    harness.manualScroll(650);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_300;
+    harness.setRowLayout(response, { height: 850 });
+    harness.setPartLayout(answer, { top: 350 });
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(300);
+    expect(answer.getBoundingClientRect().top).toBe(50);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("resolves a replaced visible part through its stable key", () => {
+    const harness = createHarness({
+      scrollTop: 650,
+      scrollHeight: 1_600,
+      clientHeight: 400,
+    });
+    const response = harness.addRow("response", 100, 1_200);
+    const original = harness.addPart(response, "answer", 700, 180);
+    harness.manualScroll(650);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    original.remove();
+    const replacement = harness.addPart(response, "answer", 400, 180);
+    harness.state.scrollHeight = 1_300;
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(350);
+    expect(replacement.getBoundingClientRect().top).toBe(50);
+    harness.cleanup();
+  });
+
+  it("falls back to the response row when its keyed parts are outside the viewport", () => {
+    const harness = createHarness({
+      scrollTop: 600,
+      scrollHeight: 1_400,
+      clientHeight: 400,
+    });
+    const response = harness.addRow("response", 500, 700);
+    const above = harness.addPart(response, "above", 500, 50);
+    const below = harness.addPart(response, "below", 1_050, 50);
+    harness.manualScroll(600);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_700;
+    harness.setRowLayout(response, { top: 700 });
+    harness.setPartLayout(above, { top: 700 });
+    harness.setPartLayout(below, { top: 1_250 });
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(800);
+    expect(response.offsetTop - harness.state.scrollTop).toBe(-100);
+    harness.cleanup();
+  });
+
+  it("falls back to the response row when the captured keyed part disappears", () => {
+    const harness = createHarness({
+      scrollTop: 650,
+      scrollHeight: 1_600,
+      clientHeight: 400,
+    });
+    const response = harness.addRow("response", 100, 1_200);
+    const answer = harness.addPart(response, "answer", 700, 180);
+    harness.manualScroll(650);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    answer.remove();
+    harness.state.scrollHeight = 1_800;
+    harness.setRowLayout(response, { top: 250 });
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(800);
+    expect(response.offsetTop - harness.state.scrollTop).toBe(-550);
+    harness.cleanup();
+  });
+
+  it("anchors the topmost visible row without relying on registration order", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    const lower = harness.addRow("lower", 300, 100);
+    const topmost = harness.addRow("topmost", 200, 100);
+    harness.addRow("above", 0, 100);
+    harness.manualScroll(250);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_500;
+    harness.setRowLayout(lower, { top: 900 });
+    harness.setRowLayout(topmost, { top: 500 });
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(550);
+    expect(topmost.offsetTop - harness.state.scrollTop).toBe(-50);
+    harness.cleanup();
+  });
+
+  it("does not inspect row geometry when an end-follow mutation starts", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+    const row = harness.addRow("visible", 500, 300);
+    const target = document.createElement("div");
+    harness.content.appendChild(target);
+    const targetRect = jest.spyOn(target, "getBoundingClientRect");
+    const offsetTop = jest.spyOn(row, "offsetTop", "get");
+    const offsetHeight = jest.spyOn(row, "offsetHeight", "get");
+
+    const finishMutation = harness.scroller.beginLayoutMutation(target);
+    expect(targetRect).not.toHaveBeenCalled();
+    expect(offsetTop).not.toHaveBeenCalled();
+    expect(offsetHeight).not.toHaveBeenCalled();
+
+    harness.state.scrollHeight = 1_300;
+    finishMutation();
+    expect(harness.state.scrollTop).toBe(900);
+    expect(offsetTop).not.toHaveBeenCalled();
+    expect(offsetHeight).not.toHaveBeenCalled();
+    harness.cleanup();
+  });
+
+  it("skips manual history geometry for a connected target below the viewport", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 5_000 });
+    const rows = Array.from({ length: 40 }, (_, index) =>
+      harness.addRow(`history-${String(index)}`, index * 100, 100));
+    const offsetTopReads = rows.map((row) => jest.spyOn(row, "offsetTop", "get"));
+    const offsetHeightReads = rows.map((row) => jest.spyOn(row, "offsetHeight", "get"));
+    const target = document.createElement("div");
+    harness.content.appendChild(target);
+    bindViewportRect(harness.viewport, harness.state, {
+      top: harness.state.scrollTop,
+      height: harness.state.clientHeight,
+    });
+    bindViewportRect(target, harness.state, {
+      top: harness.state.scrollTop + harness.state.clientHeight + 1,
+      height: 20,
+    });
+    harness.manualScroll(250);
+
+    const finishMutation = harness.scroller.beginLayoutMutation(target);
+    harness.state.scrollHeight = 5_200;
+    finishMutation();
+
+    expect(offsetTopReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+    expect(offsetHeightReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+    expect(harness.state.scrollTop).toBe(250);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("anchors a visible target part without reading unrelated row geometry", () => {
+    const harness = createHarness({
+      scrollTop: 650,
+      scrollHeight: 5_000,
+      clientHeight: 400,
+    });
+    const historyRows = Array.from({ length: 40 }, (_, index) =>
+      harness.addRow(`history-target-${String(index)}`, index * 100, 100));
+    const response = harness.addRow("target-response", 500, 800);
+    const answer = harness.addPart(response, "target-answer", 700, 180);
+    const offsetTopReads = historyRows.map((row) => jest.spyOn(row, "offsetTop", "get"));
+    const offsetHeightReads = historyRows.map((row) => jest.spyOn(row, "offsetHeight", "get"));
+    bindViewportRect(harness.viewport, harness.state, {
+      top: harness.state.scrollTop,
+      height: harness.state.clientHeight,
+    });
+    harness.manualScroll(650);
+
+    const finishMutation = harness.scroller.beginLayoutMutation(answer);
+    expect(offsetTopReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+    expect(offsetHeightReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+
+    harness.setPartLayout(answer, { top: 400 });
+    harness.state.scrollHeight = 4_700;
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(350);
+    expect(answer.getBoundingClientRect().top).toBe(50);
+    expect(offsetTopReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+    expect(offsetHeightReads.every((read) => read.mock.calls.length === 0)).toBe(true);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it.each([
+    ["intersecting", "content", 400],
+    ["above", "content", -20],
+    ["foreign", "foreign", 401],
+    ["disconnected", "disconnected", 401],
+  ] as const)("uses the full manual anchor path for a %s target", (_name, owner, screenTop) => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    const visible = harness.addRow("visible", 200, 200);
+    const offsetTop = jest.spyOn(visible, "offsetTop", "get");
+    const target = document.createElement("div");
+    if (owner === "content") harness.content.appendChild(target);
+    else if (owner === "foreign") document.body.appendChild(target);
+    bindViewportRect(harness.viewport, harness.state, {
+      top: harness.state.scrollTop,
+      height: harness.state.clientHeight,
+    });
+    bindViewportRect(target, harness.state, {
+      top: harness.state.scrollTop + screenTop,
+      height: 20,
+    });
+    harness.manualScroll(250);
+
+    const finishMutation = harness.scroller.beginLayoutMutation(target);
+
+    expect(offsetTop).toHaveBeenCalled();
+    finishMutation();
+    expect(harness.state.scrollTop).toBe(250);
+    harness.cleanup();
+  });
+
+  it("upgrades a skipped outer mutation when overlapping work needs a full anchor", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    const visible = harness.addRow("visible", 200, 200);
+    const offsetTop = jest.spyOn(visible, "offsetTop", "get");
+    const target = document.createElement("div");
+    harness.content.appendChild(target);
+    bindViewportRect(harness.viewport, harness.state, {
+      top: harness.state.scrollTop,
+      height: harness.state.clientHeight,
+    });
+    bindViewportRect(target, harness.state, {
+      top: harness.state.scrollTop + harness.state.clientHeight + 1,
+      height: 20,
+    });
+    harness.manualScroll(250);
+
+    const finishOuterMutation = harness.scroller.beginLayoutMutation(target);
+    expect(offsetTop).not.toHaveBeenCalled();
+    const finishInnerMutation = harness.scroller.beginLayoutMutation();
+    expect(offsetTop).toHaveBeenCalled();
+    harness.setRowLayout(visible, { top: 500 });
+    harness.state.scrollHeight = 1_300;
+
+    finishInnerMutation();
+    expect(harness.state.scrollTop).toBe(250);
+    finishOuterMutation();
+    expect(harness.state.scrollTop).toBe(550);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("does not restore a skipped target mutation after manual scroll input", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    harness.addRow("visible", 200, 200);
+    const target = document.createElement("div");
+    harness.content.appendChild(target);
+    bindViewportRect(harness.viewport, harness.state, {
+      top: harness.state.scrollTop,
+      height: harness.state.clientHeight,
+    });
+    bindViewportRect(target, harness.state, {
+      top: harness.state.scrollTop + harness.state.clientHeight + 1,
+      height: 20,
+    });
+    harness.manualScroll(250);
+    const finishMutation = harness.scroller.beginLayoutMutation(target);
+
+    harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -120,
+    }));
+    harness.manualScroll(100);
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(100);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("keeps outer and nested disclosure controls fixed across open and close", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+    const row = harness.addRow("response", 400, 500);
+    const outer = document.createElement("details");
+    const outerSummary = document.createElement("summary");
+    const nested = document.createElement("details");
+    const nestedSummary = document.createElement("summary");
+    outerSummary.dataset.focusKey = "activity-summary";
+    nestedSummary.dataset.focusKey = "tool-summary";
+    nested.appendChild(nestedSummary);
+    outer.append(outerSummary, nested);
+    row.appendChild(outer);
+    const outerLayout = { top: 700, height: 30 };
+    const nestedLayout = { top: 850, height: 30 };
+    bindViewportRect(outerSummary, harness.state, outerLayout);
+    bindViewportRect(nestedSummary, harness.state, nestedLayout);
+
+    const finishOuterOpen = harness.scroller.beginDisclosureLayoutMutation(outerSummary);
+    harness.state.scrollHeight = 1_400;
+    finishOuterOpen();
+    expect(harness.state.scrollTop).toBe(600);
+    expect(outerSummary.getBoundingClientRect().top).toBe(100);
+    expect(harness.scroller.getMode()).toBe("manual");
+
+    const finishNestedOpen = harness.scroller.beginDisclosureLayoutMutation(nestedSummary);
+    nestedLayout.top = 900;
+    harness.state.scrollHeight = 1_500;
+    finishNestedOpen();
+    expect(harness.state.scrollTop).toBe(650);
+    expect(nestedSummary.getBoundingClientRect().top).toBe(250);
+
+    const finishNestedClose = harness.scroller.beginDisclosureLayoutMutation(nestedSummary);
+    nestedLayout.top = 800;
+    harness.state.scrollHeight = 1_300;
+    finishNestedClose();
+    expect(harness.state.scrollTop).toBe(550);
+    expect(nestedSummary.getBoundingClientRect().top).toBe(250);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("falls back to the containing response when a disclosure control disappears", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+    const row = harness.addRow("response", 400, 500);
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.dataset.focusKey = "activity-summary";
+    details.appendChild(summary);
+    row.appendChild(details);
+    bindViewportRect(summary, harness.state, { top: 700, height: 30 });
+
+    const finishMutation = harness.scroller.beginDisclosureLayoutMutation(summary);
+    summary.remove();
+    harness.setRowLayout(row, { top: 450 });
+    harness.state.scrollHeight = 1_300;
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(650);
+    expect(row.offsetTop - harness.state.scrollTop).toBe(-200);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("shares the outermost anchor across overlapping layout mutations", () => {
+    const harness = createHarness({ scrollTop: 250, scrollHeight: 1_000 });
+    const visible = harness.addRow("visible", 200, 200);
+    harness.manualScroll(250);
+    const finishOuterMutation = harness.scroller.beginLayoutMutation();
+
+    harness.setRowLayout(visible, { top: 400 });
+    const finishInnerMutation = harness.scroller.beginLayoutMutation();
+    harness.state.scrollHeight = 1_300;
+    harness.setRowLayout(visible, { top: 500 });
+
+    finishInnerMutation();
+    expect(harness.state.scrollTop).toBe(250);
+    finishOuterMutation();
+    expect(harness.state.scrollTop).toBe(550);
+    expect(visible.offsetTop - harness.state.scrollTop).toBe(-50);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("restores exact end following after mutation-generated scroll events", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+    harness.addRow("visible", 500, 300);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_400;
+    harness.manualScroll(600);
+    expect(harness.scroller.getMode()).toBe("manual");
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(1_000);
+    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.calls.at(-1)).toEqual({ top: 1_000, behavior: "auto" });
+    harness.cleanup();
+  });
+
+  it("does not restore a mutation anchor after the reader takes scroll ownership", () => {
+    const harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+    harness.addRow("visible", 500, 300);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_400;
+    harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -120,
+    }));
+    harness.manualScroll(100);
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(100);
+    expect(harness.scroller.getMode()).toBe("manual");
+    harness.cleanup();
+  });
+
+  it("keeps manual ownership when a layout mutation has no visible registered row", () => {
+    const harness = createHarness({ scrollTop: 100, scrollHeight: 1_000 });
+    harness.addRow("below", 600, 100);
+    harness.manualScroll(100);
+    const finishMutation = harness.scroller.beginLayoutMutation();
+
+    harness.state.scrollHeight = 1_300;
+    finishMutation();
+
+    expect(harness.state.scrollTop).toBe(100);
+    expect(harness.scroller.getMode()).toBe("manual");
     harness.cleanup();
   });
 
@@ -293,8 +908,9 @@ describe("AnchoredScroller", () => {
     harness.manualScroll(590);
     expect(harness.scroller.getMode()).toBe("end");
 
+    const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishGrowth();
     expect(harness.state.scrollTop).toBe(800);
     harness.cleanup();
   });
@@ -357,12 +973,18 @@ describe("AnchoredScroller", () => {
 
       harness.state.scrollHeight = 1_100;
       harness.state.clientHeight = 300;
+      const callsBeforeStreamingState = harness.calls.length;
+      harness.scroller.setStreaming(true);
+      expect(harness.content.getAttribute("aria-busy")).toBe("true");
+      expect(harness.calls).toHaveLength(callsBeforeStreamingState);
       resizeCallback?.([], {} as ResizeObserver);
       resizeCallback?.([], {} as ResizeObserver);
       expect(requestFrame).toHaveBeenCalledTimes(1);
       frames.shift()?.(0);
       expect(harness.state.scrollTop).toBe(800);
       expect(harness.calls.at(-1)).toEqual({ top: 800, behavior: "auto" });
+      harness.scroller.setStreaming(false);
+      expect(harness.content.hasAttribute("aria-busy")).toBe(false);
 
       harness.manualScroll(100);
       harness.state.scrollHeight = 1_300;
@@ -388,6 +1010,207 @@ describe("AnchoredScroller", () => {
     }
   });
 
+  it("keeps a keyed part fixed when delayed intrinsic content grows above the viewport", () => {
+    const resize = installResizeObserverHarness();
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness({
+        scrollTop: 650,
+        scrollHeight: 1_600,
+        clientHeight: 400,
+      });
+      const response = harness.addRow("delayed-above", 100, 1_200);
+      const answer = harness.addPart(response, "answer", 700, 180);
+      harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: -120,
+      }));
+      harness.manualScroll(650);
+      harness.scroller.notifyViewportGeometryChanged();
+      expect(answer.getBoundingClientRect().top).toBe(50);
+
+      harness.state.scrollHeight = 1_800;
+      harness.setRowLayout(response, { height: 1_400 });
+      harness.setPartLayout(answer, { top: 900 });
+      resize.notify(harness.content);
+      resize.flush();
+
+      expect(harness.state.scrollTop).toBe(850);
+      expect(answer.getBoundingClientRect().top).toBe(50);
+      expect(harness.scroller.getMode()).toBe("manual");
+    } finally {
+      harness?.cleanup();
+      resize.cleanup();
+    }
+  });
+
+  it("keeps a keyed part fixed when delayed intrinsic content grows inside the viewport", () => {
+    const resize = installResizeObserverHarness();
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness({
+        scrollTop: 600,
+        scrollHeight: 1_500,
+        clientHeight: 400,
+      });
+      const response = harness.addRow("delayed-visible", 100, 1_200);
+      const delayedEmbed = document.createElement("div");
+      response.appendChild(delayedEmbed);
+      bindViewportRect(delayedEmbed, harness.state, { top: 650, height: 80 });
+      const answer = harness.addPart(response, "answer", 780, 180);
+      harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: -120,
+      }));
+      harness.manualScroll(600);
+      harness.scroller.notifyViewportGeometryChanged();
+      expect(delayedEmbed.getBoundingClientRect().top).toBe(50);
+      expect(answer.getBoundingClientRect().top).toBe(180);
+
+      harness.state.scrollHeight = 1_630;
+      harness.setRowLayout(response, { height: 1_330 });
+      harness.setPartLayout(answer, { top: 910 });
+      resize.notify(harness.content);
+      resize.flush();
+
+      expect(harness.state.scrollTop).toBe(730);
+      expect(answer.getBoundingClientRect().top).toBe(180);
+      expect(harness.scroller.getMode()).toBe("manual");
+    } finally {
+      harness?.cleanup();
+      resize.cleanup();
+    }
+  });
+
+  it("lets a reader scroll during a pending intrinsic resize and anchors later growth", () => {
+    const resize = installResizeObserverHarness();
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness({
+        scrollTop: 650,
+        scrollHeight: 1_600,
+        clientHeight: 400,
+      });
+      const response = harness.addRow("delayed-user-scroll", 100, 1_300);
+      const answer = harness.addPart(response, "answer", 700, 180);
+      harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: -120,
+      }));
+      harness.manualScroll(650);
+      harness.scroller.notifyViewportGeometryChanged();
+
+      harness.state.scrollHeight = 1_800;
+      harness.setRowLayout(response, { height: 1_500 });
+      harness.setPartLayout(answer, { top: 900 });
+      resize.notify(harness.content);
+      harness.viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: 120,
+      }));
+      harness.manualScroll(720);
+      harness.scroller.notifyViewportGeometryChanged();
+      resize.flush();
+
+      expect(harness.state.scrollTop).toBe(720);
+      expect(answer.getBoundingClientRect().top).toBe(180);
+
+      harness.state.scrollHeight = 1_900;
+      harness.setRowLayout(response, { height: 1_600 });
+      harness.setPartLayout(answer, { top: 1_000 });
+      resize.notify(harness.content);
+      resize.flush();
+
+      expect(harness.state.scrollTop).toBe(820);
+      expect(answer.getBoundingClientRect().top).toBe(180);
+      expect(harness.scroller.getMode()).toBe("manual");
+    } finally {
+      harness?.cleanup();
+      resize.cleanup();
+    }
+  });
+
+  it("keeps end followers pinned during delayed intrinsic content growth", () => {
+    const resize = installResizeObserverHarness();
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness({
+        scrollTop: 600,
+        scrollHeight: 1_000,
+        clientHeight: 400,
+      });
+
+      harness.state.scrollHeight = 1_300;
+      resize.notify(harness.content);
+      resize.flush();
+
+      expect(harness.state.scrollTop).toBe(900);
+      expect(harness.calls.at(-1)).toEqual({ top: 900, behavior: "auto" });
+      expect(harness.scroller.getMode()).toBe("end");
+    } finally {
+      harness?.cleanup();
+      resize.cleanup();
+    }
+  });
+
+  it("suppresses ResizeObserver end correction while a disclosure settles", () => {
+    const originalResizeObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+    let resizeCallback: ResizeObserverCallback | null = null;
+    class TestResizeObserver {
+      public constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      public observe = jest.fn();
+      public unobserve = jest.fn();
+      public disconnect = jest.fn();
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: TestResizeObserver,
+    });
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = jest.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    let harness: ReturnType<typeof createHarness> | null = null;
+    try {
+      harness = createHarness({ scrollTop: 600, scrollHeight: 1_000 });
+      const row = harness.addRow("response", 400, 500);
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      details.appendChild(summary);
+      row.appendChild(details);
+      bindViewportRect(summary, harness.state, { top: 700, height: 30 });
+
+      const finishMutation = harness.scroller.beginDisclosureLayoutMutation(summary);
+      harness.state.scrollHeight = 1_400;
+      resizeCallback?.([], {} as ResizeObserver);
+      frames.shift()?.(0);
+      expect(harness.state.scrollTop).toBe(600);
+
+      finishMutation();
+      expect(harness.state.scrollTop).toBe(600);
+      expect(harness.scroller.getMode()).toBe("manual");
+
+      resizeCallback?.([], {} as ResizeObserver);
+      frames.shift()?.(0);
+      expect(harness.state.scrollTop).toBe(600);
+      expect(harness.scroller.getMode()).toBe("manual");
+    } finally {
+      harness?.cleanup();
+      requestFrame.mockRestore();
+      if (originalResizeObserver) {
+        Object.defineProperty(window, "ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(window, "ResizeObserver");
+      }
+    }
+  });
+
   it("fails fast for unstable registration, missing rows, and use after destroy", () => {
     const harness = createHarness();
     const row = harness.addRow("row", 100);
@@ -402,7 +1225,7 @@ describe("AnchoredScroller", () => {
     harness.scroller.unregisterRow("row");
     expect(row.dataset.agentRowId).toBeUndefined();
     harness.scroller.destroy();
-    expect(() => harness.scroller.notifyContentChanged()).toThrow(
+    expect(() => harness.scroller.beginLayoutMutation()).toThrow(
       "AnchoredScroller has been destroyed.",
     );
     harness.viewport.remove();
@@ -412,14 +1235,10 @@ describe("AnchoredScroller", () => {
   it("restores end ownership to the latest content after history replacement", () => {
     const harness = createHarness({ scrollTop: 1_000, scrollHeight: 1_400 });
     const turn = harness.addRow("turn", 900, 200);
-    const anchor: AnchoredScrollerPrependAnchor = {
-      rowId: "turn",
-      offsetFromViewportTop: turn.offsetTop - harness.state.scrollTop,
-      mode: "end",
-    };
+    const finishMutation = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_700;
     harness.setRowLayout(turn, { top: 1_200 });
-    harness.scroller.restorePrependAnchor(anchor);
+    finishMutation();
     expect(harness.scroller.getMode()).toBe("end");
     expect(harness.state.scrollTop).toBe(1_300);
     harness.cleanup();
@@ -439,8 +1258,9 @@ describe("AnchoredScroller", () => {
     harness.viewport.dispatchEvent(new Event("scroll"));
 
     expect(harness.scroller.getMode()).toBe("end");
+    const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_900;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishGrowth();
     expect(harness.calls.at(-1)).toEqual({ top: 1_500, behavior: "auto" });
     harness.cleanup();
   });
@@ -461,8 +1281,9 @@ describe("AnchoredScroller", () => {
     }));
     expect(harness.scroller.getMode()).toBe("end");
 
+    const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishGrowth();
     expect(harness.state.scrollTop).toBe(800);
     expect(harness.scroller.getMode()).toBe("end");
     harness.cleanup();
@@ -481,8 +1302,9 @@ describe("AnchoredScroller", () => {
     harness.viewport.dispatchEvent(createEvent());
     harness.manualScroll(600);
     expect(harness.scroller.getMode()).toBe("end");
+    const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
-    harness.scroller.notifyContentChanged({ streaming: true });
+    finishGrowth();
     expect(harness.state.scrollTop).toBe(800);
     harness.cleanup();
   });

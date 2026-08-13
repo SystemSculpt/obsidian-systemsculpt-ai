@@ -20,6 +20,7 @@ import {
 } from "./ChatPersistenceTypes";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
+const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 type FramedMessagePayload =
   | Readonly<{
@@ -244,8 +245,8 @@ export class ChatMarkdownSerializer {
       const restored = storedMultipart.state === "valid"
         ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
         : reconstructed;
-      const withOutcome = this.withTerminalOutcome(restored, attrs);
-      messages.push(attachmentMetadata.state === "valid" ? { ...withOutcome, attachmentMetadata: attachmentMetadata.metadata } : withOutcome);
+      const withMetadata = this.withAdditiveMetadata(restored, attrs);
+      messages.push(attachmentMetadata.state === "valid" ? { ...withMetadata, attachmentMetadata: attachmentMetadata.metadata } : withMetadata);
     }
 
     if (parsedBlocks !== declaredStarts || messages.length !== declaredStarts) {
@@ -281,7 +282,7 @@ export class ChatMarkdownSerializer {
         const attachmentMetadata = this.extractAttachmentMetadata(attributes, multipart);
         if (attachmentMetadata.state === "invalid") return null;
         const timestamp = Date.now();
-        const restored = this.withTerminalOutcome(
+        const restored = this.withAdditiveMetadata(
           multipart
             ? { role, message_id, content: multipart }
             : decoded.content.length > 0
@@ -331,7 +332,7 @@ export class ChatMarkdownSerializer {
         }
         throw new Error("Unsupported framed message part.");
       });
-      const restored = this.withTerminalOutcome(
+      const restored = this.withAdditiveMetadata(
         this.reconstructMessageFromParts(role, message_id, parts),
         attributes,
       );
@@ -345,21 +346,33 @@ export class ChatMarkdownSerializer {
     }
   }
 
-  /**
-   * Restore the additive terminal-outcome marker. Only the exact known value
-   * is honored so a corrupted attribute can never invent a new outcome.
-   */
-  private static withTerminalOutcome(
+  /** Restore bounded presentation metadata without making it part of message content. */
+  private static withAdditiveMetadata(
     message: ChatMessage,
     attributes: string,
   ): ChatMessage {
+    let restored = message;
     if (
       message.role === "assistant"
       && attributes.includes("terminal-outcome=\"cancelled\"")
     ) {
-      return { ...message, terminalOutcome: "cancelled" };
+      restored = { ...restored, terminalOutcome: "cancelled" };
     }
-    return message;
+    if (message.role !== "assistant") return restored;
+    const durationMatch = attributes.match(
+      /(?:^|\s)response-duration-ms="([0-9]+)"(?:\s|$)/u,
+    );
+    if (!durationMatch) return restored;
+    const responseDurationMs = Number(durationMatch[1]);
+    return this.isResponseDurationMs(responseDurationMs)
+      ? { ...restored, responseDurationMs }
+      : restored;
+  }
+
+  private static isResponseDurationMs(value: unknown): value is number {
+    return Number.isSafeInteger(value)
+      && (value as number) >= 0
+      && (value as number) <= MAX_RESPONSE_DURATION_MS;
   }
 
   private static isFramedMessagePayload(value: unknown): value is FramedMessagePayload {
@@ -629,6 +642,9 @@ export class ChatMarkdownSerializer {
     // written with this marker still loads everywhere.
     if (msg.terminalOutcome === "cancelled") {
       attributes += " terminal-outcome=\"cancelled\"";
+    }
+    if (msg.role === "assistant" && this.isResponseDurationMs(msg.responseDurationMs)) {
+      attributes += ` response-duration-ms="${msg.responseDurationMs}"`;
     }
     if (Array.isArray(msg.content) && msg.attachmentMetadata?.length) {
       attributes += ` attachment-metadata="${this.encodeBase64Json(msg.attachmentMetadata)}"`;

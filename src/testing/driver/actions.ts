@@ -180,13 +180,13 @@ const TOOL_LIFECYCLE_STATES = [
 
 type ToolLifecycleState = typeof TOOL_LIFECYCLE_STATES[number];
 
-const TOOL_TERMINAL_LABELS: Partial<Record<ToolLifecycleState, string>> = {
-  succeeded: "Done",
-  partial: "Partial",
-  failed: "Failed",
-  denied: "Denied",
-  cancelled: "Stopped",
-  "outcome-unknown": "Check required",
+const TOOL_TERMINAL_ICONS: Partial<Record<ToolLifecycleState, string>> = {
+  succeeded: "check",
+  partial: "x",
+  failed: "x",
+  denied: "x",
+  cancelled: "x",
+  "outcome-unknown": "x",
 };
 
 interface ToolLifecycleTransition {
@@ -200,10 +200,10 @@ interface ToolVisualTransition {
   mutationBatch: number;
   observedAtMs: number;
   observedSequence: number;
-  /** Terminal, label-consistent, unanimated, AND the whole surface is quiet. */
+  /** Terminal, icon-consistent, AND the whole surface is quiet. */
   settled: boolean;
   /**
-   * Terminal, label-consistent, and unanimated for this row alone. A later
+   * Terminal and icon-consistent for this row alone. A later
    * sequential tool legitimately re-busies the shared tail status while it
    * executes, which must not retroactively unsettle an already-terminal row.
    */
@@ -622,14 +622,13 @@ function exactTerminalRowCallCount(element: HTMLElement): number | null {
 }
 
 function toolRowSnapshot(element: HTMLElement): Record<string, unknown> {
-  const icon = element.querySelector<HTMLElement>(".systemsculpt-agent-tool-icon");
+  const stateIcon = element.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
   return {
     partKey: element.dataset.partKey ?? null,
     callCount: toolCallCount(element),
     label: element.querySelector(".systemsculpt-agent-tool-label")?.textContent?.trim() ?? null,
     state: toolLifecycleState(element),
-    stateLabel: element.querySelector(".systemsculpt-agent-tool-state")?.textContent?.trim() ?? null,
-    animated: icon?.classList.contains("is-animated") ?? false,
+    stateIcon: stateIcon?.dataset.iconState ?? null,
   };
 }
 
@@ -1442,8 +1441,7 @@ function toolRowIsVisuallyTerminal(element: HTMLElement): boolean {
   const snapshot = toolRowSnapshot(element);
   const state = snapshot.state as ToolLifecycleState | null;
   return state !== null
-    && TOOL_TERMINAL_LABELS[state] === snapshot.stateLabel
-    && snapshot.animated === false;
+    && TOOL_TERMINAL_ICONS[state] === snapshot.stateIcon;
 }
 
 function toolIsVisuallySettled(element: HTMLElement, container: HTMLElement): boolean {
@@ -2075,10 +2073,15 @@ function assertToolLifecycle(
     0,
   );
   const observedToolIdentityCount = currentRunRecords.length;
+  const observedToolCallCount = currentRunRecords.reduce(
+    (sum, record) => sum + firstCapturedToolCallCount(record),
+    0,
+  );
   const surfaces = capture.surfaceTransitions.get(turnId) ?? [];
   const toolCallCount = Math.max(
     connectedToolCallCount,
     observedToolIdentityCount,
+    observedToolCallCount,
     ...surfaces.map((surface) => surface.toolCallCount),
   );
   if (toolCallCount < (minToolCount as number)) {
@@ -2087,8 +2090,13 @@ function assertToolLifecycle(
         + `at least ${String(minToolCount)} were required.`,
     );
   }
+  const retainedTerminalToolCallCount = currentRunRecords
+    .filter((record) => record.visualTransitions[record.visualTransitions.length - 1]
+      ?.rowSettled === true)
+    .reduce((sum, record) => sum + firstCapturedToolCallCount(record), 0);
   const terminalToolCallCount = Math.max(
     0,
+    retainedTerminalToolCallCount,
     ...surfaces.map((surface) => surface.terminalToolCallCount),
   );
   const allTerminal = terminalToolCallCount >= toolCallCount;
@@ -2097,6 +2105,8 @@ function assertToolLifecycle(
       `Current run has not reached a fully terminal captured tool surface: ${JSON.stringify({
         connectedToolCallCount,
         observedToolIdentityCount,
+        observedToolCallCount,
+        retainedTerminalToolCallCount,
         terminalToolCallCount,
         toolCallCount,
       })}.`,
@@ -2118,6 +2128,8 @@ function assertToolLifecycle(
     observedToolIdentityCount,
     supersededToolRowCount: Math.max(0, currentRunRecords.length - toolRowCount),
     connectedToolCallCount,
+    observedToolCallCount,
+    retainedTerminalToolCallCount,
     terminalToolCallCount,
     allTerminal,
   };
@@ -2242,13 +2254,25 @@ function proveContinuationOrdering(
   });
   const surfacesBeforeContinuation = (capture.surfaceTransitions.get(turnId) ?? [])
     .filter((surface) => surface.observedSequence <= continuationAt.observedSequence);
+  const observedToolCallCount = priorRecords.reduce(
+    (sum, record) => sum + firstCapturedToolCallCount(record),
+    0,
+  );
   const toolCallCount = Math.max(
     priorRecords.length,
+    observedToolCallCount,
     0,
     ...surfacesBeforeContinuation.map((surface) => surface.toolCallCount),
   );
+  const retainedTerminalToolCallCount = priorRecords
+    .filter((record) => latestVisualTransitionAt(
+      record,
+      continuationAt.observedSequence,
+    )?.rowSettled === true)
+    .reduce((sum, record) => sum + firstCapturedToolCallCount(record), 0);
   const terminalToolCallCount = Math.max(
     0,
+    retainedTerminalToolCallCount,
     ...surfacesBeforeContinuation.map((surface) => surface.terminalToolCallCount),
   );
   const expectedFirst = expectedRecord ? firstToolRecordObservation(expectedRecord) : null;
@@ -2352,16 +2376,10 @@ async function assertLatestToolSettledAfterContinuation(
   const expectedState = typeof params.expectedState === "string"
     ? params.expectedState.trim() as ToolLifecycleState
     : null;
-  if (expectedState && TOOL_TERMINAL_LABELS[expectedState] === undefined) {
+  if (expectedState && TOOL_TERMINAL_ICONS[expectedState] === undefined) {
     throw new DriverActionError(
-      `expectedState must be visibly terminal: ${Object.keys(TOOL_TERMINAL_LABELS).join(", ")}.`,
+      `expectedState must be visibly terminal: ${Object.keys(TOOL_TERMINAL_ICONS).join(", ")}.`,
     );
-  }
-  const expectedStateLabel = typeof params.expectedStateLabel === "string"
-    ? params.expectedStateLabel.trim()
-    : null;
-  if (params.expectedStateLabel !== undefined && !expectedStateLabel) {
-    throw new DriverActionError("expectedStateLabel must be a non-empty string.");
   }
   if (params.requireCommandAck !== undefined && typeof params.requireCommandAck !== "boolean") {
     throw new DriverActionError("requireCommandAck must be a boolean.");
@@ -2443,12 +2461,6 @@ async function assertLatestToolSettledAfterContinuation(
             `Expected tool state ${JSON.stringify(expectedState)}, got ${JSON.stringify(snapshot.state)}.`,
           );
         }
-        if (expectedStateLabel && snapshot.stateLabel !== expectedStateLabel) {
-          throw new DriverActionError(
-            `Expected tool state label ${JSON.stringify(expectedStateLabel)}, got `
-              + `${JSON.stringify(snapshot.stateLabel)}.`,
-          );
-        }
         const sameTurnContinuations = capturedContinuationEntries(capture)
           .filter(([, observation]) =>
             observation.turnId === record.turnId
@@ -2478,7 +2490,7 @@ async function assertLatestToolSettledAfterContinuation(
             `Continuation text appeared after tool ${JSON.stringify(snapshot.label)} before its `
               + `row was visibly settled: continuationSequence=${continuationAt.observedSequence}, `
               + `state=${String(snapshot.state)}, `
-              + `stateLabel=${String(snapshot.stateLabel)}, animated=${String(snapshot.animated)}, `
+              + `stateIcon=${String(snapshot.stateIcon)}, `
               + `agentStatus=${String(agentStatus)}, `
               + `continuationEvidence=${JSON.stringify(
                 continuationObservationMetadata(continuationEntry),
@@ -2910,23 +2922,34 @@ function exactTerminalGroupedToolSurface(
   container: HTMLElement,
   orderedPartKeys: readonly string[],
 ): boolean {
-  const rows = [...turn.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-part.is-tool",
+  const collapsedOverflows = [...turn.querySelectorAll<HTMLButtonElement>(
+    'button[data-agent-activity-overflow][aria-expanded="false"]',
   )];
-  if (rows.length === 0) return false;
-  let logicalIndex = 0;
-  for (const row of rows) {
-    const callCount = exactTerminalRowCallCount(row);
-    if (
-      callCount === null
-      || logicalIndex + callCount > orderedPartKeys.length
-      || row.dataset.partKey !== orderedPartKeys[logicalIndex]
-      || toolLifecycleState(row) !== "succeeded"
-      || !toolIsVisuallySettled(row, container)
-    ) return false;
-    logicalIndex += callCount;
+  for (const overflow of collapsedOverflows) overflow.click();
+  try {
+    if (collapsedOverflows.some((overflow) =>
+      overflow.getAttribute("aria-expanded") !== "true")) return false;
+    const rows = [...turn.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-part.is-tool",
+    )];
+    if (rows.length === 0) return false;
+    let logicalIndex = 0;
+    for (const row of rows) {
+      const callCount = exactTerminalRowCallCount(row);
+      if (
+        callCount === null
+        || row.dataset.partKey !== orderedPartKeys[logicalIndex]
+        || toolLifecycleState(row) !== "succeeded"
+        || !toolIsVisuallySettled(row, container)
+      ) return false;
+      logicalIndex += callCount;
+    }
+    return logicalIndex === orderedPartKeys.length;
+  } finally {
+    for (const overflow of collapsedOverflows.reverse()) {
+      if (overflow.getAttribute("aria-expanded") === "true") overflow.click();
+    }
   }
-  return logicalIndex === orderedPartKeys.length;
 }
 
 /**
@@ -5157,9 +5180,20 @@ function runProgressFingerprint(snapshot: Record<string, unknown>): string {
   const turns = Array.isArray(snapshot.turns) ? snapshot.turns : [];
   const last = asRecord(turns[turns.length - 1]);
   const parts = Array.isArray(last.parts) ? last.parts : [];
+  const toolProgress = parts.map((value) => {
+    const part = asRecord(value);
+    const tool = asRecord(part.tool);
+    return [
+      part.kind ?? null,
+      tool.partKey ?? null,
+      tool.callCount ?? null,
+      tool.state ?? null,
+    ];
+  });
   return [
     turns.length,
     parts.length,
+    JSON.stringify(toolProgress),
     typeof last.textCharacters === "number"
       ? last.textCharacters
       : typeof last.text === "string" ? last.text.length : 0,

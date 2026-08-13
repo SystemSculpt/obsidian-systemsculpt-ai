@@ -54,7 +54,6 @@ function terminalToolSteps({ prefix, marker, toolLabel, toolCount }) {
         text: marker,
         textMode: "contains",
         expectedState: "succeeded",
-        expectedStateLabel: "Done",
         requireCommandAck: true,
         requireAllToolResultAcks: true,
         expectedAllToolResultState: "succeeded",

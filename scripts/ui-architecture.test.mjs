@@ -125,6 +125,7 @@ test("Agent workspace CSS stays feature-owned, bounded, and explicitly ordered",
   const modules = [
     "shell.css",
     "conversation.css",
+    "activity.css",
     "reasoning.css",
     "tools.css",
     "states.css",
