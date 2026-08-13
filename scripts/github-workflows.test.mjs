@@ -10,14 +10,18 @@ const workflowNames = fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.t
 const ci = normalizeLineEndings(
   fs.readFileSync(path.join(workflowsDir, "ci.yml"), "utf8"),
 );
+const releaseMetadataSource = normalizeLineEndings(
+  fs.readFileSync(path.join(workflowsDir, "publish-release-metadata.yml"), "utf8"),
+);
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
 );
 const nvmVersion = fs.readFileSync(path.join(process.cwd(), ".nvmrc"), "utf8").trim();
 const workflow = parse(ci);
+const releaseMetadataWorkflow = parse(releaseMetadataSource);
 
-test("CI is the only hosted workflow", () => {
-  assert.deepEqual(workflowNames, ["ci.yml"]);
+test("hosted workflows separate secret-free CI from release publication", () => {
+  assert.deepEqual(workflowNames, ["ci.yml", "publish-release-metadata.yml"]);
   assert.deepEqual(Object.keys(workflow.jobs), ["plugin", "compatibility", "required"]);
   assert.deepEqual(Object.keys(workflow.on), [
     "pull_request",
@@ -25,6 +29,47 @@ test("CI is the only hosted workflow", () => {
     "push",
     "workflow_dispatch",
   ]);
+});
+
+test("only a published stable release can update first-party release metadata", () => {
+  assert.deepEqual(releaseMetadataWorkflow.on, { release: { types: ["published"] } });
+  assert.deepEqual(releaseMetadataWorkflow.permissions, { contents: "read" });
+  assert.equal(releaseMetadataWorkflow.concurrency.group, "publish-release-metadata");
+  assert.equal(releaseMetadataWorkflow.concurrency["cancel-in-progress"], false);
+  assert.deepEqual(Object.keys(releaseMetadataWorkflow.jobs), ["publish"]);
+
+  const job = releaseMetadataWorkflow.jobs.publish;
+  assert.equal(
+    job.if,
+    "${{ github.event.release.draft == false && github.event.release.prerelease == false }}",
+  );
+  assert.equal(job.environment, "production-release-metadata");
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job["timeout-minutes"], 5);
+  assert.deepEqual(job.steps.filter((step) => step.uses).map((step) => step.uses), [
+    "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+  ]);
+  assert.equal(job.steps[0].with.ref, "${{ github.event.release.tag_name }}");
+
+  const validate = job.steps.find((step) => step.name === "Validate release identity");
+  const publish = job.steps.find((step) => step.name === "Publish release metadata");
+  const verify = job.steps.find((step) => step.name === "Verify SystemSculpt release endpoint");
+  assert.equal(validate.run, "node scripts/plugin-release-metadata.mjs --check");
+  assert.match(publish.run, /plugin\/releases\/latest\.json/);
+  assert.match(publish.run, /--assert-not-older=/);
+  assert.match(publish.run, /list-objects-v2/);
+  assert.match(publish.run, /Unexpected release metadata object count/);
+  assert.match(publish.run, /--cache-control "no-store"/);
+  assert.match(publish.env.AWS_ACCESS_KEY_ID, /secrets\.RELEASE_METADATA_R2_ACCESS_KEY_ID/);
+  assert.match(publish.env.AWS_SECRET_ACCESS_KEY, /secrets\.RELEASE_METADATA_R2_SECRET_ACCESS_KEY/);
+  assert.match(publish.env.R2_BUCKET_NAME, /vars\.RELEASE_METADATA_R2_BUCKET_NAME/);
+  assert.match(publish.env.R2_ENDPOINT, /vars\.RELEASE_METADATA_R2_ENDPOINT/);
+  assert.equal(
+    verify.run,
+    "node scripts/plugin-release-metadata.mjs --verify-url=https://systemsculpt.com/api/plugin/releases/latest",
+  );
+  assert.doesNotMatch(releaseMetadataSource, /pull_request_target|contents: write|GITHUB_TOKEN/);
 });
 
 test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix", () => {

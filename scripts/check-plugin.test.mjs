@@ -71,6 +71,7 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /scripts\/verify-ci-failure-evidence\.test\.mjs/);
   assert.match(source, /scripts\/chatview-critical-mutants\.test\.mjs/);
   assert.match(source, /scripts\/github-workflows\.test\.mjs/);
+  assert.match(source, /scripts\/plugin-release-metadata\.test\.mjs/);
   assert.match(source, /scripts\/check\/chatview-critical-mutants-policy\.test\.mjs/);
   assert.match(source, /scripts\/check\/test-gate-partition-policy\.test\.mjs/);
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);

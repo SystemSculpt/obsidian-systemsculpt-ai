@@ -87,8 +87,8 @@ protocol evolution.
   testing/fixtures/managed. Tests and CI remain credential-free.
 - Built-in tool names describe user actions, not transport history. Do not add
   MCP or provider terminology to product code.
-- Obsidian Community Plugins owns plugin updates. Do not restore a custom
-  version checker or update modal.
+- SystemSculpt may detect and announce published releases. Obsidian Community
+  Plugins exclusively owns download, installation, activation, and rollback.
 - Studio is portable. Every built-in node declares
   requiredHostCapabilities, including an explicit empty list for portable
   nodes. Registry presentation, run preflight, and runtime enforcement all use

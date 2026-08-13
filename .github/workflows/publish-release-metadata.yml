@@ -1,0 +1,77 @@
+name: Publish release metadata
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: publish-release-metadata
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: ${{ github.event.release.draft == false && github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-release-metadata
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.x"
+
+      - name: Validate release identity
+        env:
+          SYSTEMSCULPT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SYSTEMSCULPT_RELEASE_URL: ${{ github.event.release.html_url }}
+          SYSTEMSCULPT_RELEASE_PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: node scripts/plugin-release-metadata.mjs --check
+
+      - name: Publish release metadata
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_METADATA_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_METADATA_R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_BUCKET_NAME: ${{ vars.RELEASE_METADATA_R2_BUCKET_NAME }}
+          R2_ENDPOINT: ${{ vars.RELEASE_METADATA_R2_ENDPOINT }}
+          SYSTEMSCULPT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SYSTEMSCULPT_RELEASE_URL: ${{ github.event.release.html_url }}
+          SYSTEMSCULPT_RELEASE_PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          current_metadata="${RUNNER_TEMP}/current-plugin-release.json"
+          current_count="$(aws s3api list-objects-v2 \
+            --bucket "${R2_BUCKET_NAME}" \
+            --prefix "plugin/releases/latest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --query "length(Contents[?Key=='plugin/releases/latest.json'])" \
+            --output text)"
+          if [ "${current_count}" = "1" ]; then
+            aws s3 cp "s3://${R2_BUCKET_NAME}/plugin/releases/latest.json" "${current_metadata}" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --only-show-errors
+            node scripts/plugin-release-metadata.mjs --assert-not-older="${current_metadata}"
+          elif [ "${current_count}" != "0" ]; then
+            echo "Unexpected release metadata object count: ${current_count}" >&2
+            exit 1
+          fi
+          node scripts/plugin-release-metadata.mjs | aws s3 cp - "s3://${R2_BUCKET_NAME}/plugin/releases/latest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-store" \
+            --only-show-errors
+
+      - name: Verify SystemSculpt release endpoint
+        env:
+          SYSTEMSCULPT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SYSTEMSCULPT_RELEASE_URL: ${{ github.event.release.html_url }}
+          SYSTEMSCULPT_RELEASE_PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: node scripts/plugin-release-metadata.mjs --verify-url=https://systemsculpt.com/api/plugin/releases/latest

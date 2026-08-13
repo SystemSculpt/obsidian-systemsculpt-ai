@@ -68,6 +68,7 @@ import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedAdmission } from "./services/managed/ManagedAdmission";
 import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
+import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
@@ -211,6 +212,7 @@ export default class SystemSculptPlugin extends Plugin {
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
+  private pluginUpdateService: PluginUpdateService | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
@@ -669,6 +671,15 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "services.pluginUpdates",
+      label: "plugin updates",
+      optional: true,
+      run: () => {
+        this.pluginUpdateService = new PluginUpdateService(this);
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "logging.ready",
       label: "plugin logger",
       optional: true,
@@ -732,6 +743,15 @@ export default class SystemSculptPlugin extends Plugin {
           phase.fail(error);
           throw error;
         }
+      },
+    });
+
+    coordinator.registerTask("critical", {
+      id: "updates.start",
+      label: "update notifications",
+      optional: true,
+      run: () => {
+        this.pluginUpdateService?.start();
       },
     });
   }
@@ -1694,6 +1714,9 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async onunload() {
+    this.pluginUpdateService?.stop();
+    this.pluginUpdateService = null;
+
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;

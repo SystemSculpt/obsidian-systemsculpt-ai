@@ -279,6 +279,21 @@ revision recorded in release provenance. It always rebuilds the artifacts;
 there is no release CLI path that can bind stale pre-existing bytes to a newer
 source revision.
 
+Publishing a stable GitHub release runs `publish-release-metadata.yml`. The job
+checks out the release tag, requires its version and URL to match manifest.json,
+and writes only `plugin/releases/latest.json` to the release-metadata R2 bucket.
+It then waits through the API's 60-second cache and verifies the public endpoint.
+Drafts, prereleases, ordinary tags, and merges to main cannot announce a release.
+
+Configure the `production-release-metadata` GitHub environment with:
+
+- Secrets: `RELEASE_METADATA_R2_ACCESS_KEY_ID` and `RELEASE_METADATA_R2_SECRET_ACCESS_KEY`.
+- Variables: `RELEASE_METADATA_R2_BUCKET_NAME` and `RELEASE_METADATA_R2_ENDPOINT`.
+
+Use credentials limited to the dedicated `systemsculpt-plugin-releases` bucket.
+The workflow cannot create, edit, or delete GitHub releases and does not deploy
+the plugin or API worker.
+
 Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with a controlled QA vault:
 
 ~~~bash
