@@ -11,16 +11,17 @@ const INTERRUPTED_ERROR_CODE =
 const INTERRUPTED_UI_WORDING =
   /\b(?:agent connection|connection (?:closed|lost)|websocket|web socket|socket|transport)\b/i;
 const NOT_STARTED_ERROR =
-  /(?:bootstrap|context|admission|license|rate_limit)|\bbootstrap\b/i;
+  /(?:bootstrap|context|admission|license|rate_limit|response_start)|\bbootstrap\b/i;
 
 export type PresentedAgentError = Readonly<{
   heading: "Response interrupted" | "Could not finish" | "Not enough credits" | "Out of credits";
   message: string;
-  /** Server-issued support id, shown so a user can quote it when reporting. */
+  /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
 }>;
 
-const REPORT_ID = /^incident_[a-f0-9]{32}$/;
+const LOCAL_REPORT_ID = /^report_(?!0{32}$)[a-f0-9]{32}$/;
+const SERVER_INCIDENT_ID = /^incident_(?!0{32}$)[a-f0-9]{32}$/;
 
 export function presentAgentErrorMessage(
   _message: string,
@@ -62,12 +63,13 @@ export function presentAgentError(
     INTERRUPTED_ERROR_CODE.test(error.code)
     || INTERRUPTED_UI_WORDING.test(error.message)
   );
-  // The report id is the only service-issued identity allowed through this
-  // boundary: it is minted for support lookup and carries no provider or
-  // implementation identity. Interrupted turns omit it; retrying is the fix.
-  const reportId = !interrupted && error.incidentId && REPORT_ID.test(error.incidentId)
-    ? error.incidentId
-    : undefined;
+  // A valid incident id lets the user copy the local content-free report.
+  // Keep it available even when retrying may recover the interrupted turn.
+  const reportId = error.reportId && LOCAL_REPORT_ID.test(error.reportId)
+    ? error.reportId
+    : error.incidentId && SERVER_INCIDENT_ID.test(error.incidentId)
+      ? error.incidentId
+      : undefined;
   return {
     heading: interrupted ? "Response interrupted" : "Could not finish",
     message: presentAgentErrorMessage(error.message, interrupted),

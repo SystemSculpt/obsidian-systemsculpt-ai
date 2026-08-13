@@ -1,15 +1,21 @@
 const base = require("./jest.config.cjs");
 
 const criticalRiskTests = [
+	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentCoordinator.test.ts",
+	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentRecorder.test.ts",
+	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentRecorderStoreContract.test.ts",
+	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentStore.test.ts",
 	"<rootDir>/src/services/chat/__tests__/managed-tool-execution.test.ts",
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatMarkdownSerializer.test.ts",
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatPersistenceTypes.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/ChatStorageService.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-admission.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-close-barrier.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-fork-retry-integration.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/chat-1450-regression.acceptance.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-presentation.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-renderer-icons.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-incident-report-regression.integration.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-transcript-repository.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/live-markdown-renderer.test.ts",
@@ -22,6 +28,9 @@ const criticalRiskTests = [
 ];
 
 const criticalRiskCoverage = [
+	"src/core/diagnostics/AgentIncidentCoordinator.ts",
+	"src/core/diagnostics/AgentIncidentRecorder.ts",
+	"src/core/diagnostics/AgentIncidentStore.ts",
 	"src/services/chat/ManagedToolExecution.ts",
 	"src/views/chatview/AgentChatView.ts",
 	"src/views/chatview/AgentConversationPresentation.ts",
@@ -49,8 +58,26 @@ module.exports = {
 	collectCoverage: true,
 	collectCoverageFrom: criticalRiskCoverage,
 	coverageDirectory: "<rootDir>/.cache/coverage-chatview-critical-risk",
-	coverageReporters: ["text-summary", "json-summary"],
+	coverageReporters: ["text-summary", "json", "json-summary"],
 	coverageThreshold: {
+		"./src/core/diagnostics/AgentIncidentCoordinator.ts": {
+			statements: 80,
+			branches: 60,
+			functions: 85,
+			lines: 80,
+		},
+		"./src/core/diagnostics/AgentIncidentRecorder.ts": {
+			statements: 80,
+			branches: 80,
+			functions: 85,
+			lines: 85,
+		},
+		"./src/core/diagnostics/AgentIncidentStore.ts": {
+			statements: 75,
+			branches: 70,
+			functions: 90,
+			lines: 90,
+		},
 		"./src/services/chat/ManagedToolExecution.ts": {
 			statements: 100,
 			branches: 100,

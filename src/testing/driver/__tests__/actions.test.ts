@@ -950,6 +950,57 @@ describe("guarded development driver actions", () => {
       .rejects.toThrow(/No run started within 0ms/);
   });
 
+  it("proves a fast failed-turn Retry from replacement user identity", async () => {
+    const marker = "SS-DEV-TEST-FASTRETRY";
+    const harness = makeDevelopmentHarness();
+    const renderFailedTurn = (messageId: string): void => {
+      for (const turn of harness.container.querySelectorAll(".systemsculpt-agent-turn")) {
+        turn.remove();
+      }
+      const user = document.createElement("div");
+      user.className = "systemsculpt-agent-turn is-user";
+      user.dataset.messageId = messageId;
+      user.textContent = `${marker} retry request`;
+      harness.container.append(user);
+      const assistant = document.createElement("div");
+      assistant.className = "systemsculpt-agent-turn is-assistant";
+      assistant.textContent = "same deterministic failure";
+      harness.container.append(assistant);
+    };
+    await runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker });
+    harness.send.onclick = () => {
+      harness.view.chatId = "retry-chat";
+      harness.input.value = "";
+      renderFailedTurn("user-first");
+    };
+    await runDriverAction(harness.ctx, "chat.typeDevelopmentDraft", {
+      text: "retry request",
+      submit: true,
+    });
+    await runDriverAction(harness.ctx, "chat.waitForDevelopmentRun", {
+      until: "complete",
+      timeoutMs: 0,
+    });
+
+    const retry = document.createElement("button");
+    retry.dataset.testid = "chat.turn.retry-failed";
+    retry.textContent = "Retry";
+    retry.getBoundingClientRect = () => rect();
+    retry.scrollIntoView = jest.fn();
+    retry.onclick = () => renderFailedTurn("user-retry");
+    harness.container.append(retry);
+
+    await expect(runDriverAction(harness.ctx, "click", {
+      target: "chat.turn.retry-failed",
+      timeoutMs: 0,
+    })).resolves.toMatchObject({ text: "Retry" });
+    await expect(runDriverAction(harness.ctx, "chat.waitForDevelopmentRun", {
+      until: "complete",
+      timeoutMs: 0,
+    })).resolves.toMatchObject({ reached: "complete" });
+    await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
+  });
+
   it("bridges the submitted composer marker to a next-task optimistic turn and durable id", async () => {
     const marker = "SS-DEV-TEST-HANDOFF";
     const harness = makeDevelopmentHarness();
@@ -4458,6 +4509,113 @@ describe("guarded development driver actions", () => {
     )).rejects.toThrow(/"pendingApprovalCount":1/);
 
     await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
+  });
+});
+
+describe("incident report and reload ownership bridges", () => {
+  const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+    window.navigator,
+    "clipboard",
+  );
+
+  afterEach(() => {
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  it("reads only an exact persisted incident copy", async () => {
+    const reportId = `report_${"a".repeat(32)}`;
+    const serialized = `{"report_id":"${reportId}"}`;
+    const readText = jest.fn(async () => serialized);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { readText },
+    });
+    const { ctx, read } = makeContext(jest.fn(async () => serialized));
+
+    await expect(runDriverAction(
+      ctx,
+      "chat.readCopiedIncidentReport",
+      {},
+    )).resolves.toEqual({ reportId, serialized });
+    expect(readText).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith(
+      `.systemsculpt/diagnostics/incidents/${reportId}.json`,
+    );
+
+    read.mockResolvedValueOnce(`${serialized}\n`);
+    await expect(runDriverAction(
+      ctx,
+      "chat.readCopiedIncidentReport",
+      {},
+    )).rejects.toThrow(/differs from its stored bytes/);
+  });
+
+  it("restores exact reload ownership, trashes only its chat, and restores the prior chat", async () => {
+    const marker = "SS-DEV-TEST-RELOAD";
+    const savedText = `<!-- SYSTEMSCULPT-MESSAGE-START role="user" -->\n${marker} request\n`;
+    const before = makeDevelopmentHarness({ chatId: "private-chat" });
+    before.adapterRead.mockResolvedValue(savedText);
+    await runDriverAction(before.ctx, "chat.beginDevelopmentState", { marker });
+    before.send.onclick = () => {
+      before.view.chatId = "owned-chat";
+      before.input.value = "";
+      const turn = document.createElement("div");
+      turn.className = "systemsculpt-agent-turn is-user";
+      turn.textContent = `${marker} request`;
+      before.container.append(turn);
+    };
+    await runDriverAction(before.ctx, "chat.typeDevelopmentDraft", {
+      text: "request",
+      submit: true,
+    });
+    const receipt = await runDriverAction(
+      before.ctx,
+      "chat.exportDevelopmentOwnershipReceipt",
+      {},
+    ) as Record<string, unknown>;
+    expect(receipt).toMatchObject({
+      version: 1,
+      marker,
+      ownedChatId: "owned-chat",
+      previousChatId: "private-chat",
+      chatPath: "SystemSculpt/Chats/owned-chat.md",
+    });
+    expect(receipt.chatSha256).toMatch(/^[a-f0-9]{64}$/);
+    await runDriverAction(before.ctx, "chat.resetDevelopmentState", { marker });
+
+    const after = makeDevelopmentHarness({ chatId: "owned-chat" });
+    after.adapterRead.mockResolvedValue(savedText);
+    const restoredTurn = document.createElement("div");
+    restoredTurn.className = "systemsculpt-agent-turn is-user";
+    restoredTurn.textContent = `${marker} request`;
+    after.container.append(restoredTurn);
+    const chatFile = { path: "SystemSculpt/Chats/owned-chat.md" };
+    after.getAbstractFileByPath.mockImplementation((path) =>
+      path === chatFile.path ? chatFile : null);
+
+    await expect(runDriverAction(
+      after.ctx,
+      "chat.importDevelopmentOwnershipReceipt",
+      { receipt },
+    )).resolves.toEqual({
+      restored: true,
+      exactChatBytesPreserved: true,
+      markerRestored: true,
+    });
+    await expect(runDriverAction(after.ctx, "chat.resetDevelopmentState", {
+      marker,
+      trashSavedChat: true,
+    })).resolves.toMatchObject({
+      trashedChat: true,
+      restoredPreviousChat: true,
+    });
+    expect(after.trashFile).toHaveBeenCalledTimes(1);
+    expect(after.trashFile).toHaveBeenCalledWith(chatFile);
+    expect(after.view.loadChatById).toHaveBeenCalledWith("private-chat");
   });
 });
 

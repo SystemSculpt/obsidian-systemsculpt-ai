@@ -15,6 +15,22 @@ export interface ResourceSample {
   note?: string;
 }
 
+export type IncidentResourceSample = Readonly<{
+  captured_at: string;
+  heap_used_mb?: number;
+  heap_limit_mb?: number;
+  rss_mb?: number;
+  cpu_percent?: number;
+  event_loop_lag_ms?: number;
+  freeze_delta_ms?: number;
+}>;
+
+export interface IncidentResourceWindowOptions {
+  beforeMs?: number;
+  afterMs?: number;
+  limit?: number;
+}
+
 interface MonitorOptions {
   intervalMs?: number;
   metricsFileName?: string;
@@ -22,6 +38,12 @@ interface MonitorOptions {
 }
 
 const DEFAULT_METRICS_FILE = "resource-metrics.ndjson";
+const INCIDENT_TERMINAL_NOTE = "incident-terminal";
+const DEFAULT_INCIDENT_WINDOW_BEFORE_MS = 60_000;
+const DEFAULT_INCIDENT_WINDOW_AFTER_MS = 5_000;
+const DEFAULT_INCIDENT_WINDOW_LIMIT = 12;
+const MAX_INCIDENT_WINDOW_MS = 5 * 60_000;
+const MAX_INCIDENT_WINDOW_LIMIT = 24;
 const LAG_WARN_THRESHOLD_MS = 200;
 const FREEZE_WARN_THRESHOLD_MS = 800;
 const ALERT_COOLDOWN_MS: Record<string, number> = {
@@ -70,9 +92,11 @@ export class ResourceMonitorService {
       source: "ResourceMonitor",
       metadata: { intervalMs: this.samplingIntervalMs },
     });
-    this.collectAndPersistSample("startup");
+    void this.collectAndPersistSample("startup").catch(() => undefined);
     if (typeof window !== "undefined") {
-      this.intervalId = window.setInterval(() => this.collectAndPersistSample(), this.samplingIntervalMs);
+      this.intervalId = window.setInterval(() => {
+        void this.collectAndPersistSample().catch(() => undefined);
+      }, this.samplingIntervalMs);
       this.startStartupBurstSampling();
       this.startLagProbe();
       this.subscribeToFreezeEvents();
@@ -102,8 +126,79 @@ export class ResourceMonitorService {
     return this.collectAndPersistSample(note);
   }
 
+  /**
+   * Captures the terminal resource state without delaying incident handling on diagnostics storage.
+   * The returned projection contains only allowlisted scalar metrics and never exposes the internal note.
+   */
+  captureIncidentTerminalSample(): IncidentResourceSample {
+    const sample = this.collectSample(INCIDENT_TERMINAL_NOTE);
+    this.bufferAndCheckSample(sample);
+    this.writeSampleDetached(sample);
+    return projectIncidentResourceSample(sample) ?? Object.freeze({ captured_at: sample.iso });
+  }
+
   getRecentSamples(limit: number = 10): ResourceSample[] {
     return this.samples.slice(-limit);
+  }
+
+  /**
+   * Returns a count-bounded and time-bounded incident-safe window in chronological order.
+   */
+  getIncidentResourceSamplesAround(
+    timestamp: number,
+    options: IncidentResourceWindowOptions = {},
+  ): IncidentResourceSample[] {
+    if (!Number.isFinite(timestamp)) {
+      return [];
+    }
+
+    const beforeMs = normalizeBoundedWholeNumber(
+      options.beforeMs,
+      DEFAULT_INCIDENT_WINDOW_BEFORE_MS,
+      MAX_INCIDENT_WINDOW_MS,
+    );
+    const afterMs = normalizeBoundedWholeNumber(
+      options.afterMs,
+      DEFAULT_INCIDENT_WINDOW_AFTER_MS,
+      MAX_INCIDENT_WINDOW_MS,
+    );
+    const limit = normalizeBoundedWholeNumber(
+      options.limit,
+      DEFAULT_INCIDENT_WINDOW_LIMIT,
+      MAX_INCIDENT_WINDOW_LIMIT,
+    );
+    if (limit === 0) {
+      return [];
+    }
+
+    const windowStart = timestamp - beforeMs;
+    const windowEnd = timestamp + afterMs;
+    const candidates = this.samples
+      .map((sample, index) => ({ sample, index }))
+      .filter(({ sample }) => (
+        Number.isFinite(sample.timestamp)
+        && sample.timestamp >= windowStart
+        && sample.timestamp <= windowEnd
+      ));
+
+    const selected = candidates.length <= limit
+      ? candidates
+      : candidates
+        .sort((left, right) => {
+          const distance = Math.abs(left.sample.timestamp - timestamp) - Math.abs(right.sample.timestamp - timestamp);
+          if (distance !== 0) return distance;
+          const capturedAt = left.sample.timestamp - right.sample.timestamp;
+          return capturedAt !== 0 ? capturedAt : left.index - right.index;
+        })
+        .slice(0, limit);
+
+    return selected
+      .sort((left, right) => {
+        const capturedAt = left.sample.timestamp - right.sample.timestamp;
+        return capturedAt !== 0 ? capturedAt : left.index - right.index;
+      })
+      .map(({ sample }) => projectIncidentResourceSample(sample))
+      .filter((sample): sample is IncidentResourceSample => sample !== null);
   }
 
   buildSummary(lines: number = 8): string {
@@ -157,14 +252,18 @@ export class ResourceMonitorService {
 
   private async collectAndPersistSample(note?: string): Promise<ResourceSample> {
     const sample = this.collectSample(note);
+    this.bufferAndCheckSample(sample);
+    await this.writeSample(sample);
+    return sample;
+  }
+
+  private bufferAndCheckSample(sample: ResourceSample): void {
     this.samples.push(sample);
     if (this.samples.length > this.maxSamples) {
       this.samples.shift();
     }
 
     this.checkThresholds(sample);
-    await this.writeSample(sample);
-    return sample;
   }
 
   private collectSample(note?: string): ResourceSample {
@@ -271,11 +370,24 @@ export class ResourceMonitorService {
         ...sample,
         sessionId: this.sessionId ?? null,
       };
-      await storage.appendToFile("diagnostics", this.metricsFileName, `${JSON.stringify(payload)}\n`);
+      const result = await storage.appendToFile("diagnostics", this.metricsFileName, `${JSON.stringify(payload)}\n`);
+      if (result?.success === false) {
+        this.logger.error("Failed to write resource metrics", undefined, {
+          source: "ResourceMonitor",
+        });
+      }
     } catch (error) {
       this.logger.error("Failed to write resource metrics", error, {
         source: "ResourceMonitor",
       });
+    }
+  }
+
+  private writeSampleDetached(sample: ResourceSample): void {
+    try {
+      void this.writeSample(sample).catch(() => undefined);
+    } catch {
+      // Resource diagnostics must stay observational, including synchronous write failures.
     }
   }
 
@@ -298,12 +410,28 @@ export class ResourceMonitorService {
       return;
     }
     this.freezeEventHandler = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      const deltaMs = detail?.deltaMs;
-      if (typeof deltaMs === "number") {
+      try {
+        const detail = (event as CustomEvent).detail;
+        const deltaMs = detail?.deltaMs;
+        if (typeof deltaMs !== "number") {
+          return;
+        }
+
         const timestamp = Date.now();
-        const memoryUsage = this.readMemoryUsage();
-        const cpuPercent = this.captureCpuPercent(timestamp);
+        let memoryUsage: Partial<ResourceSample> = {};
+        try {
+          memoryUsage = { ...this.readMemoryUsage() };
+        } catch {
+          // A failed platform metric must not suppress the remaining freeze evidence.
+        }
+
+        let cpuPercent: number | undefined;
+        try {
+          cpuPercent = this.captureCpuPercent(timestamp);
+        } catch {
+          // CPU APIs differ across Electron versions and can fail independently.
+        }
+
         const lagValue = Math.max(this.lastLagMs, deltaMs);
         const sample: ResourceSample = {
           timestamp,
@@ -314,12 +442,14 @@ export class ResourceMonitorService {
           ...memoryUsage,
           cpuPercent,
         };
-        this.samples.push(sample);
-        if (this.samples.length > this.maxSamples) {
-          this.samples.shift();
+        try {
+          this.bufferAndCheckSample(sample);
+        } catch {
+          // Buffer and threshold logging failures must not block best-effort persistence.
         }
-        this.checkThresholds(sample);
-        void this.writeSample(sample);
+        this.writeSampleDetached(sample);
+      } catch {
+        // Freeze reporting must never add a second failure to the application event loop.
       }
     };
     window.addEventListener("systemsculpt:freeze-detected", this.freezeEventHandler as EventListener);
@@ -338,7 +468,7 @@ export class ResourceMonitorService {
         }
         return;
       }
-      void this.collectAndPersistSample("startup-burst");
+      void this.collectAndPersistSample("startup-burst").catch(() => undefined);
     }, this.startupBurstIntervalMs);
   }
 
@@ -411,6 +541,74 @@ export class ResourceMonitorService {
     this.lastAlertAt[kind] = now;
     return true;
   }
+}
+
+/**
+ * Projects an internal sample through the only resource fields allowed in incident reports.
+ */
+export function projectIncidentResourceSample(sample: unknown): IncidentResourceSample | null {
+  try {
+    if (!sample || typeof sample !== "object" || Array.isArray(sample)) {
+      return null;
+    }
+
+    const candidate = sample as Record<string, unknown>;
+    // Read every allowlisted property once. A getter cannot pass validation
+    // with one value and then place a different value in the report.
+    const raw = {
+      iso: candidate.iso,
+      heapUsedMB: candidate.heapUsedMB,
+      heapLimitMB: candidate.heapLimitMB,
+      rssMB: candidate.rssMB,
+      cpuPercent: candidate.cpuPercent,
+      eventLoopLagMs: candidate.eventLoopLagMs,
+      freezeDeltaMs: candidate.freezeDeltaMs,
+    };
+    if (typeof raw.iso !== "string" || raw.iso.length > 40) {
+      return null;
+    }
+    const parsedCapturedAt = Date.parse(raw.iso);
+    if (!Number.isFinite(parsedCapturedAt) || new Date(parsedCapturedAt).toISOString() !== raw.iso) {
+      return null;
+    }
+
+    const projected: {
+      captured_at: string;
+      heap_used_mb?: number;
+      heap_limit_mb?: number;
+      rss_mb?: number;
+      cpu_percent?: number;
+      event_loop_lag_ms?: number;
+      freeze_delta_ms?: number;
+    } = {
+      captured_at: raw.iso,
+    };
+    const metrics = [
+      ["heap_used_mb", raw.heapUsedMB],
+      ["heap_limit_mb", raw.heapLimitMB],
+      ["rss_mb", raw.rssMB],
+      ["cpu_percent", raw.cpuPercent],
+      ["event_loop_lag_ms", raw.eventLoopLagMs],
+      ["freeze_delta_ms", raw.freezeDeltaMs],
+    ] as const;
+    for (const [key, value] of metrics) {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000_000) {
+        continue;
+      }
+      projected[key] = Math.round(value * 10) / 10;
+    }
+
+    return Object.freeze(projected);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBoundedWholeNumber(value: number | undefined, fallback: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(0, Math.floor(value)));
 }
 
 function formatFileTimestamp(date: Date): string {

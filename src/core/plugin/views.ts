@@ -15,6 +15,7 @@ import {
 type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
 type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
 type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
+const CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS = 1_000;
 type AppWithViewRegistry = App & {
   viewRegistry?: {
     viewByType?: Record<string, unknown>;
@@ -24,6 +25,7 @@ type AppWithViewRegistry = App & {
 type ChatViewLike = ItemView & {
   isFullyLoaded: boolean;
   setState(state: ChatState): Promise<void>;
+  quiesceIncidentProducers?: () => Promise<void>;
   leaf?: WorkspaceLeaf;
 };
 
@@ -366,6 +368,28 @@ export class ViewManager {
 
     this.app.workspace.revealLeaf(leaf);
     return leaf.view as SystemSculptStudioView;
+  }
+
+  /** Waits until live ChatViews can no longer add incident evidence. */
+  async quiesceChatViewProducers(): Promise<void> {
+    const leaves = [...this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)];
+    const barriers = Promise.allSettled(leaves.map(async (leaf) => {
+      const view = leaf.view as ChatViewLike;
+      if (typeof view.quiesceIncidentProducers !== "function") return;
+      await view.quiesceIncidentProducers();
+    })).then(() => undefined);
+    let deadlineTimer: number | null = null;
+    const deadline = new Promise<void>((resolve) => {
+      deadlineTimer = window.setTimeout(
+        resolve,
+        CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS,
+      );
+    });
+    try {
+      await Promise.race([barriers, deadline]);
+    } finally {
+      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+    }
   }
 
   unloadViews() {

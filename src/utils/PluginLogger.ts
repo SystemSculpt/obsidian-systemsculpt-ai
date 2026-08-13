@@ -12,6 +12,9 @@ import {
   isAgentLifecyclePhase,
   isCreditsRefreshReason,
   isHistorySyncKind,
+  isToolDiagnosticFailureClass,
+  isToolDiagnosticOutcome,
+  boundedToolDiagnosticItemCount,
   isThinAgentClientInstanceId,
   isThinAgentConversationId,
   isThinAgentFailureCode,
@@ -21,6 +24,8 @@ import {
   type AgentLifecyclePhase,
   type CreditsRefreshReason,
   type HistorySyncKind,
+  type ToolDiagnosticFailureClass,
+  type ToolDiagnosticOutcome,
 } from "./ThinAgentLifecycleSchema";
 
 export type PluginLogLevel = "info" | "warn" | "error" | "debug";
@@ -59,6 +64,11 @@ export type SupportDiagnosticEvent = Readonly<{
   command_kind?: ThinAgentCommandKind;
   command_segment_ordinal?: number;
   tool_execution_ordinal?: number;
+  tool_outcome?: ToolDiagnosticOutcome;
+  tool_failure_class?: ToolDiagnosticFailureClass;
+  tool_item_count?: number;
+  tool_completed_item_count?: number;
+  tool_failed_item_count?: number;
   history_sync_kind?: HistorySyncKind;
   history_sync_ordinal?: number;
   response_delivery_mode?: "fetch_stream" | "request_url_buffered";
@@ -202,12 +212,20 @@ export class PluginLogger {
     this.write("info", message, undefined, context);
   }
 
-  lifecycle(metadata: Record<string, unknown>): void {
+  lifecycle(metadata: Record<string, unknown>): SupportDiagnosticEvent | null {
     const sanitized = sanitizeLifecycleMetadata(metadata);
-    if (!sanitized) return;
-    this.write("info", "thin-agent:lifecycle", undefined, {
+    if (!sanitized) return null;
+    const entry = this.write("info", "thin-agent:lifecycle", undefined, {
       source: "AgentLifecycle",
-      metadata: sanitized,
+      metadata: redactPersistedLifecycleMetadata(sanitized),
+    });
+    if (!entry) return null;
+    return projectSupportDiagnosticEvent({
+      ...entry,
+      context: {
+        source: "AgentLifecycle",
+        metadata: sanitized,
+      },
     });
   }
 
@@ -239,9 +257,9 @@ export class PluginLogger {
     if (boundedLimit === 0) return [];
 
     return this.buffer
-      .slice(-boundedLimit)
       .map(projectSupportDiagnosticEvent)
-      .filter((entry): entry is SupportDiagnosticEvent => entry !== null);
+      .filter((entry): entry is SupportDiagnosticEvent => entry !== null)
+      .slice(-boundedLimit);
   }
 
   setLogFileName(fileName: string): void {
@@ -250,18 +268,23 @@ export class PluginLogger {
     }
   }
 
-  private write(level: PluginLogLevel, message: string, error?: unknown, context?: PluginLogContext) {
+  private write(
+    level: PluginLogLevel,
+    message: string,
+    error?: unknown,
+    context?: PluginLogContext,
+  ): PluginLogEntry | null {
     // Disabled means inert (#214/#158): once the plugin is unloading, stop
     // buffering and scheduling new diagnostics so nothing writes after disable.
     if (this.drainingForUnload || this.plugin?.isPluginUnloading?.()) {
-      return;
+      return null;
     }
     if (!this.shouldLog(level, context)) {
-      return;
+      return null;
     }
     const thinAgentFailure = normalizeThinAgentFailure(level, message, error, context);
     if (thinAgentFailure && this.isDuplicateThinAgentFailure(thinAgentFailure.dedupeKey)) {
-      return;
+      return null;
     }
 
     const entry: PluginLogEntry = {
@@ -285,10 +308,11 @@ export class PluginLogger {
       // connected, emitted through the strict client-diagnostic contract.
       // Sending them through patched console and ErrorCollector would create
       // duplicate entries and reintroduce arbitrary Error messages/stacks.
-      return;
+      return entry;
     }
     this.emitToConsole(entry, error);
     this.forwardToCollector(entry, error);
+    return entry;
   }
 
   private isDuplicateThinAgentFailure(key: string): boolean {
@@ -407,6 +431,7 @@ export class PluginLogger {
       this.pendingFlush.length = 0;
       return;
     }
+    let entries: PluginLogEntry[] = [];
     try {
       const storage = this.plugin.storage;
       if (!storage) {
@@ -418,13 +443,20 @@ export class PluginLogger {
         return;
       }
 
-      const entries = this.pendingFlush.splice(0, this.pendingFlush.length);
+      entries = this.pendingFlush.splice(0, this.pendingFlush.length);
       if (entries.length === 0) return;
 
       const payload = entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
-      await storage.appendToFile("diagnostics", this.logFileName, payload);
+      const result = await storage.appendToFile("diagnostics", this.logFileName, payload);
+      if (result?.success === false) {
+        throw new Error("Diagnostics storage rejected the log batch.");
+      }
       await this.enforceSizeLimit();
     } catch (error) {
+      if (entries.length > 0 && !this.plugin?.isPluginUnloading?.()) {
+        this.pendingFlush.unshift(...entries);
+        if (!force) this.ensureFlushScheduled();
+      }
       this.emitToConsole(
         {
           level: "error",
@@ -514,9 +546,72 @@ function sanitizeContext(context: PluginLogContext): PluginLogContext {
   return safeContext;
 }
 
-function sanitizeLifecycleMetadata(
+function snapshotLifecycleMetadata(
   metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    code: metadata.code,
+    phase: metadata.phase,
+    sequence: metadata.sequence,
+    timestamp: metadata.timestamp,
+    conversationId: metadata.conversationId,
+    requestId: metadata.requestId,
+    clientInstanceId: metadata.clientInstanceId,
+    pluginBuildId: metadata.pluginBuildId,
+    runId: metadata.runId,
+    serverRunId: metadata.serverRunId,
+    toolName: metadata.toolName,
+    toolCallId: metadata.toolCallId,
+    status: metadata.status,
+    retryable: metadata.retryable,
+    incidentId: metadata.incidentId,
+    failureCode: metadata.failureCode,
+    latencyTraceId: metadata.latencyTraceId,
+    commandKind: metadata.commandKind,
+    commandSegmentOrdinal: metadata.commandSegmentOrdinal,
+    toolExecutionOrdinal: metadata.toolExecutionOrdinal,
+    toolOutcome: metadata.toolOutcome,
+    toolFailureClass: metadata.toolFailureClass,
+    toolItemCount: metadata.toolItemCount,
+    toolCompletedItemCount: metadata.toolCompletedItemCount,
+    toolFailedItemCount: metadata.toolFailedItemCount,
+    historySyncKind: metadata.historySyncKind,
+    historySyncOrdinal: metadata.historySyncOrdinal,
+    responseDeliveryMode: metadata.responseDeliveryMode,
+    clientMonotonicOffsetMs: metadata.clientMonotonicOffsetMs,
+    serverTimingAppMs: metadata.serverTimingAppMs,
+    serverTimingAuthMs: metadata.serverTimingAuthMs,
+    creditsRefreshReason: metadata.creditsRefreshReason,
+    creditsRefreshSequence: metadata.creditsRefreshSequence,
+    creditsRefreshTransport: metadata.creditsRefreshTransport,
+    creditsRefreshElapsedMs: metadata.creditsRefreshElapsedMs,
+    creditsRefreshServerAuthMs: metadata.creditsRefreshServerAuthMs,
+    creditsRefreshServerRateLimitMs: metadata.creditsRefreshServerRateLimitMs,
+    creditsRefreshServerBalanceStoreMs: metadata.creditsRefreshServerBalanceStoreMs,
+    creditsRefreshServerTotalMs: metadata.creditsRefreshServerTotalMs,
+  };
+}
+
+function redactPersistedLifecycleMetadata(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const persisted = { ...metadata };
+  delete persisted.conversationId;
+  delete persisted.requestId;
+  delete persisted.clientInstanceId;
+  delete persisted.toolCallId;
+  return persisted;
+}
+
+function sanitizeLifecycleMetadata(
+  input: Record<string, unknown>,
 ): Record<string, unknown> | null {
+  let metadata: Record<string, unknown>;
+  try {
+    metadata = snapshotLifecycleMetadata(input);
+  } catch {
+    return null;
+  }
   const code = isAgentLifecycleCode(metadata.code)
     ? metadata.code
     : undefined;
@@ -592,6 +687,20 @@ function sanitizeLifecycleMetadata(
     && (metadata.toolExecutionOrdinal as number) <= MAX_TOOL_EXECUTION_ORDINAL
   ) {
     sanitized.toolExecutionOrdinal = metadata.toolExecutionOrdinal;
+  }
+  if (isToolDiagnosticOutcome(metadata.toolOutcome)) {
+    sanitized.toolOutcome = metadata.toolOutcome;
+  }
+  if (isToolDiagnosticFailureClass(metadata.toolFailureClass)) {
+    sanitized.toolFailureClass = metadata.toolFailureClass;
+  }
+  for (const key of [
+    "toolItemCount",
+    "toolCompletedItemCount",
+    "toolFailedItemCount",
+  ] as const) {
+    const value = boundedToolDiagnosticItemCount(metadata[key]);
+    if (value !== undefined) sanitized[key] = value;
   }
   if (isHistorySyncKind(metadata.historySyncKind)) {
     sanitized.historySyncKind = metadata.historySyncKind;
@@ -732,6 +841,11 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     command_kind?: ThinAgentCommandKind;
     command_segment_ordinal?: number;
     tool_execution_ordinal?: number;
+    tool_outcome?: ToolDiagnosticOutcome;
+    tool_failure_class?: ToolDiagnosticFailureClass;
+    tool_item_count?: number;
+    tool_completed_item_count?: number;
+    tool_failed_item_count?: number;
     history_sync_kind?: HistorySyncKind;
     history_sync_ordinal?: number;
     response_delivery_mode?: "fetch_stream" | "request_url_buffered";
@@ -851,6 +965,28 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     && (metadata.toolExecutionOrdinal as number) <= MAX_TOOL_EXECUTION_ORDINAL
   ) {
     projected.tool_execution_ordinal = metadata.toolExecutionOrdinal as number;
+  }
+  if (isLifecycle && isToolDiagnosticOutcome(metadata.toolOutcome)) {
+    projected.tool_outcome = metadata.toolOutcome;
+  }
+  if (isLifecycle && isToolDiagnosticFailureClass(metadata.toolFailureClass)) {
+    projected.tool_failure_class = metadata.toolFailureClass;
+  }
+  const toolItemCount = boundedToolDiagnosticItemCount(metadata.toolItemCount);
+  const toolCompletedItemCount = boundedToolDiagnosticItemCount(
+    metadata.toolCompletedItemCount,
+  );
+  const toolFailedItemCount = boundedToolDiagnosticItemCount(
+    metadata.toolFailedItemCount,
+  );
+  if (isLifecycle && toolItemCount !== undefined) {
+    projected.tool_item_count = toolItemCount;
+  }
+  if (isLifecycle && toolCompletedItemCount !== undefined) {
+    projected.tool_completed_item_count = toolCompletedItemCount;
+  }
+  if (isLifecycle && toolFailedItemCount !== undefined) {
+    projected.tool_failed_item_count = toolFailedItemCount;
   }
   if (isLifecycle && isHistorySyncKind(metadata.historySyncKind)) {
     projected.history_sync_kind = metadata.historySyncKind;

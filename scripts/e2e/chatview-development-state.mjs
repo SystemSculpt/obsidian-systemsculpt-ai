@@ -1,15 +1,13 @@
 const DEVELOPMENT_ROOT = "SystemSculpt/Development Tests";
 
-// The final part must be the durable marker text itself. Anchoring on
-// :last-child keeps the assertion exact while tolerating conversational
-// prose the model may stream before its tool calls — the locator resolves
-// the first visible match, so an unanchored selector would grab that prose
-// instead of the marker.
+// The final content part must be the durable marker text itself. A failed
+// response may append its terminal error card after that text.
 export const LATEST_DURABLE_ASSISTANT_TEXT =
   "chat:.systemsculpt-agent-history"
   + " > .systemsculpt-agent-turn.is-assistant:last-child"
   + " > .systemsculpt-agent-turn-body"
-  + " > .systemsculpt-agent-part.is-text:last-child";
+  + " > .systemsculpt-agent-part.is-text:is("
+  + ":last-child, :has(+ .systemsculpt-agent-part.is-error:last-child))";
 
 export function makeDevelopmentContext(prefix, now) {
   const runId = `${prefix}${now.toString(36).toUpperCase().padStart(2, "0")}`;

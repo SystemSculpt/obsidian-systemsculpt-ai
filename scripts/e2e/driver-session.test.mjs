@@ -19,6 +19,7 @@ import {
   runScenario,
   runSteps,
   scenarioFromModule,
+  validateIncidentReportCopy,
   validateScenario,
   writeHandshakeFileAtomically,
 } from "./driver-session.mjs";
@@ -69,12 +70,143 @@ function connectFakeDriver(pluginDir, {
       return;
     }
     if (message.type !== "action") return;
-    const reply = replies[message.action] ?? { ok: true, result: { echoed: message.action } };
+    const configured = replies[message.action];
+    const reply = typeof configured === "function"
+      ? configured(message)
+      : configured ?? { ok: true, result: { echoed: message.action } };
     if (reply.defer === true) return;
     socket.send(JSON.stringify({ type: "result", id: message.id, ...reply }));
   });
   return socket;
 }
+
+function canonicalForTest(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalForTest).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) =>
+    `${JSON.stringify(key)}:${canonicalForTest(value[key])}`).join(",")}}`;
+}
+
+function incidentReportText() {
+  const report = {
+    schema_version: "systemsculpt.incident/2",
+    report_id: `report_${"a".repeat(32)}`,
+    created_at: "2026-08-13T12:00:00.000Z",
+    incident: {
+      classification: "operation_failure",
+      impact: "run_failed",
+      outcome: "failed",
+      severity_text: "ERROR",
+      severity_number: 17,
+      failure_authority: "server",
+      origin: "agent_terminal",
+      terminal_evidence: "server_protocol_validated",
+      artifact_integrity: "unauthenticated_client_record",
+      evidence_scope: "client_observation_only",
+      causal_assessment: "not_established",
+      observation_source: "server_protocol_terminal",
+      failure_stage: "response_terminal",
+      failure_mechanism: "service_terminal",
+      failure_code: "agent_turn_failed",
+      retryable: true,
+    },
+    correlation: {},
+    grouping: {
+      strategy: "systemsculpt.failure-contract/1",
+      fingerprint: "systemsculpt.failure-contract/1|authority=server|stage=response_terminal|mechanism=service_terminal|failure=agent_turn_failed|status=not_recorded|terminal=not_recorded",
+    },
+    environment: {},
+    run_summary: {
+      partial_output: {
+        assistant_text_part_count: 1,
+        assistant_text_character_count: 27,
+      },
+    },
+    tools: [],
+    timeline: [],
+    transport_segments: [],
+    rendering: {
+      before_terminal_publish: {
+        first_dom_commit_observed: false,
+        first_paint_opportunity_observed: false,
+      },
+      after_terminal_commit: {
+        first_dom_commit_observed: true,
+        first_paint_opportunity_observed: true,
+      },
+      failure_surface_dom_committed: true,
+      failure_surface_paint_opportunity_observed: true,
+    },
+    resource_samples: [],
+    capture_quality: { report_bytes: 1 },
+    privacy: {
+      policy: "strict_allowlist_content_free",
+      policy_version: "systemsculpt.incident-privacy/1",
+      capture_implementation_version: "agent-incident-recorder/1",
+      storage_target: "vault_local",
+      host_sync: "may_sync_with_vault",
+      automatic_upload: false,
+      excluded_data_categories: [
+        "prompt_text",
+        "assistant_text",
+        "reasoning_text",
+        "vault_names",
+        "paths_and_filenames",
+        "file_contents",
+        "tool_arguments_and_results",
+        "tool_call_ids",
+        "search_queries",
+        "urls",
+        "provider_and_model_names",
+        "license_and_account_data",
+        "tokens_and_headers",
+        "raw_errors_and_stacks",
+        "hostnames_usernames_and_device_ids",
+        "conversation_and_request_ids",
+      ],
+    },
+  };
+  for (;;) {
+    const serialized = canonicalForTest(report);
+    const bytes = Buffer.byteLength(serialized, "utf8");
+    if (report.capture_quality.report_bytes === bytes) return serialized;
+    report.capture_quality.report_bytes = bytes;
+  }
+}
+
+test("incident copy validation enforces canonical privacy and rendering evidence", () => {
+  const serialized = incidentReportText();
+  const validated = validateIncidentReportCopy(serialized);
+  assert.equal(validated.reportId, `report_${"a".repeat(32)}`);
+  assert.equal(validated.bytes, Buffer.byteLength(serialized, "utf8"));
+  assert.match(validated.sha256, /^[a-f0-9]{64}$/u);
+  assert.throws(
+    () => validateIncidentReportCopy(`${serialized}\n`),
+    /not canonical JSON|validation failed/u,
+  );
+  assert.throws(
+    () => validateIncidentReportCopy(serialized, { forbiddenStrings: ["systemsculpt.incident/2"] }),
+    /private canary/u,
+  );
+  const missingPaint = canonicalForTest({
+    ...JSON.parse(serialized),
+    rendering: {
+      ...JSON.parse(serialized).rendering,
+      failure_surface_paint_opportunity_observed: false,
+    },
+  });
+  assert.throws(
+    () => validateIncidentReportCopy(missingPaint),
+    /rendering evidence is incomplete|byte accounting is invalid/u,
+  );
+  const deprecatedIncidentFields = JSON.parse(serialized);
+  deprecatedIncidentFields.incident.handled = true;
+  deprecatedIncidentFields.incident.synthetic = false;
+  assert.throws(
+    () => validateIncidentReportCopy(canonicalForTest(deprecatedIncidentFields)),
+    /terminal evidence is invalid/u,
+  );
+});
 
 test("resolvePluginTarget prefers explicit paths and validates config targets", () => {
   const explicit = resolvePluginTarget({ explicitPath: "/tmp/vault/.obsidian/plugins/systemsculpt-ai" });
@@ -336,6 +468,104 @@ test("DriverSession writes a valid handshake, accepts the driver, and round-trip
   } finally {
     session.close();
     assert.equal(fs.existsSync(path.join(pluginDir, HANDSHAKE_FILE)), false);
+    fs.rmSync(pluginDir, { recursive: true, force: true });
+  }
+});
+
+test("harness actions preserve incident bytes and ownership across one plugin reload", async () => {
+  const pluginDir = makeTempPluginDir();
+  fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+    id: "systemsculpt-ai",
+    version: "0.0.0-test",
+  }));
+  const serialized = incidentReportText();
+  const reportId = `report_${"a".repeat(32)}`;
+  const receipt = {
+    version: 1,
+    marker: "SS-DEV-TEST-RELOAD",
+    ownedChatId: "owned-chat",
+    previousChatId: "previous-chat",
+    initialApprovalMode: "ask",
+    chatPath: "SystemSculpt/Chats/owned-chat.md",
+    chatSha256: "b".repeat(64),
+  };
+  let owner;
+  let replacement;
+  let importedReceipt = null;
+  const cleanLogs = {
+    ok: true,
+    result: { entries: [], lastSeq: 0, dropped: 0 },
+  };
+  const replacementReplies = {
+    logs: cleanLogs,
+    "chat.importDevelopmentOwnershipReceipt": (message) => {
+      importedReceipt = message.params.receipt;
+      return { ok: true, result: { restored: true } };
+    },
+    "chat.readCopiedIncidentReport": {
+      ok: true,
+      result: { reportId, serialized },
+    },
+  };
+  const session = new DriverSession({
+    pluginDir,
+    connectTimeoutMs: 5000,
+    actionTimeoutMs: 5000,
+    reloadPlugin: async ({ pluginId, vault }) => {
+      assert.equal(pluginId, "systemsculpt-ai");
+      assert.equal(vault, "fixture-vault");
+      const closed = new Promise((resolve) => owner.once("close", resolve));
+      owner.close(1000, "fixture reload");
+      await closed;
+      replacement = connectFakeDriver(pluginDir, { replies: replacementReplies });
+    },
+  });
+  try {
+    const connected = session.connect();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    owner = connectFakeDriver(pluginDir, {
+      replies: {
+        logs: cleanLogs,
+        "chat.exportDevelopmentOwnershipReceipt": {
+          ok: true,
+          result: receipt,
+        },
+        "chat.readCopiedIncidentReport": {
+          ok: true,
+          result: { reportId, serialized },
+        },
+      },
+    });
+    await connected;
+
+    await session.run("e2e.console.baseline");
+    const captured = await session.run("e2e.incident.captureCopiedReport");
+    assert.equal(captured.captured, true);
+    assert.equal(captured.reportId, reportId);
+    assert.equal("serialized" in captured, false);
+
+    const reloaded = await session.run("e2e.plugin.reloadOwnedDevelopmentChat", {
+      timeoutMs: 5000,
+    });
+    assert.deepEqual(reloaded, {
+      reloaded: true,
+      exactPluginIdentityPreserved: true,
+      developmentOwnershipRestored: true,
+    });
+    assert.deepEqual(importedReceipt, receipt);
+
+    const exact = await session.run("e2e.incident.assertCopiedReportExact");
+    assert.equal(exact.exact, true);
+    assert.equal(exact.reportId, reportId);
+    assert.equal("serialized" in exact, false);
+    assert.deepEqual(await session.run("e2e.console.assertNoErrors"), {
+      exact: true,
+      addedConsoleErrors: 0,
+    });
+  } finally {
+    replacement?.close();
+    owner?.close();
+    session.close();
     fs.rmSync(pluginDir, { recursive: true, force: true });
   }
 });

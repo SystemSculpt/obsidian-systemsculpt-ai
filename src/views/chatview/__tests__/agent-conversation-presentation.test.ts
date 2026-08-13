@@ -5,6 +5,18 @@ import {
 } from "../AgentConversationPresentation";
 
 describe("AgentConversationPresentation product-copy boundary", () => {
+  it("prefers the plugin-local report ID for client-only failures", () => {
+    expect(presentAgentError({
+      code: "response_start_failed",
+      message: "private transport text",
+      retryable: true,
+      reportId: `report_${"f".repeat(32)}`,
+    }, true)).toMatchObject({
+      heading: "Could not finish",
+      reportId: `report_${"f".repeat(32)}`,
+    });
+  });
+
   it.each([
     {
       code: "agent_connection_closed",
@@ -102,7 +114,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
-  it("omits the report id when a retry is the fix", () => {
+  it("keeps the report id available when a retry may recover the turn", () => {
     expect(presentAgentError({
       code: "agent_connection_closed",
       message: "The agent connection ticket is invalid.",
@@ -111,6 +123,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     }, true)).toEqual({
       heading: "Response interrupted",
       message: "Retry this message to continue.",
+      reportId: "incident_0123456789abcdef0123456789abcdef",
     });
   });
 

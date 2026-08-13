@@ -47,7 +47,7 @@
 }
 .systemsculpt-agent-error-report {
   overflow-wrap: anywhere;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-xs);
   line-height: 1.5;
@@ -237,8 +237,10 @@
   font-size: var(--ss-text-sm);
   color: var(--ss-danger);
 }
-.systemsculpt-agent-error-retry {
-  align-self: flex-start;
+.systemsculpt-agent-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
   margin-top: var(--ss-space-2);
 }
 .systemsculpt-agent-approval {

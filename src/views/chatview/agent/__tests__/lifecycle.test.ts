@@ -11,6 +11,7 @@ import {
   HISTORY_SYNC_KINDS as SHARED_HISTORY_SYNC_KINDS,
   THIN_AGENT_LIFECYCLE_CODES as SHARED_THIN_AGENT_LIFECYCLE_CODES,
   THIN_AGENT_LIFECYCLE_PHASES as SHARED_THIN_AGENT_LIFECYCLE_PHASES,
+  isThinAgentRequestId,
 } from "../../../../utils/ThinAgentLifecycleSchema";
 
 describe("AgentLifecycle privacy-safe chronology", () => {
@@ -199,6 +200,48 @@ describe("AgentLifecycle privacy-safe chronology", () => {
     ]) {
       expect(serializedRecord).not.toContain(forbidden);
     }
+  });
+
+  it("rejects synthetic all-zero server identifiers", () => {
+    const lifecycle = new AgentLifecycle(() => undefined, () => 101);
+
+    expect(lifecycle.record({
+      code: "run_finished_failed",
+      phase: "response",
+      serverRunId: `run_${"0".repeat(32)}`,
+      incidentId: `incident_${"0".repeat(32)}`,
+      failureCode: "response_failed",
+      retryable: true,
+    })).toEqual({
+      sequence: 1,
+      timestamp: 101,
+      code: "run_finished_failed",
+      phase: "response",
+      failureCode: "response_failed",
+      retryable: true,
+    });
+  });
+
+  it.each([
+    ["UUID version 1", "user-01234567-89ab-1cde-8fab-0123456789ab"],
+    ["UUID version 8", "user-abcdef01-2345-8abc-bdef-0123456789ab"],
+    ["short timestamp form", "user-1700000000-abcde"],
+    ["long timestamp form", "user-1234567890123456-abcdefghijklmnopqrst"],
+  ])("accepts the generated %s request ID", (_case, requestId) => {
+    expect(isThinAgentRequestId(requestId)).toBe(true);
+  });
+
+  it.each([
+    ["all-zero UUID", "user-00000000-0000-0000-0000-000000000000"],
+    ["unsupported UUID version", "user-01234567-89ab-9cde-8fab-0123456789ab"],
+    ["unsupported UUID variant", "user-01234567-89ab-4cde-cfab-0123456789ab"],
+    ["uppercase UUID", "user-01234567-89AB-4CDE-8FAB-0123456789AB"],
+    ["short timestamp", "user-123456789-abcde"],
+    ["short suffix", "user-1700000000-abcd"],
+    ["unsafe URL", "https://private.example/user-1700000000-abcde"],
+    ["non-string", null],
+  ])("rejects the %s request ID", (_case, requestId) => {
+    expect(isThinAgentRequestId(requestId)).toBe(false);
   });
 
   it.each([
@@ -401,5 +444,90 @@ describe("AgentLifecycle privacy-safe chronology", () => {
       code: "session_opened",
       phase: "session",
     })).not.toThrow();
+  });
+
+  it("contains revoked inputs and throwing clocks without consuming sequence", () => {
+    const persisted: unknown[] = [];
+    let clockCalls = 0;
+    const lifecycle = new AgentLifecycle(
+      (record) => persisted.push(record),
+      () => {
+        clockCalls += 1;
+        if (clockCalls === 1) throw new Error("clock unavailable");
+        return 900;
+      },
+    );
+    const revoked = Proxy.revocable({
+      code: "run_started",
+      phase: "response",
+    }, {});
+    revoked.revoke();
+
+    expect(() => lifecycle.record(
+      revoked.proxy as unknown as AgentLifecycleInput,
+    )).not.toThrow();
+    expect(lifecycle.record(
+      revoked.proxy as unknown as AgentLifecycleInput,
+    )).toBeNull();
+    expect(() => lifecycle.record({
+      code: "run_started",
+      phase: "response",
+    })).not.toThrow();
+    expect(persisted).toEqual([]);
+    expect(lifecycle.record({
+      code: "session_opened",
+      phase: "session",
+    })).toEqual({
+      sequence: 1,
+      timestamp: 900,
+      code: "session_opened",
+      phase: "session",
+    });
+  });
+
+  it("reads each allowlisted input property once and never reads other properties", () => {
+    const reads = new Map<PropertyKey, number>();
+    const values = {
+      code: "local_tool_completed_failed",
+      phase: "tool_execution",
+      status: 503,
+      retryable: true,
+      toolName: "read",
+      toolOutcome: "failed",
+      toolFailureClass: "operation_failed",
+      toolItemCount: 2,
+      toolCompletedItemCount: 1,
+      toolFailedItemCount: 1,
+      prompt: "private prompt",
+    };
+    const changing = new Proxy(values, {
+      get(target, property, receiver) {
+        const count = (reads.get(property) ?? 0) + 1;
+        reads.set(property, count);
+        if (count > 1) throw new Error(`property read twice: ${String(property)}`);
+        if (property === "prompt") throw new Error("private property read");
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const lifecycle = new AgentLifecycle(() => undefined, () => 901);
+
+    expect(lifecycle.record(
+      changing as unknown as AgentLifecycleInput,
+    )).toEqual({
+      sequence: 1,
+      timestamp: 901,
+      code: "local_tool_completed_failed",
+      phase: "tool_execution",
+      toolName: "read",
+      status: 503,
+      retryable: true,
+      toolOutcome: "failed",
+      toolFailureClass: "operation_failed",
+      toolItemCount: 2,
+      toolCompletedItemCount: 1,
+      toolFailedItemCount: 1,
+    });
+    expect([...reads.values()].every((count) => count === 1)).toBe(true);
+    expect(reads.has("prompt")).toBe(false);
   });
 });

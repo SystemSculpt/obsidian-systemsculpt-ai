@@ -36,6 +36,10 @@ import {
   type AgentConversationPresentation,
 } from "./AgentConversationPresentation";
 import {
+  isLocalReportId,
+  normalizeFailedTerminalReceipt,
+} from "./FailedTerminalReceipt";
+import {
   presentAgentTool,
   presentAgentToolDetails,
   presentAgentToolFailure,
@@ -61,10 +65,31 @@ export type AgentConversationRendererOptions = Readonly<{
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
+  onCopyIncidentReport?: (
+    reportId: string,
+  ) => boolean | "memory_fallback" | Promise<boolean | "memory_fallback">;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
   onCopyText?: (text: string) => boolean | Promise<boolean>;
+}>;
+
+export type AgentConversationRendererIncidentSnapshot = Readonly<{
+  renderPassCount: number;
+  pendingRenderPassCount: number;
+  lastRenderDurationMs: number;
+  maxRenderDurationMs: number;
+  historicalRowCount: number;
+  historicalPartCount: number;
+  activePartCount: number;
+  disclosureCount: number;
+  openDisclosureCount: number;
+  activityDisclosureCount: number;
+  reasoningDisclosureCount: number;
+  toolDisclosureCount: number;
+  overflowDisclosureCount: number;
+  pendingHydrationCount: number;
+  renderingEnabled: boolean;
 }>;
 
 export type AgentInlineMessageEdit = Readonly<{
@@ -89,6 +114,26 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
 }
 
 const ACTIONABLE_ARTIFACT_TOOLS = new Set(["write", "edit", "multi_edit", "move"]);
+const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
+const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
+
+type IncidentDisclosureKind = "activity" | "reasoning" | "tool" | "overflow";
+
+type IncidentDisclosureState = {
+  kind: IncidentDisclosureKind;
+  available: boolean;
+  open: boolean;
+};
+
+function boundedIncidentRenderCount(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
+}
+
+function boundedIncidentRenderDuration(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
+}
 
 function toolPartKey(callId: string): string {
   return `tool:${callId}`;
@@ -117,6 +162,29 @@ type HistoricalTurnSemantics = Readonly<{
   copyText: string;
 }>;
 
+type DurableFailedReceipt = Readonly<{
+  messageId: string;
+  reportId: string;
+  incidentId?: string;
+  failureCode: string;
+  retryable: boolean;
+  serverRunId?: string;
+}>;
+
+function durableFailedReceipt(message: ChatMessage): DurableFailedReceipt | null {
+  if (message.role !== "assistant") return null;
+  const receipt = normalizeFailedTerminalReceipt(message);
+  if (!receipt) return null;
+  return Object.freeze({
+    messageId: message.message_id,
+    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId!,
+    ...(receipt.terminalIncidentId ? { incidentId: receipt.terminalIncidentId } : {}),
+    failureCode: receipt.terminalFailureCode,
+    retryable: receipt.terminalRetryable,
+    ...(receipt.terminalServerRunId ? { serverRunId: receipt.terminalServerRunId } : {}),
+  });
+}
+
 type HistoricalPartPartition = Readonly<{
   workParts: readonly MessagePart[];
   finalAnswers: readonly MessagePart[];
@@ -128,17 +196,19 @@ type HistoricalActivityHydrationState = {
   summary: HTMLElement;
   body: HTMLElement;
   parts: readonly MessagePart[];
-  status: "cold" | "hydrating" | "hydrated" | "disposed";
+  status: HistoricalHydrationStatus;
   staging: HTMLElement | null;
   hydration: Promise<void> | null;
 };
 
 type HistoricalOverflowHydrationState = {
   parts: readonly MessagePart[];
-  status: "cold" | "hydrating" | "hydrated" | "disposed";
+  status: HistoricalHydrationStatus;
   staging: HTMLElement | null;
   hydration: Promise<void> | null;
 };
+
+type HistoricalHydrationStatus = "cold" | "hydrating" | "hydrated" | "disposed";
 
 type ToolApprovalPreviewHydrationState = {
   approval: HTMLElement;
@@ -401,6 +471,8 @@ export class AgentConversationRenderer extends Component {
   private historyRows = new Map<string, HistoricalRowState>();
   private historyMessageIds: ReadonlySet<string> = new Set<string>();
   private committedCancelledMessageIds: ReadonlySet<string> = new Set<string>();
+  private committedFailedMessageIds: ReadonlySet<string> = new Set<string>();
+  private committedFailedTurnIds: ReadonlySet<string> = new Set<string>();
   private inlineMessageEdit: AgentInlineMessageEdit | null = null;
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
@@ -410,11 +482,19 @@ export class AgentConversationRenderer extends Component {
   private suppressedEditorKeyupTimer: number | null = null;
   private inlineEditorShortcutCleanup: (() => void) | null = null;
   private readonly copyFeedbackTimers = new Map<HTMLButtonElement, number>();
+  private readonly incidentDisclosureStates = new Map<HTMLElement, IncidentDisclosureState>();
   private readonly liveMarkdown: LiveMarkdownRenderer;
   private renderGeneration = 0;
   private lifecycleGeneration = 0;
   private renderingEnabled = true;
   private adoptingTurnId: string | null = null;
+  private incidentMetricsGeneration = 0;
+  private incidentRenderPassCount = 0;
+  private incidentPendingRenderPassCount = 0;
+  private incidentLastRenderDurationMs = 0;
+  private incidentMaxRenderDurationMs = 0;
+  private incidentHistoricalPartCount = 0;
+  private incidentPendingHydrationCount = 0;
 
   constructor(parent: HTMLElement, private readonly options: AgentConversationRendererOptions) {
     super();
@@ -452,7 +532,122 @@ export class AgentConversationRenderer extends Component {
     this.addChild(this.liveMarkdown);
   }
 
-  public async renderHistory(messages: readonly ChatMessage[]): Promise<void> {
+  /** Resets per-run timing while keeping current content-free DOM state counts. */
+  public resetIncidentRenderMetrics(): void {
+    this.incidentMetricsGeneration += 1;
+    this.incidentRenderPassCount = 0;
+    this.incidentPendingRenderPassCount = 0;
+    this.incidentLastRenderDurationMs = 0;
+    this.incidentMaxRenderDurationMs = 0;
+  }
+
+  /** Returns a frozen scalar-only projection without inspecting rendered text. */
+  public captureIncidentSnapshot(): AgentConversationRendererIncidentSnapshot {
+    let disclosureCount = 0;
+    let openDisclosureCount = 0;
+    let activityDisclosureCount = 0;
+    let reasoningDisclosureCount = 0;
+    let toolDisclosureCount = 0;
+    let overflowDisclosureCount = 0;
+    for (const state of this.incidentDisclosureStates.values()) {
+      if (!state.available) continue;
+      disclosureCount += 1;
+      if (state.open) openDisclosureCount += 1;
+      if (state.kind === "activity") {
+        activityDisclosureCount += 1;
+      } else if (state.kind === "reasoning") {
+        reasoningDisclosureCount += 1;
+      } else if (state.kind === "tool") {
+        toolDisclosureCount += 1;
+      } else {
+        overflowDisclosureCount += 1;
+      }
+    }
+    return Object.freeze({
+      renderPassCount: boundedIncidentRenderCount(this.incidentRenderPassCount),
+      pendingRenderPassCount: boundedIncidentRenderCount(
+        this.incidentPendingRenderPassCount,
+      ),
+      lastRenderDurationMs: boundedIncidentRenderDuration(
+        this.incidentLastRenderDurationMs,
+      ),
+      maxRenderDurationMs: boundedIncidentRenderDuration(
+        this.incidentMaxRenderDurationMs,
+      ),
+      historicalRowCount: boundedIncidentRenderCount(this.historyRows.size),
+      historicalPartCount: boundedIncidentRenderCount(this.incidentHistoricalPartCount),
+      activePartCount: boundedIncidentRenderCount(this.activeNodes.size),
+      disclosureCount: boundedIncidentRenderCount(disclosureCount),
+      openDisclosureCount: boundedIncidentRenderCount(openDisclosureCount),
+      activityDisclosureCount: boundedIncidentRenderCount(activityDisclosureCount),
+      reasoningDisclosureCount: boundedIncidentRenderCount(reasoningDisclosureCount),
+      toolDisclosureCount: boundedIncidentRenderCount(toolDisclosureCount),
+      overflowDisclosureCount: boundedIncidentRenderCount(overflowDisclosureCount),
+      pendingHydrationCount: boundedIncidentRenderCount(this.incidentPendingHydrationCount),
+      renderingEnabled: this.renderingEnabled,
+    });
+  }
+
+  /** Uses maintained reconciliation state to prove that a failed surface committed. */
+  public hasCommittedFailureSurface(turnId: string): boolean {
+    if (!this.renderingEnabled || !turnId) return false;
+    if (this.committedFailedTurnIds.has(turnId)) return true;
+    if (this.activeTurnId !== turnId) return false;
+    for (const part of this.activePartRefs.values()) {
+      if (part.kind === "error") return true;
+    }
+    return false;
+  }
+
+  private async measureIncidentRenderPass(task: () => Promise<void>): Promise<void> {
+    const generation = this.incidentMetricsGeneration;
+    this.incidentRenderPassCount = boundedIncidentRenderCount(
+      this.incidentRenderPassCount + 1,
+    );
+    this.incidentPendingRenderPassCount = boundedIncidentRenderCount(
+      this.incidentPendingRenderPassCount + 1,
+    );
+    const startedAt = this.incidentMonotonicNow();
+    try {
+      await task();
+    } finally {
+      if (generation === this.incidentMetricsGeneration) {
+        this.incidentPendingRenderPassCount = Math.max(
+          0,
+          this.incidentPendingRenderPassCount - 1,
+        );
+        const durationMs = boundedIncidentRenderDuration(
+          this.incidentMonotonicNow() - startedAt,
+        );
+        this.incidentLastRenderDurationMs = durationMs;
+        this.incidentMaxRenderDurationMs = Math.max(
+          this.incidentMaxRenderDurationMs,
+          durationMs,
+        );
+      }
+    }
+  }
+
+  private incidentMonotonicNow(): number {
+    try {
+      const value = getSurfaceOwnerWindow(this.element).performance?.now?.();
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    } catch {
+      // Incident measurement must never affect rendering.
+    }
+    try {
+      const value = Date.now();
+      return Number.isFinite(value) ? value : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  public renderHistory(messages: readonly ChatMessage[]): Promise<void> {
+    return this.measureIncidentRenderPass(() => this.renderHistoryPass(messages));
+  }
+
+  private async renderHistoryPass(messages: readonly ChatMessage[]): Promise<void> {
     if (!this.renderingEnabled) return;
     const adoptionState = this.captureActiveAdoptionState();
     const lifecycleGeneration = this.lifecycleGeneration;
@@ -472,8 +667,11 @@ export class AgentConversationRenderer extends Component {
     const nextRows = new Map<string, HistoricalRowState>();
     const nextMessageIds = new Set<string>();
     const nextDurableCancelledMessageIds = new Set<string>();
+    const nextDurableFailedMessageIds = new Set<string>();
+    const nextDurableFailedTurnIds = new Set<string>();
     const desiredRows: HTMLElement[] = [];
     const rowReplacements: HistoricalRowReplacement[] = [];
+    let nextHistoricalPartCount = 0;
     let hasInlineEdit = false;
     let currentTurnId: string | null = null;
     for (let index = 0; index < messages.length;) {
@@ -507,21 +705,29 @@ export class AgentConversationRenderer extends Component {
       });
       const hasVisibleContent = presented.some((entry) => entry.semantics.hasVisibleContent);
       const hasTools = presented.some((entry) => entry.semantics.hasTools);
+      const failedReceipt = [...turnMessages]
+        .reverse()
+        .map(durableFailedReceipt)
+        .find((receipt): receipt is DurableFailedReceipt => receipt !== null) ?? null;
       const copyText = presented
         .map((entry) => entry.semantics.copyText)
         .filter(Boolean)
         .join("\n\n");
       const semantics: HistoricalTurnSemantics = {
-        hasVisibleContent,
+        hasVisibleContent: hasVisibleContent || failedReceipt !== null,
         hasTools,
-        isToolOnly: hasTools && !hasVisibleContent,
+        isToolOnly: hasTools && !hasVisibleContent && failedReceipt === null,
         copyText,
       };
+      if (failedReceipt && turnId) nextDurableFailedTurnIds.add(turnId);
       if (!semantics.hasVisibleContent && !semantics.hasTools) continue;
       for (const entry of turnMessages) {
         nextMessageIds.add(entry.message_id);
         if (entry.role === "assistant" && entry.terminalOutcome === "cancelled") {
           nextDurableCancelledMessageIds.add(entry.message_id);
+        }
+        if (entry.role === "assistant" && durableFailedReceipt(entry)) {
+          nextDurableFailedMessageIds.add(entry.message_id);
         }
       }
       const inlineEdit = message.role === "user"
@@ -540,10 +746,14 @@ export class AgentConversationRenderer extends Component {
         messages: turnMessages,
         inlineEdit,
         cancelledTurn,
+        failedReceipt,
       });
       const existing = this.historyRows.get(rowKey);
       if (existing?.fingerprint === fingerprint) {
         nextRows.set(rowKey, existing);
+        nextHistoricalPartCount = boundedIncidentRenderCount(
+          nextHistoricalPartCount + existing.partFingerprints.size,
+        );
         desiredRows.push(existing.node);
         continue;
       }
@@ -617,6 +827,9 @@ export class AgentConversationRenderer extends Component {
         if (cancelledTurn && !foldedCancelledActivity) {
           this.renderDurableCancelledTail(body);
         }
+        if (failedReceipt) {
+          await this.renderDurableFailedTail(body, failedReceipt, turnId, adoptActive);
+        }
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
@@ -644,6 +857,9 @@ export class AgentConversationRenderer extends Component {
       }
       const rendered: HistoricalRowState = { fingerprint, node: row, partFingerprints };
       nextRows.set(rowKey, rendered);
+      nextHistoricalPartCount = boundedIncidentRenderCount(
+        nextHistoricalPartCount + partFingerprints.size,
+      );
       desiredRows.push(row);
       if (existing && !adoptActive) {
         rowReplacements.push({
@@ -696,8 +912,11 @@ export class AgentConversationRenderer extends Component {
       historicalInteraction?.selection ?? adoptionState?.selection ?? null,
     );
     this.historyRows = nextRows;
+    this.incidentHistoricalPartCount = nextHistoricalPartCount;
     this.historyMessageIds = nextMessageIds;
     this.committedCancelledMessageIds = nextDurableCancelledMessageIds;
+    this.committedFailedMessageIds = nextDurableFailedMessageIds;
+    this.committedFailedTurnIds = nextDurableFailedTurnIds;
     if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
   }
 
@@ -963,7 +1182,7 @@ export class AgentConversationRenderer extends Component {
     if (!state || state.status === "hydrated" || state.status === "disposed") return null;
     if (state.hydration) return state.hydration;
 
-    state.status = "hydrating";
+    this.setHistoricalHydrationStatus(state, "hydrating");
     const lifecycleGeneration = this.lifecycleGeneration;
     const staging = createSurfaceElement(element.ownerDocument, "div");
     state.staging = staging;
@@ -978,7 +1197,7 @@ export class AgentConversationRenderer extends Component {
         state.status !== "disposed"
         && this.historicalOverflowHydrationStates.get(element) === state
       ) {
-        state.status = "cold";
+        this.setHistoricalHydrationStatus(state, "cold");
       }
     };
     let hydration!: Promise<void>;
@@ -1002,7 +1221,7 @@ export class AgentConversationRenderer extends Component {
         }
         overflow.previousNodes = Array.from(staging.children) as HTMLElement[];
         state.staging = null;
-        state.status = "hydrated";
+        this.setHistoricalHydrationStatus(state, "hydrated");
         this.applyActivityOverflowLayout(element);
       } catch (error) {
         discardStaging();
@@ -1045,7 +1264,7 @@ export class AgentConversationRenderer extends Component {
       return Promise.resolve();
     }
     if (state.hydration) return state.hydration;
-    state.status = "hydrating";
+    this.setHistoricalHydrationStatus(state, "hydrating");
     const lifecycleGeneration = this.lifecycleGeneration;
     const staging = createSurfaceElement(state.body.ownerDocument, "div");
     state.staging = staging;
@@ -1073,15 +1292,18 @@ export class AgentConversationRenderer extends Component {
           }
           state.body.replaceChildren(...Array.from(staging.childNodes));
           state.staging = null;
-          state.status = "hydrated";
+          this.setHistoricalHydrationStatus(state, "hydrated");
         } finally {
           finishLayoutMutation?.();
         }
       } catch (error) {
         this.forgetMarkdown(staging);
-        if (isCurrent()) state.status = "cold";
+        if (isCurrent()) this.setHistoricalHydrationStatus(state, "cold");
         throw error;
       } finally {
+        if (state.status === "hydrating") {
+          this.setHistoricalHydrationStatus(state, "cold");
+        }
         if (state.staging === staging) state.staging = null;
         if (state.hydration === hydration) state.hydration = null;
       }
@@ -1190,7 +1412,15 @@ export class AgentConversationRenderer extends Component {
     this.element.setAttribute("aria-busy", "false");
   }
 
-  public async renderActive(
+  public renderActive(
+    snapshot: AgentConversationSnapshot,
+    presentation: AgentConversationPresentation,
+  ): Promise<void> {
+    return this.measureIncidentRenderPass(() =>
+      this.renderActivePass(snapshot, presentation));
+  }
+
+  private async renderActivePass(
     snapshot: AgentConversationSnapshot,
     presentation: AgentConversationPresentation,
   ): Promise<void> {
@@ -1201,6 +1431,9 @@ export class AgentConversationRenderer extends Component {
     this.element.setAttribute("aria-busy", String(presentation.busy));
     const body = this.ensureActiveTurn(snapshot.turnId);
     this.activeTurn?.toggleClass("is-active", presentation.busy);
+    const hasCommittedFailedProjection = presentation.phase === "failed"
+      && snapshot.messages.some((message) =>
+        this.committedFailedMessageIds.has(message.id));
     const wantedParts = new Set<string>();
     const orderedParts = presentation.visibleParts
       .map((part) => terminalToolPresentation(part, presentation))
@@ -1214,6 +1447,7 @@ export class AgentConversationRenderer extends Component {
       // (the terminal error and its Retry affordance) may stay.
       .filter((part) =>
         part.kind === "error" || !this.historyMessageIds.has(part.messageId))
+      .filter((part) => part.kind !== "error" || !hasCommittedFailedProjection)
       .filter((part) =>
         presentation.phase !== "completed"
         || part.kind !== "reasoning"
@@ -1226,7 +1460,9 @@ export class AgentConversationRenderer extends Component {
         this.committedCancelledMessageIds.has(message.id));
     const showTerminalStatus = presentation.phase === "cancelled"
       ? !hasCommittedCancelledProjection
-      : presentation.phase === "failed" && terminalErrors.length === 0;
+      : presentation.phase === "failed"
+        && terminalErrors.length === 0
+        && !hasCommittedFailedProjection;
     const tailStatus = presentation.busy || showTerminalStatus
       ? this.ensureTailStatus(presentation, snapshot.elapsedMs)
       : null;
@@ -1234,6 +1470,10 @@ export class AgentConversationRenderer extends Component {
       this.activeTailStatus.remove();
       this.activeTailStatus = null;
       this.stopWorkingTimer();
+    }
+    if (orderedParts.length === 0 && !tailStatus) {
+      this.clearActive();
+      return;
     }
     const duplicatesTerminalError = (part: AgentToolPart): boolean =>
       Boolean(part.error && terminalErrors.some((terminal) =>
@@ -1385,6 +1625,7 @@ export class AgentConversationRenderer extends Component {
     }
     for (const [key, overflow] of this.activeOverflowNodes) {
       if (wantedOverflowKeys.has(key)) continue;
+      this.forgetMarkdown(overflow);
       overflow.remove();
       this.activeOverflowNodes.delete(key);
       this.activityOverflowStates.delete(overflow);
@@ -1521,6 +1762,10 @@ export class AgentConversationRenderer extends Component {
       attr: { "data-agent-turn-fold-body": "" },
     });
     element.open = false;
+    this.trackIncidentDisclosure(element, "activity", true, false);
+    element.addEventListener("toggle", () => {
+      this.updateIncidentDisclosure(element, true, element.open);
+    });
     return { element, summary: header, body };
   }
 
@@ -1553,10 +1798,12 @@ export class AgentConversationRenderer extends Component {
       latestNode: null,
       previousNodes: [],
     });
+    this.trackIncidentDisclosure(element, "overflow", true, false);
     element.onclick = () => {
       const finishLayoutMutation = this.options.beginLayoutMutation?.(element);
       const expanded = !this.activityOverflowExpanded(element);
       element.setAttribute("aria-expanded", String(expanded));
+      this.updateIncidentDisclosure(element, true, expanded);
       this.applyActivityOverflowLayout(element);
       const hydration = expanded
         ? this.startHistoricalOverflowHydration(element)
@@ -1670,6 +1917,40 @@ export class AgentConversationRenderer extends Component {
     setIcon(icon, "circle-stop");
     icon.dataset.iconState = "circle-stop";
     status.createSpan({ cls: "systemsculpt-agent-tail-status-label", text: "Stopped" });
+  }
+
+  private async renderDurableFailedTail(
+    body: HTMLElement,
+    receipt: DurableFailedReceipt,
+    retryMessageId: string | null,
+    adoptActive: boolean,
+  ): Promise<void> {
+    const key = `error:${retryMessageId ?? receipt.messageId}`;
+    const part: AgentPart = {
+      id: key,
+      order: Number.MAX_SAFE_INTEGER,
+      kind: "error",
+      error: {
+        code: receipt.failureCode,
+        message: "SystemSculpt could not complete the response.",
+        retryable: receipt.retryable,
+        ...(isLocalReportId(receipt.reportId)
+          ? { reportId: receipt.reportId }
+          : { incidentId: receipt.reportId }),
+        ...(receipt.incidentId ? { incidentId: receipt.incidentId } : {}),
+      },
+      retryable: receipt.retryable,
+      ...(retryMessageId ? { retryMessageId } : {}),
+    };
+    if (adoptActive) {
+      await this.renderActivePart(part, key, false, body);
+      return;
+    }
+    const node = body.createDiv({
+      cls: "systemsculpt-agent-part is-error",
+      attr: { "data-part-key": key },
+    });
+    await this.renderPart(node, part);
   }
 
   private ensureActiveTurn(turnId: string | null): HTMLElement {
@@ -1831,7 +2112,7 @@ export class AgentConversationRenderer extends Component {
   private disposeHistoricalActivityHydrationWithin(target: HTMLElement): void {
     for (const [element, state] of this.historicalActivityHydrationStates) {
       if (element !== target && !target.contains(element)) continue;
-      state.status = "disposed";
+      this.setHistoricalHydrationStatus(state, "disposed");
       if (state.staging) this.forgetMarkdown(state.staging);
       state.staging = null;
       this.historicalActivityHydrationStates.delete(element);
@@ -1841,7 +2122,7 @@ export class AgentConversationRenderer extends Component {
   private disposeHistoricalOverflowHydration(element: HTMLButtonElement): void {
     const state = this.historicalOverflowHydrationStates.get(element);
     if (!state) return;
-    state.status = "disposed";
+    this.setHistoricalHydrationStatus(state, "disposed");
     if (state.staging) this.forgetMarkdown(state.staging);
     state.staging = null;
     this.historicalOverflowHydrationStates.delete(element);
@@ -1907,7 +2188,10 @@ export class AgentConversationRenderer extends Component {
       const hydration = this.historicalActivityHydrationStates.get(nextWorked);
       if (hydration) await this.hydrateHistoricalActivity(hydration);
     }
-    if (nextWorked) nextWorked.open = replacement.disclosure.workedOpen;
+    if (nextWorked) {
+      nextWorked.open = replacement.disclosure.workedOpen;
+      this.updateIncidentDisclosureOpen(nextWorked, nextWorked.open);
+    }
 
     const previousOverflows = new Map<string, HTMLButtonElement>();
     for (const overflow of replacement.previous.node.querySelectorAll<HTMLButtonElement>(
@@ -1928,6 +2212,7 @@ export class AgentConversationRenderer extends Component {
         : false;
       if (!expanded && !previousWasHydrated) continue;
       overflow.setAttribute("aria-expanded", String(expanded));
+      this.updateIncidentDisclosureOpen(overflow, expanded);
       const hydration = this.startHistoricalOverflowHydration(overflow);
       if (hydration) await hydration;
     }
@@ -1950,6 +2235,7 @@ export class AgentConversationRenderer extends Component {
       );
       if (!details) continue;
       details.open = true;
+      this.updateIncidentDisclosureOpen(details, true);
       await this.renderReasoningDisclosure(details);
     }
   }
@@ -2024,20 +2310,29 @@ export class AgentConversationRenderer extends Component {
     const nextWorked = replacement.next.node.querySelector<HTMLDetailsElement>(
       "details[data-agent-turn-fold]",
     );
-    if (nextWorked) nextWorked.open = replacement.disclosure.workedOpen;
+    if (nextWorked) {
+      nextWorked.open = replacement.disclosure.workedOpen;
+      this.updateIncidentDisclosureOpen(nextWorked, nextWorked.open);
+    }
 
     const transferredParts = this.collectHistoricalPartNodes(replacement.next.node);
     for (const [key, open] of replacement.disclosure.reasoningOpen) {
       const details = transferredParts.get(key)?.querySelector<HTMLDetailsElement>(
         ":scope > .systemsculpt-agent-reasoning-details",
       );
-      if (details) details.open = open;
+      if (details) {
+        details.open = open;
+        this.updateIncidentDisclosureOpen(details, open);
+      }
     }
     for (const [key, open] of replacement.disclosure.toolOpen) {
       const details = transferredParts.get(key)?.querySelector<HTMLDetailsElement>(
         ":scope > details.systemsculpt-agent-tool",
       );
-      if (details) details.open = open;
+      if (details) {
+        details.open = open;
+        this.updateIncidentDisclosureOpen(details, open);
+      }
     }
     for (const overflow of replacement.next.node.querySelectorAll<HTMLButtonElement>(
       "button[data-agent-activity-overflow-key]",
@@ -2046,6 +2341,7 @@ export class AgentConversationRenderer extends Component {
       const open = key ? replacement.disclosure.overflowOpen.get(key) : undefined;
       if (open === undefined) continue;
       overflow.setAttribute("aria-expanded", String(open));
+      this.updateIncidentDisclosureOpen(overflow, open);
       this.applyActivityOverflowLayout(overflow);
     }
   }
@@ -2148,7 +2444,10 @@ export class AgentConversationRenderer extends Component {
         );
         activeDetails.forEach((details, index) => {
           const replacement = historicalDetails[index];
-          if (replacement) replacement.open = details.open;
+          if (replacement) {
+            replacement.open = details.open;
+            this.updateIncidentDisclosureOpen(replacement, replacement.open);
+          }
         });
 
         if (!focusedElement || !active.contains(focusedElement)) continue;
@@ -2256,8 +2555,12 @@ export class AgentConversationRenderer extends Component {
             text: `Report ID: ${presented.reportId}`,
           });
         }
-        if (part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
-          const retry = createUiAction(copy, {
+        const actions = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
+          || presented.reportId && this.options.onCopyIncidentReport
+          ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" })
+          : null;
+        if (actions && part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
+          const retry = createUiAction(actions, {
             label: "Retry",
             testId: "chat.turn.retry-failed",
             tone: "primary",
@@ -2265,6 +2568,19 @@ export class AgentConversationRenderer extends Component {
           });
           retry.addClass("systemsculpt-agent-error-retry");
           retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
+        }
+        if (actions && presented.reportId && this.options.onCopyIncidentReport) {
+          const copyReport = createUiAction(actions, {
+            label: "Copy report",
+            testId: "chat.turn.copy-incident-report",
+            size: "small",
+            tooltip: false,
+          });
+          copyReport.addClass("systemsculpt-agent-error-copy-report");
+          copyReport.onclick = () => void this.copyIncidentReport(
+            copyReport,
+            presented.reportId!,
+          );
         }
         return true;
       }
@@ -2288,8 +2604,13 @@ export class AgentConversationRenderer extends Component {
     for (const timer of this.copyFeedbackTimers.values()) ownerWindow.clearTimeout(timer);
     this.copyFeedbackTimers.clear();
     this.historyRows.clear();
+    this.incidentHistoricalPartCount = 0;
     this.historyMessageIds = new Set<string>();
     this.committedCancelledMessageIds = new Set<string>();
+    this.committedFailedMessageIds = new Set<string>();
+    this.committedFailedTurnIds = new Set<string>();
+    this.incidentDisclosureStates.clear();
+    this.incidentPendingHydrationCount = 0;
     this.clearInlineEditorShortcutGuard();
     this.clearSuppressedEditorKeyup();
   }
@@ -2338,7 +2659,9 @@ export class AgentConversationRenderer extends Component {
       dirty: true,
       revision: 0,
     });
+    this.trackIncidentDisclosure(details, "reasoning", true, details.open);
     details.addEventListener("toggle", () => {
+      this.updateIncidentDisclosure(details, true, details.open);
       if (!details.open) {
         this.pauseReasoningDisclosure(details);
         return;
@@ -2544,6 +2867,7 @@ export class AgentConversationRenderer extends Component {
       || !stateIcon
       || !support
     ) {
+      this.untrackIncidentDisclosuresWithin(node);
       node.empty();
       rebuiltShell = true;
       shell = node.createEl("details", {
@@ -2574,6 +2898,13 @@ export class AgentConversationRenderer extends Component {
       header.addEventListener("click", (event) => {
         if (!createdShell.classList.contains("is-disclosure")) event.preventDefault();
       });
+      createdShell.addEventListener("toggle", () => {
+        this.updateIncidentDisclosure(
+          createdShell,
+          createdShell.classList.contains("is-disclosure"),
+          createdShell.open,
+        );
+      });
       support = shell.createDiv({ cls: "systemsculpt-agent-tool-support" });
       createdShell.open = preservedOpen && hasDetail;
     }
@@ -2582,6 +2913,12 @@ export class AgentConversationRenderer extends Component {
     if (!hasDetail && (shell as HTMLDetailsElement).open) {
       (shell as HTMLDetailsElement).open = false;
     }
+    this.trackIncidentDisclosure(
+      shell,
+      "tool",
+      hasDetail,
+      hasDetail && (shell as HTMLDetailsElement).open,
+    );
     if (hasDetail) {
       if (disclosureIcon.dataset.iconName !== "chevron-down") {
         setIcon(disclosureIcon, "chevron-down");
@@ -3084,6 +3421,7 @@ export class AgentConversationRenderer extends Component {
   }
 
   private forgetMarkdown(target: HTMLElement): void {
+    this.untrackIncidentDisclosuresWithin(target);
     this.disposeHistoricalActivityHydrationWithin(target);
     this.disposeHistoricalOverflowHydrationWithin(target);
     const overflows = target.matches("button[data-agent-activity-overflow]")
@@ -3095,11 +3433,78 @@ export class AgentConversationRenderer extends Component {
       const state = this.activityOverflowStates.get(overflow);
       if (!state) continue;
       for (const node of state.previousNodes) {
-        if (!target.contains(node)) this.liveMarkdown.forget(node);
+        if (!target.contains(node)) {
+          this.untrackIncidentDisclosuresWithin(node);
+          this.liveMarkdown.forget(node);
+        }
       }
       this.activityOverflowStates.delete(overflow);
     }
     this.liveMarkdown.forget(target);
+  }
+
+  private trackIncidentDisclosure(
+    element: HTMLElement,
+    kind: IncidentDisclosureKind,
+    available: boolean,
+    open: boolean,
+  ): void {
+    const state = this.incidentDisclosureStates.get(element);
+    if (state) {
+      state.kind = kind;
+      state.available = available;
+      state.open = available && open;
+      return;
+    }
+    const created: IncidentDisclosureState = {
+      kind,
+      available,
+      open: available && open,
+    };
+    this.incidentDisclosureStates.set(element, created);
+  }
+
+  private updateIncidentDisclosure(
+    element: HTMLElement,
+    available: boolean,
+    open: boolean,
+  ): void {
+    const state = this.incidentDisclosureStates.get(element);
+    if (!state) return;
+    state.available = available;
+    state.open = available && open;
+  }
+
+  private updateIncidentDisclosureOpen(element: HTMLElement, open: boolean): void {
+    const state = this.incidentDisclosureStates.get(element);
+    if (!state) return;
+    state.open = state.available && open;
+  }
+
+  private untrackIncidentDisclosuresWithin(target: HTMLElement): void {
+    for (const element of this.incidentDisclosureStates.keys()) {
+      if (element === target || target.contains(element)) {
+        this.incidentDisclosureStates.delete(element);
+      }
+    }
+  }
+
+  private setHistoricalHydrationStatus(
+    state: HistoricalActivityHydrationState | HistoricalOverflowHydrationState,
+    status: HistoricalHydrationStatus,
+  ): void {
+    if (state.status === status) return;
+    if (state.status === "hydrating") {
+      this.incidentPendingHydrationCount = boundedIncidentRenderCount(
+        this.incidentPendingHydrationCount - 1,
+      );
+    }
+    state.status = status;
+    if (status === "hydrating") {
+      this.incidentPendingHydrationCount = boundedIncidentRenderCount(
+        this.incidentPendingHydrationCount + 1,
+      );
+    }
   }
 
   private enhanceCodeBlocks(parent: HTMLElement): void {
@@ -3147,6 +3552,46 @@ export class AgentConversationRenderer extends Component {
       button.setAttribute("aria-label", "Copy code");
     }, 1_600);
     this.copyFeedbackTimers.set(button, timer);
+  }
+
+  private async copyIncidentReport(
+    button: HTMLButtonElement,
+    reportId: string,
+  ): Promise<void> {
+    if (button.dataset.copyPending === "true") return;
+    const attempt = String(Number(button.dataset.copyAttempt ?? "0") + 1);
+    button.dataset.copyAttempt = attempt;
+    button.dataset.copyPending = "true";
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    updateUiAction(button, { label: "Preparing…" });
+    let result: boolean | "memory_fallback" = false;
+    try {
+      result = await this.options.onCopyIncidentReport?.(reportId) ?? false;
+    } catch {
+      result = false;
+    }
+    if (button.dataset.copyAttempt !== attempt) return;
+    delete button.dataset.copyPending;
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    if (!button.isConnected) return;
+    if (!result) {
+      updateUiAction(button, { label: "Try again" });
+      return;
+    }
+
+    updateUiAction(button, {
+      label: result === "memory_fallback" ? "Copied for this session" : "Copied",
+    });
+    const ownerWindow = getSurfaceOwnerWindow(button);
+    const prior = this.copyFeedbackTimers.get(button);
+    if (prior !== undefined) ownerWindow.clearTimeout(prior);
+    this.copyFeedbackTimers.set(button, ownerWindow.setTimeout(() => {
+      this.copyFeedbackTimers.delete(button);
+      if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
+      updateUiAction(button, { label: "Copy report" });
+    }, 2_000));
   }
 
   private async copyMessage(

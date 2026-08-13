@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import {
   AgentStreamingTransport,
+  type AgentTransportSegmentSummaryEvent,
   type AgentTransportTimingEvent,
 } from "../StreamingTransport";
 import {
@@ -100,6 +101,7 @@ function harness(
   timing?: Readonly<{
     monotonicNow: () => number;
     onTiming: (event: AgentTransportTimingEvent) => void;
+    onSegmentSummary?: (event: AgentTransportSegmentSummaryEvent) => void;
     classifyResponseDelivery?: (
       response: Response,
     ) => PlatformResponseDeliveryMode | undefined;
@@ -419,6 +421,280 @@ describe("AgentStreamingTransport", () => {
       && event.commandSegmentOrdinal === 1)).toBe(true);
     expect(timingEvents.filter((event) => event.milestone !== "command_dispatch_started")
       .every((event) => event.latencyTraceId === "f".repeat(32))).toBe(true);
+  });
+
+  it("emits one frozen content-free summary for a clean command segment", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const clock = [10, 10, 10, 12.3456];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => clock.shift() ?? 12.3456,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    const frame = {
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "terminal",
+    };
+    const first = new TextEncoder().encode(`data: ${JSON.stringify(frame)}\n\n`);
+    const metadata = new TextEncoder().encode(": keepalive\nretry: 1000\n\n");
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array());
+        controller.enqueue(first);
+        controller.enqueue(metadata);
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+
+    await transport.sendSubmit(submit("user_segment_summary"));
+
+    expect(summaries).toEqual([{
+      requestId: "user_segment_summary",
+      commandKind: "submit",
+      commandSegmentOrdinal: 1,
+      closeReason: "clean_eof",
+      durationMs: 2.346,
+      receivedBytes: first.byteLength + metadata.byteLength,
+      nonEmptyRawChunkCount: 2,
+      sseEventCount: 2,
+      acceptedFrameCount: 1,
+      deliveredFrameCount: 1,
+      metricsTruncated: false,
+    }]);
+    expect(Object.isFrozen(summaries[0])).toBe(true);
+  });
+
+  it("keeps segment-summary observers observational when they throw", async () => {
+    const seen: string[] = [];
+    const onSegmentSummary = jest.fn(() => {
+      throw new Error("The optional summary observer failed.");
+    });
+    const { transport } = harness([
+      { type: "systemsculpt.agent.event.v1", version: 1, kind: "terminal" },
+    ], undefined, undefined, {
+      monotonicNow: () => 5,
+      onTiming: () => {},
+      onSegmentSummary,
+    });
+    transport.addAuthoritativeFrameListener((frame) => seen.push(frame.kind));
+    await transport.connect();
+
+    await expect(transport.sendSubmit(submit("user_summary_throw")))
+      .resolves.toBeUndefined();
+
+    expect(seen).toEqual(["session_snapshot", "terminal"]);
+    expect(onSegmentSummary).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe("open");
+  });
+
+  it("classifies rejected and pre-response command failures without copying error text", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 5,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(JSON.stringify({
+      code: "upstream_unavailable",
+      detail: "private rejected response detail",
+    }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    }));
+
+    await expect(transport.sendSubmit(submit("user_summary_rejected")))
+      .rejects.toThrow("503");
+    expect(summaries.at(-1)).toMatchObject({
+      requestId: "user_summary_rejected",
+      closeReason: "response_rejected",
+      receivedBytes: 0,
+      sseEventCount: 0,
+    });
+
+    request.mockRejectedValueOnce(new TypeError("private fetch failure detail"));
+    await expect(transport.sendSubmit(submit("user_summary_request_failed")))
+      .rejects.toThrow("private fetch failure detail");
+    expect(summaries.at(-1)).toMatchObject({
+      requestId: "user_summary_request_failed",
+      closeReason: "request_failed",
+      receivedBytes: 0,
+      sseEventCount: 0,
+    });
+
+    request.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await expect(transport.sendSubmit(submit("user_summary_empty_response")))
+      .rejects.toThrow("200");
+    expect(summaries.at(-1)).toMatchObject({
+      requestId: "user_summary_empty_response",
+      closeReason: "response_rejected",
+      receivedBytes: 0,
+      sseEventCount: 0,
+    });
+    expect(JSON.stringify(summaries)).not.toContain("private");
+  });
+
+  it("bounds segment durations when the monotonic clock reverses or overflows", () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport } = harness([], undefined, undefined, {
+      monotonicNow: () => 50,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    const internals = transport as unknown as {
+      reportSegmentSummary: (
+        command: Readonly<{
+          requestId: string;
+          commandKind: "submit";
+          commandSegmentOrdinal: number;
+        }>,
+        startedAtMonotonicMs: number,
+        metrics: {
+          closeReason: null;
+          receivedBytes: number;
+          nonEmptyRawChunkCount: number;
+          sseEventCount: number;
+          acceptedFrameCount: number;
+          deliveredFrameCount: number;
+          metricsTruncated: boolean;
+        },
+      ) => void;
+    };
+    const metrics = () => ({
+      closeReason: null,
+      receivedBytes: 0,
+      nonEmptyRawChunkCount: 0,
+      sseEventCount: 0,
+      acceptedFrameCount: 0,
+      deliveredFrameCount: 0,
+      metricsTruncated: false,
+    } as const);
+
+    internals.reportSegmentSummary({
+      requestId: "user_clock_reversed",
+      commandKind: "submit",
+      commandSegmentOrdinal: 1,
+    }, 100, { ...metrics() });
+    internals.reportSegmentSummary({
+      requestId: "user_clock_overflow",
+      commandKind: "submit",
+      commandSegmentOrdinal: 2,
+    }, Number.NEGATIVE_INFINITY, { ...metrics() });
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        requestId: "user_clock_reversed",
+        closeReason: "stream_failed",
+        durationMs: 0,
+        metricsTruncated: true,
+      }),
+      expect.objectContaining({
+        requestId: "user_clock_overflow",
+        closeReason: "stream_failed",
+        durationMs: 7 * 24 * 60 * 60 * 1_000,
+        metricsTruncated: true,
+      }),
+    ]);
+  });
+
+  it("keeps optional stream diagnostics and stale delivery guards inert", async () => {
+    const { transport, request } = harness([]);
+    await transport.connect();
+    const initialCallCount = request.mock.calls.length;
+    await transport.connect({ reuseWarmAuthority: true });
+    expect(request).toHaveBeenCalledTimes(initialCallCount);
+
+    const internals = transport as unknown as {
+      connectGeneration: number;
+      consume: (
+        body: ReadableStream<Uint8Array>,
+        generation: number,
+        signal: AbortSignal,
+        command: Readonly<{
+          requestId: string;
+          commandKind: "submit";
+          commandSegmentOrdinal: number;
+        }>,
+        responseDeliveryMode?: PlatformResponseDeliveryMode,
+        latencyTraceId?: string,
+        conversationId?: string,
+      ) => Promise<void>;
+      emit: (
+        chunk: string,
+        generation?: number,
+        signal?: AbortSignal,
+        onAccepted?: (frame: unknown, stage: "parsed" | "delivered") => void,
+      ) => boolean;
+      emitValue: (
+        frame: unknown,
+        generation?: number,
+        signal?: AbortSignal,
+        onAccepted?: (frame: unknown, stage: "parsed" | "delivered") => void,
+      ) => boolean;
+    };
+    const emptyBody = (): ReadableStream<Uint8Array> =>
+      new Response("").body!;
+    await internals.consume(
+      emptyBody(),
+      internals.connectGeneration,
+      new AbortController().signal,
+      {
+        requestId: "user_optional_metrics",
+        commandKind: "submit",
+        commandSegmentOrdinal: 1,
+      },
+    );
+
+    await internals.consume(
+      new Response("data: {}\n\n").body!,
+      internals.connectGeneration,
+      new AbortController().signal,
+      {
+        requestId: "user_optional_conversation",
+        commandKind: "submit",
+        commandSegmentOrdinal: 2,
+      },
+    );
+
+    const nullFrame = new Response("data: null\n\n").body!;
+    await internals.consume(
+      nullFrame,
+      internals.connectGeneration,
+      new AbortController().signal,
+      {
+        requestId: "user_non_object_frame",
+        commandKind: "submit",
+        commandSegmentOrdinal: 3,
+      },
+      undefined,
+      undefined,
+      CONVERSATION_ID,
+    );
+    expect(internals.emit("data:   ")).toBe(true);
+    expect(internals.emit(
+      "data: {}",
+      internals.connectGeneration + 1,
+    )).toBe(true);
+    expect(internals.emitValue({})).toBe(true);
+    expect(internals.emitValue(
+      {},
+      internals.connectGeneration + 1,
+    )).toBe(true);
+
+    const stages: string[] = [];
+    const laterListener = jest.fn();
+    transport.addAuthoritativeFrameListener(() => transport.close());
+    transport.addAuthoritativeFrameListener(laterListener);
+    expect(internals.emit(
+      "data: {}",
+      internals.connectGeneration,
+      undefined,
+      (_frame, stage) => stages.push(stage),
+    )).toBe(true);
+    expect(stages).toEqual(["parsed"]);
+    expect(laterListener).not.toHaveBeenCalled();
   });
 
   it("assigns distinct joinable ordinals to every command segment in one run", async () => {
@@ -747,6 +1023,93 @@ describe("AgentStreamingTransport", () => {
     expect(transport.state).toBe("closed");
   });
 
+  it("rejects a streamed snapshot that exceeds its byte bound", async () => {
+    const { transport, request } = harness([]);
+    const cancel = jest.fn(async () => {});
+    const releaseLock = jest.fn();
+    const read = jest.fn().mockResolvedValueOnce({
+      done: false,
+      value: { byteLength: 64 * 1024 * 1024 + 1 } as Uint8Array,
+    });
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/agent/bootstrap")) return bootstrapResponse();
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: {
+          getReader: () => ({ read, cancel, releaseLock }),
+        },
+      } as unknown as Response;
+    });
+
+    await expect(transport.connect()).rejects.toThrow(
+      "oversized chat snapshot",
+    );
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe("closed");
+  });
+
+  it.each([
+    [401, 2],
+    [503, 1],
+  ])("handles a %i snapshot rejection before reconnecting", async (
+    status,
+    expectedBootstrapRequests,
+  ) => {
+    const { transport, request } = harness([]);
+    let bootstrapRequests = 0;
+    let snapshotRequests = 0;
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      const url = String(input.url);
+      if (url.includes("/agent/bootstrap")) {
+        bootstrapRequests += 1;
+        return bootstrapResponse();
+      }
+      if (url.includes("/get-messages")) {
+        snapshotRequests += 1;
+        return snapshotRequests === 1
+          ? new Response(null, { status })
+          : snapshotResponse();
+      }
+      return sseResponse([]);
+    });
+
+    await expect(transport.connect()).rejects.toThrow(String(status));
+    await expect(transport.connect()).resolves.toBeUndefined();
+
+    expect(bootstrapRequests).toBe(expectedBootstrapRequests);
+    expect(transport.state).toBe("open");
+  });
+
+  it("shares one in-flight bootstrap request across concurrent callers", async () => {
+    const { transport, request } = harness([]);
+    let releaseBootstrap!: (response: Response) => void;
+    request.mockImplementation(async (input: Record<string, unknown>) => {
+      if (String(input.url).includes("/agent/bootstrap")) {
+        return await new Promise<Response>((resolve) => {
+          releaseBootstrap = resolve;
+        });
+      }
+      return snapshotResponse();
+    });
+
+    const first = transport.bootstrap();
+    const second = transport.bootstrap();
+    while (!releaseBootstrap) await Promise.resolve();
+
+    expect(request).toHaveBeenCalledTimes(1);
+    releaseBootstrap(bootstrapResponse());
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ conversation_id: CONVERSATION_ID }),
+      expect.objectContaining({ conversation_id: CONVERSATION_ID }),
+    ]);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("does not truncate authoritative history at the legacy message cap", async () => {
     const messages = Array.from({ length: 300 }, (_, index) => ({
       id: `message_history_${index}`,
@@ -930,10 +1293,14 @@ describe("AgentStreamingTransport", () => {
 
   it("does not bootstrap or send after close", async () => {
     const { transport, calls } = harness([]);
+    const states: string[] = [];
+    transport.addConnectionStateListener((state) => states.push(state));
     transport.close();
+    transport.markUnsynchronized();
 
     await expect(transport.sendSubmit(submit("user_closed"))).resolves.toBeUndefined();
     expect(calls).toEqual([]);
+    expect(states).toEqual(["closed"]);
   });
 
   it("marks a failed command unsynchronized so its owner can restore state", async () => {
@@ -1194,7 +1561,12 @@ describe("AgentStreamingTransport", () => {
   });
 
   it("retires a silent superseded turn only after replacement authority settles", async () => {
-    const { transport, request } = harness([]);
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
     await transport.connect();
 
     let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -1230,6 +1602,9 @@ describe("AgentStreamingTransport", () => {
 
     expect((staleSignal as AbortSignal).aborted).toBe(true);
     expect(streamCancelled).toHaveBeenCalledTimes(1);
+    expect(summaries).toEqual([
+      expect.objectContaining({ closeReason: "superseded" }),
+    ]);
     expect(transport.state).toBe("open");
   });
 
@@ -1268,7 +1643,12 @@ describe("AgentStreamingTransport", () => {
   });
 
   it("cancels a dormant turn stream and settles it when the transport closes", async () => {
-    const { transport, request } = harness([]);
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
     await transport.connect();
     const seen: string[] = [];
     transport.addAuthoritativeFrameListener((frame) => {
@@ -1293,11 +1673,19 @@ describe("AgentStreamingTransport", () => {
 
     expect(streamCancelled).toHaveBeenCalledTimes(1);
     expect(seen).toEqual([]);
+    expect(summaries).toEqual([
+      expect.objectContaining({ closeReason: "aborted" }),
+    ]);
     expect(transport.state).toBe("closed");
   });
 
   it("closes synchronization when a streamed event is malformed", async () => {
-    const { transport, request } = harness([]);
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
     await transport.connect();
     request.mockResolvedValueOnce(new Response("data: {not json\n\n", {
       status: 200,
@@ -1306,7 +1694,105 @@ describe("AgentStreamingTransport", () => {
 
     await expect(transport.sendSubmit(submit("user_malformed")))
       .rejects.toThrow("invalid session event");
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        closeReason: "invalid_event",
+        sseEventCount: 1,
+        acceptedFrameCount: 0,
+        deliveredFrameCount: 0,
+      }),
+    ]);
     expect(transport.state).toBe("closed");
+  });
+
+  it("classifies invalid UTF-8 and reader failures without raw error text", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0xc3, 0x28]));
+        controller.close();
+      },
+    }), { status: 200 }));
+
+    await expect(transport.sendSubmit(submit("user_invalid_utf8"))).rejects.toThrow();
+    expect(summaries.at(-1)).toMatchObject({
+      closeReason: "decode_failed",
+      receivedBytes: 2,
+      nonEmptyRawChunkCount: 1,
+    });
+
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([0xc3]));
+        controller.close();
+      },
+    }), { status: 200 }));
+    await expect(transport.sendSubmit(submit("user_incomplete_utf8"))).rejects.toThrow();
+    expect(summaries.at(-1)).toMatchObject({
+      closeReason: "decode_failed",
+      receivedBytes: 1,
+      nonEmptyRawChunkCount: 1,
+    });
+
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("private reader failure text"));
+      },
+    }), { status: 200 }));
+    await expect(transport.sendSubmit(submit("user_reader_failure"))).rejects.toThrow();
+    expect(summaries.at(-1)).toMatchObject({
+      closeReason: "read_failed",
+      receivedBytes: 0,
+      nonEmptyRawChunkCount: 0,
+    });
+    expect(Object.values(summaries.at(-1)!).join(" "))
+      .not.toContain("private reader failure text");
+  });
+
+  it("classifies final-boundary parse and delivery failures", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    request.mockResolvedValueOnce(new Response("data: {not json", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+
+    await expect(transport.sendSubmit(submit("user_final_parse_failure")))
+      .rejects.toThrow("invalid session event");
+    expect(summaries.at(-1)).toMatchObject({
+      closeReason: "invalid_event",
+      sseEventCount: 1,
+    });
+
+    const remove = transport.addAuthoritativeFrameListener(() => {
+      throw new Error("private delivery callback failure");
+    });
+    request.mockResolvedValueOnce(sseResponse([{
+      type: "systemsculpt.agent.event.v1",
+      version: 1,
+      kind: "terminal",
+    }]));
+    await expect(transport.sendSubmit(submit("user_delivery_failure")))
+      .rejects.toThrow("private delivery callback failure");
+    remove();
+    expect(summaries.at(-1)).toMatchObject({
+      closeReason: "delivery_failed",
+      sseEventCount: 1,
+      acceptedFrameCount: 1,
+      deliveredFrameCount: 0,
+    });
+    expect(JSON.stringify(summaries)).not.toContain("private");
   });
 
   it("ignores a frame it cannot parse rather than surfacing partial state", async () => {
@@ -1408,16 +1894,24 @@ describe("AgentStreamingTransport", () => {
   });
 
   it("rejects an oversized multi-byte session event by exact encoded size", async () => {
-    const { transport, request } = harness([]);
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
     await transport.connect();
-    // 23M "€" runs to 69MB of UTF-8 — over the 64MB event cap — while the
-    // cheap UTF-16 unit count alone (23M) stays far under it, forcing the
-    // exact byte-accounting fallback.
-    const oversized = "€".repeat(23_000_000);
+    // The ASCII prefix crosses the conservative UTF-16 bound while remaining
+    // below 64MB. The multi-byte suffix then crosses the exact UTF-8 bound.
+    const prefix = "a".repeat(22_400_000);
+    const suffix = "€".repeat(15_000_000);
     request.mockResolvedValueOnce(new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode(`data: ${oversized}\n\n`));
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode("data: "));
+          controller.enqueue(encoder.encode(prefix));
+          controller.enqueue(encoder.encode(suffix));
           controller.close();
         },
       }),
@@ -1426,6 +1920,80 @@ describe("AgentStreamingTransport", () => {
 
     await expect(transport.sendSubmit(submit("user_oversized_event")))
       .rejects.toThrow("oversized session event");
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        closeReason: "oversized_event",
+        receivedBytes: 64 * 1024 * 1024,
+        metricsTruncated: true,
+      }),
+    ]);
+  });
+
+  it("does not count fragmented whitespace as an SSE event", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    const whitespace = new TextEncoder().encode(" ");
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 1_024; index += 1) {
+          controller.enqueue(whitespace);
+        }
+        controller.enqueue(new TextEncoder().encode("\n\n "));
+        controller.close();
+      },
+    }), { status: 200 }));
+
+    await transport.sendSubmit(submit("user_fragmented_whitespace"));
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        closeReason: "clean_eof",
+        receivedBytes: 1_027,
+        nonEmptyRawChunkCount: 1_025,
+        sseEventCount: 0,
+        acceptedFrameCount: 0,
+        deliveredFrameCount: 0,
+        metricsTruncated: false,
+      }),
+    ]);
+  });
+
+  it("saturates segment counters without overflow", async () => {
+    const summaries: AgentTransportSegmentSummaryEvent[] = [];
+    const { transport, request } = harness([], undefined, undefined, {
+      monotonicNow: () => 1,
+      onTiming: () => {},
+      onSegmentSummary: (summary) => summaries.push(summary),
+    });
+    await transport.connect();
+    const metadata = new TextEncoder().encode(": keepalive\n\n");
+    request.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 10_002; index += 1) {
+          controller.enqueue(metadata);
+        }
+        controller.close();
+      },
+    }), { status: 200 }));
+
+    await transport.sendSubmit(submit("user_counter_saturation"));
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        closeReason: "clean_eof",
+        receivedBytes: metadata.byteLength * 10_002,
+        nonEmptyRawChunkCount: 10_000,
+        sseEventCount: 10_000,
+        acceptedFrameCount: 0,
+        deliveredFrameCount: 0,
+        metricsTruncated: true,
+      }),
+    ]);
   });
 
   it("rejects a command of the wrong kind for each sender", async () => {

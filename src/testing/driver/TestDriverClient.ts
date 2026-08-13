@@ -31,6 +31,7 @@ const DETACHABLE_ACTIONS = new Set([
   "chat.waitForDevelopmentRun",
   "chat.assertLatestToolSettledAfterContinuation",
   "chat.assertNoClientToolsBeforeContinuation",
+  "chat.readCopiedIncidentReport",
 ]);
 
 function isDetachableAction(request: TestDriverActionRequest): boolean {

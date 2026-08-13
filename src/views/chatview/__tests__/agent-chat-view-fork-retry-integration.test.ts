@@ -371,6 +371,7 @@ describe("AgentChatView historical Retry integration", () => {
       plugin: {
         settings: { licenseKey: "private-license" },
         getLogger: () => ({ error: jest.fn(), warn: jest.fn() }),
+        getLoadedPluginBuildId: jest.fn(async () => PLUGIN_BUILD_ID),
       },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
@@ -407,7 +408,6 @@ describe("AgentChatView historical Retry integration", () => {
         path: "doc:11111111-1111-4111-8111-111111111111",
         document_id: "11111111-1111-4111-8111-111111111111",
       }]),
-      getLoadedPluginBuildId: jest.fn(async () => PLUGIN_BUILD_ID),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -434,6 +434,16 @@ describe("AgentChatView historical Retry integration", () => {
       expect(JSON.stringify(projectedSnapshot)).toContain(SOURCE_RUN_ID);
       expect(durableMessages).toEqual([
         expect.objectContaining({ message_id: ORIGINAL_USER_ID, role: "user" }),
+        expect.objectContaining({
+          message_id: OLD_FAILURE_ID,
+          role: "assistant",
+          content: "",
+          terminalOutcome: "failed",
+          terminalIncidentId: SOURCE_INCIDENT_ID,
+          terminalFailureCode: "response_capacity_unavailable",
+          terminalRetryable: true,
+          terminalServerRunId: SOURCE_RUN_ID,
+        }),
       ]);
       const reconciliationsBeforeFork = transcript.reconcileServerHistory.mock.calls.length;
 

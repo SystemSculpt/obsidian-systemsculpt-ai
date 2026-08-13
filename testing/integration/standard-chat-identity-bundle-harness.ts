@@ -21,6 +21,7 @@ export async function exerciseBuiltStandardChatIdentity(
     readFileSync(path.resolve(__dirname, "..", "..", "manifest.json"), "utf8"),
   );
   const plugin = new (PluginClass as new (app: object, manifest: object) => Record<string, any>)(app, manifest);
+  plugin.getLoadedPluginBuildId = jest.fn(async () => `sha256:${"a".repeat(64)}`);
   await plugin.onload();
   await plugin.criticalInitializationPromise;
   await plugin.deferredInitializationPromise;
@@ -222,8 +223,6 @@ export async function exerciseBuiltStandardChatIdentity(
     next.requestClient.request = agentRequest;
     return next;
   };
-  view.getLoadedPluginBuildId = jest.fn(async () => `sha256:${"a".repeat(64)}`);
-
   await view.onOpen();
   viewOpened = true;
   const content = view.containerEl.children[1] as HTMLElement;

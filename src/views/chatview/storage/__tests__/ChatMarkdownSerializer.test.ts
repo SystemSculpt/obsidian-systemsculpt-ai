@@ -281,6 +281,202 @@ describe("ChatMarkdownSerializer", () => {
       expect(String(parsed?.messages[1]?.content)).toContain("PARTIAL-STREAM-START");
     });
 
+    it.each([true, false])(
+      "round-trips a complete failed terminal receipt when retryable is %s",
+      (terminalRetryable) => {
+        const serialized = ChatMarkdownSerializer.serializeMessages([{
+          role: "assistant",
+          content: "The response failed after producing this content.",
+          message_id: `asst-failed-${String(terminalRetryable)}`,
+          terminalOutcome: "failed",
+          terminalIncidentId: `incident_${"a".repeat(32)}`,
+          terminalFailureCode: "agent_turn_failed",
+          terminalRetryable,
+          terminalServerRunId: `run_${"b".repeat(32)}`,
+          responseDurationMs: 35_695,
+        }]);
+
+        expect(serialized).toContain('terminal-outcome="failed"');
+        expect(serialized).toContain(`terminal-incident-id="incident_${"a".repeat(32)}"`);
+        expect(serialized).toContain('terminal-failure-code="agent_turn_failed"');
+        expect(serialized).toContain(`terminal-retryable="${String(terminalRetryable)}"`);
+        expect(serialized).toContain(`terminal-server-run-id="run_${"b".repeat(32)}"`);
+        expect(serialized).toContain('response-duration-ms="35695"');
+
+        const restored = ChatMarkdownSerializer.parseMarkdown(
+          `---\nid: chat-failed-roundtrip\n---\n\n${serialized}`,
+        )?.messages[0];
+        expect(restored).toMatchObject({
+          terminalOutcome: "failed",
+          terminalIncidentId: `incident_${"a".repeat(32)}`,
+          terminalFailureCode: "agent_turn_failed",
+          terminalRetryable,
+          terminalServerRunId: `run_${"b".repeat(32)}`,
+          responseDurationMs: 35_695,
+        });
+        expect(String(restored?.content).trim())
+          .toBe("The response failed after producing this content.");
+      },
+    );
+
+    it("round-trips a content-free plugin-local failed receipt", () => {
+      const reportId = `report_${"c".repeat(32)}`;
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "",
+        message_id: `failure-${reportId}`,
+        terminalOutcome: "failed",
+        terminalReportId: reportId,
+        terminalFailureCode: "response_start_failed",
+        terminalRetryable: true,
+      }]);
+
+      expect(serialized).toContain(`terminal-report-id="${reportId}"`);
+      expect(serialized).not.toContain("terminal-incident-id");
+      expect(serialized).not.toContain("terminal-server-run-id");
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-local-failure\n---\n\n${serialized}`,
+      )?.messages[0]).toMatchObject({
+        content: "",
+        terminalOutcome: "failed",
+        terminalReportId: reportId,
+        terminalFailureCode: "response_start_failed",
+        terminalRetryable: true,
+      });
+    });
+
+    it.each([
+      [
+        "incident ID",
+        `terminal-incident-id="incident_${"a".repeat(32)}"`,
+        'terminal-incident-id="incident_invalid"',
+      ],
+      [
+        "all-zero incident ID",
+        `terminal-incident-id="incident_${"a".repeat(32)}"`,
+        `terminal-incident-id="incident_${"0".repeat(32)}"`,
+      ],
+      [
+        "failure code",
+        'terminal-failure-code="agent_turn_failed"',
+        'terminal-failure-code="Agent Turn Failed"',
+      ],
+      [
+        "retryable value",
+        'terminal-retryable="true"',
+        'terminal-retryable="yes"',
+      ],
+      [
+        "server run ID",
+        `terminal-server-run-id="run_${"b".repeat(32)}"`,
+        'terminal-server-run-id="run_invalid"',
+      ],
+      [
+        "all-zero server run ID",
+        `terminal-server-run-id="run_${"b".repeat(32)}"`,
+        `terminal-server-run-id="run_${"0".repeat(32)}"`,
+      ],
+    ])("ignores a failed receipt with an invalid %s", (_label, valid, invalid) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Valid message content",
+        message_id: "asst-invalid-failed-receipt",
+        terminalOutcome: "failed",
+        terminalIncidentId: `incident_${"a".repeat(32)}`,
+        terminalFailureCode: "agent_turn_failed",
+        terminalRetryable: true,
+        terminalServerRunId: `run_${"b".repeat(32)}`,
+        responseDurationMs: 1_234,
+      }]).replace(valid, invalid);
+
+      const restored = ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-invalid-failed-receipt\n---\n\n${serialized}`,
+      )?.messages[0];
+      expect(restored).toMatchObject({
+        responseDurationMs: 1_234,
+      });
+      expect(String(restored?.content).trim()).toBe("Valid message content");
+      expect(restored).not.toHaveProperty("terminalOutcome");
+      expect(restored).not.toHaveProperty("terminalIncidentId");
+      expect(restored).not.toHaveProperty("terminalFailureCode");
+      expect(restored).not.toHaveProperty("terminalRetryable");
+      expect(restored).not.toHaveProperty("terminalServerRunId");
+    });
+
+    it.each([
+      'terminal-outcome="failed"',
+      `terminal-incident-id="incident_${"a".repeat(32)}"`,
+      'terminal-failure-code="agent_turn_failed"',
+      'terminal-retryable="false"',
+      `terminal-server-run-id="run_${"b".repeat(32)}"`,
+    ])("does not restore an incomplete failed receipt missing %s", (missingAttribute) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Valid message content",
+        message_id: "asst-incomplete-failed-receipt",
+        terminalOutcome: "failed",
+        terminalIncidentId: `incident_${"a".repeat(32)}`,
+        terminalFailureCode: "agent_turn_failed",
+        terminalRetryable: false,
+        terminalServerRunId: `run_${"b".repeat(32)}`,
+      }]).replace(` ${missingAttribute}`, "");
+
+      const restored = ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: chat-incomplete-failed-receipt\n---\n\n${serialized}`,
+      )?.messages[0];
+      expect(String(restored?.content).trim()).toBe("Valid message content");
+      expect(restored).not.toHaveProperty("terminalOutcome");
+      expect(restored).not.toHaveProperty("terminalIncidentId");
+      expect(restored).not.toHaveProperty("terminalFailureCode");
+      expect(restored).not.toHaveProperty("terminalRetryable");
+      expect(restored).not.toHaveProperty("terminalServerRunId");
+    });
+
+    it("does not serialize incomplete or invalid failed receipt metadata", () => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Still durable",
+        message_id: "asst-invalid-failed-writer",
+        terminalOutcome: "failed",
+        terminalIncidentId: "incident_invalid",
+        terminalFailureCode: "agent_turn_failed",
+        terminalRetryable: true,
+        terminalServerRunId: `run_${"b".repeat(32)}`,
+        responseDurationMs: 500,
+      }]);
+
+      expect(serialized).not.toContain("terminal-");
+      expect(serialized).toContain("Still durable");
+      expect(serialized).toContain('response-duration-ms="500"');
+    });
+
+    it.each([
+      [
+        "incident ID",
+        `incident_${"0".repeat(32)}`,
+        `run_${"b".repeat(32)}`,
+      ],
+      [
+        "server run ID",
+        `incident_${"a".repeat(32)}`,
+        `run_${"0".repeat(32)}`,
+      ],
+    ])("does not serialize an all-zero %s", (_label, terminalIncidentId, terminalServerRunId) => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant",
+        content: "Still durable",
+        message_id: "asst-zero-failed-writer",
+        terminalOutcome: "failed",
+        terminalIncidentId,
+        terminalFailureCode: "agent_turn_failed",
+        terminalRetryable: true,
+        terminalServerRunId,
+      }]);
+
+      expect(serialized).not.toContain("terminal-");
+      expect(serialized).toContain("Still durable");
+    });
+
     it("round-trips a bounded assistant response duration as additive metadata", () => {
       const serialized = ChatMarkdownSerializer.serializeMessages([{
         role: "assistant",
@@ -322,7 +518,7 @@ describe("ChatMarkdownSerializer", () => {
         "id: chat-cancel-unknown",
         "---",
         "",
-        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="asst-odd" terminal-outcome="exploded" -->',
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="asst-odd" terminal-outcome="exploded" terminal-incident-id="incident_${"a".repeat(32)}" terminal-failure-code="agent_turn_failed" terminal-retryable="true" terminal-server-run-id="run_${"b".repeat(32)}" -->`,
         "Odd outcome body",
         "<!-- SYSTEMSCULPT-MESSAGE-END -->",
       ].join("\n");
@@ -330,6 +526,10 @@ describe("ChatMarkdownSerializer", () => {
       const parsed = ChatMarkdownSerializer.parseMarkdown(content);
       expect(parsed).not.toBeNull();
       expect(parsed?.messages[0]?.terminalOutcome).toBeUndefined();
+      expect(parsed?.messages[0]?.terminalIncidentId).toBeUndefined();
+      expect(parsed?.messages[0]?.terminalFailureCode).toBeUndefined();
+      expect(parsed?.messages[0]?.terminalRetryable).toBeUndefined();
+      expect(parsed?.messages[0]?.terminalServerRunId).toBeUndefined();
     });
 
     it("joins multiple messages with double newlines", () => {

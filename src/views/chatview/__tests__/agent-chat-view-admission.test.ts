@@ -90,12 +90,16 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
-function failedRun(code: string, message: string): AgentRunResult {
+function failedRun(
+  code: string,
+  message: string,
+  turnId = "user-admission",
+): AgentRunResult {
   return {
     kind: "failed",
     snapshot: {
       runId: "run-admission",
-      turnId: "user-admission",
+      turnId,
       status: "failed",
       messages: [],
       parts: [],
@@ -170,9 +174,17 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
         try {
           await input.beforeSend?.();
         } catch {
-          return failedRun("agent_local_commit_failed", "The local user turn could not be saved.");
+          return failedRun(
+            "agent_local_commit_failed",
+            "The local user turn could not be saved.",
+            input.turnId,
+          );
         }
-        return failedRun("agent_provider_failed", "The admitted run failed later.");
+        return failedRun(
+          "agent_provider_failed",
+          "The admitted run failed later.",
+          input.turnId,
+        );
       });
     }),
     disconnect: jest.fn(),
@@ -194,7 +206,10 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
       }),
     },
     contextManager: { getPinnedFiles: jest.fn(() => []) },
-    plugin: { settings: { licenseKey: "test-license" } },
+    plugin: {
+      settings: { licenseKey: "test-license" },
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+    },
     automationApprovalMode: "interactive",
     approvalMode: "ask",
     sessionTrustedToolNames: new Set<string>(),
@@ -208,7 +223,6 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     chatId: "",
     chatTitle: "New chat",
     readThinAgentContextSources: jest.fn(async () => []),
-    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -321,6 +335,7 @@ function createHistoricalResubmitHarness(
     plugin: {
       settings: { licenseKey: "test-license" },
       getLogger: () => logger,
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     },
     automationApprovalMode: "interactive",
     approvalMode: "ask",
@@ -338,7 +353,6 @@ function createHistoricalResubmitHarness(
     chatId: "2026-07-30 08-02-11",
     chatTitle: "Saved chat",
     readThinAgentContextSources: jest.fn(async () => []),
-    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -498,6 +512,7 @@ async function createPersistentHistoricalResubmitHarness(
     plugin: {
       settings: { licenseKey: "test-license" },
       getLogger: () => logger,
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     },
     automationApprovalMode: "interactive",
     approvalMode: "ask",
@@ -518,7 +533,6 @@ async function createPersistentHistoricalResubmitHarness(
     chatId,
     chatTitle: "Saved chat",
     readThinAgentContextSources: jest.fn(async () => []),
-    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     prepareSubmission: jest.fn(async (submission: AgentComposerSubmit) => submission),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -624,7 +638,10 @@ function createSavedChatLoadHarness(
     chatFontSize: "medium",
     approvalMode: "ask",
     isFullyLoaded: true,
-    plugin: { getLogger: () => logger },
+    plugin: {
+      getLogger: () => logger,
+      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+    },
     workspace,
     agent,
     agentUnsubscribe: null,
@@ -643,7 +660,6 @@ function createSavedChatLoadHarness(
     }),
     syncAttachments: jest.fn(),
     updateViewState: jest.fn(),
-    getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     prepareThinConversation,
   });
   return {
@@ -756,7 +772,9 @@ describe("AgentChatView composer admission", () => {
     const setCreditsBalance = jest.fn();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
-      plugin: { settings: { licenseKey: "test-license" } },
+      plugin: {
+        settings: { licenseKey: "test-license" },
+      },
       aiService: { getCreditsBalance },
       workspace: { setCreditsBalance },
       creditsPromise: null,
@@ -1386,6 +1404,237 @@ describe("AgentChatView composer admission", () => {
     harness.composer.unload();
   });
 
+  it("releases a failed run while its local incident receipt write remains pending", async () => {
+    const harness = createHarness("after-commit");
+    const receiptWrite = deferred<unknown>();
+    const persistFailedReceipt = jest.fn(() => receiptWrite.promise);
+    Object.assign(harness.view as any, {
+      pendingLocalReportIds: new Map<string, string>(),
+    });
+    Object.assign((harness.view as any).transcript, { persistFailedReceipt });
+    harness.composer.setValue("Keep the composer responsive after failure");
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    const input = await harness.runStarted.promise;
+    const reportId = `report_${"a".repeat(32)}`;
+    (harness.view as any).pendingLocalReportIds.set(input.turnId, reportId);
+    harness.runGate.resolve();
+    await harness.runFinished.promise;
+    await Promise.resolve();
+
+    expect(persistFailedReceipt).toHaveBeenCalledWith({
+      turnId: input.turnId,
+      reportId,
+      failureCode: "agent_local_commit_failed",
+      retryable: false,
+    });
+    expect((harness.view as any).pendingLocalReportIds.get(input.turnId))
+      .toBe(reportId);
+    expect((harness.view as any).activeSubmissionOperation).toBeNull();
+    expect(harness.workspace.setRunPending).toHaveBeenLastCalledWith(false);
+    expect(harness.workspace.settleUnfinishedRun).toHaveBeenCalledWith(
+      harness.durableMessages,
+    );
+    harness.composer.unload();
+  });
+
+  it("retains a failed receipt mapping after rejection and clears it after a later successful retry", async () => {
+    jest.useFakeTimers();
+    try {
+      const turnId = "user-local-receipt-retry";
+      const reportId = `report_${"b".repeat(32)}`;
+      const persistenceError = new Error("vault write rejected");
+      const transcriptSnapshot = {
+        chatId: "durable-chat",
+        title: "Receipt retry",
+        version: 2,
+        messages: [{ role: "user", content: "Request", message_id: turnId }],
+      };
+      const persistFailedReceipt = jest.fn()
+        .mockRejectedValueOnce(persistenceError)
+        .mockResolvedValueOnce(transcriptSnapshot);
+      const logger = {
+        error: jest.fn(() => {
+          throw new Error("diagnostics backend rejected");
+        }),
+      };
+      const applyTranscriptIdentity = jest.fn();
+      const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+      Object.assign(view, {
+        transcript: {
+          snapshot: jest.fn(() => transcriptSnapshot),
+          persistFailedReceipt,
+        },
+        pendingLocalReportIds: new Map([[turnId, reportId]]),
+        applyTranscriptIdentity,
+        plugin: { getLogger: () => logger },
+        chatId: "durable-chat",
+      });
+      const result = failedRun(
+        "agent_provider_failed",
+        "The admitted run failed later.",
+        turnId,
+      );
+      if (result.kind !== "failed") throw new Error("Expected a failed run.");
+
+      expect(() => (view as any).scheduleLocalFailedReceiptPersistence(result))
+        .not.toThrow();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        "ChatView agent session failed",
+        persistenceError,
+        expect.objectContaining({ method: "failedReceiptPersistence" }),
+      );
+      expect((view as any).pendingLocalReportIds.get(turnId)).toBe(reportId);
+      expect(applyTranscriptIdentity).not.toHaveBeenCalled();
+
+      await jest.runOnlyPendingTimersAsync();
+
+      expect(persistFailedReceipt).toHaveBeenCalledTimes(2);
+      expect(applyTranscriptIdentity).toHaveBeenCalledWith(transcriptSnapshot);
+      expect((view as any).pendingLocalReportIds.has(turnId)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("makes one immediate failed-receipt retry when the view closes during backoff", async () => {
+    jest.useFakeTimers();
+    try {
+      const turnId = "user-local-receipt-close";
+      const reportId = `report_${"c".repeat(32)}`;
+      const transcriptSnapshot = {
+        chatId: "durable-chat",
+        title: "Receipt close",
+        version: 2,
+        messages: [{ role: "user", content: "Request", message_id: turnId }],
+      };
+      const persistFailedReceipt = jest.fn()
+        .mockRejectedValueOnce(new Error("vault write rejected"))
+        .mockResolvedValueOnce(transcriptSnapshot);
+      const applyTranscriptIdentity = jest.fn();
+      const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+      const operation = {
+        kind: "transition",
+        settled: false,
+        resolveFinished: jest.fn(),
+      };
+      Object.assign(view, {
+        transcript: {
+          snapshot: jest.fn(() => transcriptSnapshot),
+          persistFailedReceipt,
+          idle: jest.fn(async () => undefined),
+        },
+        pendingLocalReportIds: new Map([[turnId, reportId]]),
+        applyTranscriptIdentity,
+        plugin: { getLogger: () => ({ error: jest.fn() }) },
+        chatId: "durable-chat",
+        draftKey: "durable-chat",
+        closing: false,
+        activeSubmissionOperation: null,
+        conversationOriginToken: "origin-before-close",
+        queueDrainSuppressionDepth: 0,
+        agentSessionBinding: null,
+        agent: { detach: jest.fn(async () => undefined) },
+        beginConversationTransition: jest.fn(() => operation),
+        finishSubmissionOperation: jest.fn((candidate) => {
+          candidate.settled = true;
+          candidate.resolveFinished();
+        }),
+        queuedFollowUps: [],
+        queueHydrated: false,
+        queuePersistence: Promise.resolve(),
+        workspace: { setRunPending: jest.fn(), setBanner: jest.fn() },
+      });
+      const result = failedRun(
+        "agent_provider_failed",
+        "The admitted run failed later.",
+        turnId,
+      );
+      if (result.kind !== "failed") throw new Error("Expected a failed run.");
+
+      (view as any).scheduleLocalFailedReceiptPersistence(result);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(persistFailedReceipt).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(1);
+
+      await expect((view as any).performClose()).resolves.toBeUndefined();
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(persistFailedReceipt).toHaveBeenCalledTimes(2);
+      expect(applyTranscriptIdentity).toHaveBeenCalledWith(transcriptSnapshot);
+      expect((view as any).pendingLocalReportIds.has(turnId)).toBe(false);
+      expect((view as any).localFailedReceiptPersistenceTasks.size).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("settles close and fences callbacks when a failed-receipt write never resolves", async () => {
+    jest.useFakeTimers();
+    try {
+      const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+      const receiptWrite = new Promise<void>(() => undefined);
+      const transcriptCommitUnsubscribe = jest.fn();
+      const agentUnsubscribe = jest.fn();
+      const operation = {
+        kind: "transition",
+        settled: false,
+        resolveFinished: jest.fn(),
+      };
+      Object.assign(view, {
+        transcript: { idle: jest.fn(() => receiptWrite) },
+        pendingLocalReportIds: new Map<string, string>(),
+        localFailedReceiptPersistenceTasks: new Set([receiptWrite]),
+        localFailedReceiptRetryTimers: new Map(),
+        closing: false,
+        activeSubmissionOperation: null,
+        conversationOriginToken: "origin-before-close",
+        queueDrainSuppressionDepth: 0,
+        agentSessionBinding: null,
+        agent: { detach: jest.fn(async () => undefined) },
+        beginConversationTransition: jest.fn(() => operation),
+        finishSubmissionOperation: jest.fn((candidate) => {
+          candidate.settled = true;
+          candidate.resolveFinished();
+        }),
+        queuedFollowUps: [],
+        queueHydrated: false,
+        queuePersistence: Promise.resolve(),
+        chatId: "durable-chat",
+        draftKey: "durable-chat",
+        workspace: { setRunPending: jest.fn(), setBanner: jest.fn() },
+        transcriptCommitUnsubscribe,
+        agentUnsubscribe,
+      });
+
+      let settled = false;
+      const closing = (view as any).onClose().then(() => { settled = true; });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      jest.advanceTimersByTime(749);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      jest.advanceTimersByTime(1);
+      await expect(closing).resolves.toBeUndefined();
+      expect(settled).toBe(true);
+      expect((view as any).closing).toBe(true);
+      expect((view as any).workspace).toBeNull();
+      expect(agentUnsubscribe).toHaveBeenCalledTimes(1);
+      expect(transcriptCommitUnsubscribe).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+      expect((view as any).onClose()).toBe((view as any).closeBarrier);
+      await expect((view as any).onClose()).resolves.toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("omits obsolete web-search preferences from the autonomous thin turn body", async () => {
     const harness = createHarness("before-commit");
     harness.composer.setValue("Research this");
@@ -1571,6 +1820,187 @@ describe("AgentChatView composer admission", () => {
       await Promise.resolve();
       expect(recordClientRenderMilestone).toHaveBeenCalledTimes(2);
       expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      });
+      host.remove();
+    }
+  });
+
+  it("forwards failed-surface DOM and paint evidence without awaiting diagnostics", async () => {
+    const host = document.body.createDiv();
+    const render = deferred();
+    let paint: FrameRequestCallback | null = null;
+    const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      paint = callback;
+      return 71;
+    });
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: requestAnimationFrame,
+    });
+    const domRendering = {
+      renderState: "idle",
+      renderPassCount: 4,
+      pendingRenderCount: 0,
+      lastRenderDurationMs: 12,
+      maxRenderDurationMs: 18,
+      firstDomCommitObserved: true,
+      firstPaintOpportunityObserved: false,
+      failureSurfaceDomCommitted: true,
+      failureSurfacePaintOpportunityObserved: false,
+      registeredRowCount: 3,
+      renderer: {},
+      scroller: {},
+    } as const;
+    const paintRendering = {
+      ...domRendering,
+      firstPaintOpportunityObserved: true,
+      failureSurfacePaintOpportunityObserved: true,
+    } as const;
+    const captureIncidentRenderingSnapshot = jest.fn()
+      .mockReturnValueOnce(domRendering)
+      .mockReturnValueOnce(paintRendering);
+    const recordIncidentFailureSurfacePaintOpportunity = jest.fn(() => true);
+    const diagnosticsNeverSettle = new Promise<void>(() => {});
+    const recordFailureSurfaceRendering = jest.fn(() => diagnosticsNeverSettle);
+    const agent = {};
+    const workspace = {
+      element: host,
+      setAgentSnapshot: jest.fn(() => render.promise),
+      captureIncidentRenderingSnapshot,
+      recordIncidentFailureSurfacePaintOpportunity,
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      workspace,
+      agent,
+      plugin: {
+        getAgentIncidentCoordinator: () => ({
+          recordFailureSurfaceRendering,
+        }),
+      },
+      transcript: {
+        snapshot: () => ({
+          agentConversationId: "conversation_failure_surface",
+        }),
+      },
+      pendingThinConversationId: null,
+      conversationOriginToken: "origin-failure-surface",
+      runConversationOrigins: new Map([
+        ["user-failure-surface", "origin-failure-surface"],
+      ]),
+    });
+
+    try {
+      expect((view as any).renderAgentSnapshot({
+        runId: "run_failure_surface",
+        turnId: "user-failure-surface",
+        status: "failed",
+        messages: [],
+        parts: [],
+        terminalError: {
+          code: "operation_failure",
+          message: "Excluded from incident evidence",
+        },
+      })).toBeUndefined();
+      expect(recordFailureSurfaceRendering).not.toHaveBeenCalled();
+
+      render.resolve();
+      await Promise.resolve();
+
+      expect(recordFailureSurfaceRendering).toHaveBeenCalledWith({
+        conversationId: "conversation_failure_surface",
+        requestId: "user-failure-surface",
+        milestone: "dom_committed",
+        rendering: domRendering,
+      });
+      expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+      (paint as FrameRequestCallback)(512.5);
+
+      expect(recordIncidentFailureSurfacePaintOpportunity).toHaveBeenCalledWith(
+        "user-failure-surface",
+      );
+      expect(recordFailureSurfaceRendering).toHaveBeenLastCalledWith({
+        conversationId: "conversation_failure_surface",
+        requestId: "user-failure-surface",
+        milestone: "paint_opportunity_observed",
+        rendering: paintRendering,
+      });
+    } finally {
+      Object.defineProperty(window, "requestAnimationFrame", {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      });
+      host.remove();
+    }
+  });
+
+  it("contains failed-surface paint capture errors inside the frame callback", async () => {
+    const host = document.body.createDiv();
+    let paint: FrameRequestCallback | null = null;
+    const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      paint = callback;
+      return 72;
+    });
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: requestAnimationFrame,
+    });
+    const recordFailureSurfaceRendering = jest.fn();
+    const captureIncidentRenderingSnapshot = jest.fn()
+      .mockReturnValueOnce({ failureSurfaceDomCommitted: true })
+      .mockImplementationOnce(() => {
+        throw new Error("diagnostic capture failed");
+      });
+    const agent = {};
+    const workspace = {
+      element: host,
+      setAgentSnapshot: jest.fn(async () => undefined),
+      captureIncidentRenderingSnapshot,
+      recordIncidentFailureSurfacePaintOpportunity: jest.fn(() => true),
+    };
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      workspace,
+      agent,
+      plugin: {
+        getAgentIncidentCoordinator: () => ({
+          recordFailureSurfaceRendering,
+        }),
+      },
+      transcript: {
+        snapshot: () => ({
+          agentConversationId: "conversation_capture_failure",
+        }),
+      },
+      pendingThinConversationId: null,
+      conversationOriginToken: "origin-capture-failure",
+      runConversationOrigins: new Map([
+        ["user-capture-failure", "origin-capture-failure"],
+      ]),
+    });
+
+    try {
+      (view as any).renderAgentSnapshot({
+        runId: "run_capture_failure",
+        turnId: "user-capture-failure",
+        status: "failed",
+        messages: [],
+        parts: [],
+      });
+      await Promise.resolve();
+
+      expect(() => (paint as FrameRequestCallback)(600)).not.toThrow();
+      expect(recordFailureSurfaceRendering).toHaveBeenCalledTimes(1);
+      expect(recordFailureSurfaceRendering).toHaveBeenCalledWith(expect.objectContaining({
+        milestone: "dom_committed",
+      }));
     } finally {
       Object.defineProperty(window, "requestAnimationFrame", {
         configurable: true,
@@ -2201,7 +2631,10 @@ describe("AgentChatView composer admission", () => {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
       contextManager: { getPinnedFiles: jest.fn(() => []) },
-      plugin: { settings: { licenseKey: "test-license" } },
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
       sessionTrustedToolNames: new Set<string>(),
@@ -2220,7 +2653,6 @@ describe("AgentChatView composer admission", () => {
       chatId: "",
       chatTitle: "Old chat",
       readThinAgentContextSources: jest.fn(async () => []),
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -2345,7 +2777,10 @@ describe("AgentChatView composer admission", () => {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
       contextManager: { getPinnedFiles: jest.fn(() => []) },
-      plugin: { settings: { licenseKey: "test-license" } },
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
       sessionTrustedToolNames: new Set<string>(),
@@ -2360,7 +2795,6 @@ describe("AgentChatView composer admission", () => {
       chatId: "",
       chatTitle: "Settlement test",
       readThinAgentContextSources: jest.fn(async () => []),
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -2444,7 +2878,10 @@ describe("AgentChatView composer admission", () => {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
       contextManager: { getPinnedFiles: jest.fn(() => []) },
-      plugin: { settings: { licenseKey: "test-license" } },
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
       automationApprovalMode: "interactive",
       approvalMode: "ask",
       sessionTrustedToolNames: new Set<string>(),
@@ -2459,7 +2896,6 @@ describe("AgentChatView composer admission", () => {
       chatId: "",
       chatTitle: "Cache missed settlement",
       readThinAgentContextSources: jest.fn(async () => []),
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -3933,7 +4369,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
       createAgentSession: jest.fn(function (this: { agent: unknown }) {
         return this.agent;
       }),
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      plugin: {
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
     });
 
     const oldSubmission = { text: "Old preflight", mode: "send" as const };
@@ -4365,7 +4803,9 @@ describe("AgentChatView thin conversation lifecycle", () => {
       }),
       syncAttachments: jest.fn(),
       updateViewState: jest.fn(),
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      plugin: {
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
       runPromotedQueuedSubmission,
     });
 
@@ -4390,6 +4830,162 @@ describe("AgentChatView thin conversation lifecycle", () => {
       true,
       expect.stringMatching(/^user-/),
     );
+  });
+
+  it("promotes a deferred recovered completion only for the matching durable turn", () => {
+    const conversationId = "conversation_deferred_recovery";
+    const turnId = "user-deferred-recovery";
+    const expectedOrigin = "origin-deferred-recovery";
+    const durableSnapshot = {
+      agentConversationId: conversationId,
+      messages: [{ role: "user", content: "Request", message_id: turnId }],
+    };
+    const transcript = {
+      snapshot: jest.fn(() => durableSnapshot),
+    };
+    const promotion = { item: { id: "queued-after-recovery" } };
+    const promoteRecoveredQueuedSubmission = jest.fn();
+    const runPromotedQueuedSubmission = jest.fn();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      conversationOriginToken: expectedOrigin,
+      deferredRecoveredCompletion: null,
+      transcript,
+      promoteRecoveredQueuedSubmission,
+      runPromotedQueuedSubmission,
+    });
+    const setDeferred = (overrides: Record<string, string> = {}) => {
+      (view as any).deferredRecoveredCompletion = {
+        conversationOriginToken: expectedOrigin,
+        conversationId,
+        turnId,
+        ...overrides,
+      };
+    };
+
+    setDeferred({ conversationOriginToken: "origin-stale" });
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+
+    setDeferred();
+    (view as any).conversationOriginToken = "origin-replaced";
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+    (view as any).conversationOriginToken = expectedOrigin;
+
+    setDeferred({ conversationId: "conversation_replaced" });
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+
+    transcript.snapshot.mockReturnValueOnce({
+      ...durableSnapshot,
+      messages: [],
+    });
+    setDeferred();
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+
+    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+    expect((view as any).deferredRecoveredCompletion).toBeNull();
+
+    promoteRecoveredQueuedSubmission
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(promotion);
+    setDeferred();
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+    setDeferred();
+    (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
+
+    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledTimes(2);
+    expect(promoteRecoveredQueuedSubmission).toHaveBeenNthCalledWith(
+      1,
+      expectedOrigin,
+    );
+    expect(runPromotedQueuedSubmission).toHaveBeenCalledWith(
+      promotion,
+      expectedOrigin,
+    );
+  });
+
+  it("uses the pending conversation for failure-render evidence and contains unavailable diagnostics", () => {
+    const pendingConversationId = "conversation_pending_failure_render";
+    const rendering = { failureSurfaceDomCommitted: true };
+    const recordFailureSurfaceRendering = jest.fn();
+    const getAgentIncidentCoordinator = jest.fn(() => ({
+      recordFailureSurfaceRendering,
+    }));
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      transcript: { snapshot: jest.fn(() => ({})) },
+      pendingThinConversationId: pendingConversationId,
+      plugin: { getAgentIncidentCoordinator },
+    });
+
+    (view as any).recordIncidentFailureSurfaceRendering(
+      "user-failure-render",
+      "dom_committed",
+      rendering,
+    );
+
+    expect(recordFailureSurfaceRendering).toHaveBeenCalledWith({
+      conversationId: pendingConversationId,
+      requestId: "user-failure-render",
+      milestone: "dom_committed",
+      rendering,
+    });
+
+    (view as any).pendingThinConversationId = null;
+    (view as any).recordIncidentFailureSurfaceRendering(
+      "user-without-conversation",
+      "paint_opportunity_observed",
+      rendering,
+    );
+    expect(getAgentIncidentCoordinator).toHaveBeenCalledTimes(1);
+
+    (view as any).pendingThinConversationId = pendingConversationId;
+    getAgentIncidentCoordinator.mockReturnValueOnce(undefined as never);
+    expect(() => (view as any).recordIncidentFailureSurfaceRendering(
+      "user-without-coordinator",
+      "paint_opportunity_observed",
+      rendering,
+    )).not.toThrow();
+
+    (view as any).transcript.snapshot.mockImplementationOnce(() => {
+      throw new Error("transcript unavailable");
+    });
+    expect(() => (view as any).recordIncidentFailureSurfaceRendering(
+      "user-without-transcript",
+      "paint_opportunity_observed",
+      rendering,
+    )).not.toThrow();
+  });
+
+  it("keeps hydrated follow-ups queued while the recovered run or promotion is unavailable", () => {
+    const queued = {
+      id: "queued-hydration-guard",
+      text: "Wait for safe promotion",
+      includeContextFiles: true,
+    };
+    const getSnapshot = jest.fn(() => ({ status: "running" }));
+    const promoteRecoveredQueuedSubmission = jest.fn(() => null);
+    const runPromotedQueuedSubmission = jest.fn();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      conversationOriginToken: "origin-hydration-guard",
+      activeSubmissionOperation: null,
+      queuedFollowUps: [queued],
+      agent: { getSnapshot },
+      promoteRecoveredQueuedSubmission,
+      runPromotedQueuedSubmission,
+    });
+
+    (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
+    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+
+    getSnapshot.mockReturnValueOnce({ status: "idle" });
+    (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
+
+    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledWith(
+      "origin-hydration-guard",
+    );
+    expect(runPromotedQueuedSubmission).not.toHaveBeenCalled();
+    expect((view as any).queuedFollowUps).toEqual([queued]);
   });
 
   it("promotes recovered-run follow-ups in FIFO order without exposing an idle gap", async () => {
@@ -4617,8 +5213,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
     const hydrate = jest.fn(async () => undefined);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
-      plugin: { settings: { licenseKey: "test-license" } },
-      getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
+      },
       pendingThinConversationId: conversationId,
       thinBootstrapRequest: null,
       thinClientId: `client_${"c".repeat(32)}`,
@@ -4641,13 +5239,15 @@ describe("AgentChatView thin conversation lifecycle", () => {
     let releaseBuildId!: (value: `sha256:${string}`) => void;
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
-      plugin: { settings: { licenseKey: "test-license" } },
-      getLoadedPluginBuildId: jest.fn(() => {
-        buildIdStarted.resolve();
-        return new Promise<`sha256:${string}`>((resolve) => {
-          releaseBuildId = resolve;
-        });
-      }),
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(() => {
+          buildIdStarted.resolve();
+          return new Promise<`sha256:${string}`>((resolve) => {
+            releaseBuildId = resolve;
+          });
+        }),
+      },
       pendingThinConversationId: conversationId,
       thinBootstrapRequest: null,
       thinClientId: `client_${"c".repeat(32)}`,
@@ -4668,10 +5268,12 @@ describe("AgentChatView thin conversation lifecycle", () => {
     const conversationId = "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
-      plugin: { settings: { licenseKey: "test-license" } },
-      getLoadedPluginBuildId: jest.fn(async () => {
-        throw new Error("Current build identity is unavailable.");
-      }),
+      plugin: {
+        settings: { licenseKey: "test-license" },
+        getLoadedPluginBuildId: jest.fn(async () => {
+          throw new Error("Current build identity is unavailable.");
+        }),
+      },
       pendingThinConversationId: conversationId,
       thinBootstrapRequest: null,
       thinClientId: `client_${"c".repeat(32)}`,

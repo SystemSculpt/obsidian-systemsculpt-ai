@@ -159,7 +159,7 @@ describe("PluginLogger", () => {
 
     it("persists sanitized lifecycle info while ordinary info remains filtered", async () => {
       logger.info("ordinary info");
-      logger.lifecycle({
+      const lifecycle = logger.lifecycle({
         sequence: 7,
         timestamp: 123,
         code: "local_tool_started",
@@ -197,6 +197,18 @@ describe("PluginLogger", () => {
         credential: "private credential",
       });
 
+      expect(lifecycle).toEqual(expect.objectContaining({
+        conversation_id: "conversation_0123456789abcdef0123456789abcdef",
+        request_id: "request_0123456789abcdef",
+        client_instance_id: "client_0123456789abcdef0123456789abcdef",
+        plugin_build_id: "07bd9378-dirty-20260731T120000000Z",
+        run_id: "run-local-safe",
+        server_run_id: "run_0123456789abcdef0123456789abcdef",
+        incident_id: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        latency_trace_id: "c".repeat(32),
+      }));
+      expect(lifecycle).not.toHaveProperty("tool_call_id");
+
       expect(logger.getRecentEntries()).toEqual([
         expect.objectContaining({
           level: "info",
@@ -208,14 +220,10 @@ describe("PluginLogger", () => {
               timestamp: 123,
               code: "local_tool_started",
               phase: "tool_execution",
-              conversationId: "conversation_0123456789abcdef0123456789abcdef",
-              requestId: "request_0123456789abcdef",
-              clientInstanceId: "client_0123456789abcdef0123456789abcdef",
               pluginBuildId: "07bd9378-dirty-20260731T120000000Z",
               runId: "run-local-safe",
               serverRunId: "run_0123456789abcdef0123456789abcdef",
               toolName: "read",
-              toolCallId: "call-safe",
               incidentId: "incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               failureCode: "response_capacity_unavailable",
               latencyTraceId: "c".repeat(32),
@@ -240,9 +248,22 @@ describe("PluginLogger", () => {
         .split("\n")
         .map((line: string) => JSON.parse(line));
       expect(persisted).toHaveLength(1);
-      expect(JSON.stringify(persisted)).not.toMatch(
+      const persistedText = JSON.stringify(persisted);
+      expect(persistedText).not.toMatch(
         /prompt|content|path|url|query|arguments|input|output|rawError|license|ticket|provider|credential|reason/i,
       );
+      for (const privateIdentifier of [
+        "conversation_0123456789abcdef0123456789abcdef",
+        "request_0123456789abcdef",
+        "client_0123456789abcdef0123456789abcdef",
+        "call-safe",
+      ]) {
+        expect(persistedText).not.toContain(privateIdentifier);
+      }
+      expect(persistedText).toContain("run-local-safe");
+      expect(persistedText).toContain("run_0123456789abcdef0123456789abcdef");
+      expect(persistedText).toContain("incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+      expect(persistedText).toContain("c".repeat(32));
       expect(consoleSpy.debug).not.toHaveBeenCalled();
     });
 
@@ -331,6 +352,77 @@ describe("PluginLogger", () => {
       expect(JSON.stringify(logger.getRecentEntries())).not.toMatch(
         /private-license|private-account|private-content/u,
       );
+    });
+
+    it("contains revoked lifecycle proxies and throwing allowlisted getters", () => {
+      const revoked = Proxy.revocable({
+        code: "run_started",
+        phase: "response",
+      }, {});
+      revoked.revoke();
+      const throwing = {
+        code: "run_started",
+        phase: "response",
+        get status(): number {
+          throw new Error("hostile getter");
+        },
+      };
+
+      expect(() => logger.lifecycle(
+        revoked.proxy as unknown as Record<string, unknown>,
+      )).not.toThrow();
+      expect(logger.lifecycle(
+        revoked.proxy as unknown as Record<string, unknown>,
+      )).toBeNull();
+      expect(() => logger.lifecycle(throwing)).not.toThrow();
+      expect(logger.lifecycle(throwing)).toBeNull();
+      expect(logger.getRecentEntries()).toEqual([]);
+    });
+
+    it("reads lifecycle input scalars once and never reads other properties", () => {
+      const reads = new Map<PropertyKey, number>();
+      const values: Record<string, unknown> = {
+        code: "local_tool_completed_failed",
+        phase: "tool_execution",
+        sequence: 7,
+        status: 503,
+        retryable: true,
+        toolName: "read",
+        toolOutcome: "failed",
+        toolFailureClass: "operation_failed",
+        toolItemCount: 2,
+        toolCompletedItemCount: 1,
+        toolFailedItemCount: 1,
+        prompt: "private prompt",
+      };
+      const changing = new Proxy(values, {
+        get(target, property, receiver) {
+          const count = (reads.get(property) ?? 0) + 1;
+          reads.set(property, count);
+          if (count > 1) throw new Error(`property read twice: ${String(property)}`);
+          if (property === "prompt") throw new Error("private property read");
+          return Reflect.get(target, property, receiver);
+        },
+      });
+
+      expect(logger.lifecycle(changing)).toEqual({
+        timestamp: expect.any(String),
+        severity: "info",
+        code: "local_tool_completed_failed",
+        phase: "tool_execution",
+        sequence: 7,
+        tool_name: "read",
+        status: 503,
+        retryable: true,
+        tool_outcome: "failed",
+        tool_failure_class: "operation_failed",
+        tool_item_count: 2,
+        tool_completed_item_count: 1,
+        tool_failed_item_count: 1,
+      });
+      expect([...reads.values()].every((count) => count === 1)).toBe(true);
+      expect(reads.has("prompt")).toBe(false);
+      expect(JSON.stringify(logger.getRecentEntries())).not.toContain("private prompt");
     });
 
     it("accepts every code in the strict lifecycle contract", () => {
@@ -486,9 +578,6 @@ describe("PluginLogger", () => {
           code: "run_started",
           phase: "response",
           sequence: 7,
-          conversation_id: "conversation_0123456789abcdef0123456789abcdef",
-          request_id: "request_0123456789abcdef",
-          client_instance_id: "client_0123456789abcdef0123456789abcdef",
           plugin_build_id: "07bd9378-dirty-20260731T120000000Z",
           run_id: "run-local-safe",
           server_run_id: "run_0123456789abcdef0123456789abcdef",
@@ -521,6 +610,9 @@ describe("PluginLogger", () => {
         expect(copied).not.toContain(canary);
       }
       expect(copied).not.toContain("call-safe");
+      expect(copied).not.toContain("conversation_0123456789abcdef0123456789abcdef");
+      expect(copied).not.toContain("request_0123456789abcdef");
+      expect(copied).not.toContain("client_0123456789abcdef0123456789abcdef");
       expect(copied).not.toMatch(
         /\b(?:model|provider|harness|transport|protocol|Cloudflare|Think|Pi|OpenRouter|WebSocket)\b|agent connection|connection ticket|AI SDK/iu,
       );
@@ -566,6 +658,18 @@ describe("PluginLogger", () => {
       ]);
       expect(JSON.stringify(projected)).not.toContain("QA-CANARY-7421");
     });
+
+    it("applies the support limit after excluding unrelated log entries", () => {
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      mockPlugin.settings.debugMode = true;
+      for (let index = 0; index < 20; index += 1) {
+        logger.debug(`unrelated-${index}`);
+      }
+
+      expect(logger.getSupportDiagnostics(1)).toEqual([
+        expect.objectContaining({ code: "run_started" }),
+      ]);
+    });
   });
 
   describe("setLogFileName", () => {
@@ -605,6 +709,21 @@ describe("PluginLogger", () => {
       await logger.flushNow();
 
       expect(mockStorage.appendToFile).toHaveBeenCalled();
+    });
+
+    it("retries a diagnostics batch after storage reports a failed write", async () => {
+      mockPlugin.settings.debugMode = true;
+      mockStorage.appendToFile
+        .mockResolvedValueOnce({ success: false, error: "disk-full" })
+        .mockResolvedValueOnce({ success: true });
+
+      logger.info("Retain this batch");
+      await logger.flushNow();
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(2);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("Retain this batch");
+      expect(mockStorage.appendToFile.mock.calls[1][2]).toContain("Retain this batch");
     });
 
     it("does not flush when no entries pending", async () => {

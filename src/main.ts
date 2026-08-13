@@ -43,7 +43,16 @@ import { FreezeMonitor } from "./services/FreezeMonitor";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
-import { hasHostCapability, openLocalFolder } from "./platform/hostCapabilities";
+import { AgentIncidentCoordinator } from "./core/diagnostics/AgentIncidentCoordinator";
+import { AgentIncidentRecorder } from "./core/diagnostics/AgentIncidentRecorder";
+import { AgentIncidentStore } from "./core/diagnostics/AgentIncidentStore";
+import { DiagnosticsSessionLifecycle, sanitizePublicDiagnosticsVersion } from "./core/diagnostics/DiagnosticsSessionLifecycle";
+import {
+  getHostDeviceType,
+  getHostOperatingSystem,
+  hasHostCapability,
+  openLocalFolder,
+} from "./platform/hostCapabilities";
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
@@ -62,6 +71,7 @@ import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransp
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
+import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
 
 export type ManagedCapabilityClientGraph = Readonly<{
   transport: HostedTransportAdapter;
@@ -75,6 +85,8 @@ type StudioServiceModule = typeof import("./studio/StudioService");
 type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
 type RecorderServiceModule = typeof import("./services/RecorderService");
 type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
+
+const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
 
 function loadViewManagerModule(): ViewManagerModule {
   return require("./core/plugin/views");
@@ -113,11 +125,6 @@ type PublicSupportResourceSample = Readonly<{
 function normalizePublicDiagnosticsLimit(value: number, fallback: number, maximum: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(maximum, Math.max(0, Math.floor(value)));
-}
-
-function sanitizePublicVersion(value: unknown): string {
-  if (typeof value !== "string") return "unknown";
-  return /^\d{1,4}(?:\.\d{1,4}){1,3}$/u.test(value) ? value : "unknown";
 }
 
 function projectPublicSupportResourceSample(sample: unknown): PublicSupportResourceSample | null {
@@ -192,10 +199,14 @@ export default class SystemSculptPlugin extends Plugin {
   public vaultFileCache: VaultFileCache;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
+  private loadedPluginBuildIdPromise: Promise<`sha256:${string}`> | null = null;
+  private agentIncidentCoordinator: AgentIncidentCoordinator | null = null;
+  private agentIncidentLoadedBundleId: `sha256:${string}` | null = null;
   private lifecycleCoordinator: LifecycleCoordinator | null = null;
   private diagnosticsSessionId: string | null = null;
   private diagnosticsLogFileName = "systemsculpt-latest.log";
   private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
+  private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
   private workflowEngineService: WorkflowEngineService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
@@ -318,21 +329,16 @@ export default class SystemSculptPlugin extends Plugin {
     await this.rotateDiagnosticsFile(this.diagnosticsLogFileName, `systemsculpt-${timestamp}.log`, header);
     await this.rotateDiagnosticsFile(this.diagnosticsMetricsFileName, `resource-metrics-${timestamp}.ndjson`);
 
-    const metadata = {
+    this.diagnosticsSessionLifecycle ??= new DiagnosticsSessionLifecycle({
+      adapter: this.app.vault.adapter,
+      storage: this.storage,
+      pluginVersion: this.manifest.version,
+      getObsidianVersion: () => this.getObsidianApiVersion(),
+    });
+    await this.diagnosticsSessionLifecycle.schedule({
       sessionId: timestamp,
       startedAt: new Date().toISOString(),
-      pluginVersion: this.manifest.version,
-      vaultName: typeof this.app.vault.getName === "function" ? this.app.vault.getName() : "",
-      obsidianConfigDir: this.app.vault.configDir,
-      enabledPlugins: this.collectEnabledPluginIds(),
-    };
-
-    try {
-      await this.storage!.writeFile("diagnostics", "session-latest.json", metadata);
-      await this.storage!.writeFile("diagnostics", `session-${timestamp}.json`, metadata);
-    } catch (error) {
-      console.warn("[SystemSculpt][Diagnostics] Failed to write session metadata", error);
-    }
+    });
 
     if (this.pluginLogger) {
       this.pluginLogger.setLogFileName(this.diagnosticsLogFileName);
@@ -373,25 +379,9 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  private collectEnabledPluginIds(): string[] {
-    const pluginManager = (this.app as any)?.plugins;
-    if (!pluginManager) {
-      return [];
-    }
-
-    if (pluginManager.enabledPlugins instanceof Set) {
-      return Array.from(pluginManager.enabledPlugins);
-    }
-
-    if (Array.isArray(pluginManager.enabledPlugins)) {
-      return [...pluginManager.enabledPlugins];
-    }
-
-    return [];
-  }
-
   async onload() {
     const loadStart = performance.now();
+    this.initializeAgentIncidentCoordinator();
     // Injected by esbuild `define`; "dev" outside the bundler (tests).
     const buildStamp =
       typeof __SS_BUILD_STAMP__ !== "undefined" ? __SS_BUILD_STAMP__ : "dev";
@@ -970,8 +960,8 @@ export default class SystemSculptPlugin extends Plugin {
     const snapshot = {
       schema_version: 1,
       generated_at: new Date().toISOString(),
-      plugin_version: sanitizePublicVersion(this.manifest.version),
-      obsidian_version: sanitizePublicVersion(this.getObsidianApiVersion()),
+      plugin_version: sanitizePublicDiagnosticsVersion(this.manifest.version),
+      obsidian_version: sanitizePublicDiagnosticsVersion(this.getObsidianApiVersion()),
       status: {
         safe_mode: this.safeMode,
         initialization_issue_count: Math.min(9_999, this.failures.length),
@@ -1680,6 +1670,29 @@ export default class SystemSculptPlugin extends Plugin {
 
   
 
+  private async closeAndDrainAgentIncidentCoordinatorBeforeUnload(): Promise<void> {
+    const coordinator = this.agentIncidentCoordinator;
+    if (!coordinator) return;
+
+    // Closing admission is synchronous inside the coordinator. Do not cancel
+    // accepted writes after the deadline; they may still persist best-effort.
+    const draining = Promise.resolve()
+      .then(() => coordinator.closeAdmissionAndDrain())
+      .catch(() => undefined);
+    let deadlineTimer: number | null = null;
+    const deadline = new Promise<void>((resolve) => {
+      deadlineTimer = window.setTimeout(
+        resolve,
+        INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS,
+      );
+    });
+    try {
+      await Promise.race([draining, deadline]);
+    } finally {
+      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+    }
+  }
+
   async onunload() {
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
@@ -1690,15 +1703,38 @@ export default class SystemSculptPlugin extends Plugin {
     } catch {
       // Recorder teardown is internally best-effort; continue plugin unload.
     }
+    this.diagnosticsSessionLifecycle?.close();
 
-    // Stop diagnostic producers, durably drain entries accepted while the
-    // plugin was active, then make the global unload guard authoritative.
-    // PluginLogger quiesces itself during the awaited drain, so nothing new can
-    // enter the queue before the guard flips.
+    // Stop non-view producers first. ChatView teardown must run while incident
+    // admission remains open so its final accepted failure evidence is kept.
     try {
       FreezeMonitor.stop();
     } catch {
       // A failed producer stop must not skip the pending diagnostics drain.
+    }
+
+    // Wait for each live ChatView to stop session callbacks before closing
+    // incident admission. Each view owns an idempotent close barrier, so the
+    // normal leaf detach below reuses the completed teardown.
+    const viewManager = this.viewManager;
+    this.viewManager = null;
+    try {
+      await viewManager?.quiesceChatViewProducers();
+    } catch {
+      // A stale ViewManager must not skip normal leaf detach or incident drain.
+    }
+    try {
+      viewManager?.unloadViews();
+    } catch {
+      // View detach is best-effort; still close incident admission below.
+    }
+
+    try {
+      await this.closeAndDrainAgentIncidentCoordinatorBeforeUnload();
+    } catch {
+      // Incident persistence is best-effort and cannot block plugin teardown.
+    } finally {
+      this.agentIncidentCoordinator = null;
     }
     try {
       await this.pluginLogger?.flushBeforeUnload();
@@ -1808,11 +1844,6 @@ export default class SystemSculptPlugin extends Plugin {
         });
       }
 
-      // Cleanup views
-      if (this.viewManager) {
-        this.viewManager.unloadViews();
-      }
-
       if (this.fileContextMenuService) {
         this.fileContextMenuService.stop();
         this.fileContextMenuService = null;
@@ -1901,6 +1932,80 @@ export default class SystemSculptPlugin extends Plugin {
 
   public getResourceMonitor(): ResourceMonitorService | null {
     return this.resourceMonitor;
+  }
+
+  public getLoadedPluginBuildId(): Promise<`sha256:${string}`> {
+    return this.loadedPluginBuildIdPromise
+      ??= getLoadedPluginBuildId(this.app, this.manifest);
+  }
+
+  public getAgentIncidentCoordinator(): AgentIncidentCoordinator | null {
+    return this.agentIncidentCoordinator;
+  }
+
+  private initializeAgentIncidentCoordinator(): void {
+    try {
+      const recorder = new AgentIncidentRecorder();
+      const store = new AgentIncidentStore(this.app.vault.adapter);
+      this.agentIncidentCoordinator = new AgentIncidentCoordinator({
+        recorder,
+        store,
+        environmentProvider: () => {
+          const device = getHostDeviceType();
+          const operatingSystem = getHostOperatingSystem();
+          const loadedBundleId = this.agentIncidentLoadedBundleId;
+          return {
+            pluginVersion: this.manifest.version,
+            ...(loadedBundleId
+              ? {
+                  pluginBuildId: loadedBundleId,
+                  loadedBundleSha256: loadedBundleId.slice("sha256:".length),
+                }
+              : {}),
+            obsidianVersion: this.getObsidianApiVersion(),
+            hostType: device === "Desktop"
+              ? "desktop"
+              : device === "Mobile"
+                ? "mobile"
+                : "unknown",
+            osFamily: operatingSystem === "macOS"
+              ? "macos"
+              : operatingSystem === "Windows"
+                ? "windows"
+                : operatingSystem === "Linux"
+                  ? "linux"
+                  : operatingSystem === "iOS"
+                    ? "ios"
+                    : operatingSystem === "Android"
+                      ? "android"
+                      : "unknown",
+          };
+        },
+        resourceSamplesProvider: () => {
+          const monitor = this.resourceMonitor;
+          if (!monitor) return [];
+          const terminal = monitor.captureIncidentTerminalSample();
+          const window = monitor.getIncidentResourceSamplesAround(Date.now(), {
+            limit: 12,
+          });
+          return window.some((sample) => sample.captured_at === terminal.captured_at)
+            ? window
+            : [...window.slice(-11), terminal];
+        },
+      });
+      void this.agentIncidentCoordinator.initialize();
+      void this.getLoadedPluginBuildId().then(
+        (buildId) => {
+          this.agentIncidentLoadedBundleId = buildId;
+        },
+        () => {
+          this.agentIncidentLoadedBundleId = null;
+        },
+      );
+    } catch {
+      this.agentIncidentCoordinator = null;
+      this.agentIncidentLoadedBundleId = null;
+    }
   }
 
   public async openDiagnosticsFolder(): Promise<boolean> {

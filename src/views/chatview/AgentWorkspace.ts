@@ -9,7 +9,10 @@ import {
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import type { ChatMessage } from "../../types";
-import { AnchoredScroller } from "./AnchoredScroller";
+import {
+  AnchoredScroller,
+  type AnchoredScrollerIncidentSnapshot,
+} from "./AnchoredScroller";
 import {
   AgentComposer,
   type AgentComposerAttachment,
@@ -23,6 +26,7 @@ import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversati
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import {
   AgentConversationRenderer,
+  type AgentConversationRendererIncidentSnapshot,
   type AgentInlineMessageEdit,
 } from "./AgentConversationRenderer";
 
@@ -49,6 +53,9 @@ export type AgentWorkspaceOptions = Readonly<{
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
+  onCopyIncidentReport?: (
+    reportId: string,
+  ) => boolean | "memory_fallback" | Promise<boolean | "memory_fallback">;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -99,6 +106,41 @@ type SnapshotRenderWaiter = Readonly<{
   reject: (error: unknown) => void;
 }>;
 
+export type AgentWorkspaceIncidentRenderState =
+  | "idle"
+  | "frame_pending"
+  | "queued"
+  | "rendering"
+  | "rendering_with_pending";
+
+export type AgentWorkspaceIncidentRenderingSnapshot = Readonly<{
+  renderState: AgentWorkspaceIncidentRenderState;
+  renderPassCount: number;
+  pendingRenderCount: number;
+  lastRenderDurationMs: number;
+  maxRenderDurationMs: number;
+  firstDomCommitObserved: boolean;
+  firstPaintOpportunityObserved: boolean;
+  failureSurfaceDomCommitted: boolean;
+  failureSurfacePaintOpportunityObserved: boolean;
+  registeredRowCount: number;
+  renderer: AgentConversationRendererIncidentSnapshot;
+  scroller: AnchoredScrollerIncidentSnapshot;
+}>;
+
+const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
+const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
+
+function boundedIncidentRenderCount(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
+}
+
+function boundedIncidentRenderDuration(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
+}
+
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
   public readonly element: HTMLElement;
@@ -136,6 +178,17 @@ export class AgentWorkspace extends Component {
   }> | null = null;
   private unloaded = false;
   private lifecycleGeneration = 0;
+  private incidentMetricsGeneration = 0;
+  private incidentRenderPassCount = 0;
+  private incidentQueuedRenderCount = 0;
+  private incidentActiveRenderCount = 0;
+  private incidentLastRenderDurationMs = 0;
+  private incidentMaxRenderDurationMs = 0;
+  private incidentFirstDomCommitObserved = false;
+  private incidentFirstPaintOpportunityObserved = false;
+  private incidentFailureSurfaceTurnId: string | null = null;
+  private incidentFailureSurfaceDomCommitted = false;
+  private incidentFailureSurfacePaintOpportunityObserved = false;
 
   constructor(parent: HTMLElement, private readonly options: AgentWorkspaceOptions) {
     super();
@@ -197,6 +250,7 @@ export class AgentWorkspace extends Component {
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
       onRetryFailedTurn: options.onRetryFailedTurn,
+      onCopyIncidentReport: options.onCopyIncidentReport,
       onRetryMessage: options.onRetryMessage,
       onResubmitMessage: options.onResubmitMessage,
       onCancelMessageEdit: options.onCancelMessageEdit,
@@ -250,6 +304,73 @@ export class AgentWorkspace extends Component {
       },
     });
     this.addChild(this.composer);
+  }
+
+  /** Returns a deeply frozen, content-free projection for a local incident report. */
+  public captureIncidentRenderingSnapshot(): AgentWorkspaceIncidentRenderingSnapshot {
+    const deferredSnapshotCount = typeof this.pendingSnapshotRender !== "undefined"
+      && this.incidentQueuedRenderCount === 0
+      && this.incidentActiveRenderCount === 0
+      ? 1
+      : 0;
+    const pendingRenderCount = boundedIncidentRenderCount(
+      this.incidentQueuedRenderCount
+      + this.incidentActiveRenderCount
+      + deferredSnapshotCount,
+    );
+    const hasPendingAfterActive = this.incidentQueuedRenderCount > 0
+      || typeof this.pendingSnapshotRender !== "undefined"
+      || this.snapshotRenderFrame !== null;
+    const renderState: AgentWorkspaceIncidentRenderState = this.incidentActiveRenderCount > 0
+      ? hasPendingAfterActive ? "rendering_with_pending" : "rendering"
+      : this.snapshotRenderFrame !== null
+        ? "frame_pending"
+        : pendingRenderCount > 0
+          ? "queued"
+          : "idle";
+    const renderer = this.renderer.captureIncidentSnapshot();
+    const scroller = this.scroller.captureIncidentSnapshot();
+    return Object.freeze({
+      renderState,
+      renderPassCount: boundedIncidentRenderCount(this.incidentRenderPassCount),
+      pendingRenderCount,
+      lastRenderDurationMs: boundedIncidentRenderDuration(
+        this.incidentLastRenderDurationMs,
+      ),
+      maxRenderDurationMs: boundedIncidentRenderDuration(
+        this.incidentMaxRenderDurationMs,
+      ),
+      firstDomCommitObserved: this.incidentFirstDomCommitObserved,
+      firstPaintOpportunityObserved: this.incidentFirstPaintOpportunityObserved,
+      failureSurfaceDomCommitted: this.incidentFailureSurfaceDomCommitted,
+      failureSurfacePaintOpportunityObserved:
+        this.incidentFailureSurfacePaintOpportunityObserved,
+      registeredRowCount: boundedIncidentRenderCount(this.registeredRows.size),
+      renderer,
+      scroller,
+    });
+  }
+
+  /** Records a validated DOM commit from the ChatView render lifecycle. */
+  public recordIncidentDomCommit(): void {
+    this.incidentFirstDomCommitObserved = true;
+  }
+
+  /** Records the frame callback already owned by the ChatView render lifecycle. */
+  public recordIncidentPaintOpportunity(): void {
+    if (!this.incidentFirstDomCommitObserved) return;
+    this.incidentFirstPaintOpportunityObserved = true;
+  }
+
+  /** Records a paint opportunity only for the maintained failed surface. */
+  public recordIncidentFailureSurfacePaintOpportunity(turnId: string): boolean {
+    if (
+      !this.incidentFailureSurfaceDomCommitted
+      || this.incidentFailureSurfaceTurnId !== turnId
+    ) return false;
+    this.incidentFailureSurfacePaintOpportunityObserved = true;
+    this.incidentFirstPaintOpportunityObserved = true;
+    return true;
   }
 
   public setTitle(title: string): void {
@@ -601,6 +722,12 @@ export class AgentWorkspace extends Component {
   }
 
   public setAgentSnapshot(snapshot: AgentConversationSnapshot | null): Promise<void> {
+    const currentTurnId = this.runPending
+      ? this.pendingTurnId ?? this.snapshot?.turnId ?? null
+      : this.snapshot?.turnId ?? null;
+    if (snapshot?.turnId && snapshot.turnId !== currentTurnId) {
+      this.resetIncidentRenderingMetrics();
+    }
     this.snapshot = snapshot;
     if (this.unloaded) return Promise.resolve();
     if (!snapshot && !this.runPending) {
@@ -629,6 +756,15 @@ export class AgentWorkspace extends Component {
     turnId?: string,
     options: Readonly<{ anchorSubmittedPrompt?: boolean }> = {},
   ): void {
+    const currentTurnId = this.runPending
+      ? this.pendingTurnId ?? this.snapshot?.turnId ?? null
+      : this.snapshot?.turnId ?? null;
+    if (
+      pending
+      && (turnId ? turnId !== currentTurnId : !this.runPending)
+    ) {
+      this.resetIncidentRenderingMetrics();
+    }
     if (pending && turnId) {
       this.submittedPromptTurnId = options.anchorSubmittedPrompt === true
         ? turnId
@@ -794,8 +930,76 @@ export class AgentWorkspace extends Component {
   }
 
   private scheduleRender(task: () => Promise<void>): Promise<void> {
-    this.rendering = this.rendering.then(task, task);
+    const metricsGeneration = this.incidentMetricsGeneration;
+    this.incidentQueuedRenderCount = boundedIncidentRenderCount(
+      this.incidentQueuedRenderCount + 1,
+    );
+    const measuredTask = async (): Promise<void> => {
+      const measure = metricsGeneration === this.incidentMetricsGeneration;
+      if (measure) {
+        this.incidentQueuedRenderCount = Math.max(
+          0,
+          this.incidentQueuedRenderCount - 1,
+        );
+        this.incidentActiveRenderCount = boundedIncidentRenderCount(
+          this.incidentActiveRenderCount + 1,
+        );
+        this.incidentRenderPassCount = boundedIncidentRenderCount(
+          this.incidentRenderPassCount + 1,
+        );
+      }
+      const startedAt = this.incidentMonotonicNow();
+      try {
+        await task();
+      } finally {
+        if (measure && metricsGeneration === this.incidentMetricsGeneration) {
+          this.incidentActiveRenderCount = Math.max(
+            0,
+            this.incidentActiveRenderCount - 1,
+          );
+          const durationMs = boundedIncidentRenderDuration(
+            this.incidentMonotonicNow() - startedAt,
+          );
+          this.incidentLastRenderDurationMs = durationMs;
+          this.incidentMaxRenderDurationMs = Math.max(
+            this.incidentMaxRenderDurationMs,
+            durationMs,
+          );
+        }
+      }
+    };
+    this.rendering = this.rendering.then(measuredTask, measuredTask);
     return this.rendering;
+  }
+
+  private resetIncidentRenderingMetrics(): void {
+    this.incidentMetricsGeneration += 1;
+    this.incidentRenderPassCount = 0;
+    this.incidentQueuedRenderCount = 0;
+    this.incidentActiveRenderCount = 0;
+    this.incidentLastRenderDurationMs = 0;
+    this.incidentMaxRenderDurationMs = 0;
+    this.incidentFirstDomCommitObserved = false;
+    this.incidentFirstPaintOpportunityObserved = false;
+    this.incidentFailureSurfaceTurnId = null;
+    this.incidentFailureSurfaceDomCommitted = false;
+    this.incidentFailureSurfacePaintOpportunityObserved = false;
+    this.renderer.resetIncidentRenderMetrics();
+  }
+
+  private incidentMonotonicNow(): number {
+    try {
+      const value = this.element.ownerDocument.defaultView?.performance?.now?.();
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    } catch {
+      // Incident measurement must never affect rendering.
+    }
+    try {
+      const value = Date.now();
+      return Number.isFinite(value) ? value : 0;
+    } catch {
+      return 0;
+    }
   }
 
   private ensureSnapshotRender(): void {
@@ -835,6 +1039,15 @@ export class AgentWorkspace extends Component {
       try {
         if (snapshot) {
           await this.renderer.renderActive(snapshot, presentation);
+          if (
+            snapshot.status === "failed"
+            && snapshot.turnId
+            && this.renderer.hasCommittedFailureSurface(snapshot.turnId)
+          ) {
+            this.incidentFailureSurfaceTurnId = snapshot.turnId;
+            this.incidentFailureSurfaceDomCommitted = true;
+            this.incidentFirstDomCommitObserved = true;
+          }
         } else if (presentation.busy) {
           await this.renderer.renderActive({
             ...PENDING_AGENT_SNAPSHOT,

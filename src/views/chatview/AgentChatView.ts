@@ -1,6 +1,5 @@
 import { ItemView, normalizePath, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { getLoadedPluginBuildId } from "../../core/plugin/LoadedPluginBuildIdentity";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import {
   SystemSculptService,
@@ -135,6 +134,9 @@ const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
 const AGENT_SESSION_RESTORE_ERROR =
   "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
+const LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS = 3;
+const LOCAL_FAILED_RECEIPT_RETRY_DELAY_MS = 250;
+const CHAT_VIEW_CLOSE_PERSISTENCE_DEADLINE_MS = 750;
 
 function crossWindowMonotonicTimestamp(
   ownerWindow: Window,
@@ -460,6 +462,14 @@ export class AgentChatView extends ItemView {
   private draftKey: string;
   private conversationOriginToken = messageId("conversation-origin");
   private readonly runConversationOrigins = new Map<string, string>();
+  private pendingLocalReportIds?: Map<string, string>;
+  private localFailedReceiptRetryTimers?: Map<
+    number,
+    (retry: boolean) => void
+  >;
+  private localFailedReceiptPersistenceTasks?: Set<Promise<void>>;
+  private closing = false;
+  private closed = false;
   private queueHydrated = false;
   private queuePersistence: Promise<void> = Promise.resolve();
   private pendingRetry: PendingHistoricalResubmit | null = null;
@@ -472,10 +482,10 @@ export class AgentChatView extends ItemView {
   private thinBootstrapRequest: ThinAgentBootstrapRequest | null = null;
   private pendingThinConversationId: string | null = null;
   private readonly thinClientId: string;
-  private loadedPluginBuildId: Promise<`sha256:${string}`> | null = null;
   private pendingForkHistory: PendingForkHistory | null = null;
   private deferredRecoveredCompletion: DeferredRecoveredCompletion | null = null;
   private legacyHistoryViewOnly = false;
+  private closeBarrier: Promise<void> | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
@@ -591,7 +601,36 @@ export class AgentChatView extends ItemView {
         ...correlation,
       }),
       reportError: (error) => this.logAgentError(error, "agentSession"),
-      onLifecycle: (record) => this.plugin.getLogger().lifecycle({ ...record }),
+      onLifecycle: (record) => {
+        try {
+          const event = this.plugin.getLogger().lifecycle({ ...record });
+          if (event) this.plugin.getAgentIncidentCoordinator()?.recordLifecycle(event);
+        } catch {
+          // Incident diagnostics cannot affect a live agent run.
+        }
+      },
+      onIncidentCapture: (event) => {
+        try {
+          const receipt = this.plugin.getAgentIncidentCoordinator()?.captureFailure(
+            event,
+            this.workspace?.captureIncidentRenderingSnapshot(),
+            { chatViewState: this.workspace ? "mounted" : "detached" },
+          );
+          if (receipt?.reportId) {
+            this.localReportIds().set(event.requestId, receipt.reportId);
+            this.attachLocalReportToSnapshot(event.requestId, receipt.reportId);
+          }
+        } catch {
+          // Failure evidence is observational and never changes settlement.
+        }
+      },
+      onTransportSegmentSummary: (event) => {
+        try {
+          this.plugin.getAgentIncidentCoordinator()?.recordTransport(event);
+        } catch {
+          // Transport evidence is observational.
+        }
+      },
       monotonicNow: () => this.clientMonotonicNow(),
     });
   }
@@ -668,6 +707,7 @@ export class AgentChatView extends ItemView {
       onOpenArtifact: (artifact) => this.openArtifact(artifact),
       onCopyArtifactPath: (artifact) => this.copyArtifactPath(artifact),
       onRetryFailedTurn: (id) => this.retryFailedTurn(id),
+      onCopyIncidentReport: (reportId) => this.copyIncidentReport(reportId),
       onRetryMessage: (id) => this.prepareRetry(id),
       onResubmitMessage: (id, text) => this.resubmitMessage(id, text),
       onCancelMessageEdit: (id) => this.cancelMessageEdit(id),
@@ -752,6 +792,7 @@ export class AgentChatView extends ItemView {
       this.messageEditGeneration += 1;
       this.pendingRetry = null;
       this.pendingRejectedRetry = null;
+      this.localReportIds().clear();
       this.workspace?.resetMessageEditor();
       if (this.queueHydrated) await this.persistQueueState();
       // Each loaded conversation gets its own local session object. Retiring
@@ -801,7 +842,7 @@ export class AgentChatView extends ItemView {
         const conversationId = loaded.agentConversationId;
         this.pendingThinConversationId = conversationId;
         try {
-          const pluginBuildId = await this.getLoadedPluginBuildId();
+          const pluginBuildId = await this.plugin.getLoadedPluginBuildId();
           if (
             this.conversationOriginToken !== loadOriginToken
             || this.pendingThinConversationId !== conversationId
@@ -1223,7 +1264,27 @@ export class AgentChatView extends ItemView {
     this.workspace?.setBanner(presented.message, "error");
   }
 
-  public async onClose(): Promise<void> {
+  /**
+   * Stops every session callback that can still add incident evidence.
+   *
+   * ViewManager awaits this barrier before it closes incident admission. The
+   * cached promise also makes Obsidian's later leaf detach use the same close
+   * operation instead of running teardown twice.
+   */
+  public quiesceIncidentProducers(): Promise<void> {
+    return this.onClose();
+  }
+
+  public onClose(): Promise<void> {
+    if (!this.closeBarrier) {
+      this.closeBarrier = this.performClose();
+    }
+    return this.closeBarrier;
+  }
+
+  private async performClose(): Promise<void> {
+    this.closing = true;
+    this.expediteLocalFailedReceiptRetryTimers();
     this.beginQueueDrainSuppression();
     const closingSubmission = this.activeSubmissionOperation?.kind === "submission"
       ? this.activeSubmissionOperation
@@ -1236,47 +1297,63 @@ export class AgentChatView extends ItemView {
     // the expected cancellation cannot surface as a user-facing agent error.
     this.pendingThinConversationId = null;
     this.thinBootstrapRequest = null;
+    this.agentSessionBinding?.unsubscribe();
     try {
-      if (this.agentSessionBinding) {
-        await this.agentSessionBinding.detach();
-      } else {
-        await this.agent.detach();
-      }
-      await this.transcript.idle();
-      if (closingSubmission && !closingSubmission.userCommitted) {
-        const submission = closingSubmission.preparedSubmission
-          ?? closingSubmission.originalSubmission;
-        if (submission) {
-          this.queuedFollowUps.unshift({
-            id: messageId("queued"),
-            text: submission.text,
-            includeContextFiles: closingSubmission.includeContextFiles,
-            ...(submission.attachments?.length
-              ? { attachments: submission.attachments }
-              : {}),
-          });
-          this.syncQueue();
-        }
-      }
-      if (this.chatId && this.draftKey !== this.chatId) {
-        await this.bindQueueToChat(this.chatId)
-          .catch((error) => this.reportQueuePersistenceError(error));
-      }
-      if (this.queueHydrated) {
-        await this.persistQueueState().catch((error) => this.reportQueuePersistenceError(error));
-      }
-      await this.queuePersistence;
-      this.agentUnsubscribe?.();
-      this.transcriptCommitUnsubscribe?.();
-      this.recorderToggleUnsubscribe?.();
-      this.recorderTranscriptUnsubscribe?.();
-      this.workspace = null;
+      await this.waitForCloseWork(this.performCloseWork(closingSubmission));
     } finally {
       // A submit that began while Obsidian was closing must not resume against
       // a destroyed view when the transition promise settles.
       this.conversationOriginToken = messageId("conversation-origin");
       this.finishSubmissionOperation(transition);
+      this.closed = true;
+      this.agentUnsubscribe?.();
+      this.transcriptCommitUnsubscribe?.();
+      this.recorderToggleUnsubscribe?.();
+      this.recorderTranscriptUnsubscribe?.();
+      this.workspace = null;
     }
+  }
+
+  private async performCloseWork(
+    closingSubmission: ActiveSubmissionOperation | null,
+  ): Promise<void> {
+    if (this.agentSessionBinding) {
+      await this.agentSessionBinding.detach();
+    } else {
+      await this.agent.detach();
+    }
+    if (this.closed) return;
+    await Promise.allSettled([
+      this.transcript.idle(),
+      ...this.localFailedReceiptTasks(),
+    ]);
+    if (this.closed) return;
+    if (closingSubmission && !closingSubmission.userCommitted) {
+      const submission = closingSubmission.preparedSubmission
+        ?? closingSubmission.originalSubmission;
+      if (submission) {
+        this.queuedFollowUps.unshift({
+          id: messageId("queued"),
+          text: submission.text,
+          includeContextFiles: closingSubmission.includeContextFiles,
+          ...(submission.attachments?.length
+            ? { attachments: submission.attachments }
+            : {}),
+        });
+        this.syncQueue();
+      }
+    }
+    if (this.chatId && this.draftKey !== this.chatId) {
+      await this.bindQueueToChat(this.chatId)
+        .catch((error) => this.reportQueuePersistenceError(error));
+    }
+    if (this.closed) return;
+    if (this.queueHydrated) {
+      await this.persistQueueState()
+        .catch((error) => this.reportQueuePersistenceError(error));
+    }
+    if (this.closed) return;
+    await this.queuePersistence;
   }
 
   private isSubmissionActive(): boolean {
@@ -1724,11 +1801,6 @@ export class AgentChatView extends ItemView {
     return sources;
   }
 
-  private getLoadedPluginBuildId(): Promise<`sha256:${string}`> {
-    return this.loadedPluginBuildId
-      ??= getLoadedPluginBuildId(this.app, this.plugin.manifest);
-  }
-
   /**
    * Prepares a draft conversation entirely locally: identity and bootstrap
    * payload only. A new chat sends no server request until the first message,
@@ -1736,7 +1808,7 @@ export class AgentChatView extends ItemView {
    */
   private async prepareThinConversation(conversationId: string): Promise<void> {
     if (!this.plugin.settings.licenseKey?.trim()) return;
-    const pluginBuildId = await this.getLoadedPluginBuildId();
+    const pluginBuildId = await this.plugin.getLoadedPluginBuildId();
     if (this.pendingThinConversationId !== conversationId) return;
     this.thinBootstrapRequest = {
       contract_version: THIN_AGENT_CONTRACT_VERSION,
@@ -1920,7 +1992,7 @@ export class AgentChatView extends ItemView {
             ? new Set()
             : new Set(this.contextManager.getPinnedFiles()),
         ),
-        this.getLoadedPluginBuildId(),
+        this.plugin.getLoadedPluginBuildId(),
       ]);
       if (!this.isCurrentSubmissionOperation(operation)) return;
       if (historicalResubmit) this.agent.disconnect();
@@ -1986,6 +2058,17 @@ export class AgentChatView extends ItemView {
         this.activeSubmissionOperation !== operation
         || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
       ) return;
+      if (result.kind === "failed") {
+        const reportId = this.localReportIds().get(admittedUserMessage.message_id);
+        if (reportId) {
+          result = {
+            ...result,
+            error: { ...result.error, reportId },
+            snapshot: this.snapshotWithLocalReport(result.snapshot, reportId),
+          };
+          this.renderAgentSnapshot(result.snapshot);
+        }
+      }
       if (historicalResubmit && result.kind === "failed") {
         this.recordUiLifecycle("historical_resubmit_failed");
       }
@@ -2011,6 +2094,9 @@ export class AgentChatView extends ItemView {
         }
       } else if (userWasCommitted) {
         this.pendingRejectedRetry = null;
+      }
+      if (result.kind === "failed" && userWasCommitted) {
+        this.scheduleLocalFailedReceiptPersistence(result);
       }
       this.handleRunResult();
       if (
@@ -2139,6 +2225,139 @@ export class AgentChatView extends ItemView {
 
   private handleRunResult(): void {
     this.updateViewState();
+  }
+
+  private localReportIds(): Map<string, string> {
+    return this.pendingLocalReportIds ??= new Map<string, string>();
+  }
+
+  private attachLocalReportToSnapshot(turnId: string, reportId: string): void {
+    const snapshot = this.agent.getSnapshot();
+    if (snapshot.turnId !== turnId || snapshot.status !== "failed") return;
+    const withReport = this.snapshotWithLocalReport(snapshot, reportId);
+    if (withReport !== snapshot) this.renderAgentSnapshot(withReport);
+  }
+
+  private snapshotWithLocalReport(
+    snapshot: AgentConversationSnapshot,
+    reportId: string,
+  ): AgentConversationSnapshot {
+    let changed = false;
+    const patchError = (error: ManagedAgentError): ManagedAgentError => {
+      if (error.reportId === reportId) return error;
+      changed = true;
+      return Object.freeze({ ...error, reportId });
+    };
+    const terminalError = snapshot.terminalError
+      ? patchError(snapshot.terminalError)
+      : undefined;
+    const parts = snapshot.parts.map((part) => {
+      if (part.kind !== "error") return part;
+      return Object.freeze({ ...part, error: patchError(part.error) });
+    });
+    if (!changed) return snapshot;
+    return Object.freeze({
+      ...snapshot,
+      ...(terminalError ? { terminalError } : {}),
+      parts: Object.freeze(parts),
+    });
+  }
+
+  private async persistLocalFailedReceipt(
+    result: Extract<AgentRunResult, { kind: "failed" }>,
+  ): Promise<void> {
+    const turnId = result.snapshot.turnId;
+    if (!turnId) return;
+    const pendingReportId = this.localReportIds().get(turnId);
+    const reportId = result.error.reportId ?? pendingReportId;
+    if (!reportId || pendingReportId !== reportId) return;
+    if (!this.transcript.snapshot().messages.some((message) =>
+      message.role === "user" && message.message_id === turnId)) return;
+    const snapshot = await this.transcript.persistFailedReceipt({
+      turnId,
+      reportId,
+      failureCode: result.error.code,
+      retryable: result.error.retryable === true,
+    });
+    if (this.closed) return;
+    this.applyTranscriptIdentity(snapshot);
+    if (this.localReportIds().get(turnId) === reportId) {
+      this.localReportIds().delete(turnId);
+    }
+  }
+
+  private scheduleLocalFailedReceiptPersistence(
+    result: Extract<AgentRunResult, { kind: "failed" }>,
+  ): void {
+    if (this.closing) return;
+    let task: Promise<void>;
+    task = this.persistLocalFailedReceiptWithRetry(result).catch((error) => {
+      this.logAgentError(error, "failedReceiptPersistence");
+    }).finally(() => {
+      this.localFailedReceiptTasks().delete(task);
+    });
+    this.localFailedReceiptTasks().add(task);
+  }
+
+  private async persistLocalFailedReceiptWithRetry(
+    result: Extract<AgentRunResult, { kind: "failed" }>,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await this.persistLocalFailedReceipt(result);
+        return;
+      } catch (error) {
+        this.logAgentError(error, "failedReceiptPersistence");
+        if (attempt >= LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS || this.closing) return;
+        if (!await this.waitForLocalFailedReceiptRetry(
+          LOCAL_FAILED_RECEIPT_RETRY_DELAY_MS * attempt,
+        )) return;
+      }
+    }
+  }
+
+  private localFailedReceiptTasks(): Set<Promise<void>> {
+    return this.localFailedReceiptPersistenceTasks ??= new Set<Promise<void>>();
+  }
+
+  private localFailedReceiptTimers(): Map<number, (retry: boolean) => void> {
+    return this.localFailedReceiptRetryTimers
+      ??= new Map<number, (retry: boolean) => void>();
+  }
+
+  private waitForLocalFailedReceiptRetry(delayMs: number): Promise<boolean> {
+    if (this.closing) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const timers = this.localFailedReceiptTimers();
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
+        resolve(!this.closing);
+      }, delayMs);
+      timers.set(timer, resolve);
+    });
+  }
+
+  private expediteLocalFailedReceiptRetryTimers(): void {
+    for (const [timer, resolve] of this.localFailedReceiptTimers()) {
+      window.clearTimeout(timer);
+      resolve(true);
+    }
+    this.localFailedReceiptTimers().clear();
+  }
+
+  private async waitForCloseWork(work: Promise<void>): Promise<void> {
+    let deadlineTimer: number | null = null;
+    const deadline = new Promise<void>((resolve) => {
+      deadlineTimer = window.setTimeout(
+        resolve,
+        CHAT_VIEW_CLOSE_PERSISTENCE_DEADLINE_MS,
+      );
+    });
+    try {
+      await Promise.race([work, deadline]);
+    } finally {
+      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+    }
   }
 
   private promoteQueuedSubmission(
@@ -2682,6 +2901,7 @@ export class AgentChatView extends ItemView {
       this.messageEditGeneration += 1;
       this.pendingRetry = null;
       this.pendingRejectedRetry = null;
+      this.localReportIds().clear();
       this.workspace?.resetMessageEditor();
       this.sessionTrustedToolNames.clear();
       this.approvalMode = "ask";
@@ -2922,6 +3142,33 @@ export class AgentChatView extends ItemView {
       : false;
   }
 
+  private async copyIncidentReport(
+    reportId: string,
+  ): Promise<boolean | "memory_fallback"> {
+    try {
+      const coordinator = this.plugin.getAgentIncidentCoordinator();
+      if (!coordinator) return false;
+      const local = reportId.startsWith("report_")
+        ? await coordinator.loadReportForCopy(reportId)
+        : null;
+      const serialized = local?.serialized
+        ?? (!local && reportId.startsWith("incident_")
+          ? await coordinator.loadSerializedByIncidentId(reportId)
+          : null);
+      if (!serialized) return false;
+      const copied = await tryCopyToClipboard(
+        serialized,
+        this.workspace?.element ?? this.containerEl,
+      );
+      if (!copied) return false;
+      return local?.durability === "memory_fallback"
+        ? "memory_fallback"
+        : true;
+    } catch {
+      return false;
+    }
+  }
+
   private async reconcileAgentHistory(
     messages: readonly ChatMessage[],
   ): Promise<void> {
@@ -3003,7 +3250,13 @@ export class AgentChatView extends ItemView {
     method = "reportAgentError",
   ): void {
     this.logAgentError(error, method);
-    void this.handleError(error);
+    try {
+      void this.handleError(error).catch(() => {
+        // Error presentation cannot replace the product failure.
+      });
+    } catch {
+      // A partial harness can replace the async presenter with a throwing stub.
+    }
   }
 
   private isCurrentConversationOrigin(expectedConversationOriginToken: string): boolean {
@@ -3020,6 +3273,39 @@ export class AgentChatView extends ItemView {
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {
       void rendering.then(() => {
+        if (
+          this.workspace === workspace
+          && this.agent === agent
+          && snapshot.status === "failed"
+          && snapshot.turnId
+        ) {
+          const renderingSnapshot = workspace.captureIncidentRenderingSnapshot();
+          if (renderingSnapshot.failureSurfaceDomCommitted) {
+            this.recordIncidentFailureSurfaceRendering(
+              snapshot.turnId,
+              "dom_committed",
+              renderingSnapshot,
+            );
+            requestSurfaceAnimationFrame(workspace.element, () => {
+              try {
+                if (
+                  this.workspace !== workspace
+                  || this.agent !== agent
+                  || !workspace.recordIncidentFailureSurfacePaintOpportunity(
+                    snapshot.turnId!,
+                  )
+                ) return;
+                this.recordIncidentFailureSurfaceRendering(
+                  snapshot.turnId!,
+                  "paint_opportunity_observed",
+                  workspace.captureIncidentRenderingSnapshot(),
+                );
+              } catch {
+                // Paint evidence cannot affect the failed surface.
+              }
+            });
+          }
+        }
         if (
           this.workspace !== workspace
           || this.agent !== agent
@@ -3130,6 +3416,7 @@ export class AgentChatView extends ItemView {
           return tool.compareDocumentPosition(text) & 4 ? text : undefined;
         };
         if (!hasRenderedContent()) return;
+        workspace.recordIncidentDomCommit?.();
         if (needsDomMilestone) {
           agent.recordClientRenderMilestone(
             "response_first_dom_committed",
@@ -3178,6 +3465,7 @@ export class AgentChatView extends ItemView {
             || this.agent !== agent
             || !hasRenderedContent()
           ) return;
+          workspace.recordIncidentPaintOpportunity?.();
           const observedAt = crossWindowMonotonicTimestamp(paintOwnerWindow, timestamp);
           if (agent.needsClientRenderMilestone?.(
             "response_first_paint_opportunity",
@@ -3256,6 +3544,26 @@ export class AgentChatView extends ItemView {
     );
   }
 
+  private recordIncidentFailureSurfaceRendering(
+    requestId: string,
+    milestone: "dom_committed" | "paint_opportunity_observed",
+    rendering: ReturnType<AgentWorkspace["captureIncidentRenderingSnapshot"]>,
+  ): void {
+    try {
+      const conversationId = this.transcript.snapshot().agentConversationId
+        ?? this.pendingThinConversationId;
+      if (!conversationId) return;
+      this.plugin.getAgentIncidentCoordinator()?.recordFailureSurfaceRendering({
+        conversationId,
+        requestId,
+        milestone,
+        rendering,
+      });
+    } catch {
+      // Failure-surface diagnostics are observational.
+    }
+  }
+
   private promoteDeferredRecoveredCompletion(
     expectedConversationOriginToken: string,
   ): void {
@@ -3309,12 +3617,16 @@ export class AgentChatView extends ItemView {
   private logAgentError(error: unknown, method: string): void {
     // Diagnostics are observational: a torn-down view (or a partial test
     // harness) must never turn an error report into a second failure.
-    this.plugin?.getLogger?.().error("ChatView agent session failed", error, {
-      source: "AgentChatView",
-      method,
-      metadata: {
-        chatId: this.chatId || undefined,
-      },
-    });
+    try {
+      this.plugin?.getLogger?.().error("ChatView agent session failed", error, {
+        source: "AgentChatView",
+        method,
+        metadata: {
+          chatId: this.chatId || undefined,
+        },
+      });
+    } catch {
+      // A diagnostics backend failure cannot affect product settlement.
+    }
   }
 }

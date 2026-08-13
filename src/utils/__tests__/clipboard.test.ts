@@ -57,20 +57,76 @@ describe("clipboard", () => {
       expect(execCommand).toHaveBeenCalledWith("copy");
     });
 
-    it("returns false when both methods fail", async () => {
+    it("returns false and removes the textarea when both methods fail", async () => {
       Object.defineProperty(navigator, "clipboard", {
         value: { writeText: jest.fn().mockRejectedValue(new Error("fail")) },
         writable: true,
         configurable: true,
       });
 
+      const appendChildSpy = jest.spyOn(document.body, "appendChild");
       document.execCommand = jest.fn().mockImplementation(() => {
         throw new Error("execCommand failed");
       });
 
-      const result = await tryCopyToClipboard("fail text");
+      try {
+        await expect(tryCopyToClipboard("fail text")).resolves.toBe(false);
+        const textarea = appendChildSpy.mock.calls.at(-1)?.[0] as HTMLTextAreaElement;
+        expect(textarea.value).toBe("fail text");
+        expect(textarea.isConnected).toBe(false);
+      } finally {
+        appendChildSpy.mockRestore();
+      }
+    });
 
-      expect(result).toBe(false);
+    it("removes the fallback textarea when setup fails", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+      const textarea = document.createElement("textarea");
+      const createElementSpy = jest.spyOn(document, "createElement")
+        .mockReturnValueOnce(textarea);
+      const setAttributeSpy = jest.spyOn(textarea, "setAttribute")
+        .mockImplementation(() => {
+          throw new Error("setup failed");
+        });
+      document.execCommand = jest.fn();
+
+      try {
+        await expect(tryCopyToClipboard("private setup text")).resolves.toBe(false);
+        expect(document.execCommand).not.toHaveBeenCalled();
+        expect(textarea.isConnected).toBe(false);
+      } finally {
+        setAttributeSpy.mockRestore();
+        createElementSpy.mockRestore();
+      }
+    });
+
+    it("removes the fallback textarea when selection fails", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+      const appendChildSpy = jest.spyOn(document.body, "appendChild");
+      const selectSpy = jest.spyOn(HTMLTextAreaElement.prototype, "select")
+        .mockImplementation(() => {
+          throw new Error("selection failed");
+        });
+      document.execCommand = jest.fn();
+
+      try {
+        await expect(tryCopyToClipboard("private selection text")).resolves.toBe(false);
+        expect(document.execCommand).not.toHaveBeenCalled();
+        const textarea = appendChildSpy.mock.calls[0][0] as HTMLTextAreaElement;
+        expect(textarea.value).toBe("private selection text");
+        expect(textarea.isConnected).toBe(false);
+      } finally {
+        selectSpy.mockRestore();
+        appendChildSpy.mockRestore();
+      }
     });
 
     it("returns false when execCommand returns false", async () => {

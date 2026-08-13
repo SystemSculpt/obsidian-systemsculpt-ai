@@ -34,6 +34,593 @@ describe("AgentConversationRenderer tail status", () => {
     jest.useRealTimers();
   });
 
+  it("maintains a frozen scalar-only incident snapshot without reading rendered content", async () => {
+    let now = 100;
+    const performanceNow = jest.spyOn(window.performance, "now")
+      .mockImplementation(() => now);
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "private-path-canary.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const snapshot: AgentConversationSnapshot = {
+      runId: "private-run-id-canary",
+      turnId: "private-turn-id-canary",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "private-message-id-canary",
+        role: "assistant",
+        partIds: ["private-reasoning-id-canary", "private-tool-id-canary"],
+      }],
+      parts: [{
+        id: "private-reasoning-id-canary",
+        kind: "reasoning",
+        messageId: "private-message-id-canary",
+        state: "streaming",
+        summary: "private-reasoning-content-canary",
+        order: 0,
+      }, {
+        id: "private-tool-id-canary",
+        kind: "tool",
+        messageId: "private-message-id-canary",
+        callId: "private-tool-call-id-canary",
+        name: "read",
+        location: "vault",
+        input: { paths: ["private-tool-path-canary.md"] },
+        state: "running",
+        order: 1,
+      }],
+    };
+
+    const rendering = renderer.renderActive(
+      snapshot,
+      presentation("responding", true, "Working", snapshot),
+    );
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      renderPassCount: 1,
+      pendingRenderPassCount: 1,
+    });
+    now = 112;
+    await rendering;
+
+    const captured = renderer.captureIncidentSnapshot();
+    expect(Object.isFrozen(captured)).toBe(true);
+    expect(Object.keys(captured)).toEqual([
+      "renderPassCount",
+      "pendingRenderPassCount",
+      "lastRenderDurationMs",
+      "maxRenderDurationMs",
+      "historicalRowCount",
+      "historicalPartCount",
+      "activePartCount",
+      "disclosureCount",
+      "openDisclosureCount",
+      "activityDisclosureCount",
+      "reasoningDisclosureCount",
+      "toolDisclosureCount",
+      "overflowDisclosureCount",
+      "pendingHydrationCount",
+      "renderingEnabled",
+    ]);
+    expect(captured).toMatchObject({
+      renderPassCount: 1,
+      pendingRenderPassCount: 0,
+      lastRenderDurationMs: 12,
+      maxRenderDurationMs: 12,
+      historicalRowCount: 0,
+      historicalPartCount: 0,
+      activePartCount: 2,
+      disclosureCount: 3,
+      openDisclosureCount: 0,
+      activityDisclosureCount: 0,
+      reasoningDisclosureCount: 1,
+      toolDisclosureCount: 1,
+      overflowDisclosureCount: 1,
+      pendingHydrationCount: 0,
+      renderingEnabled: true,
+    });
+    const serialized = JSON.stringify(captured);
+    expect(serialized).not.toContain("private-");
+    expect(Object.values(captured).every((value) =>
+      typeof value === "number" || typeof value === "boolean"))
+      .toBe(true);
+    const querySelectorAll = jest.spyOn(renderer.element, "querySelectorAll")
+      .mockImplementation(() => {
+        throw new Error("dom-traversal-private-canary");
+      });
+    expect(() => renderer.captureIncidentSnapshot()).not.toThrow();
+    expect(querySelectorAll).not.toHaveBeenCalled();
+    querySelectorAll.mockRestore();
+
+    const overflow = parent.querySelector<HTMLButtonElement>(
+      ".systemsculpt-agent-activity-overflow",
+    )!;
+    overflow.click();
+    const disclosures = parent.querySelectorAll<HTMLDetailsElement>(
+      ".systemsculpt-agent-reasoning-details, details.systemsculpt-agent-tool",
+    );
+    for (const disclosure of Array.from(disclosures)) {
+      disclosure.open = true;
+      disclosure.dispatchEvent(new Event("toggle"));
+    }
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      disclosureCount: 3,
+      openDisclosureCount: 3,
+      activityDisclosureCount: 0,
+      reasoningDisclosureCount: 1,
+      toolDisclosureCount: 1,
+      overflowDisclosureCount: 1,
+    });
+
+    const reasoning = parent.querySelector<HTMLDetailsElement>(
+      ".systemsculpt-agent-reasoning-details",
+    )!;
+    reasoning.open = false;
+    reasoning.dispatchEvent(new Event("toggle"));
+    expect(renderer.captureIncidentSnapshot().openDisclosureCount).toBe(2);
+
+    const unavailableToolSnapshot: AgentConversationSnapshot = {
+      ...snapshot,
+      parts: snapshot.parts.map((part) => part.kind === "tool"
+        ? { ...part, input: {} }
+        : part),
+    };
+    await renderer.renderActive(
+      unavailableToolSnapshot,
+      presentation("responding", true, "Working", unavailableToolSnapshot),
+    );
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      disclosureCount: 2,
+      openDisclosureCount: 1,
+      activityDisclosureCount: 0,
+      reasoningDisclosureCount: 1,
+      toolDisclosureCount: 0,
+      overflowDisclosureCount: 1,
+    });
+
+    const reasoningOnlySnapshot: AgentConversationSnapshot = {
+      ...snapshot,
+      messages: [{
+        ...snapshot.messages[0]!,
+        partIds: [snapshot.parts[0]!.id],
+      }],
+      parts: [snapshot.parts[0]!],
+    };
+    await renderer.renderActive(
+      reasoningOnlySnapshot,
+      presentation("reasoning", true, "Working", reasoningOnlySnapshot),
+    );
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      activePartCount: 1,
+      disclosureCount: 0,
+      openDisclosureCount: 0,
+      activityDisclosureCount: 0,
+      reasoningDisclosureCount: 0,
+      toolDisclosureCount: 0,
+      overflowDisclosureCount: 0,
+    });
+
+    renderer.resetIncidentRenderMetrics();
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      renderPassCount: 0,
+      pendingRenderPassCount: 0,
+      disclosureCount: 0,
+      reasoningDisclosureCount: 0,
+    });
+
+    renderer.clearActive();
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      activePartCount: 0,
+      disclosureCount: 0,
+      openDisclosureCount: 0,
+    });
+    await renderer.renderHistory([{
+      role: "user",
+      message_id: "user-incident-history",
+      content: "Private user content canary",
+    }, {
+      role: "assistant",
+      message_id: "assistant-incident-history",
+      content: "Private assistant content canary",
+    }]);
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      historicalRowCount: 2,
+      historicalPartCount: 1,
+    });
+    const internals = renderer as unknown as {
+      historyRows: Map<unknown, unknown>;
+      incidentDisclosureStates: Map<unknown, unknown>;
+      historicalActivityHydrationStates: Map<unknown, unknown>;
+      historicalOverflowHydrationStates: Map<unknown, unknown>;
+    };
+    const disclosureValues = jest.spyOn(internals.incidentDisclosureStates, "values");
+    const forbiddenTraversalSpies = [
+      jest.spyOn(internals.historyRows, "values").mockImplementation(() => {
+        throw new Error("history-traversal-private-canary");
+      }),
+      jest.spyOn(internals.historicalActivityHydrationStates, "values").mockImplementation(() => {
+        throw new Error("activity-hydration-traversal-private-canary");
+      }),
+      jest.spyOn(internals.historicalOverflowHydrationStates, "values").mockImplementation(() => {
+        throw new Error("overflow-hydration-traversal-private-canary");
+      }),
+    ];
+    expect(() => renderer.captureIncidentSnapshot()).not.toThrow();
+    expect(disclosureValues).toHaveBeenCalledTimes(1);
+    expect(forbiddenTraversalSpies.every((spy) => spy.mock.calls.length === 0)).toBe(true);
+    disclosureValues.mockRestore();
+    for (const spy of forbiddenTraversalSpies) spy.mockRestore();
+
+    await renderer.renderActive(
+      snapshot,
+      presentation("responding", true, "Working", snapshot),
+    );
+    expect(renderer.captureIncidentSnapshot().disclosureCount).toBe(3);
+    renderer.unload();
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      disclosureCount: 0,
+      openDisclosureCount: 0,
+      activityDisclosureCount: 0,
+      reasoningDisclosureCount: 0,
+      toolDisclosureCount: 0,
+      overflowDisclosureCount: 0,
+      renderingEnabled: false,
+    });
+    performanceNow.mockRestore();
+  });
+
+  it("bounds incident render metrics and isolates a reset from an older render pass", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "private-path-canary.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const internals = renderer as unknown as {
+      incidentRenderPassCount: number;
+      incidentPendingRenderPassCount: number;
+      incidentLastRenderDurationMs: number;
+      incidentMaxRenderDurationMs: number;
+      incidentHistoricalPartCount: number;
+      trackIncidentDisclosure(
+        element: HTMLElement,
+        kind: "activity" | "reasoning" | "tool" | "overflow",
+        available: boolean,
+        open: boolean,
+      ): void;
+      incidentPendingHydrationCount: number;
+      incidentMonotonicNow: () => number;
+      measureIncidentRenderPass: (task: () => Promise<void>) => Promise<void>;
+    };
+    internals.incidentRenderPassCount = Number.POSITIVE_INFINITY;
+    internals.incidentPendingRenderPassCount = -2;
+    internals.incidentLastRenderDurationMs = Number.NaN;
+    internals.incidentMaxRenderDurationMs = 100_000_000;
+    internals.incidentHistoricalPartCount = 1_000_001;
+    internals.incidentPendingHydrationCount = 1_000_001;
+    internals.trackIncidentDisclosure(parent.createDiv(), "activity", true, true);
+    internals.trackIncidentDisclosure(parent.createDiv(), "reasoning", true, false);
+    internals.trackIncidentDisclosure(parent.createDiv(), "tool", true, true);
+    internals.trackIncidentDisclosure(parent.createDiv(), "overflow", false, true);
+
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      renderPassCount: 0,
+      pendingRenderPassCount: 0,
+      lastRenderDurationMs: 0,
+      maxRenderDurationMs: 86_400_000,
+      historicalPartCount: 1_000_000,
+      disclosureCount: 3,
+      openDisclosureCount: 2,
+      activityDisclosureCount: 1,
+      reasoningDisclosureCount: 1,
+      toolDisclosureCount: 1,
+      overflowDisclosureCount: 0,
+      pendingHydrationCount: 1_000_000,
+    });
+
+    let release!: () => void;
+    const task = new Promise<void>((resolve) => { release = resolve; });
+    const measured = internals.measureIncidentRenderPass(() => task);
+    renderer.resetIncidentRenderMetrics();
+    release();
+    await measured;
+    expect(renderer.captureIncidentSnapshot()).toMatchObject({
+      renderPassCount: 0,
+      pendingRenderPassCount: 0,
+      lastRenderDurationMs: 0,
+      maxRenderDurationMs: 0,
+      disclosureCount: 3,
+      openDisclosureCount: 2,
+    });
+
+    const performanceNow = jest.spyOn(window.performance, "now")
+      .mockImplementation(() => { throw new Error("private clock failure"); });
+    const dateNow = jest.spyOn(Date, "now").mockReturnValue(Number.NaN);
+    expect(internals.incidentMonotonicNow()).toBe(0);
+    dateNow.mockImplementation(() => { throw new Error("private wall clock failure"); });
+    expect(internals.incidentMonotonicNow()).toBe(0);
+    dateNow.mockRestore();
+    performanceNow.mockRestore();
+    renderer.unload();
+  });
+
+  it("reports committed failures and restores selection without optional browser helpers", () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "private-path-canary.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const internals = renderer as unknown as {
+      activeTurnId: string | null;
+      committedFailedTurnIds: Set<string>;
+      incidentMonotonicNow(): number;
+      restoreDomSelection(selection: Readonly<{
+        anchorNode: Node;
+        anchorOffset: number;
+        focusNode: Node;
+        focusOffset: number;
+      }> | null): void;
+    };
+
+    internals.committedFailedTurnIds.add("turn-committed-failure");
+    expect(renderer.hasCommittedFailureSurface("turn-committed-failure")).toBe(true);
+    internals.activeTurnId = "turn-other-failure";
+    expect(renderer.hasCommittedFailureSurface("turn-missing-failure")).toBe(false);
+
+    const performanceNow = jest.spyOn(window.performance, "now").mockReturnValue(Number.NaN);
+    const dateNow = jest.spyOn(Date, "now").mockReturnValue(321);
+    expect(internals.incidentMonotonicNow()).toBe(321);
+    dateNow.mockRestore();
+    performanceNow.mockRestore();
+
+    const anchor = document.createTextNode("private-selection-canary");
+    const focus = parent.createSpan();
+    parent.appendChild(anchor);
+    const preserved = {
+      anchorNode: anchor,
+      anchorOffset: 99,
+      focusNode: focus,
+      focusOffset: 99,
+    };
+    const getSelection = jest.spyOn(document, "getSelection").mockReturnValue(null);
+    expect(() => internals.restoreDomSelection(preserved)).not.toThrow();
+
+    const removeAllRanges = jest.fn();
+    const addRange = jest.fn();
+    getSelection.mockReturnValue({
+      removeAllRanges,
+      addRange,
+    } as unknown as Selection);
+    Object.defineProperty(anchor, "nodeValue", {
+      configurable: true,
+      get: () => null,
+    });
+    internals.restoreDomSelection(preserved);
+    expect(addRange).toHaveBeenCalledTimes(1);
+    expect((addRange.mock.calls[0]?.[0] as Range).startOffset).toBe(0);
+
+    addRange.mockImplementationOnce(() => {
+      throw new Error("private-selection-restore-canary");
+    });
+    expect(() => internals.restoreDomSelection(preserved)).not.toThrow();
+    expect(removeAllRanges).toHaveBeenCalledTimes(3);
+    getSelection.mockRestore();
+
+    const history = renderer.element.querySelector<HTMLElement>(
+      ".systemsculpt-agent-history",
+    )!;
+    const row = history.createDiv({
+      cls: "systemsculpt-agent-turn",
+      attr: { "data-message-id": "message-focus-guard" },
+    });
+    const edit = row.createEl("button", { attr: { "data-focus-key": "edit-message" } });
+    renderer.focusMessageEditAction("message-focus-guard");
+    expect(document.activeElement).toBe(edit);
+    renderer.unload();
+  });
+
+  it("keeps malformed durable and historical parts inside defensive rendering guards", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const internals = renderer as unknown as {
+      finalHistoricalAnswerPartIds(parts: readonly Readonly<{
+        part: MessagePart;
+        messageId: string;
+      }>[] | readonly []): ReadonlySet<string>;
+      renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
+      renderHistoricalParts(
+        parent: HTMLElement,
+        parts: readonly MessagePart[],
+        elapsedMs?: number,
+        finalAnswerPartIds?: ReadonlySet<string>,
+        cancelled?: boolean,
+      ): Promise<boolean>;
+      renderHistoricalTimeline(
+        parent: HTMLElement,
+        parts: readonly MessagePart[],
+        isCurrent?: () => boolean,
+      ): Promise<boolean>;
+    };
+    const blankReasoning: MessagePart = {
+      id: "reasoning-blank-guard",
+      type: "reasoning",
+      timestamp: 1,
+      data: "   ",
+    };
+    expect(internals.finalHistoricalAnswerPartIds([{
+      part: blankReasoning,
+      messageId: "assistant-blank-reasoning-guard",
+    }]).has(blankReasoning.id)).toBe(false);
+
+    const scratch = parent.createDiv();
+    await internals.renderHistoricalPart(scratch, blankReasoning);
+    await internals.renderHistoricalPart(scratch, {
+      id: "unsupported-historical-guard",
+      type: "unsupported",
+      timestamp: 2,
+      data: null,
+    } as unknown as MessagePart);
+    expect(scratch.childElementCount).toBe(0);
+
+    const imagePart: MessagePart = {
+      id: "image-historical-guard",
+      type: "content",
+      timestamp: 3,
+      data: [{
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,AA==" },
+      }],
+    };
+    await internals.renderHistoricalPart(scratch, imagePart);
+    expect(scratch.querySelector(".systemsculpt-agent-message-attachment.is-image")).not.toBeNull();
+
+    const defaulted = parent.createDiv();
+    await expect(internals.renderHistoricalParts(defaulted, [])).resolves.toBe(false);
+    const renderPart = jest.spyOn(internals, "renderHistoricalPart");
+    await expect(internals.renderHistoricalTimeline(
+      defaulted,
+      [{ id: "content-stale-guard", type: "content", timestamp: 4, data: "ignored" }],
+      () => false,
+    )).resolves.toBe(false);
+    expect(renderPart).not.toHaveBeenCalled();
+    renderPart.mockRestore();
+
+    const localReportId = `report_${"d".repeat(32)}`;
+    const partialIncidentId = `incident_${"e".repeat(32)}`;
+    await renderer.renderHistory([{
+      role: "user",
+      message_id: "user-partial-receipt-guard",
+      content: "Private prompt canary",
+    }, {
+      role: "assistant",
+      message_id: "assistant-partial-receipt-guard",
+      content: "Private answer canary",
+      terminalOutcome: "failed",
+      terminalReportId: localReportId,
+      terminalIncidentId: partialIncidentId,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+    }]);
+    expect(parent.querySelector(".systemsculpt-agent-part.is-error")).toBeNull();
+    renderer.unload();
+  });
+
+  it("keeps unsupported active parts and missing disclosure state harmless", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const internals = renderer as unknown as {
+      renderActivePart(
+        part: AgentPart,
+        key: string,
+        suppressToolError?: boolean,
+        insertionParent?: HTMLElement,
+      ): Promise<HTMLElement>;
+      renderPart(node: HTMLElement, part: AgentPart): Promise<boolean>;
+      renderReasoning(
+        node: HTMLElement,
+        summary: string,
+        streaming: boolean,
+        preservedOpen?: boolean,
+      ): Promise<void>;
+      updateReasoning(
+        node: HTMLElement,
+        part: Extract<AgentPart, { kind: "reasoning" }>,
+      ): Promise<boolean>;
+      updateIncidentDisclosureOpen(element: HTMLElement, open: boolean): void;
+      setHistoricalHydrationStatus(state: { status: string }, status: string): void;
+      enhanceCodeBlocks(parent: HTMLElement): void;
+    };
+
+    const orphan = await internals.renderActivePart({
+      id: "text-orphan-guard",
+      kind: "text",
+      messageId: "assistant-orphan-guard",
+      state: "complete",
+      markdown: "Orphan rendering guard",
+      order: 0,
+    }, "text-orphan-guard");
+    expect(orphan.isConnected).toBe(false);
+
+    const unsupported = parent.createDiv();
+    await expect(internals.renderPart(unsupported, {
+      kind: "unsupported",
+    } as unknown as AgentPart)).resolves.toBe(true);
+
+    const streamingReasoning: Extract<AgentPart, { kind: "reasoning" }> = {
+      id: "reasoning-open-guard",
+      kind: "reasoning",
+      messageId: "assistant-reasoning-open-guard",
+      state: "streaming",
+      summary: "Updated private reasoning canary",
+      order: 1,
+    };
+    expect(await internals.updateReasoning(parent.createDiv(), streamingReasoning)).toBe(false);
+    const reasoningNode = parent.createDiv();
+    await internals.renderReasoning(
+      reasoningNode,
+      "Initial private reasoning canary",
+      false,
+      true,
+    );
+    expect(reasoningNode.querySelector<HTMLDetailsElement>("details")?.open).toBe(true);
+    expect(await internals.updateReasoning(reasoningNode, streamingReasoning)).toBe(true);
+    expect(reasoningNode.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-icon")
+      ?.dataset.iconState).toBe("streaming");
+
+    internals.updateIncidentDisclosureOpen(document.createElement("details"), true);
+    const hydrationState = { status: "cold" };
+    internals.setHistoricalHydrationStatus(hydrationState, "cold");
+    expect(hydrationState.status).toBe("cold");
+
+    const codeHost = parent.createDiv();
+    codeHost.createEl("pre");
+    const enhanced = codeHost.createEl("pre");
+    enhanced.createEl("code", { text: "private-code-canary" });
+    enhanced.createEl("button", { cls: "systemsculpt-agent-code-copy" });
+    internals.enhanceCodeBlocks(codeHost);
+    expect(codeHost.querySelectorAll(".systemsculpt-agent-code-copy")).toHaveLength(1);
+
+    renderer.unload();
+    const inactive: AgentConversationSnapshot = {
+      runId: "run-disabled-render-guard",
+      turnId: "turn-disabled-render-guard",
+      status: "running",
+      phase: "working",
+      messages: [],
+      parts: [],
+    };
+    await expect(renderer.renderActive(
+      inactive,
+      presentation("responding", true, "Working", inactive),
+    )).resolves.toBeUndefined();
+  });
+
   it("keeps one loader node across live lifecycle changes and removes it at terminal", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
@@ -1535,11 +2122,13 @@ describe("AgentConversationRenderer tail status", () => {
     worked.dispatchEvent(new Event("toggle"));
     await hiddenRenderStarted;
     const hydration = hydrationState.hydration!;
+    expect(renderer.captureIncidentSnapshot().pendingHydrationCount).toBe(1);
     expect((renderer as unknown as {
       hydrateHistoricalActivity(state: object): Promise<void>;
     }).hydrateHistoricalActivity(hydrationState)).toBe(hydration);
 
     renderer.unload();
+    expect(renderer.captureIncidentSnapshot().pendingHydrationCount).toBe(0);
     releaseHiddenRender();
     await hydration;
 
@@ -1718,6 +2307,148 @@ describe("AgentConversationRenderer tail status", () => {
       "You stopped after 45s",
       "You stopped this response",
     ]);
+    renderer.unload();
+  });
+
+  it("restores one failed receipt card with retry and report copy actions", async () => {
+    const parent = document.body.createDiv();
+    const copyIncidentReport = jest.fn()
+      .mockRejectedValueOnce(new Error("clipboard unavailable"))
+      .mockResolvedValue(true);
+    const retryFailedTurn = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyIncidentReport: copyIncidentReport,
+      onRetryFailedTurn: retryFailedTurn,
+    });
+    renderer.load();
+    const incidentId = `incident_${"a".repeat(32)}`;
+    const runId = `run_${"b".repeat(32)}`;
+    const history: readonly ChatMessage[] = [{
+      role: "user",
+      message_id: "user-failed-restored",
+      content: "Inspect the vault.",
+    }, {
+      role: "assistant",
+      message_id: "assistant-failed-restored",
+      content: "Partial response",
+      terminalOutcome: "failed",
+      terminalIncidentId: incidentId,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: runId,
+    }];
+
+    await renderer.renderHistory(history);
+
+    const cards = parent.querySelectorAll(".systemsculpt-agent-part.is-error");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.textContent).toContain(`Report ID: ${incidentId}`);
+    const retry = parent.querySelector<HTMLButtonElement>(
+      '[data-testid="chat.turn.retry-failed"]',
+    )!;
+    const copy = parent.querySelector<HTMLButtonElement>(
+      '[data-testid="chat.turn.copy-incident-report"]',
+    )!;
+    retry.click();
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(retryFailedTurn).toHaveBeenCalledWith("user-failed-restored");
+    expect(copyIncidentReport).toHaveBeenCalledWith(incidentId);
+    expect(copy.textContent).toContain("Try again");
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copyIncidentReport).toHaveBeenCalledTimes(2);
+    expect(copy.textContent).toContain("Copied");
+
+    const activeFailure: AgentConversationSnapshot = {
+      runId,
+      turnId: "user-failed-restored",
+      status: "failed",
+      phase: "complete",
+      messages: [{
+        id: "assistant-failed-restored",
+        role: "assistant",
+        partIds: ["error:user-failed-restored"],
+      }],
+      parts: [{
+        id: "error:user-failed-restored",
+        order: 1,
+        kind: "error",
+        retryable: true,
+        retryMessageId: "user-failed-restored",
+        error: {
+          code: "agent_turn_failed",
+          message: "SystemSculpt could not complete the response.",
+          retryable: true,
+          incidentId,
+        },
+      }],
+    };
+    await renderer.renderActive(
+      activeFailure,
+      presentation("failed", false, "", activeFailure),
+    );
+    expect(parent.querySelectorAll(".systemsculpt-agent-part.is-error")).toHaveLength(1);
+    expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
+    renderer.unload();
+  });
+
+  it("shows a compact preparing state and blocks duplicate local-report copies", async () => {
+    const parent = document.body.createDiv();
+    let resolveCopy!: (value: "memory_fallback") => void;
+    const pendingCopy = new Promise<"memory_fallback">((resolve) => {
+      resolveCopy = resolve;
+    });
+    const copyIncidentReport = jest.fn(() => pendingCopy);
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onCopyIncidentReport: copyIncidentReport,
+    });
+    renderer.load();
+    const reportId = `report_${"c".repeat(32)}`;
+    await renderer.renderHistory([{
+      role: "user",
+      message_id: "user-local-report",
+      content: "Submitted prompt",
+    }, {
+      role: "assistant",
+      message_id: `failure-${reportId}`,
+      content: "",
+      terminalOutcome: "failed",
+      terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed",
+      terminalRetryable: true,
+    }]);
+
+    expect(parent.textContent).toContain(`Report ID: ${reportId}`);
+    const copy = parent.querySelector<HTMLButtonElement>(
+      '[data-testid="chat.turn.copy-incident-report"]',
+    )!;
+    copy.click();
+    expect(copy.disabled).toBe(true);
+    expect(copy.getAttribute("aria-busy")).toBe("true");
+    expect(copy.textContent).toContain("Preparing…");
+    copy.click();
+    expect(copyIncidentReport).toHaveBeenCalledTimes(1);
+
+    resolveCopy("memory_fallback");
+    await pendingCopy;
+    await Promise.resolve();
+    expect(copy.disabled).toBe(false);
+    expect(copy.hasAttribute("aria-busy")).toBe(false);
+    expect(copy.textContent).toContain("Copied for this session");
+    expect(copyIncidentReport).toHaveBeenCalledWith(reportId);
     renderer.unload();
   });
 

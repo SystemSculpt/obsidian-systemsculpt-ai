@@ -7,6 +7,9 @@ import {
   isAgentLifecyclePhase,
   isCreditsRefreshReason,
   isHistorySyncKind,
+  isToolDiagnosticFailureClass,
+  isToolDiagnosticOutcome,
+  boundedToolDiagnosticItemCount,
   isThinAgentClientInstanceId,
   isThinAgentConversationId,
   isThinAgentFailureCode,
@@ -17,6 +20,8 @@ import {
   type AgentLifecyclePhase,
   type CreditsRefreshReason,
   type HistorySyncKind,
+  type ToolDiagnosticFailureClass,
+  type ToolDiagnosticOutcome,
 } from "../../../utils/ThinAgentLifecycleSchema";
 import type { AgentCommandKind } from "./Protocol";
 
@@ -55,6 +60,11 @@ export type AgentLifecycleInput = Readonly<{
   commandKind?: AgentCommandKind;
   commandSegmentOrdinal?: number;
   toolExecutionOrdinal?: number;
+  toolOutcome?: ToolDiagnosticOutcome;
+  toolFailureClass?: ToolDiagnosticFailureClass;
+  toolItemCount?: number;
+  toolCompletedItemCount?: number;
+  toolFailedItemCount?: number;
   historySyncKind?: HistorySyncKind;
   historySyncOrdinal?: number;
   responseDeliveryMode?: "fetch_stream" | "request_url_buffered";
@@ -92,6 +102,11 @@ export type AgentLifecycleRecord = Readonly<{
   commandKind?: AgentCommandKind;
   commandSegmentOrdinal?: number;
   toolExecutionOrdinal?: number;
+  toolOutcome?: ToolDiagnosticOutcome;
+  toolFailureClass?: ToolDiagnosticFailureClass;
+  toolItemCount?: number;
+  toolCompletedItemCount?: number;
+  toolFailedItemCount?: number;
   historySyncKind?: HistorySyncKind;
   historySyncOrdinal?: number;
   responseDeliveryMode?: "fetch_stream" | "request_url_buffered";
@@ -112,6 +127,54 @@ export type AgentLifecycleRecord = Readonly<{
   creditsRefreshServerTimingClockDomain?: "server_response_headers_monotonic_duration";
 }>;
 
+type AgentLifecycleInputSnapshot = {
+  readonly [Key in keyof AgentLifecycleInput]: AgentLifecycleInput[Key];
+};
+
+function snapshotAgentLifecycleInput(
+  input: AgentLifecycleInput,
+): AgentLifecycleInputSnapshot {
+  return {
+    code: input.code,
+    phase: input.phase,
+    conversationId: input.conversationId,
+    requestId: input.requestId,
+    clientInstanceId: input.clientInstanceId,
+    pluginBuildId: input.pluginBuildId,
+    runId: input.runId,
+    serverRunId: input.serverRunId,
+    toolName: input.toolName,
+    toolCallId: input.toolCallId,
+    status: input.status,
+    retryable: input.retryable,
+    incidentId: input.incidentId,
+    failureCode: input.failureCode,
+    latencyTraceId: input.latencyTraceId,
+    commandKind: input.commandKind,
+    commandSegmentOrdinal: input.commandSegmentOrdinal,
+    toolExecutionOrdinal: input.toolExecutionOrdinal,
+    toolOutcome: input.toolOutcome,
+    toolFailureClass: input.toolFailureClass,
+    toolItemCount: input.toolItemCount,
+    toolCompletedItemCount: input.toolCompletedItemCount,
+    toolFailedItemCount: input.toolFailedItemCount,
+    historySyncKind: input.historySyncKind,
+    historySyncOrdinal: input.historySyncOrdinal,
+    responseDeliveryMode: input.responseDeliveryMode,
+    clientMonotonicOffsetMs: input.clientMonotonicOffsetMs,
+    serverTimingAppMs: input.serverTimingAppMs,
+    serverTimingAuthMs: input.serverTimingAuthMs,
+    creditsRefreshReason: input.creditsRefreshReason,
+    creditsRefreshSequence: input.creditsRefreshSequence,
+    creditsRefreshTransport: input.creditsRefreshTransport,
+    creditsRefreshElapsedMs: input.creditsRefreshElapsedMs,
+    creditsRefreshServerAuthMs: input.creditsRefreshServerAuthMs,
+    creditsRefreshServerRateLimitMs: input.creditsRefreshServerRateLimitMs,
+    creditsRefreshServerBalanceStoreMs: input.creditsRefreshServerBalanceStoreMs,
+    creditsRefreshServerTotalMs: input.creditsRefreshServerTotalMs,
+  };
+}
+
 /**
  * Strict, content-free client lifecycle recorder. It copies only explicitly
  * allowlisted scalar fields and never serializes caller-owned objects.
@@ -125,97 +188,116 @@ export class AgentLifecycle {
   ) {}
 
   public record(input: AgentLifecycleInput): AgentLifecycleRecord | null {
-    if (!isAgentLifecycleCode(input.code) || !isAgentLifecyclePhase(input.phase)) {
-      return null;
-    }
-    const conversationId = isThinAgentConversationId(input.conversationId)
-      ? input.conversationId
-      : undefined;
-    const requestId = boundedThinAgentIdentifier(input.requestId, 160);
-    const clientInstanceId = isThinAgentClientInstanceId(input.clientInstanceId)
-      ? input.clientInstanceId
-      : undefined;
-    const pluginBuildId = boundedThinAgentIdentifier(input.pluginBuildId, 160);
-    const runId = boundedThinAgentIdentifier(input.runId, 160);
-    const serverRunId = isThinAgentServerRunId(input.serverRunId)
-      ? input.serverRunId
-      : undefined;
-    const toolName = isFirstPartyToolName(input.toolName)
-      ? input.toolName
-      : undefined;
-    const toolCallId = boundedThinAgentIdentifier(input.toolCallId, 160);
-    const status = Number.isInteger(input.status)
-      && input.status! >= 100
-      && input.status! <= 599
-      ? input.status
-      : undefined;
-    const incidentId = isThinAgentIncidentId(input.incidentId)
-      ? input.incidentId
-      : undefined;
-    const failureCode = isThinAgentFailureCode(input.failureCode)
-      ? input.failureCode
-      : undefined;
-    const latencyTraceId = isThinAgentLatencyTraceId(input.latencyTraceId)
-      ? input.latencyTraceId
-      : undefined;
-    const commandKind = isThinAgentCommandKind(input.commandKind)
-      ? input.commandKind
-      : undefined;
-    const commandSegmentOrdinal = Number.isSafeInteger(input.commandSegmentOrdinal)
-      && input.commandSegmentOrdinal! > 0
-      ? input.commandSegmentOrdinal
-      : undefined;
-    const toolExecutionOrdinal = Number.isSafeInteger(input.toolExecutionOrdinal)
-      && input.toolExecutionOrdinal! > 0
-      && input.toolExecutionOrdinal! <= MAX_TOOL_EXECUTION_ORDINAL
-      ? input.toolExecutionOrdinal
-      : undefined;
-    const historySyncKind = isHistorySyncKind(input.historySyncKind)
-      ? input.historySyncKind
-      : undefined;
-    const historySyncOrdinal = Number.isSafeInteger(input.historySyncOrdinal)
-      && input.historySyncOrdinal! > 0
-      && input.historySyncOrdinal! <= MAX_HISTORY_SYNC_ORDINAL
-      ? input.historySyncOrdinal
-      : undefined;
-    const responseDeliveryMode = input.responseDeliveryMode === "fetch_stream"
-      || input.responseDeliveryMode === "request_url_buffered"
-      ? input.responseDeliveryMode
-      : undefined;
-    const clientMonotonicOffsetMs = boundedThinAgentTiming(
-      input.clientMonotonicOffsetMs,
-    );
-    const serverTimingAppMs = boundedThinAgentTiming(input.serverTimingAppMs);
-    const serverTimingAuthMs = boundedThinAgentTiming(input.serverTimingAuthMs);
-    const creditsRefreshReason = isCreditsRefreshReason(input.creditsRefreshReason)
-      ? input.creditsRefreshReason
-      : undefined;
-    const creditsRefreshSequence = Number.isSafeInteger(input.creditsRefreshSequence)
-      && input.creditsRefreshSequence! > 0
-      ? input.creditsRefreshSequence
-      : undefined;
-    const creditsRefreshTransport = input.creditsRefreshTransport === "fetch"
-      || input.creditsRefreshTransport === "request_url"
-      ? input.creditsRefreshTransport
-      : undefined;
-    const creditsRefreshElapsedMs = boundedThinAgentTiming(input.creditsRefreshElapsedMs);
-    const creditsRefreshServerAuthMs = boundedThinAgentTiming(
-      input.creditsRefreshServerAuthMs,
-    );
-    const creditsRefreshServerRateLimitMs = boundedThinAgentTiming(
-      input.creditsRefreshServerRateLimitMs,
-    );
-    const creditsRefreshServerBalanceStoreMs = boundedThinAgentTiming(
-      input.creditsRefreshServerBalanceStoreMs,
-    );
-    const creditsRefreshServerTotalMs = boundedThinAgentTiming(
-      input.creditsRefreshServerTotalMs,
-    );
-    const record: AgentLifecycleRecord = Object.freeze({
-      sequence: ++this.sequence,
+    let record: AgentLifecycleRecord;
+    try {
+      const snapshot = snapshotAgentLifecycleInput(input);
+      if (!isAgentLifecycleCode(snapshot.code) || !isAgentLifecyclePhase(snapshot.phase)) {
+        return null;
+      }
+      const conversationId = isThinAgentConversationId(snapshot.conversationId)
+        ? snapshot.conversationId
+        : undefined;
+      const requestId = boundedThinAgentIdentifier(snapshot.requestId, 160);
+      const clientInstanceId = isThinAgentClientInstanceId(snapshot.clientInstanceId)
+        ? snapshot.clientInstanceId
+        : undefined;
+      const pluginBuildId = boundedThinAgentIdentifier(snapshot.pluginBuildId, 160);
+      const runId = boundedThinAgentIdentifier(snapshot.runId, 160);
+      const serverRunId = isThinAgentServerRunId(snapshot.serverRunId)
+        ? snapshot.serverRunId
+        : undefined;
+      const toolName = isFirstPartyToolName(snapshot.toolName)
+        ? snapshot.toolName
+        : undefined;
+      const toolCallId = boundedThinAgentIdentifier(snapshot.toolCallId, 160);
+      const status = Number.isInteger(snapshot.status)
+        && snapshot.status! >= 100
+        && snapshot.status! <= 599
+        ? snapshot.status
+        : undefined;
+      const incidentId = isThinAgentIncidentId(snapshot.incidentId)
+        ? snapshot.incidentId
+        : undefined;
+      const failureCode = isThinAgentFailureCode(snapshot.failureCode)
+        ? snapshot.failureCode
+        : undefined;
+      const latencyTraceId = isThinAgentLatencyTraceId(snapshot.latencyTraceId)
+        ? snapshot.latencyTraceId
+        : undefined;
+      const commandKind = isThinAgentCommandKind(snapshot.commandKind)
+        ? snapshot.commandKind
+        : undefined;
+      const commandSegmentOrdinal = Number.isSafeInteger(snapshot.commandSegmentOrdinal)
+        && snapshot.commandSegmentOrdinal! > 0
+        ? snapshot.commandSegmentOrdinal
+        : undefined;
+      const toolExecutionOrdinal = Number.isSafeInteger(snapshot.toolExecutionOrdinal)
+        && snapshot.toolExecutionOrdinal! > 0
+        && snapshot.toolExecutionOrdinal! <= MAX_TOOL_EXECUTION_ORDINAL
+        ? snapshot.toolExecutionOrdinal
+        : undefined;
+      const toolOutcome = isToolDiagnosticOutcome(snapshot.toolOutcome)
+        ? snapshot.toolOutcome
+        : undefined;
+      const toolFailureClass = isToolDiagnosticFailureClass(snapshot.toolFailureClass)
+        ? snapshot.toolFailureClass
+        : undefined;
+      const toolItemCount = boundedToolDiagnosticItemCount(snapshot.toolItemCount);
+      const toolCompletedItemCount = boundedToolDiagnosticItemCount(
+        snapshot.toolCompletedItemCount,
+      );
+      const toolFailedItemCount = boundedToolDiagnosticItemCount(
+        snapshot.toolFailedItemCount,
+      );
+      const historySyncKind = isHistorySyncKind(snapshot.historySyncKind)
+        ? snapshot.historySyncKind
+        : undefined;
+      const historySyncOrdinal = Number.isSafeInteger(snapshot.historySyncOrdinal)
+        && snapshot.historySyncOrdinal! > 0
+        && snapshot.historySyncOrdinal! <= MAX_HISTORY_SYNC_ORDINAL
+        ? snapshot.historySyncOrdinal
+        : undefined;
+      const responseDeliveryMode = snapshot.responseDeliveryMode === "fetch_stream"
+        || snapshot.responseDeliveryMode === "request_url_buffered"
+        ? snapshot.responseDeliveryMode
+        : undefined;
+      const clientMonotonicOffsetMs = boundedThinAgentTiming(
+        snapshot.clientMonotonicOffsetMs,
+      );
+      const serverTimingAppMs = boundedThinAgentTiming(snapshot.serverTimingAppMs);
+      const serverTimingAuthMs = boundedThinAgentTiming(snapshot.serverTimingAuthMs);
+      const creditsRefreshReason = isCreditsRefreshReason(snapshot.creditsRefreshReason)
+        ? snapshot.creditsRefreshReason
+        : undefined;
+      const creditsRefreshSequence = Number.isSafeInteger(snapshot.creditsRefreshSequence)
+        && snapshot.creditsRefreshSequence! > 0
+        ? snapshot.creditsRefreshSequence
+        : undefined;
+      const creditsRefreshTransport = snapshot.creditsRefreshTransport === "fetch"
+        || snapshot.creditsRefreshTransport === "request_url"
+        ? snapshot.creditsRefreshTransport
+        : undefined;
+      const creditsRefreshElapsedMs = boundedThinAgentTiming(
+        snapshot.creditsRefreshElapsedMs,
+      );
+      const creditsRefreshServerAuthMs = boundedThinAgentTiming(
+        snapshot.creditsRefreshServerAuthMs,
+      );
+      const creditsRefreshServerRateLimitMs = boundedThinAgentTiming(
+        snapshot.creditsRefreshServerRateLimitMs,
+      );
+      const creditsRefreshServerBalanceStoreMs = boundedThinAgentTiming(
+        snapshot.creditsRefreshServerBalanceStoreMs,
+      );
+      const creditsRefreshServerTotalMs = boundedThinAgentTiming(
+        snapshot.creditsRefreshServerTotalMs,
+      );
+      const nextSequence = this.sequence + 1;
+      record = Object.freeze({
+      sequence: nextSequence,
       timestamp: this.now(),
-      code: input.code,
-      phase: input.phase,
+      code: snapshot.code,
+      phase: snapshot.phase,
       ...(conversationId ? { conversationId } : {}),
       ...(requestId ? { requestId } : {}),
       ...(clientInstanceId ? { clientInstanceId } : {}),
@@ -225,13 +307,18 @@ export class AgentLifecycle {
       ...(toolName ? { toolName } : {}),
       ...(toolCallId ? { toolCallId } : {}),
       ...(status === undefined ? {} : { status }),
-      ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
+      ...(typeof snapshot.retryable === "boolean" ? { retryable: snapshot.retryable } : {}),
       ...(incidentId ? { incidentId } : {}),
       ...(failureCode ? { failureCode } : {}),
       ...(latencyTraceId ? { latencyTraceId } : {}),
       ...(commandKind ? { commandKind } : {}),
       ...(commandSegmentOrdinal === undefined ? {} : { commandSegmentOrdinal }),
       ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
+      ...(toolOutcome ? { toolOutcome } : {}),
+      ...(toolFailureClass ? { toolFailureClass } : {}),
+      ...(toolItemCount === undefined ? {} : { toolItemCount }),
+      ...(toolCompletedItemCount === undefined ? {} : { toolCompletedItemCount }),
+      ...(toolFailedItemCount === undefined ? {} : { toolFailedItemCount }),
       ...(historySyncKind ? { historySyncKind } : {}),
       ...(historySyncOrdinal === undefined ? {} : { historySyncOrdinal }),
       ...(responseDeliveryMode ? { responseDeliveryMode } : {}),
@@ -272,7 +359,12 @@ export class AgentLifecycle {
             creditsRefreshServerTimingClockDomain:
               "server_response_headers_monotonic_duration" as const,
           }),
-    });
+      });
+      this.sequence = nextSequence;
+    } catch {
+      // Hostile inputs and unavailable clocks cannot affect the product flow.
+      return null;
+    }
     try {
       this.persist(record);
     } catch {

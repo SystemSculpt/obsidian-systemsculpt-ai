@@ -43,6 +43,8 @@ export type ManagedAgentError = Readonly<{
   requestId?: string;
   retryable?: boolean;
   retryAfterSeconds?: number;
+  /** Plugin-created local diagnostics report id (report_<32 hex>). */
+  reportId?: string;
   /** Server-issued support id from the failed terminal (incident_<32 hex>). */
   incidentId?: string;
 }>;
@@ -118,4 +120,3 @@ export type AgentConversationSnapshot = Readonly<{
   messages: readonly AgentMessageProjection[];
   parts: readonly AgentPart[];
 }>;
-

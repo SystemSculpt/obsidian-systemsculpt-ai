@@ -7,6 +7,25 @@ import {
 
 export type AnchoredScrollMode = "end" | "manual";
 
+export type AnchoredScrollDistanceBucket =
+  | "at_end"
+  | "near_end"
+  | "within_viewport"
+  | "far_from_end"
+  | "unknown";
+
+export type AnchoredScrollerIncidentSnapshot = Readonly<{
+  mode: AnchoredScrollMode;
+  distanceFromEndBucket: AnchoredScrollDistanceBucket;
+  registeredRowCount: number;
+  pendingLayoutMutationCount: number;
+  layoutMutationPending: boolean;
+  geometryUpdatePending: boolean;
+  programmaticScrollPending: boolean;
+  submittedPromptAnchorActive: boolean;
+  destroyed: boolean;
+}>;
+
 export type AnchoredScrollerOptions = Readonly<{
   viewport: HTMLElement;
   content: HTMLElement;
@@ -50,7 +69,14 @@ type SubmittedPromptAnchor = Readonly<{
   offset: number;
 }>;
 
+type ScrollGeometry = Readonly<{
+  scrollTop: number;
+  viewportHeight: number;
+  distanceFromEnd: number;
+}>;
+
 const DEFAULT_END_THRESHOLD = 24;
+const INCIDENT_COUNT_LIMIT = 1_000_000;
 
 function finite(value: number, fallback = 0): number {
   return Number.isFinite(value) ? value : fallback;
@@ -58,6 +84,10 @@ function finite(value: number, fallback = 0): number {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
+
+function boundedIncidentCount(value: number): number {
+  return Math.min(INCIDENT_COUNT_LIMIT, Math.max(0, Math.floor(finite(value))));
 }
 
 /**
@@ -84,6 +114,7 @@ export class AnchoredScroller {
   private readonly submittedPromptSpacer: SVGSVGElement;
   private submittedPromptSpacerHeight = 0;
   private submittedPromptAnchor: SubmittedPromptAnchor | null = null;
+  private distanceFromEndBucket: AnchoredScrollDistanceBucket = "unknown";
   private destroyed = false;
 
   constructor(options: AnchoredScrollerOptions) {
@@ -377,6 +408,24 @@ export class AnchoredScroller {
     return this.mode === "end";
   }
 
+  /** Returns content-free state maintained by the scroller during normal work. */
+  public captureIncidentSnapshot(): AnchoredScrollerIncidentSnapshot {
+    const pendingLayoutMutationCount = boundedIncidentCount(
+      this.layoutMutation?.pendingFinishes ?? 0,
+    );
+    return Object.freeze({
+      mode: this.mode,
+      distanceFromEndBucket: this.distanceFromEndBucket,
+      registeredRowCount: boundedIncidentCount(this.rows.size),
+      pendingLayoutMutationCount,
+      layoutMutationPending: pendingLayoutMutationCount > 0,
+      geometryUpdatePending: this.geometryFrame !== null,
+      programmaticScrollPending: this.programmaticTarget !== null,
+      submittedPromptAnchorActive: this.submittedPromptAnchor !== null,
+      destroyed: this.destroyed,
+    });
+  }
+
   public destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -404,21 +453,21 @@ export class AnchoredScroller {
 
   private readonly handleScroll = (): void => {
     if (this.destroyed) return;
-    const current = finite(this.viewport.scrollTop);
+    const geometry = this.measureScrollGeometry();
     if (this.programmaticTarget !== null) {
-      if (Math.abs(current - this.programmaticTarget) <= 1) {
+      if (Math.abs(geometry.scrollTop - this.programmaticTarget) <= 1) {
         this.programmaticTarget = null;
       }
-      this.updateScrollButton();
+      this.updateScrollButton(geometry);
       return;
     }
-    if (this.isNearEnd()) {
+    if (this.isNearEnd(geometry)) {
       this.mode = "end";
       this.lastKnownManualAnchor = null;
     } else {
       this.mode = "manual";
     }
-    this.updateScrollButton();
+    this.updateScrollButton(geometry);
   };
 
   private readonly handleScrollIntent = (): void => {
@@ -796,6 +845,20 @@ export class AnchoredScroller {
     return Math.max(0, finite(this.viewport.scrollHeight) - Math.max(0, finite(this.viewport.clientHeight)));
   }
 
+  private measureScrollGeometry(): ScrollGeometry {
+    const scrollTop = finite(this.viewport.scrollTop);
+    const scrollHeight = finite(this.viewport.scrollHeight);
+    const viewportHeight = Math.max(0, finite(this.viewport.clientHeight));
+    return {
+      scrollTop,
+      viewportHeight,
+      distanceFromEnd: Math.max(
+        0,
+        Math.max(0, scrollHeight - viewportHeight) - scrollTop,
+      ),
+    };
+  }
+
   private maintainFollowPosition(behavior: ScrollBehavior): void {
     const anchor = this.submittedPromptAnchor;
     const row = anchor ? this.rows.get(anchor.rowId) : null;
@@ -823,8 +886,8 @@ export class AnchoredScroller {
     this.submittedPromptSpacer.setAttribute("height", String(next));
   }
 
-  private isNearEnd(): boolean {
-    return this.maximumScrollTop() - finite(this.viewport.scrollTop) <= this.endThreshold;
+  private isNearEnd(geometry: ScrollGeometry = this.measureScrollGeometry()): boolean {
+    return geometry.distanceFromEnd <= this.endThreshold;
   }
 
   private setScrollTop(rawTarget: number, requestedBehavior: ScrollBehavior): void {
@@ -880,13 +943,34 @@ export class AnchoredScroller {
       : this.reducedMotion;
   }
 
-  private updateScrollButton(): void {
+  private updateScrollButton(geometry?: ScrollGeometry): void {
+    let currentGeometry = geometry;
+    if (!currentGeometry) {
+      try {
+        currentGeometry = this.measureScrollGeometry();
+      } catch {
+        this.distanceFromEndBucket = "unknown";
+      }
+    }
+    if (currentGeometry) {
+      this.updateIncidentDistanceFromEndBucket(currentGeometry);
+    }
     if (!this.scrollButton) return;
-    const active = !this.isNearEnd();
+    const active = !this.isNearEnd(currentGeometry);
     this.scrollButton.toggleAttribute("inert", !active);
     this.scrollButton.tabIndex = active ? 0 : -1;
     this.scrollButton.dataset.active = active ? "true" : "false";
     this.scrollButton.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+
+  private updateIncidentDistanceFromEndBucket(geometry: ScrollGeometry): void {
+    this.distanceFromEndBucket = geometry.distanceFromEnd <= 1
+      ? "at_end"
+      : geometry.distanceFromEnd <= this.endThreshold
+        ? "near_end"
+        : geometry.viewportHeight > 0 && geometry.distanceFromEnd <= geometry.viewportHeight
+          ? "within_viewport"
+          : "far_from_end";
   }
 
   private assertLive(): void {

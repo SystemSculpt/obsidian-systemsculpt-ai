@@ -122,6 +122,30 @@ export const HISTORY_SYNC_KINDS = [
 
 export type HistorySyncKind = typeof HISTORY_SYNC_KINDS[number];
 
+export const TOOL_DIAGNOSTIC_OUTCOMES = [
+  "succeeded",
+  "failed",
+  "cancelled",
+  "outcome_unknown",
+] as const;
+
+export type ToolDiagnosticOutcome = typeof TOOL_DIAGNOSTIC_OUTCOMES[number];
+
+export const TOOL_DIAGNOSTIC_FAILURE_CLASSES = [
+  "partial_failure",
+  "operation_failed",
+  "execution_failed",
+  "cancelled",
+  "journal_unavailable",
+  "outcome_unknown",
+  "identity_mismatch",
+  "invalid_input",
+  "unknown",
+] as const;
+
+export type ToolDiagnosticFailureClass =
+  typeof TOOL_DIAGNOSTIC_FAILURE_CLASSES[number];
+
 const LIFECYCLE_CODE_SET: ReadonlySet<string> = new Set(
   THIN_AGENT_LIFECYCLE_CODES,
 );
@@ -132,10 +156,17 @@ const CREDITS_REFRESH_REASON_SET: ReadonlySet<string> = new Set(
   CREDITS_REFRESH_REASONS,
 );
 const HISTORY_SYNC_KIND_SET: ReadonlySet<string> = new Set(HISTORY_SYNC_KINDS);
+const TOOL_DIAGNOSTIC_OUTCOME_SET: ReadonlySet<string> = new Set(
+  TOOL_DIAGNOSTIC_OUTCOMES,
+);
+const TOOL_DIAGNOSTIC_FAILURE_CLASS_SET: ReadonlySet<string> = new Set(
+  TOOL_DIAGNOSTIC_FAILURE_CLASSES,
+);
 const CLIENT_INSTANCE_ID = /^client_[a-f0-9]{32}$/u;
 const CONVERSATION_ID = /^conversation_[a-f0-9]{32}$/u;
-const INCIDENT_ID = /^incident_[a-f0-9]{32}$/u;
-const SERVER_RUN_ID = /^run_[a-f0-9]{32}$/u;
+const REQUEST_ID = /^user-(?:[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}|[0-9]{10,16}-[a-z0-9]{5,20})$/u;
+const INCIDENT_ID = /^incident_(?!0{32}$)[a-f0-9]{32}$/u;
+const SERVER_RUN_ID = /^run_(?!0{32}$)[a-f0-9]{32}$/u;
 const LATENCY_TRACE_ID = /^[a-f0-9]{32}$/u;
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 const SAFE_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
@@ -161,6 +192,28 @@ export function isCreditsRefreshReason(
 
 export function isHistorySyncKind(value: unknown): value is HistorySyncKind {
   return typeof value === "string" && HISTORY_SYNC_KIND_SET.has(value);
+}
+
+export function isToolDiagnosticOutcome(
+  value: unknown,
+): value is ToolDiagnosticOutcome {
+  return typeof value === "string" && TOOL_DIAGNOSTIC_OUTCOME_SET.has(value);
+}
+
+export function isToolDiagnosticFailureClass(
+  value: unknown,
+): value is ToolDiagnosticFailureClass {
+  return typeof value === "string"
+    && TOOL_DIAGNOSTIC_FAILURE_CLASS_SET.has(value);
+}
+
+export function boundedToolDiagnosticItemCount(
+  value: unknown,
+): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+    && (value as number) <= 10_000
+    ? value as number
+    : undefined;
 }
 
 export function boundedThinAgentIdentifier(
@@ -195,6 +248,10 @@ export function isThinAgentClientInstanceId(value: unknown): value is string {
 
 export function isThinAgentConversationId(value: unknown): value is string {
   return typeof value === "string" && CONVERSATION_ID.test(value);
+}
+
+export function isThinAgentRequestId(value: unknown): value is string {
+  return typeof value === "string" && REQUEST_ID.test(value);
 }
 
 export function isThinAgentIncidentId(value: unknown): value is string {

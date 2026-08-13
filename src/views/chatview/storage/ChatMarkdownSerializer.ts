@@ -18,6 +18,9 @@ import {
   type ChatMetadata,
   type ParsedChatMarkdown,
 } from "./ChatPersistenceTypes";
+import {
+  normalizeFailedTerminalReceipt,
+} from "../FailedTerminalReceipt";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
 const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
@@ -351,14 +354,46 @@ export class ChatMarkdownSerializer {
     message: ChatMessage,
     attributes: string,
   ): ChatMessage {
+    if (message.role !== "assistant") return message;
+
     let restored = message;
-    if (
-      message.role === "assistant"
-      && attributes.includes("terminal-outcome=\"cancelled\"")
-    ) {
+    const terminalOutcome = this.uniqueAdditiveAttribute(
+      attributes,
+      "terminal-outcome",
+    );
+    if (terminalOutcome === "cancelled") {
       restored = { ...restored, terminalOutcome: "cancelled" };
+    } else if (terminalOutcome === "failed") {
+      const retryableValue = this.uniqueAdditiveAttribute(
+        attributes,
+        "terminal-retryable",
+      );
+      const failedReceipt = normalizeFailedTerminalReceipt({
+        terminalOutcome,
+        terminalReportId: this.uniqueAdditiveAttribute(
+          attributes,
+          "terminal-report-id",
+        ),
+        terminalIncidentId: this.uniqueAdditiveAttribute(
+          attributes,
+          "terminal-incident-id",
+        ),
+        terminalFailureCode: this.uniqueAdditiveAttribute(
+          attributes,
+          "terminal-failure-code",
+        ),
+        terminalRetryable: retryableValue === "true"
+          ? true
+          : retryableValue === "false"
+            ? false
+            : undefined,
+        terminalServerRunId: this.uniqueAdditiveAttribute(
+          attributes,
+          "terminal-server-run-id",
+        ),
+      });
+      if (failedReceipt) restored = { ...restored, ...failedReceipt };
     }
-    if (message.role !== "assistant") return restored;
     const durationMatch = attributes.match(
       /(?:^|\s)response-duration-ms="([0-9]+)"(?:\s|$)/u,
     );
@@ -367,6 +402,18 @@ export class ChatMarkdownSerializer {
     return this.isResponseDurationMs(responseDurationMs)
       ? { ...restored, responseDurationMs }
       : restored;
+  }
+
+  private static uniqueAdditiveAttribute(
+    attributes: string,
+    name: string,
+  ): string | undefined {
+    const pattern = new RegExp(
+      `(?:^|\\s)${name}="([^"]*)"(?=\\s|$)`,
+      "gu",
+    );
+    const matches = [...attributes.matchAll(pattern)];
+    return matches.length === 1 ? matches[0][1] : undefined;
   }
 
   private static isResponseDurationMs(value: unknown): value is number {
@@ -642,6 +689,24 @@ export class ChatMarkdownSerializer {
     // written with this marker still loads everywhere.
     if (msg.terminalOutcome === "cancelled") {
       attributes += " terminal-outcome=\"cancelled\"";
+    } else {
+      const failedReceipt = msg.role === "assistant"
+        ? normalizeFailedTerminalReceipt(msg)
+        : null;
+      if (failedReceipt) {
+        attributes += " terminal-outcome=\"failed\"";
+        if (failedReceipt.terminalReportId) {
+          attributes += ` terminal-report-id="${failedReceipt.terminalReportId}"`;
+        }
+        if (failedReceipt.terminalIncidentId) {
+          attributes += ` terminal-incident-id="${failedReceipt.terminalIncidentId}"`;
+        }
+        attributes += ` terminal-failure-code="${failedReceipt.terminalFailureCode}"`;
+        attributes += ` terminal-retryable="${String(failedReceipt.terminalRetryable)}"`;
+        if (failedReceipt.terminalServerRunId) {
+          attributes += ` terminal-server-run-id="${failedReceipt.terminalServerRunId}"`;
+        }
+      }
     }
     if (msg.role === "assistant" && this.isResponseDurationMs(msg.responseDurationMs)) {
       attributes += ` response-duration-ms="${msg.responseDurationMs}"`;

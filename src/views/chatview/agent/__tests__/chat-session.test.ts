@@ -9,11 +9,18 @@ import {
 import type { ChatMessage } from "../../../../types";
 import type { ToolCall, ToolCallResult } from "../../../../types/toolCalls";
 import {
+  AGENT_INCIDENT_EXPORTED_FAILURE_CODES,
+  normalizeAgentIncidentFailureCode,
+} from "../../../../core/diagnostics/AgentIncidentSchema";
+import {
   presentAgentTool,
   presentAgentToolFailure,
 } from "../../AgentToolPresentation";
 import { AgentConversationRenderer } from "../../AgentConversationRenderer";
-import type { AgentToolPart } from "../../AgentConversation";
+import type {
+  AgentConversationSnapshot,
+  AgentToolPart,
+} from "../../AgentConversation";
 import { ChatMarkdownSerializer } from "../../storage/ChatMarkdownSerializer";
 import {
   THIN_AGENT_EVENT_TYPE,
@@ -21,6 +28,8 @@ import {
 } from "../Protocol";
 import {
   AgentChatSession,
+  type AgentChatTransportSegmentSummaryEvent,
+  type AgentRunFailureCaptureEvent,
   type AgentRunResult,
 } from "../ChatSession";
 import { AgentMutationJournal } from "../MutationJournal";
@@ -31,6 +40,8 @@ const SESSION_ID = `session_${"c".repeat(32)}`;
 const RUN_ID = `run_${"d".repeat(32)}`;
 const PLUGIN_BUILD_ID = `sha256:${"e".repeat(64)}`;
 const ACCESS_TOKEN = "access_token_agent_session_1234567890";
+const CAPTURE_REQUEST_ID = "user-76712c65-86b6-4408-8dfc-6de89d79a479";
+const LOCAL_CAPTURE_REQUEST_ID = "user-2c9bb63e-b95d-4da3-a5dd-8b21828bd66e";
 
 type WireMessage = Readonly<{
   id: string;
@@ -480,6 +491,10 @@ function createHarness(input: Readonly<{
     reason: "post_terminal" | "billing_failure",
     correlation: Readonly<{ requestId: string; serverRunId?: string }>,
   ) => Promise<void>;
+  onTransportSegmentSummary?: (
+    event: AgentChatTransportSegmentSummaryEvent,
+  ) => void;
+  onIncidentCapture?: (event: AgentRunFailureCaptureEvent) => void;
   monotonicNow?: () => number;
 }> = {}) {
   const conversationId = input.conversationId ?? CONVERSATION_ID;
@@ -501,6 +516,12 @@ function createHarness(input: Readonly<{
   const reconcileHistory = jest.fn(async () => undefined);
   const reportError = jest.fn();
   const onLifecycle = jest.fn();
+  const onTransportSegmentSummary = jest.fn(
+    input.onTransportSegmentSummary ?? (() => undefined),
+  );
+  const onIncidentCapture = jest.fn(
+    input.onIncidentCapture ?? (() => undefined),
+  );
   const refreshCredits = jest.fn(input.refreshCredits ?? (async () => undefined));
   const agent = new AgentChatSession({
     baseUrl: "https://systemsculpt.test",
@@ -513,6 +534,8 @@ function createHarness(input: Readonly<{
     reconcileHistory,
     reportError,
     onLifecycle,
+    onTransportSegmentSummary,
+    onIncidentCapture,
     refreshCredits,
     requestClient: { request },
     ...(input.runStallGraceMs
@@ -532,6 +555,8 @@ function createHarness(input: Readonly<{
     reconcileHistory,
     reportError,
     onLifecycle,
+    onTransportSegmentSummary,
+    onIncidentCapture,
     refreshCredits,
     mutationAdapter: mutation.adapter,
     async open(messages: readonly WireMessage[] = []): Promise<FakeAgentServer> {
@@ -616,6 +641,163 @@ afterEach(async () => {
 });
 
 describe("AgentChatSession", () => {
+  it("keeps failure-code projection aligned with the shared incident schema", () => {
+    const captures: AgentRunFailureCaptureEvent[] = [];
+    const harness = createHarness({
+      onIncidentCapture: (capture) => captures.push(capture),
+    });
+    const active = {
+      conversationId: CONVERSATION_ID,
+      requestId: CAPTURE_REQUEST_ID,
+      executingToolIds: { size: 0 },
+      toolTasks: { size: 0 },
+      elapsedMs: 0,
+      origin: "submitted",
+      phase: "submitted",
+      serverQueued: false,
+    };
+    const snapshot = { parts: [] } as unknown as AgentConversationSnapshot;
+    const internals = harness.agent as unknown as {
+      captureFailedRun(
+        active: unknown,
+        snapshot: AgentConversationSnapshot,
+        failure: Readonly<{
+          failureAuthority: "server" | "client";
+          failureStage: AgentRunFailureCaptureEvent["failureStage"];
+          failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+          terminalValidation: "validated" | "unvalidated";
+          terminalSource: "session_terminal" | "local_failure";
+          retryable: boolean;
+          failureCode?: string;
+        }>,
+      ): void;
+    };
+
+    for (const authority of ["server", "client"] as const) {
+      for (const failureCode of AGENT_INCIDENT_EXPORTED_FAILURE_CODES) {
+        internals.captureFailedRun(active, snapshot, {
+          failureAuthority: authority,
+          failureStage: authority === "server"
+            ? "response_terminal"
+            : "request_dispatch",
+          failureMechanism: authority === "server"
+            ? "service_terminal"
+            : "transport_or_protocol_failure",
+          terminalValidation: authority === "server" ? "validated" : "unvalidated",
+          terminalSource: authority === "server" ? "session_terminal" : "local_failure",
+          retryable: false,
+          failureCode,
+        });
+      }
+      internals.captureFailedRun(active, snapshot, {
+        failureAuthority: authority,
+        failureStage: authority === "server"
+          ? "response_terminal"
+          : "request_dispatch",
+        failureMechanism: authority === "server"
+          ? "service_terminal"
+          : "transport_or_protocol_failure",
+        terminalValidation: authority === "server" ? "validated" : "unvalidated",
+        terminalSource: authority === "server" ? "session_terminal" : "local_failure",
+        retryable: false,
+        failureCode: "future_failure_code",
+      });
+    }
+
+    const expected = (["server", "client"] as const).flatMap((authority) => [
+      ...AGENT_INCIDENT_EXPORTED_FAILURE_CODES,
+      normalizeAgentIncidentFailureCode("future_failure_code", authority),
+    ]);
+    expect(captures.map((capture) => capture.failureCode)).toEqual(expected);
+  });
+
+  it("records complete assistant output as present and requires a failed projection for retention", () => {
+    const privateText = "private completed assistant output";
+    const privateReasoning = "private streaming reasoning";
+    const captures: AgentRunFailureCaptureEvent[] = [];
+    const harness = createHarness({
+      onIncidentCapture: (capture) => captures.push(capture),
+    });
+    const active = {
+      conversationId: CONVERSATION_ID,
+      requestId: CAPTURE_REQUEST_ID,
+      executingToolIds: { size: 0 },
+      toolTasks: { size: 0 },
+      elapsedMs: 0,
+      origin: "submitted",
+      phase: "working",
+      serverQueued: false,
+    };
+    const snapshot = {
+      runId: null,
+      turnId: CAPTURE_REQUEST_ID,
+      phase: "working",
+      messages: [],
+      parts: [
+        {
+          id: "text_complete",
+          order: 0,
+          kind: "text",
+          messageId: "assistant_complete",
+          state: "complete",
+          markdown: privateText,
+        },
+        {
+          id: "reasoning_streaming",
+          order: 1,
+          kind: "reasoning",
+          messageId: "assistant_complete",
+          state: "streaming",
+          summary: privateReasoning,
+        },
+      ],
+    } as const;
+    const internals = harness.agent as unknown as {
+      captureFailedRun(
+        active: unknown,
+        snapshot: AgentConversationSnapshot,
+        failure: Readonly<{
+          failureAuthority: "client";
+          failureStage: AgentRunFailureCaptureEvent["failureStage"];
+          failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+          terminalValidation: "unvalidated";
+          terminalSource: "local_failure";
+          retryable: boolean;
+        }>,
+      ): void;
+    };
+    const failure = {
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: true,
+    } as const;
+
+    internals.captureFailedRun(active, { ...snapshot, status: "running" }, failure);
+    internals.captureFailedRun(active, { ...snapshot, status: "failed" }, failure);
+
+    expect(captures).toEqual([
+      expect.objectContaining({
+        assistantTextPartCount: 1,
+        assistantTextStreamingPartCount: 0,
+        assistantTextCompletePartCount: 1,
+        reasoningPartCount: 1,
+        reasoningStreamingPartCount: 1,
+        reasoningCompletePartCount: 0,
+        assistantOutputPresentBeforeFailure: true,
+        assistantOutputRetainedInFailedProjection: false,
+      }),
+      expect.objectContaining({
+        assistantOutputPresentBeforeFailure: true,
+        assistantOutputRetainedInFailedProjection: true,
+      }),
+    ]);
+    expect(JSON.stringify(captures)).not.toContain(privateText);
+    expect(JSON.stringify(captures)).not.toContain(privateReasoning);
+  });
+
   it("bootstraps and stages selected context before the chat session is hydrated", async () => {
     const harness = createHarness();
     const rootMessageId = "user_context_before_hydration";
@@ -657,6 +839,104 @@ describe("AgentChatSession", () => {
       phase: "start",
       conversationId: CONVERSATION_ID,
       requestId: rootMessageId,
+    }));
+  });
+
+  it.each([
+    {
+      label: "an oversized body",
+      body: "private".repeat(600),
+      status: 500,
+      expectedCode: "context_prepare_failed",
+    },
+    {
+      label: "malformed JSON",
+      body: "{private",
+      status: 500,
+      expectedCode: "context_prepare_failed",
+    },
+    {
+      label: "a non-object JSON value",
+      body: "null",
+      status: 500,
+      expectedCode: "context_prepare_failed",
+    },
+    {
+      label: "valid top-level support fields",
+      body: JSON.stringify({
+        message: "private top-level service error",
+        incident_id: `incident_${"1".repeat(32)}`,
+      }),
+      status: 401,
+      expectedCode: "context_prepare_failed",
+      expectedRequestId: `incident_${"1".repeat(32)}`,
+    },
+    {
+      label: "valid nested support fields",
+      body: JSON.stringify({
+        error: {
+          message: "private nested service error",
+          incident_id: `incident_${"2".repeat(32)}`,
+        },
+      }),
+      status: 413,
+      expectedCode: "context_too_large",
+      expectedRequestId: `incident_${"2".repeat(32)}`,
+    },
+    {
+      label: "invalid nested support fields",
+      body: JSON.stringify({
+        error: {
+          message: 42,
+          incident_id: "private-invalid-incident",
+        },
+      }),
+      status: 429,
+      expectedCode: "context_prepare_failed",
+    },
+  ] as const)("bounds $label in a context error response", async ({
+    body,
+    status,
+    expectedCode,
+    expectedRequestId,
+  }) => {
+    const request = jest.fn(async (input: PlatformRequestInput): Promise<Response> => {
+      const url = String(input.url);
+      if (url.includes("/agent/bootstrap")) {
+        return jsonResponse(bootstrapResponse());
+      }
+      if (url.includes("/agent/context")) {
+        return new Response(body, {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected request url: ${url}`);
+    });
+    const harness = createHarness({ request });
+    const rootMessageId = `user_context_error_${status}_${body.length}`;
+
+    const result = harness.agent.stageContext(rootMessageId, []);
+
+    await expect(result).rejects.toMatchObject({
+      code: expectedCode,
+      status,
+      retryable: status === 401 || status === 429 || status >= 500,
+      ...(expectedRequestId ? { requestId: expectedRequestId } : {}),
+    });
+    await expect(result).rejects.not.toHaveProperty(
+      "message",
+      expect.stringContaining("private"),
+    );
+    if (!expectedRequestId) {
+      await expect(result).rejects.not.toHaveProperty("requestId");
+    }
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "context_prepare_failed",
+      phase: "start",
+      requestId: rootMessageId,
+      status,
+      retryable: true,
     }));
   });
 
@@ -773,10 +1053,665 @@ describe("AgentChatSession", () => {
     }));
     const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
       readonly ChatMessage[];
-    expect(reconciled.find((message) =>
-      message.message_id === "assistant_classified_failure"))
-      .toMatchObject({ responseDurationMs: 850 });
+    const failedMessage = reconciled.find((message) =>
+      message.message_id === "assistant_classified_failure");
+    const receipt = {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"f".repeat(32)}`,
+      terminalFailureCode: "response_capacity_unavailable",
+      terminalRetryable: true,
+      terminalServerRunId: RUN_ID,
+    } as const;
+    expect(failedMessage).toMatchObject({
+      responseDurationMs: 850,
+      ...receipt,
+    });
+    expect(reloadSavedMessage(failedMessage!)).toMatchObject(receipt);
   });
+
+  it("captures frozen content-free evidence before a validated failed terminal renders", async () => {
+    let now = 1_000;
+    const order: string[] = [];
+    const captures: AgentRunFailureCaptureEvent[] = [];
+    const harness = trackedHarness({
+      monotonicNow: () => now,
+      onIncidentCapture: (event) => {
+        order.push("capture");
+        captures.push(event);
+      },
+    });
+    const server = await harness.open();
+    const text = "private assistant response canary";
+    const completeText = "private complete assistant canary";
+    const reasoning = "private reasoning canary";
+    const completeReasoning = "private complete reasoning canary";
+    const toolCallId = "private_tool_call_canary";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: CAPTURE_REQUEST_ID,
+      message: userMessage(CAPTURE_REQUEST_ID, "private prompt canary"),
+      clientStartedAtMonotonicMs: 900,
+    });
+    const unsubscribe = harness.agent.subscribe((snapshot) => {
+      if (snapshot.status === "failed") order.push("render");
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(
+      1,
+      CAPTURE_REQUEST_ID,
+      CAPTURE_REQUEST_ID,
+    )));
+    server.serverMessage(assistantSnapshot(
+      CAPTURE_REQUEST_ID,
+      wireAssistant("assistant_capture_failure", [
+        { type: "text", text, state: "streaming" },
+        { type: "text", text: completeText, state: "done" },
+        { type: "reasoning", text: reasoning, state: "streaming" },
+        { type: "reasoning", text: completeReasoning, state: "done" },
+        {
+          type: "tool-web_search",
+          toolCallId,
+          state: "output-available",
+          input: { query: "private search query canary" },
+          output: { success: true, data: { url: "https://private.example" } },
+        },
+      ]),
+    ));
+    now = 1_750;
+    server.serverMessage(failedTerminal(
+      CAPTURE_REQUEST_ID,
+      CAPTURE_REQUEST_ID,
+      "response_capacity_unavailable",
+      true,
+    ));
+
+    await expect(run).resolves.toMatchObject({ kind: "failed" });
+    unsubscribe();
+    expect(captures).toHaveLength(1);
+    expect(captures[0]).toEqual({
+      kind: "agent_run_failed",
+      conversationId: CONVERSATION_ID,
+      requestId: CAPTURE_REQUEST_ID,
+      failureAuthority: "server",
+      failureStage: "response_terminal",
+      failureMechanism: "service_terminal",
+      terminalValidation: "validated",
+      terminalSource: "session_terminal",
+      hostProcessState: "responsive",
+      chatViewState: "unknown",
+      runOrigin: "submitted",
+      runPhase: "working",
+      connectionState: "open",
+      elapsedMs: 850,
+      elapsedMsTruncated: false,
+      serverRunId: RUN_ID,
+      incidentId: `incident_${"f".repeat(32)}`,
+      failureCode: "response_capacity_unavailable",
+      retryable: true,
+      assistantTextPartCount: 2,
+      assistantTextStreamingPartCount: 1,
+      assistantTextCompletePartCount: 1,
+      assistantTextCharacterCount: text.length + completeText.length,
+      reasoningPartCount: 2,
+      reasoningStreamingPartCount: 1,
+      reasoningCompletePartCount: 1,
+      reasoningCharacterCount: reasoning.length + completeReasoning.length,
+      assistantOutputPresentBeforeFailure: true,
+      assistantOutputRetainedInFailedProjection: true,
+      snapshotPartCount: 6,
+      executingLocalToolCount: 0,
+      pendingToolDeliveryCount: 0,
+      pendingApprovalDeliveryCount: 0,
+      pendingToolTaskCount: 0,
+      serverQueued: false,
+      runStalled: false,
+      awaitingClientWork: false,
+      pendingCancel: false,
+      pendingRegenerate: false,
+      countsTruncated: false,
+    });
+    expect(Object.isFrozen(captures[0])).toBe(true);
+    expect(order[0]).toBe("capture");
+    expect(order).toContain("render");
+    const serialized = JSON.stringify(captures[0]);
+    for (const canary of [
+      "private prompt canary",
+      text,
+      completeText,
+      reasoning,
+      completeReasoning,
+      toolCallId,
+      "private search query canary",
+      "https://private.example",
+    ]) expect(serialized).not.toContain(canary);
+  });
+
+  it("bounds hostile failure evidence without leaking or changing run control", () => {
+    const captures: AgentRunFailureCaptureEvent[] = [];
+    const harness = createHarness({
+      onIncidentCapture: (capture) => captures.push(capture),
+    });
+    const requestId = CAPTURE_REQUEST_ID;
+    const active = {
+      conversationId: CONVERSATION_ID,
+      requestId,
+      executingToolIds: { size: 513 },
+      toolTasks: { size: 513 },
+      elapsedMs: 7 * 24 * 60 * 60 * 1_000 + 1,
+      origin: "recovered",
+      phase: "awaiting_client",
+      serverQueued: true,
+    };
+    const parts = {
+      length: 100_000_001,
+      *[Symbol.iterator]() {
+        yield {
+          kind: "text",
+          state: "streaming",
+          markdown: { length: 100_000_000 },
+        };
+        yield {
+          kind: "text",
+          state: "complete",
+          markdown: { length: 1 },
+        };
+        yield {
+          kind: "reasoning",
+          state: "streaming",
+          summary: { length: -1 },
+        };
+        yield {
+          kind: "reasoning",
+          state: "complete",
+          summary: { length: Number.NaN },
+        };
+      },
+    };
+    const snapshot = {
+      status: "failed",
+      parts,
+    } as unknown as AgentConversationSnapshot;
+    const internals = harness.agent as unknown as {
+      pendingDeliveries: { size: number };
+      pendingApprovalDeliveries: { size: number };
+      pendingCancelRequestId: string | null;
+      pendingRegenerate: { requestId: string } | null;
+      runStalled: boolean;
+      awaitingClientWork: boolean;
+      connectionState: "closed";
+      captureFailedRun(
+        active: unknown,
+        snapshot: AgentConversationSnapshot,
+        failure: Readonly<{
+          failureAuthority: "client";
+          failureStage: AgentRunFailureCaptureEvent["failureStage"];
+          failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+          terminalValidation: "unvalidated";
+          terminalSource: "local_failure";
+          retryable: boolean;
+          serverRunId?: string;
+          incidentId?: string;
+          failureCode?: string;
+        }>,
+      ): void;
+    };
+    internals.pendingDeliveries = { size: 513 };
+    internals.pendingApprovalDeliveries = { size: 513 };
+    internals.pendingCancelRequestId = requestId;
+    internals.pendingRegenerate = { requestId };
+    internals.runStalled = true;
+    internals.awaitingClientWork = true;
+    internals.connectionState = "closed";
+
+    internals.captureFailedRun(active, snapshot, {
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: false,
+      serverRunId: "private-server-run-id",
+      incidentId: "private-incident-id",
+      failureCode: "new_client_failure",
+    });
+
+    expect(captures).toEqual([expect.objectContaining({
+      requestId,
+      runOrigin: "recovered",
+      runPhase: "awaiting_client",
+      connectionState: "closed",
+      elapsedMs: 7 * 24 * 60 * 60 * 1_000,
+      elapsedMsTruncated: true,
+      failureCode: "unknown_client_failure",
+      assistantTextPartCount: 2,
+      assistantTextStreamingPartCount: 1,
+      assistantTextCompletePartCount: 1,
+      assistantTextCharacterCount: 100_000_000,
+      reasoningPartCount: 2,
+      reasoningStreamingPartCount: 1,
+      reasoningCompletePartCount: 1,
+      reasoningCharacterCount: 100_000_000,
+      assistantOutputPresentBeforeFailure: true,
+      assistantOutputRetainedInFailedProjection: true,
+      snapshotPartCount: 100_000_000,
+      executingLocalToolCount: 512,
+      pendingToolDeliveryCount: 512,
+      pendingApprovalDeliveryCount: 512,
+      pendingToolTaskCount: 512,
+      serverQueued: true,
+      runStalled: true,
+      awaitingClientWork: true,
+      pendingCancel: true,
+      pendingRegenerate: true,
+      countsTruncated: true,
+    })]);
+    expect(captures[0]).not.toHaveProperty("serverRunId");
+    expect(captures[0]).not.toHaveProperty("incidentId");
+    expect(JSON.stringify(captures[0])).not.toContain("private-");
+
+    const invalidRequest = { ...active, requestId: "../../private-request" };
+    internals.captureFailedRun(invalidRequest, snapshot, {
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: false,
+    });
+    const invalidConversation = { ...active, conversationId: "private-conversation" };
+    internals.captureFailedRun(invalidConversation, snapshot, {
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: false,
+    });
+    const hostileActive = new Proxy(active, {
+      get(target, key, receiver) {
+        if (key === "requestId") throw new Error("private hostile getter");
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    expect(() => internals.captureFailedRun(hostileActive, snapshot, {
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: false,
+    })).not.toThrow();
+    expect(captures).toHaveLength(1);
+  });
+
+  it("bounds preflight clocks and validates optional incident fields", () => {
+    let now = 7 * 24 * 60 * 60 * 1_000 + 1;
+    const captures: AgentRunFailureCaptureEvent[] = [];
+    const harness = createHarness({
+      monotonicNow: () => now,
+      onIncidentCapture: (capture) => captures.push(capture),
+    });
+    const firstRequestId = CAPTURE_REQUEST_ID;
+    const secondRequestId = LOCAL_CAPTURE_REQUEST_ID;
+    const internals = harness.agent as unknown as {
+      clientLatency: Map<string, Readonly<{
+        conversationId: string;
+        startedAtMonotonicMs: number;
+      }>>;
+      capturePreflightFailure(
+        conversationId: string,
+        requestId: string,
+        error: Readonly<{
+          code: string;
+          message: string;
+          retryable?: boolean;
+          incidentId?: string;
+          requestId?: string;
+        }>,
+        taxonomy: Readonly<{
+          failureStage: AgentRunFailureCaptureEvent["failureStage"];
+          failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+        }>,
+        prepareFailureAlreadyRecorded?: boolean,
+      ): void;
+    };
+    internals.clientLatency.set(firstRequestId, {
+      conversationId: CONVERSATION_ID,
+      startedAtMonotonicMs: 0,
+    });
+    internals.capturePreflightFailure(CONVERSATION_ID, firstRequestId, {
+      code: "invalid-code!",
+      message: "private preflight error",
+      retryable: false,
+      requestId: `incident_${"1".repeat(32)}`,
+    }, {
+      failureStage: "response_prepare",
+      failureMechanism: "transport_or_protocol_failure",
+    }, true);
+
+    now = 0;
+    internals.clientLatency.set(secondRequestId, {
+      conversationId: CONVERSATION_ID,
+      startedAtMonotonicMs: 10,
+    });
+    internals.capturePreflightFailure(CONVERSATION_ID, secondRequestId, {
+      code: "new_client_failure",
+      message: "private negative clock error",
+      incidentId: "private-invalid-incident",
+    }, {
+      failureStage: "response_prepare",
+      failureMechanism: "transport_or_protocol_failure",
+    }, true);
+
+    expect(captures[0]).toMatchObject({
+      requestId: firstRequestId,
+      elapsedMs: 7 * 24 * 60 * 60 * 1_000,
+      elapsedMsTruncated: true,
+      incidentId: `incident_${"1".repeat(32)}`,
+      failureStage: "response_prepare",
+      failureMechanism: "transport_or_protocol_failure",
+      retryable: false,
+      assistantTextStreamingPartCount: 0,
+      assistantTextCompletePartCount: 0,
+      reasoningStreamingPartCount: 0,
+      reasoningCompletePartCount: 0,
+      assistantOutputPresentBeforeFailure: false,
+      assistantOutputRetainedInFailedProjection: false,
+    });
+    expect(captures[0]).not.toHaveProperty("failureCode");
+    expect(captures[1]).toMatchObject({
+      requestId: secondRequestId,
+      elapsedMsTruncated: false,
+      failureCode: "unknown_client_failure",
+      retryable: false,
+    });
+    expect(captures[1]).not.toHaveProperty("elapsedMs");
+    expect(captures[1]).not.toHaveProperty("incidentId");
+    expect(JSON.stringify(captures)).not.toContain("private ");
+
+    internals.capturePreflightFailure(
+      "private-conversation",
+      firstRequestId,
+      { code: "response_start_failed", message: "private" },
+      {
+        failureStage: "response_prepare",
+        failureMechanism: "transport_or_protocol_failure",
+      },
+    );
+    internals.capturePreflightFailure(
+      CONVERSATION_ID,
+      "../../private-request",
+      { code: "response_start_failed", message: "private" },
+      {
+        failureStage: "response_prepare",
+        failureMechanism: "transport_or_protocol_failure",
+      },
+    );
+    expect(captures).toHaveLength(2);
+  });
+
+  it("contains a throwing local-failure capture callback and omits synthetic IDs", async () => {
+    const captureFailure = new Error("capture callback failure");
+    const harness = trackedHarness({
+      onIncidentCapture: () => { throw captureFailure; },
+    });
+    const server = await harness.open();
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: LOCAL_CAPTURE_REQUEST_ID,
+      message: userMessage(LOCAL_CAPTURE_REQUEST_ID, "Fail locally"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    (harness.agent as unknown as {
+      generation: number;
+      handleCommandDeliveryError(error: Error, generation: number): void;
+    }).handleCommandDeliveryError(Object.assign(
+      new Error("private raw billing failure"),
+      {
+        code: "insufficient_credits",
+        status: 402,
+        retryable: false,
+        serverAdmissionPossible: false,
+      },
+    ), (harness.agent as unknown as { generation: number }).generation);
+    server.endTurn();
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "insufficient_credits", retryable: false },
+    });
+    expect(harness.onIncidentCapture).toHaveBeenCalledTimes(1);
+    const captured = harness.onIncidentCapture.mock.calls[0]![0];
+    expect(captured).toMatchObject({
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "http_rejection",
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      failureCode: "insufficient_credits",
+      retryable: false,
+    });
+    expect(captured).not.toHaveProperty("serverRunId");
+    expect(captured).not.toHaveProperty("incidentId");
+    expect(JSON.stringify(captured)).not.toContain("0".repeat(32));
+    expect(harness.reportError).not.toHaveBeenCalledWith(captureFailure);
+  });
+
+  it("classifies an unrecognized local failure as an unknown client failure", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: LOCAL_CAPTURE_REQUEST_ID,
+      message: userMessage(LOCAL_CAPTURE_REQUEST_ID, "Fail with a client-only code"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    const internals = harness.agent as unknown as {
+      active: unknown;
+      finishLocalFailure(
+        active: unknown,
+        error: Readonly<{ code: string; message: string; retryable: boolean }>,
+        taxonomy: Readonly<{
+          failureStage: AgentRunFailureCaptureEvent["failureStage"];
+          failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+        }>,
+      ): void;
+    };
+    internals.finishLocalFailure(internals.active, {
+      code: "approval_identity_mismatch",
+      message: "The local approval identity changed.",
+      retryable: false,
+    }, {
+      failureStage: "tool_authorization",
+      failureMechanism: "identity_mismatch",
+    });
+    server.endTurn();
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "approval_identity_mismatch" },
+    });
+    expect(harness.onIncidentCapture).toHaveBeenCalledWith(expect.objectContaining({
+      failureAuthority: "client",
+      failureStage: "tool_authorization",
+      failureMechanism: "identity_mismatch",
+      failureCode: "unknown_client_failure",
+    }));
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "run_finished_failed",
+      requestId: LOCAL_CAPTURE_REQUEST_ID,
+      failureCode: "unknown_client_failure",
+    }));
+  });
+
+  it("classifies an unrecognized authoritative code as an unknown server failure", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId: CAPTURE_REQUEST_ID,
+      message: userMessage(CAPTURE_REQUEST_ID, "Fail with a new server code"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(failedTerminal(
+      CAPTURE_REQUEST_ID,
+      CAPTURE_REQUEST_ID,
+      "new_provider_failure",
+      true,
+    ));
+
+    await expect(run).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "new_provider_failure" },
+    });
+    expect(harness.onIncidentCapture).toHaveBeenCalledWith(expect.objectContaining({
+      failureAuthority: "server",
+      failureStage: "response_terminal",
+      failureMechanism: "service_terminal",
+      failureCode: "unknown_server_failure",
+    }));
+    expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      code: "run_finished_failed",
+      requestId: CAPTURE_REQUEST_ID,
+      failureCode: "unknown_server_failure",
+    }));
+  });
+
+  it("records mixed read counts and failure class before outbound sanitization", async () => {
+    const privateFailure = "/Users/private/Vault/Missing.md was not found";
+    const harness = trackedHarness({
+      executeLocalTool: async () => ({
+        success: false,
+        data: {
+          files: [
+            { path: "Notes/Found.md", content: "private note content" },
+            { path: "Notes/Missing.md", error: privateFailure },
+          ],
+        },
+        error: { code: "TOOL_PARTIAL_FAILURE", message: privateFailure },
+      }),
+    });
+    const server = await harness.open();
+    const turnId = "user_mixed_read_lifecycle";
+    const callId = "call_mixed_read_lifecycle";
+    const input = { paths: ["Notes/Found.md", "Notes/Missing.md"] };
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read two notes"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId, "waiting_for_client")));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_mixed_read_lifecycle", [
+        clientToolRequest(callId, "read", input),
+        {
+          type: "tool-read",
+          toolCallId: callId,
+          state: "input-available",
+          input,
+        },
+      ]),
+    ));
+    await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+      record.code === "local_tool_completed_failed"));
+
+    const completion = harness.onLifecycle.mock.calls
+      .map(([record]) => record)
+      .find((record) => record.code === "local_tool_completed_failed");
+    expect(completion).toMatchObject({
+      toolName: "read",
+      toolOutcome: "failed",
+      toolFailureClass: "partial_failure",
+      toolItemCount: 2,
+      toolCompletedItemCount: 1,
+      toolFailedItemCount: 1,
+    });
+    expect(JSON.stringify(completion)).not.toContain(privateFailure);
+    expect(JSON.stringify(completion)).not.toContain("private note content");
+
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result"));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  it.each([
+    ["TOOL_CANCELLED_BEFORE_START", "cancelled"],
+    ["TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN", "outcome_unknown"],
+    ["TOOL_MUTATION_JOURNAL_UNAVAILABLE", "journal_unavailable"],
+    ["TOOL_MUTATION_OUTCOME_UNKNOWN", "outcome_unknown"],
+    ["TOOL_CALL_ID_CONFLICT", "identity_mismatch"],
+    ["INVALID_TOOL_ARGUMENTS", "invalid_input"],
+    ["TOOL_EXECUTION_FAILED", "execution_failed"],
+    ["PRIVATE_NEW_TOOL_FAILURE", "unknown"],
+  ] as const)(
+    "maps %s to the content-free %s tool failure class",
+    async (errorCode, failureClass) => {
+      const harness = trackedHarness({
+        executeLocalTool: async () => ({
+          success: false,
+          error: {
+            code: errorCode,
+            message: "private tool failure message",
+          },
+        }),
+      });
+      const server = await harness.open();
+      const turnId = `user_tool_failure_class_${failureClass}_${errorCode}`;
+      const callId = `call_tool_failure_class_${failureClass}_${errorCode}`;
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Classify a local tool failure"),
+      });
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "submit"));
+      server.serverMessage(runState(active(1, turnId, turnId, "waiting_for_client")));
+      server.serverMessage(assistantSnapshot(
+        turnId,
+        wireAssistant(`assistant_${callId}`, [
+          clientToolRequest(callId, "read", {}),
+          {
+            type: "tool-read",
+            toolCallId: callId,
+            state: "input-available",
+            input: {},
+          },
+        ]),
+      ));
+      await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
+        record.code === "local_tool_completed_failed"
+        && record.toolCallId === callId));
+
+      expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+        code: "local_tool_completed_failed",
+        toolCallId: callId,
+        toolFailureClass: failureClass,
+        toolCompletedItemCount: 0,
+        toolFailedItemCount: 0,
+      }));
+      const completion = harness.onLifecycle.mock.calls
+        .map(([record]) => record)
+        .find((record) => record.code === "local_tool_completed_failed"
+          && record.toolCallId === callId);
+      expect(completion).not.toHaveProperty("toolItemCount");
+      expect(JSON.stringify(completion)).not.toContain("private tool failure message");
+
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "client_tool_result" && command.tool_call_id === callId));
+      server.serverMessage(succeededTerminal(turnId, turnId));
+      await expect(run).resolves.toMatchObject({ kind: "completed" });
+    },
+  );
 
   it("releases a fast failure terminal before running is observed and admits the next turn", async () => {
     const harness = trackedHarness();
@@ -894,6 +1829,50 @@ describe("AgentChatSession", () => {
     });
     expect(harness.agent.getSnapshot()).toMatchObject({ status: "failed" });
     expect((harness.agent as unknown as { active: unknown }).active).toBeNull();
+  });
+
+  it("keeps a terminal-only failed receipt durable when the turn has no assistant content", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_terminal_only_failure";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Fail without assistant content"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [wireUser(turnId, "Fail without assistant content")],
+      active(1, turnId, turnId),
+    ));
+    server.serverMessage(failedTerminal(
+      turnId,
+      turnId,
+      "response_capacity_unavailable",
+      false,
+    ));
+
+    await expect(run).resolves.toMatchObject({ kind: "failed" });
+    const failedHistory = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
+      readonly ChatMessage[];
+    const terminalOnly = failedHistory.find((message) =>
+      message.role === "assistant"
+      && message.terminalOutcome === "failed");
+    expect(terminalOnly).toMatchObject({
+      content: "",
+      terminalIncidentId: `incident_${"f".repeat(32)}`,
+      terminalFailureCode: "response_capacity_unavailable",
+      terminalRetryable: false,
+      terminalServerRunId: RUN_ID,
+    });
+    expect(reloadSavedMessage(terminalOnly!)).toMatchObject({
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"f".repeat(32)}`,
+      terminalFailureCode: "response_capacity_unavailable",
+      terminalRetryable: false,
+      terminalServerRunId: RUN_ID,
+    });
   });
 
   it("does not let a stalled balance refresh hold terminal completion or follow-up work", async () => {
@@ -1049,7 +2028,7 @@ describe("AgentChatSession", () => {
   it("settles a queued command billing failure and refreshes credits", async () => {
     const harness = createHarness();
     const server = await harness.open();
-    const turnId = "user_billing_queued_command";
+    const turnId = LOCAL_CAPTURE_REQUEST_ID;
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
@@ -1074,6 +2053,11 @@ describe("AgentChatSession", () => {
     });
     expect(server.turnRequests).toBe(1);
     expect(harness.refreshCredits).toHaveBeenCalledTimes(1);
+    expect(harness.onIncidentCapture).toHaveBeenCalledWith(expect.objectContaining({
+      failureAuthority: "client",
+      failureStage: "request_dispatch",
+      failureMechanism: "http_rejection",
+    }));
   });
 
   it("treats a 402 submit as definite non-admission without replay", async () => {
@@ -1967,6 +2951,9 @@ describe("AgentChatSession", () => {
           code: "local_duration_failure",
           message: "The local response stopped.",
           retryable: false,
+        }, {
+          failureStage: "request_dispatch",
+          failureMechanism: "transport_or_protocol_failure",
         });
       } else {
         internals.finishLocalCancellation(activeRun);
@@ -2015,6 +3002,9 @@ describe("AgentChatSession", () => {
       code: "local_empty_failure",
       message: "The local response stopped.",
       retryable: false,
+    }, {
+      failureStage: "request_dispatch",
+      failureMechanism: "transport_or_protocol_failure",
     });
     server.endTurn();
     await expect(run).resolves.toMatchObject({ kind: "failed" });
@@ -2054,8 +3044,28 @@ describe("AgentChatSession", () => {
 
     const reconciled = harness.reconcileHistory.mock.calls.at(-1)?.[0] as
       readonly ChatMessage[];
-    expect(reconciled.find((message) => message.message_id === assistantId))
-      .toMatchObject({ responseDurationMs: 850 });
+    const durable = reconciled.find((message) => message.message_id === assistantId);
+    expect(durable).toMatchObject({
+      responseDurationMs: 850,
+      terminalOutcome: "cancelled",
+    });
+    expect(reloadSavedMessage(durable!)).toMatchObject({
+      responseDurationMs: 850,
+      terminalOutcome: "cancelled",
+    });
+    expect(harness.onLifecycle.mock.calls
+      .filter(([record]) => record.code === "run_finished_cancelled"
+        && record.requestId === turnId)).toHaveLength(1);
+    expect(harness.onLifecycle).not.toHaveBeenCalledWith(expect.objectContaining({
+      code: "run_finished_failed",
+      requestId: turnId,
+    }));
+    expect(harness.onIncidentCapture).not.toHaveBeenCalled();
+
+    await harness.agent.detach();
+    expect(harness.onLifecycle.mock.calls
+      .filter(([record]) => record.code === "run_finished_cancelled"
+        && record.requestId === turnId)).toHaveLength(1);
   });
 
   it("keeps a cold response preparation failure on the original request clock", async () => {
@@ -2065,7 +3075,7 @@ describe("AgentChatSession", () => {
       throw Object.assign(new Error("cold preparation failed"), { status: 503 });
     });
     const harness = trackedHarness({ request, monotonicNow: () => now });
-    const turnId = "user_cold_prepare_failure";
+    const turnId = CAPTURE_REQUEST_ID;
 
     await expect(harness.agent.start({
       conversationId: CONVERSATION_ID,
@@ -2091,7 +3101,103 @@ describe("AgentChatSession", () => {
         status: 503,
       }),
     ]);
+    expect(harness.onIncidentCapture).toHaveBeenCalledWith(expect.objectContaining({
+      failureAuthority: "client",
+      failureStage: "response_prepare",
+      failureMechanism: "http_rejection",
+    }));
   });
+
+  it("classifies a pre-dispatch context build failure without capturing its content", async () => {
+    const privateFailure = "private context preparation failure";
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = CAPTURE_REQUEST_ID;
+
+    await expect(harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Build private context"),
+      buildBody: async () => { throw new Error(privateFailure); },
+    })).resolves.toMatchObject({
+      kind: "failed",
+      error: { code: "response_start_failed" },
+    });
+
+    expect(harness.commands(server).filter((command) =>
+      command.kind === "submit")).toHaveLength(0);
+    expect(harness.onIncidentCapture).toHaveBeenCalledWith(expect.objectContaining({
+      failureAuthority: "client",
+      failureStage: "context_prepare",
+      failureMechanism: "preparation_failure",
+      assistantOutputPresentBeforeFailure: false,
+      assistantOutputRetainedInFailedProjection: false,
+    }));
+    expect(JSON.stringify(harness.onIncidentCapture.mock.calls)).not.toContain(
+      privateFailure,
+    );
+  });
+
+  it.each([401, 429, 503])(
+    "keeps HTTP %i on the finished lifecycle for an active local failure",
+    async (status) => {
+      const harness = trackedHarness();
+      const server = await harness.open();
+      const turnId = CAPTURE_REQUEST_ID;
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId,
+        message: userMessage(turnId, "Fail this active response locally"),
+      });
+      await waitFor(() => harness.commands(server).some((command) =>
+        command.kind === "submit"));
+
+      const internals = harness.agent as unknown as {
+        active: unknown;
+        finishLocalFailure(
+          active: unknown,
+          error: Readonly<{
+            code: string;
+            message: string;
+            status: number;
+            retryable: boolean;
+          }>,
+          taxonomy: Readonly<{
+            failureStage: AgentRunFailureCaptureEvent["failureStage"];
+            failureMechanism: AgentRunFailureCaptureEvent["failureMechanism"];
+          }>,
+        ): void;
+      };
+      internals.finishLocalFailure(internals.active, {
+        code: "response_start_failed",
+        message: "The active response failed locally.",
+        status,
+        retryable: true,
+      }, {
+        failureStage: "request_dispatch",
+        failureMechanism: "http_rejection",
+      });
+      server.endTurn();
+
+      await expect(run).resolves.toMatchObject({
+        kind: "failed",
+        error: { status },
+      });
+      const finished = harness.onLifecycle.mock.calls
+        .map(([record]) => record)
+        .filter((record) => record.code === "run_finished_failed"
+          && record.requestId === turnId);
+      expect(finished).toEqual([
+        expect.objectContaining({ status }),
+      ]);
+      expect(harness.onIncidentCapture).toHaveBeenCalledWith(
+        expect.objectContaining({
+          failureStage: "request_dispatch",
+          failureMechanism: "http_rejection",
+        }),
+      );
+    },
+  );
 
   it("keeps a rejected response save on the original request clock", async () => {
     let now = 200;
@@ -2251,6 +3357,187 @@ describe("AgentChatSession", () => {
 
     await harness.agent.detach();
     await expect(run).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("projects a frozen content-free summary for each transport segment", async () => {
+    let now = 100;
+    const summaries: AgentChatTransportSegmentSummaryEvent[] = [];
+    const harness = trackedHarness({
+      monotonicNow: () => now,
+      onTransportSegmentSummary: (summary) => summaries.push(summary),
+    });
+    const server = await harness.open();
+    const turnId = "user-11111111-1111-4111-8111-111111111111";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Capture content-free transport evidence"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(
+      turnId,
+      wireAssistant("assistant_transport_segment_summary", "Private answer text"),
+    ));
+    now = 140;
+    server.serverMessage(succeededTerminal(turnId, turnId));
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    await waitFor(() => summaries.some((summary) =>
+      summary.requestId === turnId && summary.commandKind === "submit"));
+    const summary = summaries.find((candidate) =>
+      candidate.requestId === turnId && candidate.commandKind === "submit");
+    expect(summary).toEqual({
+      conversationId: CONVERSATION_ID,
+      requestId: turnId,
+      commandKind: "submit",
+      commandSegmentOrdinal: 1,
+      closeReason: "clean_eof",
+      durationMs: 40,
+      receivedBytes: expect.any(Number),
+      nonEmptyRawChunkCount: 3,
+      sseEventCount: 3,
+      acceptedFrameCount: 3,
+      deliveredFrameCount: 3,
+      metricsTruncated: false,
+    });
+    expect(summary!.receivedBytes).toBeGreaterThan(0);
+    expect(Object.isFrozen(summary)).toBe(true);
+    expect(JSON.stringify(summary)).not.toContain("Private answer text");
+    expect(summary).not.toHaveProperty("toolCallId");
+  });
+
+  it("replaces a transport tool-call ID with its local execution ordinal", async () => {
+    const summaries: AgentChatTransportSegmentSummaryEvent[] = [];
+    const harness = trackedHarness({
+      onTransportSegmentSummary: (summary) => summaries.push(summary),
+    });
+    const server = await harness.open();
+    const turnId = "user-22222222-2222-4222-8222-222222222222";
+    const assistantId = "assistant_transport_tool_segment_summary";
+    const callId = "call_private_transport_identity";
+    const input = { paths: ["Private path.md"] };
+    const user = wireUser(turnId, "Read a private path");
+    const request = clientToolRequest(callId, "read", input);
+    const pending = wireAssistant(assistantId, [
+      request,
+      { type: "tool-read", toolCallId: callId, state: "input-available", input },
+    ]);
+    const settled = wireAssistant(assistantId, [
+      request,
+      {
+        type: "tool-read",
+        toolCallId: callId,
+        state: "output-available",
+        input,
+        output: { success: true, data: { content: "Private tool output" } },
+      },
+    ]);
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Read a private path"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(sessionSnapshot(
+      [user],
+      active(1, turnId, turnId, "waiting_for_client"),
+    ));
+    server.serverMessage(assistantSnapshot(turnId, pending));
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "client_tool_result" && command.tool_call_id === callId));
+
+    server.serverMessage(event("command_ack", {
+      request_id: turnId,
+      command_kind: "client_tool_result",
+      tool_call_id: callId,
+      status: "accepted",
+    }));
+    server.serverMessage(assistantSnapshot(turnId, settled));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    await waitFor(() => summaries.some((summary) =>
+      summary.requestId === turnId
+      && summary.commandKind === "client_tool_result"));
+    const toolSummary = summaries.find((summary) =>
+      summary.requestId === turnId
+      && summary.commandKind === "client_tool_result");
+    expect(toolSummary).toMatchObject({
+      conversationId: CONVERSATION_ID,
+      requestId: turnId,
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 2,
+      toolExecutionOrdinal: 1,
+      closeReason: "clean_eof",
+    });
+    expect(Object.isFrozen(toolSummary)).toBe(true);
+    expect(toolSummary).not.toHaveProperty("toolCallId");
+    expect(JSON.stringify(toolSummary)).not.toContain(callId);
+    expect(JSON.stringify(toolSummary)).not.toContain("Private path.md");
+    expect(JSON.stringify(toolSummary)).not.toContain("Private tool output");
+  });
+
+  it("keeps a throwing transport summary observer outside run control", async () => {
+    const onTransportSegmentSummary = jest.fn(() => {
+      throw new Error("observer failed");
+    });
+    const harness = trackedHarness({ onTransportSegmentSummary });
+    const server = await harness.open();
+    const turnId = "user-33333333-3333-4333-8333-333333333333";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Finish despite the observer"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(succeededTerminal(turnId, turnId));
+
+    await expect(run).resolves.toMatchObject({ kind: "completed" });
+    await waitFor(() => onTransportSegmentSummary.mock.calls.length === 1);
+    expect(harness.reportError).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: "observer failed" }),
+    );
+  });
+
+  it("drops invalid transport summary correlation before the observer", () => {
+    const harness = createHarness();
+    const internal = harness.agent as unknown as {
+      handleTransportSegmentSummary: (
+        conversationId: string,
+        event: Readonly<Record<string, unknown>>,
+      ) => void;
+    };
+    const metrics = {
+      commandKind: "client_tool_result",
+      commandSegmentOrdinal: 1,
+      toolCallId: "call_private_invalid_correlation",
+      closeReason: "clean_eof",
+      durationMs: 1,
+      receivedBytes: 1,
+      nonEmptyRawChunkCount: 1,
+      sseEventCount: 1,
+      acceptedFrameCount: 1,
+      deliveredFrameCount: 1,
+      metricsTruncated: false,
+    } as const;
+
+    internal.handleTransportSegmentSummary(CONVERSATION_ID, {
+      ...metrics,
+      requestId: "../../private-request",
+    });
+    const hostile = Object.defineProperty({ ...metrics }, "requestId", {
+      get: () => { throw new Error("hostile request ID getter"); },
+    });
+    expect(() => internal.handleTransportSegmentSummary(
+      CONVERSATION_ID,
+      hostile,
+    )).not.toThrow();
+    expect(harness.onTransportSegmentSummary).not.toHaveBeenCalled();
   });
 
   it("does not allocate a tool execution ordinal from an unknown transport ID", async () => {

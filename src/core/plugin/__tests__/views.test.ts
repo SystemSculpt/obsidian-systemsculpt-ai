@@ -133,4 +133,79 @@ describe("ViewManager", () => {
     });
     expect(revealLeaf).toHaveBeenCalledWith(leaf);
   });
+
+  it("awaits every ChatView producer barrier and isolates individual failures", async () => {
+    const { app, manager } = createFixture();
+    let finishSlowClose!: () => void;
+    const slowClose = new Promise<void>((resolve) => {
+      finishSlowClose = resolve;
+    });
+    const slowQuiesce = jest.fn(() => slowClose);
+    const rejectedQuiesce = jest.fn(async () => {
+      throw new Error("simulated stale ChatView close failure");
+    });
+    jest.spyOn(app.workspace, "getLeavesOfType").mockReturnValue([
+      { view: { quiesceIncidentProducers: slowQuiesce } },
+      { view: { quiesceIncidentProducers: rejectedQuiesce } },
+      { view: {} },
+    ] as any);
+
+    let settled = false;
+    const quiescing = manager.quiesceChatViewProducers().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(slowQuiesce).toHaveBeenCalledTimes(1);
+    expect(rejectedQuiesce).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+
+    finishSlowClose();
+    await expect(quiescing).resolves.toBeUndefined();
+    expect(settled).toBe(true);
+  });
+
+  it("bounds a ChatView whose failed-receipt write never settles", async () => {
+    const { app, manager } = createFixture();
+    const failedReceiptWrite = new Promise<void>(() => undefined);
+    const hungQuiesce = jest.fn(async () => {
+      await failedReceiptWrite;
+    });
+    jest.spyOn(app.workspace, "getLeavesOfType").mockReturnValue([
+      { view: { quiesceIncidentProducers: hungQuiesce } },
+    ] as any);
+
+    let settled = false;
+    const quiescing = manager.quiesceChatViewProducers().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(hungQuiesce).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+    jest.advanceTimersByTime(999);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(1);
+    await expect(quiescing).resolves.toBeUndefined();
+    expect(settled).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("keeps normal view and ribbon teardown after producer quiescence", () => {
+    const { app, manager } = createFixture();
+    const detachLeavesOfType = jest.fn();
+    Object.assign(app.workspace, { detachLeavesOfType });
+    const cleanup = jest.spyOn((manager as any).ribbonManager, "cleanup");
+
+    manager.unloadViews();
+
+    expect(detachLeavesOfType.mock.calls).toEqual([
+      [CHAT_VIEW_TYPE],
+      [EMBEDDINGS_VIEW_TYPE],
+      [SYSTEMSCULPT_STUDIO_VIEW_TYPE],
+    ]);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
 });

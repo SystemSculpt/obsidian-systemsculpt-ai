@@ -34,7 +34,10 @@ function makePlugin(): any {
 }
 
 describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
 
   it("enterSafeMode flips the flag and registers a single recovery command (idempotent)", () => {
     const plugin = makePlugin();
@@ -105,6 +108,136 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
     expect(order).toEqual(["recorder", "settings"]);
     expect((plugin as any).recorderService).toBeNull();
+  });
+
+  it("bounds incident persistence drain while its accepted write continues best-effort", async () => {
+    jest.useFakeTimers();
+    const plugin = makePlugin();
+    const order: string[] = [];
+    const persisted = jest.fn();
+    let finishDrain!: () => void;
+    const closeAdmissionAndDrain = jest.fn(() => new Promise<void>((resolve) => {
+      finishDrain = () => {
+        persisted();
+        resolve();
+      };
+    }));
+    (plugin as any).agentIncidentCoordinator = { closeAdmissionAndDrain };
+    (plugin as any).recorderService = {
+      unload: jest.fn(() => { order.push("recorder"); }),
+    };
+    (plugin as any).viewManager = {
+      quiesceChatViewProducers: jest.fn(async () => undefined),
+      unloadViews: jest.fn(() => { order.push("views"); }),
+    };
+
+    const unloading = plugin.onunload();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["recorder", "views"]);
+
+    jest.advanceTimersByTime(1_999);
+    await Promise.resolve();
+    expect(order).toEqual(["recorder", "views"]);
+
+    jest.advanceTimersByTime(1);
+    await unloading;
+    expect(order).toEqual(["recorder", "views"]);
+    expect((plugin as any).agentIncidentCoordinator).toBeNull();
+    expect(persisted).not.toHaveBeenCalled();
+
+    finishDrain();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persisted).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows the coordinator drain to use its normal bounded persistence window", async () => {
+    jest.useFakeTimers();
+    const plugin = makePlugin();
+    const order: string[] = [];
+    const closeAdmissionAndDrain = jest.fn(() => new Promise<void>((resolve) => {
+      window.setTimeout(() => {
+        order.push("incident-drained");
+        resolve();
+      }, 1_500);
+    }));
+    (plugin as any).agentIncidentCoordinator = { closeAdmissionAndDrain };
+    (plugin as any).recorderService = {
+      unload: jest.fn(() => { order.push("recorder"); }),
+    };
+    (plugin as any).viewManager = {
+      quiesceChatViewProducers: jest.fn(async () => undefined),
+      unloadViews: jest.fn(() => { order.push("views"); }),
+    };
+
+    const unloading = plugin.onunload();
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(1_499);
+    await Promise.resolve();
+    expect(order).toEqual(["recorder", "views"]);
+
+    jest.advanceTimersByTime(1);
+    await unloading;
+    expect(order).toEqual(["recorder", "views", "incident-drained"]);
+    expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
+    expect((plugin as any).agentIncidentCoordinator).toBeNull();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("awaits ChatView producer quiescence before closing incident admission", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    let admissionOpen = true;
+    const acceptedFailures: string[] = [];
+    let finishChatClose!: () => void;
+    const chatClose = new Promise<void>((resolve) => {
+      finishChatClose = resolve;
+    });
+    const closeAdmissionAndDrain = jest.fn(async () => {
+      order.push("incident-admission-closed");
+      admissionOpen = false;
+    });
+    (plugin as any).agentIncidentCoordinator = { closeAdmissionAndDrain };
+    (plugin as any).recorderService = {
+      unload: jest.fn(() => { order.push("recorder"); }),
+    };
+    (plugin as any).viewManager = {
+      quiesceChatViewProducers: jest.fn(async () => {
+        order.push("chat-session-stopping");
+        await chatClose;
+        order.push("chat-session-stopped");
+        if (admissionOpen) acceptedFailures.push("terminal-failure");
+      }),
+      unloadViews: jest.fn(() => {
+        order.push("views-detached");
+        throw new Error("simulated stale view teardown failure");
+      }),
+    };
+
+    const unloading = plugin.onunload();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(order).toEqual(["recorder", "chat-session-stopping"]);
+    expect(closeAdmissionAndDrain).not.toHaveBeenCalled();
+
+    finishChatClose();
+    await expect(unloading).resolves.toBeUndefined();
+
+    expect(order.slice(0, 5)).toEqual([
+      "recorder",
+      "chat-session-stopping",
+      "chat-session-stopped",
+      "views-detached",
+      "incident-admission-closed",
+    ]);
+    expect(acceptedFailures).toEqual(["terminal-failure"]);
+    expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
+    expect((plugin as any).viewManager).toBeNull();
+    expect((plugin as any).agentIncidentCoordinator).toBeNull();
   });
 
   it("flushes and disposes diagnostics before the unload guard flips", async () => {

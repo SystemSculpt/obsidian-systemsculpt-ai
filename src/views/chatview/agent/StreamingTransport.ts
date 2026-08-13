@@ -53,6 +53,7 @@ export type AgentStreamingTransportOptions = Readonly<{
   isAuthoritativeFrame?: (value: unknown) => boolean;
   monotonicNow?: () => number;
   onTiming?: (event: AgentTransportTimingEvent) => void;
+  onSegmentSummary?: (event: AgentTransportSegmentSummaryEvent) => void;
   classifyResponseDelivery?: (
     response: Response,
   ) => PlatformResponseDeliveryMode | undefined;
@@ -82,6 +83,38 @@ export type AgentTransportTimingEvent = Readonly<{
   serverTimingAuthMs?: number;
 }>;
 
+export type AgentTransportSegmentCloseReason =
+  | "clean_eof"
+  | "aborted"
+  | "superseded"
+  | "request_failed"
+  | "response_rejected"
+  | "read_failed"
+  | "decode_failed"
+  | "invalid_event"
+  | "oversized_event"
+  | "delivery_failed"
+  | "stream_failed";
+
+export type AgentTransportSegmentSummaryEvent = Readonly<{
+  /**
+   * Internal live join keys only. Generic protocol-safe IDs are not a privacy
+   * boundary, so any persisted exporter must replace or omit both values.
+   */
+  requestId: string;
+  commandKind: AgentCommandKind;
+  commandSegmentOrdinal: number;
+  toolCallId?: string;
+  closeReason: AgentTransportSegmentCloseReason;
+  durationMs: number;
+  receivedBytes: number;
+  nonEmptyRawChunkCount: number;
+  sseEventCount: number;
+  acceptedFrameCount: number;
+  deliveredFrameCount: number;
+  metricsTruncated: boolean;
+}>;
+
 type BootstrapAccess = Readonly<{
   response: ThinAgentBootstrapResponse;
   expiresAt: number;
@@ -94,12 +127,51 @@ const ACCESS_BACKGROUND_REFRESH_WINDOW_MS = 20_000;
 const MAX_BOOTSTRAP_RESPONSE_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_EVENT_BYTES = 64 * 1024 * 1024;
+const MAX_SEGMENT_RECEIVED_BYTES = MAX_EVENT_BYTES;
+const MAX_SEGMENT_OBSERVATION_COUNT = 10_000;
+const MAX_SEGMENT_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
 const LATENCY_TRACE_HEADER = "x-systemsculpt-agent-latency-trace";
 const LATENCY_TRACE_ID = /^[a-f0-9]{32}$/u;
 const AGENT_SERVER_TIMING_NAMES = Object.freeze({
   app: "appMs",
   auth: "authMs",
 } as const);
+
+type MutableAgentTransportSegmentMetrics = {
+  closeReason: AgentTransportSegmentCloseReason | null;
+  receivedBytes: number;
+  nonEmptyRawChunkCount: number;
+  sseEventCount: number;
+  acceptedFrameCount: number;
+  deliveredFrameCount: number;
+  metricsTruncated: boolean;
+};
+
+type AgentTransportSegmentCounter = Exclude<
+  keyof MutableAgentTransportSegmentMetrics,
+  "closeReason" | "metricsTruncated"
+>;
+
+function addBoundedSegmentMetric(
+  metrics: MutableAgentTransportSegmentMetrics,
+  key: AgentTransportSegmentCounter,
+  amount: number,
+  maximum: number,
+): void {
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    metrics[key] = maximum;
+    metrics.metricsTruncated = true;
+    return;
+  }
+  if (amount === 0) return;
+  const current = metrics[key];
+  if (current >= maximum || amount > maximum - current) {
+    metrics[key] = maximum;
+    metrics.metricsTruncated = true;
+    return;
+  }
+  metrics[key] = current + amount;
+}
 
 async function readBoundedText(
   response: Response,
@@ -573,6 +645,16 @@ implements AgentConnectionPort {
         ? { toolCallId: command.tool_call_id }
         : {}),
     } as const;
+    const segmentStartedAtMonotonicMs = this.monotonicNow();
+    const segmentMetrics: MutableAgentTransportSegmentMetrics = {
+      closeReason: null,
+      receivedBytes: 0,
+      nonEmptyRawChunkCount: 0,
+      sseEventCount: 0,
+      acceptedFrameCount: 0,
+      deliveredFrameCount: 0,
+      metricsTruncated: false,
+    };
     this.reportTiming({
       milestone: "command_dispatch_started",
       ...commandTiming,
@@ -637,6 +719,7 @@ implements AgentConnectionPort {
         })(),
       });
       if (!response.ok || !response.body) {
+        segmentMetrics.closeReason = "response_rejected";
         if (response.status === 401) this.access = null;
         const payload = response.ok ? {} : await responseErrorPayload(response);
         const serverAdmissionPossible = ![
@@ -667,9 +750,14 @@ implements AgentConnectionPort {
           ? latencyTraceHeader
           : undefined,
         bootstrap.conversation_id,
+        segmentMetrics,
       );
       this.refreshExpiringAccessInBackground();
     } catch (error) {
+      segmentMetrics.closeReason ??= this.interruptedSegmentCloseReason(
+        generation,
+        controller.signal,
+      ) ?? "request_failed";
       if (!this.disposed && generation !== this.connectGeneration) {
         // A newer authoritative synchronization owns the connection now.
         // This command may already be durable, so neither a stale pre-abort
@@ -687,6 +775,11 @@ implements AgentConnectionPort {
       throw error;
     } finally {
       this.inFlight.delete(controller);
+      this.reportSegmentSummary(
+        commandTiming,
+        segmentStartedAtMonotonicMs,
+        segmentMetrics,
+      );
     }
   }
 
@@ -703,7 +796,17 @@ implements AgentConnectionPort {
     responseDeliveryMode?: PlatformResponseDeliveryMode,
     latencyTraceId?: string,
     conversationId?: string,
+    segmentMetrics?: MutableAgentTransportSegmentMetrics,
   ): Promise<void> {
+    const metrics = segmentMetrics ?? {
+      closeReason: null,
+      receivedBytes: 0,
+      nonEmptyRawChunkCount: 0,
+      sseEventCount: 0,
+      acceptedFrameCount: 0,
+      deliveredFrameCount: 0,
+      metricsTruncated: false,
+    };
     const reader = body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     const encoder = new TextEncoder();
@@ -724,6 +827,12 @@ implements AgentConnectionPort {
       frame: unknown,
       stage: "parsed" | "delivered",
     ): void => {
+      addBoundedSegmentMetric(
+        metrics,
+        stage === "parsed" ? "acceptedFrameCount" : "deliveredFrameCount",
+        1,
+        MAX_SEGMENT_OBSERVATION_COUNT,
+      );
       if (stage === "parsed" && !firstSseFrameObserved) {
         firstSseFrameObserved = true;
         this.reportTiming({
@@ -802,6 +911,7 @@ implements AgentConnectionPort {
       if (measuringExactBytes) {
         eventBytes += encoder.encode(text).byteLength;
         if (eventBytes > MAX_EVENT_BYTES) {
+          metrics.closeReason = "oversized_event";
           throw new Error("SystemSculpt returned an oversized session event.");
         }
       }
@@ -830,12 +940,22 @@ implements AgentConnectionPort {
         match;
         match = eventBoundary.exec(input)) {
         appendEventText(input.slice(start, match.index));
+        const eventText = takeEventText();
+        if (eventText.trim()) {
+          addBoundedSegmentMetric(
+            metrics,
+            "sseEventCount",
+            1,
+            MAX_SEGMENT_OBSERVATION_COUNT,
+          );
+        }
         if (!this.emit(
-          takeEventText(),
+          eventText,
           generation,
           signal,
           observeAcceptedFrame,
         )) {
+          metrics.closeReason = "invalid_event";
           throw new Error("SystemSculpt returned an invalid session event.");
         }
         start = match.index + match[0].length;
@@ -854,8 +974,36 @@ implements AgentConnectionPort {
     if (signal.aborted) cancelReader();
     try {
       for (;;) {
-        const { done, value } = await reader.read();
+        let read: ReadableStreamReadResult<Uint8Array>;
+        try {
+          read = await reader.read();
+        } catch (error) {
+          metrics.closeReason = this.interruptedSegmentCloseReason(
+            generation,
+            signal,
+          ) ?? "read_failed";
+          throw error;
+        }
+        const { done, value } = read;
+        if (!done && value.byteLength > 0) {
+          addBoundedSegmentMetric(
+            metrics,
+            "receivedBytes",
+            value.byteLength,
+            MAX_SEGMENT_RECEIVED_BYTES,
+          );
+          addBoundedSegmentMetric(
+            metrics,
+            "nonEmptyRawChunkCount",
+            1,
+            MAX_SEGMENT_OBSERVATION_COUNT,
+          );
+        }
         if (!this.isCurrentDelivery(generation, signal)) {
+          metrics.closeReason = this.interruptedSegmentCloseReason(
+            generation,
+            signal,
+          ) ?? "stream_failed";
           await cancelReaderSafely(reader);
           return;
         }
@@ -870,24 +1018,63 @@ implements AgentConnectionPort {
             ...(latencyTraceId ? { latencyTraceId } : {}),
           });
         }
-        consumeDecodedText(decoder.decode(value, { stream: true }));
+        let decoded: string;
+        try {
+          decoded = decoder.decode(value, { stream: true });
+        } catch (error) {
+          metrics.closeReason = "decode_failed";
+          throw error;
+        }
+        try {
+          consumeDecodedText(decoded);
+        } catch (error) {
+          metrics.closeReason ??= "delivery_failed";
+          throw error;
+        }
       }
-      if (!this.isCurrentDelivery(generation, signal)) return;
-      consumeDecodedText(decoder.decode());
+      if (!this.isCurrentDelivery(generation, signal)) {
+        metrics.closeReason = this.interruptedSegmentCloseReason(
+          generation,
+          signal,
+        ) ?? "stream_failed";
+        return;
+      }
+      let decoded: string;
+      try {
+        decoded = decoder.decode();
+      } catch (error) {
+        metrics.closeReason = "decode_failed";
+        throw error;
+      }
+      try {
+        consumeDecodedText(decoded);
+      } catch (error) {
+        metrics.closeReason ??= "delivery_failed";
+        throw error;
+      }
       appendEventText(boundaryPrefix);
       boundaryPrefix = "";
       if (eventUnits > 0) {
         const finalEvent = takeEventText();
-        if (finalEvent.trim()
-          && !this.emit(
-            finalEvent,
-            generation,
-            signal,
-            observeAcceptedFrame,
-          )) {
-          throw new Error("SystemSculpt returned an invalid session event.");
+        if (finalEvent.trim()) {
+          addBoundedSegmentMetric(
+            metrics,
+            "sseEventCount",
+            1,
+            MAX_SEGMENT_OBSERVATION_COUNT,
+          );
+          if (!this.emit(
+              finalEvent,
+              generation,
+              signal,
+              observeAcceptedFrame,
+            )) {
+            metrics.closeReason = "invalid_event";
+            throw new Error("SystemSculpt returned an invalid session event.");
+          }
         }
       }
+      metrics.closeReason = "clean_eof";
     } finally {
       signal.removeEventListener("abort", cancelReader);
       reader.releaseLock();
@@ -954,6 +1141,15 @@ implements AgentConnectionPort {
       && signal?.aborted !== true;
   }
 
+  private interruptedSegmentCloseReason(
+    generation: number,
+    signal: AbortSignal,
+  ): Extract<AgentTransportSegmentCloseReason, "aborted" | "superseded"> | null {
+    if (this.disposed) return "aborted";
+    if (generation !== this.connectGeneration) return "superseded";
+    return signal.aborted ? "aborted" : null;
+  }
+
   private monotonicNow(): number {
     try {
       const value = this.options.monotonicNow?.()
@@ -969,6 +1165,45 @@ implements AgentConnectionPort {
       this.options.onTiming?.(Object.freeze(event));
     } catch {
       // Timing diagnostics are observational and cannot affect delivery.
+    }
+  }
+
+  private reportSegmentSummary(
+    command: Readonly<{
+      requestId: string;
+      commandKind: AgentCommandKind;
+      commandSegmentOrdinal: number;
+      toolCallId?: string;
+    }>,
+    startedAtMonotonicMs: number,
+    metrics: MutableAgentTransportSegmentMetrics,
+  ): void {
+    const endedAtMonotonicMs = this.monotonicNow();
+    const rawDurationMs = endedAtMonotonicMs - startedAtMonotonicMs;
+    let durationMs = rawDurationMs;
+    if (!Number.isFinite(rawDurationMs) || rawDurationMs > MAX_SEGMENT_DURATION_MS) {
+      durationMs = MAX_SEGMENT_DURATION_MS;
+      metrics.metricsTruncated = true;
+    } else if (rawDurationMs < 0) {
+      durationMs = 0;
+      metrics.metricsTruncated = true;
+    }
+    durationMs = Math.round(durationMs * 1_000) / 1_000;
+    const event: AgentTransportSegmentSummaryEvent = Object.freeze({
+      ...command,
+      closeReason: metrics.closeReason ?? "stream_failed",
+      durationMs,
+      receivedBytes: metrics.receivedBytes,
+      nonEmptyRawChunkCount: metrics.nonEmptyRawChunkCount,
+      sseEventCount: metrics.sseEventCount,
+      acceptedFrameCount: metrics.acceptedFrameCount,
+      deliveredFrameCount: metrics.deliveredFrameCount,
+      metricsTruncated: metrics.metricsTruncated,
+    });
+    try {
+      this.options.onSegmentSummary?.(event);
+    } catch {
+      // Segment diagnostics are observational and cannot affect delivery.
     }
   }
 }

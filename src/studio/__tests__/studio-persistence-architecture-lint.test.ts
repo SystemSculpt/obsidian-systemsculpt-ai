@@ -70,6 +70,7 @@ describe("Studio persistence architecture lint", () => {
       "src/studio/persistence/StudioProjectRecoveryStore.ts",
     ]);
     const allowedNonProjectContexts = new Set([
+      "src/core/diagnostics/DiagnosticsSessionLifecycle.ts#run",
       "src/main.ts#rotateDiagnosticsFile",
       "src/studio/StudioApiExecutionAdapter.ts#removeTempPath",
       "src/studio/StudioApiExecutionAdapter.ts#ensureDir",

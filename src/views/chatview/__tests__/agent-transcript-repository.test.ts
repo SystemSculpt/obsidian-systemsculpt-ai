@@ -396,6 +396,374 @@ describe("AgentTranscriptRepository", () => {
     expect(storage.saveChat).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves a valid local failed receipt when authoritative history omits it", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const localHistory = projectedServerHistory(100);
+    const receipt = {
+      terminalOutcome: "failed" as const,
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "response_capacity_unavailable",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    };
+    Object.assign(localHistory[1], receipt);
+    await repository.persistAssistant(localHistory[1]);
+
+    const reconciled = await repository.reconcileServerHistory(
+      projectedServerHistory(10_000),
+    );
+
+    expect(reconciled.messages[1]).toMatchObject(receipt);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists and reloads a content-free local report receipt beside its user turn", async () => {
+    const { repository, records } = createHarness();
+    const committed = await repository.commitUser({
+      kind: "append",
+      message: user("user-local-failure", "Keep this normal chat prompt."),
+    }, conversationId);
+    const reportId = `report_${"e".repeat(32)}`;
+
+    const failed = await repository.persistFailedReceipt({
+      turnId: "user-local-failure",
+      reportId,
+      failureCode: "response_start_failed",
+      retryable: true,
+    });
+    expect(failed.messages[1]).toEqual({
+      role: "assistant",
+      message_id: `failure-${reportId}`,
+      content: "",
+      terminalOutcome: "failed",
+      terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed",
+      terminalRetryable: true,
+    });
+
+    const restarted = new AgentTranscriptRepository({
+      loadChat: jest.fn(async (id: string) => records.get(id) ?? null),
+    } as any, () => ({}));
+    const restored = await restarted.load(committed.chatId);
+    expect(restored?.messages[1]).toMatchObject({
+      content: "",
+      terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed",
+    });
+    expect(JSON.stringify(restored?.messages[1])).not.toContain(conversationId);
+    expect(JSON.stringify(restored?.messages[1])).not.toContain("user-local-failure");
+  });
+
+  it.each([
+    {
+      label: "malformed report identifier",
+      reportId: "report_invalid",
+      failureCode: "response_start_failed",
+      turnId: "user-local-failure",
+      expectedMessage: "Invalid local failure receipt.",
+    },
+    {
+      label: "zero report identifier",
+      reportId: `report_${"0".repeat(32)}`,
+      failureCode: "response_start_failed",
+      turnId: "user-local-failure",
+      expectedMessage: "Invalid local failure receipt.",
+    },
+    {
+      label: "invalid failure code",
+      reportId: `report_${"a".repeat(32)}`,
+      failureCode: "Response Start Failed",
+      turnId: "user-local-failure",
+      expectedMessage: "Invalid local failure receipt.",
+    },
+    {
+      label: "missing durable turn",
+      reportId: `report_${"a".repeat(32)}`,
+      failureCode: "response_start_failed",
+      turnId: "missing-user",
+      expectedMessage: "A local failure receipt requires a durable user turn.",
+    },
+  ])("rejects a local receipt with $label without changing durable history", async ({
+    reportId,
+    failureCode,
+    turnId,
+    expectedMessage,
+  }) => {
+    const { repository, storage } = createHarness();
+    const committed = await repository.commitUser({
+      kind: "append",
+      message: user("user-local-failure", "Keep this turn durable."),
+    }, conversationId);
+
+    await expect(repository.persistFailedReceipt({
+      turnId,
+      reportId,
+      failureCode,
+      retryable: true,
+    })).rejects.toThrow(expectedMessage);
+
+    expect(repository.snapshot()).toEqual(committed);
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
+  it("replaces the last failed assistant receipt within a turn", async () => {
+    const { repository } = createHarness();
+    const commits: string[] = [];
+    repository.subscribeToCommits(({ messageId }) => commits.push(messageId));
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Try the operation."),
+    }, conversationId);
+    const failed = assistant("assistant-failed", "");
+    Object.assign(failed, {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: false,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    });
+    await repository.persistAssistant(failed);
+    await repository.persistAssistant(assistant("assistant-follow-up", "Additional context."));
+    const reportId = `report_${"c".repeat(32)}`;
+
+    const updated = await repository.persistFailedReceipt({
+      turnId: "user-1",
+      reportId,
+      failureCode: "response_start_failed",
+      retryable: true,
+    });
+
+    expect(updated.messages.map((message) => message.message_id)).toEqual([
+      "user-1",
+      "assistant-failed",
+      "assistant-follow-up",
+    ]);
+    expect(updated.messages[1]).toMatchObject({
+      message_id: "assistant-failed",
+      terminalOutcome: "failed",
+      terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed",
+      terminalRetryable: true,
+    });
+    expect(updated.messages[2]).toMatchObject({
+      message_id: "assistant-follow-up",
+      content: "Additional context.",
+    });
+    expect(commits.at(-1)).toBe("assistant-failed");
+  });
+
+  it("promotes a durable local report ID onto the matching authoritative failed receipt", async () => {
+    const { repository } = createHarness();
+    const reportId = `report_${"e".repeat(32)}`;
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-report", "Run the operation."),
+    }, conversationId);
+    await repository.persistFailedReceipt({
+      turnId: "user-report",
+      reportId,
+      failureCode: "response_start_failed",
+      retryable: true,
+    });
+    const authoritativeFailure = assistant(`failure-${reportId}`, "");
+    Object.assign(authoritativeFailure, {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: false,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    });
+
+    const reconciled = await repository.reconcileServerHistory([
+      user("user-report", "Run the operation."),
+      authoritativeFailure,
+    ]);
+
+    expect(reconciled.messages).toHaveLength(2);
+    expect(reconciled.messages[1]).toEqual({
+      ...authoritativeFailure,
+      terminalReportId: reportId,
+    });
+  });
+
+  it("reconciles local report receipts across every authoritative turn shape", async () => {
+    const { repository, storage } = createHarness();
+    const reportIds = {
+      insert: `report_${"a".repeat(32)}`,
+      update: `report_${"b".repeat(32)}`,
+      content: `report_${"c".repeat(32)}`,
+      missing: `report_${"d".repeat(32)}`,
+    };
+    const persistReceipt = async (turnId: string, reportId: string): Promise<void> => {
+      await repository.persistFailedReceipt({
+        turnId,
+        reportId,
+        failureCode: "response_start_failed",
+        retryable: true,
+      });
+    };
+
+    await repository.commitUser({ kind: "append", message: user("user-insert") }, conversationId);
+    await persistReceipt("user-insert", reportIds.insert);
+    await repository.commitUser({ kind: "append", message: user("user-update") }, conversationId);
+    await persistReceipt("user-update", reportIds.update);
+    await repository.commitUser({ kind: "append", message: user("user-content") }, conversationId);
+    await repository.persistAssistant(assistant("local-content", "Local cached content."));
+    await persistReceipt("user-content", reportIds.content);
+    await repository.commitUser({ kind: "append", message: user("user-missing") }, conversationId);
+    await persistReceipt("user-missing", reportIds.missing);
+
+    const authoritativeFailure = assistant("server-failed", "");
+    Object.assign(authoritativeFailure, {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"e".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: false,
+      terminalServerRunId: `run_${"f".repeat(32)}`,
+    });
+    const authoritativeContent = assistant("server-content", "The server completed this turn.");
+    const reconciled = await repository.reconcileServerHistory([
+      user("user-insert"),
+      user("user-update"),
+      authoritativeFailure,
+      user("user-content"),
+      authoritativeContent,
+    ]);
+
+    expect(reconciled.messages.map((message) => message.message_id)).toEqual([
+      "user-insert",
+      `failure-${reportIds.insert}`,
+      "user-update",
+      "server-failed",
+      "user-content",
+      "server-content",
+    ]);
+    expect(reconciled.messages[1]).toMatchObject({
+      content: "",
+      terminalReportId: reportIds.insert,
+      terminalFailureCode: "response_start_failed",
+    });
+    expect(reconciled.messages[3]).toMatchObject({
+      terminalReportId: reportIds.update,
+      terminalIncidentId: `incident_${"e".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalServerRunId: `run_${"f".repeat(32)}`,
+    });
+    expect(reconciled.messages[5]).toEqual(authoritativeContent);
+    expect(reconciled.messages).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ terminalReportId: reportIds.content }),
+      expect.objectContaining({ terminalReportId: reportIds.missing }),
+    ]));
+    expect(storage.saveChat.mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({
+      authoritativeServerHistoryReconciliation: true,
+    }));
+  });
+
+  it("accepts a new authoritative failed receipt over stale local receipt data", async () => {
+    const { repository, storage } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const localHistory = projectedServerHistory(100);
+    Object.assign(localHistory[1], {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "response_capacity_unavailable",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    });
+    await repository.persistAssistant(localHistory[1]);
+    const authoritative = projectedServerHistory(10_000);
+    const replacement = {
+      terminalOutcome: "failed" as const,
+      terminalIncidentId: `incident_${"c".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: false,
+      terminalServerRunId: `run_${"d".repeat(32)}`,
+    };
+    Object.assign(authoritative[1], replacement);
+
+    const reconciled = await repository.reconcileServerHistory(authoritative);
+
+    expect(reconciled.messages[1]).toMatchObject(replacement);
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["missing incident ID", {
+      terminalOutcome: "failed",
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    }],
+    ["invalid incident ID", {
+      terminalOutcome: "failed",
+      terminalIncidentId: "incident_invalid",
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    }],
+    ["zero incident ID", {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"0".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    }],
+    ["invalid failure code", {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "Agent Turn Failed",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    }],
+    ["invalid retryable value", {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: "true",
+      terminalServerRunId: `run_${"b".repeat(32)}`,
+    }],
+    ["invalid server run ID", {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: "run_invalid",
+    }],
+    ["zero server run ID", {
+      terminalOutcome: "failed",
+      terminalIncidentId: `incident_${"a".repeat(32)}`,
+      terminalFailureCode: "agent_turn_failed",
+      terminalRetryable: true,
+      terminalServerRunId: `run_${"0".repeat(32)}`,
+    }],
+  ])("does not preserve a local failed receipt with %s", async (_label, receipt) => {
+    const { repository } = createHarness();
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const localHistory = projectedServerHistory(100);
+    Object.assign(localHistory[1], receipt);
+    await repository.persistAssistant(localHistory[1]);
+
+    const reconciled = await repository.reconcileServerHistory(
+      projectedServerHistory(10_000),
+    );
+
+    expect(reconciled.messages[1]).not.toHaveProperty("terminalOutcome");
+    expect(reconciled.messages[1]).not.toHaveProperty("terminalIncidentId");
+    expect(reconciled.messages[1]).not.toHaveProperty("terminalFailureCode");
+    expect(reconciled.messages[1]).not.toHaveProperty("terminalRetryable");
+    expect(reconciled.messages[1]).not.toHaveProperty("terminalServerRunId");
+  });
+
   it("does not rewrite history when the projected echo only reorders message keys", async () => {
     const { repository, storage } = createHarness();
     // The locally committed user row serializes as {role, content, message_id}.

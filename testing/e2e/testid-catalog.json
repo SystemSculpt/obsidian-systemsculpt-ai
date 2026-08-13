@@ -54,6 +54,7 @@
     "chat.tool.file.copy-path",
     "chat.tool.file.open",
     "chat.turn.copy",
+    "chat.turn.copy-incident-report",
     "chat.turn.edit-resubmit",
     "chat.turn.retry-failed",
     "credits.buy",

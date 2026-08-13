@@ -1,6 +1,12 @@
 import type { ChatMessage } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
+import { isThinAgentFailureCode } from "../../utils/ThinAgentLifecycleSchema";
 import { ChatStorageService } from "./ChatStorageService";
+import {
+  isLocalReportId,
+  normalizeFailedTerminalReceipt,
+  type NormalizedFailedTerminalReceipt,
+} from "./FailedTerminalReceipt";
 import { ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import {
   parseAgentConversationId,
@@ -149,15 +155,35 @@ function canPreserveProjectedPartTimestamps(
   return true;
 }
 
+function omitsTerminalMetadata(message: ChatMessage): boolean {
+  return message.terminalOutcome === undefined
+    && message.terminalReportId === undefined
+    && message.terminalIncidentId === undefined
+    && message.terminalFailureCode === undefined
+    && message.terminalRetryable === undefined
+    && message.terminalServerRunId === undefined;
+}
+
 function preserveProjectedAssistantMetadata(
   incoming: ChatMessage,
   local: ChatMessage | undefined,
 ): ChatMessage {
   if (incoming.role !== "assistant" || local?.role !== "assistant") return incoming;
-  const restoredIncoming = incoming.responseDurationMs === undefined
-    && local.responseDurationMs !== undefined
-    ? { ...incoming, responseDurationMs: local.responseDurationMs }
+  const validatedLocalReceipt = normalizeFailedTerminalReceipt(local);
+  const localFailedReceipt = omitsTerminalMetadata(incoming)
+    ? validatedLocalReceipt
+    : null;
+  const incomingWithTerminal = localFailedReceipt
+    ? { ...incoming, ...localFailedReceipt }
     : incoming;
+  const incomingReceipt = normalizeFailedTerminalReceipt(incomingWithTerminal);
+  const incomingWithReport = validatedLocalReceipt?.terminalReportId && incomingReceipt
+    ? { ...incomingWithTerminal, terminalReportId: validatedLocalReceipt.terminalReportId }
+    : incomingWithTerminal;
+  const restoredIncoming = incomingWithReport.responseDurationMs === undefined
+    && local.responseDurationMs !== undefined
+    ? { ...incomingWithReport, responseDurationMs: local.responseDurationMs }
+    : incomingWithReport;
 
   const localParts = local.messageParts ?? [];
   const incomingParts = restoredIncoming.messageParts ?? [];
@@ -226,6 +252,55 @@ function preserveProjectedAssistantMetadata(
     ...(restoredIncoming.messageParts ? { messageParts: preservedParts } : {}),
     ...(restoredIncoming.tool_calls ? { tool_calls: preservedTools } : {}),
   };
+}
+
+function preserveContentFreeLocalFailedReceipts(
+  incoming: ChatMessage[],
+  local: readonly ChatMessage[],
+): ChatMessage[] {
+  const receipts = new Map<string, NormalizedFailedTerminalReceipt>();
+  let localTurnId: string | null = null;
+  for (const message of local) {
+    if (message.role === "user") {
+      localTurnId = message.message_id;
+      continue;
+    }
+    const receipt = normalizeFailedTerminalReceipt(message);
+    if (localTurnId && receipt?.terminalReportId) receipts.set(localTurnId, receipt);
+  }
+  const next = [...incoming];
+  for (const [turnId, receipt] of receipts) {
+    const userIndex = next.findIndex((message) =>
+      message.role === "user" && message.message_id === turnId);
+    if (userIndex < 0) continue;
+    let turnEnd = userIndex + 1;
+    while (turnEnd < next.length && next[turnEnd].role === "assistant") turnEnd += 1;
+    let failedIndex = -1;
+    for (let index = turnEnd - 1; index > userIndex; index -= 1) {
+      if (next[index].role === "assistant" && normalizeFailedTerminalReceipt(next[index])) {
+        failedIndex = index;
+        break;
+      }
+    }
+    if (failedIndex >= 0) {
+      next[failedIndex] = {
+        ...next[failedIndex],
+        terminalReportId: receipt.terminalReportId,
+      };
+      continue;
+    }
+    if (turnEnd > userIndex + 1) continue;
+    next.splice(turnEnd, 0, {
+      role: "assistant",
+      message_id: `failure-${receipt.terminalReportId}`,
+      content: "",
+      terminalOutcome: "failed",
+      terminalReportId: receipt.terminalReportId,
+      terminalFailureCode: receipt.terminalFailureCode,
+      terminalRetryable: receipt.terminalRetryable,
+    });
+  }
+  return next;
 }
 
 function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly ToolCall[] = []): ToolCall[] | undefined {
@@ -364,6 +439,62 @@ export class AgentTranscriptRepository {
     });
   }
 
+  /** Adds the plugin-local report identity to a failed submitted turn. */
+  public persistFailedReceipt(input: Readonly<{
+    turnId: string;
+    reportId: string;
+    failureCode: string;
+    retryable: boolean;
+  }>): Promise<AgentTranscriptSnapshot> {
+    const generation = this.generation;
+    return this.serializeForGeneration(generation, async () => {
+      if (!isLocalReportId(input.reportId)
+        || !isThinAgentFailureCode(input.failureCode)) {
+        throw new Error("Invalid local failure receipt.");
+      }
+      const userIndex = this.messages.findIndex((message) =>
+        message.role === "user" && message.message_id === input.turnId);
+      if (userIndex < 0) {
+        throw new Error("A local failure receipt requires a durable user turn.");
+      }
+      let turnEnd = userIndex + 1;
+      while (turnEnd < this.messages.length && this.messages[turnEnd].role === "assistant") {
+        turnEnd += 1;
+      }
+      const next = cloneMessages(this.messages);
+      let failedIndex = -1;
+      for (let index = turnEnd - 1; index > userIndex; index -= 1) {
+        if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
+          failedIndex = index;
+          break;
+        }
+      }
+      const receipt = {
+        terminalOutcome: "failed" as const,
+        terminalReportId: input.reportId,
+        terminalFailureCode: input.failureCode,
+        terminalRetryable: input.retryable,
+      };
+      let messageId: string;
+      if (failedIndex >= 0) {
+        next[failedIndex] = { ...next[failedIndex], ...receipt };
+        messageId = next[failedIndex].message_id;
+      } else {
+        messageId = `failure-${input.reportId}`;
+        next.splice(turnEnd, 0, {
+          role: "assistant",
+          message_id: messageId,
+          content: "",
+          ...receipt,
+        });
+      }
+      await this.persist(next, false, generation);
+      const snapshot = this.snapshot();
+      this.emitCommit({ snapshot, role: "assistant", messageId });
+      return snapshot;
+    });
+  }
+
   public reconcileServerHistory(
     messages: readonly ChatMessage[],
   ): Promise<AgentTranscriptSnapshot> {
@@ -375,7 +506,7 @@ export class AgentTranscriptRepository {
         throw new Error("The server returned invalid or duplicate chat message identifiers.");
       }
       const localById = new Map(this.messages.map((message) => [message.message_id, message]));
-      const next = incoming.map((message) => {
+      const projected = incoming.map((message) => {
         const local = localById.get(message.message_id);
         if (message.role === "assistant") {
           return preserveProjectedAssistantMetadata(message, local);
@@ -388,6 +519,7 @@ export class AgentTranscriptRepository {
         }
         return message;
       });
+      const next = preserveContentFreeLocalFailedReceipts(projected, this.messages);
       // The agent session derives assistant part/tool timestamps from the
       // local observation clock. They preserve ordering but are not a server
       // history revision, so a reconnect must not rewrite an otherwise

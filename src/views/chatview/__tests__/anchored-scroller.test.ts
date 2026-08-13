@@ -25,6 +25,12 @@ type ScrollCall = {
   behavior: ScrollBehavior;
 };
 
+type ViewportGeometryReads = {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+};
+
 function bindViewportRect(
   element: HTMLElement,
   viewportState: ViewportState,
@@ -64,18 +70,27 @@ function createHarness(options: {
     clientHeight: options.clientHeight ?? 400,
   };
   const calls: ScrollCall[] = [];
+  const viewportGeometryReads: ViewportGeometryReads = {
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
   const rowLayouts = new Map<HTMLElement, RowLayout>();
   const partLayouts = new Map<HTMLElement, PartLayout>();
 
   Object.defineProperties(viewport, {
     scrollTop: {
       configurable: true,
-      get: () => state.scrollTop,
+      get: () => {
+        viewportGeometryReads.scrollTop += 1;
+        return state.scrollTop;
+      },
       set: (value: number) => { state.scrollTop = value; },
     },
     scrollHeight: {
       configurable: true,
       get: () => {
+        viewportGeometryReads.scrollHeight += 1;
         const spacer = content.querySelector<HTMLElement>(
           "[data-agent-submitted-prompt-space]",
         );
@@ -84,7 +99,10 @@ function createHarness(options: {
     },
     clientHeight: {
       configurable: true,
-      get: () => state.clientHeight,
+      get: () => {
+        viewportGeometryReads.clientHeight += 1;
+        return state.clientHeight;
+      },
     },
   });
 
@@ -173,6 +191,12 @@ function createHarness(options: {
     viewport.dispatchEvent(new Event("scroll"));
   };
 
+  const resetViewportGeometryReads = (): void => {
+    viewportGeometryReads.scrollTop = 0;
+    viewportGeometryReads.scrollHeight = 0;
+    viewportGeometryReads.clientHeight = 0;
+  };
+
   const cleanup = (): void => {
     scroller.destroy();
     viewport.remove();
@@ -185,12 +209,14 @@ function createHarness(options: {
     scrollButton,
     state,
     calls,
+    viewportGeometryReads,
     scroller,
     addRow,
     addPart,
     setRowLayout,
     setPartLayout,
     manualScroll,
+    resetViewportGeometryReads,
     cleanup,
   };
 }
@@ -275,6 +301,120 @@ describe("AnchoredScroller", () => {
     expect(content.getAttribute("aria-relevant")).toBe("all");
     scroller.destroy();
   });
+
+  it("returns a frozen content-free incident snapshot from maintained scroll state", () => {
+    const harness = createHarness();
+    harness.addRow("private-row-id-canary", 600);
+
+    const atEnd = harness.scroller.captureIncidentSnapshot();
+    expect(Object.isFrozen(atEnd)).toBe(true);
+    expect(atEnd).toEqual({
+      mode: "end",
+      distanceFromEndBucket: "at_end",
+      registeredRowCount: 1,
+      pendingLayoutMutationCount: 0,
+      layoutMutationPending: false,
+      geometryUpdatePending: false,
+      programmaticScrollPending: false,
+      submittedPromptAnchorActive: false,
+      destroyed: false,
+    });
+
+    harness.manualScroll(300);
+    expect(harness.scroller.captureIncidentSnapshot()).toMatchObject({
+      mode: "manual",
+      distanceFromEndBucket: "within_viewport",
+    });
+    harness.manualScroll(0);
+    expect(harness.scroller.captureIncidentSnapshot().distanceFromEndBucket)
+      .toBe("far_from_end");
+
+    const finishOuter = harness.scroller.beginLayoutMutation();
+    const finishInner = harness.scroller.beginLayoutMutation();
+    const pending = harness.scroller.captureIncidentSnapshot();
+    expect(pending.pendingLayoutMutationCount).toBe(2);
+    expect(pending.layoutMutationPending).toBe(true);
+    expect(JSON.stringify(pending)).not.toContain("private-row-id-canary");
+    finishInner();
+    finishOuter();
+
+    Object.defineProperties(harness.viewport, {
+      scrollTop: {
+        configurable: true,
+        get: () => { throw new Error("scroll-top-private-canary"); },
+      },
+      scrollHeight: {
+        configurable: true,
+        get: () => { throw new Error("scroll-height-private-canary"); },
+      },
+      clientHeight: {
+        configurable: true,
+        get: () => { throw new Error("client-height-private-canary"); },
+      },
+    });
+    expect(() => harness.scroller.captureIncidentSnapshot()).not.toThrow();
+    expect(JSON.stringify(harness.scroller.captureIncidentSnapshot()))
+      .not.toContain("private-canary");
+    harness.cleanup();
+  });
+
+  it.each([
+    [0, "at_end", false, "end"],
+    [1, "at_end", false, "end"],
+    [1.01, "near_end", false, "end"],
+    [24, "near_end", false, "end"],
+    [24.01, "within_viewport", true, "manual"],
+    [400, "within_viewport", true, "manual"],
+    [400.01, "far_from_end", true, "manual"],
+  ] as const)(
+    "measures geometry once and keeps boundary state aligned at %s pixels from the end",
+    (distanceFromEnd, expectedBucket, expectedButtonActive, expectedMode) => {
+      const harness = createHarness({
+        scrollTop: 600 - distanceFromEnd,
+      });
+      harness.resetViewportGeometryReads();
+
+      harness.addRow(`boundary-${String(distanceFromEnd)}`, 0);
+
+      expect(harness.viewportGeometryReads).toEqual({
+        scrollTop: 1,
+        scrollHeight: 1,
+        clientHeight: 1,
+      });
+      const refreshedState = {
+        bucket: harness.scroller.captureIncidentSnapshot().distanceFromEndBucket,
+        active: harness.scrollButton.dataset.active,
+        hidden: harness.scrollButton.getAttribute("aria-hidden"),
+        inert: harness.scrollButton.hasAttribute("inert"),
+        tabIndex: harness.scrollButton.tabIndex,
+      };
+      expect(refreshedState).toEqual({
+        bucket: expectedBucket,
+        active: String(expectedButtonActive),
+        hidden: expectedButtonActive ? "false" : "true",
+        inert: !expectedButtonActive,
+        tabIndex: expectedButtonActive ? 0 : -1,
+      });
+
+      harness.resetViewportGeometryReads();
+      harness.viewport.dispatchEvent(new Event("scroll"));
+
+      expect(harness.viewportGeometryReads).toEqual({
+        scrollTop: 1,
+        scrollHeight: 1,
+        clientHeight: 1,
+      });
+      expect(harness.scroller.getMode()).toBe(expectedMode);
+      expect({
+        bucket: harness.scroller.captureIncidentSnapshot().distanceFromEndBucket,
+        active: harness.scrollButton.dataset.active,
+        hidden: harness.scrollButton.getAttribute("aria-hidden"),
+        inert: harness.scrollButton.hasAttribute("inert"),
+        tabIndex: harness.scrollButton.tabIndex,
+      }).toEqual(refreshedState);
+      harness.cleanup();
+    },
+  );
 
   it("follows streaming growth only while the reader remains at the end", () => {
     const harness = createHarness();
@@ -1255,8 +1395,14 @@ describe("AnchoredScroller", () => {
 
     harness.scroller.scrollToEnd();
     harness.state.scrollTop = 300;
+    harness.resetViewportGeometryReads();
     harness.viewport.dispatchEvent(new Event("scroll"));
 
+    expect(harness.viewportGeometryReads).toEqual({
+      scrollTop: 1,
+      scrollHeight: 1,
+      clientHeight: 1,
+    });
     expect(harness.scroller.getMode()).toBe("end");
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_900;

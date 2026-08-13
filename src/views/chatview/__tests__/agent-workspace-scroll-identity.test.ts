@@ -130,6 +130,148 @@ describe("AgentWorkspace response scroll identity", () => {
     document.body.replaceChildren();
   });
 
+  it("returns a deeply frozen content-free rendering snapshot for the active run", async () => {
+    const frames: FrameRequestCallback[] = [];
+    jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const { workspace } = createWorkspace();
+    workspace.setRunPending(true, "private-turn-id-canary");
+    const queued = workspace.captureIncidentRenderingSnapshot();
+    expect(Object.isFrozen(queued)).toBe(true);
+    expect(Object.isFrozen(queued.renderer)).toBe(true);
+    expect(Object.isFrozen(queued.scroller)).toBe(true);
+    expect(queued).toMatchObject({
+      renderState: "frame_pending",
+      renderPassCount: 0,
+      pendingRenderCount: 1,
+      firstDomCommitObserved: false,
+      firstPaintOpportunityObserved: false,
+      failureSurfaceDomCommitted: false,
+      failureSurfacePaintOpportunityObserved: false,
+    });
+
+    const completion = workspace.setAgentSnapshot({
+      runId: "private-run-id-canary",
+      turnId: "private-turn-id-canary",
+      status: "running",
+      phase: "working",
+      messages: [{
+        id: "private-message-id-canary",
+        role: "assistant",
+        partIds: ["private-part-id-canary"],
+      }],
+      parts: [{
+        id: "private-part-id-canary",
+        kind: "text",
+        messageId: "private-message-id-canary",
+        state: "streaming",
+        markdown: "private-message-content-canary",
+        order: 0,
+      }],
+    });
+    const frame = frames.shift();
+    if (!frame) throw new Error("Expected a pending transcript frame.");
+    frame(0);
+    await completion;
+
+    const committed = workspace.captureIncidentRenderingSnapshot();
+    expect(Object.keys(committed)).toEqual([
+      "renderState",
+      "renderPassCount",
+      "pendingRenderCount",
+      "lastRenderDurationMs",
+      "maxRenderDurationMs",
+      "firstDomCommitObserved",
+      "firstPaintOpportunityObserved",
+      "failureSurfaceDomCommitted",
+      "failureSurfacePaintOpportunityObserved",
+      "registeredRowCount",
+      "renderer",
+      "scroller",
+    ]);
+    expect(committed).toMatchObject({
+      renderState: "idle",
+      renderPassCount: 1,
+      pendingRenderCount: 0,
+      firstDomCommitObserved: false,
+      firstPaintOpportunityObserved: false,
+      failureSurfaceDomCommitted: false,
+      failureSurfacePaintOpportunityObserved: false,
+      registeredRowCount: 1,
+      renderer: {
+        renderPassCount: 1,
+        pendingRenderPassCount: 0,
+        activePartCount: 1,
+      },
+      scroller: {
+        registeredRowCount: 1,
+      },
+    });
+    expect(JSON.stringify(committed)).not.toContain("private-");
+
+    workspace.recordIncidentDomCommit();
+    workspace.recordIncidentPaintOpportunity();
+    expect(workspace.captureIncidentRenderingSnapshot()).toMatchObject({
+      firstDomCommitObserved: true,
+      firstPaintOpportunityObserved: true,
+    });
+    workspace.unload();
+  });
+
+  it("proves failed-surface DOM and paint from maintained reconciliation state", async () => {
+    const frames: FrameRequestCallback[] = [];
+    jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const { workspace } = createWorkspace();
+    const turnId = "user-failed-surface";
+    const completion = workspace.setAgentSnapshot({
+      runId: "run-failed-surface",
+      turnId,
+      status: "failed",
+      phase: "complete",
+      messages: [],
+      parts: [{
+        id: `error:${turnId}`,
+        kind: "error",
+        order: 0,
+        error: {
+          code: "response_failed",
+          message: "private-failure-message-canary",
+          retryable: true,
+        },
+        retryable: true,
+        retryMessageId: turnId,
+      }],
+    });
+    const frame = frames.shift();
+    if (!frame) throw new Error("Expected a failed-surface transcript frame.");
+    frame(0);
+    await completion;
+
+    const committed = workspace.captureIncidentRenderingSnapshot();
+    expect(committed).toMatchObject({
+      firstDomCommitObserved: true,
+      firstPaintOpportunityObserved: false,
+      failureSurfaceDomCommitted: true,
+      failureSurfacePaintOpportunityObserved: false,
+    });
+    expect(JSON.stringify(committed)).not.toContain("private-");
+    expect(workspace.recordIncidentFailureSurfacePaintOpportunity("other-turn"))
+      .toBe(false);
+    expect(workspace.recordIncidentFailureSurfacePaintOpportunity(turnId)).toBe(true);
+    expect(workspace.captureIncidentRenderingSnapshot()).toMatchObject({
+      firstDomCommitObserved: true,
+      firstPaintOpportunityObserved: true,
+      failureSurfaceDomCommitted: true,
+      failureSurfacePaintOpportunityObserved: true,
+    });
+    workspace.unload();
+  });
+
   it("moves one turn anchor from the active response to its durable response", async () => {
     const { host, workspace } = createWorkspace();
     const turnId = "user-response-identity";

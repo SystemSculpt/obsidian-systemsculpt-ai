@@ -1,4 +1,9 @@
 import {
+  normalizeAgentIncidentFailureCode,
+  type AgentIncidentFailureMechanism,
+  type AgentIncidentFailureStage,
+} from "../../../core/diagnostics/AgentIncidentSchema";
+import {
   PlatformRequestClient,
   type PlatformResponseDeliveryMode,
 } from "../../../services/PlatformRequestClient";
@@ -23,11 +28,22 @@ import {
 } from "../../../services/managed/ThinAgentInputLimits";
 import type { ChatMessage, MessagePart, MultiPartContent } from "../../../types";
 import type { ToolCall, ToolCallResult } from "../../../types/toolCalls";
+import {
+  countLocalToolOutcome,
+  localToolOutcomeSchema,
+} from "../../../tools/LocalToolOutcome";
 import { isFirstPartyToolName } from "../../../tools/toolNames";
 import {
   collectSuccessfulToolArtifactPaths,
   collectToolArtifactPaths,
 } from "../../../utils/toolArtifacts";
+import {
+  isThinAgentConversationId,
+  isThinAgentFailureCode,
+  isThinAgentIncidentId,
+  isThinAgentRequestId,
+  isThinAgentServerRunId,
+} from "../../../utils/ThinAgentLifecycleSchema";
 import {
   isMutatingTool,
   requiresUserApproval,
@@ -54,6 +70,8 @@ import {
 } from "./AuthoritativeSession";
 import {
   AgentStreamingTransport,
+  type AgentTransportSegmentCloseReason,
+  type AgentTransportSegmentSummaryEvent,
   type AgentTransportTimingEvent,
 } from "./StreamingTransport";
 import type {
@@ -96,6 +114,38 @@ type LocalToolCall = Readonly<{
   name: string;
   input: AgentJsonValue;
 }>;
+
+function toolRequestedItemCount(call: LocalToolCall): number | undefined {
+  if (!call.input || typeof call.input !== "object" || Array.isArray(call.input)) {
+    return undefined;
+  }
+  const input = call.input as Readonly<Record<string, AgentJsonValue>>;
+  const candidates = call.name === "multi_edit" || call.name === "open"
+    ? input.files
+    : input.paths;
+  return Array.isArray(candidates) && candidates.length <= 10_000
+    ? candidates.length
+    : undefined;
+}
+
+function safeToolFailureClass(
+  result: ToolCallResult,
+): AgentLifecycleInput["toolFailureClass"] {
+  if (result.success) return undefined;
+  switch (result.error?.code) {
+    case "TOOL_PARTIAL_FAILURE": return "partial_failure";
+    case "TOOL_OPERATION_FAILED": return "operation_failed";
+    case "TOOL_CANCELLED_BEFORE_START": return "cancelled";
+    case "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN": return "outcome_unknown";
+    case "TOOL_MUTATION_JOURNAL_UNAVAILABLE": return "journal_unavailable";
+    case "TOOL_MUTATION_OUTCOME_UNKNOWN": return "outcome_unknown";
+    case "TOOL_CALL_ID_CONFLICT": return "identity_mismatch";
+    case "INVALID_TOOL_CALL":
+    case "INVALID_TOOL_ARGUMENTS": return "invalid_input";
+    case "TOOL_EXECUTION_FAILED": return "execution_failed";
+    default: return "unknown";
+  }
+}
 
 type ToolTarget = Readonly<{
   name: string;
@@ -140,6 +190,80 @@ export type AgentRunInput = Readonly<{
   clientStartedAtMonotonicMs?: number;
 }>;
 
+/**
+ * Content-free evidence captured while a failed run still owns its state.
+ *
+ * This boundary intentionally exposes only purpose-specific identifiers,
+ * validated enums, booleans, and bounded counts. It must never grow raw
+ * messages, errors, tool identities, paths, URLs, inputs, or outputs.
+ */
+export type AgentRunFailureCaptureEvent = Readonly<{
+  kind: "agent_run_failed";
+  conversationId: string;
+  requestId: string;
+  failureAuthority: "server" | "client";
+  failureStage: AgentIncidentFailureStage;
+  failureMechanism: AgentIncidentFailureMechanism;
+  terminalValidation: "validated" | "unvalidated";
+  terminalSource: "session_terminal" | "message_reconstruction" | "local_failure";
+  hostProcessState: "responsive";
+  chatViewState: "unknown";
+  runOrigin: "submitted" | "recovered";
+  runPhase: AgentRunPhase;
+  connectionState: AgentConnectionState;
+  elapsedMs?: number;
+  elapsedMsTruncated: boolean;
+  serverRunId?: string;
+  incidentId?: string;
+  failureCode?: string;
+  retryable: boolean;
+  assistantTextPartCount: number;
+  assistantTextStreamingPartCount: number;
+  assistantTextCompletePartCount: number;
+  assistantTextCharacterCount: number;
+  reasoningPartCount: number;
+  reasoningStreamingPartCount: number;
+  reasoningCompletePartCount: number;
+  reasoningCharacterCount: number;
+  assistantOutputPresentBeforeFailure: boolean;
+  assistantOutputRetainedInFailedProjection: boolean;
+  snapshotPartCount: number;
+  executingLocalToolCount: number;
+  pendingToolDeliveryCount: number;
+  pendingApprovalDeliveryCount: number;
+  pendingToolTaskCount: number;
+  serverQueued: boolean;
+  runStalled: boolean;
+  awaitingClientWork: boolean;
+  pendingCancel: boolean;
+  pendingRegenerate: boolean;
+  countsTruncated: boolean;
+}>;
+
+/**
+ * Content-free transport evidence for local incident capture.
+ *
+ * The conversation and request IDs are internal correlation keys. Persisted
+ * reports must replace or omit them. Tool-call IDs never cross this boundary;
+ * a locally established execution can contribute only its derived ordinal.
+ */
+export type AgentChatTransportSegmentSummaryEvent = Readonly<{
+  conversationId: string;
+  requestId: string;
+  commandKind: AgentCommandKind;
+  commandSegmentOrdinal: number;
+  serverLatencyCorrelationId?: string;
+  toolExecutionOrdinal?: number;
+  closeReason: AgentTransportSegmentCloseReason;
+  durationMs: number;
+  receivedBytes: number;
+  nonEmptyRawChunkCount: number;
+  sseEventCount: number;
+  acceptedFrameCount: number;
+  deliveredFrameCount: number;
+  metricsTruncated: boolean;
+}>;
+
 type RequestClient = Pick<PlatformRequestClient, "request">;
 
 export type AgentChatSessionOptions = Readonly<{
@@ -164,6 +288,10 @@ export type AgentChatSessionOptions = Readonly<{
   ) => Promise<void>;
   reportError?: (error: unknown) => void;
   onLifecycle?: (record: AgentLifecycleRecord) => void;
+  onIncidentCapture?: (event: AgentRunFailureCaptureEvent) => void;
+  onTransportSegmentSummary?: (
+    event: AgentChatTransportSegmentSummaryEvent,
+  ) => void;
   requestClient?: RequestClient;
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
@@ -187,6 +315,8 @@ const MAX_RETAINED_LATENCY_RUNS = 8;
 const MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN = 512;
 const MAX_TOOL_EXECUTIONS_PER_RUN = 512;
 const MAX_HISTORY_SYNCS_PER_RUN = 2_048;
+const MAX_INCIDENT_CAPTURE_COUNT = 100_000_000;
+const MAX_INCIDENT_CAPTURE_ELAPSED_MS = 7 * 24 * 60 * 60 * 1_000;
 
 type ToolIdentity = Readonly<{
   toolName: string;
@@ -267,6 +397,7 @@ type ClientLatencyContext = {
     toolCallId: string | null;
   }> | null;
   pendingTerminalOrdinal: number | null;
+  terminalSegmentOrdinal: number | null;
   lastOffsetMs: number;
 };
 
@@ -391,6 +522,7 @@ function managedError(
       ),
       ...(status === undefined ? {} : { status }),
       ...(requestId ? { requestId } : {}),
+      ...(requestId ? { incidentId: requestId } : {}),
       retryable,
     };
   }
@@ -405,15 +537,18 @@ function managedError(
 }
 
 function terminalError(terminal: Extract<ThinAgentRunTerminalData, { outcome: "failed" }>): ManagedAgentError {
+  const incidentId = /^incident_(?!0{32}$)[a-f0-9]{32}$/u.test(terminal.incident_id)
+    ? terminal.incident_id
+    : undefined;
   return {
     code: terminal.code,
     message: safeServiceMessage(
       terminal.message,
       "SystemSculpt could not complete the response.",
     ),
-    requestId: terminal.incident_id,
+    ...(incidentId ? { requestId: incidentId } : {}),
     retryable: terminal.retryable,
-    incidentId: terminal.incident_id,
+    ...(incidentId ? { incidentId } : {}),
   };
 }
 
@@ -1098,6 +1233,148 @@ function projectRun(
   });
 }
 
+type IncidentSnapshotCounts = Readonly<{
+  assistantTextPartCount: number;
+  assistantTextStreamingPartCount: number;
+  assistantTextCompletePartCount: number;
+  assistantTextCharacterCount: number;
+  reasoningPartCount: number;
+  reasoningStreamingPartCount: number;
+  reasoningCompletePartCount: number;
+  reasoningCharacterCount: number;
+  assistantOutputPresentBeforeFailure: boolean;
+  assistantOutputRetainedInFailedProjection: boolean;
+  snapshotPartCount: number;
+  truncated: boolean;
+}>;
+
+type IncidentFailureScalars = Readonly<{
+  failureAuthority: "server" | "client";
+  failureStage: AgentIncidentFailureStage;
+  failureMechanism: AgentIncidentFailureMechanism;
+  terminalValidation: "validated" | "unvalidated";
+  terminalSource: AgentRunFailureCaptureEvent["terminalSource"];
+  retryable: boolean;
+  runPhase?: AgentRunPhase;
+  serverRunId?: string;
+  incidentId?: string;
+  failureCode?: string;
+}>;
+
+function addIncidentCount(
+  current: number,
+  addition: number,
+): Readonly<{ value: number; truncated: boolean }> {
+  if (
+    !Number.isSafeInteger(addition)
+    || addition < 0
+    || current > MAX_INCIDENT_CAPTURE_COUNT - addition
+  ) {
+    return { value: MAX_INCIDENT_CAPTURE_COUNT, truncated: true };
+  }
+  return { value: current + addition, truncated: false };
+}
+
+function incidentSnapshotCounts(
+  snapshot: AgentConversationSnapshot,
+): IncidentSnapshotCounts {
+  let assistantTextPartCount = 0;
+  let assistantTextStreamingPartCount = 0;
+  let assistantTextCompletePartCount = 0;
+  let assistantTextCharacterCount = 0;
+  let reasoningPartCount = 0;
+  let reasoningStreamingPartCount = 0;
+  let reasoningCompletePartCount = 0;
+  let reasoningCharacterCount = 0;
+  let assistantOutputPresentBeforeFailure = false;
+  let truncated = snapshot.parts.length > MAX_INCIDENT_CAPTURE_COUNT;
+  for (const part of snapshot.parts) {
+    if (part.kind === "text") {
+      const parts = addIncidentCount(assistantTextPartCount, 1);
+      const streamingParts = part.state === "streaming"
+        ? addIncidentCount(assistantTextStreamingPartCount, 1)
+        : { value: assistantTextStreamingPartCount, truncated: false };
+      const completeParts = part.state === "complete"
+        ? addIncidentCount(assistantTextCompletePartCount, 1)
+        : { value: assistantTextCompletePartCount, truncated: false };
+      const characters = addIncidentCount(
+        assistantTextCharacterCount,
+        part.markdown.length,
+      );
+      assistantTextPartCount = parts.value;
+      assistantTextStreamingPartCount = streamingParts.value;
+      assistantTextCompletePartCount = completeParts.value;
+      assistantTextCharacterCount = characters.value;
+      assistantOutputPresentBeforeFailure = assistantOutputPresentBeforeFailure
+        || (Number.isSafeInteger(part.markdown.length) && part.markdown.length > 0);
+      truncated = truncated
+        || parts.truncated
+        || streamingParts.truncated
+        || completeParts.truncated
+        || characters.truncated;
+    } else if (part.kind === "reasoning") {
+      const parts = addIncidentCount(reasoningPartCount, 1);
+      const streamingParts = part.state === "streaming"
+        ? addIncidentCount(reasoningStreamingPartCount, 1)
+        : { value: reasoningStreamingPartCount, truncated: false };
+      const completeParts = part.state === "complete"
+        ? addIncidentCount(reasoningCompletePartCount, 1)
+        : { value: reasoningCompletePartCount, truncated: false };
+      const characters = addIncidentCount(
+        reasoningCharacterCount,
+        part.summary.length,
+      );
+      reasoningPartCount = parts.value;
+      reasoningStreamingPartCount = streamingParts.value;
+      reasoningCompletePartCount = completeParts.value;
+      reasoningCharacterCount = characters.value;
+      truncated = truncated
+        || parts.truncated
+        || streamingParts.truncated
+        || completeParts.truncated
+        || characters.truncated;
+    }
+  }
+  return {
+    assistantTextPartCount,
+    assistantTextStreamingPartCount,
+    assistantTextCompletePartCount,
+    assistantTextCharacterCount,
+    reasoningPartCount,
+    reasoningStreamingPartCount,
+    reasoningCompletePartCount,
+    reasoningCharacterCount,
+    assistantOutputPresentBeforeFailure,
+    assistantOutputRetainedInFailedProjection:
+      snapshot.status === "failed" && assistantOutputPresentBeforeFailure,
+    snapshotPartCount: Math.min(
+      snapshot.parts.length,
+      MAX_INCIDENT_CAPTURE_COUNT,
+    ),
+    truncated,
+  };
+}
+
+function boundedIncidentPendingCount(
+  value: number,
+): Readonly<{ value: number; truncated: boolean }> {
+  return value > MAX_TOOL_EXECUTIONS_PER_RUN
+    ? { value: MAX_TOOL_EXECUTIONS_PER_RUN, truncated: true }
+    : { value, truncated: false };
+}
+
+function boundedIncidentElapsedMs(
+  value: number | null,
+): Readonly<{ value?: number; truncated: boolean }> {
+  if (value === null || !Number.isFinite(value) || value < 0) {
+    return { truncated: false };
+  }
+  if (value > MAX_INCIDENT_CAPTURE_ELAPSED_MS) {
+    return { value: MAX_INCIDENT_CAPTURE_ELAPSED_MS, truncated: true };
+  }
+  return { value: Math.round(value), truncated: false };
+}
+
 // Must not exceed the protocol codec's MAX_JSON_DEPTH: content beyond the
 // protocol bound drops here so a deep result degrades instead of failing the
 // whole client_tool_result command at encode time.
@@ -1349,14 +1626,48 @@ function durableAssistantMessage(
   };
 }
 
+type DurableTerminalMetadata =
+  | Readonly<{ terminalOutcome: "cancelled" }>
+  | Readonly<{
+      terminalOutcome: "failed";
+      terminalIncidentId: string;
+      terminalFailureCode: string;
+      terminalRetryable: boolean;
+      terminalServerRunId: string;
+    }>;
+
+function durableTerminalMetadata(
+  terminal: ThinAgentRunTerminalData,
+): DurableTerminalMetadata | null {
+  if (terminal.outcome === "cancelled") {
+    return { terminalOutcome: "cancelled" };
+  }
+  if (
+    terminal.outcome !== "failed"
+    || !isThinAgentIncidentId(terminal.incident_id)
+    || terminal.incident_id === `incident_${"0".repeat(32)}`
+    || !isThinAgentFailureCode(terminal.code)
+    || !isThinAgentServerRunId(terminal.run_id)
+    || terminal.run_id === `run_${"0".repeat(32)}`
+  ) return null;
+  return {
+    terminalOutcome: "failed",
+    terminalIncidentId: terminal.incident_id,
+    terminalFailureCode: terminal.code,
+    terminalRetryable: terminal.retryable,
+    terminalServerRunId: terminal.run_id,
+  };
+}
+
 /**
- * The run-terminal outcome carried by an assistant wire sequence, whether the
- * terminal is folded into the streamed message or persisted as a standalone
- * marker sibling by an older server.
+ * Validated terminal presentation data carried by an assistant wire sequence,
+ * whether folded into a streamed message or stored as a marker sibling.
  */
-function sequenceTerminalOutcome(
+function sequenceTerminalMetadata(
   sequence: readonly WireMessage[],
-): ThinAgentRunTerminalData["outcome"] | null {
+  rootMessageId: string | null,
+): Readonly<{ messageId: string; metadata: DurableTerminalMetadata }> | null {
+  if (rootMessageId === null) return null;
   for (let messageIndex = sequence.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const message = sequence[messageIndex]!;
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
@@ -1364,7 +1675,11 @@ function sequenceTerminalOutcome(
       if (
         parsed?.kind === "known"
         && parsed.type === "data-systemsculpt-run-terminal"
-      ) return parsed.data.outcome;
+        && parsed.data.root_message_id === rootMessageId
+      ) {
+        const metadata = durableTerminalMetadata(parsed.data);
+        return metadata ? { messageId: message.id, metadata } : null;
+      }
     }
   }
   return null;
@@ -1393,7 +1708,7 @@ function durableServerHistory(
     const start = index;
     while (index < messages.length && messages[index]!.role === "assistant") index += 1;
     const sequence = messages.slice(start, index);
-    const cancelled = sequenceTerminalOutcome(sequence) === "cancelled";
+    const terminal = sequenceTerminalMetadata(sequence, rootMessageId);
     const sequenceStart = output.length;
     sequence.forEach((assistant, sequenceIndex) => {
       const durable = durableAssistantMessage(
@@ -1404,9 +1719,19 @@ function durableServerHistory(
       );
       if (durable) output.push(durable);
     });
-    if (cancelled && output.length > sequenceStart) {
+    if (
+      output.length === sequenceStart
+      && terminal?.metadata.terminalOutcome === "failed"
+    ) {
+      output.push({
+        role: "assistant",
+        message_id: terminal.messageId,
+        content: "",
+        ...terminal.metadata,
+      });
+    } else if (terminal && output.length > sequenceStart) {
       const tail = output[output.length - 1]!;
-      output[output.length - 1] = { ...tail, terminalOutcome: "cancelled" };
+      output[output.length - 1] = { ...tail, ...terminal.metadata };
     }
     if (
       turnPresentation
@@ -1546,14 +1871,22 @@ function restoreInterruptedTurnTail(
   const present = new Set(turn.map((message) => message.id));
   const missing = active.streamedTurnMessages.filter((message) =>
     message.role === "assistant" && !present.has(message.id));
-  if (missing.length === 0) return messages;
   const restored = [...turn, ...missing];
+  if (restored.length === 0) {
+    if (terminal.outcome !== "failed") return messages;
+    restored.push({
+      id: `terminal:${terminal.run_id}`,
+      role: "assistant",
+      parts: [],
+    });
+  }
   const hasTerminalPart = restored.some((message) =>
     message.parts.some((part) => {
       const parsed = parseThinAgentDataPart(part);
       return parsed?.kind === "known"
         && parsed.type === "data-systemsculpt-run-terminal";
     }));
+  if (missing.length === 0 && hasTerminalPart) return messages;
   if (!hasTerminalPart) {
     const last = restored[restored.length - 1]!;
     restored[restored.length - 1] = {
@@ -1596,6 +1929,18 @@ function responseStatus(error: unknown): number | undefined {
   return isRecord(error) && typeof error.status === "number"
     ? error.status
     : undefined;
+}
+
+function incidentFailureMechanism(
+  error: Pick<ManagedAgentError, "status">,
+  fallback: AgentIncidentFailureMechanism,
+): AgentIncidentFailureMechanism {
+  return Number.isInteger(error.status)
+    && error.status !== undefined
+    && error.status >= 400
+    && error.status <= 599
+    ? "http_rejection"
+    : fallback;
 }
 
 function boundedErrorPayload(text: string): Readonly<{
@@ -1840,6 +2185,11 @@ export class AgentChatSession {
       onTiming: (event) => {
         if (this.generation === generation) this.handleTransportTiming(event);
       },
+      onSegmentSummary: (event) => {
+        if (this.generation === generation) {
+          this.handleTransportSegmentSummary(conversationId, event);
+        }
+      },
     });
     const session = new AgentSession<WireMessage>({
       conversationId,
@@ -1915,10 +2265,16 @@ export class AgentChatSession {
 
   public async start(input: AgentRunInput): Promise<AgentRunResult> {
     if (this.active && !this.active.terminal) {
-      return this.failedResult(
-        input.turnId,
-        { code: "response_in_progress", message: "SystemSculpt is already working.", retryable: true },
-      );
+      const failure = {
+        code: "response_in_progress",
+        message: "SystemSculpt is already working.",
+        retryable: true,
+      } as const;
+      this.capturePreflightFailure(input.conversationId, input.turnId, failure, {
+        failureStage: "submission_admission",
+        failureMechanism: "concurrent_run",
+      });
+      return this.failedResult(input.turnId, failure);
     }
     try {
       await this.hydrate(input.conversationId, {
@@ -1932,15 +2288,33 @@ export class AgentChatSession {
         "SystemSculpt could not start the response.",
       );
       this.reportLocalIssue(normalized);
+      this.capturePreflightFailure(
+        input.conversationId,
+        input.turnId,
+        normalized,
+        {
+          failureStage: "response_prepare",
+          failureMechanism: incidentFailureMechanism(
+            normalized,
+            "transport_or_protocol_failure",
+          ),
+        },
+        true,
+      );
       return this.failedResult(input.turnId, normalized);
     }
     const session = this.session;
     if (!session || session.current.runState.state !== "idle") {
-      return this.failedResult(input.turnId, {
+      const failure = {
         code: "response_in_progress",
         message: "The previous response is still active.",
         retryable: true,
+      } as const;
+      this.capturePreflightFailure(input.conversationId, input.turnId, failure, {
+        failureStage: "submission_admission",
+        failureMechanism: "concurrent_run",
       });
+      return this.failedResult(input.turnId, failure);
     }
     const active = this.createActiveRun({
       origin: "submitted",
@@ -1959,6 +2333,7 @@ export class AgentChatSession {
       ...this.clientLatencyFields(input.turnId),
     });
     this.publishActive(active, true);
+    let requestDispatchStarted = false;
     try {
       let contextRef: string | undefined;
       if (input.buildBody) {
@@ -1990,6 +2365,7 @@ export class AgentChatSession {
         requestId: input.turnId,
         ...this.clientLatencyFields(input.turnId),
       });
+      requestDispatchStarted = true;
       const delivery = await session.submit({
         request_id: input.turnId,
         user_message: input.message,
@@ -2041,7 +2417,17 @@ export class AgentChatSession {
           retryable: normalized.retryable,
           ...this.clientLatencyFields(input.turnId),
         });
-        this.finishLocalFailure(active, normalized);
+        this.finishLocalFailure(active, normalized, {
+          failureStage: requestDispatchStarted
+            ? "request_dispatch"
+            : "context_prepare",
+          failureMechanism: requestDispatchStarted
+            ? incidentFailureMechanism(
+                normalized,
+                "transport_or_protocol_failure",
+              )
+            : "preparation_failure",
+        });
       }
     }
     return active.completion;
@@ -2052,14 +2438,42 @@ export class AgentChatSession {
     requestId: string;
     rootMessageId: string;
   }>): Promise<AgentRunResult> {
-    await this.hydrate(input.conversationId);
+    try {
+      await this.hydrate(input.conversationId, { requestId: input.requestId });
+    } catch (error) {
+      const normalized = managedError(
+        error,
+        "response_start_failed",
+        "SystemSculpt could not start the response.",
+      );
+      this.reportLocalIssue(normalized);
+      this.capturePreflightFailure(
+        input.conversationId,
+        input.requestId,
+        normalized,
+        {
+          failureStage: "response_prepare",
+          failureMechanism: incidentFailureMechanism(
+            normalized,
+            "transport_or_protocol_failure",
+          ),
+        },
+        true,
+      );
+      return this.failedResult(input.rootMessageId, normalized);
+    }
     const session = this.session;
     if (!session || session.current.runState.state !== "idle") {
-      return this.failedResult(input.rootMessageId, {
+      const failure = {
         code: "response_in_progress",
         message: "The previous response is still active.",
         retryable: true,
+      } as const;
+      this.capturePreflightFailure(input.conversationId, input.requestId, failure, {
+        failureStage: "submission_admission",
+        failureMechanism: "concurrent_run",
       });
+      return this.failedResult(input.rootMessageId, failure);
     }
     const active = this.createActiveRun({
       origin: "submitted",
@@ -2170,7 +2584,10 @@ export class AgentChatSession {
     message: string,
   ): void {
     if (active.terminal) return;
-    this.finishLocalFailure(active, { code, message, retryable: false });
+    this.finishLocalFailure(active, { code, message, retryable: false }, {
+      failureStage: "tool_authorization",
+      failureMechanism: "identity_mismatch",
+    });
   }
 
   private ensureIdentity(
@@ -2392,12 +2809,25 @@ export class AgentChatSession {
         outcome: "cancelled",
         code: "cancelled",
       };
+      this.presentationMessages = restoreInterruptedTurnTail(
+        this.presentationMessages,
+        active,
+        active.terminal,
+      );
       this.reconcileLocalTerminalDuration(active);
       const snapshot = projectRun(
         active,
         this.authoritativeMessages,
         this.connectionState,
       );
+      this.recordLifecycle({
+        code: "run_finished_cancelled",
+        phase: "response",
+        conversationId: active.conversationId,
+        requestId: active.requestId,
+        ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
+        ...this.clientLatencyFields(active.requestId),
+      });
       active.resolve({ kind: "cancelled", snapshot });
       this.active = null;
     }
@@ -2519,6 +2949,7 @@ export class AgentChatSession {
       pendingAssistantProjectionOrdinal: null,
       pendingCommandAck: null,
       pendingTerminalOrdinal: null,
+      terminalSegmentOrdinal: null,
       lastOffsetMs: 0,
     });
     while (this.clientLatency.size > MAX_RETAINED_LATENCY_RUNS) {
@@ -2880,6 +3311,50 @@ export class AgentChatSession {
     );
   }
 
+  private handleTransportSegmentSummary(
+    conversationId: string,
+    event: AgentTransportSegmentSummaryEvent,
+  ): void {
+    try {
+      const requestId = event.requestId;
+      if (
+        !isThinAgentConversationId(conversationId)
+        || !isThinAgentRequestId(requestId)
+      ) return;
+      const context = this.clientLatency.get(requestId);
+      const segment = context?.conversationId === conversationId
+        ? context.segments.get(event.commandSegmentOrdinal)
+        : undefined;
+      const toolExecutionOrdinal = segment?.commandKind === event.commandKind
+        && segment.toolCallId === (event.toolCallId ?? null)
+        ? segment.toolExecutionOrdinal ?? undefined
+        : undefined;
+      const safeEvent: AgentChatTransportSegmentSummaryEvent = Object.freeze({
+        conversationId,
+        requestId,
+        commandKind: event.commandKind,
+        commandSegmentOrdinal: event.commandSegmentOrdinal,
+        ...(segment?.latencyTraceId
+          ? { serverLatencyCorrelationId: segment.latencyTraceId }
+          : {}),
+        ...(toolExecutionOrdinal === undefined
+          ? {}
+          : { toolExecutionOrdinal }),
+        closeReason: event.closeReason,
+        durationMs: event.durationMs,
+        receivedBytes: event.receivedBytes,
+        nonEmptyRawChunkCount: event.nonEmptyRawChunkCount,
+        sseEventCount: event.sseEventCount,
+        acceptedFrameCount: event.acceptedFrameCount,
+        deliveredFrameCount: event.deliveredFrameCount,
+        metricsTruncated: event.metricsTruncated,
+      });
+      this.options.onTransportSegmentSummary?.(safeEvent);
+    } catch {
+      // Incident evidence is observational and cannot affect the run.
+    }
+  }
+
   private isIncompleteSubmitBoundary(
     active: ActiveRun,
     session: AgentSession<WireMessage>,
@@ -2956,7 +3431,7 @@ export class AgentChatSession {
     if (active) this.reconcileAcknowledgedContinuations(active);
     if (snapshot.terminal && active
       && snapshot.terminal.request_id === active.requestId) {
-      this.acceptTerminal(active, snapshot.terminal.value);
+      this.acceptTerminal(active, snapshot.terminal.value, "session_terminal");
       return;
     }
     if (active && !active.terminal) {
@@ -2971,7 +3446,7 @@ export class AgentChatSession {
         active.serverRunId,
       );
       if (persistedTerminal) {
-        this.acceptTerminal(active, persistedTerminal);
+        this.acceptTerminal(active, persistedTerminal, "message_reconstruction");
         return;
       }
     }
@@ -3028,6 +3503,9 @@ export class AgentChatSession {
             code: "response_state_mismatch",
             message: "SystemSculpt returned a mismatched response state.",
             retryable: true,
+          }, {
+            failureStage: "run_state_reconciliation",
+            failureMechanism: "state_mismatch",
           });
           return;
         }
@@ -3114,7 +3592,13 @@ export class AgentChatSession {
       return;
     }
     active.serverAdmissionPossible = false;
-    this.finishLocalFailure(active, normalized);
+    this.finishLocalFailure(active, normalized, {
+      failureStage: "request_dispatch",
+      failureMechanism: incidentFailureMechanism(
+        normalized,
+        "transport_or_protocol_failure",
+      ),
+    });
   }
 
   private handleCommandAck(
@@ -3568,6 +4052,9 @@ export class AgentChatSession {
         code: "approval_state_mismatch",
         message: "SystemSculpt returned a mismatched approval state.",
         retryable: false,
+      }, {
+        failureStage: "approval_reconciliation",
+        failureMechanism: "state_mismatch",
       });
       return false;
     }
@@ -3871,8 +4358,14 @@ export class AgentChatSession {
           toJsonValue(await this.options.executeLocalTool(call, active.abort.signal)),
         );
       }
+      const toolFailureClass = safeToolFailureClass(result);
+      const toolCounts = countLocalToolOutcome(
+        result.data,
+        localToolOutcomeSchema(call.name),
+      );
       result = safeOutboundVaultToolResult(result);
       presentationResult = result;
+      const requestedItemCount = toolRequestedItemCount(call);
       this.recordLifecycle({
         code: result.success
           ? "local_tool_completed_succeeded"
@@ -3882,6 +4375,13 @@ export class AgentChatSession {
         requestId: active.requestId,
         toolName: call.name,
         toolCallId: call.callId,
+        toolOutcome: result.success ? "succeeded" : "failed",
+        ...(result.success ? {} : { toolFailureClass }),
+        ...(requestedItemCount === undefined
+          ? {}
+          : { toolItemCount: requestedItemCount }),
+        toolCompletedItemCount: toolCounts.completed,
+        toolFailedItemCount: toolCounts.failed,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatencyFields(active.requestId),
       });
@@ -3912,6 +4412,13 @@ export class AgentChatSession {
         requestId: active.requestId,
         toolName: call.name,
         toolCallId: call.callId,
+        toolOutcome: "failed",
+        toolFailureClass: "execution_failed",
+        ...(toolRequestedItemCount(call) === undefined
+          ? {}
+          : { toolItemCount: toolRequestedItemCount(call) }),
+        toolCompletedItemCount: 0,
+        toolFailedItemCount: toolRequestedItemCount(call) ?? 0,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatencyFields(active.requestId),
       });
@@ -4194,7 +4701,258 @@ export class AgentChatSession {
         || tool.part.state === "output-denied";
   }
 
-  private acceptTerminal(active: ActiveRun, terminal: ThinAgentRunTerminalData): void {
+  private captureFailedRun(
+    active: ActiveRun,
+    snapshot: AgentConversationSnapshot,
+    failure: IncidentFailureScalars,
+  ): void {
+    try {
+      const callback = this.options.onIncidentCapture;
+      if (
+        !callback
+        || !isThinAgentConversationId(active.conversationId)
+        || !isThinAgentRequestId(active.requestId)
+      ) return;
+      const content = incidentSnapshotCounts(snapshot);
+      const executingLocalTools = boundedIncidentPendingCount(
+        active.executingToolIds.size,
+      );
+      const pendingToolDeliveries = boundedIncidentPendingCount(
+        this.pendingDeliveries.size,
+      );
+      const pendingApprovalDeliveries = boundedIncidentPendingCount(
+        this.pendingApprovalDeliveries.size,
+      );
+      const pendingToolTasks = boundedIncidentPendingCount(
+        active.toolTasks.size,
+      );
+      const elapsed = boundedIncidentElapsedMs(active.elapsedMs);
+      const serverRunId = isThinAgentServerRunId(failure.serverRunId)
+        ? failure.serverRunId
+        : undefined;
+      const incidentId = isThinAgentIncidentId(failure.incidentId)
+        ? failure.incidentId
+        : undefined;
+      const failureCode = normalizeAgentIncidentFailureCode(
+        failure.failureCode,
+        failure.failureAuthority,
+      );
+      const capture = Object.freeze({
+        kind: "agent_run_failed",
+        conversationId: active.conversationId,
+        requestId: active.requestId,
+        failureAuthority: failure.failureAuthority,
+        failureStage: failure.failureStage,
+        failureMechanism: failure.failureMechanism,
+        terminalValidation: failure.terminalValidation,
+        terminalSource: failure.terminalSource,
+        hostProcessState: "responsive",
+        chatViewState: "unknown",
+        runOrigin: active.origin,
+        runPhase: failure.runPhase ?? active.phase,
+        connectionState: this.connectionState,
+        ...(elapsed.value === undefined ? {} : { elapsedMs: elapsed.value }),
+        elapsedMsTruncated: elapsed.truncated,
+        ...(serverRunId ? { serverRunId } : {}),
+        ...(incidentId ? { incidentId } : {}),
+        ...(failureCode ? { failureCode } : {}),
+        retryable: failure.retryable,
+        assistantTextPartCount: content.assistantTextPartCount,
+        assistantTextStreamingPartCount: content.assistantTextStreamingPartCount,
+        assistantTextCompletePartCount: content.assistantTextCompletePartCount,
+        assistantTextCharacterCount: content.assistantTextCharacterCount,
+        reasoningPartCount: content.reasoningPartCount,
+        reasoningStreamingPartCount: content.reasoningStreamingPartCount,
+        reasoningCompletePartCount: content.reasoningCompletePartCount,
+        reasoningCharacterCount: content.reasoningCharacterCount,
+        assistantOutputPresentBeforeFailure:
+          content.assistantOutputPresentBeforeFailure,
+        assistantOutputRetainedInFailedProjection:
+          content.assistantOutputRetainedInFailedProjection,
+        snapshotPartCount: content.snapshotPartCount,
+        executingLocalToolCount: executingLocalTools.value,
+        pendingToolDeliveryCount: pendingToolDeliveries.value,
+        pendingApprovalDeliveryCount: pendingApprovalDeliveries.value,
+        pendingToolTaskCount: pendingToolTasks.value,
+        serverQueued: active.serverQueued,
+        runStalled: this.runStalled,
+        awaitingClientWork: this.awaitingClientWork,
+        pendingCancel: this.pendingCancelRequestId === active.requestId,
+        pendingRegenerate: this.pendingRegenerate?.requestId === active.requestId,
+        countsTruncated: content.truncated
+          || executingLocalTools.truncated
+          || pendingToolDeliveries.truncated
+          || pendingApprovalDeliveries.truncated
+          || pendingToolTasks.truncated,
+      });
+      try {
+        callback(capture);
+      } catch {
+        // The failed lifecycle still records even if capture projection fails.
+      }
+    } catch {
+      // Diagnostics are observational. Capture failure cannot affect a run.
+    }
+  }
+
+  private capturePreflightFailure(
+    conversationId: string,
+    requestId: string,
+    error: ManagedAgentError,
+    taxonomy: Readonly<{
+      failureStage: AgentIncidentFailureStage;
+      failureMechanism: AgentIncidentFailureMechanism;
+    }>,
+    prepareFailureAlreadyRecorded: boolean = false,
+  ): void {
+    try {
+      const callback = this.options.onIncidentCapture;
+      if (
+        !callback
+        || !isThinAgentConversationId(conversationId)
+        || !isThinAgentRequestId(requestId)
+      ) return;
+      if (!prepareFailureAlreadyRecorded) {
+        this.recordLifecycle({
+          code: "response_prepare_failed",
+          phase: "start",
+          conversationId,
+          requestId,
+          ...(error.status === undefined ? {} : { status: error.status }),
+          retryable: error.retryable === true,
+          ...this.clientLatencyFields(requestId),
+        });
+      }
+      const latency = this.clientLatency.get(requestId);
+      const rawElapsed = latency?.conversationId === conversationId
+        ? this.monotonicNow() - latency.startedAtMonotonicMs
+        : null;
+      const elapsed = boundedIncidentElapsedMs(rawElapsed);
+      const incidentCandidate = error.incidentId ?? error.requestId;
+      const incidentId = isThinAgentIncidentId(incidentCandidate)
+        ? incidentCandidate
+        : undefined;
+      const failureCode = normalizeAgentIncidentFailureCode(error.code, "client");
+      const capture = Object.freeze({
+        kind: "agent_run_failed",
+        conversationId,
+        requestId,
+        failureAuthority: "client",
+        failureStage: taxonomy.failureStage,
+        failureMechanism: taxonomy.failureMechanism,
+        terminalValidation: "unvalidated",
+        terminalSource: "local_failure",
+        hostProcessState: "responsive",
+        chatViewState: "unknown",
+        runOrigin: "submitted",
+        runPhase: "submitted",
+        connectionState: this.connectionState,
+        ...(elapsed.value === undefined ? {} : { elapsedMs: elapsed.value }),
+        elapsedMsTruncated: elapsed.truncated,
+        ...(incidentId ? { incidentId } : {}),
+        ...(failureCode ? { failureCode } : {}),
+        retryable: error.retryable === true,
+        assistantTextPartCount: 0,
+        assistantTextStreamingPartCount: 0,
+        assistantTextCompletePartCount: 0,
+        assistantTextCharacterCount: 0,
+        reasoningPartCount: 0,
+        reasoningStreamingPartCount: 0,
+        reasoningCompletePartCount: 0,
+        reasoningCharacterCount: 0,
+        assistantOutputPresentBeforeFailure: false,
+        assistantOutputRetainedInFailedProjection: false,
+        snapshotPartCount: 1,
+        executingLocalToolCount: 0,
+        pendingToolDeliveryCount: 0,
+        pendingApprovalDeliveryCount: 0,
+        pendingToolTaskCount: 0,
+        serverQueued: false,
+        runStalled: this.runStalled,
+        awaitingClientWork: this.awaitingClientWork,
+        pendingCancel: false,
+        pendingRegenerate: false,
+        countsTruncated: false,
+      });
+      try {
+        callback(capture);
+      } catch {
+        // The failed lifecycle still records even if capture projection fails.
+      }
+      this.recordLifecycle({
+        code: "run_finished_failed",
+        phase: "response",
+        conversationId,
+        requestId,
+        ...(error.status === undefined ? {} : { status: error.status }),
+        retryable: error.retryable === true,
+        ...(incidentId ? { incidentId } : {}),
+        ...(failureCode ? { failureCode } : {}),
+        ...this.clientLatencyFields(requestId),
+      });
+    } catch {
+      // Preflight diagnostics cannot affect the user-visible failed result.
+    }
+  }
+
+  private captureAuthoritativeFailure(
+    active: ActiveRun,
+    terminal: Extract<ThinAgentRunTerminalData, { outcome: "failed" }>,
+    observedRunPhase: AgentRunPhase,
+    terminalSource: Extract<
+      AgentRunFailureCaptureEvent["terminalSource"],
+      "session_terminal" | "message_reconstruction"
+    >,
+  ): void {
+    if (
+      !isThinAgentServerRunId(terminal.run_id)
+      || !isThinAgentIncidentId(terminal.incident_id)
+      || !isThinAgentFailureCode(terminal.code)
+    ) return;
+    try {
+      const messages = restoreInterruptedTurnTail(
+        this.presentationMessages,
+        active,
+        terminal,
+      );
+      const projectionActive: ActiveRun = {
+        ...active,
+        completedLocalToolResults: new Map(active.completedLocalToolResults),
+      };
+      this.captureFailedRun(
+        active,
+        projectRun(
+          projectionActive,
+          messages,
+          this.connectionState,
+          this.runStalled,
+        ),
+        {
+          failureAuthority: "server",
+          failureStage: "response_terminal",
+          failureMechanism: "service_terminal",
+          terminalValidation: "validated",
+          terminalSource,
+          retryable: terminal.retryable,
+          runPhase: observedRunPhase,
+          serverRunId: terminal.run_id,
+          incidentId: terminal.incident_id,
+          failureCode: terminal.code,
+        },
+      );
+    } catch {
+      // Projection evidence is best effort and cannot affect terminal handling.
+    }
+  }
+
+  private acceptTerminal(
+    active: ActiveRun,
+    terminal: ThinAgentRunTerminalData,
+    terminalSource: Extract<
+      AgentRunFailureCaptureEvent["terminalSource"],
+      "session_terminal" | "message_reconstruction"
+    >,
+  ): void {
     if (
       this.active?.token !== active.token
       || active.terminal
@@ -4202,12 +4960,17 @@ export class AgentChatSession {
       || (active.serverRunId && terminal.run_id !== active.serverRunId)
     ) return;
     this.updateActiveElapsed(active);
+    const observedRunPhase = active.phase;
     active.serverRunId = terminal.run_id;
     active.terminal = terminal;
     active.phase = terminal.outcome === "succeeded" ? "settling" : "complete";
     active.label = terminal.outcome === "succeeded" ? "Finishing" : "";
     const terminalSegmentOrdinal = this.clientLatency.get(active.requestId)
       ?.pendingTerminalOrdinal ?? undefined;
+    const latencyContext = this.clientLatency.get(active.requestId);
+    if (latencyContext && terminalSegmentOrdinal !== undefined) {
+      latencyContext.terminalSegmentOrdinal = terminalSegmentOrdinal;
+    }
     this.recordLifecycle({
       code: terminal.outcome === "succeeded"
         ? "response_result_received_succeeded"
@@ -4231,6 +4994,14 @@ export class AgentChatSession {
         terminalSegmentOrdinal,
       ),
     });
+    if (terminal.outcome === "failed") {
+      this.captureAuthoritativeFailure(
+        active,
+        terminal,
+        observedRunPhase,
+        terminalSource,
+      );
+    }
     this.publishActive(active, true);
     const finalization = this.finalizeTerminal(active);
     this.pendingFinalization = finalization.then(
@@ -4327,7 +5098,11 @@ export class AgentChatSession {
       : terminal.outcome === "cancelled"
         ? { kind: "cancelled", snapshot }
         : { kind: "failed", snapshot, error: terminalError(terminal) };
-    this.completeActive(active, result);
+    this.completeActive(
+      active,
+      result,
+      result.kind === "failed" ? "server" : undefined,
+    );
     if (terminal.outcome === "succeeded") {
       // Credit balance is presentation metadata; the server remains the
       // authority for admitting the next billed turn. A slow balance lookup
@@ -4344,7 +5119,11 @@ export class AgentChatSession {
     }
   }
 
-  private completeActive(active: ActiveRun, result: AgentRunResult): void {
+  private completeActive(
+    active: ActiveRun,
+    result: AgentRunResult,
+    failureAuthority?: "server" | "client",
+  ): void {
     if (this.active?.token !== active.token) return;
     this.clearRunStallTimer();
     this.clearResynchronization();
@@ -4365,8 +5144,26 @@ export class AgentChatSession {
       conversationId: active.conversationId,
       requestId: active.requestId,
       ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
-      ...(result.kind === "failed" ? { retryable: result.error.retryable } : {}),
-      ...this.clientLatencyFields(active.requestId),
+      ...(result.kind === "failed"
+        ? {
+            retryable: result.error.retryable,
+            failureCode: normalizeAgentIncidentFailureCode(
+              result.error.code,
+              failureAuthority ?? "server",
+            ),
+            ...(result.error.status === undefined
+              ? {}
+              : { status: result.error.status }),
+            ...(result.error.incidentId
+              ? { incidentId: result.error.incidentId }
+              : {}),
+          }
+        : {}),
+      ...this.clientLatencyFields(
+        active.requestId,
+        this.monotonicNow(),
+        this.clientLatency.get(active.requestId)?.terminalSegmentOrdinal ?? undefined,
+      ),
     });
     const billingFailure = result.kind === "failed" ? result.error : null;
     this.active = null;
@@ -4412,7 +5209,14 @@ export class AgentChatSession {
     this.completeActive(active, { kind: "cancelled", snapshot });
   }
 
-  private finishLocalFailure(active: ActiveRun, error: ManagedAgentError): void {
+  private finishLocalFailure(
+    active: ActiveRun,
+    error: ManagedAgentError,
+    taxonomy: Readonly<{
+      failureStage: AgentIncidentFailureStage;
+      failureMechanism: AgentIncidentFailureMechanism;
+    }>,
+  ): void {
     if (this.active?.token !== active.token || active.terminal) return;
     this.updateActiveElapsed(active);
     active.terminal = {
@@ -4433,8 +5237,26 @@ export class AgentChatSession {
       this.presentationMessages,
       this.connectionState,
     );
+    const incidentCandidate = error.incidentId ?? error.requestId;
+    this.captureFailedRun(active, snapshot, {
+      failureAuthority: "client",
+      failureStage: taxonomy.failureStage,
+      failureMechanism: taxonomy.failureMechanism,
+      terminalValidation: "unvalidated",
+      terminalSource: "local_failure",
+      retryable: error.retryable === true,
+      ...(isThinAgentServerRunId(active.serverRunId)
+        ? { serverRunId: active.serverRunId }
+        : {}),
+      ...(isThinAgentIncidentId(incidentCandidate)
+        ? { incidentId: incidentCandidate }
+        : {}),
+      ...(isThinAgentFailureCode(error.code)
+        ? { failureCode: error.code }
+        : {}),
+    });
     this.commitSnapshot(snapshot);
-    this.completeActive(active, { kind: "failed", snapshot, error });
+    this.completeActive(active, { kind: "failed", snapshot, error }, "client");
     // Complete/release first so the session-owned billing refresh starts
     // before AgentChatView's generic error presentation sees the same 402.
     // The latter then joins the in-flight refresh instead of forcing another.
@@ -4670,11 +5492,18 @@ export class AgentChatSession {
         if (active.cancelRequested) {
           this.finishLocalCancellation(active);
         } else {
-          this.finishLocalFailure(active, managedError(
+          const normalized = managedError(
             error,
             "response_start_failed",
             "SystemSculpt could not retry the response.",
-          ));
+          );
+          this.finishLocalFailure(active, normalized, {
+            failureStage: "request_dispatch",
+            failureMechanism: incidentFailureMechanism(
+              normalized,
+              "transport_or_protocol_failure",
+            ),
+          });
         }
       } else {
         this.reportLocalIssue(error);

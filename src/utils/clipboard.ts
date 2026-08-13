@@ -132,18 +132,20 @@ export async function tryCopyToClipboard(text: string, host?: Node): Promise<boo
   }
 
   if (ownerDocument?.body) {
-    const textarea = ownerDocument.body.createEl("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.setCssStyles({ position: "fixed" });
-    textarea.setCssStyles({ opacity: "0" });
-    textarea.select();
+    let textarea: HTMLTextAreaElement | undefined;
     try {
-      const result = ownerDocument.execCommand("copy");
+      textarea = ownerDocument.body.createEl("textarea");
       textarea.remove();
-      return result;
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.setCssStyles({ position: "fixed", opacity: "0" });
+      ownerDocument.body.appendChild(textarea);
+      textarea.select();
+      return ownerDocument.execCommand("copy");
     } catch {
-      textarea.remove();
+      return false;
+    } finally {
+      textarea?.remove();
     }
   }
 

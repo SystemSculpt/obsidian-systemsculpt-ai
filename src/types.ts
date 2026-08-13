@@ -415,8 +415,15 @@ export interface ChatMessage {
   streaming?: boolean;
   // The run that produced this assistant message ended without finishing it.
   // Additive presentation metadata: restored history uses it to keep the
-  // interrupted turn visibly terminal ("Stopped") instead of silently complete.
-  terminalOutcome?: "cancelled";
+  // interrupted turn visibly terminal instead of silently complete.
+  terminalOutcome?: "cancelled" | "failed";
+  // Local content-free diagnostics report. Unlike terminalIncidentId, this
+  // identifier is created by the plugin and remains usable after restart.
+  terminalReportId?: string;
+  terminalIncidentId?: string;
+  terminalFailureCode?: string;
+  terminalRetryable?: boolean;
+  terminalServerRunId?: string;
 }
 
 export interface SystemSculptResponse {

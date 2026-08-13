@@ -95,6 +95,16 @@ interface DevelopmentChatOwnership {
   view: DevelopmentChatView;
 }
 
+interface DevelopmentChatOwnershipReceipt {
+  readonly chatSha256: string;
+  readonly chatPath: string;
+  readonly initialApprovalMode: string;
+  readonly marker: string;
+  readonly ownedChatId: string;
+  readonly previousChatId: string;
+  readonly version: 1;
+}
+
 interface ApprovedDevelopmentTrashArtifact {
   readonly candidates: readonly string[];
   readonly expectedText: string;
@@ -122,6 +132,10 @@ interface DevelopmentCleanupProgress {
 }
 
 const developmentChatOwners = new WeakMap<App, DevelopmentChatOwnership>();
+
+const INCIDENT_REPORT_ID_PATTERN = /^report_(?!0{32}$)[a-f0-9]{32}$/u;
+const INCIDENT_REPORT_DIRECTORY = ".systemsculpt/diagnostics/incidents";
+const INCIDENT_REPORT_MAX_BYTES = 256 * 1024;
 
 /**
  * Diagnostics-export attribution state. The harness may only trash a
@@ -3645,6 +3659,37 @@ function composerDraft(input: HTMLElement | null): string {
   return input?.isContentEditable ? input.textContent ?? "" : "";
 }
 
+async function waitForFailedTurnRetryAdmission(
+  ctx: ActionContext,
+  priorUserTurn: HTMLElement | null,
+  priorMessageId: string,
+  timeoutMs: number,
+): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    throwIfActionCancelled(ctx);
+    const stop = resolveTarget(ctx, "chat.composer.stop");
+    if (stop && isVisible(stop)) return;
+    const container = chatContainer(ctx.app);
+    const currentUserTurns = container?.querySelectorAll<HTMLElement>(
+      ".systemsculpt-agent-turn.is-user",
+    );
+    const currentUserTurn = currentUserTurns?.[currentUserTurns.length - 1] ?? null;
+    const currentMessageId = currentUserTurn?.dataset.messageId ?? "";
+    if (
+      currentUserTurn
+      && (
+        currentUserTurn !== priorUserTurn
+        || (priorMessageId.length > 0 && currentMessageId !== priorMessageId)
+      )
+    ) return;
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new DriverActionError("Retry did not admit a replacement failed turn.");
+    }
+    await sleep(20);
+  }
+}
+
 async function waitForBlankDevelopmentChat(
   ctx: ActionContext,
   newChatLoaded: () => boolean,
@@ -4127,6 +4172,263 @@ async function reopenOwnedDevelopmentHistory(
     }
     throw error;
   }
+}
+
+function exactReceiptRecord(value: unknown): DevelopmentChatOwnershipReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new DriverActionError("The development ownership receipt is invalid.");
+  }
+  const receipt = value as Record<string, unknown>;
+  const expectedKeys = [
+    "chatPath",
+    "chatSha256",
+    "initialApprovalMode",
+    "marker",
+    "ownedChatId",
+    "previousChatId",
+    "version",
+  ];
+  if (
+    Object.keys(receipt).length !== expectedKeys.length
+    || expectedKeys.some((key) => !(key in receipt))
+    || receipt.version !== 1
+    || typeof receipt.ownedChatId !== "string"
+    || receipt.ownedChatId.length === 0
+    || receipt.ownedChatId.length > 256
+    || receipt.ownedChatId.includes("/")
+    || receipt.ownedChatId.includes("\\")
+    || typeof receipt.previousChatId !== "string"
+    || receipt.previousChatId.length > 256
+    || receipt.previousChatId.includes("/")
+    || receipt.previousChatId.includes("\\")
+    || receipt.previousChatId === receipt.ownedChatId
+    || typeof receipt.initialApprovalMode !== "string"
+    || receipt.initialApprovalMode.length === 0
+    || receipt.initialApprovalMode.length > 64
+    || typeof receipt.chatSha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(receipt.chatSha256)
+  ) {
+    throw new DriverActionError("The development ownership receipt is invalid.");
+  }
+  const marker = validatedDevelopmentMarker(receipt.marker);
+  const chatPath = validatedVaultPath(receipt.chatPath);
+  if (!chatPath.endsWith(".md")) {
+    throw new DriverActionError("The development ownership receipt is invalid.");
+  }
+  return {
+    version: 1,
+    marker,
+    ownedChatId: receipt.ownedChatId,
+    previousChatId: receipt.previousChatId,
+    initialApprovalMode: receipt.initialApprovalMode,
+    chatPath,
+    chatSha256: receipt.chatSha256,
+  };
+}
+
+async function exportDevelopmentOwnershipReceipt(
+  ctx: ActionContext,
+): Promise<DevelopmentChatOwnershipReceipt> {
+  const ownership = requireDevelopmentChatOwnership(ctx);
+  const { container, input } = requireCurrentDevelopmentChatMarker(ctx, ownership);
+  if (
+    ownership.cleanupProgress
+    || ownership.approvedMutationCount !== 0
+    || ownership.approvedDevelopmentPaths.size !== 0
+    || ownership.approvedDevelopmentDirectories.size !== 0
+    || ownership.approvedTrashArtifacts.size !== 0
+  ) {
+    throw new DriverActionError(
+      "Development ownership can cross a reload only before cleanup and without vault mutations.",
+    );
+  }
+  const ownedChatId = ownership.ownedChatId;
+  const chatPath = ownership.view.getChatHistoryFilePath();
+  if (
+    !ownedChatId
+    || ownership.view.chatId !== ownedChatId
+    || !chatPath
+    || ownership.view.getExpectedChatHistoryFilePath() !== chatPath
+  ) {
+    throw new DriverActionError("The owned development chat is not durably saved.");
+  }
+  const stop = resolveTarget(ctx, "chat.composer.stop");
+  if (
+    (stop && isVisible(stop))
+    || composerDraft(input).length > 0
+    || container.querySelector(
+      '[data-testid="chat.composer.attachment.remove"], '
+        + '[data-testid="chat.composer.attachment.unpin"]',
+    )
+  ) {
+    throw new DriverActionError("The owned development chat is not idle for reload.");
+  }
+  const text = await ctx.app.vault.adapter.read(chatPath);
+  if (
+    !containsExactDevelopmentMarker(text, ownership.marker)
+    || !text.includes("<!-- SYSTEMSCULPT-MESSAGE-START")
+  ) {
+    throw new DriverActionError("The saved development chat does not match its ownership proof.");
+  }
+  if (ownership.toolCaptureOwned) {
+    endToolLifecycleCapture(ctx);
+    ownership.toolCaptureOwned = false;
+  }
+  return {
+    version: 1,
+    marker: ownership.marker,
+    ownedChatId,
+    previousChatId: ownership.previousChatId,
+    initialApprovalMode: ownership.initialApprovalMode,
+    chatPath,
+    chatSha256: sha256OfText(text),
+  };
+}
+
+async function importDevelopmentOwnershipReceipt(
+  ctx: ActionContext,
+  value: unknown,
+): Promise<Record<string, unknown>> {
+  const receipt = exactReceiptRecord(value);
+  const existing = developmentChatOwners.get(ctx.app);
+  const view = existing?.view ?? activeChatView(ctx);
+  if (!view) throw new DriverActionError("Chat must be open before restoring development ownership.");
+  if (existing) {
+    if (
+      existing.marker !== receipt.marker
+      || existing.ownedChatId !== receipt.ownedChatId
+      || existing.previousChatId !== receipt.previousChatId
+      || existing.initialApprovalMode !== receipt.initialApprovalMode
+      || existing.view.getExpectedChatHistoryFilePath() !== receipt.chatPath
+    ) {
+      throw new DriverActionError("A different development-test chat is already owned.");
+    }
+  }
+  if (view.chatId !== receipt.ownedChatId) await view.loadChatById(receipt.ownedChatId);
+  if (
+    activeChatView(ctx) !== view
+    || view.chatId !== receipt.ownedChatId
+    || view.getExpectedChatHistoryFilePath() !== receipt.chatPath
+    || view.getChatHistoryFilePath() !== receipt.chatPath
+  ) {
+    throw new DriverActionError("The reloaded chat does not match its ownership proof.");
+  }
+  const text = await ctx.app.vault.adapter.read(receipt.chatPath);
+  if (
+    sha256OfText(text) !== receipt.chatSha256
+    || !containsExactDevelopmentMarker(text, receipt.marker)
+    || !text.includes("<!-- SYSTEMSCULPT-MESSAGE-START")
+  ) {
+    throw new DriverActionError("The reloaded chat changed since its ownership proof.");
+  }
+  const container = chatContainer(ctx.app);
+  const input = resolveTarget(ctx, "chat.composer.input");
+  if (
+    activeChatView(ctx) !== view
+    || !container
+    || !input
+    || !chatContainsDevelopmentMarker(container, input, receipt.marker)
+  ) {
+    throw new DriverActionError("The reloaded chat does not contain its ownership marker.");
+  }
+  const stop = resolveTarget(ctx, "chat.composer.stop");
+  if (
+    (stop && isVisible(stop))
+    || composerDraft(input).length > 0
+    || container.querySelector(
+      '[data-testid="chat.composer.attachment.remove"], '
+        + '[data-testid="chat.composer.attachment.unpin"]',
+    )
+  ) {
+    throw new DriverActionError("The reloaded development chat is not idle.");
+  }
+  const approval = resolveTarget(ctx, "chat.composer.approval-mode");
+  if (
+    !approval?.instanceOf(HTMLSelectElement)
+    || ![...approval.options].some((option) => option.value === receipt.initialApprovalMode)
+  ) {
+    throw new DriverActionError("The prior approval mode cannot be restored safely.");
+  }
+  if (existing) {
+    return {
+      restored: true,
+      alreadyOwned: true,
+      exactChatBytesPreserved: true,
+      markerRestored: true,
+    };
+  }
+  developmentChatOwners.set(ctx.app, {
+    approvalClearedAfterGrant: false,
+    approvalGranted: false,
+    approvedDevelopmentDirectories: new Set(),
+    approvedDevelopmentPaths: new Map(),
+    approvedDevelopmentRootEstablished: false,
+    approvedMutationCount: 0,
+    approvedTrashArtifacts: new Map(),
+    cleanupProgress: null,
+    initialApprovalMode: receipt.initialApprovalMode,
+    marker: receipt.marker,
+    ownedChatId: receipt.ownedChatId,
+    previousChatId: receipt.previousChatId,
+    runObserved: true,
+    submissionBaseline: null,
+    submissionAttempted: true,
+    toolCaptureOwned: false,
+    view,
+  });
+  return {
+    restored: true,
+    exactChatBytesPreserved: true,
+    markerRestored: true,
+  };
+}
+
+async function readCopiedIncidentReport(
+  ctx: ActionContext,
+): Promise<Readonly<{ reportId: string; serialized: string }>> {
+  const ownerWindow = chatContainer(ctx.app)?.ownerDocument.defaultView ?? window;
+  const clipboard = ownerWindow.navigator.clipboard;
+  const readText = clipboard?.readText;
+  if (typeof readText !== "function") {
+    throw new DriverActionError("Clipboard reading is unavailable in this development build.");
+  }
+  let serialized: string;
+  try {
+    serialized = await readText.call(clipboard);
+  } catch {
+    throw new DriverActionError("The copied incident report could not be read.");
+  }
+  const bytes = new TextEncoder().encode(serialized).byteLength;
+  if (bytes === 0 || bytes > INCIDENT_REPORT_MAX_BYTES) {
+    throw new DriverActionError("The copied incident report has an invalid size.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    throw new DriverActionError("The copied incident report is not valid JSON.");
+  }
+  const reportId = typeof parsed === "object"
+    && parsed !== null
+    && !Array.isArray(parsed)
+    && typeof (parsed as { report_id?: unknown }).report_id === "string"
+    ? (parsed as { report_id: string }).report_id
+    : "";
+  if (!INCIDENT_REPORT_ID_PATTERN.test(reportId)) {
+    throw new DriverActionError("The copied incident report has an invalid identity.");
+  }
+  let persisted: string;
+  try {
+    persisted = await ctx.app.vault.adapter.read(
+      `${INCIDENT_REPORT_DIRECTORY}/${reportId}.json`,
+    );
+  } catch {
+    throw new DriverActionError("The copied incident report is not durably stored.");
+  }
+  if (persisted !== serialized) {
+    throw new DriverActionError("The copied incident report differs from its stored bytes.");
+  }
+  return { reportId, serialized };
 }
 
 function developmentCleanupProgress(
@@ -5767,6 +6069,15 @@ export async function runDriverAction(
     case "chat.beginDevelopmentState": {
       return beginDevelopmentChat(ctx, params);
     }
+    case "chat.exportDevelopmentOwnershipReceipt": {
+      return exportDevelopmentOwnershipReceipt(ctx);
+    }
+    case "chat.importDevelopmentOwnershipReceipt": {
+      return importDevelopmentOwnershipReceipt(ctx, params.receipt);
+    }
+    case "chat.readCopiedIncidentReport": {
+      return readCopiedIncidentReport(ctx);
+    }
     case "chat.resetDevelopmentState": {
       return resetDevelopmentChatState(ctx, params);
     }
@@ -5796,12 +6107,53 @@ export async function runDriverAction(
     }
     case "click": {
       const element = requireTarget(ctx, params.target);
-      const submissionBaseline = element === resolveTarget(ctx, "chat.composer.send")
+      const isFailedTurnRetry = element === resolveTarget(ctx, "chat.turn.retry-failed");
+      const retryContainer = isFailedTurnRetry ? chatContainer(ctx.app) : null;
+      const retryUserTurns = retryContainer?.querySelectorAll<HTMLElement>(
+        ".systemsculpt-agent-turn.is-user",
+      );
+      const priorRetryUserTurn = retryUserTurns?.[retryUserTurns.length - 1] ?? null;
+      const priorRetryMessageId = priorRetryUserTurn?.dataset.messageId ?? "";
+      const submissionBaseline = (
+        element === resolveTarget(ctx, "chat.composer.send")
+        || isFailedTurnRetry
+      )
         ? captureRunSubmissionBaseline(ctx)
         : null;
       element.scrollIntoView({ block: "nearest" });
       pointerSequence(element);
-      if (submissionBaseline) pendingRunSubmissions.set(ctx.app, submissionBaseline);
+      if (
+        typeof params.immediateTextEquals === "string"
+        && (element.textContent ?? "").trim() !== params.immediateTextEquals
+      ) {
+        throw new DriverActionError("The clicked control did not enter its expected immediate state.");
+      }
+      if (submissionBaseline) {
+        pendingRunSubmissions.set(ctx.app, submissionBaseline);
+        if (isFailedTurnRetry) {
+          const ownership = developmentChatOwners.get(ctx.app);
+          if (ownership) {
+            ownership.approvalClearedAfterGrant = false;
+            ownership.approvalGranted = false;
+            ownership.runObserved = false;
+            ownership.submissionAttempted = true;
+            ownership.submissionBaseline = submissionBaseline;
+          }
+        }
+      }
+      if (isFailedTurnRetry) {
+        const timeoutMs = typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs)
+          ? Math.max(0, Math.min(params.timeoutMs, 60000))
+          : 20000;
+        await waitForFailedTurnRetryAdmission(
+          ctx,
+          priorRetryUserTurn,
+          priorRetryMessageId,
+          timeoutMs,
+        );
+        const ownership = developmentChatOwners.get(ctx.app);
+        if (ownership) ownership.runObserved = true;
+      }
       return describeElement(element);
     }
     case "type": {
@@ -5989,6 +6341,8 @@ export async function runDriverAction(
           "chat.assertExactToolPlanCleanClose, " +
           "chat.assertNoClientToolsBeforeContinuation, " +
           "chat.beginDevelopmentState, chat.typeDevelopmentDraft, " +
+          "chat.exportDevelopmentOwnershipReceipt, chat.importDevelopmentOwnershipReceipt, " +
+          "chat.readCopiedIncidentReport, " +
           "chat.approveDevelopmentWriteOnce, " +
           "chat.approveDevelopmentMutationOnce, " +
           "chat.waitForDevelopmentRun, chat.resetDevelopmentState, click, type, press, " +
