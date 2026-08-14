@@ -100,8 +100,8 @@
 .systemsculpt-agent-reasoning-body {
   min-width: 0;
   max-height: var(--ss-agent-tool-details-height);
-  margin: var(--ss-space-0) 0 var(--ss-space-1) 28px;
-  padding: var(--ss-space-0) var(--ss-space-3);
+  margin: var(--ss-space-0) 0 var(--ss-space-1) var(--ss-space-2);
+  padding: var(--ss-space-0) var(--ss-space-3) var(--ss-space-0) var(--ss-space-2);
   overflow: auto;
   overscroll-behavior: contain;
   border-left: 1px solid var(--ss-line);

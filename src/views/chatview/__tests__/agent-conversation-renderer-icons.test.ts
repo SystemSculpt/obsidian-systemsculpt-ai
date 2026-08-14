@@ -1026,15 +1026,18 @@ describe("AgentConversationRenderer tail status", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(firstSummary, firstBody);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(firstBody.querySelectorAll(":scope > .systemsculpt-agent-part.is-tool"))
-      .toHaveLength(2);
-    expect(firstBody.querySelector<HTMLButtonElement>(
+      .toHaveLength(1);
+    const firstOverflow = firstBody.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
-    )?.getAttribute("aria-expanded")).toBe("false");
+    )!;
+    expect(firstOverflow.getAttribute("aria-expanded")).toBe("false");
+    expect(firstOverflow.nextElementSibling?.classList)
+      .toContain("systemsculpt-agent-activity-overflow-body");
+    expect(firstOverflow.nextElementSibling?.hasAttribute("hidden")).toBe(true);
     expect(firstBody.querySelector('[data-part-key="reasoning-cold-one"]')).toBeNull();
     expect(Array.from(firstBody.querySelectorAll<HTMLElement>(
       ":scope > [data-agent-activity-row]",
     )).map((row) => row.dataset.partKey)).toEqual([
-      "tool:call-cold-one",
       "tool:call-cold-two",
     ]);
     expect(firstBody.querySelectorAll("details.systemsculpt-agent-tool[open]"))
@@ -1198,7 +1201,8 @@ describe("AgentConversationRenderer tail status", () => {
     expect(retryHydration).not.toBe(firstHydration);
     await retryHydration;
     await Promise.resolve();
-    const rows = Array.from(body.querySelectorAll<HTMLElement>(
+    const drawer = overflow.nextElementSibling as HTMLElement;
+    const rows = Array.from(drawer.querySelectorAll<HTMLElement>(
       ":scope > [data-agent-activity-row]",
     ));
     expect(rows.map((row) => row.dataset.partKey)).toEqual([
@@ -1206,11 +1210,11 @@ describe("AgentConversationRenderer tail status", () => {
       "tool:call-lazy-one",
       "tool:call-lazy-two",
     ]);
-    expect(body.querySelectorAll("details.systemsculpt-agent-reasoning-details[open]"))
+    expect(drawer.querySelectorAll("details.systemsculpt-agent-reasoning-details[open]"))
       .toHaveLength(0);
-    expect(body.querySelectorAll("details.systemsculpt-agent-tool[open]"))
+    expect(drawer.querySelectorAll("details.systemsculpt-agent-tool[open]"))
       .toHaveLength(0);
-    expect(beginLayoutMutation).toHaveBeenLastCalledWith(overflow);
+    expect(beginLayoutMutation).toHaveBeenLastCalledWith(overflow, drawer);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(6);
     expect(overflowStates.get(overflow)?.status).toBe("hydrated");
     const olderNodes = rows.slice(0, 2);
@@ -1220,7 +1224,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(olderNodes.every((node) => !node.isConnected)).toBe(true);
     overflow.click();
     await Promise.resolve();
-    expect(Array.from(body.querySelectorAll<HTMLElement>(
+    expect(Array.from(drawer.querySelectorAll<HTMLElement>(
       ":scope > [data-agent-activity-row]",
     )).slice(0, 2)).toEqual(olderNodes);
     expect(markdownRender).toHaveBeenCalledTimes(callsAfterFirstExpansion);
@@ -1533,7 +1537,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     expect(internals.historicalOverflowHydrationStates.get(overflow)?.status).toBe("hydrated");
     expect(Array.from(worked.querySelectorAll<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body > [data-agent-activity-row]",
+      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > [data-agent-activity-row]",
     )).map((row) => row.dataset.partKey)).toEqual([
       "reasoning-lazy-refresh",
       "tool:call-lazy-refresh-one",
@@ -1868,7 +1872,7 @@ describe("AgentConversationRenderer tail status", () => {
     const internals = renderer as unknown as {
       activityOverflowStates: WeakMap<
         HTMLButtonElement,
-        { label: HTMLElement; latestNode: HTMLElement | null; previousNodes: HTMLElement[] }
+        { body: HTMLElement; icon: HTMLElement; label: HTMLElement; latestNode: HTMLElement | null; previousNodes: HTMLElement[] }
       >;
       captureHistoricalDisclosureState(row: HTMLElement): unknown;
       prepareHistoricalRowReplacement(replacement: Replacement): Promise<void>;
@@ -1892,6 +1896,8 @@ describe("AgentConversationRenderer tail status", () => {
       attr: { "data-agent-activity-overflow": "" },
     });
     internals.activityOverflowStates.set(mappedOverflow, {
+      body: workedBody.createDiv(),
+      icon: mappedOverflow.createSpan(),
       label: mappedOverflow.createSpan(),
       latestNode: null,
       previousNodes: [],
@@ -1970,7 +1976,7 @@ describe("AgentConversationRenderer tail status", () => {
     const internals = renderer as unknown as {
       activityOverflowStates: WeakMap<
         HTMLButtonElement,
-        { label: HTMLElement; latestNode: HTMLElement | null; previousNodes: HTMLElement[] }
+        { body: HTMLElement; icon: HTMLElement; label: HTMLElement; latestNode: HTMLElement | null; previousNodes: HTMLElement[] }
       >;
       applyActivityOverflowLayout(element: HTMLButtonElement): void;
       captureHistoricalDisclosureState(row: HTMLElement): {
@@ -1978,7 +1984,6 @@ describe("AgentConversationRenderer tail status", () => {
         overflowOpen: ReadonlyMap<string, boolean>;
       };
       disposeHistoricalOverflowHydration(element: HTMLButtonElement): void;
-      reconcileTimelineSegment(parent: HTMLElement, desired: readonly HTMLElement[]): void;
       setTextNode(element: HTMLElement | null, text: string): void;
       updateActivityOverflow(element: HTMLButtonElement, hiddenCount: number): void;
     };
@@ -1986,7 +1991,6 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.focusInlineMessageEdit();
     renderer.showCompletedRenderFallback();
     renderer.showCompletedRenderFallback();
-    internals.reconcileTimelineSegment(parent, []);
     internals.setTextNode(null, "ignored");
     expect(internals.captureHistoricalDisclosureState(document.createElement("div")).workedOpen)
       .toBe(false);
@@ -2004,6 +2008,8 @@ describe("AgentConversationRenderer tail status", () => {
 
     const overflow = document.createElement("button");
     internals.activityOverflowStates.set(overflow, {
+      body: document.createElement("div"),
+      icon: document.createElement("span"),
       label: document.createElement("span"),
       latestNode: null,
       previousNodes: [],
@@ -3018,7 +3024,7 @@ describe("AgentConversationRenderer tail status", () => {
       ".systemsculpt-agent-reasoning-header",
     )!;
     expect(details.open).toBe(false);
-    expect(header.textContent).toBe("Thinking");
+    expect(header.textContent).toBe("Reasoning...");
     expect(header.hasAttribute("aria-label")).toBe(false);
     expect(header.hasAttribute("title")).toBe(false);
     expect(details.querySelector(".systemsculpt-agent-reasoning-preview")).toBeNull();
@@ -3083,10 +3089,17 @@ describe("AgentConversationRenderer tail status", () => {
       "button[data-agent-activity-overflow]",
     )!;
     const rows = () => Array.from(body.querySelectorAll<HTMLElement>(
-      ":scope > [data-agent-activity-row]",
+      "[data-agent-activity-row]",
     )).map((row) => row.dataset.partKey);
     expect(rows()).toEqual(["tool:call-overflow-three"]);
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
+    expect(overflow.querySelector<HTMLElement>(
+      ".systemsculpt-agent-activity-overflow-icon",
+    )?.dataset.iconName).toBe("file-text");
+    expect(overflow.lastElementChild?.classList)
+      .toContain("systemsculpt-agent-activity-overflow-disclosure");
+    const drawer = overflow.nextElementSibling as HTMLElement;
+    expect(overflow.getAttribute("aria-controls")).toBe(drawer.id);
 
     overflow.click();
     expect(rows()).toEqual([
@@ -3094,16 +3107,16 @@ describe("AgentConversationRenderer tail status", () => {
       "tool:call-overflow-two",
       "tool:call-overflow-three",
     ]);
-    expect(overflow.previousElementSibling?.getAttribute("data-part-key"))
+    expect(drawer.lastElementChild?.getAttribute("data-part-key"))
       .toBe("tool:call-overflow-three");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Show fewer tool calls");
+      .toBe("Read 1 file + 2 other tool calls");
 
-    body.insertBefore(overflow, body.firstElementChild);
+    drawer.insertBefore(drawer.lastElementChild!, drawer.firstElementChild);
     (renderer as unknown as {
       applyActivityOverflowLayout(element: HTMLButtonElement): void;
     }).applyActivityOverflowLayout(overflow);
-    expect(overflow.previousElementSibling?.getAttribute("data-part-key"))
+    expect(drawer.lastElementChild?.getAttribute("data-part-key"))
       .toBe("tool:call-overflow-three");
 
     overflow.focus();
@@ -3113,6 +3126,23 @@ describe("AgentConversationRenderer tail status", () => {
     expect(overflow.dataset.hiddenCount).toBe("1");
     expect(overflow.getAttribute("aria-expanded")).toBe("true");
     expect(document.activeElement).toBe(overflow);
+
+    const finalReasoning: AgentPart = {
+      id: "reasoning-overflow-final",
+      kind: "reasoning",
+      messageId: "assistant-overflow",
+      state: "complete",
+      summary: "Finished checking the files.",
+      order: 4,
+    };
+    await render([tools[0]!, finalReasoning]);
+    expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
+      .toBe("Reasoned + 1 other tool call");
+    expect(overflow.querySelector<HTMLElement>(
+      ".systemsculpt-agent-activity-overflow-icon",
+    )?.dataset.iconName).toBe("sparkles");
+    expect(overflow.lastElementChild?.classList)
+      .toContain("systemsculpt-agent-activity-overflow-disclosure");
 
     await render([tools[2]!]);
     expect(body.querySelector("button[data-agent-activity-overflow]")).toBeNull();
@@ -3332,10 +3362,9 @@ describe("AgentConversationRenderer tail status", () => {
     expect(worked.contains(liveReasoning)).toBe(true);
     expect(worked.contains(liveTool)).toBe(true);
     expect(Array.from(worked.querySelectorAll<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body > [data-agent-activity-row]",
+      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > [data-agent-activity-row]",
     ))).toEqual([liveReasoning, liveTool]);
-    expect(worked.querySelector(".systemsculpt-agent-activity-body")?.lastElementChild)
-      .toBe(overflow);
+    expect(overflow.nextElementSibling?.lastElementChild).toBe(liveTool);
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
     renderer.unload();
   });
@@ -4075,7 +4104,7 @@ describe("AgentConversationRenderer tail status", () => {
     )!;
     expect(details.querySelector(".systemsculpt-agent-reasoning-preview")).toBeNull();
     expect(details.querySelector(".systemsculpt-agent-reasoning-header")?.textContent)
-      .toBe("Reasoning");
+      .toBe("Reasoned");
     const settle = jest.spyOn((renderer as unknown as {
       liveMarkdown: { settle(node: HTMLElement, markdown: string): Promise<void> };
     }).liveMarkdown, "settle").mockRejectedValueOnce(new Error("render failed"));

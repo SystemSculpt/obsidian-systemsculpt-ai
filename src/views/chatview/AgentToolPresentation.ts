@@ -4,6 +4,7 @@ import {
   localToolOutcomeSchema,
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "./AgentConversation";
+import { isActiveAgentToolState } from "./AgentConversationPresentation";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 
@@ -84,8 +85,8 @@ const COUNTED_TOOL_COPY: Readonly<Record<string, Omit<CountedTool, "items">>> = 
   read: { verb: "Read", singular: "file", plural: "files" },
   open: { verb: "Open", singular: "file", plural: "files" },
   list_items: { verb: "List", singular: "folder", plural: "folders" },
-  find: { verb: "Search", singular: "file pattern", plural: "file patterns" },
-  search: { verb: "Search", singular: "text pattern", plural: "text patterns" },
+  find: { verb: "Search", singular: "pattern", plural: "patterns" },
+  search: { verb: "Search", singular: "pattern", plural: "patterns" },
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -150,9 +151,48 @@ function countedTool(canonicalName: string, input: Record<string, unknown>): Cou
   return items.length > 0 ? { ...copy, items } : null;
 }
 
-function countedLabel(counted: CountedTool): string {
+type ToolActionState = "base" | "active" | "complete";
+
+const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, complete: string]>> = {
+  Read: ["Reading", "Read"],
+  Write: ["Writing", "Wrote"],
+  Edit: ["Editing", "Edited"],
+  Create: ["Creating", "Created"],
+  List: ["Listing", "Listed"],
+  Move: ["Moving", "Moved"],
+  Find: ["Finding", "Found"],
+  Search: ["Searching", "Searched"],
+  Open: ["Opening", "Opened"],
+  Manage: ["Managing", "Managed"],
+  Pin: ["Pinning", "Pinned"],
+  Unpin: ["Unpinning", "Unpinned"],
+};
+
+function actionState(displayState: AgentToolDisplayState): ToolActionState {
+  if (displayState !== "partial" && isActiveAgentToolState(displayState)) {
+    return "active";
+  }
+  return displayState === "succeeded" || displayState === "partial"
+    ? "complete"
+    : "base";
+}
+
+function actionLabel(label: string, state: ToolActionState): string {
+  if (state === "base") return label;
+  if (label === UNKNOWN_SERVER_TOOL_LABEL) {
+    return state === "active" ? "Running SystemSculpt action..." : "Ran SystemSculpt action";
+  }
+  const verb = label.split(" ", 1)[0] ?? "";
+  const forms = TOOL_ACTION_FORMS[verb];
+  if (!forms) return label;
+  const tense = state === "active" ? forms[0] : forms[1];
+  const result = `${tense}${label.slice(verb.length)}`;
+  return state === "active" ? `${result}...` : result;
+}
+
+function countedLabel(counted: CountedTool, state: ToolActionState): string {
   const noun = counted.items.length === 1 ? counted.singular : counted.plural;
-  return `${counted.verb} ${counted.items.length} ${noun}`;
+  return actionLabel(`${counted.verb} ${counted.items.length} ${noun}`, state);
 }
 
 type ToolOutcomeCounts = Readonly<{ completed: number; failed: number }>;
@@ -439,17 +479,20 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     ? null
     : partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
   const presentedName = unknownServerTool ? "server_action" : canonicalName;
+  const labelState = actionState(displayState);
   return {
     canonicalName: presentedName,
     label: part.location === "server"
-      ? serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL
+      ? actionLabel(serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
       : counted
-        ? countedLabel(counted)
+        ? countedLabel(counted, labelState)
         : canonicalName === "context"
-          ? contextToolLabel(input)
-          : TOOL_LABELS[canonicalName] || canonicalName
-          .replace(/[_-]+/g, " ")
-          .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+          ? actionLabel(contextToolLabel(input), labelState)
+          : TOOL_LABELS[canonicalName]
+            ? actionLabel(TOOL_LABELS[canonicalName], labelState)
+            : canonicalName
+              .replace(/[_-]+/g, " ")
+              .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
     icon: STATE_ICONS[displayState],

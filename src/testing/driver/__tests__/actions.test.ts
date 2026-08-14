@@ -567,6 +567,32 @@ function renderWriteApproval(
   return approved;
 }
 
+function collapseApprovalIntoActivityDrawer(
+  harness: ReturnType<typeof makeDevelopmentHarness>,
+): HTMLButtonElement {
+  const approval = harness.container.querySelector<HTMLElement>(
+    '[data-testid="chat.approval.allow-once"]',
+  )!;
+  const tool = approval.closest<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+  const parent = tool.parentElement!;
+  const disclosure = document.createElement("button");
+  disclosure.dataset.agentActivityOverflow = "";
+  disclosure.setAttribute("aria-expanded", "false");
+  const body = document.createElement("div");
+  body.className = "systemsculpt-agent-activity-overflow-body";
+  body.hidden = true;
+  disclosure.onclick = () => {
+    const expanded = disclosure.getAttribute("aria-expanded") !== "true";
+    disclosure.setAttribute("aria-expanded", String(expanded));
+    body.hidden = !expanded;
+  };
+  approval.getBoundingClientRect = () => body.hidden ? rect(false) : rect();
+  parent.insertBefore(disclosure, tool);
+  parent.insertBefore(body, tool);
+  body.append(tool);
+  return disclosure;
+}
+
 function renderMutationApproval(
   harness: ReturnType<typeof makeDevelopmentHarness>,
   callId: string,
@@ -1654,6 +1680,7 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.typeDevelopmentDraft", { text: "approval check" });
     const ownedPath = `${DEVELOPMENT_TEST_ROOT}/${marker}/round-trip.md`;
     const approved = renderWriteApproval(harness, ownedPath, "EXACT");
+    const activityDrawer = collapseApprovalIntoActivityDrawer(harness);
 
     await expect(runDriverAction(harness.ctx, "chat.approveDevelopmentWriteOnce", {
       path: ownedPath,
@@ -1668,6 +1695,7 @@ describe("guarded development driver actions", () => {
       text: "EXACT",
     })).resolves.toEqual({ approved: true, path: ownedPath });
     expect(approved).toHaveBeenCalledTimes(1);
+    expect(activityDrawer.getAttribute("aria-expanded")).toBe("true");
 
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });

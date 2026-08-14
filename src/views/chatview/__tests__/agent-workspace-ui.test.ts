@@ -604,7 +604,7 @@ describe("AgentWorkspace", () => {
       input: { query: "Obsidian agents" },
       state: "running",
     });
-    expect(node.textContent).toContain("Search the web");
+    expect(node.textContent).toContain("Searching the web...");
     expect(node.textContent).not.toContain("Obsidian agents");
     expect(node.textContent).not.toContain("web_search");
     expect(node.querySelector(":scope > .systemsculpt-agent-tool")?.tagName)
@@ -841,7 +841,7 @@ describe("AgentWorkspace", () => {
     expect(worked.querySelector(".systemsculpt-agent-tool")).toBeNull();
     await hydrateRestoredWorked(renderer, worked);
     expect(host.querySelector(".systemsculpt-agent-tool")).not.toBeNull();
-    expect(host.textContent).toContain("Search the web");
+    expect(host.textContent).toContain("Searched the web");
     expect(host.textContent).toContain("Legacy search answer");
     expect(host.textContent).toContain("legacy release");
   });
@@ -1716,26 +1716,28 @@ describe("AgentWorkspace", () => {
     expect(activityBody.childElementCount).toBe(0);
     await hydrateRestoredWorked(workspace.renderer, activity);
     expect(Array.from(body.children).map((node) => node.textContent)).toEqual([
-      expect.stringMatching(/Before[\s\S]*Two\.md[\s\S]*\+1 previous tool call/),
+      expect.stringMatching(/Before[\s\S]*Read 1 file \+ 1 other tool call[\s\S]*Two\.md/),
       "After",
     ]);
     expect(Array.from(activityBody.querySelectorAll<HTMLElement>(
       ":scope > .systemsculpt-agent-part.is-tool",
-    )).map((tool) => tool.dataset.partKey)).toEqual(["tool:call-2"]);
+    ))).toHaveLength(0);
     const overflow = activity.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("+1 previous tool call");
-    expect(activity.querySelector(".systemsculpt-agent-activity-body > .is-tool")?.textContent)
+      .toBe("Read 1 file + 1 other tool call");
+    const overflowBody = overflow.nextElementSibling as HTMLElement;
+    expect(overflowBody.hasAttribute("hidden")).toBe(true);
+    expect(overflowBody.querySelector(".is-tool")?.textContent)
       .toContain("Two.md");
     await expandHistoricalOverflow(workspace.renderer, overflow);
     expect(overflow.getAttribute("aria-expanded")).toBe("true");
-    expect(Array.from(activityBody.querySelectorAll<HTMLElement>(
+    expect(Array.from(overflowBody.querySelectorAll<HTMLElement>(
       ":scope > .systemsculpt-agent-part.is-tool",
     )).map((tool) => tool.dataset.partKey)).toEqual(["tool:call-1", "tool:call-2"]);
-    expect(activityBody.lastElementChild).toBe(overflow);
+    expect(activityBody.lastElementChild).toBe(overflowBody);
     expect(body.querySelectorAll(":scope > .systemsculpt-agent-activity")).toHaveLength(1);
     expect(body.textContent).not.toContain("BeforeAfter");
     workspace.unload();
@@ -1838,11 +1840,13 @@ describe("AgentWorkspace", () => {
       )!;
       expect(overflow.getAttribute("aria-expanded")).toBe(String(expectedInitiallyExpanded));
       expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe(expectedInitiallyExpanded ? "Show fewer tool calls" : "+4 previous tool calls");
-      expect(activityBody.lastElementChild).toBe(overflow);
+        .toBe("Read 1 file + 4 other tool calls");
+      const overflowBody = overflow.nextElementSibling as HTMLElement;
+      expect(overflowBody.hasAttribute("hidden")).toBe(!expectedInitiallyExpanded);
+      expect(activityBody.lastElementChild).toBe(overflowBody);
       if (!expectedInitiallyExpanded) {
-        expect(activityBody.firstElementChild?.classList.contains("is-tool")).toBe(true);
-        expect(Array.from(activityBody.querySelectorAll<HTMLElement>(
+        expect(activityBody.firstElementChild).toBe(overflow);
+        expect(Array.from(overflowBody.querySelectorAll<HTMLElement>(
           "[data-agent-activity-row]",
         )).map((node) => node.dataset.activityKind)).toEqual(["tool"]);
         expect(row.querySelectorAll(".systemsculpt-agent-part.is-reasoning")).toHaveLength(0);
@@ -1850,7 +1854,7 @@ describe("AgentWorkspace", () => {
         await expandHistoricalOverflow(workspace.renderer, overflow);
       }
       expect(overflow.getAttribute("aria-expanded")).toBe("true");
-      expect(Array.from(activityBody.querySelectorAll<HTMLElement>(
+      expect(Array.from(overflowBody.querySelectorAll<HTMLElement>(
         ":scope > [data-agent-activity-row]",
       )).map((node) => node.dataset.activityKind)).toEqual([
         "reasoning",
@@ -1869,7 +1873,7 @@ describe("AgentWorkspace", () => {
         "tool:second",
         "tool:third",
       ]);
-      expect(activityBody.lastElementChild).toBe(overflow);
+      expect(activityBody.lastElementChild).toBe(overflowBody);
       expect(row.querySelector(".systemsculpt-agent-part.is-tool pre")).not.toBeNull();
       expect(row.querySelector(".systemsculpt-agent-artifact")).toBeNull();
       expect(row.textContent).not.toContain("not product UI");
@@ -1970,19 +1974,20 @@ describe("AgentWorkspace", () => {
       )!;
       expect(overflow.getAttribute("aria-expanded")).toBe(String(expectedInitiallyExpanded));
       expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe(expectedInitiallyExpanded ? "Show fewer tool calls" : "+2 previous tool calls");
+        .toBe("Read 1 file + 2 other tool calls");
+      const overflowBody = overflow.nextElementSibling as HTMLElement;
       if (!expectedInitiallyExpanded) {
-        const collapsedTool = activityBody.querySelector<HTMLElement>(
+        const collapsedTool = overflowBody.querySelector<HTMLElement>(
           ":scope > .systemsculpt-agent-part.is-tool",
         )!;
         expect(collapsedTool.dataset.partKey).toBe("tool:read-3");
         expect(collapsedTool.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
           .toBe("Research/Three.md");
-        expect(collapsedTool.nextElementSibling).toBe(overflow);
+        expect(overflowBody.hasAttribute("hidden")).toBe(true);
         await expandHistoricalOverflow(workspace.renderer, overflow);
       }
       expect(overflow.getAttribute("aria-expanded")).toBe("true");
-      const toolRows = activityBody.querySelectorAll<HTMLElement>(
+      const toolRows = overflowBody.querySelectorAll<HTMLElement>(
         ":scope > .systemsculpt-agent-part.is-tool",
       );
       expect(Array.from(toolRows).map((toolRow) => toolRow.dataset.partKey))
@@ -1996,7 +2001,7 @@ describe("AgentWorkspace", () => {
       expect(Array.from(toolRows).map((toolRow) =>
         toolRow.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon")?.dataset.iconState))
         .toEqual(["check", "check", "check"]);
-      expect(activityBody.lastElementChild).toBe(overflow);
+      expect(activityBody.lastElementChild).toBe(overflowBody);
     };
 
     await workspace.setHistory([firstUser, ...assistantRounds]);
@@ -2907,29 +2912,31 @@ describe("AgentWorkspace", () => {
         expect(current.querySelector(
           ":scope > .systemsculpt-agent-activity-overflow-label",
         )?.textContent).toBe(
-          `+${String(partCount - 1)} previous tool call${partCount === 2 ? "" : "s"}`,
+          `Read 1 file + ${String(partCount - 1)} other tool call${partCount === 2 ? "" : "s"}`,
         );
         const directRows = Array.from(body.children).filter((node) =>
           node instanceof HTMLElement && node.hasAttribute("data-agent-activity-row"));
         const latestPart = activity[partCount - 1]!;
-        expect(directRows).toHaveLength(1);
-        expect((directRows[0] as HTMLElement).dataset.partKey).toBe(
+        expect(directRows).toHaveLength(0);
+        const drawer = current.nextElementSibling as HTMLElement;
+        expect(drawer.querySelector<HTMLElement>("[data-agent-activity-row]")?.dataset.partKey).toBe(
           latestPart.kind === "tool" ? `tool:${latestPart.callId}` : latestPart.id,
         );
-        expect(directRows[0]?.nextElementSibling).toBe(current);
+        expect(drawer.hasAttribute("hidden")).toBe(true);
         expect(current.querySelectorAll("[data-agent-activity-row]")).toHaveLength(0);
       }
       const body = parent.querySelector<HTMLElement>(
         ".systemsculpt-agent-active-run .systemsculpt-agent-turn-body",
       )!;
       const latest = body.querySelector<HTMLElement>(
-        ':scope > [data-part-key="tool:call-overflow-growth-3"]',
+        '[data-part-key="tool:call-overflow-growth-3"]',
       )!;
+      const drawer = overflow!.nextElementSibling as HTMLElement;
       overflow!.click();
       expect(overflow!.getAttribute("aria-expanded")).toBe("true");
       expect(overflow!.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe("Show fewer tool calls");
-      const expandedRows = Array.from(body.querySelectorAll<HTMLElement>(
+        .toBe("Read 1 file + 3 other tool calls");
+      const expandedRows = Array.from(drawer.querySelectorAll<HTMLElement>(
         ":scope > [data-agent-activity-row]",
       ));
       expect(expandedRows.map((node) => node.dataset.partKey)).toEqual([
@@ -2939,8 +2946,8 @@ describe("AgentWorkspace", () => {
         "tool:call-overflow-growth-3",
       ]);
       expect(expandedRows[2]?.nextElementSibling).toBe(latest);
-      expect(latest.nextElementSibling).toBe(overflow);
-      const insertBefore = jest.spyOn(body, "insertBefore");
+      expect(drawer.lastElementChild).toBe(latest);
+      const insertBefore = jest.spyOn(drawer, "insertBefore");
       await workspace.setAgentSnapshot({
         ...snapshot(4),
         elapsedMs: 2_500,
@@ -2949,9 +2956,9 @@ describe("AgentWorkspace", () => {
       insertBefore.mockRestore();
       overflow!.click();
       expect(overflow!.getAttribute("aria-expanded")).toBe("false");
-      expect(body.querySelectorAll(":scope > [data-agent-activity-row]"))
+      expect(drawer.querySelectorAll(":scope > [data-agent-activity-row]"))
         .toHaveLength(1);
-      expect(latest.nextElementSibling).toBe(overflow);
+      expect(drawer.lastElementChild).toBe(latest);
       expect(expandedRows.slice(0, 3).every((node) => !node.isConnected)).toBe(true);
     } finally {
       workspace.unload();
@@ -3027,8 +3034,10 @@ describe("AgentWorkspace", () => {
       )!;
       expect(reasoningNode.isConnected).toBe(false);
       expect(overflow.getAttribute("aria-expanded")).toBe("false");
-      expect(body.firstElementChild).toBe(toolNode);
-      expect(body.children[1]).toBe(overflow);
+      expect(body.firstElementChild).toBe(overflow);
+      const overflowBody = overflow.nextElementSibling as HTMLElement;
+      expect(body.children[1]).toBe(overflowBody);
+      expect(overflowBody.contains(toolNode)).toBe(true);
       overflow.click();
       expect(overflow.getAttribute("aria-expanded")).toBe("true");
       expect(body.querySelector(".systemsculpt-agent-part.is-reasoning"))
@@ -3496,7 +3505,7 @@ describe("AgentWorkspace", () => {
         }
         if (node.classList.contains("is-text")) return "text";
         return "other";
-      })).toEqual(["tool", "overflow", "text", "status"]);
+      })).toEqual(["overflow", "other", "text", "status"]);
       expect(tailStatus.querySelector(".systemsculpt-agent-part")).toBeNull();
       const overflowDrawer = timeline.querySelector<HTMLButtonElement>(
         ":scope > button[data-agent-activity-overflow]",
@@ -3504,7 +3513,7 @@ describe("AgentWorkspace", () => {
       expect(overflowDrawer.getAttribute("aria-expanded")).toBe("false");
       expect(overflowDrawer.querySelector(
         ".systemsculpt-agent-activity-overflow-label",
-      )?.textContent).toBe("+1 previous tool call");
+      )?.textContent).toBe("Write file + 1 other tool call");
       const reasoningNode = (workspace.renderer as any).activeNodes.get(
         "reasoning-token-stream",
       ) as HTMLElement;
@@ -3519,7 +3528,7 @@ describe("AgentWorkspace", () => {
         }
         if (node.classList.contains("is-text")) return "text";
         return "other";
-      })).toEqual(["reasoning", "tool", "overflow", "text", "status"]);
+      })).toEqual(["overflow", "other", "text", "status"]);
       const reasoningDetails = reasoningNode.querySelector<HTMLDetailsElement>(
         ".systemsculpt-agent-reasoning-details",
       )!;
@@ -3528,7 +3537,7 @@ describe("AgentWorkspace", () => {
       )!;
       const reasoningSvg = reasoningIcon.querySelector("svg");
       const toolNode = timeline.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-part.is-tool",
+        ".systemsculpt-agent-activity-overflow-body > .systemsculpt-agent-part.is-tool",
       )!;
       const toolIcon = toolNode.querySelector<HTMLElement>(".systemsculpt-agent-tool-icon")!;
       const toolSvg = toolIcon.querySelector("svg");
@@ -3846,7 +3855,7 @@ describe("AgentWorkspace", () => {
     expect(toolNode.firstElementChild).toBe(shell);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(icon);
     expect(icon.firstElementChild).toBe(svg);
-    expect(toolNode.textContent).toContain("Search the web");
+    expect(toolNode.textContent).toContain("Searching the web...");
     expect(toolNode.textContent).not.toContain("cloudflare official documentation");
     workspace.unload();
   });
@@ -4798,14 +4807,14 @@ describe("AgentWorkspace", () => {
     )!;
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("+1 previous tool call");
+      .toBe("Read 1 file + 1 other tool call");
     expect(worked.querySelector(
-      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool",
+      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > .systemsculpt-agent-part.is-tool",
     )).toBe(secondToolNode);
     overflow.click();
     expect(overflow.getAttribute("aria-expanded")).toBe("true");
     const completedTools = worked.querySelectorAll<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool",
+      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > .systemsculpt-agent-part.is-tool",
     );
     expect(Array.from(completedTools)).toEqual([firstToolNode, secondToolNode]);
     expect(Array.from(completedTools).map((tool) => tool.dataset.partKey))
@@ -4814,7 +4823,7 @@ describe("AgentWorkspace", () => {
       tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon")?.dataset.iconState))
       .toEqual(["check", "check"]);
     expect(worked.querySelector(".systemsculpt-agent-activity-body")?.lastElementChild)
-      .toBe(overflow);
+      .toBe(overflow.nextElementSibling);
     workspace.unload();
   });
 
@@ -5741,7 +5750,7 @@ describe("AgentWorkspace", () => {
     let details = active.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
     expect(details.open).toBe(false);
     expect(details.querySelector(".systemsculpt-agent-reasoning-header")?.textContent)
-      .toBe("Thinking");
+      .toBe("Reasoning...");
     expect(details.querySelector(".systemsculpt-agent-reasoning-body")?.textContent).toBe("");
     expect(details.textContent).not.toContain("Checking the active note.");
     expect(active.querySelector(".systemsculpt-agent-part.is-status.is-thinking")).toBeNull();
@@ -5788,7 +5797,7 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(snapshot);
     details = active.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
     expect(details.open).toBe(true);
-    expect(details.textContent).toContain("Reasoning");
+    expect(details.textContent).toContain("Reasoned");
     expect(details.textContent).toContain("Checking the active note. Planning one safe edit.");
     const worked = active.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
@@ -5809,7 +5818,7 @@ describe("AgentWorkspace", () => {
     )!;
     expect(historical.open).toBe(false);
     expect(historical.querySelector(".systemsculpt-agent-reasoning-header")?.textContent)
-      .toBe("Reasoning");
+      .toBe("Reasoned");
     expect(historical.querySelector(".systemsculpt-agent-reasoning-body")?.textContent).toBe("");
     expect(historical.textContent).not.toContain("Checked the vault first.");
     historical.open = true;
@@ -6106,7 +6115,7 @@ describe("AgentWorkspace", () => {
     );
 
     expect(parent.textContent).toContain("Project.md");
-    expect(parent.textContent).toContain("Write file");
+    expect(parent.textContent).toContain("Wrote file");
     expect(parent.textContent).not.toContain("Mcp Filesystem");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("Result");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).not.toBeNull();

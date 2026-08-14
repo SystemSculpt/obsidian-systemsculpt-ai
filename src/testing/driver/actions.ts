@@ -615,6 +615,20 @@ function requireAskApprovalMode(ctx: ActionContext): void {
   }
 }
 
+function revealActivityTarget(ctx: ActionContext, target: string): HTMLElement | null {
+  const element = resolveTarget(ctx, target);
+  const body = element?.closest<HTMLElement>(".systemsculpt-agent-activity-overflow-body");
+  const disclosure = body?.previousElementSibling;
+  if (
+    disclosure?.instanceOf(HTMLButtonElement)
+    && disclosure.matches("button[data-agent-activity-overflow]")
+    && disclosure.getAttribute("aria-expanded") === "false"
+  ) {
+    disclosure.click();
+  }
+  return resolveTarget(ctx, target);
+}
+
 function toolLifecycleState(element: HTMLElement): ToolLifecycleState | null {
   return TOOL_LIFECYCLE_STATES.find((state) => element.classList.contains(`is-${state}`)) ?? null;
 }
@@ -5119,7 +5133,7 @@ function approveDevelopmentWriteOnce(
       "The approval path does not belong to the owned development-test marker.",
     );
   }
-  const approval = resolveTarget(ctx, "chat.approval.allow-once");
+  const approval = revealActivityTarget(ctx, "chat.approval.allow-once");
   if (!approval || !isVisible(approval)) {
     throw new DriverActionError("The safe Allow once approval is unavailable.");
   }
@@ -5292,6 +5306,7 @@ async function approveDevelopmentMutationOnce(
     );
   }
   const toolName = expected.toolName as DevelopmentMutationToolName;
+  revealActivityTarget(ctx, "chat.approval.allow-once");
   const pendingTools = [...container.querySelectorAll<HTMLElement>(
     ".systemsculpt-agent-turn.is-assistant.is-active "
       + ".systemsculpt-agent-part.is-tool.is-approval-required",
@@ -5403,7 +5418,7 @@ async function waitForDevelopmentRun(
     const stop = resolveTarget(ctx, "chat.composer.stop");
     const running = stop !== null && isVisible(stop);
     if (running) ownership.runObserved = true;
-    const approval = resolveTarget(ctx, "chat.approval.allow-once");
+    const approval = revealActivityTarget(ctx, "chat.approval.allow-once");
     if (approval !== null && isVisible(approval)) {
       ownership.runObserved = true;
       if (until === "approval") {
@@ -5672,8 +5687,8 @@ async function waitForRun(
     // Approve exactly as a user would, rather than relying on the composer's
     // approval mode. A run that parks on approval is otherwise indisputably
     // "not progressing", so a driven run would stall by design.
-    const approvalButton = resolveTarget(ctx, "chat.approval.allow-for-chat")
-      ?? resolveTarget(ctx, "chat.approval.allow-once");
+    const approvalButton = revealActivityTarget(ctx, "chat.approval.allow-for-chat")
+      ?? revealActivityTarget(ctx, "chat.approval.allow-once");
     if (approvalButton && isVisible(approvalButton)) {
       if (returnOnApproval) {
         const approvalSnapshot = chatSnapshot(ctx);

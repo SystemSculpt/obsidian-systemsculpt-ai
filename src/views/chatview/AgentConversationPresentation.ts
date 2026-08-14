@@ -106,6 +106,10 @@ const ACTIVE_TOOL_STATES = new Set<AgentToolPart["state"]>([
   "running",
 ]);
 
+export function isActiveAgentToolState(state: AgentToolPart["state"]): boolean {
+  return ACTIVE_TOOL_STATES.has(state);
+}
+
 function phaseFor(snapshot: AgentConversationSnapshot | null, requestPending: boolean): AgentPresentationPhase {
   if (!snapshot) return requestPending ? "submitting" : "idle";
   if (snapshot.status === "completed") return "completed";
@@ -119,7 +123,8 @@ function phaseFor(snapshot: AgentConversationSnapshot | null, requestPending: bo
     && part.state === "approval-required")) {
     return "awaiting-approval";
   }
-  if (snapshot.parts.some((part) => part.kind === "tool" && ACTIVE_TOOL_STATES.has(part.state))) {
+  if (snapshot.parts.some((part) =>
+    part.kind === "tool" && isActiveAgentToolState(part.state))) {
     return "acting";
   }
   if (snapshot.parts.some((part) => part.kind === "text" && part.state === "streaming")) {
@@ -148,7 +153,7 @@ function activityStatus(
   // happening now.
   if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
   const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
-    part.kind === "tool" && ACTIVE_TOOL_STATES.has(part.state)) ?? [];
+    part.kind === "tool" && isActiveAgentToolState(part.state)) ?? [];
   if (phase === "awaiting-approval") return "Needs approval";
   if (activeTools.some((part) =>
     part.location === "server" && part.name === "web_search")) {
