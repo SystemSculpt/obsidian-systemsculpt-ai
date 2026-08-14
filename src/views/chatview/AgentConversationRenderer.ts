@@ -32,6 +32,7 @@ import {
   splitPreviousAgentActivity,
 } from "./AgentActivityPresentation";
 import {
+  isActiveAgentToolState,
   presentAgentError,
   type AgentConversationPresentation,
 } from "./AgentConversationPresentation";
@@ -116,6 +117,7 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
 const ACTIONABLE_ARTIFACT_TOOLS = new Set(["write", "edit", "multi_edit", "move"]);
 const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
 const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
+let activityDrawerSequence = 0;
 
 type IncidentDisclosureKind = "activity" | "reasoning" | "tool" | "overflow";
 
@@ -401,14 +403,6 @@ function agentPartsEqual(
   }
 }
 
-const ACTIVE_TOOL_PRESENTATION_STATES = new Set<AgentToolPart["state"]>([
-  "input-streaming",
-  "input-ready",
-  "approval-required",
-  "approved",
-  "running",
-]);
-
 function terminalToolPresentation(
   part: AgentPart,
   presentation: AgentConversationPresentation,
@@ -416,7 +410,7 @@ function terminalToolPresentation(
   if (
     part.kind !== "tool"
     || presentation.busy
-    || !ACTIVE_TOOL_PRESENTATION_STATES.has(part.state)
+    || (part.state !== "approval-required" && !isActiveAgentToolState(part.state))
   ) {
     return part;
   }
@@ -436,6 +430,8 @@ export class AgentConversationRenderer extends Component {
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activeOverflowNodes = new Map<string, HTMLButtonElement>();
   private readonly activityOverflowStates = new WeakMap<HTMLButtonElement, {
+    body: HTMLElement;
+    icon: HTMLElement;
     label: HTMLElement;
     latestNode: HTMLElement | null;
     previousNodes: HTMLElement[];
@@ -1616,15 +1612,16 @@ export class AgentConversationRenderer extends Component {
           split.latest?.lane.node ?? null,
           previousLanes.map(({ node }) => node),
         );
-        if (this.activityOverflowExpanded(overflow)) result.push(...previousLanes);
-        if (split.latest) result.push(split.latest.lane);
         result.push({ key, node: overflow });
+        const overflowBody = this.activityOverflowStates.get(overflow)?.body;
+        if (overflowBody) result.push({ key: `${key}:body`, node: overflowBody });
         continue;
       }
       if (split.latest) result.push(split.latest.lane);
     }
     for (const [key, overflow] of this.activeOverflowNodes) {
       if (wantedOverflowKeys.has(key)) continue;
+      this.activityOverflowStates.get(overflow)?.body.remove();
       this.forgetMarkdown(overflow);
       overflow.remove();
       this.activeOverflowNodes.delete(key);
@@ -1785,22 +1782,41 @@ export class AgentConversationRenderer extends Component {
         "data-focus-key": "activity-overflow-summary",
       },
     });
+    const icon = element.createSpan({
+      cls: "systemsculpt-agent-activity-overflow-icon",
+    });
+    setIcon(icon, "sparkles");
+    icon.dataset.iconName = "sparkles";
+    const label = element.createEl("strong", {
+      cls: "systemsculpt-agent-activity-overflow-label",
+      text: this.activityOverflowLabel(hiddenCount, null),
+    });
     const disclosure = element.createSpan({
       cls: "systemsculpt-agent-activity-overflow-disclosure",
     });
-    setIcon(disclosure, "chevron-down");
-    const label = element.createEl("strong", {
-      cls: "systemsculpt-agent-activity-overflow-label",
-      text: this.activityOverflowLabel(hiddenCount),
+    setIcon(disclosure, "chevron-right");
+    disclosure.dataset.iconName = "chevron-right";
+    const body = parent.createDiv({
+      cls: "systemsculpt-agent-activity-overflow-body",
+      attr: {
+        hidden: "",
+        role: "group",
+        "aria-label": "Tool calls",
+      },
     });
+    const bodyId = `systemsculpt-agent-activity-drawer-${String(++activityDrawerSequence)}`;
+    body.id = bodyId;
+    element.setAttribute("aria-controls", bodyId);
     this.activityOverflowStates.set(element, {
+      body,
+      icon,
       label,
       latestNode: null,
       previousNodes: [],
     });
     this.trackIncidentDisclosure(element, "overflow", true, false);
     element.onclick = () => {
-      const finishLayoutMutation = this.options.beginLayoutMutation?.(element);
+      const finishLayoutMutation = this.options.beginLayoutMutation?.(element, body);
       const expanded = !this.activityOverflowExpanded(element);
       element.setAttribute("aria-expanded", String(expanded));
       this.updateIncidentDisclosure(element, true, expanded);
@@ -1825,11 +1841,13 @@ export class AgentConversationRenderer extends Component {
   ): void {
     const state = this.activityOverflowStates.get(element);
     if (!state) return;
-    if (
-      state.latestNode === latestNode
+    const unchanged = state.latestNode === latestNode
       && state.previousNodes.length === previousNodes.length
-      && state.previousNodes.every((node, index) => node === previousNodes[index])
-    ) return;
+      && state.previousNodes.every((node, index) => node === previousNodes[index]);
+    if (unchanged) {
+      this.applyActivityOverflowLayout(element);
+      return;
+    }
     const wanted = new Set(previousNodes);
     for (const node of state.previousNodes) {
       if (!wanted.has(node)) node.remove();
@@ -1848,47 +1866,46 @@ export class AgentConversationRenderer extends Component {
     if (!state) return;
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
-    state.label.setText(expanded
-      ? "Show fewer tool calls"
-      : this.activityOverflowLabel(Number.isFinite(count) ? count : 0));
-    const parent = state.latestNode?.parentElement ?? element.parentElement;
-    if (!parent || state.latestNode?.parentElement !== parent) return;
-    if (!expanded) {
-      for (const node of state.previousNodes) node.remove();
-    }
-    const desired = expanded
-      ? [...state.previousNodes, state.latestNode, element]
-      : [state.latestNode, element];
-    this.reconcileTimelineSegment(parent, desired);
+    const label = this.activityOverflowLabel(
+      Number.isFinite(count) ? count : 0,
+      state.latestNode,
+    );
+    if (state.label.textContent !== label) state.label.setText(label);
+    this.updateActivityOverflowIcon(state.icon, state.latestNode);
+    const desired = state.latestNode
+      ? [...(expanded ? state.previousNodes : []), state.latestNode]
+      : [];
+    this.reconcileChildren(state.body, desired);
+    state.body.toggleAttribute("hidden", !expanded);
   }
 
-  private reconcileTimelineSegment(
-    parent: HTMLElement,
-    desired: readonly HTMLElement[],
-  ): void {
-    const last = desired[desired.length - 1];
-    if (!last) return;
-    const cursorAfterSegment = last.parentElement === parent ? last.nextElementSibling : null;
-    let cursor: Element | null = cursorAfterSegment;
-    for (let index = desired.length - 1; index >= 0; index -= 1) {
-      const node = desired[index]!;
-      if (node.nextElementSibling !== cursor || node.parentElement !== parent) {
-        parent.insertBefore(node, cursor);
-      }
-      cursor = node;
+  private updateActivityOverflowIcon(icon: HTMLElement, latestNode: HTMLElement | null): void {
+    const reasoningIcon = latestNode?.querySelector<HTMLElement>(
+      ".systemsculpt-agent-reasoning-icon",
+    ) ?? null;
+    const toolIcon = latestNode?.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tool-icon",
+    ) ?? null;
+    const iconName = reasoningIcon
+      ? reasoningIcon.dataset.iconState === "streaming" ? "loader-circle" : "sparkles"
+      : toolIcon?.dataset.iconName ?? "sparkles";
+    if (icon.dataset.iconName !== iconName) {
+      setIcon(icon, iconName);
+      icon.dataset.iconName = iconName;
     }
+    icon.classList.toggle("is-animated", reasoningIcon?.dataset.iconState === "streaming");
   }
 
   private updateActivityOverflow(element: HTMLButtonElement, hiddenCount: number): void {
-    element.dataset.hiddenCount = String(hiddenCount);
-    const state = this.activityOverflowStates.get(element);
-    state?.label.setText(this.activityOverflowExpanded(element)
-      ? "Show fewer tool calls"
-      : this.activityOverflowLabel(hiddenCount));
+    const count = String(hiddenCount);
+    if (element.dataset.hiddenCount !== count) element.dataset.hiddenCount = count;
   }
 
-  private activityOverflowLabel(count: number): string {
-    return `+${count} previous tool call${count === 1 ? "" : "s"}`;
+  private activityOverflowLabel(count: number, latestNode: HTMLElement | null): string {
+    const latestLabel = latestNode?.querySelector<HTMLElement>(
+      ".systemsculpt-agent-tool-label, .systemsculpt-agent-reasoning-header strong",
+    )?.textContent?.trim() || "Activity";
+    return `${latestLabel} + ${count} other tool call${count === 1 ? "" : "s"}`;
   }
 
   private workedLabel(elapsedMs?: number, cancelled = false): string {
@@ -2647,7 +2664,7 @@ export class AgentConversationRenderer extends Component {
     setIcon(icon, streaming ? "loader-circle" : "sparkles");
     icon.dataset.iconState = streaming ? "streaming" : "complete";
     icon.classList.toggle("is-animated", streaming);
-    const labelText = streaming ? "Thinking" : "Reasoning";
+    const labelText = streaming ? "Reasoning..." : "Reasoned";
     header.createEl("strong", { text: labelText });
     const disclosure = header.createSpan({ cls: "systemsculpt-agent-reasoning-disclosure" });
     setIcon(disclosure, "chevron-right");
@@ -2683,7 +2700,7 @@ export class AgentConversationRenderer extends Component {
     if (!details || !header || !icon || !label || !body) return false;
 
     const streaming = current.state === "streaming";
-    const labelText = streaming ? "Thinking" : "Reasoning";
+    const labelText = streaming ? "Reasoning..." : "Reasoned";
     node.className = "systemsculpt-agent-part is-reasoning";
     node.classList.toggle("is-streaming", streaming);
     label.setText(labelText);

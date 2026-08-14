@@ -88,19 +88,33 @@ describe("agent workspace CSS contract", () => {
     );
   });
 
-  it("supports a separate previous-tool toggle row inside the Worked fold", () => {
+  it("uses one summary drawer for each adjacent activity group", () => {
     const css = readAgentWorkspaceCss();
 
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-body\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-overflow-body\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-overflow-body\s*\{[^}]*margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-0\) var\(--ss-space-2\);[^}]*padding-left:\s*var\(--ss-space-1\);[^}]*border-left:\s*1px solid var\(--ss-line\);/s,
+    );
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-overflow-body\[hidden\]\s*\{[^}]*display:\s*none;/s,
+    );
     expect(css).toMatch(
       /button\.systemsculpt-agent-activity-overflow\s*\{[^}]*font-size:\s*var\(--ss-text-sm\);[^}]*line-height:\s*20px;/s,
     );
     expect(css).toMatch(
-      /button\.systemsculpt-agent-activity-overflow-header\s*\{[^}]*border:\s*0;[^}]*text-align:\s*left;[^}]*appearance:\s*none;/s,
+      /button\.systemsculpt-agent-activity-overflow-header\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*0 var\(--ss-space-0\);[^}]*border:\s*0;[^}]*border-radius:\s*var\(--ss-radius-sm\);[^}]*justify-content:\s*flex-start;[^}]*text-align:\s*left;[^}]*appearance:\s*none;/s,
     );
     expect(css).toMatch(
-      /button\.systemsculpt-agent-activity-overflow\[aria-expanded="true"\][\s\S]*\.systemsculpt-agent-activity-overflow-disclosure[\s\S]*transform:\s*rotate\(180deg\);/,
+      /button\.systemsculpt-agent-activity-overflow\[aria-expanded="true"\][\s\S]*\.systemsculpt-agent-activity-overflow-disclosure[\s\S]*transform:\s*rotate\(90deg\);/,
     );
-    expect(css).not.toContain(".systemsculpt-agent-activity-overflow-body");
+    expect(css).toMatch(
+      /\.systemsculpt-agent-activity-overflow-disclosure\s*\{[^}]*margin-left:\s*auto;/s,
+    );
   });
 
   it("keeps reasoning and tool details compact, closed, and on one faint rail", () => {
@@ -110,10 +124,10 @@ describe("agent workspace CSS contract", () => {
       /\.systemsculpt-agent-reasoning-details:not\(\[open\]\)\s*>\s*\.systemsculpt-agent-reasoning-body\s*\{[^}]*display:\s*none;/s,
     );
     expect(css).toMatch(
-      /\.systemsculpt-agent-reasoning-body\s*\{[^}]*margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\) 28px;[^}]*padding:\s*var\(--ss-space-0\) var\(--ss-space-3\);[^}]*border-left:\s*1px solid var\(--ss-line\);/s,
+      /\.systemsculpt-agent-reasoning-body\s*\{[^}]*margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\) var\(--ss-space-2\);[^}]*padding:\s*var\(--ss-space-0\) var\(--ss-space-3\) var\(--ss-space-0\) var\(--ss-space-2\);[^}]*border-left:\s*1px solid var\(--ss-line\);/s,
     );
     expect(css).toMatch(
-      /\.systemsculpt-agent-conversation \.systemsculpt-agent-tool-support\s*\{[^}]*margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\) 28px;[^}]*padding-left:\s*var\(--ss-space-3\);[^}]*border-left:\s*1px solid var\(--ss-line\);[^}]*background:\s*transparent;/s,
+      /\.systemsculpt-agent-conversation \.systemsculpt-agent-tool-support\s*\{[^}]*margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\) var\(--ss-space-2\);[^}]*padding-left:\s*var\(--ss-space-2\);[^}]*border-left:\s*1px solid var\(--ss-line\);[^}]*background:\s*transparent;/s,
     );
     expect(css).toMatch(
       /details\.systemsculpt-agent-tool:not\(\[open\]\)\s*>\s*\.systemsculpt-agent-tool-support\s*\{[^}]*display:\s*none;/s,

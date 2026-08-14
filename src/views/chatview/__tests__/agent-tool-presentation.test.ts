@@ -140,7 +140,7 @@ describe("presentAgentTool", () => {
   it("concentrates labels, state, and compact target summaries", () => {
     expect(presentAgentTool(part())).toMatchObject({
       canonicalName: "read",
-      label: "Read 1 file",
+      label: "Reading 1 file...",
       actionIcon: "file-text",
       icon: "minus",
       summary: "Projects/Plan.md",
@@ -197,7 +197,7 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "write", input: { path: "Note.md" } })))
       .toMatchObject({
         canonicalName: "write",
-        label: "Write file",
+        label: "Writing file...",
         actionIcon: "file-plus-2",
         summary: "Note.md",
       });
@@ -213,7 +213,7 @@ describe("presentAgentTool", () => {
       input: { action: "add", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Pin files",
+      label: "Pinning files...",
       summary: "Project.md",
     });
     expect(presentAgentTool(part({
@@ -221,14 +221,14 @@ describe("presentAgentTool", () => {
       input: { action: "remove", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Unpin files",
+      label: "Unpinning files...",
     });
     expect(presentAgentTool(part({
       name: "context",
       input: { paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Manage pinned files",
+      label: "Managing pinned files...",
     });
   });
 
@@ -339,7 +339,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       canonicalName: "server_action",
-      label: "SystemSculpt action",
+      label: "Running SystemSculpt action...",
       actionIcon: "wand-sparkles",
       summary: null,
     });
@@ -351,7 +351,7 @@ describe("presentAgentTool", () => {
       location: "server",
       input: { paths: ["Private provider path"] },
     }))).toMatchObject({
-      label: "SystemSculpt action",
+      label: "Running SystemSculpt action...",
       summary: null,
     });
   });
@@ -364,7 +364,7 @@ describe("presentAgentTool", () => {
       approvalId: "server-approval",
     }))).toMatchObject({
       canonicalName: "server_action",
-      label: "SystemSculpt action",
+      label: "Running SystemSculpt action...",
       icon: "minus",
     });
   });
@@ -381,26 +381,30 @@ describe("presentAgentTool", () => {
   });
 
   it("uses accurate singular and plural labels for safely countable tools", () => {
-    expect(presentAgentTool(part({ input: { paths: ["One.md"] } })).label)
+    expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md"] } })).label)
       .toBe("Read 1 file");
-    expect(presentAgentTool(part({ input: { paths: ["One.md", "Two.md"] } })).label)
+    expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md", "Two.md"] } })).label)
       .toBe("Read 2 files");
     expect(presentAgentTool(part({
+      state: "succeeded",
       name: "open",
       input: { files: [{ path: "One.md" }, { path: "Two.md" }] },
-    })).label).toBe("Open 2 files");
+    })).label).toBe("Opened 2 files");
     expect(presentAgentTool(part({
+      state: "succeeded",
       name: "list_items",
       input: { paths: ["Projects", "Archive"] },
-    })).label).toBe("List 2 folders");
+    })).label).toBe("Listed 2 folders");
     expect(presentAgentTool(part({
+      state: "succeeded",
       name: "find",
       input: { patterns: ["project", "meeting"] },
-    })).label).toBe("Search 2 file patterns");
+    })).label).toBe("Searched 2 patterns");
     expect(presentAgentTool(part({
+      state: "succeeded",
       name: "search",
       input: { patterns: ["TODO"] },
-    })).label).toBe("Search 1 text pattern");
+    })).label).toBe("Searched 1 pattern");
   });
 
   it("presents an item-level partial failure independently", () => {
