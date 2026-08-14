@@ -55,7 +55,7 @@ export type AgentWorkspaceOptions = Readonly<{
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onCopyIncidentReport?: (
     reportId: string,
-  ) => boolean | "memory_fallback" | Promise<boolean | "memory_fallback">;
+  ) => boolean | Promise<boolean>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;

@@ -68,7 +68,7 @@ export type AgentConversationRendererOptions = Readonly<{
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onCopyIncidentReport?: (
     reportId: string,
-  ) => boolean | "memory_fallback" | Promise<boolean | "memory_fallback">;
+  ) => boolean | Promise<boolean>;
   onRetryMessage?: (messageId: string) => void | Promise<void>;
   onResubmitMessage?: (messageId: string, text: string) => boolean | Promise<boolean>;
   onCancelMessageEdit?: (messageId: string) => void | Promise<void>;
@@ -2588,7 +2588,7 @@ export class AgentConversationRenderer extends Component {
         }
         if (actions && presented.reportId && this.options.onCopyIncidentReport) {
           const copyReport = createUiAction(actions, {
-            label: "Copy report",
+            label: "Copy report ID",
             testId: "chat.turn.copy-incident-report",
             size: "small",
             tooltip: false,
@@ -3581,8 +3581,8 @@ export class AgentConversationRenderer extends Component {
     button.dataset.copyPending = "true";
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
-    updateUiAction(button, { label: "Preparing…" });
-    let result: boolean | "memory_fallback" = false;
+    updateUiAction(button, { label: "Copying…" });
+    let result = false;
     try {
       result = await this.options.onCopyIncidentReport?.(reportId) ?? false;
     } catch {
@@ -3599,7 +3599,7 @@ export class AgentConversationRenderer extends Component {
     }
 
     updateUiAction(button, {
-      label: result === "memory_fallback" ? "Copied for this session" : "Copied",
+      label: "Report ID copied",
     });
     const ownerWindow = getSurfaceOwnerWindow(button);
     const prior = this.copyFeedbackTimers.get(button);
@@ -3607,7 +3607,7 @@ export class AgentConversationRenderer extends Component {
     this.copyFeedbackTimers.set(button, ownerWindow.setTimeout(() => {
       this.copyFeedbackTimers.delete(button);
       if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
-      updateUiAction(button, { label: "Copy report" });
+      updateUiAction(button, { label: "Copy report ID" });
     }, 2_000));
   }
 

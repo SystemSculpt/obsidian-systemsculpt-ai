@@ -3144,29 +3144,11 @@ export class AgentChatView extends ItemView {
 
   private async copyIncidentReport(
     reportId: string,
-  ): Promise<boolean | "memory_fallback"> {
-    try {
-      const coordinator = this.plugin.getAgentIncidentCoordinator();
-      if (!coordinator) return false;
-      const local = reportId.startsWith("report_")
-        ? await coordinator.loadReportForCopy(reportId)
-        : null;
-      const serialized = local?.serialized
-        ?? (!local && reportId.startsWith("incident_")
-          ? await coordinator.loadSerializedByIncidentId(reportId)
-          : null);
-      if (!serialized) return false;
-      const copied = await tryCopyToClipboard(
-        serialized,
-        this.workspace?.element ?? this.containerEl,
-      );
-      if (!copied) return false;
-      return local?.durability === "memory_fallback"
-        ? "memory_fallback"
-        : true;
-    } catch {
-      return false;
-    }
+  ): Promise<boolean> {
+    return tryCopyToClipboard(
+      reportId,
+      this.workspace?.element ?? this.containerEl,
+    );
   }
 
   private async reconcileAgentHistory(

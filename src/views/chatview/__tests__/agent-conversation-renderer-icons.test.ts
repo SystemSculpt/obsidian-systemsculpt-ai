@@ -2316,7 +2316,7 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("restores one failed receipt card with retry and report copy actions", async () => {
+  it("restores one failed receipt card with retry and report ID copy actions", async () => {
     const parent = document.body.createDiv();
     const copyIncidentReport = jest.fn()
       .mockRejectedValueOnce(new Error("clipboard unavailable"))
@@ -2371,7 +2371,7 @@ describe("AgentConversationRenderer tail status", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(copyIncidentReport).toHaveBeenCalledTimes(2);
-    expect(copy.textContent).toContain("Copied");
+    expect(copy.textContent).toContain("Report ID copied");
 
     const activeFailure: AgentConversationSnapshot = {
       runId,
@@ -2406,10 +2406,10 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("shows a compact preparing state and blocks duplicate local-report copies", async () => {
+  it("shows a compact copying state and blocks duplicate report ID copies", async () => {
     const parent = document.body.createDiv();
-    let resolveCopy!: (value: "memory_fallback") => void;
-    const pendingCopy = new Promise<"memory_fallback">((resolve) => {
+    let resolveCopy!: (value: boolean) => void;
+    const pendingCopy = new Promise<boolean>((resolve) => {
       resolveCopy = resolve;
     });
     const copyIncidentReport = jest.fn(() => pendingCopy);
@@ -2444,16 +2444,16 @@ describe("AgentConversationRenderer tail status", () => {
     copy.click();
     expect(copy.disabled).toBe(true);
     expect(copy.getAttribute("aria-busy")).toBe("true");
-    expect(copy.textContent).toContain("Preparing…");
+    expect(copy.textContent).toContain("Copying…");
     copy.click();
     expect(copyIncidentReport).toHaveBeenCalledTimes(1);
 
-    resolveCopy("memory_fallback");
+    resolveCopy(true);
     await pendingCopy;
     await Promise.resolve();
     expect(copy.disabled).toBe(false);
     expect(copy.hasAttribute("aria-busy")).toBe(false);
-    expect(copy.textContent).toContain("Copied for this session");
+    expect(copy.textContent).toContain("Report ID copied");
     expect(copyIncidentReport).toHaveBeenCalledWith(reportId);
     renderer.unload();
   });

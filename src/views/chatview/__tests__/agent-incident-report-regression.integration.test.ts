@@ -293,10 +293,8 @@ function installNoEgressProbe(): Readonly<{
   };
 }
 
-function createAgentChatViewCopyBridge(
-  coordinator: AgentIncidentCoordinator,
-): Readonly<{
-  copy: (reportId: string) => Promise<boolean | "memory_fallback">;
+function createAgentChatViewCopyBridge(): Readonly<{
+  copy: (reportId: string) => Promise<boolean>;
   writeText: jest.Mock;
 }> {
   const writeText = jest.fn(async (_text: string): Promise<void> => undefined);
@@ -309,14 +307,13 @@ function createAgentChatViewCopyBridge(
   } as unknown as Node;
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, unknown>;
   Object.assign(view, {
-    plugin: { getAgentIncidentCoordinator: () => coordinator },
     workspace: { element: host },
   });
   return {
     copy: (reportId) => (view as unknown as {
       copyIncidentReport: (
         reportId: string,
-      ) => Promise<boolean | "memory_fallback">;
+      ) => Promise<boolean>;
     }).copyIncidentReport(reportId),
     writeText,
   };
@@ -1073,13 +1070,11 @@ describe("ChatView incident report regression integration", () => {
         durability: "memory_fallback",
       });
       copiedBytes.push(inMemoryCopy!.serialized);
-      const beforeSaveBridge = createAgentChatViewCopyBridge(coordinator);
+      const beforeSaveBridge = createAgentChatViewCopyBridge();
       await expect(beforeSaveBridge.copy(localReportId))
-        .resolves.toBe("memory_fallback");
+        .resolves.toBe(true);
       expect(beforeSaveBridge.writeText).toHaveBeenCalledTimes(1);
-      expect(beforeSaveBridge.writeText).toHaveBeenCalledWith(
-        inMemoryCopy!.serialized,
-      );
+      expect(beforeSaveBridge.writeText).toHaveBeenCalledWith(localReportId);
       const finalPath = `${AGENT_INCIDENT_STORE_PATH}/${localReportId}.json`;
       expect(adapter.files.has(finalPath)).toBe(false);
 
@@ -1255,15 +1250,13 @@ describe("ChatView incident report regression integration", () => {
         .resolves.toBeNull();
       const restartedCopy = await restarted.loadReportForCopy(restoredReportId!);
       copiedBytes.push(restartedCopy!.serialized);
-      const restartedBridge = createAgentChatViewCopyBridge(restarted);
+      const restartedBridge = createAgentChatViewCopyBridge();
       await expect(restartedBridge.copy(restoredReportId!)).resolves.toBe(true);
       expect(restartedBridge.writeText).toHaveBeenCalledTimes(1);
-      expect(restartedBridge.writeText).toHaveBeenCalledWith(
-        inMemoryCopy!.serialized,
-      );
+      expect(restartedBridge.writeText).toHaveBeenCalledWith(restoredReportId);
       await expect(restartedBridge.copy(`report_${"e".repeat(32)}`))
-        .resolves.toBe(false);
-      expect(restartedBridge.writeText).toHaveBeenCalledTimes(1);
+        .resolves.toBe(true);
+      expect(restartedBridge.writeText).toHaveBeenCalledTimes(2);
       const reportText = JSON.stringify(report);
       expect(reportText).not.toContain(CONVERSATION_ID);
       expect(reportText).not.toContain(REQUEST_ID);
