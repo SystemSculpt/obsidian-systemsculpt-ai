@@ -34,6 +34,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/check/test-gate-partition-policy.test.mjs",
   "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
+  "scripts/plugin-release-metadata.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",
   "scripts/plugin-build-options.test.mjs",

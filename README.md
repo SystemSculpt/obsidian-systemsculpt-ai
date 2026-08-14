@@ -24,12 +24,12 @@ local CLI, terminal, dataset-adapter, and FFmpeg nodes require Obsidian Desktop.
 3. Activate your SystemSculpt license.
 4. Run Open SystemSculpt Chat or open Studio.
 
-Obsidian Community Plugins owns installation and updates. SystemSculpt does not
-run a separate update checker.
+SystemSculpt checks its first-party release endpoint and announces new versions.
+Obsidian Community Plugins exclusively owns download, installation, and activation.
 
 ## Privacy and safety
 
-- The plugin sends AI work only to the first-party SystemSculpt API.
+- The plugin sends AI work and release checks only to the first-party SystemSculpt API.
 - Provider credentials and model selection stay on the server.
 - Built-in tools operate against the current vault.
 - Ask Approval pauses before vault mutations. Full Access runs them without
