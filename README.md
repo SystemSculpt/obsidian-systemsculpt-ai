@@ -24,7 +24,7 @@ local CLI, terminal, dataset-adapter, and FFmpeg nodes require Obsidian Desktop.
 3. Activate your SystemSculpt license.
 4. Run Open SystemSculpt Chat or open Studio.
 
-SystemSculpt checks its first-party release endpoint and announces new versions.
+SystemSculpt checks its first-party release endpoint and shows one update prompt per new version.
 Obsidian Community Plugins exclusively owns download, installation, and activation.
 
 ## Privacy and safety

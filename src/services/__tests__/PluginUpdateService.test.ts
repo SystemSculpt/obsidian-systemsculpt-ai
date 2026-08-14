@@ -13,6 +13,7 @@ const releaseBody = (version = "6.6.2") => ({
 
 function createPlugin(overrides: Record<string, unknown> = {}) {
   const settings = {
+    lastAnnouncedPluginRelease: "",
     lastLoadedPluginVersion: "6.6.1",
     ...overrides,
   };
@@ -51,29 +52,65 @@ describe("PluginUpdateService", () => {
     expect(parsePluginReleaseInfo("<html>gateway error</html>")).toBeNull();
   });
 
-  it("announces an available release once per session and keeps an update action", async () => {
+  it("shows one prompt per release and keeps an update action", async () => {
     const plugin = createPlugin();
     const request = jest.fn().mockResolvedValue(releaseBody());
     const notify = jest.fn();
     const openUpdatePage = jest.fn();
-    const service = new PluginUpdateService(plugin, { request, notify, openUpdatePage });
+    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
+    const service = new PluginUpdateService(plugin, {
+      request,
+      notify,
+      openUpdatePage,
+      showUpdatePrompt,
+    });
 
     service.start();
     await service.checkForUpdates();
 
-    expect(notify).toHaveBeenCalledWith(
-      "SystemSculpt 6.6.2 is ready. Open Community Plugins to update.",
-      12_000,
-    );
+    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
+    expect(plugin.updateSettings).toHaveBeenCalledWith({ lastAnnouncedPluginRelease: "6.6.2" });
+    expect(notify).not.toHaveBeenCalled();
     expect(plugin.statusBarEl.hidden).toBe(false);
     expect(plugin.statusBarEl.textContent).toBe("Update SystemSculpt to 6.6.2");
     plugin.statusBarEl.click();
     expect(openUpdatePage).toHaveBeenCalledTimes(1);
 
-    notify.mockClear();
+    showUpdatePrompt.mockClear();
     await service.checkForUpdates();
-    expect(notify).not.toHaveBeenCalled();
+    expect(showUpdatePrompt).not.toHaveBeenCalled();
     service.stop();
+  });
+
+  it("opens the Obsidian update page from the prompt", async () => {
+    const plugin = createPlugin();
+    const openUpdatePage = jest.fn();
+    const service = new PluginUpdateService(plugin, {
+      request: jest.fn().mockResolvedValue(releaseBody()),
+      notify: jest.fn(),
+      openUpdatePage,
+      showUpdatePrompt: jest.fn().mockResolvedValue(true),
+    });
+
+    await service.checkForUpdates();
+
+    expect(openUpdatePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not repeat a dismissed release unless the user checks manually", async () => {
+    const plugin = createPlugin({ lastAnnouncedPluginRelease: "6.6.2" });
+    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
+    const service = new PluginUpdateService(plugin, {
+      request: jest.fn().mockResolvedValue(releaseBody()),
+      notify: jest.fn(),
+      showUpdatePrompt,
+    });
+
+    await service.checkForUpdates();
+    expect(showUpdatePrompt).not.toHaveBeenCalled();
+
+    await service.checkForUpdates({ manual: true });
+    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
   });
 
   it("checks every minute and when the user returns after 30 seconds", async () => {
@@ -143,14 +180,12 @@ describe("PluginUpdateService", () => {
     const service = new PluginUpdateService(plugin, {
       request: jest.fn().mockResolvedValue(releaseBody()),
       notify,
+      showUpdatePrompt: jest.fn().mockResolvedValue(false),
     });
 
     await service.checkForUpdates();
 
-    expect(notify).toHaveBeenCalledWith(
-      "SystemSculpt 6.6.2 is ready. Open Community Plugins to update.",
-      12_000,
-    );
+    expect(notify).not.toHaveBeenCalled();
     expect(plugin.addStatusBarItem).not.toHaveBeenCalled();
   });
 });
