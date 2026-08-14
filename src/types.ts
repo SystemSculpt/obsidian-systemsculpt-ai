@@ -117,7 +117,7 @@ export interface SystemSculptSettings {
    */
   savedChatsDirectory: string;
   lastValidated: number;
-  /** Last release for which the plugin showed an update-available notice. */
+  /** Last release for which the plugin showed the update prompt. */
   lastAnnouncedPluginRelease: string;
   /** Last plugin version observed after a successful load. */
   lastLoadedPluginVersion: string;

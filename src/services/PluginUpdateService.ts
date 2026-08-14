@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 
 import type SystemSculptPlugin from "../main";
 import { API_BASE_URL } from "../constants/api";
+import { showPrompt } from "../core/ui/modals/PromptModal";
 import { hasHostCapability } from "../platform/hostCapabilities";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
 import { PlatformRequestClient } from "./PlatformRequestClient";
@@ -31,6 +32,7 @@ type PluginUpdateServiceOptions = Readonly<{
   request?: () => Promise<unknown>;
   notify?: (message: string, durationMs?: number) => void;
   openUpdatePage?: () => void;
+  showUpdatePrompt?: (version: string) => Promise<boolean>;
   now?: () => number;
 }>;
 
@@ -74,6 +76,7 @@ export class PluginUpdateService {
   private readonly request: NonNullable<PluginUpdateServiceOptions["request"]>;
   private readonly notify: NonNullable<PluginUpdateServiceOptions["notify"]>;
   private readonly openUpdatePage: NonNullable<PluginUpdateServiceOptions["openUpdatePage"]>;
+  private readonly showUpdatePrompt: NonNullable<PluginUpdateServiceOptions["showUpdatePrompt"]>;
   private readonly now: NonNullable<PluginUpdateServiceOptions["now"]>;
   private statusBarEl: HTMLElement | null = null;
   private periodicCheck: number | null = null;
@@ -98,6 +101,20 @@ export class PluginUpdateService {
     this.openUpdatePage = options.openUpdatePage ?? (() => {
       const ownerWindow = typeof window !== "undefined" ? window.activeWindow ?? window : undefined;
       ownerWindow?.open?.(UPDATE_URI, "_blank");
+    });
+    this.showUpdatePrompt = options.showUpdatePrompt ?? (async (version) => {
+      const result = await showPrompt(
+        this.plugin.app,
+        "Update to unlock the newest capabilities, sharper workflows, and fresh improvements.",
+        {
+          title: "SystemSculpt just evolved",
+          description: `Version ${version} has landed.`,
+          primaryButton: "Let's evolve",
+          secondaryButton: "Stay here for now",
+          icon: "sparkles",
+        },
+      );
+      return result?.confirmed === true;
     });
     this.now = options.now ?? (() => Date.now());
   }
@@ -158,12 +175,14 @@ export class PluginUpdateService {
 
       if (compareNumericVersions(release.latestVersion, this.plugin.manifest.version) > 0) {
         this.showUpdateAction(release.latestVersion);
-        if (this.pendingManualFeedback || this.announcedVersion !== release.latestVersion) {
-          this.notify(
-            `SystemSculpt ${release.latestVersion} is ready. Open Community Plugins to update.`,
-            12_000,
-          );
-          this.announcedVersion = release.latestVersion;
+        if (
+          this.pendingManualFeedback
+          || (
+            this.announcedVersion !== release.latestVersion
+            && this.plugin.settings.lastAnnouncedPluginRelease !== release.latestVersion
+          )
+        ) {
+          await this.presentUpdate(release.latestVersion);
         }
         return { outcome: "update_available", release };
       }
@@ -212,6 +231,15 @@ export class PluginUpdateService {
     if (previousVersion !== currentVersion) {
       await this.plugin.getSettingsManager().updateSettings({ lastLoadedPluginVersion: currentVersion });
     }
+  }
+
+  private async presentUpdate(version: string): Promise<void> {
+    this.announcedVersion = version;
+    const shouldOpenUpdatePage = await this.showUpdatePrompt(version);
+    if (this.plugin.settings.lastAnnouncedPluginRelease !== version) {
+      await this.plugin.getSettingsManager().updateSettings({ lastAnnouncedPluginRelease: version });
+    }
+    if (shouldOpenUpdatePage) this.openUpdatePage();
   }
 
   private prepareStatusBar(): void {
