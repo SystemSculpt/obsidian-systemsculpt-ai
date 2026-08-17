@@ -76,12 +76,21 @@ async function flushSetupSectionRender(): Promise<void> {
 describe("Setup tab SystemSculpt-only layout", () => {
   let app: App;
   let windowOpenSpy: jest.SpyInstance;
+  let anchorClickSpy: jest.SpyInstance;
+  let anchorHrefs: string[];
 
   beforeEach(() => {
     jest.clearAllMocks();
     document.body.innerHTML = "";
     app = new App();
     windowOpenSpy = jest.spyOn(window, "open").mockImplementation(() => null);
+    // External opens click a synthetic anchor when Electron is unavailable.
+    anchorHrefs = [];
+    anchorClickSpy = jest
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        anchorHrefs.push(this.getAttribute("href") ?? "");
+      });
     getCreditsBalanceMock.mockResolvedValue({
       totalRemaining: 2500,
       includedRemaining: 1200,
@@ -103,6 +112,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
   afterEach(() => {
     windowOpenSpy.mockRestore();
+    anchorClickSpy.mockRestore();
   });
 
   it("renders account, license, and help surfaces without local Pi setup", () => {
@@ -386,11 +396,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(annualSwitchButton).toBeTruthy();
     (annualSwitchButton as HTMLButtonElement).click();
 
-    expect(window.open).toHaveBeenCalledWith(
+    expect(anchorHrefs).toEqual([
       "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    ]);
   });
 
   it("keeps rejected billing URLs from surfacing as settings actions", async () => {
@@ -428,15 +436,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(buyCreditsButton).toBeTruthy();
     (buyCreditsButton as HTMLButtonElement).click();
 
-    expect(window.open).toHaveBeenCalledWith(
-      "https://systemsculpt.com/pricing",
-      "_blank",
-      "noopener,noreferrer",
-    );
-    expect(window.open).not.toHaveBeenCalledWith(
-      "https://evil.example/checkout",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    // Only the safe fallback opens — the rejected URL never surfaces.
+    expect(anchorHrefs).toEqual(["https://systemsculpt.com/pricing"]);
+    expect(window.open).not.toHaveBeenCalled();
   });
 });

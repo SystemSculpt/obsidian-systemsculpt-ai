@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { API_BASE_URL } from "../../constants/api";
-import { AccountConnectService } from "../AccountConnectService";
+import { AccountConnectService, type ConnectOutcome } from "../AccountConnectService";
 
 const BASE64_URL_32_BYTES = /^[A-Za-z0-9_-]{43}$/;
 
@@ -36,10 +36,19 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
     settings,
     getSettingsManager: () => ({ updateSettings }),
     getLicenseManager: () => ({ validateLicenseKeyDetailed }),
+    registerInterval: jest.fn((timer: number) => timer),
     updateSettings,
     validateLicenseKeyDetailed,
   } as any;
 }
+
+// begin() starts a polling interval; cancel every service after each test so
+// no interval outlives its suite (the shared setup provides a real window).
+const createdServices: AccountConnectService[] = [];
+
+afterEach(() => {
+  createdServices.splice(0).forEach((service) => service.cancelPending());
+});
 
 function createService(plugin = createPlugin()) {
   const openedUrls: string[] = [];
@@ -48,6 +57,7 @@ function createService(plugin = createPlugin()) {
     return true;
   });
   const service = new AccountConnectService(plugin, requestClient, opener);
+  createdServices.push(service);
   return { service, plugin, opener, openedUrls };
 }
 
@@ -244,5 +254,121 @@ describe("AccountConnectService browser sign-in", () => {
 
     expect(request).not.toHaveBeenCalled();
     expect(outcome).toEqual({ kind: "error", reason: "expired" });
+  });
+
+  it("reopens the browser with the same state and challenge for the active request", async () => {
+    const { service, openedUrls } = createService();
+
+    expect(await service.reopen()).toBe(false);
+
+    await service.begin("sign-in");
+    expect(await service.reopen()).toBe(true);
+
+    const first = parseConnectUrl(openedUrls[0]);
+    const second = parseConnectUrl(openedUrls[1]);
+    expect(second.state).toBe(first.state);
+    expect(second.challenge).toBe(first.challenge);
+    expect(service.hasPendingRequest()).toBe(true);
+  });
+});
+
+describe("AccountConnectService background polling", () => {
+  // The shared test setup provides a window whose timers delegate to the
+  // global timers, so Jest's fake timers drive the polling interval.
+  beforeEach(() => {
+    jest.clearAllMocks();
+    request.mockReset();
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  function createPollingService() {
+    const created = createService();
+    const outcomes: ConnectOutcome[] = [];
+    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    return { ...created, outcomes };
+  }
+
+  it("completes the sign-in by polling when the deep link never arrives", async () => {
+    const { service, plugin, openedUrls, outcomes } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    expect(plugin.registerInterval).toHaveBeenCalledTimes(1);
+    const { challenge } = parseConnectUrl(openedUrls[0]);
+
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toHaveLength(0);
+    expect(service.hasPendingRequest()).toBe(true);
+
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    const pollInput = request.mock.calls[0][0];
+    expect(pollInput).toMatchObject({ url: `${API_BASE_URL}/auth/poll`, method: "POST" });
+    expect(pollInput.headers["x-license-key"]).toBeUndefined();
+    expect(sha256Base64Url(pollInput.body.verifier)).toBe(challenge);
+
+    expect(plugin.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ licenseKey: "skss-connected" }),
+    );
+    expect(outcomes).toEqual([
+      { kind: "signed-in", name: "User", email: "user@example.com", licenseValid: true },
+    ]);
+    expect(service.hasPendingRequest()).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(14_000);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps polling through network failures and error responses", async () => {
+    const { service, outcomes } = createPollingService();
+    request.mockRejectedValueOnce(new Error("offline"));
+    request.mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }));
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3 * 3_500);
+
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(outcomes).toHaveLength(0);
+    expect(service.hasPendingRequest()).toBe(true);
+  });
+
+  it("stops polling when the pending request is cancelled", async () => {
+    const { service } = createPollingService();
+
+    await service.begin("sign-in");
+    service.cancelPending();
+    await jest.advanceTimersByTimeAsync(35_000);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("ignores a poll result when an exchange already completed the sign-in", async () => {
+    const { service, plugin, outcomes } = createPollingService();
+    let resolvePoll!: (response: Response) => void;
+    request.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolvePoll = resolve; }),
+    );
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    const manual = await service.submitManualCode("manual-code");
+    expect(manual).toMatchObject({ kind: "signed-in" });
+
+    resolvePoll(jsonResponse(200, successPayload));
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(outcomes).toHaveLength(0);
+    expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
+    expect(plugin.validateLicenseKeyDetailed).toHaveBeenCalledTimes(1);
   });
 });

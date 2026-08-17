@@ -105,6 +105,17 @@ const findButtonByText = (root: HTMLElement, text: string): HTMLButtonElement =>
   return button as HTMLButtonElement;
 };
 
+/** Captures external opens: the no-Electron path clicks a synthetic anchor. */
+const spyOnAnchorClicks = () => {
+  const hrefs: string[] = [];
+  const spy = jest
+    .spyOn((window as any).HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      hrefs.push(this.getAttribute("href") ?? "");
+    });
+  return { hrefs, spy };
+};
+
 describe("CreditsBalanceModal", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -161,12 +172,10 @@ describe("CreditsBalanceModal", () => {
     // 2200 / 3000 = 73.333... -> conservative floor to 73.3%
     expect(meterFill?.style.width).toBe("73.3%");
 
+    const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect((window as any).open).toHaveBeenCalledWith(
-      "https://systemsculpt.com/buy-credits",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(hrefs).toEqual(["https://systemsculpt.com/buy-credits"]);
+    spy.mockRestore();
 
     findButtonByText(modal.modalEl, "Open Account").click();
     expect(onOpenSetup).toHaveBeenCalledTimes(1);
@@ -302,12 +311,10 @@ describe("CreditsBalanceModal", () => {
     await flushPromises();
     expect(loadBalance).toHaveBeenCalledTimes(2);
 
+    const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect((window as any).open).toHaveBeenCalledWith(
-      LICENSE_URL,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(hrefs).toEqual([LICENSE_URL]);
+    spy.mockRestore();
   });
 
   it("uses conservative totals when reported and derived balances disagree", async () => {

@@ -202,8 +202,8 @@ export class UpgradePlanModal extends StandardModal {
     );
     const status = this.contentEl.createDiv({ cls: "ss-upgrade-plan__status" });
     status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
-    status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Waiting for the browser…" });
-    this.addDetail("Obsidian will reopen automatically. If it doesn't, paste the connection code shown in your browser:");
+    status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Waiting for you to finish in the browser…" });
+    this.addDetail("This screen finishes automatically once you're signed in. If nothing happens, paste the connection code shown in your browser:");
     const codeInput = this.contentEl.createEl("input", {
       cls: "ss-upgrade-plan__code-input",
       attr: {
@@ -214,6 +214,13 @@ export class UpgradePlanModal extends StandardModal {
         spellcheck: "false",
         "data-testid": "upgrade-plan.code",
       },
+    });
+    this.addLink("upgrade-plan.reopen", "Open the sign-in page again", () => {
+      const ownerWindow = getSurfaceOwnerWindow(this.modalEl);
+      const service = this.plugin.getAccountConnectService();
+      void service.reopen(ownerWindow).then((reopened) => {
+        if (!reopened) void service.begin(mode, ownerWindow);
+      });
     });
     this.addActionButton(
       "upgrade-plan.complete-code",

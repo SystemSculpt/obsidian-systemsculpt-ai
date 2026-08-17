@@ -430,14 +430,42 @@ export default class SystemSculptPlugin extends Plugin {
       this.startCriticalAndDeferredPhases(tracer, logger);
 
       // Browser sign-in returns through obsidian://systemsculpt-connect on
-      // both desktop and mobile. Cheap synchronous registration.
-      this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
-        // The upgrade/sign-in modal's browser handoff is superseded the
-        // moment the deep link comes back — close it before the welcome.
+      // both desktop and mobile. Cheap synchronous registration. Delivery is
+      // not guaranteed (the host can gate plugin URIs behind a trust prompt
+      // or drop them), so the connect service also polls while a sign-in is
+      // pending and greets the user the moment it completes.
+      this.getAccountConnectService().setBackgroundOutcomeHandler((outcome) => {
         UpgradePlanModal.closeCurrent();
         new AccountConnectModal(
           this.app,
-          () => this.getAccountConnectService().handleProtocolCallback(params),
+          () => Promise.resolve(outcome),
+          defaultAccountConnectActions(this),
+        ).open();
+      });
+      this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
+        const connect = this.getAccountConnectService();
+        // The upgrade/sign-in modal's browser handoff is superseded the
+        // moment the deep link comes back — close it before the welcome.
+        UpgradePlanModal.closeCurrent();
+        const email = this.settings.userEmail?.trim() ?? "";
+        if (!connect.hasPendingRequest() && email) {
+          // Polling already finished this sign-in; a late deep link should
+          // greet the signed-in user, not show an expired-request error.
+          new AccountConnectModal(
+            this.app,
+            () => Promise.resolve({
+              kind: "signed-in" as const,
+              name: this.settings.userName?.trim() || null,
+              email,
+              licenseValid: this.settings.licenseValid === true,
+            }),
+            defaultAccountConnectActions(this),
+          ).open();
+          return;
+        }
+        new AccountConnectModal(
+          this.app,
+          () => connect.handleProtocolCallback(params),
           defaultAccountConnectActions(this),
         ).open();
       });

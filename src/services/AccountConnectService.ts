@@ -8,6 +8,7 @@ export type AccountConnectMode = "sign-in" | "sign-up";
 type PendingConnectRequest = Readonly<{
   state: string;
   verifier: string;
+  mode: AccountConnectMode;
   createdAt: number;
 }>;
 
@@ -37,6 +38,14 @@ export type ConnectOutcome =
 /** Pending browser sign-in requests expire after ten minutes. */
 const PENDING_CONNECT_TTL_MS = 10 * 60_000;
 
+/**
+ * While a sign-in is pending the plugin polls the server for completion.
+ * The obsidian:// deep link is only an accelerator — the host may gate it
+ * behind a trust prompt or drop it entirely (observed on iOS and desktop),
+ * so polling is what guarantees the sign-in finishes.
+ */
+const CONNECT_POLL_INTERVAL_MS = 3_500;
+
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (let index = 0; index < bytes.length; index += 1) {
@@ -58,6 +67,9 @@ export class AccountConnectService {
   private readonly requestClient: Pick<PlatformRequestClient, "request">;
   private readonly openUrl: (url: string, ownerWindow?: Window) => Promise<boolean>;
   private pending: PendingConnectRequest | null = null;
+  private pollTimer: number | null = null;
+  private pollInFlight = false;
+  private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -74,6 +86,15 @@ export class AccountConnectService {
 
   public cancelPending(): void {
     this.pending = null;
+    this.stopPolling();
+  }
+
+  /**
+   * Receives sign-in outcomes that complete in the background (via polling)
+   * with no modal awaiting them, so the UI can greet the user immediately.
+   */
+  public setBackgroundOutcomeHandler(handler: ((outcome: ConnectOutcome) => void) | null): void {
+    this.backgroundOutcomeHandler = handler;
   }
 
   /**
@@ -84,18 +105,91 @@ export class AccountConnectService {
   public async begin(mode: AccountConnectMode, ownerWindow?: Window): Promise<boolean> {
     const state = base64UrlEncode(this.randomBytes());
     const verifier = base64UrlEncode(this.randomBytes());
-    const challenge = base64UrlEncode(await this.sha256(verifier));
-    this.pending = { state, verifier, createdAt: Date.now() };
+    this.pending = { state, verifier, mode, createdAt: Date.now() };
+    this.startPolling();
 
-    const origin = new URL(API_BASE_URL).origin;
-    const path = mode === "sign-up" ? "/sign-up" : "/sign-in";
-    const redirect = `/plugin/connect?state=${state}&challenge=${challenge}`;
-    const opened = await this.openUrl(
-      `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`,
-      ownerWindow,
-    );
+    const opened = await this.openUrl(await this.connectUrl(this.pending), ownerWindow);
     this.refreshSettingsTab();
     return opened;
+  }
+
+  /**
+   * Re-opens the browser page for the active pending request (same state and
+   * challenge, so any code the site mints still completes this sign-in).
+   * Returns false when nothing is pending — callers should begin() instead.
+   */
+  public async reopen(ownerWindow?: Window): Promise<boolean> {
+    const pending = this.activePending();
+    if (!pending) return false;
+    return this.openUrl(await this.connectUrl(pending), ownerWindow);
+  }
+
+  private async connectUrl(pending: PendingConnectRequest): Promise<string> {
+    const challenge = base64UrlEncode(await this.sha256(pending.verifier));
+    const origin = new URL(API_BASE_URL).origin;
+    const path = pending.mode === "sign-up" ? "/sign-up" : "/sign-in";
+    const redirect = `/plugin/connect?state=${pending.state}&challenge=${challenge}`;
+    return `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`;
+  }
+
+  private startPolling(): void {
+    this.stopPolling();
+    if (typeof window === "undefined") return;
+    const timer = window.setInterval(() => {
+      void this.pollOnce();
+    }, CONNECT_POLL_INTERVAL_MS);
+    this.pollTimer = timer;
+    // Registered so a plugin unload can never leak the interval.
+    this.plugin.registerInterval(timer);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer !== null) {
+      window.clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private async pollOnce(): Promise<void> {
+    const pending = this.activePending();
+    if (!pending) {
+      this.stopPolling();
+      return;
+    }
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
+    try {
+      let response: Response;
+      try {
+        response = await this.requestClient.request({
+          url: `${API_BASE_URL}/auth/poll`,
+          method: "POST",
+          headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
+          body: { verifier: pending.verifier },
+        });
+      } catch {
+        return; // Transient network failure — keep polling until the TTL.
+      }
+      if (response.status !== 200) return;
+      const payload = await this.readJson(response);
+      const envelope =
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : null;
+      if (!envelope || envelope.status === "pending") return;
+      const success = this.readExchangeSuccess(payload);
+      if (!success) return;
+      // A deep-link or manual-code exchange may have won the race meanwhile.
+      if (this.pending !== pending) return;
+      this.stopPolling();
+      const outcome =
+        success.status === "ok"
+          ? await this.completeSignIn(success.licenseKey, success.account)
+          : await this.completeWithoutLicense(success.account);
+      this.backgroundOutcomeHandler?.(outcome);
+    } finally {
+      this.pollInFlight = false;
+    }
   }
 
   /** Handles the obsidian://systemsculpt-connect deep link from the website. */
@@ -163,6 +257,7 @@ export class AccountConnectService {
 
   private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<ConnectOutcome> {
     this.pending = null;
+    this.stopPolling();
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey,
       userEmail: account.email ?? "",
@@ -181,6 +276,7 @@ export class AccountConnectService {
 
   private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
     this.pending = null;
+    this.stopPolling();
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey: "",
       licenseValid: false,

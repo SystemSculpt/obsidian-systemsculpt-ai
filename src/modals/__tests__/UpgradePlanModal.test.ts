@@ -107,15 +107,28 @@ const findButtonByText = (root: HTMLElement, text: string): HTMLButtonElement =>
 
 function createPlugin(settings: Record<string, unknown> = {}) {
   const begin = jest.fn().mockResolvedValue(true);
+  const reopen = jest.fn().mockResolvedValue(true);
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
-    getAccountConnectService: () => ({ begin, submitManualCode }),
+    getAccountConnectService: () => ({ begin, reopen, submitManualCode }),
     openNewChat: jest.fn(),
     begin,
+    reopen,
     submitManualCode,
   } as any;
+}
+
+/** Captures external opens: the no-Electron path clicks a synthetic anchor. */
+function spyOnAnchorClicks() {
+  const hrefs: string[] = [];
+  const spy = jest
+    .spyOn((window as any).HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      hrefs.push(this.getAttribute("href") ?? "");
+    });
+  return { hrefs, spy };
 }
 
 describe("UpgradePlanModal", () => {
@@ -149,21 +162,19 @@ describe("UpgradePlanModal", () => {
   });
 
   it("opens checkout with attribution and guides back to license sync after purchase", () => {
-    const openSpy = jest.fn();
-    (window as any).open = openSpy;
+    const { hrefs, spy } = spyOnAnchorClicks();
     const plugin = createPlugin({ userEmail: "user@example.com" });
     const modal = new UpgradePlanModal(plugin);
     modal.onOpen();
 
     findButtonByText(modal.modalEl, "Get lifetime license").click();
 
-    expect(openSpy).toHaveBeenCalledWith(
+    expect(hrefs).toEqual([
       "https://systemsculpt.com/lifetime?utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    ]);
     expect(modal.modalEl.textContent).toContain("Finish your purchase in the browser");
     expect(findButtonByText(modal.modalEl, "I've purchased — Sync license")).toBeTruthy();
+    spy.mockRestore();
     modal.onClose();
   });
 
@@ -177,6 +188,8 @@ describe("UpgradePlanModal", () => {
 
     expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything());
     expect(modal.modalEl.textContent).toContain("Continue in your browser");
+    expect(modal.modalEl.textContent).toContain("Waiting for you to finish in the browser");
+    expect(modal.modalEl.textContent).toContain("finishes automatically");
     const codeInput = modal.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
     expect(codeInput).not.toBeNull();
 
@@ -185,6 +198,33 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
 
     expect(plugin.submitManualCode).toHaveBeenCalledWith("code-123");
+  });
+
+  it("lets the user reopen the sign-in page from the browser handoff", async () => {
+    const plugin = createPlugin();
+    const modal = new UpgradePlanModal(plugin);
+    modal.onOpen();
+
+    findButtonByText(modal.modalEl, "Sign in").click();
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledTimes(1);
+
+    const reopenLink = modal.modalEl.querySelector<HTMLButtonElement>(
+      "[data-testid='upgrade-plan.reopen']",
+    );
+    expect(reopenLink).not.toBeNull();
+
+    reopenLink!.click();
+    await flushPromises();
+    expect(plugin.reopen).toHaveBeenCalledTimes(1);
+    expect(plugin.begin).toHaveBeenCalledTimes(1);
+
+    plugin.reopen.mockResolvedValue(false);
+    reopenLink!.click();
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledTimes(2);
+    expect(plugin.begin).toHaveBeenLastCalledWith("sign-in", expect.anything());
+    modal.onClose();
   });
 
   it("shows the manual path when the browser could not be opened", async () => {

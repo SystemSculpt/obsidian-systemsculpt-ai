@@ -105,6 +105,17 @@ const findButtonByText = (root: HTMLElement, text: string): HTMLButtonElement =>
   return button as HTMLButtonElement;
 };
 
+/** Captures external opens: the no-Electron path clicks a synthetic anchor. */
+const spyOnAnchorClicks = () => {
+  const hrefs: string[] = [];
+  const spy = jest
+    .spyOn((window as any).HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      hrefs.push(this.getAttribute("href") ?? "");
+    });
+  return { hrefs, spy };
+};
+
 describe("AccountConnectModal", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -169,12 +180,10 @@ describe("AccountConnectModal", () => {
     expect(modal.modalEl.textContent).toContain("Welcome, User!");
     expect(modal.modalEl.textContent).toContain("no active plan yet");
 
+    const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Choose a plan").click();
-    expect((window as any).open).toHaveBeenCalledWith(
-      "https://systemsculpt.com/pricing",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(hrefs).toEqual(["https://systemsculpt.com/pricing"]);
+    spy.mockRestore();
   });
 
   it("routes the plan-needed account into the caller's upgrade flow", async () => {
@@ -188,9 +197,12 @@ describe("AccountConnectModal", () => {
     modal.onOpen();
     await flushPromises();
 
+    const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Choose a plan").click();
     expect(onChoosePlan).toHaveBeenCalledTimes(1);
+    expect(hrefs).toEqual([]);
     expect((window as any).open).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("runs the get-started action after a successful sign-in", async () => {
