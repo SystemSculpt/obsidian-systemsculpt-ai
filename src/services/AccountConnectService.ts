@@ -145,7 +145,7 @@ export class AccountConnectService {
 
   private stopPolling(): void {
     if (this.pollTimer !== null) {
-      clearInterval(this.pollTimer);
+      window.clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
   }

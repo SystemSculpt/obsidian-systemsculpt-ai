@@ -43,12 +43,10 @@ export async function openExternalUrl(url: string, ownerWindow?: Window): Promis
   // note. WKWebView on iOS silently ignores window.open with a features
   // string, so the anchor is the reliable route; window.open stays last.
   const doc = targetWindow?.document;
-  if (doc?.body && typeof doc.createElement === "function") {
-    const anchor = doc.createElement("a");
-    anchor.setAttribute("href", href);
-    anchor.setAttribute("target", "_blank");
-    anchor.setAttribute("rel", "noopener noreferrer");
-    doc.body.appendChild(anchor);
+  if (doc?.body && typeof doc.body.createEl === "function") {
+    const anchor = doc.body.createEl("a", {
+      attr: { href, target: "_blank", rel: "noopener noreferrer" },
+    });
     try {
       anchor.click();
       return true;
