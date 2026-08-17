@@ -3,6 +3,7 @@ import {
   type AgentIncidentFailureMechanism,
   type AgentIncidentFailureStage,
 } from "../../../core/diagnostics/AgentIncidentSchema";
+import { planRequiredError } from "../../../utils/errors";
 import {
   PlatformRequestClient,
   type PlatformResponseDeliveryMode,
@@ -5561,7 +5562,7 @@ export class AgentChatSession {
     }
 
     const licenseKey = this.options.licenseKey().trim();
-    if (!licenseKey) throw new Error("Add your SystemSculpt license to start a response.");
+    if (!licenseKey) throw planRequiredError("Chat");
     const request = parseThinAgentBootstrapRequest(this.options.bootstrapRequest());
     const response = await this.requestClient.request({
       url: new URL(THIN_AGENT_BOOTSTRAP_PATH, this.options.baseUrl).toString(),

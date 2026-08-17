@@ -39,7 +39,7 @@ const createPluginStub = () => {
     hasPendingRequest: jest.fn(() => false),
     cancelPending: jest.fn(),
     begin: jest.fn().mockResolvedValue(undefined),
-    submitManualCode: jest.fn().mockResolvedValue(undefined),
+    submitManualCode: jest.fn().mockResolvedValue({ kind: "error", reason: "expired" }),
   };
 
   return {

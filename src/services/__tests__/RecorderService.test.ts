@@ -175,6 +175,7 @@ describe("RecorderService", () => {
         autoPasteTranscription: true,
         autoSubmitAfterTranscription: false,
         pendingRecorderCaptures: [],
+        licenseKey: "skss-test",
       },
       directoryManager: {
         ensureDirectoryByPath: jest.fn().mockResolvedValue(undefined),

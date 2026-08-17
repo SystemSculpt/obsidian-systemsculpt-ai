@@ -1,5 +1,7 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { OperationProgressPanel } from "../../core/ui/progress/OperationProgressPanel";
 import type {
   AudioProcessorArtifactKind,
@@ -182,6 +184,10 @@ export class AudioProcessorPanel {
     this.finished = true;
     const message = error instanceof Error ? error.message : String(error ?? "Audio processing failed.");
     const cancelled = error instanceof DOMException && error.name === "AbortError";
+    if (!cancelled && isPlanAccessError(error)) {
+      this.renderPlanRequired();
+      return;
+    }
     if (!this.panel || this.hidden) {
       if (cancelled) return;
       new Notice(`Audio processing failed: ${message}`, 7000);
@@ -203,6 +209,34 @@ export class AudioProcessorPanel {
     });
     if (!stoppedWatching) this.panel.setTimelineState(this.currentStep, "error");
     this.panel.setActions([{ label: "Close", testId: "audio.progress.close", variant: "primary", onClick: () => this.close() }]);
+  }
+
+  /** License/plan failures route to the guided upgrade path, not a dead end. */
+  private renderPlanRequired(): void {
+    if (!this.panel || this.hidden) {
+      UpgradePlanModal.openOnce(this.plugin, { feature: "Audio processing" });
+      return;
+    }
+    this.panel.setStatus({
+      label: "Plan required",
+      icon: "lock",
+      progress: 100,
+      details: `Audio processing needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`,
+      state: "error",
+    });
+    this.panel.setTimelineState(this.currentStep, "error");
+    this.panel.setActions([
+      {
+        label: "Choose a plan",
+        testId: "audio.progress.choose-plan",
+        variant: "primary",
+        onClick: () => {
+          this.close();
+          UpgradePlanModal.openOnce(this.plugin, { feature: "Audio processing" });
+        },
+      },
+      { label: "Close", testId: "audio.progress.close", onClick: () => this.close() },
+    ]);
   }
 
   close(): void {

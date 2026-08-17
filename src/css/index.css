@@ -30,6 +30,8 @@
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/credits-balance.css';
+@import 'modals/account-connect.css';
+@import 'modals/upgrade-plan.css';
 @import 'modals/bulk-transcription.css';
 @import 'modals/progress-toast.css';
 @import 'modals/file-pickers.css';

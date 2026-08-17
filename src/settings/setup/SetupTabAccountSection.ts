@@ -4,6 +4,8 @@ import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE } from "../../constants/e
 import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
+import { AccountConnectModal } from "../../modals/AccountConnectModal";
+import { defaultAccountConnectActions, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
 
@@ -29,7 +31,10 @@ export function renderAccountSection(
   ): Promise<void> => {
     try {
       button.setDisabled(true);
-      await connectService.begin(mode, ownerWindow);
+      const opened = await connectService.begin(mode, ownerWindow);
+      if (!opened) {
+        new Notice("Couldn't open your browser. Visit systemsculpt.com/sign-in on this device, then paste the connection code below.");
+      }
     } finally {
       button.setDisabled(false);
     }
@@ -100,9 +105,11 @@ export function renderAccountSection(
   } else if (signedInWithoutPlan) {
     statusSetting.addButton((button) => {
       button
-        .setButtonText("View plans")
+        .setButtonText("Choose a plan")
         .setCta()
-        .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow));
+        .onClick(() => {
+          UpgradePlanModal.openOnce(plugin);
+        });
     });
     statusSetting.addButton((button) => {
       // Re-runs the browser connect; after a purchase the exchange returns
@@ -182,12 +189,11 @@ export function renderAccountSection(
           new Notice("Paste the connection code from your browser first.");
           return;
         }
-        try {
-          button.setDisabled(true).setButtonText("Working...");
-          await connectService.submitManualCode(value);
-        } finally {
-          button.setDisabled(false).setButtonText("Complete sign-in");
-        }
+        new AccountConnectModal(
+          plugin.app,
+          () => connectService.submitManualCode(value),
+          defaultAccountConnectActions(plugin),
+        ).open();
       };
       button.onClick(() => void submitCode?.());
     });

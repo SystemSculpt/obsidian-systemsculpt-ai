@@ -1,0 +1,96 @@
+/**
+ * Plan gate / first-run welcome modal — sign-in, purchase, and manual-code
+ * handoff states. Root: `.ss-upgrade-plan-modal.ss-modal--small` with
+ * `.ss-modal--scrollable` so long copy scrolls inside the sheet on mobile
+ * (UpgradePlanModal.ts).
+ */
+
+.ss-upgrade-plan-modal {
+  max-width: 460px;
+}
+
+.ss-upgrade-plan-modal .ss-modal__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-5);
+  text-align: center;
+}
+
+.ss-upgrade-plan__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ss-accent);
+}
+
+.ss-upgrade-plan__icon svg {
+  width: 34px;
+  height: 34px;
+}
+
+.ss-upgrade-plan__detail {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-base);
+}
+
+.ss-upgrade-plan__link {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: var(--ss-space-1);
+  color: var(--ss-accent);
+  font-size: var(--ss-text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ss-upgrade-plan__status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  color: var(--ss-ink-muted);
+}
+
+.ss-upgrade-plan__spinner {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 2px solid var(--ss-line-strong);
+  border-top-color: var(--ss-accent);
+  border-radius: var(--ss-radius-full);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+.ss-upgrade-plan__status-text {
+  font-size: var(--ss-text-base);
+}
+
+.ss-upgrade-plan__code-input {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  font-size: var(--ss-text-base);
+}
+
+/* Purchase and sign-in actions become a full-width stack on the mobile sheet
+ * so every choice is an easy touch target. */
+.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer,
+.ss-mobile-layout .ss-account-connect-modal .ss-modal__footer {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* In the column footer, the narrow-container `flex: 1 1 12rem` would turn
+ * the 12rem basis into button HEIGHT — reset to natural height. */
+.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer > .ss-button,
+.ss-mobile-layout .ss-account-connect-modal .ss-modal__footer > .ss-button {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: var(--ss-touch-target);
+}
+
+.ss-mobile-layout .ss-upgrade-plan__link {
+  min-height: var(--ss-touch-target);
+}

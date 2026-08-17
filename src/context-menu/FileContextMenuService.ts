@@ -33,6 +33,8 @@ import {
 } from "../modals/DocumentProcessingPanel";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
+import { isPlanAccessError } from "../utils/errors";
+import { requireActivePlan, UpgradePlanModal } from "../modals/UpgradePlanModal";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const COPYABLE_IMAGE_EXTENSIONS = new Set([
@@ -485,6 +487,7 @@ export class FileContextMenuService {
   }
 
   private async handleDocumentConversion(file: TFile): Promise<void> {
+    if (!requireActivePlan(this.plugin, "Document conversion")) return;
     const startedAt = Date.now();
     this.info("Document conversion started", { filePath: file.path });
     let progressPanel: DocumentProcessingPanelHandle | null = null;
@@ -539,11 +542,8 @@ export class FileContextMenuService {
         file,
       });
 
-      if (message?.toLowerCase().includes("license")) {
-        new Notice(
-          "Document conversion requires an active SystemSculpt license.",
-          6000
-        );
+      if (isPlanAccessError(error)) {
+        UpgradePlanModal.openOnce(this.plugin, { feature: "Document conversion" });
         return;
       }
 
@@ -601,6 +601,7 @@ export class FileContextMenuService {
   }
 
   private async handleAudioConversion(file: TFile): Promise<void> {
+    if (!requireActivePlan(this.plugin, "Transcription")) return;
     this.info("Audio transcription launch requested", { filePath: file.path });
 
     try {

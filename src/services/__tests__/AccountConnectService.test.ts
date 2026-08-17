@@ -1,14 +1,6 @@
 import { createHash } from "crypto";
 import { API_BASE_URL } from "../../constants/api";
 import { AccountConnectService } from "../AccountConnectService";
-import { Notice } from "obsidian";
-
-jest.mock("obsidian", () => {
-  const actual = jest.requireActual("obsidian");
-  return { ...actual, Notice: jest.fn() };
-});
-
-const mockedNotice = Notice as unknown as jest.Mock;
 
 const BASE64_URL_32_BYTES = /^[A-Za-z0-9_-]{43}$/;
 
@@ -36,7 +28,10 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
   const updateSettings = jest.fn(async (patch: Record<string, unknown>) => {
     Object.assign(settings, patch);
   });
-  const validateLicenseKeyDetailed = jest.fn(async () => ({ outcome: "valid", isValid: true }));
+  const validateLicenseKeyDetailed = jest.fn(async () => {
+    settings.licenseValid = true;
+    return { outcome: "valid", isValid: true };
+  });
   return {
     settings,
     getSettingsManager: () => ({ updateSettings }),
@@ -123,12 +118,10 @@ describe("AccountConnectService browser sign-in", () => {
     const { service } = createService();
     await service.begin("sign-in");
 
-    await service.handleProtocolCallback({ code: "code-1", state: "tampered-state" });
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state: "tampered-state" });
 
     expect(request).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith(
-      "Sign-in could not be verified. Start again from SystemSculpt settings.",
-    );
+    expect(outcome).toEqual({ kind: "error", reason: "state-mismatch" });
     expect(service.hasPendingRequest()).toBe(true);
   });
 
@@ -140,12 +133,10 @@ describe("AccountConnectService browser sign-in", () => {
     const { state } = parseConnectUrl(openedUrls[0]);
 
     now += 10 * 60_000 + 1;
-    await service.handleProtocolCallback({ code: "code-1", state });
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state });
 
     expect(request).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith(
-      "Sign-in session expired. Start sign-in again from SystemSculpt settings.",
-    );
+    expect(outcome).toEqual({ kind: "error", reason: "expired" });
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -155,7 +146,7 @@ describe("AccountConnectService browser sign-in", () => {
     await service.begin("sign-in");
     const { state, challenge } = parseConnectUrl(openedUrls[0]);
 
-    await service.handleProtocolCallback({ code: "code-1", state });
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state });
 
     const requestInput = request.mock.calls[0][0];
     expect(requestInput).toMatchObject({
@@ -180,7 +171,12 @@ describe("AccountConnectService browser sign-in", () => {
       displayName: "User",
     });
     expect(plugin.validateLicenseKeyDetailed).toHaveBeenCalledTimes(1);
-    expect(mockedNotice).toHaveBeenCalledWith("Signed in to SystemSculpt.");
+    expect(outcome).toEqual({
+      kind: "signed-in",
+      name: "User",
+      email: "user@example.com",
+      licenseValid: true,
+    });
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -193,7 +189,7 @@ describe("AccountConnectService browser sign-in", () => {
     await service.begin("sign-in");
     const { state } = parseConnectUrl(openedUrls[0]);
 
-    await service.handleProtocolCallback({ code: "code-1", state });
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state });
 
     expect(plugin.updateSettings).toHaveBeenCalledWith({
       licenseKey: "",
@@ -204,9 +200,7 @@ describe("AccountConnectService browser sign-in", () => {
       subscriptionStatus: "",
     });
     expect(plugin.validateLicenseKeyDetailed).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith(
-      "Signed in. Choose a plan to enable SystemSculpt AI features.",
-    );
+    expect(outcome).toEqual({ kind: "no-license", name: null, email: "user@example.com" });
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -216,12 +210,10 @@ describe("AccountConnectService browser sign-in", () => {
     await service.begin("sign-in");
     const { state } = parseConnectUrl(openedUrls[0]);
 
-    await service.handleProtocolCallback({ code: "code-1", state });
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state });
 
     expect(plugin.updateSettings).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith(
-      "Sign-in code was invalid or expired. Start again from SystemSculpt settings.",
-    );
+    expect(outcome).toEqual({ kind: "error", reason: "invalid-code" });
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -230,13 +222,15 @@ describe("AccountConnectService browser sign-in", () => {
     request.mockRejectedValueOnce(new Error("offline"));
     await service.begin("sign-in");
 
-    await service.submitManualCode("manual-code");
+    const firstOutcome = await service.submitManualCode("manual-code");
+    expect(firstOutcome).toEqual({ kind: "error", reason: "network" });
     expect(service.hasPendingRequest()).toBe(true);
     expect(plugin.updateSettings).not.toHaveBeenCalled();
 
     request.mockResolvedValueOnce(jsonResponse(200, successPayload));
-    await service.submitManualCode("manual-code");
+    const retryOutcome = await service.submitManualCode("manual-code");
 
+    expect(retryOutcome).toMatchObject({ kind: "signed-in" });
     expect(plugin.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({ licenseKey: "skss-connected" }),
     );
@@ -246,11 +240,9 @@ describe("AccountConnectService browser sign-in", () => {
   it("requires an active pending request before accepting a manual code", async () => {
     const { service } = createService();
 
-    await service.submitManualCode("manual-code");
+    const outcome = await service.submitManualCode("manual-code");
 
     expect(request).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith(
-      "Sign-in session expired. Start sign-in again from SystemSculpt settings.",
-    );
+    expect(outcome).toEqual({ kind: "error", reason: "expired" });
   });
 });

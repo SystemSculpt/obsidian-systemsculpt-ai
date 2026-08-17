@@ -12,6 +12,8 @@ import { readManagedToolCallFunction } from "../../services/chat/ManagedToolExec
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
+import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -891,7 +893,12 @@ export class AgentChatView extends ItemView {
       }
       this.syncAttachments();
       if (!legacyHistoryViewOnly && !hydrationFailed) {
-        this.workspace?.setBanner(null);
+        const planReminder = this.planReminderBanner();
+        if (planReminder) {
+          this.workspace?.setBanner(planReminder, "info");
+        } else {
+          this.workspace?.setBanner(null);
+        }
       }
       this.isFullyLoaded = true;
       this.updateViewState();
@@ -1223,7 +1230,29 @@ export class AgentChatView extends ItemView {
     });
   }
 
+  /**
+   * Gentle empty-state guidance for a plan-less vault: the composer stays
+   * usable and the first send opens the guided upgrade/sign-in modal.
+   */
+  private planReminderBanner(): string | null {
+    if (hasActivePlan(this.plugin)) return null;
+    const email = this.plugin.settings?.userEmail?.trim();
+    return email
+      ? "Your account has no active plan yet. Send a message to see plan options."
+      : "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.";
+  }
+
   public async handleError(error: unknown): Promise<void> {
+    // A missing or rejected plan is a guided journey, not a failure banner:
+    // open the upgrade/sign-in modal and keep an accurate banner behind it.
+    if (isPlanAccessError(error)) {
+      UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });
+      const planMessage = error instanceof Error && error.message.trim()
+        ? error.message
+        : `Chat needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`;
+      this.workspace?.setBanner(planMessage, "error");
+      return;
+    }
     this.refreshCreditsAfterBillingFailure(error);
     // Session failures reject with structured payloads ({code, message,
     // retryable}), not Error instances — read message the same way as
@@ -1950,8 +1979,8 @@ export class AgentChatView extends ItemView {
               ? new Set<string>()
               : this.sessionTrustedToolNames,
           };
-      if (!this.plugin.settings.licenseKey?.trim()) {
-        throw new Error("Add your SystemSculpt license to start a response.");
+      if (!hasActivePlan(this.plugin)) {
+        throw planRequiredError("Chat");
       }
       const previousConversationId = this.transcript.snapshot().agentConversationId;
       const conversationId = historicalResubmit
@@ -2912,7 +2941,12 @@ export class AgentChatView extends ItemView {
       const snapshot = this.transcript.reset({ title: title?.trim() || generateDefaultChatTitle() });
       this.applyTranscriptIdentity(snapshot);
       this.workspace?.setTitle(this.chatTitle);
-      this.workspace?.setBanner(null);
+      const planReminder = this.planReminderBanner();
+      if (planReminder) {
+        this.workspace?.setBanner(planReminder, "info");
+      } else {
+        this.workspace?.setBanner(null);
+      }
       await this.workspace?.setHistory([]);
       await this.workspace?.setAgentSnapshot(null);
       this.syncAttachments();

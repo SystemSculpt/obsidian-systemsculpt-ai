@@ -71,6 +71,8 @@ import { ManagedAdmission } from "./services/managed/ManagedAdmission";
 import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
+import { AccountConnectModal } from "./modals/AccountConnectModal";
+import { UpgradePlanModal, defaultAccountConnectActions } from "./modals/UpgradePlanModal";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
@@ -430,7 +432,14 @@ export default class SystemSculptPlugin extends Plugin {
       // Browser sign-in returns through obsidian://systemsculpt-connect on
       // both desktop and mobile. Cheap synchronous registration.
       this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
-        void this.getAccountConnectService().handleProtocolCallback(params);
+        // The upgrade/sign-in modal's browser handoff is superseded the
+        // moment the deep link comes back — close it before the welcome.
+        UpgradePlanModal.closeCurrent();
+        new AccountConnectModal(
+          this.app,
+          () => this.getAccountConnectService().handleProtocolCallback(params),
+          defaultAccountConnectActions(this),
+        ).open();
       });
 
       this.registerLayoutReadyHandler(loadStart);
@@ -916,12 +925,31 @@ export default class SystemSculptPlugin extends Plugin {
           layoutPhase.complete({
             elapsedSinceLoadMs: Number((performance.now() - loadStart).toFixed(1)),
           });
+          this.maybeShowAccountOnboarding();
         })
         .catch((error) => {
           this.failures.push("layout initialization");
           layoutPhase.fail(error);
         });
     });
+  }
+
+  /**
+   * One-time first-run welcome: only for a vault that has never signed in and
+   * never seen it. Persists the flag immediately so it can never nag again.
+   */
+  private maybeShowAccountOnboarding(): void {
+    if (this.settings.accountOnboardingShown === true) return;
+    if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
+    const timer = typeof window !== "undefined" && typeof window.setTimeout === "function"
+      ? window.setTimeout
+      : setTimeout;
+    timer(() => {
+      if (this.settings.accountOnboardingShown === true) return;
+      if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
+      void this.getSettingsManager().updateSettings({ accountOnboardingShown: true });
+      UpgradePlanModal.openOnce(this, { context: "onboarding" });
+    }, 1500);
   }
 
   private scheduleStorageInitialization(tracer: InitializationTracer): void {
@@ -2119,6 +2147,11 @@ export default class SystemSculptPlugin extends Plugin {
       return;
     }
     this.pendingSettingsFocusTab = null;
+  }
+
+  /** Opens a fresh chat tab — the post-sign-in "Get started" destination. */
+  public async openNewChat(): Promise<void> {
+    await this.ensureCommandManager().openChatView();
   }
 
   public async openCreditsBalanceModal(options?: {

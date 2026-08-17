@@ -2,6 +2,10 @@
   "version": 1,
   "grammar": "^[a-z][a-z0-9-]*(\\.([a-z0-9-]+|\\*))+$",
   "ids": [
+    "account-connect.choose-plan",
+    "account-connect.close",
+    "account-connect.done",
+    "account-connect.retry",
     "audio.modal.cancel",
     "audio.modal.output.clean-transcript",
     "audio.modal.output.detailed",
@@ -13,6 +17,7 @@
     "audio.modal.tab.vault",
     "audio.modal.tab.youtube",
     "audio.progress.cancel",
+    "audio.progress.choose-plan",
     "audio.progress.close",
     "audio.progress.credits",
     "audio.progress.hide",
@@ -70,6 +75,7 @@
     "document.progress.hide",
     "document.progress.open-markdown",
     "embeddings.index.add-credits",
+    "embeddings.index.choose-plan",
     "embeddings.index.review-pending",
     "embeddings.pending-files",
     "embeddings.pending.close",
@@ -188,6 +194,16 @@
     "transcription.progress.hide",
     "transcription.progress.open-transcript",
     "transcription.progress.retry",
-    "transcription.progress.stop-waiting"
+    "transcription.progress.stop-waiting",
+    "upgrade-plan.back",
+    "upgrade-plan.code",
+    "upgrade-plan.complete-code",
+    "upgrade-plan.create-account",
+    "upgrade-plan.explore",
+    "upgrade-plan.lifetime",
+    "upgrade-plan.pricing",
+    "upgrade-plan.sign-in",
+    "upgrade-plan.subscribe",
+    "upgrade-plan.sync"
   ]
 }
