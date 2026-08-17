@@ -1,4 +1,5 @@
 import type { StudioNodeGroup, StudioProjectV1 } from "../../../studio/types";
+import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 import {
   STUDIO_GRAPH_DEFAULT_NODE_HEIGHT,
   STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
@@ -51,6 +52,20 @@ export function computeStudioGraphGroupBounds(
     minY = Math.min(minY, node.position.y);
     maxX = Math.max(maxX, node.position.x + nodeWidth);
     maxY = Math.max(maxY, node.position.y + nodeHeight);
+  }
+
+  // A grouped shape stretches the same frame; its size is already in the model.
+  if (group.shapeIds && group.shapeIds.length > 0) {
+    const groupShapeIds = new Set(group.shapeIds);
+    for (const shape of readStudioDiagramFromProject(project).shapes) {
+      if (!groupShapeIds.has(shape.id)) {
+        continue;
+      }
+      minX = Math.min(minX, shape.position.x);
+      minY = Math.min(minY, shape.position.y);
+      maxX = Math.max(maxX, shape.position.x + shape.size.width);
+      maxY = Math.max(maxY, shape.position.y + shape.size.height);
+    }
   }
 
   if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {

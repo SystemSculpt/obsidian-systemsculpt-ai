@@ -4,6 +4,7 @@ import type {
   StudioNodeInstance,
   StudioProjectV1,
 } from "../../../studio/types";
+import { mutateStudioDiagram } from "../../../studio/StudioShapes";
 import { randomId } from "../../../studio/utils";
 import { tryCopyToClipboard } from "../../../utils/clipboard";
 import { cloneConfigDefaults, prettifyNodeKind } from "../StudioViewHelpers";
@@ -50,6 +51,10 @@ export interface StudioClipboardAndDropHost {
   getProjectPath(): string | null;
   getNodeDefinitions(): readonly StudioNodeDefinition[];
   getSelectedNodeIds(): string[];
+  /** Diagram half of the canvas selection; absent hosts simply copy nodes. */
+  getSelectedShapeIds?(): string[];
+  removeDiagramSelection?(): boolean;
+  selectPastedShapes?(shapeIds: string[]): void;
   getGraphZoom(): number;
   getDefaultNodePosition(project: StudioProjectV1): StudioGraphPoint;
   normalizeNodePosition(position: StudioGraphPoint): StudioGraphPoint;
@@ -82,6 +87,11 @@ type ProjectOperationScope = {
   projectPath: string;
   lifecycleEpoch: number;
 };
+
+/** Nodes and shapes are one clipboard, so the notice counts items, not kinds. */
+function describeClipboardCount(verb: string, count: number): string {
+  return count === 1 ? `${verb} 1 item.` : `${verb} ${count} items.`;
+}
 
 const DEFAULT_DEPENDENCIES: StudioClipboardAndDropDependencies = {
   createId: (prefix) => randomId(prefix),
@@ -181,6 +191,7 @@ export class StudioClipboardAndDropController {
     const payload = buildGraphClipboardPayload({
       project,
       selectedNodeIds: this.host.getSelectedNodeIds(),
+      selectedShapeIds: this.host.getSelectedShapeIds?.() || [],
     });
     if (!payload) return false;
 
@@ -188,7 +199,7 @@ export class StudioClipboardAndDropController {
     this.graphClipboardPasteCount = 0;
     void this.syncGraphClipboardToSystemClipboard(payload);
     if (options?.showNotice !== false) {
-      new Notice(payload.nodes.length === 1 ? "Copied 1 node." : `Copied ${payload.nodes.length} nodes.`);
+      new Notice(describeClipboardCount("Copied", payload.nodes.length + payload.shapes.length));
     }
     return true;
   }
@@ -196,13 +207,25 @@ export class StudioClipboardAndDropController {
   cutSelectedGraphNodes(): boolean {
     if (this.host.isBusy() || !this.host.getCurrentProject()) return false;
     const selectedNodeIds = this.host.getSelectedNodeIds();
-    if (selectedNodeIds.length === 0) return false;
+    const selectedShapeIds = this.host.getSelectedShapeIds?.() || [];
+    if (selectedNodeIds.length === 0 && selectedShapeIds.length === 0) return false;
     if (!this.copySelectedGraphNodes({ showNotice: false })) return false;
-    if (!this.host.removeNodes(selectedNodeIds)) {
-      new Notice("Unable to cut: the selected nodes no longer exist in this project.");
+
+    // Shapes go first: removing them cannot invalidate a node id, and the
+    // diagram removal already takes its own arrows with it.
+    let removed = selectedShapeIds.length > 0
+      ? this.host.removeDiagramSelection?.() === true
+      : false;
+    if (selectedNodeIds.length > 0) {
+      removed = this.host.removeNodes(selectedNodeIds) || removed;
+    }
+    if (!removed) {
+      new Notice("Unable to cut: the selection no longer exists in this project.");
       return false;
     }
-    new Notice(selectedNodeIds.length === 1 ? "Cut 1 node." : `Cut ${selectedNodeIds.length} nodes.`);
+    new Notice(
+      describeClipboardCount("Cut", selectedNodeIds.length + selectedShapeIds.length)
+    );
     return true;
   }
 
@@ -213,8 +236,8 @@ export class StudioClipboardAndDropController {
     if (
       !payload ||
       payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA ||
-      !Array.isArray(payload.nodes) ||
-      payload.nodes.length === 0
+      (!(Array.isArray(payload.nodes) && payload.nodes.length > 0) &&
+        !(Array.isArray(payload.shapes) && payload.shapes.length > 0))
     ) {
       return false;
     }
@@ -227,16 +250,25 @@ export class StudioClipboardAndDropController {
       nextNodeId: () => this.dependencies.createId("node"),
       nextEdgeId: () => this.dependencies.createId("edge"),
       nextGroupId: () => this.dependencies.createId("group"),
+      nextShapeId: () => this.dependencies.createId("shape"),
+      nextArrowId: () => this.dependencies.createId("arrow"),
     });
     if (!materialized) return false;
 
-    const { newNodes, newEdges, newGroups, nextSelection } = materialized;
+    const { newNodes, newEdges, newGroups, newShapes, newArrows, nextSelection, nextShapeSelection } =
+      materialized;
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...newNodes);
       project.graph.edges.push(...newEdges);
       if (newGroups.length > 0) {
         if (!Array.isArray(project.graph.groups)) project.graph.groups = [];
         project.graph.groups.push(...newGroups);
+      }
+      if (newShapes.length > 0 || newArrows.length > 0) {
+        mutateStudioDiagram(project, (diagram) => {
+          diagram.shapes.push(...newShapes);
+          diagram.arrows.push(...newArrows);
+        });
       }
       return true;
     });
@@ -245,6 +277,7 @@ export class StudioClipboardAndDropController {
     const pastedNoteNodeIds = newNodes
       .filter((node) => node.kind === "studio.note")
       .map((node) => node.id);
+    this.host.selectPastedShapes?.(nextShapeSelection);
     this.host.finalizeCreatedNodes(scope.project, {
       selection: nextSelection,
       selectionMode: "replace",
@@ -253,7 +286,7 @@ export class StudioClipboardAndDropController {
       refreshNoteNodeIds: pastedNoteNodeIds,
     });
     this.graphClipboardPasteCount += 1;
-    new Notice(newNodes.length === 1 ? "Pasted 1 node." : `Pasted ${newNodes.length} nodes.`);
+    new Notice(describeClipboardCount("Pasted", newNodes.length + newShapes.length));
     return true;
   }
 

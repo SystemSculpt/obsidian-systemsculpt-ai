@@ -84,6 +84,24 @@ export type StudioGraphInteractionHost = {
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onGraphZoomChanged?: (zoom: number, context: StudioGraphZoomChangeContext) => void;
+  /**
+   * Diagram half of the one canvas selection. The graph owns the marquee and
+   * the node drag; these carry the selected shapes through the same gesture.
+   */
+  beginDiagramMarquee?: () => void;
+  selectDiagramInBounds?: (
+    bounds: { left: number; top: number; right: number; bottom: number },
+    additive: boolean
+  ) => void;
+  beginDiagramTranslation?: () => void;
+  /** Group drags move their own shapes, not whatever happens to be selected. */
+  beginGroupShapeTranslation?: (shapeIds: readonly string[]) => void;
+  translateDiagramSelection?: (
+    project: StudioProjectV1,
+    delta: { x: number; y: number }
+  ) => boolean;
+  previewDiagramTranslation?: () => void;
+  finishDiagramTranslation?: () => void;
   getPortType: (nodeId: string, direction: "in" | "out", portId: string) => string | null;
   portTypeCompatible: (sourceType: string, targetType: string) => boolean;
   describeConnectionAutoCreate?: (sourceType: string) => ConnectionAutoCreateDescriptor | null;

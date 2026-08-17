@@ -208,7 +208,6 @@ describe("StudioProjectStore", () => {
 
     const externallyEdited = JSON.parse(files.get(created.path)!) as Record<string, unknown>;
     externallyEdited.name = "Edited outside Studio";
-    externallyEdited.updatedAt = "2026-07-15T12:00:00.000Z";
     files.set(created.path, `${JSON.stringify(externallyEdited, null, 2)}\n`);
 
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");

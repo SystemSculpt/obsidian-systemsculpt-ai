@@ -2,6 +2,7 @@ import type { HostCapability } from "../platform/hostCapabilities";
 
 export const STUDIO_PROJECT_EXTENSION = ".systemsculpt" as const;
 export const STUDIO_PROJECT_SCHEMA_V1 = "studio.project.v1" as const;
+export const STUDIO_PROJECT_SCHEMA_V2 = "studio.project.v2" as const;
 export const STUDIO_POLICY_SCHEMA_V1 = "studio.policy.v1" as const;
 
 export type StudioPortDataType =
@@ -144,11 +145,17 @@ export type StudioEdge = {
   toPortId: string;
 };
 
+/**
+ * A group frames whatever the user selected, so it can hold nodes, diagram
+ * shapes, or both. It stays in `graph` because it is pure presentation for the
+ * canvas either way, and the compiler ignores it.
+ */
 export type StudioNodeGroup = {
   id: string;
   name: string;
   color?: string;
   nodeIds: string[];
+  shapeIds?: string[];
 };
 
 export type StudioGraph = {
@@ -156,6 +163,46 @@ export type StudioGraph = {
   edges: StudioEdge[];
   entryNodeIds: string[];
   groups?: StudioNodeGroup[];
+};
+
+/**
+ * Diagram layer — the tldraw half of Studio, stored beside the graph and
+ * never part of it. A shape is not a node: no kind, no version, no ports, no
+ * config, no registry definition, and no path into the compiler or runtime.
+ * Behavior lives in src/studio/StudioShapes.ts.
+ */
+export type StudioShapeKind =
+  | "rectangle"
+  | "ellipse"
+  | "diamond"
+  | "pill"
+  | "cylinder"
+  | "note"
+  | "hexagon";
+
+export type StudioShapeInstance = {
+  id: string;
+  shape: StudioShapeKind;
+  position: StudioNodePosition;
+  /** Both dimensions are explicit: a shape is drawn, never content-sized. */
+  size: { width: number; height: number };
+  label: string;
+  /** Reserved for shape properties (fill, stroke, font). Preserved verbatim. */
+  style?: Record<string, StudioJsonValue>;
+};
+
+/** Shape-to-shape connector. Shapes have no ports, so arrows carry no port IDs. */
+export type StudioShapeArrow = {
+  id: string;
+  fromShapeId: string;
+  toShapeId: string;
+  /** Optional text drawn at the arrow's midpoint. */
+  label?: string;
+};
+
+export type StudioDiagram = {
+  shapes: StudioShapeInstance[];
+  arrows: StudioShapeArrow[];
 };
 
 export type StudioCapabilityGrant = {
@@ -187,6 +234,11 @@ export type StudioProjectV1 = {
     minPluginVersion: string;
   };
   graph: StudioGraph;
+  /**
+   * Canvas diagram layer. Optional because projects persisted before shapes
+   * existed have none; src/studio/StudioShapes.ts is the only reader/writer.
+   */
+  diagram?: StudioDiagram;
   permissionsRef: {
     policyVersion: number;
     policyPath: string;

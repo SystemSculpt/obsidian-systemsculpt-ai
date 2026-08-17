@@ -69,6 +69,16 @@ type StudioGraphSelectionHost = {
   onNodeDragHoverGroupChange?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onNodeDropToGroup?: (groupId: string | null, draggedNodeIds: string[]) => void;
   onGraphZoomChanged?: (zoom: number, context: StudioGraphZoomChangeContext) => void;
+  /**
+   * The diagram layer's half of the one canvas selection: a marquee sweeps
+   * shapes with nodes, and a node drag carries the selected shapes along.
+   */
+  beginDiagramMarquee?: () => void;
+  selectDiagramInBounds?: (bounds: GraphBounds, additive: boolean) => void;
+  beginDiagramTranslation?: () => void;
+  translateDiagramSelection?: (project: StudioProjectV1, delta: GraphPoint) => boolean;
+  previewDiagramTranslation?: () => void;
+  finishDiagramTranslation?: () => void;
 };
 
 type NotifyNodePositionsChangedOptions = {
@@ -90,6 +100,7 @@ export class StudioGraphSelectionController {
   private graphOwnerWindow: Window | null = null;
   private nodeElsById = new Map<string, HTMLElement>();
   private selectedNodeIds = new Set<string>();
+  private nodeTranslationOrigins = new Map<string, GraphPoint>();
   private suppressNextCanvasClick = false;
   private onSelectionChange: (() => void) | null = null;
   private zoomSettleTimer: number | null = null;
@@ -433,6 +444,7 @@ export class StudioGraphSelectionController {
     const pointerId = startEvent.pointerId;
     const additive = startEvent.shiftKey || startEvent.metaKey || startEvent.ctrlKey;
     const baselineSelection = additive ? new Set(this.selectedNodeIds) : new Set<string>();
+    this.host.beginDiagramMarquee?.();
     const startGraph = this.graphPointFromClient(startEvent.clientX, startEvent.clientY);
     if (!startGraph) {
       return;
@@ -499,6 +511,11 @@ export class StudioGraphSelectionController {
         : marqueeSelected;
       this.selectedNodeIds = nextSelection;
       this.refreshNodeSelectionClasses();
+      // The same sweep collects shapes: one marquee, one selection.
+      this.host.selectDiagramInBounds?.(
+        { left: x1, top: y1, right: x2, bottom: y2 },
+        additive
+      );
     };
 
     const flushSelectionFrame = (): void => {
@@ -838,6 +855,61 @@ export class StudioGraphSelectionController {
     element.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
   }
 
+  /**
+   * Node half of a drag that started on a shape. Mirrors what the diagram
+   * controller does for a drag that starts on a node card: snapshot origins,
+   * write positions from them, then refresh what the DOM already shows.
+   */
+  beginSelectionTranslation(): void {
+    const project = this.host.getCurrentProject();
+    this.nodeTranslationOrigins = new Map();
+    if (!project) {
+      return;
+    }
+    for (const nodeId of this.selectedNodeIds) {
+      const node = this.findNode(project, nodeId);
+      if (node) {
+        this.nodeTranslationOrigins.set(nodeId, { x: node.position.x, y: node.position.y });
+      }
+    }
+  }
+
+  applySelectionTranslation(project: StudioProjectV1, delta: GraphPoint): boolean {
+    let changed = false;
+    for (const [nodeId, origin] of this.nodeTranslationOrigins) {
+      const node = this.findNode(project, nodeId);
+      if (!node) {
+        continue;
+      }
+      const nextX = Math.max(24, Math.round(origin.x + delta.x));
+      const nextY = Math.max(24, Math.round(origin.y + delta.y));
+      if (node.position.x !== nextX || node.position.y !== nextY) {
+        node.position.x = nextX;
+        node.position.y = nextY;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  previewSelectionTranslation(): void {
+    if (this.nodeTranslationOrigins.size === 0) {
+      return;
+    }
+    for (const nodeId of this.nodeTranslationOrigins.keys()) {
+      this.updateNodePosition(nodeId);
+    }
+    this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
+  }
+
+  finishSelectionTranslation(): void {
+    if (this.nodeTranslationOrigins.size === 0) {
+      return;
+    }
+    this.nodeTranslationOrigins = new Map();
+    this.notifyNodePositionsChanged();
+  }
+
   startNodeDrag(nodeId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
     if (this.graphZoomMode === "overview") {
       return;
@@ -975,10 +1047,13 @@ export class StudioGraphSelectionController {
           activeSnap = snap;
         }
       }
+      const delta = { x: deltaX, y: deltaY };
       return this.host.commitProjectMutation(
         "node.position",
         (currentProject) => {
-          let changed = false;
+          // Selected shapes ride the same snapped delta, in the same mutation,
+          // so a mixed selection stays put relative to itself.
+          let changed = this.host.translateDiagramSelection?.(currentProject, delta) === true;
           for (const dragNodeId of dragNodeIds) {
             const dragNode = this.findNode(currentProject, dragNodeId);
             const origin = originByNodeId.get(dragNodeId);
@@ -1009,6 +1084,9 @@ export class StudioGraphSelectionController {
         dragged = true;
         startEvent.preventDefault();
         captureHistoryOnNextMutation = true;
+        // Shape origins are captured here, not on pointerdown: the press may
+        // still have been about to clear the diagram selection.
+        this.host.beginDiagramTranslation?.();
         this.host.onNodeDragStateChange?.(true);
         syncHoveredGroup();
       }
@@ -1029,6 +1107,7 @@ export class StudioGraphSelectionController {
       for (const dragNodeId of dragNodeIds) {
         this.updateNodePosition(dragNodeId);
       }
+      this.host.previewDiagramTranslation?.();
       this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
       syncHoveredGroup();
     };
@@ -1108,6 +1187,8 @@ export class StudioGraphSelectionController {
           mode: "discrete",
           forceChanged: true,
         });
+        this.host.previewDiagramTranslation?.();
+        this.host.finishDiagramTranslation?.();
         this.notifyNodePositionsChanged();
         return;
       }

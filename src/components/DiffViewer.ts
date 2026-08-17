@@ -5,12 +5,21 @@
 import { Component } from 'obsidian';
 import { DiffResult, DiffLine } from '../utils/diffUtils';
 
+/**
+ * Why a diff is empty. An empty diff has more than one cause and they are not
+ * equivalent: "identical" is safe to approve, the rest are edits that will not
+ * apply. Rendering them all as "No changes" hides a failure behind a non-event.
+ */
+export type DiffEmptyReason = 'identical' | 'unmatched' | 'missing';
+
 export interface DiffViewerOptions {
   container: HTMLElement;
   diffResult: DiffResult;
   fileName: string;
   maxContextLines?: number; // Context lines around changes (default 2)
   showLineNumbers?: boolean; // Show line numbers (default false for compactness)
+  emptyReason?: DiffEmptyReason; // Why there is nothing to show (default 'identical')
+  emptyDetail?: string; // Extra context for the empty state, e.g. unmatched edit count
 }
 
 export class DiffViewer extends Component {
@@ -19,6 +28,8 @@ export class DiffViewer extends Component {
   private fileName: string;
   private maxContextLines: number;
   private showLineNumbers: boolean;
+  private emptyReason: DiffEmptyReason;
+  private emptyDetail: string | null;
 
   constructor(options: DiffViewerOptions) {
     super();
@@ -27,6 +38,8 @@ export class DiffViewer extends Component {
     this.fileName = options.fileName;
     this.maxContextLines = options.maxContextLines ?? 2;
     this.showLineNumbers = options.showLineNumbers ?? false;
+    this.emptyReason = options.emptyReason ?? 'identical';
+    this.emptyDetail = options.emptyDetail ?? null;
   }
 
   public render(): void {
@@ -63,8 +76,12 @@ export class DiffViewer extends Component {
     const totalChanges = this.diffResult.stats.additions + this.diffResult.stats.deletions;
 
     if (totalChanges === 0) {
-      stats.textContent = 'No changes';
+      stats.textContent = this.emptyHeadline();
       stats.addClass('systemsculpt-diff-no-changes');
+      if (this.emptyReason !== 'identical') {
+        stats.addClass('systemsculpt-diff-blocked');
+        this.container.addClass('is-blocked');
+      }
     } else {
       // Create separate spans for additions and deletions to style them independently
       if (this.diffResult.stats.additions > 0) {
@@ -98,6 +115,29 @@ export class DiffViewer extends Component {
     }
   }
 
+  private emptyHeadline(): string {
+    switch (this.emptyReason) {
+      case 'missing':
+        return 'File not found';
+      case 'unmatched':
+        return "Can't apply";
+      default:
+        return 'No changes';
+    }
+  }
+
+  private emptyExplanation(): string {
+    const detail = this.emptyDetail ? ` ${this.emptyDetail}` : '';
+    switch (this.emptyReason) {
+      case 'missing':
+        return `This file does not exist in your vault, so the change cannot be applied.${detail}`;
+      case 'unmatched':
+        return `The text this change looks for is not in the file, so nothing would be replaced.${detail}`;
+      default:
+        return 'This file already matches the proposed content — approving changes nothing.';
+    }
+  }
+
   private createChangeHunks(): void {
     const content = this.container.createDiv({
       cls: 'systemsculpt-diff-content'
@@ -107,10 +147,13 @@ export class DiffViewer extends Component {
     const hunks = this.groupIntoHunks(this.diffResult.lines);
 
     if (hunks.length === 0) {
-      content.createDiv({
+      const notice = content.createDiv({
         cls: 'systemsculpt-diff-no-changes-notice',
-        text: 'No changes to display'
+        text: this.emptyExplanation(),
       });
+      if (this.emptyReason !== 'identical') {
+        notice.addClass('systemsculpt-diff-no-changes-notice-blocked');
+      }
       return;
     }
 

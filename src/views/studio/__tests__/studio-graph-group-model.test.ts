@@ -4,9 +4,33 @@ import {
   createGroupFromSelection,
   normalizeGroupColor,
   removeNodesFromGroups,
+  removeShapesFromGroups,
   setGroupColor,
   sanitizeGraphGroups,
 } from "../../../studio/StudioGraphGroupModel";
+
+function withShapes(project: StudioProjectV1): StudioProjectV1 {
+  project.diagram = {
+    shapes: [
+      {
+        id: "s1",
+        shape: "rectangle",
+        position: { x: 400, y: 400 },
+        size: { width: 180, height: 120 },
+        label: "One",
+      },
+      {
+        id: "s2",
+        shape: "ellipse",
+        position: { x: 700, y: 400 },
+        size: { width: 180, height: 120 },
+        label: "Two",
+      },
+    ],
+    arrows: [],
+  };
+  return project;
+}
 
 function createProject(): StudioProjectV1 {
   return {
@@ -250,5 +274,61 @@ describe("StudioGraphGroupModel", () => {
     expect(normalizeGroupColor("#abc")).toBe("#aabbcc");
     expect(normalizeGroupColor("#A1B2C3")).toBe("#a1b2c3");
     expect(normalizeGroupColor("invalid")).toBeNull();
+  });
+
+  it("groups a node and a shape together", () => {
+    const project = withShapes(createProject());
+
+    const created = createGroupFromSelection(project, ["a"], () => "group_mixed", ["s1"]);
+
+    expect(created).toEqual({
+      id: "group_mixed",
+      name: "Group 1",
+      nodeIds: ["a"],
+      shapeIds: ["s1"],
+    });
+  });
+
+  it("groups shapes alone and ignores shapes that do not exist", () => {
+    const project = withShapes(createProject());
+
+    const created = createGroupFromSelection(project, [], () => "group_shapes", [
+      "s1",
+      "s2",
+      "missing",
+    ]);
+
+    expect(created?.nodeIds).toEqual([]);
+    expect(created?.shapeIds).toEqual(["s1", "s2"]);
+    // One shape is not a group, the same bar a lone node has to clear.
+    expect(createGroupFromSelection(project, [], () => "group_single", ["s1"])).toBeNull();
+  });
+
+  it("keeps a group alive while it still frames a shape", () => {
+    const project = withShapes(createProject());
+    project.graph.groups = [
+      { id: "group_1", name: "Group 1", nodeIds: ["a"], shapeIds: ["s1"] },
+    ];
+
+    expect(removeNodesFromGroups(project, ["a"])).toBe(true);
+    expect(project.graph.groups).toEqual([
+      { id: "group_1", name: "Group 1", nodeIds: [], shapeIds: ["s1"] },
+    ]);
+
+    expect(removeShapesFromGroups(project, ["s1"])).toBe(true);
+    expect(project.graph.groups).toEqual([]);
+  });
+
+  it("sanitizes shape members against the diagram", () => {
+    const project = withShapes(createProject());
+    project.graph.groups = [
+      { id: "group_1", name: "Group 1", nodeIds: ["a"], shapeIds: ["s1", "gone"] },
+      { id: "group_2", name: "Group 2", nodeIds: ["missing"], shapeIds: ["gone"] },
+    ];
+
+    expect(sanitizeGraphGroups(project)).toBe(true);
+    expect(project.graph.groups).toEqual([
+      { id: "group_1", name: "Group 1", nodeIds: ["a"], shapeIds: ["s1"] },
+    ]);
   });
 });

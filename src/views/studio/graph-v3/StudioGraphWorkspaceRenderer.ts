@@ -24,17 +24,30 @@ import type {
   StudioTextNodeMarkdownEditorSnapshot,
 } from "./StudioGraphTextNodeCard";
 import type { StudioTextNodeFocusTarget } from "./StudioGraphTextNodeFocus";
+import {
+  resolveStudioCanvasToolShape,
+  type StudioCanvasTool,
+} from "../StudioCanvasTool";
 import { createStudioAction } from "../StudioAction";
 import { createStudioSvgElement } from "../StudioDomContext";
+import {
+  renderStudioShapeLayer,
+  type StudioShapeLayerHandle,
+  type StudioShapeLayerOptions,
+} from "../shapes/StudioShapeLayer";
+import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 
 type StudioWorkspaceControlOptions = Readonly<{
   label: string;
   testId: string;
   ariaLabel: string;
   title?: string;
+  icon?: string;
   disabled?: boolean;
   selected?: boolean;
   className?: string;
+  /** "icon" drops the visible label; the tools row uses it to stay compact. */
+  size?: "small" | "icon";
   onSelect: () => void;
 }>;
 
@@ -46,8 +59,9 @@ function createStudioWorkspaceControl(
     label: options.label,
     testId: options.testId,
     ariaLabel: options.ariaLabel,
+    icon: options.icon,
     className: `ss-studio-graph-workspace-control-button${options.className ? ` ${options.className}` : ""}`,
-    size: "small",
+    size: options.size ?? "small",
     disabled: options.disabled,
     selected: options.selected,
     title: options.title ?? options.ariaLabel,
@@ -76,6 +90,20 @@ export type StudioGraphWorkspaceRendererOptions = {
   }) => void;
   onRunGraph: () => void;
   onOpenAddNodeMenuAtViewportCenter: () => void;
+  /** Armed diagram tool; "select" is the normal pointer. */
+  activeCanvasTool: StudioCanvasTool;
+  onSelectCanvasTool: (tool: StudioCanvasTool) => void;
+  /** Diagram layer callbacks — shapes and arrows, never nodes and edges. */
+  shapeLayer: Pick<
+    StudioShapeLayerOptions,
+    | "selection"
+    | "onSelect"
+    | "onMoveSelection"
+    | "onResizeShape"
+    | "onLabelChange"
+    | "onArrowLabelChange"
+    | "onConnectShapes"
+  > & { registerLayerHandle: (handle: StudioShapeLayerHandle | null) => void };
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -139,6 +167,8 @@ export type StudioGraphWorkspaceRendererOptions = {
 
 export type StudioGraphWorkspaceRenderResult = {
   viewportEl: HTMLElement | null;
+  /** Zoomed graph-coordinate layer; canvas gestures measure against it. */
+  canvasEl: HTMLElement | null;
 };
 
 export function renderStudioGraphWorkspace(
@@ -157,6 +187,9 @@ export function renderStudioGraphWorkspace(
     onOpenMediaPreview,
     onRunGraph,
     onOpenAddNodeMenuAtViewportCenter,
+    activeCanvasTool,
+    onSelectCanvasTool,
+    shapeLayer,
     onZoomIn,
     onZoomOut,
     onZoomReset,
@@ -200,10 +233,15 @@ export function renderStudioGraphWorkspace(
       text: "Open a .systemsculpt file from the left file explorer to edit this graph.",
       cls: "ss-studio-muted",
     });
-    return { viewportEl: null };
+    return { viewportEl: null, canvasEl: null };
   }
 
   const viewport = editor.createDiv({ cls: "ss-studio-graph-viewport" });
+  viewport.classList.toggle("is-arrow-tool", activeCanvasTool === "arrow");
+  viewport.classList.toggle(
+    "is-shape-tool",
+    resolveStudioCanvasToolShape(activeCanvasTool) !== null
+  );
   graphInteraction.registerViewportElement(viewport);
   viewport.addEventListener(
     "wheel",
@@ -238,7 +276,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-shape, .ss-studio-shape-arrow-hit, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -257,7 +295,7 @@ export function renderStudioGraphWorkspace(
     }
     if (
       target.closest(
-        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
+        ".ss-studio-node-card, .ss-studio-port-pin, .ss-studio-edge-hit, .ss-studio-edge-line, .ss-studio-edge-preview, .ss-studio-shape, .ss-studio-shape-arrow-hit, .ss-studio-node-context-menu, .ss-studio-simple-context-menu, .ss-studio-group-frame, .ss-studio-group-tag, .ss-studio-group-tag-input"
       )
     ) {
       return;
@@ -292,7 +330,8 @@ export function renderStudioGraphWorkspace(
   graphInteraction.registerSnapGuidesElement(snapGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
-  createStudioWorkspaceControl(controls, {
+  const graphRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-row" });
+  createStudioWorkspaceControl(graphRow, {
     label: "Run",
     testId: "studio.workspace.run",
     ariaLabel: "Run Studio graph",
@@ -307,7 +346,7 @@ export function renderStudioGraphWorkspace(
     },
   });
 
-  createStudioWorkspaceControl(controls, {
+  createStudioWorkspaceControl(graphRow, {
     label: "Add",
     testId: "studio.workspace.add-node",
     ariaLabel: "Add node",
@@ -320,7 +359,7 @@ export function renderStudioGraphWorkspace(
     },
   });
 
-  const zoomRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
+  const zoomRow = graphRow.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
   createStudioWorkspaceControl(zoomRow, {
     label: "−",
     testId: "studio.workspace.zoom-out",
@@ -338,21 +377,21 @@ export function renderStudioGraphWorkspace(
     onSelect: onZoomIn,
   });
 
-  createStudioWorkspaceControl(controls, {
+  createStudioWorkspaceControl(graphRow, {
     label: "Reset",
     testId: "studio.workspace.zoom-reset",
     ariaLabel: "Reset zoom",
     onSelect: onZoomReset,
   });
 
-  createStudioWorkspaceControl(controls, {
+  createStudioWorkspaceControl(graphRow, {
     label: "Fit",
     testId: "studio.workspace.zoom-overview",
     ariaLabel: "Overview graph",
     onSelect: onZoomOverview,
   });
 
-  createStudioWorkspaceControl(controls, {
+  createStudioWorkspaceControl(graphRow, {
     label: nodeDetailMode === "collapsed" ? "Expand" : "Collapse",
     testId: "studio.workspace.detail-mode",
     ariaLabel: "Toggle node detail mode",
@@ -363,6 +402,106 @@ export function renderStudioGraphWorkspace(
     selected: nodeDetailMode === "collapsed",
     onSelect: onToggleNodeDetailMode,
   });
+
+  // Second row — diagram tools. Each is an armed mode, not an immediate
+  // action: the shape tools draw freeform on empty canvas, and the arrow tool
+  // connects one shape to another. They act on the diagram layer only; the
+  // node graph has no shape and the diagram has no node.
+  const toolsRow = controls.createDiv({
+    cls: "ss-studio-graph-workspace-control-row is-tools",
+  });
+  const toolControls: ReadonlyArray<{
+    tool: StudioCanvasTool;
+    label: string;
+    icon: string;
+    testId: string;
+    title: string;
+  }> = [
+    {
+      tool: "select",
+      label: "Select tool",
+      icon: "mouse-pointer-2",
+      testId: "studio.workspace.tool.select",
+      title: "Select (A): the plain cursor for selecting and moving",
+    },
+    {
+      tool: "rectangle",
+      label: "Square tool",
+      icon: "square",
+      testId: "studio.workspace.tool.square",
+      title: "Square: drag on the canvas",
+    },
+    {
+      tool: "ellipse",
+      label: "Circle tool",
+      icon: "circle",
+      testId: "studio.workspace.tool.circle",
+      title: "Circle: drag on the canvas",
+    },
+    {
+      tool: "diamond",
+      label: "Diamond tool",
+      icon: "diamond",
+      testId: "studio.workspace.tool.diamond",
+      title: "Diamond: a decision or branch",
+    },
+    {
+      tool: "pill",
+      label: "Pill tool",
+      icon: "rectangle-horizontal",
+      testId: "studio.workspace.tool.pill",
+      title: "Pill: a start or end point",
+    },
+    {
+      tool: "cylinder",
+      label: "Cylinder tool",
+      icon: "database",
+      testId: "studio.workspace.tool.cylinder",
+      title: "Cylinder: a store or database",
+    },
+    {
+      tool: "note",
+      label: "Note tool",
+      icon: "sticky-note",
+      testId: "studio.workspace.tool.note",
+      title: "Note: an aside beside the diagram",
+    },
+    {
+      tool: "hexagon",
+      label: "Hexagon tool",
+      icon: "hexagon",
+      testId: "studio.workspace.tool.hexagon",
+      title: "Hexagon: a step of preparation",
+    },
+    {
+      tool: "arrow",
+      label: "Arrow tool",
+      icon: "move-right",
+      testId: "studio.workspace.tool.arrow",
+      title: "Draw an arrow: drag from one shape onto another",
+    },
+  ];
+  for (const control of toolControls) {
+    createStudioWorkspaceControl(toolsRow, {
+      label: control.label,
+      icon: control.icon,
+      testId: control.testId,
+      ariaLabel: control.label,
+      title: control.title,
+      // Icon-only: seven shapes plus the arrow only stay one compact row
+      // without labels, and each carries its name as tooltip and aria-label.
+      size: "icon",
+      selected: activeCanvasTool === control.tool,
+      disabled: busy,
+      onSelect: () => {
+        if (busy) {
+          return;
+        }
+        // Selecting the armed tool disarms it, back to the pointer.
+        onSelectCanvasTool(activeCanvasTool === control.tool ? "select" : control.tool);
+      },
+    });
+  }
 
   canvas.addEventListener("click", (event) => {
     graphInteraction.handleCanvasBackgroundClick(event.target as HTMLElement);
@@ -375,6 +514,21 @@ export function renderStudioGraphWorkspace(
   edgesLayer.setAttribute("height", String(STUDIO_GRAPH_CANVAS_HEIGHT));
   canvas.appendChild(edgesLayer);
   graphInteraction.registerEdgesLayerElement(edgesLayer);
+
+  // Diagram layer sits between the graph's edges and its node cards: shapes
+  // never occlude a node, and it owns its gestures outright — the node graph
+  // has no concept of a shape and vice versa.
+  const { registerLayerHandle, ...shapeLayerOptions } = shapeLayer;
+  registerLayerHandle(
+    renderStudioShapeLayer({
+      canvasEl: canvas,
+      diagram: readStudioDiagramFromProject(currentProject),
+      busy,
+      activeCanvasTool,
+      getGraphZoom: () => graphInteraction.getGraphZoom(),
+      ...shapeLayerOptions,
+    })
+  );
 
   const nodeLayer = canvas.createDiv({ cls: "ss-studio-nodes-layer" });
   graphInteraction.clearGraphElementMaps();
@@ -437,5 +591,5 @@ export function renderStudioGraphWorkspace(
   graphInteraction.refreshNodeSelectionClasses();
   graphInteraction.applyGraphZoom();
   graphInteraction.refreshSelectionResizeFrame();
-  return { viewportEl: viewport };
+  return { viewportEl: viewport, canvasEl: canvas };
 }

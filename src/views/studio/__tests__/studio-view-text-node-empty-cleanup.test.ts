@@ -153,6 +153,7 @@ function createEditEndHarness(options: {
     nodeContextMenuOverlay: null,
     nodeActionContextMenuOverlay: null,
     runPresentation: { removeNode: jest.fn(), reset: jest.fn() },
+    shapeController: { clearSelection: jest.fn() },
     graphInteraction: {
       getSelectedNodeIds: jest.fn(() => [] as string[]),
       onNodeRemoved: jest.fn(),

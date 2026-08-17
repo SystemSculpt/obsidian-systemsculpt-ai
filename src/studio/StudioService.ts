@@ -15,6 +15,7 @@ import {
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
 import { StudioProjectRecoveryStore } from "./persistence/StudioProjectRecoveryStore";
+import { StudioAgentReferenceFile } from "./StudioAgentReferenceFile";
 import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
   StudioAssetRef,
@@ -33,7 +34,8 @@ import {
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
-import { parseStudioProject } from "./schema";
+import { parseStudioProject, type StudioProjectParseContext } from "./schema";
+import { STUDIO_PROJECT_SCHEMA_V2 } from "./types";
 import { sha256HexFromArrayBuffer } from "./hash";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
@@ -106,11 +108,13 @@ export class StudioService {
   private readonly runtime: StudioRuntime;
   private readonly projectSessionManager = new StudioProjectSessionManager();
   private readonly projectRecoveryStore: StudioProjectRecoveryStore;
+  private readonly agentReferenceFile: StudioAgentReferenceFile;
   private readonly projectSessionOperations = new Map<string, Promise<void>>();
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
     this.projectRecoveryStore = new StudioProjectRecoveryStore(plugin.app.vault.adapter);
+    this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin);
     this.runtime = new StudioRuntime(
@@ -194,6 +198,7 @@ export class StudioService {
     project: StudioProjectV1;
     rawText: string | null;
   }> {
+    void this.agentReferenceFile.ensureCurrent();
     let project = options
       ? await this.projectStore.loadProject(projectPath, options)
       : await this.projectStore.loadProject(projectPath);
@@ -366,6 +371,7 @@ export class StudioService {
     project: StudioProjectV1;
   }> {
     const name = sanitizeStudioProjectName(String(options?.name || "New Studio Project"));
+    void this.agentReferenceFile.ensureCurrent();
     const filePath = options?.projectPath
       ? normalizeStudioProjectPath(options.projectPath)
       : this.deriveDefaultProjectPath(name);
@@ -437,7 +443,7 @@ export class StudioService {
       throw new Error("Studio no longer has the renamed project open.");
     }
     const movedRawText = await this.projectStore.readVisibleProjectRawText(newPath);
-    const lintResult = this.lintProjectText(movedRawText);
+    const lintResult = this.lintProjectText(movedRawText, { projectPath: newPath });
     if (!lintResult.ok) {
       throw new Error(`Studio couldn't read the renamed project file: ${lintResult.error}`);
     }
@@ -455,22 +461,28 @@ export class StudioService {
       if (!pathChangeMatchesRename) {
         throw new Error("permissionsRef.policyPath may only change to match the renamed Studio file.");
       }
-      assertStableStudioProjectAgentDocumentFieldsUnchanged(
-        {
-          ...lintResult.project,
-          permissionsRef: {
-            ...lintResult.project.permissionsRef,
-            policyPath: nextPolicyPath,
+      // A v2 file carries no Studio-owned envelope beyond the identity checked
+      // above; a v1 file still carries the full envelope and must keep it
+      // identical to the open canvas.
+      const movedDocument = JSON.parse(movedRawText) as Record<string, unknown>;
+      if (movedDocument.schema !== STUDIO_PROJECT_SCHEMA_V2) {
+        assertStableStudioProjectAgentDocumentFieldsUnchanged(
+          {
+            ...lintResult.project,
+            permissionsRef: {
+              ...lintResult.project.permissionsRef,
+              policyPath: nextPolicyPath,
+            },
           },
-        },
-        {
-          ...currentCanvas,
-          permissionsRef: {
-            ...currentCanvas.permissionsRef,
-            policyPath: nextPolicyPath,
-          },
-        }
-      );
+          {
+            ...currentCanvas,
+            permissionsRef: {
+              ...currentCanvas.permissionsRef,
+              policyPath: nextPolicyPath,
+            },
+          }
+        );
+      }
     }
     const replacedCanvasProject =
       !fileContainsLastSavedCanvas && session.hasPendingLocalSaveWork()
@@ -520,11 +532,11 @@ export class StudioService {
     });
   }
 
-  lintProjectText(rawText: string): StudioProjectLintResult {
+  lintProjectText(rawText: string, context?: StudioProjectParseContext): StudioProjectLintResult {
     try {
       const projectText = String(rawText || "");
       assertValidStudioProjectAgentDocumentStructure(JSON.parse(projectText));
-      const project = parseStudioProject(projectText);
+      const project = parseStudioProject(projectText, context);
       // Lint gates whether Studio adopts an edited document, so it compiles
       // in document mode like the persistence gate. Run readiness (required
       // configs and inputs) is enforced by the runtime when a run starts.

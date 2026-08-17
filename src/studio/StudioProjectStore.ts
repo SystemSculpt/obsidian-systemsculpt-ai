@@ -171,7 +171,7 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
-    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!)) };
+    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!), { projectPath: newPath }) };
   }
 
   async adoptVisibleProjectRename(options: {
@@ -183,7 +183,7 @@ export class StudioProjectStore {
     const oldPath = normalizeStudioProjectPath(options.oldPath);
     const newPath = normalizeStudioProjectPath(options.newPath);
     const selected = await this.openSelected(oldPath);
-    const movedProject = parseStudioProject(options.movedRawText);
+    const movedProject = parseStudioProject(options.movedRawText, { projectPath: newPath });
     if (movedProject.projectId !== selected.generation.metadata.projectId) {
       throw new Error("The renamed Studio file does not match the open project.");
     }
@@ -207,7 +207,8 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     const renamedProject = parseStudioProject(
-      decoder.decode(result.generation.files.get("project.systemsculpt")!)
+      decoder.decode(result.generation.files.get("project.systemsculpt")!),
+      { projectPath: newPath }
     );
     this.selectedByPath.delete(oldPath);
     this.remember(newPath, result.expectedGeneration, result.generation);
@@ -224,10 +225,11 @@ export class StudioProjectStore {
   }
 
   async loadProject(projectPath: string, options?: { forceReload?: boolean }): Promise<StudioProjectV1> {
-    const selected = await this.openSelected(projectPath, options);
+    const path = normalizeStudioProjectPath(projectPath);
+    const selected = await this.openSelected(path, options);
     const document = selected.generation.files.get("project.systemsculpt");
-    if (!document) throw new Error(`Studio project not found: ${normalizeStudioProjectPath(projectPath)}`);
-    return parseStudioProject(decoder.decode(document));
+    if (!document) throw new Error(`Studio project not found: ${path}`);
+    return parseStudioProject(decoder.decode(document), { projectPath: path });
   }
 
   async saveProject(

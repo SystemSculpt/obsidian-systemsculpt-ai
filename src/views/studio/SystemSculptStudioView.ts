@@ -19,10 +19,17 @@ import type {
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioNodeOutputMap,
+  StudioNodeSize,
   StudioProjectV1,
   StudioRunEvent,
+  StudioShapeKind,
 } from "../../studio/types";
 import { isStudioVisualOnlyNodeKind } from "../../studio/StudioNodeKinds";
+import {
+  resolveStudioCanvasToolShape,
+  type StudioCanvasTool,
+} from "./StudioCanvasTool";
+import { StudioShapeController } from "./shapes/StudioShapeController";
 import { scopeProjectForRun } from "../../studio/StudioRunScope";
 import { validateNodeConfig } from "../../studio/StudioNodeConfigValidation";
 import { resolveNodeDefinitionPorts } from "../../studio/StudioNodePortResolution";
@@ -190,6 +197,9 @@ export class SystemSculptStudioView extends ItemView {
   private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
   private nodeDragInProgress = false;
   private editingTextNodeIds = new Set<string>();
+  /** Armed diagram tool from the tools row; "select" is the normal pointer. */
+  private activeCanvasTool: StudioCanvasTool = "select";
+  private graphCanvasEl: HTMLElement | null = null;
   /** Text changes stay continuous while typing, then become one undo step on edit end. */
   private dirtyTextNodeEditIds = new Set<string>();
   private pendingTextNodeAutofocusNodeId: string | null = null;
@@ -212,6 +222,22 @@ export class SystemSculptStudioView extends ItemView {
   private readonly graphInteraction: StudioGraphInteractionEngine;
   private readonly clipboardAndDropController: StudioClipboardAndDropController;
   private readonly projectSessionController: StudioProjectSessionController;
+  /** Diagram layer: shapes and arrows, with its own selection and edits. */
+  private readonly shapeController = new StudioShapeController({
+    isBusy: () => this.busy,
+    getCanvasEl: () => this.graphCanvasEl,
+    getGraphZoom: () => this.graphInteraction.getGraphZoom(),
+    commitMutation: (reason, mutator, options) =>
+      this.projectSessionController.commitMutation(reason, mutator, options),
+    getCurrentProject: () => this.currentProject,
+    clearNodeSelection: () => this.graphInteraction.setSelectedNodeIds([]),
+    requestRender: () => this.render(),
+    beginNodeTranslation: () => this.graphInteraction.beginSelectionTranslation(),
+    translateNodes: (project, delta) =>
+      this.graphInteraction.applySelectionTranslation(project, delta),
+    previewNodeTranslation: () => this.graphInteraction.previewSelectionTranslation(),
+    finishNodeTranslation: () => this.graphInteraction.finishSelectionTranslation(),
+  });
   private graphZoomMode: StudioGraphZoomMode = "interactive";
   private graphZoomGestureInFlight = false;
   private vaultEventRefs: EventRef[] = [];
@@ -256,6 +282,16 @@ export class SystemSculptStudioView extends ItemView {
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
       describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
+      // One canvas selection: the graph's marquee and node drag carry shapes.
+      beginDiagramMarquee: () => this.shapeController.beginMarquee(),
+      selectDiagramInBounds: (bounds, additive) =>
+        this.shapeController.selectInBounds(bounds, { additive }),
+      beginDiagramTranslation: () => this.shapeController.beginTranslation(),
+      beginGroupShapeTranslation: (shapeIds) => this.shapeController.beginTranslation(shapeIds),
+      translateDiagramSelection: (project, delta) =>
+        this.shapeController.applyTranslation(project, delta),
+      previewDiagramTranslation: () => this.shapeController.previewTranslation(),
+      finishDiagramTranslation: () => this.shapeController.finishTranslation(),
     });
     this.projectSessionController = new StudioProjectSessionController({
       app: this.app,
@@ -313,6 +349,9 @@ export class SystemSculptStudioView extends ItemView {
       getProjectPath: () => this.currentProjectPath,
       getNodeDefinitions: () => this.nodeDefinitions,
       getSelectedNodeIds: () => this.graphInteraction.getSelectedNodeIds(),
+      getSelectedShapeIds: () => this.shapeController.getSelectedShapeIds(),
+      removeDiagramSelection: () => this.shapeController.removeSelection(),
+      selectPastedShapes: (shapeIds) => this.shapeController.setSelectedShapeIds(shapeIds),
       getGraphZoom: () => this.graphInteraction.getGraphZoom(),
       getDefaultNodePosition: (project) => this.computeDefaultNodePosition(project),
       normalizeNodePosition: (position) => this.normalizeNodePosition(position),
@@ -382,6 +421,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.destroy();
     this.nodeActionContextMenuOverlay = null;
     this.graphViewportEl = null;
+    this.graphCanvasEl = null;
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
   }
@@ -460,6 +500,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private clearProjectEditorState(): void {
+    this.shapeController.clearSelection();
     this.editingTextNodeIds.clear();
     this.dirtyTextNodeEditIds.clear();
     this.pendingTextNodeAutofocusNodeId = null;
@@ -497,6 +538,8 @@ export class SystemSculptStudioView extends ItemView {
     this.currentProjectSession.schedulePersist({ mode: "discrete", reason: "history.apply" });
     this.projectSessionController.syncProjectFromSession();
     this.runPresentation.reset();
+    // The restored snapshot may not contain the selected shape or arrow.
+    this.shapeController.clearSelection();
     this.editingTextNodeIds.clear();
     this.dirtyTextNodeEditIds.clear();
     this.pendingTextNodeAutofocusNodeId = null;
@@ -717,21 +760,42 @@ export class SystemSculptStudioView extends ItemView {
     if (this.busy || !this.currentProject) {
       return;
     }
-    if (normalizedKey !== "delete" && normalizedKey !== "backspace") {
-      return;
-    }
     if (editableTarget) {
       return;
     }
 
+    // "A" is the way back to the pointer. An armed shape or arrow tool stays
+    // armed until something disarms it, so there has to be a key that always
+    // returns the plain cursor for selecting and moving.
+    if (normalizedKey === "a") {
+      if (this.activeCanvasTool === "select") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectCanvasTool("select");
+      return;
+    }
+
+    if (normalizedKey !== "delete" && normalizedKey !== "backspace") {
+      return;
+    }
+
+    // One selection, one delete: a marquee that caught both layers removes both.
+    const hasShapeSelection = this.shapeController.hasSelection();
     const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-    if (selectedNodeIds.length === 0) {
+    if (!hasShapeSelection && selectedNodeIds.length === 0) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
-    this.removeNodes(selectedNodeIds);
+    if (hasShapeSelection) {
+      this.shapeController.removeSelection();
+    }
+    if (selectedNodeIds.length > 0) {
+      this.removeNodes(selectedNodeIds);
+    }
   }
 
   private isMarkdownVaultFile(file: TAbstractFile | null): file is TFile {
@@ -2582,6 +2646,10 @@ export class SystemSculptStudioView extends ItemView {
     options?: {
       position?: { x: number; y: number };
       autoEditText?: boolean;
+      /** Config values applied on top of the definition defaults. */
+      config?: Record<string, StudioJsonValue>;
+      /** Explicit canvas size; absent means the kind's default size. */
+      size?: StudioNodeSize;
     }
   ): StudioNodeInstance | null {
     let project: StudioProjectV1;
@@ -2605,7 +2673,8 @@ export class SystemSculptStudioView extends ItemView {
       version: definition.version,
       title: prettifyNodeKind(definition.kind),
       position,
-      config: cloneConfigDefaults(definition),
+      ...(options?.size ? { size: options.size } : {}),
+      config: { ...cloneConfigDefaults(definition), ...(options?.config || {}) },
       continueOnError: false,
       disabled: false,
     };
@@ -2647,6 +2716,26 @@ export class SystemSculptStudioView extends ItemView {
     this.createNodeFromDefinition(definition, {
       position,
       autoEditText: true,
+    });
+  }
+
+  private selectCanvasTool(tool: StudioCanvasTool): void {
+    if (this.activeCanvasTool === tool) {
+      return;
+    }
+    this.activeCanvasTool = tool;
+    this.graphInteraction.clearPendingConnection();
+    this.render();
+  }
+
+  /**
+   * Freeform shape drawing: the armed tool draws the bounds, and the tool
+   * returns to the pointer once the shape lands.
+   */
+  private startShapeDrawGesture(shape: StudioShapeKind, startEvent: PointerEvent): void {
+    this.shapeController.startDrawGesture(shape, startEvent, () => {
+      this.activeCanvasTool = "select";
+      this.render();
     });
   }
 
@@ -2895,7 +2984,9 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
-    const canGroupSelection = selectedNodeIds.length > 1;
+    const selectedShapeIds = this.shapeController.getSelectedShapeIds();
+    const selectionCount = selectedNodeIds.length + selectedShapeIds.length;
+    const canGroupSelection = selectionCount > 1;
     this.nodeActionContextMenuOverlay?.hide();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     contextMenu.mount(this.graphViewportEl);
@@ -2908,10 +2999,10 @@ export class SystemSculptStudioView extends ItemView {
         ? [
             {
               id: "group-selected-nodes",
-              title: "Group Selected Nodes",
-              summary: `Create a group around ${selectedNodeIds.length} selected nodes.`,
+              title: "Group Selection",
+              summary: `Create a group around ${selectionCount} selected items.`,
               onSelect: () => {
-                this.createGroupFromSelectedNodes(selectedNodeIds);
+                this.createGroupFromSelectedNodes(selectedNodeIds, selectedShapeIds);
               },
             },
           ]
@@ -3106,14 +3197,22 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
-  private createGroupFromSelectedNodes(selectedNodeIds: string[]): void {
+  private createGroupFromSelectedNodes(
+    selectedNodeIds: string[],
+    selectedShapeIds: string[] = []
+  ): void {
     if (this.busy || !this.currentProject) {
       return;
     }
 
     let createdGroupId: string | null = null;
     const changed = this.commitCurrentProjectMutation("graph.group", (project) => {
-      const createdGroup = createNodeGroupFromSelection(project, selectedNodeIds, () => randomId("group"));
+      const createdGroup = createNodeGroupFromSelection(
+        project,
+        selectedNodeIds,
+        () => randomId("group"),
+        selectedShapeIds
+      );
       if (!createdGroup) {
         return false;
       }
@@ -3121,7 +3220,7 @@ export class SystemSculptStudioView extends ItemView {
       return true;
     });
     if (!changed || !createdGroupId) {
-      new Notice("Select at least two nodes to create a group.");
+      new Notice("Select at least two items to create a group.");
       return;
     }
 
@@ -3268,6 +3367,26 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     this.blurActiveStudioEditableTarget();
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest(".ss-studio-shape, .ss-studio-shape-arrow-hit")) {
+      // Clicking away drops the diagram selection, like the node canvas does.
+      this.shapeController.clearSelectionInPlace();
+    }
+    if (this.activeCanvasTool === "select" || event.button !== 0 || !target) {
+      return;
+    }
+    // The shape layer owns the arrow gesture: an arrow starts on a shape, and
+    // a shape's own pointerdown handler runs it.
+    const shape = resolveStudioCanvasToolShape(this.activeCanvasTool);
+    if (!shape || target.closest(".ss-studio-node-card, .ss-studio-port-pin")) {
+      // A drag that starts on a node is left to that node; drawing over an
+      // existing shape is allowed, so only the node graph is excluded here.
+      return;
+    }
+    // Suppress marquee selection so the drag paints the new shape instead.
+    event.preventDefault();
+    event.stopPropagation();
+    this.startShapeDrawGesture(shape, event);
   }
 
   private async revealPathInFinder(path: string): Promise<void> {
@@ -3359,6 +3478,11 @@ export class SystemSculptStudioView extends ItemView {
       onOpenAddNodeMenuAtViewportCenter: () => {
         this.openAddNodeMenuAtViewportCenter();
       },
+      activeCanvasTool: this.activeCanvasTool,
+      onSelectCanvasTool: (tool) => {
+        this.selectCanvasTool(tool);
+      },
+      shapeLayer: this.shapeController.layerOptions(),
       onZoomIn: () => {
         this.adjustGraphZoomFromRibbon(1.1);
       },
@@ -3453,6 +3577,7 @@ export class SystemSculptStudioView extends ItemView {
     });
 
     this.graphViewportEl = result.viewportEl;
+    this.graphCanvasEl = result.canvasEl;
     if (!this.graphViewportEl || !this.currentProject) {
       this.nodeDragInProgress = false;
       this.nodeContextMenuOverlay?.hide();
@@ -3529,6 +3654,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeDragInProgress = false;
     this.clipboardAndDropController.bindViewport(null);
     this.graphViewportEl = null;
+    this.graphCanvasEl = null;
 
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });

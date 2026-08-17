@@ -10,6 +10,7 @@ const STUDIO_CANVAS_MODULES = [
   "node-runtime",
   "groups",
   "text-nodes",
+  "shapes",
   "menus",
 ] as const;
 

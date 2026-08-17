@@ -1,4 +1,10 @@
-import type { StudioEdge, StudioNodeGroup, StudioNodeInstance } from "../../../studio/types";
+import type {
+  StudioEdge,
+  StudioNodeGroup,
+  StudioNodeInstance,
+  StudioShapeArrow,
+  StudioShapeInstance,
+} from "../../../studio/types";
 import {
   normalizeNodeIdList,
   type StudioGraphClipboardPayload,
@@ -8,7 +14,10 @@ export type MaterializeGraphClipboardPasteResult = {
   newNodes: StudioNodeInstance[];
   newEdges: StudioEdge[];
   newGroups: StudioNodeGroup[];
+  newShapes: StudioShapeInstance[];
+  newArrows: StudioShapeArrow[];
   nextSelection: string[];
+  nextShapeSelection: string[];
 };
 
 export function materializeGraphClipboardPaste(options: {
@@ -19,6 +28,8 @@ export function materializeGraphClipboardPaste(options: {
   nextNodeId: () => string;
   nextEdgeId: () => string;
   nextGroupId: () => string;
+  nextShapeId: () => string;
+  nextArrowId: () => string;
 }): MaterializeGraphClipboardPasteResult | null {
   const {
     payload,
@@ -28,6 +39,8 @@ export function materializeGraphClipboardPaste(options: {
     nextNodeId,
     nextEdgeId,
     nextGroupId,
+    nextShapeId,
+    nextArrowId,
   } = options;
 
   const nodeIdMap = new Map<string, string>();
@@ -52,8 +65,43 @@ export function materializeGraphClipboardPaste(options: {
     });
     newNodes.push(clonedNode);
   }
-  if (newNodes.length === 0) {
+
+  const shapeIdMap = new Map<string, string>();
+  const newShapes: StudioShapeInstance[] = [];
+  for (const sourceShape of payload.shapes || []) {
+    const sourceShapeId = String(sourceShape.id || "").trim();
+    if (!sourceShapeId) {
+      continue;
+    }
+    const remappedShapeId = nextShapeId();
+    shapeIdMap.set(sourceShapeId, remappedShapeId);
+
+    const clonedShape = JSON.parse(JSON.stringify(sourceShape)) as StudioShapeInstance;
+    clonedShape.id = remappedShapeId;
+    clonedShape.position = {
+      x: Math.round(Number(clonedShape.position?.x || 0) + deltaX),
+      y: Math.round(Number(clonedShape.position?.y || 0) + deltaY),
+    };
+    newShapes.push(clonedShape);
+  }
+
+  if (newNodes.length === 0 && newShapes.length === 0) {
     return null;
+  }
+
+  const newArrows: StudioShapeArrow[] = [];
+  for (const sourceArrow of payload.arrows || []) {
+    const fromShapeId = shapeIdMap.get(String(sourceArrow.fromShapeId || "").trim());
+    const toShapeId = shapeIdMap.get(String(sourceArrow.toShapeId || "").trim());
+    if (!fromShapeId || !toShapeId || fromShapeId === toShapeId) {
+      continue;
+    }
+    newArrows.push({
+      id: nextArrowId(),
+      fromShapeId,
+      toShapeId,
+      ...(sourceArrow.label ? { label: sourceArrow.label } : {}),
+    });
   }
 
   const newEdges: StudioEdge[] = [];
@@ -82,7 +130,10 @@ export function materializeGraphClipboardPaste(options: {
     const groupNodeIds = normalizeNodeIdList(sourceGroup.nodeIds || [])
       .map((nodeId) => nodeIdMap.get(nodeId) || "")
       .filter((nodeId) => nodeId.length > 0);
-    if (groupNodeIds.length < 2) {
+    const groupShapeIds = normalizeNodeIdList(sourceGroup.shapeIds || [])
+      .map((shapeId) => shapeIdMap.get(shapeId) || "")
+      .filter((shapeId) => shapeId.length > 0);
+    if (groupNodeIds.length + groupShapeIds.length < 2) {
       continue;
     }
     const groupName = String(sourceGroup.name || "").trim();
@@ -95,6 +146,7 @@ export function materializeGraphClipboardPaste(options: {
       name: groupName,
       ...(groupColor ? { color: groupColor } : {}),
       nodeIds: groupNodeIds,
+      ...(groupShapeIds.length > 0 ? { shapeIds: groupShapeIds } : {}),
     });
   }
 
@@ -109,6 +161,9 @@ export function materializeGraphClipboardPaste(options: {
     newNodes,
     newEdges,
     newGroups,
+    newShapes,
+    newArrows,
     nextSelection,
+    nextShapeSelection: newShapes.map((shape) => shape.id),
   };
 }

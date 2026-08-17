@@ -39,8 +39,8 @@ function parseAgentProjectDocument(rawText: string): Record<string, unknown> {
     throw new Error("The Studio project root must be a JSON object.");
   }
   const document = value as Record<string, unknown>;
-  if (document.schema !== "studio.project.v1") {
-    throw new Error("The Studio project schema must remain studio.project.v1.");
+  if (document.schema !== "studio.project.v2" && document.schema !== "studio.project.v1") {
+    throw new Error("The Studio project schema must be studio.project.v2.");
   }
   return document;
 }
@@ -80,7 +80,7 @@ export function assertValidStudioProjectAgentFileMutation(
       const previous = parseAgentProjectDocument(mutation.previousContent);
       assertStableStudioProjectAgentDocumentFieldsUnchanged(document, previous);
     }
-    const project = parseStudioProject(mutation.content);
+    const project = parseStudioProject(mutation.content, { projectPath: path });
     validateStudioProjectForAgentEdit(project);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

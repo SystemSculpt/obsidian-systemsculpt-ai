@@ -2,6 +2,7 @@ import { StudioGraphConnectionEngineV3 } from "./connections-v3/StudioGraphConne
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
 import { StudioGraphSelectionResizeController } from "./StudioGraphSelectionResizeController";
+import type { StudioProjectV1 } from "../../studio/types";
 import type {
   PendingConnection,
   StudioGraphInteractionHost,
@@ -46,6 +47,14 @@ export class StudioGraphInteractionEngine {
         this.host.onNodeDropToGroup?.(groupId, draggedNodeIds);
       },
       onGraphZoomChanged: (zoom, context) => this.host.onGraphZoomChanged?.(zoom, context),
+      beginDiagramMarquee: () => this.host.beginDiagramMarquee?.(),
+      selectDiagramInBounds: (bounds, additive) =>
+        this.host.selectDiagramInBounds?.(bounds, additive),
+      beginDiagramTranslation: () => this.host.beginDiagramTranslation?.(),
+      translateDiagramSelection: (project, delta) =>
+        this.host.translateDiagramSelection?.(project, delta) === true,
+      previewDiagramTranslation: () => this.host.previewDiagramTranslation?.(),
+      finishDiagramTranslation: () => this.host.finishDiagramTranslation?.(),
     });
 
     this.groupController = new StudioGraphGroupController({
@@ -58,6 +67,11 @@ export class StudioGraphInteractionEngine {
       requestRender: () => this.host.requestRender(),
       commitProjectMutation: (reason, mutator, options) =>
         this.host.commitProjectMutation(reason, mutator, options),
+      beginShapeTranslation: (shapeIds) => this.host.beginGroupShapeTranslation?.(shapeIds),
+      translateShapes: (project, delta) =>
+        this.host.translateDiagramSelection?.(project, delta) === true,
+      previewShapeTranslation: () => this.host.previewDiagramTranslation?.(),
+      finishShapeTranslation: () => this.host.finishDiagramTranslation?.(),
     });
 
     this.connectionEngine = new StudioGraphConnectionEngineV3({
@@ -262,6 +276,23 @@ export class StudioGraphInteractionEngine {
 
   startNodeDrag(nodeId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
     this.selectionController.startNodeDrag(nodeId, startEvent, dragSurfaceEl);
+  }
+
+  /** Node half of a drag the diagram layer owns; see the selection controller. */
+  beginSelectionTranslation(): void {
+    this.selectionController.beginSelectionTranslation();
+  }
+
+  applySelectionTranslation(project: StudioProjectV1, delta: { x: number; y: number }): boolean {
+    return this.selectionController.applySelectionTranslation(project, delta);
+  }
+
+  previewSelectionTranslation(): void {
+    this.selectionController.previewSelectionTranslation();
+  }
+
+  finishSelectionTranslation(): void {
+    this.selectionController.finishSelectionTranslation();
   }
 
   toggleNodeSelection(nodeId: string): void {

@@ -261,6 +261,19 @@ export class StudioPortInteraction {
         return;
       }
 
+      // Released anywhere over another node's card: connect to that node's
+      // first compatible input. Dropping ON a shape or card is the whole
+      // gesture for diagram arrows, and it makes port drags forgiving —
+      // the pin-radius snap above stays the precise path.
+      const cardDrop = this.resolveCardDropTarget(event, finished);
+      if (cardDrop) {
+        this.callbacks.onConnectionCommit(cardDrop);
+        if (this.drag === finished) {
+          this.clearDragState();
+        }
+        return;
+      }
+
       // Released over empty space with the auto-create hint showing.
       if (shouldAutoCreate) {
         const handled = this.callbacks.onAutoCreateRelease({
@@ -375,6 +388,31 @@ export class StudioPortInteraction {
         port.element.setAttribute("aria-pressed", "false");
       }
     }
+  }
+
+  /**
+   * Resolves the node card under the release point into a connectable input.
+   * Self-drops and nodes with no compatible input return null so the caller
+   * falls through to its auto-create/cancel paths.
+   */
+  private resolveCardDropTarget(event: PointerEvent, drag: InternalDrag): PortAnchor | null {
+    const ownerDocument = this.canvasEl?.ownerDocument;
+    if (!ownerDocument || typeof ownerDocument.elementFromPoint !== "function") {
+      return null;
+    }
+    const releasedOver = ownerDocument.elementFromPoint(event.clientX, event.clientY);
+    const card =
+      typeof releasedOver?.closest === "function"
+        ? (releasedOver.closest(".ss-studio-node-card") as HTMLElement | null)
+        : null;
+    const nodeId = card?.dataset.nodeId;
+    if (!nodeId || nodeId === drag.fromNodeId) {
+      return null;
+    }
+    const candidate = drag.candidates.find(
+      (entry) => entry.compatible && entry.nodeId === nodeId
+    );
+    return candidate ? { nodeId: candidate.nodeId, portId: candidate.portId } : null;
   }
 
   private collectInputCandidates(

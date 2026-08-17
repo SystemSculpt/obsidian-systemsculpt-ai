@@ -59,6 +59,7 @@ test("Studio CSS stays feature-owned, bounded, and explicitly ordered", () => {
     "node-runtime.css",
     "groups.css",
     "text-nodes.css",
+    "shapes.css",
     "menus.css",
     "editor-preview.css",
     "editor-text.css",

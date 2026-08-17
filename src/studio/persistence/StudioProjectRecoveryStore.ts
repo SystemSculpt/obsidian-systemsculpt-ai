@@ -14,7 +14,13 @@ export class StudioProjectRecoveryStore {
 
   async save(project: StudioProjectV1): Promise<void> {
     await this.ensureRecoveryRoot();
-    await this.adapter.write(this.recoveryPath(project.projectId), serializeStudioProject(project));
+    // Recovery snapshots are internal machine state: persist the full in-memory
+    // model (a valid v1 document) instead of the agent-facing v2 dialect so the
+    // policy path, timestamps, and entry IDs come back byte-faithful.
+    await this.adapter.write(
+      this.recoveryPath(project.projectId),
+      `${JSON.stringify(project, null, 2)}\n`
+    );
   }
 
   async consume(

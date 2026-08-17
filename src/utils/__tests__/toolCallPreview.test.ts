@@ -78,6 +78,101 @@ describe("prepareWriteEditPreview", () => {
       ["One.md", "FIRST"],
       ["Two.md", "SECOND"],
     ]);
+    expect(previews.map((preview) => preview.status)).toEqual(["changed", "changed"]);
+  });
+
+  it("reports an edit whose text is absent as unmatched, not as an empty diff", async () => {
+    const file = new TFile({ path: "Notes/Log.md" });
+    const app = {
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        read: jest.fn(async () => "BEFORE"),
+      },
+    };
+    const preview = await prepareWriteEditPreview(app as any, {
+      id: "call-unmatched",
+      messageId: "assistant-1",
+      request: {
+        id: "call-unmatched",
+        type: "function",
+        function: {
+          name: "edit",
+          arguments: JSON.stringify({
+            path: "Notes/Log.md",
+            edits: [{ oldText: "MISSING", newText: "REPLACED" }],
+          }),
+        },
+      },
+      state: "executing",
+      timestamp: 1,
+    });
+
+    expect(preview?.status).toBe("unmatched");
+    expect(preview?.appliedCount).toBe(0);
+    expect(preview?.requestedCount).toBe(1);
+    expect(preview?.skipped[0]?.reason).toBe("Edit produced no changes");
+  });
+
+  it("keeps a degenerate zero index range from masking a valid line range", async () => {
+    const file = new TFile({ path: "Notes/Log.md" });
+    const app = {
+      vault: {
+        getAbstractFileByPath: jest.fn(() => file),
+        read: jest.fn(async () => "one\ntwo\nthree"),
+      },
+    };
+    const preview = await prepareWriteEditPreview(app as any, {
+      id: "call-range",
+      messageId: "assistant-1",
+      request: {
+        id: "call-range",
+        type: "function",
+        function: {
+          name: "edit",
+          arguments: JSON.stringify({
+            path: "Notes/Log.md",
+            edits: [{
+              oldText: "two",
+              newText: "TWO",
+              range: { startLine: 2, endLine: 2, startIndex: 0, endIndex: 0 },
+            }],
+          }),
+        },
+      },
+      state: "executing",
+      timestamp: 1,
+    });
+
+    expect(preview?.newContent).toBe("one\nTWO\nthree");
+    expect(preview?.status).toBe("changed");
+  });
+
+  it("marks an edit to a missing file as missing", async () => {
+    const app = {
+      vault: {
+        getAbstractFileByPath: jest.fn(() => null),
+        read: jest.fn(),
+      },
+    };
+    const preview = await prepareWriteEditPreview(app as any, {
+      id: "call-missing",
+      messageId: "assistant-1",
+      request: {
+        id: "call-missing",
+        type: "function",
+        function: {
+          name: "edit",
+          arguments: JSON.stringify({
+            path: "Notes/Gone.md",
+            edits: [{ oldText: "a", newText: "b" }],
+          }),
+        },
+      },
+      state: "executing",
+      timestamp: 1,
+    });
+
+    expect(preview?.status).toBe("missing");
   });
 });
 

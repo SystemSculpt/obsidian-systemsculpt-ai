@@ -129,7 +129,8 @@
   white-space: nowrap;
 }
 
-/* Workspace controls (floating toolbar) */
+/* Workspace controls (floating toolbar) — row one drives the graph, row two
+ * holds the icon-only diagram tools (one per shape kind, plus the arrow). */
 .ss-studio-graph-workspace-controls {
   position: absolute;
   top: var(--ss-space-3);
@@ -137,14 +138,29 @@
   transform: translateX(-50%);
   z-index: 8;
   display: flex;
-  align-items: center;
-  gap: var(--ss-space-1);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ss-space-0);
   padding: var(--ss-space-1);
   background-color: var(--ss-surface-0);
   border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
+  border-radius: var(--ss-radius-lg);
   box-shadow: var(--ss-elevation-2);
   pointer-events: auto;
+}
+
+.ss-studio-graph-workspace-control-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+}
+
+.ss-studio-graph-workspace-control-row.is-tools {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-0);
+  padding-top: var(--ss-space-0);
+  border-top: 1px solid var(--ss-line);
 }
 
 .ss-studio-graph-workspace-control-button {
@@ -187,16 +203,22 @@
   .ss-studio-graph-workspace-controls {
     right: var(--ss-space-2);
     left: var(--ss-space-2);
-    justify-content: center;
-    flex-wrap: wrap;
     transform: none;
     border-radius: var(--ss-radius-lg);
+  }
+
+  .ss-studio-graph-workspace-control-row {
+    justify-content: center;
+    flex-wrap: wrap;
   }
 }
 
 @container ss-surface (max-width: 480px) {
   .ss-studio-graph-workspace-controls {
     top: var(--ss-space-2);
+  }
+
+  .ss-studio-graph-workspace-control-row:not(.is-tools) {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--ss-space-0);
@@ -220,7 +242,7 @@
     padding-inline: 0;
   }
 
-  .ss-studio-graph-workspace-controls > :last-child {
+  .ss-studio-graph-workspace-control-row:not(.is-tools) > :last-child {
     grid-column: span 2;
   }
 }

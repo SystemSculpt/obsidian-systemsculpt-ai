@@ -5,8 +5,6 @@ import {
   WriteFileParams,
   EditFileParams,
   EditFileResult,
-  FileEdit,
-  SkippedEdit,
   MultiEditParams,
   MultiEditResult,
   MultiEditFileResult,
@@ -27,6 +25,7 @@ import {
 } from "../utils";
 import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
 import { resolveExistingVaultFile } from "../folderNotes";
+import { applyFileEdits } from "../editApplication";
 import {
   assertValidStudioProjectAgentFileMutation,
   isStudioProjectDocumentPath,
@@ -386,7 +385,7 @@ export class FileOperations {
       const adapter: any = this.app.vault.adapter as any;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
 
-      const { modifiedContent, appliedCount, skipped } = this.applyEdits(content, edits, strict);
+      const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
 
       const diff = createSimpleDiff(content, modifiedContent, filePath);
       // Only write when content actually changed — skip the redundant no-op write
@@ -416,7 +415,7 @@ export class FileOperations {
     const originalContent = await this.app.vault.read(abstractFile);
     const content = normalizeLineEndings(originalContent);
 
-    const { modifiedContent, appliedCount, skipped } = this.applyEdits(content, edits, strict);
+    const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
 
     // Create simple diff
     const diff = createSimpleDiff(content, modifiedContent, resolvedPath);
@@ -526,7 +525,7 @@ export class FileOperations {
         }
 
         const strict = entry.strict ?? true;
-        const applied = this.applyEdits(original, entry.edits, strict);
+        const applied = applyFileEdits(original, entry.edits, strict);
         if (applied.appliedCount === 0 || applied.modifiedContent === original) {
           throw new Error("No edits applied during preflight.");
         }
@@ -649,167 +648,4 @@ export class FileOperations {
     }
   }
 
-  /**
-   * Apply a list of edits sequentially, counting successes and collecting any
-   * skipped edits. Shared by the adapter fast-path and the Vault-API path so
-   * both report identically. Under `strict:true` a non-matching edit rethrows;
-   * under `strict:false` it is recorded in `skipped` and the loop continues.
-   */
-  private applyEdits(
-    content: string,
-    edits: FileEdit[],
-    strict: boolean
-  ): { modifiedContent: string; appliedCount: number; skipped: SkippedEdit[] } {
-    let modifiedContent = content;
-    let appliedCount = 0;
-    const skipped: SkippedEdit[] = [];
-
-    edits.forEach((edit, index) => {
-      try {
-        modifiedContent = this.applySingleEdit(modifiedContent, edit);
-        appliedCount++;
-      } catch (e) {
-        if (strict) {
-          throw e;
-        }
-        skipped.push({
-          index,
-          reason: e instanceof Error ? e.message : String(e),
-        });
-      }
-    });
-
-    return { modifiedContent, appliedCount, skipped };
-  }
-
-  private applySingleEdit(source: string, edit: FileEdit): string {
-    const text = normalizeLineEndings(source);
-    const oldText = normalizeLineEndings(edit.oldText);
-    const newText = normalizeLineEndings(edit.newText);
-    const mode = edit.mode || 'exact';
-    const preserveIndent = edit.preserveIndent !== false;
-
-    // Constrain to range if provided
-    const { sliceStart, sliceEnd } = this.computeRange(text, edit);
-    const head = text.slice(0, sliceStart);
-    const target = text.slice(sliceStart, sliceEnd);
-    const tail = text.slice(sliceEnd);
-
-    let replaced = target;
-
-    if (edit.isRegex) {
-      const flags = edit.flags || 'g';
-      const regex = new RegExp(oldText, flags.includes('g') ? flags : flags + 'g');
-      replaced = this.replaceByOccurrenceRegex(target, regex, newText, edit.occurrence ?? 'first');
-    } else if (mode === 'exact') {
-      replaced = this.replaceByOccurrenceString(target, oldText, newText, edit.occurrence ?? 'first');
-    } else {
-      // loose mode: whitespace-trim compare line-by-line
-      replaced = this.replaceLoose(target, oldText, newText, preserveIndent, edit.occurrence ?? 'first');
-    }
-
-    if (replaced === target) {
-      throw new Error('Edit produced no changes');
-    }
-
-    return head + replaced + tail;
-  }
-
-  private computeRange(text: string, edit: FileEdit): { sliceStart: number; sliceEnd: number } {
-    const totalLength = text.length;
-    const range = edit.range;
-    if (!range) return { sliceStart: 0, sliceEnd: totalLength };
-
-    const hasIndexRange = typeof range.startIndex === 'number' || typeof range.endIndex === 'number';
-    const hasLineRange = typeof range.startLine === 'number' || typeof range.endLine === 'number';
-
-    // A non-empty character range is the most precise constraint. Some models
-    // populate every optional range field and emit startIndex/endIndex as 0
-    // alongside a valid line range; treat that degenerate pair as absent so it
-    // cannot mask the useful line constraint.
-    if (hasIndexRange) {
-      const startIndex = Math.max(0, Math.min(totalLength, range.startIndex ?? 0));
-      const endIndex = Math.max(startIndex, Math.min(totalLength, range.endIndex ?? totalLength));
-      if (endIndex > startIndex || !hasLineRange) {
-        return { sliceStart: startIndex, sliceEnd: endIndex };
-      }
-    }
-
-    // Line-based range
-    const lines = text.split('\n');
-    const startLine = Math.max(1, range.startLine ?? 1);
-    const endLine = Math.max(startLine, range.endLine ?? lines.length);
-    let cursor = 0;
-    let sliceStart = 0;
-    let sliceEnd = totalLength;
-    for (let i = 1; i <= lines.length; i++) {
-      const line = lines[i - 1];
-      const next = cursor + line.length + (i < lines.length ? 1 : 0);
-      if (i === startLine) sliceStart = cursor;
-      if (i === endLine) { sliceEnd = next; break; }
-      cursor = next;
-    }
-    return { sliceStart, sliceEnd };
-  }
-
-  private replaceByOccurrenceString(target: string, find: string, replacement: string, occurrence: 'first' | 'last' | 'all'): string {
-    if (occurrence === 'all') {
-      return target.split(find).join(replacement);
-    }
-    if (occurrence === 'first') {
-      const idx = target.indexOf(find);
-      if (idx === -1) return target;
-      return target.slice(0, idx) + replacement + target.slice(idx + find.length);
-    }
-    if (occurrence === 'last') {
-      const idx = target.lastIndexOf(find);
-      if (idx === -1) return target;
-      return target.slice(0, idx) + replacement + target.slice(idx + find.length);
-    }
-    return target;
-  }
-
-  private replaceByOccurrenceRegex(target: string, pattern: RegExp, replacement: string, occurrence: 'first' | 'last' | 'all'): string {
-    if (occurrence === 'all') {
-      return target.replace(pattern, replacement);
-    }
-    const matches = Array.from(target.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g')));
-    if (matches.length === 0) return target;
-    let which = 0;
-    if (occurrence === 'first') which = 0; else if (occurrence === 'last') which = matches.length - 1;
-    const m = matches[which];
-    const start = m.index as number;
-    const end = start + m[0].length;
-    return target.slice(0, start) + m[0].replace(new RegExp(pattern.source, pattern.flags.replace('g','')), replacement) + target.slice(end);
-  }
-
-  private replaceLoose(target: string, oldText: string, newText: string, preserveIndent: boolean, occurrence: 'first' | 'last' | 'all'): string {
-    const oldLines = oldText.split('\n');
-    const tgtLines = target.split('\n');
-    const windows: number[] = [];
-    for (let i = 0; i <= tgtLines.length - oldLines.length; i++) {
-      const window = tgtLines.slice(i, i + oldLines.length);
-      const match = oldLines.every((l, idx) => l.trim() === (window[idx] ?? '').trim());
-      if (match) windows.push(i);
-    }
-    if (windows.length === 0) return target;
-    const replaceAt = (pos: number) => {
-      const originalIndent = tgtLines[pos].match(/^\s*/)?.[0] || '';
-      const newLines = newText.split('\n').map((line, j) => {
-        if (!preserveIndent) return line;
-        if (j === 0) return originalIndent + line.trimStart();
-        return originalIndent + line.trimStart();
-      });
-      tgtLines.splice(pos, oldLines.length, ...newLines);
-    };
-    if (occurrence === 'all') {
-      // Apply from last to first to keep indices stable
-      for (let k = windows.length - 1; k >= 0; k--) replaceAt(windows[k]);
-    } else {
-      let indexToUse = 0;
-      if (occurrence === 'last') indexToUse = windows.length - 1;
-      replaceAt(windows[indexToUse]);
-    }
-    return tgtLines.join('\n');
-  }
 } 

@@ -76,9 +76,10 @@ describe("FileOperations Studio agent edits", () => {
     expect(read.metadata?.hasMore).toBe(false);
     expect(read.content).toBe(original);
     expect(JSON.parse(read.content)).toMatchObject({
-      schema: "studio.project.v1",
-      graph: {
-        nodes: [expect.objectContaining({ id: "overview" })],
+      schema: "studio.project.v2",
+      docs: "SystemSculpt/Studio/AGENTS.md",
+      canvas: {
+        nodes: [expect.objectContaining({ id: "overview", kind: "text" })],
         groups: [expect.objectContaining({ id: "overview-group" })],
       },
     });
@@ -132,7 +133,7 @@ describe("FileOperations Studio agent edits", () => {
   it("rejects an invalid node kind before the vault is modified", async () => {
     await expect(operations.editFile({
       path: file.path,
-      edits: [{ oldText: '"kind": "studio.text"', newText: '"kind": "studio.unknown"' }],
+      edits: [{ oldText: '"kind": "text"', newText: '"kind": "unknown"' }],
     } as any)).rejects.toThrow("Studio project edit rejected before write");
 
     expect(app.vault.modify).not.toHaveBeenCalled();
@@ -140,34 +141,34 @@ describe("FileOperations Studio agent edits", () => {
 
   it("rejects raw positions and sizes that Studio would otherwise normalize", async () => {
     const missingPosition = JSON.parse(original);
-    delete missingPosition.graph.nodes[0].position.y;
+    delete missingPosition.canvas.nodes[0].y;
     await expect(operations.writeFile({
       path: file.path,
       content: JSON.stringify(missingPosition, null, 2),
-    } as any)).rejects.toThrow("position.y must be a finite number");
+    } as any)).rejects.toThrow("canvas.nodes[0].y is required");
 
     const nonFinitePosition = original.replace('"x": 80', '"x": 1e309');
     await expect(operations.writeFile({
       path: file.path,
       content: nonFinitePosition,
-    } as any)).rejects.toThrow("position.x must be a finite number");
+    } as any)).rejects.toThrow("canvas.nodes[0].x must be a finite number");
 
     const invalidSize = JSON.parse(original);
-    invalidSize.graph.nodes[0].size.width = "wide";
+    invalidSize.canvas.nodes[0].width = "wide";
     await expect(operations.writeFile({
       path: file.path,
       content: JSON.stringify(invalidSize, null, 2),
-    } as any)).rejects.toThrow("size.width must be a finite number");
+    } as any)).rejects.toThrow("canvas.nodes[0].width must be a finite number");
 
     expect(persisted).toBe(original);
   });
 
-  it("rejects unknown node, position, size, and group fields", async () => {
+  it("rejects unknown node and group fields", async () => {
     const cases = [
-      (document: any) => { document.graph.nodes[0].postion = { x: 500, y: 500 }; },
-      (document: any) => { document.graph.nodes[0].position.z = 1; },
-      (document: any) => { document.graph.nodes[0].size.depth = 1; },
-      (document: any) => { document.graph.groups[0].bounds = { x: 0, y: 0 }; },
+      (document: any) => { document.canvas.nodes[0].postion = { x: 500, y: 500 }; },
+      (document: any) => { document.canvas.nodes[0].z = 1; },
+      (document: any) => { document.canvas.nodes[0].version = "1.0.0"; },
+      (document: any) => { document.canvas.groups[0].bounds = { x: 0, y: 0 }; },
     ];
 
     for (const mutate of cases) {
@@ -182,26 +183,110 @@ describe("FileOperations Studio agent edits", () => {
     expect(persisted).toBe(original);
   });
 
+  it("accepts a group that frames shapes and rejects broken shape membership", async () => {
+    const withShapes = JSON.parse(original);
+    withShapes.canvas.shapes = [
+      {
+        id: "shape-1",
+        shape: "rectangle",
+        x: 400,
+        y: 400,
+        width: 180,
+        height: 120,
+        label: "Region",
+      },
+    ];
+    withShapes.canvas.groups[0].shapes = ["shape-1"];
+    assertValidStudioProjectAgentDocumentStructure(withShapes);
+
+    // A group may drop every node and live on its shapes alone.
+    const shapeOnly = JSON.parse(JSON.stringify(withShapes));
+    shapeOnly.canvas.groups[0].nodes = [];
+    assertValidStudioProjectAgentDocumentStructure(shapeOnly);
+
+    const missingShape = JSON.parse(JSON.stringify(withShapes));
+    missingShape.canvas.groups[0].shapes = ["gone"];
+    expect(() => assertValidStudioProjectAgentDocumentStructure(missingShape)).toThrow(
+      'references missing shape "gone"'
+    );
+
+    const emptyGroup = JSON.parse(JSON.stringify(withShapes));
+    emptyGroup.canvas.groups[0].nodes = [];
+    emptyGroup.canvas.groups[0].shapes = [];
+    expect(() => assertValidStudioProjectAgentDocumentStructure(emptyGroup)).toThrow(
+      "must contain at least one node or shape"
+    );
+
+    const sharedShape = JSON.parse(JSON.stringify(withShapes));
+    sharedShape.canvas.groups.push({
+      id: "second-group",
+      name: "Second",
+      shapes: ["shape-1"],
+    });
+    expect(() => assertValidStudioProjectAgentDocumentStructure(sharedShape)).toThrow(
+      'Shape "shape-1" belongs to both group "overview-group" and group "second-group"'
+    );
+  });
+
+  it("accepts labeled arrows in the object form and rejects malformed ones", () => {
+    const base = JSON.parse(original);
+    base.canvas.shapes = [
+      { id: "a", shape: "rectangle", x: 0, y: 0, width: 180, height: 120, label: "A" },
+      { id: "b", shape: "ellipse", x: 300, y: 0, width: 180, height: 120, label: "B" },
+    ];
+    base.canvas.groups[0].shapes = ["a", "b"];
+    base.canvas.arrows = ["a -> b", { from: "b", to: "a", label: "returns\nresults" }];
+    assertValidStudioProjectAgentDocumentStructure(base);
+
+    const rejects: Array<{ arrow: unknown; error: string }> = [
+      {
+        arrow: { from: "a", to: "b", note: "x" },
+        error: 'canvas.arrows[0] contains unsupported field "note"',
+      },
+      { arrow: { from: "a" }, error: "canvas.arrows[0].to is required" },
+      { arrow: { from: "a", to: "b", label: 7 }, error: "canvas.arrows[0].label must be a string" },
+      {
+        arrow: 42,
+        error:
+          'canvas.arrows[0] must be the string "fromShape -> toShape" or an object { from, to, label }',
+      },
+      { arrow: { from: "a", to: "a", label: "x" }, error: "must connect two different shapes" },
+      { arrow: { from: "a", to: "ghost" }, error: 'references missing shape "ghost"' },
+    ];
+    for (const { arrow, error } of rejects) {
+      const document = JSON.parse(JSON.stringify(base));
+      document.canvas.arrows = [arrow];
+      expect(() => assertValidStudioProjectAgentDocumentStructure(document)).toThrow(error);
+    }
+
+    // The pair-uniqueness rule sees through the two spellings of an arrow.
+    const duplicate = JSON.parse(JSON.stringify(base));
+    duplicate.canvas.arrows = ["a -> b", { from: "a", to: "b", label: "again" }];
+    expect(() => assertValidStudioProjectAgentDocumentStructure(duplicate)).toThrow(
+      'canvas.arrows already connects "a" to "b"'
+    );
+  });
+
   it("rejects missing, duplicate, and overlapping group membership", async () => {
     const missingMember = JSON.parse(original);
-    missingMember.graph.groups[0].nodeIds.push("missing-node");
+    missingMember.canvas.groups[0].nodes.push("missing-node");
     await expect(operations.writeFile({
       path: file.path,
       content: JSON.stringify(missingMember, null, 2),
     } as any)).rejects.toThrow('references missing node "missing-node"');
 
     const duplicateMember = JSON.parse(original);
-    duplicateMember.graph.groups[0].nodeIds.push("overview");
+    duplicateMember.canvas.groups[0].nodes.push("overview");
     await expect(operations.writeFile({
       path: file.path,
       content: JSON.stringify(duplicateMember, null, 2),
     } as any)).rejects.toThrow('contains duplicate node ID "overview"');
 
     const overlappingMember = JSON.parse(original);
-    overlappingMember.graph.groups.push({
+    overlappingMember.canvas.groups.push({
       id: "second-group",
       name: "Second",
-      nodeIds: ["overview"],
+      nodes: ["overview"],
     });
     await expect(operations.writeFile({
       path: file.path,
@@ -214,8 +299,8 @@ describe("FileOperations Studio agent edits", () => {
   it.each([
     {
       contract: "the root schema literal",
-      mutate: (document: any) => { document.schema = "studio.project.v2"; },
-      error: "schema must be studio.project.v1",
+      mutate: (document: any) => { document.schema = "studio.workflow.v2"; },
+      error: "schema must be studio.project.v2",
     },
     {
       contract: "unknown root fields",
@@ -223,98 +308,86 @@ describe("FileOperations Studio agent edits", () => {
       error: 'Studio project root contains unsupported field "authorityRevision"',
     },
     {
-      contract: "a closed graph object",
-      mutate: (document: any) => { document.graph.lanes = []; },
-      error: 'graph contains unsupported field "lanes"',
+      contract: "a closed canvas object",
+      mutate: (document: any) => { document.canvas.lanes = []; },
+      error: 'canvas contains unsupported field "lanes"',
     },
     {
-      contract: "all required graph arrays",
-      mutate: (document: any) => { delete document.graph.edges; },
-      error: "graph.edges is required",
+      contract: "the required canvas object",
+      mutate: (document: any) => { delete document.canvas; },
+      error: "Studio project root.canvas is required",
     },
     {
-      contract: "graph fields being arrays",
-      mutate: (document: any) => { document.graph.groups = {}; },
-      error: "graph.groups must be an array",
+      contract: "canvas fields being arrays",
+      mutate: (document: any) => { document.canvas.groups = {}; },
+      error: "canvas.groups must be an array",
     },
     {
-      contract: "all required edge fields",
+      contract: "edges written as arrow strings",
       mutate: (document: any) => {
-        document.graph.edges = [{
-          id: "overview-link",
-          fromNodeId: "overview",
-          fromPortId: "out",
-          toNodeId: "overview",
-        }];
+        document.canvas.edges = [{ fromNodeId: "overview", toNodeId: "overview" }];
       },
-      error: "graph.edges[0].toPortId is required",
+      error: 'canvas.edges[0] must be the string "fromNode.port -> toNode.port"',
     },
     {
-      contract: "closed edge objects",
+      contract: "edges with exactly one arrow",
       mutate: (document: any) => {
-        document.graph.edges = [{
-          id: "overview-link",
-          fromNodeId: "overview",
-          fromPortId: "out",
-          toNodeId: "overview",
-          toPortId: "in",
-          label: "Architecture",
-        }];
+        document.canvas.edges = ["overview.text -> overview.in -> overview"];
       },
-      error: 'graph.edges[0] contains unsupported field "label"',
+      error: 'canvas.edges[0] must contain exactly one "->"',
     },
     {
-      contract: "edge IDs without surrounding whitespace",
+      contract: "edges naming existing nodes",
+      mutate: (document: any) => { document.canvas.edges = ["overview.text -> ghost.in"]; },
+      error: 'canvas.edges[0] references missing node "ghost.in"',
+    },
+    {
+      contract: "unique edges",
       mutate: (document: any) => {
-        document.graph.edges = [{
-          id: " overview-link ",
-          fromNodeId: "overview",
-          fromPortId: "out",
-          toNodeId: "overview",
-          toPortId: "in",
-        }];
+        document.canvas.edges = [
+          "overview.text -> overview.text",
+          "overview.text  ->  overview.text",
+        ];
       },
-      error: "graph.edges[0].id must not contain surrounding whitespace",
+      error: 'canvas.edges contains duplicate edge "overview.text -> overview.text"',
     },
     {
-      contract: "unique entry node IDs",
-      mutate: (document: any) => { document.graph.entryNodeIds = ["overview", "overview"]; },
-      error: 'graph.entryNodeIds contains duplicate node ID "overview"',
-    },
-    {
-      contract: "entry IDs with a strict string type",
-      mutate: (document: any) => { document.graph.entryNodeIds = [7]; },
-      error: "graph.entryNodeIds[0] must be a non-empty string",
-    },
-    {
-      contract: "node versions with a strict string type",
-      mutate: (document: any) => { document.graph.nodes[0].version = 1; },
-      error: "graph.nodes[0].version must be a non-empty string",
+      contract: "duplicate node IDs",
+      mutate: (document: any) => { document.canvas.nodes.push({ ...document.canvas.nodes[0] }); },
+      error: 'canvas.nodes contains duplicate node ID "overview"',
     },
     {
       contract: "node titles without surrounding whitespace",
-      mutate: (document: any) => { document.graph.nodes[0].title = " Overview "; },
-      error: "graph.nodes[0].title must not contain surrounding whitespace",
+      mutate: (document: any) => { document.canvas.nodes[0].title = " Overview "; },
+      error: "canvas.nodes[0].title must not contain surrounding whitespace",
     },
     {
       contract: "node config as an object",
-      mutate: (document: any) => { document.graph.nodes[0].config = []; },
-      error: "graph.nodes[0].config must be an object",
+      mutate: (document: any) => { document.canvas.nodes[0].config = []; },
+      error: "canvas.nodes[0].config must be an object",
     },
     {
       contract: "node booleans with strict types",
-      mutate: (document: any) => { document.graph.nodes[0].disabled = "false"; },
-      error: "graph.nodes[0].disabled must be a boolean when present",
+      mutate: (document: any) => { document.canvas.nodes[0].disabled = "false"; },
+      error: "canvas.nodes[0].disabled must be a boolean when present",
+    },
+    {
+      contract: "node sizes carrying width before height",
+      mutate: (document: any) => {
+        delete document.canvas.nodes[0].width;
+        document.canvas.nodes[0].height = 200;
+      },
+      error: "canvas.nodes[0].height requires width",
     },
     {
       contract: "non-empty group names",
-      mutate: (document: any) => { document.graph.groups[0].name = " "; },
-      error: "graph.groups[0].name must be a non-empty string",
+      mutate: (document: any) => { document.canvas.groups[0].name = " "; },
+      error: "canvas.groups[0].name must be a non-empty string",
     },
     {
       contract: "group colors in the documented hex format",
-      mutate: (document: any) => { document.graph.groups[0].color = "blue"; },
-      error: "graph.groups[0].color must be #rgb or #rrggbb",
+      mutate: (document: any) => { document.canvas.groups[0].color = "blue"; },
+      error: "canvas.groups[0].color must be #rgb or #rrggbb",
     },
   ])("rejects raw Studio JSON that violates $contract", ({ mutate, error }) => {
     const document = JSON.parse(original);
@@ -323,51 +396,40 @@ describe("FileOperations Studio agent edits", () => {
     expect(() => assertValidStudioProjectAgentDocumentStructure(document)).toThrow(error);
   });
 
-  it("accepts visual-only and stale entry points because entry IDs are derived data recomputed by Studio", () => {
-    // The visual-only classification changes across plugin versions
-    // (studio.text became executable in 6.2.x), so a sibling build can
-    // legitimately persist entry IDs this build considers visual-only, and
-    // an edit can delete a node without touching the list. Runs re-derive
-    // entry points from graph structure and parse drops stale references,
-    // so accepting is harmless; rejecting bricks cross-version files.
-    const document = JSON.parse(original);
-    document.graph.nodes.push({
-      id: "terminal",
-      kind: "studio.terminal",
-      version: "1.0.0",
-      title: "Terminal",
-      position: { x: 640, y: 20 },
-      config: {},
-      continueOnError: false,
-      disabled: false,
+  it("accepts a one-way upgrade of a v1 file to the v2 dialect", () => {
+    const project = createEmptyStudioProject({
+      name: "Agent canvas",
+      policyPath: "SystemSculpt/Studio/Agent canvas.systemsculpt-assets/policy/grants.json",
+      minPluginVersion: "6.0.2",
+      maxRuns: 100,
+      maxArtifactsMb: 1024,
     });
-    document.graph.entryNodeIds = ["terminal", "no-longer-exists"];
+    const v1Document = `${JSON.stringify(project, null, 2)}\n`;
+    const upgraded = serializeStudioProject(project);
 
     expect(() => assertValidStudioProjectAgentFileMutation({
       path: file.path,
       exists: true,
       mode: "overwrite",
-      previousContent: original,
-      content: JSON.stringify(document),
+      previousContent: v1Document,
+      content: upgraded,
     })).not.toThrow();
+
+    expect(() => assertValidStudioProjectAgentFileMutation({
+      path: file.path,
+      exists: true,
+      mode: "overwrite",
+      previousContent: upgraded,
+      content: v1Document,
+    })).toThrow("schema may only move from studio.project.v1 to studio.project.v2");
   });
 
-  it("keeps Studio-owned identity and authoring reference fields stable", async () => {
-    const projectId = JSON.parse(original).projectId as string;
+  it("keeps the Studio-owned project identity stable", async () => {
+    const projectId = JSON.parse(original).id as string;
     await expect(operations.editFile({
       path: file.path,
       edits: [{ oldText: projectId, newText: `${projectId}-changed` }],
-    } as any)).rejects.toThrow("projectId is Studio-owned");
-
-    const changedGuide = JSON.parse(original);
-    changedGuide.agentGuide.purpose = "Replace the generated editing contract.";
-    expect(() => assertValidStudioProjectAgentFileMutation({
-      path: file.path,
-      exists: true,
-      mode: "overwrite",
-      previousContent: original,
-      content: JSON.stringify(changedGuide),
-    })).toThrow("agentGuide is Studio-owned");
+    } as any)).rejects.toThrow("The project identity is Studio-owned");
 
     expect(app.vault.modify).not.toHaveBeenCalled();
   });

@@ -37,6 +37,45 @@ Platform checks through node renderers or runtime implementations.
 - SystemSculptStudioView.ts coordinates the Obsidian leaf and delegates graph,
   clipboard, session, and presentation ownership to focused modules.
 
+## Project file dialect
+
+A .systemsculpt file is one JSON document in the studio.project.v2 dialect,
+designed so people and AI agents can read, edit, and reorganize a project
+directly from the file:
+
+~~~json
+{
+  "schema": "studio.project.v2",
+  "id": "proj_8c1f...",
+  "name": "My Project",
+  "docs": "SystemSculpt/Studio/AGENTS.md",
+  "canvas": {
+    "nodes": [
+      { "id": "prompt", "kind": "text", "x": 20, "y": 20, "width": 280,
+        "config": { "value": "Portrait of a fox" } },
+      { "id": "image", "kind": "image_generation", "x": 400, "y": 20 }
+    ],
+    "edges": ["prompt.text -> image.prompt"],
+    "groups": [],
+    "shapes": [],
+    "arrows": []
+  }
+}
+~~~
+
+- The file carries only user-authored canvas content plus identity. Engine
+  settings, the permissions reference, timestamps, entry points, and migration
+  history are derived at load time or live in the assets directory.
+- Node kinds omit the studio. prefix. Edges and shape arrows are "from -> to"
+  strings; an edge port may be omitted when its node has exactly one matching
+  port. A labeled arrow is written as the object
+  {"from": "a", "to": "b", "label": "text"} instead of the string.
+- docs points at the generated agent reference (node kinds, ports, config
+  fields, editing rules) that Studio keeps current in the vault.
+- Studio still reads v1 and legacy documents and rewrites them as v2 on the
+  next save. The schema never moves backward, and agent file tools validate
+  every proposed edit before bytes reach the vault.
+
 ## Persistence
 
 For My Project.systemsculpt, Studio stores durable state in:

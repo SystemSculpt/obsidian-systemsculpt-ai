@@ -20,6 +20,7 @@ import {
   renameGroup,
   setGroupColor,
 } from "../../studio/StudioGraphGroupModel";
+import { readStudioDiagramFromProject } from "../../studio/StudioShapes";
 import { createStudioAction } from "./StudioAction";
 import { getStudioOwnerWindow, requestStudioAnimationFrame } from "./StudioDomContext";
 import {
@@ -83,6 +84,14 @@ type StudioGraphGroupControllerHost = {
     mutator: (project: StudioProjectV1) => boolean | void,
     options?: StudioGraphProjectMutationOptions
   ) => boolean;
+  /**
+   * Diagram half of a group drag: a group frames shapes as well as nodes, so
+   * the frame carries both through the same three-step translation contract.
+   */
+  beginShapeTranslation?: (shapeIds: readonly string[]) => void;
+  translateShapes?: (project: StudioProjectV1, delta: { x: number; y: number }) => boolean;
+  previewShapeTranslation?: () => void;
+  finishShapeTranslation?: () => void;
 };
 
 function normalizeGroupName(value: string): string {
@@ -180,8 +189,11 @@ export class StudioGraphGroupController {
     }
 
     const nodeMap = buildNodeMap(project);
-    const groups = (project.graph.groups || []).filter((group) =>
-      group.nodeIds.some((nodeId) => nodeMap.has(nodeId))
+    const shapeIdSet = new Set(readStudioDiagramFromProject(project).shapes.map((shape) => shape.id));
+    const groups = (project.graph.groups || []).filter(
+      (group) =>
+        group.nodeIds.some((nodeId) => nodeMap.has(nodeId)) ||
+        (group.shapeIds || []).some((shapeId) => shapeIdSet.has(shapeId))
     );
     const visibleGroupIds = new Set(groups.map((group) => group.id));
     if (this.openColorPaletteGroupId && !visibleGroupIds.has(this.openColorPaletteGroupId)) {
@@ -751,7 +763,8 @@ export class StudioGraphGroupController {
     const dragNodes = group.nodeIds
       .map((nodeId) => nodeMap.get(nodeId))
       .filter((node): node is StudioProjectV1["graph"]["nodes"][number] => Boolean(node));
-    if (dragNodes.length === 0) {
+    const dragShapeIds = group.shapeIds || [];
+    if (dragNodes.length === 0 && dragShapeIds.length === 0) {
       return;
     }
 
@@ -776,6 +789,9 @@ export class StudioGraphGroupController {
       ] as const)
     );
     let dragged = false;
+    if (dragShapeIds.length > 0) {
+      this.host.beginShapeTranslation?.(dragShapeIds);
+    }
 
     if (typeof dragSurfaceEl.setPointerCapture === "function") {
       try {
@@ -809,6 +825,11 @@ export class StudioGraphGroupController {
               currentNode.position.y = nextY;
               changed = true;
             }
+          }
+          if (dragShapeIds.length > 0) {
+            changed =
+              this.host.translateShapes?.(currentProject, { x: deltaX, y: deltaY }) === true ||
+              changed;
           }
           return changed || options?.forceChanged === true;
         },
@@ -852,6 +873,7 @@ export class StudioGraphGroupController {
         }
         nodeEl.style.transform = `translate(${currentNode.position.x}px, ${currentNode.position.y}px)`;
       }
+      this.host.previewShapeTranslation?.();
       this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
     };
 
@@ -900,6 +922,7 @@ export class StudioGraphGroupController {
 
       dragSurfaceEl.classList.remove("is-dragging");
       if (!dragged) {
+        this.host.finishShapeTranslation?.();
         return;
       }
       this.host.onNodeDragStateChange?.(false);
@@ -908,6 +931,8 @@ export class StudioGraphGroupController {
         mode: "discrete",
         forceChanged: true,
       });
+      this.host.previewShapeTranslation?.();
+      this.host.finishShapeTranslation?.();
       this.host.notifyNodePositionsChanged();
     };
 

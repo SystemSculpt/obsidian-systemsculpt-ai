@@ -2,7 +2,6 @@ import { StudioGraphCompiler } from "./StudioGraphCompiler";
 import {
   resolveStudioGraphNodeResizeBounds,
   resolveStudioNodeDefaultSize,
-  resolveStudioNodeResizeSemantics,
 } from "./StudioNodeGeometry";
 import { isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
@@ -11,11 +10,17 @@ import type {
   StudioJsonValue,
   StudioNodeConfigFieldDefinition,
   StudioNodeDefinition,
+  StudioPortDefinition,
   StudioProjectV1,
 } from "./types";
 
-const AGENT_GUIDE_SCHEMA = "studio.agent-guide.v1" as const;
-const NODE_REFERENCE_SCHEMA = "studio.node-kind-reference.v1" as const;
+/**
+ * Vault path of the generated agent reference document. Every serialized v2
+ * project carries this path in its "docs" field so an agent that opens a
+ * project anywhere in the vault can find the format guide and the node kind
+ * reference without either being embedded in the project file.
+ */
+export const STUDIO_AGENT_DOCS_PATH = "SystemSculpt/Studio/AGENTS.md" as const;
 
 const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.audio_extract": "Extract audio from a media asset for downstream transcription or processing.",
@@ -35,151 +40,162 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.value": "Provide a typed primitive or structured value to downstream nodes.",
 };
 
-type AgentConfigFieldReference = {
-  key: string;
-  type: string;
-  required?: true;
-  description?: string;
-  default?: StudioJsonValue;
-  allowedValues?: string[];
-  min?: number;
-  max?: number;
-  integer?: boolean;
-  pathScope?: "vault" | "vault_or_external_desktop";
-};
-
-function compactConfigField(
-  field: StudioNodeConfigFieldDefinition,
-  defaults: Record<string, StudioJsonValue>
-): AgentConfigFieldReference {
-  const defaultValue = defaults[field.key];
-  return {
-    key: field.key,
-    type: field.type,
-    ...(field.required === true ? { required: true as const } : {}),
-    ...(field.description ? { description: String(field.description).trim() } : {}),
-    ...(typeof defaultValue !== "undefined" ? { default: defaultValue } : {}),
-    ...(field.options ? { allowedValues: field.options.map((option) => option.value) } : {}),
-    ...(typeof field.min === "number" ? { min: field.min } : {}),
-    ...(typeof field.max === "number" ? { max: field.max } : {}),
-    ...(field.integer === true ? { integer: true } : {}),
-    ...(field.type === "file_path" || field.type === "directory_path" || field.type === "media_path"
-      ? { pathScope: field.allowOutsideVault === true ? "vault_or_external_desktop" as const : "vault" as const }
-      : {}),
-  };
-}
-
-function createNodeKindReference(definition: StudioNodeDefinition) {
-  const visualOnly = isStudioVisualOnlyNodeKind(definition.kind);
-  const resizeBounds = resolveStudioGraphNodeResizeBounds({ kind: definition.kind });
-  const sizeLimitProfile = definition.kind === "studio.text"
-    ? "text"
-    : definition.kind === "studio.terminal"
-      ? "terminal"
-      : resizeBounds.minWidth > 220 || resizeBounds.minHeight > 120
-        ? "large"
-        : "standard";
-  return {
-    kind: definition.kind,
-    version: definition.version,
-    purpose: NODE_PURPOSES[definition.kind] || "Built-in Studio node.",
-    ...(definition.hiddenFromInsertMenu === true ? { newNodeAvailability: "existing_only" as const } : {}),
-    execution: {
-      mode: visualOnly ? "visual_only" as const : "executable" as const,
-      ...(definition.requiredHostCapabilities.length > 0
-        ? { requiredHostCapabilities: [...definition.requiredHostCapabilities] }
-        : {}),
-    },
-    canvas: {
-      defaultSize: resolveStudioNodeDefaultSize(definition.kind),
-      resizeMode: resolveStudioNodeResizeSemantics(definition.kind),
-      sizeLimitProfile,
-    },
-    ports: {
-      inputs: definition.inputPorts.map((port) => ({ ...port })),
-      outputs: definition.outputPorts.map((port) => ({ ...port })),
-    },
-    config: {
-      ...(definition.configSchema.allowUnknownKeys === true ? { allowUnknownKeys: true as const } : {}),
-      fields: definition.configSchema.fields.map((field) =>
-        compactConfigField(field, definition.configDefaults as Record<string, StudioJsonValue>)
-      ),
-    },
-  };
-}
-
 const builtInRegistry = new StudioNodeRegistry();
 registerBuiltInStudioNodes(builtInRegistry);
 
-export const STUDIO_PROJECT_AGENT_GUIDE = {
-  schema: AGENT_GUIDE_SCHEMA,
-  guideIsGenerated: true,
-  purpose: "This .systemsculpt JSON document is the complete editable Studio project. Read it, understand the canvas, and edit it like any other JSON file.",
-  editingContract: {
-    editOnlyThisFile: true,
-    preserveStableFields: [
-      "schema",
-      "projectId",
-      "createdAt",
-      "engine",
-      "permissionsRef",
-      "settings",
-      "migrations",
-    ],
-    editableFields: [
-      "name",
-      "updatedAt",
-      "graph.nodes",
-      "graph.edges",
-      "graph.entryNodeIds",
-      "graph.groups",
-    ],
-    generatedFields: ["agentGuide", "nodeKindReference"],
-    saveRule: "Save the complete valid JSON document back to this .systemsculpt file.",
-  },
-  content: {
-    nodeTitle: "node.title is the human-facing canvas label.",
-    nodeConfig: "node.config holds the node's authored content and settings; use nodeKindReference to find allowed keys and defaults.",
-    paths: "Paths are vault-relative unless the referenced config field explicitly allows vault_or_external_desktop.",
-  },
-  canvas: {
-    coordinateSystem: "Canvas pixels with origin at the top-left; x increases right and y increases down.",
-    position: "node.position is the top-left corner of the node card.",
-    size: "node.size is optional. Omit it to use the kind default; width is required when size is present and height may be omitted for intrinsic-height content.",
-    layout: "Prefer left-to-right execution flow. Resolve node dimensions before placement, avoid overlap, use about 90px between columns and at least 20px between rows.",
-    newNodes: "After this file is edited, Studio selects and frames newly added node IDs.",
-  },
-  graph: {
-    ids: "All node, edge, and group IDs must be non-empty and unique. Keep existing IDs stable; use descriptive deterministic IDs for additions.",
-    edges: "Edges are executable data flow only: fromNodeId/fromPortId must name an output port and toNodeId/toPortId an input port from nodeKindReference. Port types must match unless either type is any.",
-    entryNodeIds: "Entry IDs must reference existing nodes and identify intended run starting points. Studio recomputes this list from graph structure, so prefer leaving it untouched.",
-    visualOnlyNodes: "Visual-only nodes have no executable ports. Text nodes stay visually minimal but expose their declared text output for data flow; do not invent port IDs.",
-    groups: "A group is {id,name,color?,nodeIds}. Membership, not geometry, defines its bounds. Every nodeId must exist, a node should belong to at most one group, and color must be #rgb or #rrggbb.",
-  },
-  referenceField: "nodeKindReference",
-} as const;
+export const builtInStudioNodeRegistry = builtInRegistry;
 
-export const STUDIO_PROJECT_NODE_KIND_REFERENCE = {
-  schema: NODE_REFERENCE_SCHEMA,
-  sizeLimits: {
-    standard: resolveStudioGraphNodeResizeBounds({ kind: "studio.input" }),
-    large: resolveStudioGraphNodeResizeBounds({ kind: "studio.json" }),
-    text: resolveStudioGraphNodeResizeBounds({ kind: "studio.text" }),
-    terminal: resolveStudioGraphNodeResizeBounds({ kind: "studio.terminal" }),
-  },
-  kinds: builtInRegistry.list()
-    .sort((left, right) => left.kind.localeCompare(right.kind) || left.version.localeCompare(right.version))
-    .map(createNodeKindReference),
-};
+/**
+ * v2 documents spell kinds without the "studio." namespace and never persist
+ * node versions; both are restored here. A kind that is not built in keeps its
+ * spelling and the default version so future or third-party kinds round-trip.
+ */
+export function expandStudioNodeKind(kind: string): string {
+  const trimmed = String(kind || "").trim();
+  return trimmed && !trimmed.includes(".") ? `studio.${trimmed}` : trimmed;
+}
 
-export function createAgentFacingStudioProjectDocument(project: StudioProjectV1): Record<string, unknown> {
-  const { schema, ...projectFields } = project;
-  return {
-    schema,
-    agentGuide: STUDIO_PROJECT_AGENT_GUIDE,
-    ...projectFields,
-    nodeKindReference: STUDIO_PROJECT_NODE_KIND_REFERENCE,
-  };
+export function compactStudioNodeKind(kind: string): string {
+  return kind.startsWith("studio.") ? kind.slice("studio.".length) : kind;
+}
+
+export function resolveBuiltInStudioNodeVersion(kind: string): string | null {
+  const definition = builtInRegistry.list().find((entry) => entry.kind === kind);
+  return definition ? definition.version : null;
+}
+
+export function findBuiltInStudioNodeDefinition(kind: string): StudioNodeDefinition | null {
+  return builtInRegistry.list().find((entry) => entry.kind === kind) || null;
+}
+
+function renderPortLine(port: StudioPortDefinition, direction: "in" | "out"): string {
+  const flags = [port.type, ...(port.required ? ["required"] : [])].join(", ");
+  const description = port.description ? ` — ${String(port.description).trim()}` : "";
+  return `- ${direction}: \`${port.id}\` (${flags})${description}`;
+}
+
+function renderConfigFieldLine(
+  field: StudioNodeConfigFieldDefinition,
+  defaults: Record<string, StudioJsonValue>
+): string {
+  const notes: string[] = [field.type];
+  if (field.required === true) notes.push("required");
+  if (typeof defaults[field.key] !== "undefined") notes.push(`default ${JSON.stringify(defaults[field.key])}`);
+  if (field.options) notes.push(`one of ${field.options.map((option) => JSON.stringify(option.value)).join(" | ")}`);
+  if (typeof field.min === "number") notes.push(`min ${field.min}`);
+  if (typeof field.max === "number") notes.push(`max ${field.max}`);
+  if (field.integer === true) notes.push("integer");
+  if (field.type === "file_path" || field.type === "directory_path" || field.type === "media_path") {
+    notes.push(field.allowOutsideVault === true ? "vault or absolute desktop path" : "vault-relative path");
+  }
+  const description = field.description ? ` — ${String(field.description).trim()}` : "";
+  return `- \`${field.key}\` (${notes.join(", ")})${description}`;
+}
+
+function renderNodeKindSection(definition: StudioNodeDefinition): string {
+  const visualOnly = isStudioVisualOnlyNodeKind(definition.kind);
+  const defaultSize = resolveStudioNodeDefaultSize(definition.kind);
+  const bounds = resolveStudioGraphNodeResizeBounds({ kind: definition.kind });
+  const lines: string[] = [];
+  lines.push(`### ${compactStudioNodeKind(definition.kind)}`);
+  lines.push("");
+  lines.push(NODE_PURPOSES[definition.kind] || "Built-in Studio node.");
+  const facts: string[] = [];
+  facts.push(visualOnly ? "visual only (never runs)" : "executable");
+  if (definition.requiredHostCapabilities.length > 0) {
+    facts.push(`desktop only (${definition.requiredHostCapabilities.join(", ")})`);
+  }
+  if (definition.hiddenFromInsertMenu === true) {
+    facts.push("legacy: keep existing instances, never add new ones");
+  }
+  facts.push(`default size ${defaultSize.width}x${defaultSize.height}, width ${bounds.minWidth}-${bounds.maxWidth}`);
+  lines.push(`(${facts.join("; ")})`);
+  const portLines = [
+    ...definition.inputPorts.map((port) => renderPortLine(port, "in")),
+    ...definition.outputPorts.map((port) => renderPortLine(port, "out")),
+  ];
+  if (portLines.length > 0) {
+    lines.push("");
+    lines.push(...portLines);
+  }
+  if (definition.kind === "studio.dataset") {
+    lines.push("- out ports vary with config: each configured dataset column is exposed as an output port.");
+  }
+  if (definition.configSchema.fields.length > 0) {
+    lines.push("");
+    lines.push("Config:");
+    lines.push(
+      ...definition.configSchema.fields.map((field) =>
+        renderConfigFieldLine(field, definition.configDefaults as Record<string, StudioJsonValue>)
+      )
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The complete generated agent documentation for .systemsculpt files: format
+ * guide plus the node kind reference. Studio publishes it to
+ * STUDIO_AGENT_DOCS_PATH; project files only point at it. Content is fully
+ * derived from the registry, so a byte comparison detects staleness.
+ */
+export function renderStudioAgentReferenceMarkdown(): string {
+  const kinds = builtInRegistry
+    .list()
+    .slice()
+    .sort((left, right) => left.kind.localeCompare(right.kind));
+  return `# SystemSculpt Studio projects
+
+Generated by SystemSculpt. Do not edit; Studio rewrites this file when the plugin updates.
+
+A \`.systemsculpt\` file is one JSON document that fully describes a visual workflow canvas. Read it, edit it, and save it like any other JSON file; Studio picks up external edits live.
+
+## Document shape
+
+~~~json
+{
+  "schema": "studio.project.v2",
+  "id": "proj_1a2b3c",
+  "name": "Interview pipeline",
+  "docs": "${STUDIO_AGENT_DOCS_PATH}",
+  "canvas": {
+    "nodes": [
+      { "id": "recording", "kind": "media_ingest", "title": "Interview audio", "x": 40, "y": 40,
+        "config": { "path": "Recordings/interview.m4a" } },
+      { "id": "transcript", "kind": "transcription", "title": "Transcribe", "x": 400, "y": 40 },
+      { "id": "summary", "kind": "text_generation", "title": "Summarize", "x": 760, "y": 40,
+        "config": { "prompt": "Summarize the transcript." } }
+    ],
+    "edges": [
+      "recording.path -> transcript.media",
+      "transcript.text -> summary.prompt"
+    ],
+    "groups": [],
+    "shapes": [],
+    "arrows": []
+  }
+}
+~~~
+
+## Rules
+
+- \`schema\`, \`id\`, and \`docs\` are Studio-owned: keep them exactly as they are. Everything under \`canvas\` plus \`name\` is yours to edit.
+- Every id must be non-empty and unique within its list. Keep existing ids stable; use short descriptive ids for additions.
+- A node is \`{id, kind, title?, x, y, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
+- \`config\` holds the node's authored content and settings; the node kind reference below lists allowed keys, defaults, and value constraints. Paths are vault-relative unless the field says otherwise.
+- An edge is the string \`"fromNode.outPort -> toNode.inPort"\`. Port types must match unless either side is \`any\`. When a node has exactly one output (or one input) port the port name may be omitted: \`"transcript -> summary.prompt"\`.
+- Edges connect executable data flow only. Visual-only kinds have no executable ports; do not invent port names.
+- A group is \`{id, name, color?, nodes, shapes?}\` framing existing node and shape ids. Membership defines its bounds; a member belongs to at most one group; a group needs at least one member; \`color\` is \`#rgb\` or \`#rrggbb\`.
+- A shape is \`{id, shape, x, y, width, height, label, style?}\` on the same canvas. Shapes are drawings, not nodes: they never run and cannot connect to a node. \`shape\` is one of \`rectangle\` (step), \`ellipse\`, \`diamond\` (decision), \`pill\` (start or end), \`cylinder\` (store), \`note\` (aside), \`hexagon\` (preparation). Sides are whole pixels between 48 and 4000.
+- An arrow is the string \`"fromShape -> toShape"\` between two different existing shapes; each direction of a pair may appear once. Arrows are drawn border to border and carry no data.
+- To label an arrow, write it as the object \`{"from": "fromShape", "to": "toShape", "label": "text"}\` instead of the string. Shape and arrow labels are plain text; use \`\\n\` inside the JSON string for a line break.
+- Canvas coordinates are pixels; the origin is top-left, x grows right, y grows down, and \`x\`/\`y\` is a card's top-left corner. Prefer left-to-right execution flow with about 90px between columns and at least 20px between rows, and avoid overlap.
+- Older projects may still be \`studio.project.v1\`; Studio upgrades them to v2 on save. Write v2 for new work.
+
+## Node kinds
+
+${kinds.map(renderNodeKindSection).join("\n\n")}
+`;
 }
 
 export function validateStudioProjectForAgentEdit(project: StudioProjectV1): void {

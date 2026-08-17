@@ -2351,6 +2351,73 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("keeps a pending approval visible when the tool drawer is collapsed", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      reducedMotion: () => true,
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+      onCancelQueued: jest.fn(),
+      onRunQueuedNow: jest.fn(),
+    });
+    workspace.load();
+    await workspace.setHistory([{ role: "user", content: "Update Project.md", message_id: "user-1" }]);
+
+    const approvalTool: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-1",
+      kind: "tool",
+      messageId: "assistant-1",
+      callId: "call-1",
+      name: "edit",
+      location: "vault",
+      input: { path: "Project.md" },
+      state: "approval-required",
+      approvalId: "approval-1",
+      order: 0,
+    };
+    const laterTool: Extract<AgentPart, { kind: "tool" }> = {
+      id: "tool-2",
+      kind: "tool",
+      messageId: "assistant-1",
+      callId: "call-2",
+      name: "read",
+      location: "vault",
+      input: { paths: ["Notes.md"] },
+      state: "succeeded",
+      order: 1,
+    };
+    await workspace.setAgentSnapshot({
+      runId: "run-1",
+      turnId: "user-1",
+      status: "waiting",
+      phase: "waiting",
+      statusLabel: "Starting",
+      waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-1", "tool-2"] }],
+      parts: [approvalTool, laterTool],
+    });
+
+    const overflow = parent.querySelector<HTMLButtonElement>(
+      "button[data-agent-activity-overflow]",
+    )!;
+    expect(overflow.getAttribute("aria-expanded")).toBe("false");
+    const overflowBody = overflow.nextElementSibling as HTMLElement;
+    expect(overflowBody.hasAttribute("hidden")).toBe(false);
+    expect(overflowBody.querySelector(".systemsculpt-agent-approval")).not.toBeNull();
+    expect(parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')).not.toBeNull();
+    workspace.unload();
+  });
+
   it("projects a full agent run with inline approval, queue, and artifact actions", async () => {
     const parent = document.body.createDiv();
     const onApprove = jest.fn();

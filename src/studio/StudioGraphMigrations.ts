@@ -14,6 +14,24 @@ const RETIRED_HTTP_NODE_MIGRATION_ID = "studio.retire-http-request.v1";
 export const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
 
 /**
+ * Every migration stamp a born-current project starts with. v2 documents do
+ * not persist migration history: their content is by definition written in
+ * the current dialect, so parse stamps the full set to keep the migration
+ * pass from ever rewriting freshly parsed v2 projects.
+ */
+export const ALL_STUDIO_GRAPH_MIGRATION_IDS: readonly string[] = [
+  PATH_ONLY_PORTS_MIGRATION_ID,
+  PROMPT_TEMPLATE_INLINE_MIGRATION_ID,
+  RESEND_TO_HTTP_REQUEST_MIGRATION_ID,
+  NOTE_NODE_CANONICAL_MIGRATION_ID,
+  LEGACY_TEXT_NODE_MODEL_MIGRATION_ID,
+  IMAGE_NODE_LEVERS_MIGRATION_ID,
+  MANAGED_NODE_CONFIG_MIGRATION_ID,
+  RETIRED_HTTP_NODE_MIGRATION_ID,
+  TEXT_NODE_KINDS_MIGRATION_ID,
+];
+
+/**
  * One-shot kind renames applied as a single atomic lookup: every node kind is
  * mapped through this table at most once, so a project persisted with BOTH
  * legacy kinds can never chain studio.label -> studio.text ->

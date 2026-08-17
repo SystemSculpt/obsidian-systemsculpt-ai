@@ -475,8 +475,10 @@ describe("StudioService session-backed mutation commands", () => {
     movedProject.permissionsRef.policyPath =
       "Studio/Moved.systemsculpt-assets/policy/grants.json";
     const store = (service as any).projectStore;
+    // Only the v1 dialect still persists the Studio-owned envelope, so the
+    // tampered rename arrives as a v1 document.
     jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(
-      serializeStudioProject(movedProject)
+      `${JSON.stringify(movedProject, null, 2)}\n`
     );
     const adopt = jest.spyOn(store, "adoptVisibleProjectRename");
 

@@ -6,9 +6,13 @@ import {
   serializeStudioProject,
 } from "../schema";
 import { STUDIO_PROJECT_SCHEMA_V1 } from "../types";
+import {
+  STUDIO_AGENT_DOCS_PATH,
+  renderStudioAgentReferenceMarkdown,
+} from "../StudioProjectAgentContract";
 
 describe("Studio schema", () => {
-  it("round-trips a v1 project document", () => {
+  it("round-trips an empty project through the v2 dialect", () => {
     const project = createEmptyStudioProject({
       name: "Architecture",
       policyPath: "SystemSculpt/Studio/Architecture.systemsculpt-assets/policy/grants.json",
@@ -25,7 +29,7 @@ describe("Studio schema", () => {
     expect(parsed.graph.groups || []).toEqual([]);
   });
 
-  it("serializes a self-contained agent authoring guide and built-in node reference", () => {
+  it("serializes a compact v2 document that points at the generated agent reference", () => {
     const project = createEmptyStudioProject({
       name: "Agent-readable",
       policyPath: "SystemSculpt/Studio/Agent-readable.systemsculpt-assets/policy/grants.json",
@@ -33,49 +37,48 @@ describe("Studio schema", () => {
       maxRuns: 100,
       maxArtifactsMb: 1024,
     });
+    project.graph.nodes.push({
+      id: "prompt",
+      kind: "studio.text",
+      version: "1.0.0",
+      title: "Prompt",
+      position: { x: 20, y: 20 },
+      size: { width: 280 },
+      config: { value: "hello" },
+      continueOnError: false,
+      disabled: false,
+    });
 
     const serialized = serializeStudioProject(project);
     const document = JSON.parse(serialized);
-    expect(document.agentGuide).toMatchObject({
-      schema: "studio.agent-guide.v1",
-      guideIsGenerated: true,
-      editingContract: {
-        editOnlyThisFile: true,
-        generatedFields: ["agentGuide", "nodeKindReference"],
-      },
+    expect(document).toEqual({
+      schema: "studio.project.v2",
+      id: project.projectId,
+      name: "Agent-readable",
+      docs: STUDIO_AGENT_DOCS_PATH,
       canvas: {
-        coordinateSystem: expect.stringContaining("top-left"),
-      },
-      graph: {
-        groups: expect.stringContaining("Membership"),
+        nodes: [
+          { id: "prompt", kind: "text", title: "Prompt", x: 20, y: 20, width: 280, config: { value: "hello" } },
+        ],
+        edges: [],
+        groups: [],
+        shapes: [],
+        arrows: [],
       },
     });
-    expect(document.nodeKindReference.schema).toBe("studio.node-kind-reference.v1");
-    const textKind = document.nodeKindReference.kinds.find((entry: any) => entry.kind === "studio.text");
-    expect(textKind).toMatchObject({
-      execution: { mode: "executable" },
-      canvas: {
-        defaultSize: expect.objectContaining({ width: expect.any(Number) }),
-      },
-      ports: {
-        inputs: [],
-        outputs: [{ id: "text", type: "text" }],
-      },
-      config: {
-        fields: expect.arrayContaining([
-          expect.objectContaining({ key: "value", type: "textarea" }),
-          expect.objectContaining({ key: "fontSize", type: "number" }),
-        ]),
-      },
-    });
-    expect(serialized.length).toBeLessThan(20_000);
-    expect(serialized.indexOf('"graph"')).toBeLessThan(
-      serialized.lastIndexOf('\n  "nodeKindReference"')
-    );
-    expect(JSON.stringify(document.agentGuide)).not.toMatch(
-      /external[_ -]?sync|projection|authority|generation|candidate|marker|revision|hash|cas|sidecar|reconciliation/i
-    );
+    expect(serialized.length).toBeLessThan(1_000);
     expect(serializeStudioProject(parseStudioProject(serialized))).toBe(serialized);
+  });
+
+  it("renders the node-kind reference into the shared agent document instead of every project file", () => {
+    const reference = renderStudioAgentReferenceMarkdown();
+    expect(reference).toContain("### text");
+    expect(reference).toContain("- out: `text` (text)");
+    expect(reference).toContain("- `value` (textarea");
+    expect(reference).toContain("- `fontSize` (number");
+    expect(reference).not.toMatch(
+      /external[_ -]?sync|projection|authority|candidate|marker|revision|sidecar|reconciliation/i
+    );
   });
 
   it("round-trips first-class node size, keeping width-only sizes", () => {
@@ -102,19 +105,20 @@ describe("Studio schema", () => {
     expect(parsed.graph.nodes[0].size).toEqual({ width: 320, height: 240 });
 
     const corrupted = JSON.parse(serializeStudioProject(project));
-    corrupted.graph.nodes[0].size = { width: "abc", height: 240 };
+    corrupted.canvas.nodes[0].width = "abc";
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
 
     // Width-only sizes are the PERSISTED contract for intrinsic-height kinds
     // (text reflow, aspect-driven image/video cards) — regression guard: they
     // were once dropped as "partial", silently resetting resized images back
     // to the default width on the next load.
-    corrupted.graph.nodes[0].size = { width: 320 };
+    corrupted.canvas.nodes[0].width = 320;
+    delete corrupted.canvas.nodes[0].height;
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toEqual({
       width: 320,
     });
 
-    delete corrupted.graph.nodes[0].size;
+    delete corrupted.canvas.nodes[0].width;
     expect(parseStudioProject(JSON.stringify(corrupted)).graph.nodes[0].size).toBeUndefined();
   });
 
@@ -158,12 +162,29 @@ describe("Studio schema", () => {
     });
     project.graph.entryNodeIds = ["prompt"];
 
-    const parsed = parseStudioProject(serializeStudioProject(project));
-    expect(parsed.graph.edges).toEqual(project.graph.edges);
+    const serialized = serializeStudioProject(project);
+    expect(JSON.parse(serialized).canvas.edges).toEqual(["prompt.text -> image.prompt"]);
+
+    const parsed = parseStudioProject(serialized);
+    expect(parsed.graph.edges).toEqual([
+      {
+        id: "prompt.text->image.prompt",
+        fromNodeId: "prompt",
+        fromPortId: "text",
+        toNodeId: "image",
+        toPortId: "prompt",
+      },
+    ]);
     expect(parsed.graph.nodes.find((node) => node.id === "prompt")?.config.value).toBe(
       "Portrait of a fox in amber light"
     );
-    expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
+    // Entry points are derived from graph structure at run time; v2 never persists them.
+    expect(parsed.graph.entryNodeIds).toEqual([]);
+
+    // A text node has exactly one output port, so the from-side port may be omitted.
+    const shorthand = JSON.parse(serialized);
+    shorthand.canvas.edges = ["prompt -> image.prompt"];
+    expect(parseStudioProject(JSON.stringify(shorthand)).graph.edges).toEqual(parsed.graph.edges);
   });
 
   it("heals entry IDs that reference missing nodes instead of failing to parse", () => {
@@ -186,8 +207,14 @@ describe("Studio schema", () => {
     });
     project.graph.entryNodeIds = ["deleted-node", "prompt"];
 
-    const parsed = parseStudioProject(serializeStudioProject(project));
+    // The in-memory model doubles as a v1 document, which is where persisted
+    // entry IDs can still appear and need healing.
+    const parsed = parseStudioProject(JSON.stringify(project));
+    expect(parsed.schema).toBe(STUDIO_PROJECT_SCHEMA_V1);
     expect(parsed.graph.entryNodeIds).toEqual(["prompt"]);
+
+    // v2 never persists entry IDs, so stale ones cannot survive an upgrade.
+    expect(parseStudioProject(serializeStudioProject(project)).graph.entryNodeIds).toEqual([]);
   });
 
   it("migrates legacy canvas-like payloads into v1", () => {

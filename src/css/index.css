@@ -57,6 +57,7 @@
 @import 'views/studio/node-runtime.css';
 @import 'views/studio/groups.css';
 @import 'views/studio/text-nodes.css';
+@import 'views/studio/shapes.css';
 @import 'views/studio/menus.css';
 /* Studio node editors: component bodies, overlays, responsive rules, details. */
 @import 'views/studio/editor-preview.css';

@@ -277,6 +277,21 @@
 .systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
   border-top: 1px solid var(--ss-warning-line);
 }
+.systemsculpt-inline-diff__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-warning-line);
+  font-size: var(--ss-text-sm);
+}
+.systemsculpt-inline-diff__summary-count {
+  font-weight: var(--ss-weight-medium);
+}
+.systemsculpt-inline-diff__summary-blocked {
+  color: var(--ss-warning);
+}
 .systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
   margin: 0;
   padding-left: var(--ss-space-4);

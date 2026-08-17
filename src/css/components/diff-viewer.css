@@ -151,6 +151,17 @@
   text-align: center;
 }
 
+/* An edit that cannot apply is a warning, not an absence of news. */
+.systemsculpt-diff-no-changes-notice-blocked {
+  color: var(--ss-warning);
+  font-style: normal;
+  text-align: left;
+}
+
+.systemsculpt-diff-blocked {
+  color: var(--ss-warning);
+}
+
 .systemsculpt-diff-truncated {
   padding: var(--ss-space-1) var(--ss-space-2);
   color: var(--ss-ink-faint);

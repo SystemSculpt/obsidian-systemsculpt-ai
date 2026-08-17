@@ -114,4 +114,139 @@ describe("StudioPortInteraction drag-to-connect", () => {
 
     expect(sourceAtCommit).toBe("src:out:out");
   });
+
+  it("connects when the drag is released anywhere over another node's card", () => {
+    const store = new StudioLinkStore();
+
+    const canvas = document.createElement("div");
+    (canvas as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect =
+      () => rectOf({ left: 0, top: 0, width: 1000, height: 1000 });
+
+    const sourcePin = makePin("ss-studio-port-pin is-output", "src", "out", {
+      left: 0,
+      top: 50,
+      width: 12,
+      height: 12,
+    });
+    // Far outside the pin snap radius: only the card drop can resolve it.
+    const targetPin = makePin("ss-studio-port-pin is-input", "dst", "in", {
+      left: 400,
+      top: 400,
+      width: 12,
+      height: 12,
+    });
+    const targetCard = document.createElement("div");
+    targetCard.className = "ss-studio-node-card";
+    targetCard.dataset.nodeId = "dst";
+    targetCard.append(targetPin);
+    document.body.append(canvas, sourcePin, targetCard);
+    (document as unknown as { elementFromPoint: () => Element }).elementFromPoint =
+      () => targetCard;
+
+    const host = {
+      isBusy: () => false,
+      getGraphZoom: () => 1,
+      getPortType: () => "any",
+      portTypeCompatible: () => true,
+      describeConnectionAutoCreate: () => null,
+    };
+
+    const commits: Array<{ nodeId: string; portId: string }> = [];
+    const interaction = new StudioPortInteraction(host as never, store, {
+      onConnectionCommit: (target) => commits.push(target),
+      onAutoCreateHint: () => {},
+      onAutoCreateRelease: () => false,
+      onDragStateChange: () => {},
+    });
+
+    interaction.registerCanvas(canvas);
+    interaction.registerPortElement("dst", "in", "in", targetPin);
+
+    interaction.startDrag(
+      "src",
+      "out",
+      new FakePointerEvent("pointerdown", {
+        button: 0,
+        clientX: 6,
+        clientY: 56,
+        pointerId: 1,
+      }) as unknown as PointerEvent,
+      sourcePin
+    );
+    window.dispatchEvent(
+      new FakePointerEvent("pointermove", { clientX: 500, clientY: 300, pointerId: 1 })
+    );
+    window.dispatchEvent(
+      new FakePointerEvent("pointerup", { clientX: 500, clientY: 300, pointerId: 1 })
+    );
+
+    expect(commits).toEqual([{ nodeId: "dst", portId: "in" }]);
+  });
+
+  it("never self-connects when the drag is released over its own card", () => {
+    const store = new StudioLinkStore();
+
+    const canvas = document.createElement("div");
+    (canvas as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect =
+      () => rectOf({ left: 0, top: 0, width: 1000, height: 1000 });
+
+    const sourcePin = makePin("ss-studio-port-pin is-output", "src", "out", {
+      left: 0,
+      top: 50,
+      width: 12,
+      height: 12,
+    });
+    const sourceInputPin = makePin("ss-studio-port-pin is-input", "src", "in", {
+      left: 0,
+      top: 400,
+      width: 12,
+      height: 12,
+    });
+    const sourceCard = document.createElement("div");
+    sourceCard.className = "ss-studio-node-card";
+    sourceCard.dataset.nodeId = "src";
+    sourceCard.append(sourcePin, sourceInputPin);
+    document.body.append(canvas, sourceCard);
+    (document as unknown as { elementFromPoint: () => Element }).elementFromPoint =
+      () => sourceCard;
+
+    const host = {
+      isBusy: () => false,
+      getGraphZoom: () => 1,
+      getPortType: () => "any",
+      portTypeCompatible: () => true,
+      describeConnectionAutoCreate: () => null,
+    };
+
+    const commits: Array<{ nodeId: string; portId: string }> = [];
+    const interaction = new StudioPortInteraction(host as never, store, {
+      onConnectionCommit: (target) => commits.push(target),
+      onAutoCreateHint: () => {},
+      onAutoCreateRelease: () => false,
+      onDragStateChange: () => {},
+    });
+
+    interaction.registerCanvas(canvas);
+    interaction.registerPortElement("src", "in", "in", sourceInputPin);
+
+    interaction.startDrag(
+      "src",
+      "out",
+      new FakePointerEvent("pointerdown", {
+        button: 0,
+        clientX: 6,
+        clientY: 56,
+        pointerId: 1,
+      }) as unknown as PointerEvent,
+      sourcePin
+    );
+    window.dispatchEvent(
+      new FakePointerEvent("pointermove", { clientX: 6, clientY: 200, pointerId: 1 })
+    );
+    window.dispatchEvent(
+      new FakePointerEvent("pointerup", { clientX: 6, clientY: 200, pointerId: 1 })
+    );
+
+    expect(commits).toEqual([]);
+  });
 });

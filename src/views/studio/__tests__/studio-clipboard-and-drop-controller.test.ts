@@ -8,14 +8,18 @@ jest.mock("obsidian", () => {
 import { App, Notice, TFile, TFolder } from "obsidian";
 import { mediaIngestNode } from "../../../studio/nodes/mediaIngestNode";
 import { textNode } from "../../../studio/nodes/textNode";
-import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
+import type { StudioDiagram, StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import {
   StudioClipboardAndDropController,
   type StudioClipboardAndDropHost,
 } from "../systemsculpt-studio-view/StudioClipboardAndDropController";
 
-function projectWithNodes(nodes: StudioNodeInstance[] = []): StudioProjectV1 {
+function projectWithNodes(
+  nodes: StudioNodeInstance[] = [],
+  diagram?: StudioDiagram
+): StudioProjectV1 {
   return {
+    ...(diagram ? { diagram } : {}),
     schema: "studio.project.v1",
     projectId: "project_clipboard",
     name: "Clipboard project",
@@ -55,6 +59,8 @@ type Harness = {
   host: StudioClipboardAndDropHost & {
     finalizeCreatedNodes: jest.Mock;
     removeNodes: jest.Mock;
+    removeDiagramSelection: jest.Mock;
+    selectPastedShapes: jest.Mock;
     insertVaultNoteNodes: jest.Mock;
     storeAsset: jest.Mock;
     setError: jest.Mock;
@@ -67,6 +73,7 @@ type Harness = {
 function createHarness(options?: {
   project?: StudioProjectV1 | null;
   selectedNodeIds?: string[];
+  selectedShapeIds?: string[];
 }): Harness {
   const app = new App();
   let project = options && "project" in options
@@ -83,6 +90,9 @@ function createHarness(options?: {
     getProjectPath: jest.fn(() => projectPath),
     getNodeDefinitions: jest.fn(() => [textNode, mediaIngestNode]),
     getSelectedNodeIds: jest.fn(() => options?.selectedNodeIds ?? []),
+    getSelectedShapeIds: jest.fn(() => options?.selectedShapeIds ?? []),
+    removeDiagramSelection: jest.fn(() => true),
+    selectPastedShapes: jest.fn(),
     getGraphZoom: jest.fn(() => 1),
     getDefaultNodePosition: jest.fn(() => ({ x: 120, y: 240 })),
     normalizeNodePosition: jest.fn((position) => ({
@@ -287,6 +297,78 @@ describe("StudioClipboardAndDropController", () => {
     );
   });
 
+  it("carries shapes and their arrows through one copy and paste", () => {
+    const node = textInstance("source", { x: 40, y: 60 });
+    const diagram: StudioDiagram = {
+      shapes: [
+        {
+          id: "s1",
+          shape: "rectangle",
+          position: { x: 100, y: 60 },
+          size: { width: 180, height: 120 },
+          label: "One",
+        },
+        {
+          id: "s2",
+          shape: "ellipse",
+          position: { x: 400, y: 60 },
+          size: { width: 180, height: 120 },
+          label: "Two",
+        },
+      ],
+      arrows: [{ id: "a1", fromShapeId: "s1", toShapeId: "s2" }],
+    };
+    const harness = createHarness({
+      project: projectWithNodes([node], diagram),
+      selectedNodeIds: [node.id],
+      selectedShapeIds: ["s1", "s2"],
+    });
+
+    expect(harness.controller.copySelectedGraphNodes()).toBe(true);
+    expect(harness.controller.pasteGraphClipboardPayload()).toBe(true);
+
+    const pastedShapes = harness.getProject()?.diagram?.shapes.slice(2) ?? [];
+    expect(pastedShapes.map((shape) => shape.shape)).toEqual(["rectangle", "ellipse"]);
+    // The node was the top-left of the copied set, so it anchors the paste.
+    expect(pastedShapes.map((shape) => shape.position)).toEqual([
+      { x: 180, y: 240 },
+      { x: 480, y: 240 },
+    ]);
+
+    const pastedArrows = harness.getProject()?.diagram?.arrows.slice(1) ?? [];
+    expect(pastedArrows).toHaveLength(1);
+    expect(pastedArrows[0].fromShapeId).toBe(pastedShapes[0].id);
+    expect(pastedArrows[0].toShapeId).toBe(pastedShapes[1].id);
+    expect(harness.host.selectPastedShapes).toHaveBeenCalledWith(
+      pastedShapes.map((shape) => shape.id),
+    );
+    expect(noticeMessages()).toContain("Pasted 3 items.");
+  });
+
+  it("cuts a shape-only selection through the diagram layer", () => {
+    const diagram: StudioDiagram = {
+      shapes: [
+        {
+          id: "s1",
+          shape: "note",
+          position: { x: 10, y: 20 },
+          size: { width: 180, height: 120 },
+          label: "Only",
+        },
+      ],
+      arrows: [],
+    };
+    const harness = createHarness({
+      project: projectWithNodes([], diagram),
+      selectedShapeIds: ["s1"],
+    });
+
+    expect(harness.controller.cutSelectedGraphNodes()).toBe(true);
+    expect(harness.host.removeDiagramSelection).toHaveBeenCalledTimes(1);
+    expect(harness.host.removeNodes).not.toHaveBeenCalled();
+    expect(noticeMessages()).toContain("Cut 1 item.");
+  });
+
   it("mirrors graph clipboard data through the bound viewport owner realm", async () => {
     const source = textInstance("source");
     const harness = createHarness({
@@ -315,13 +397,13 @@ describe("StudioClipboardAndDropController", () => {
 
     expect(harness.controller.cutSelectedGraphNodes()).toBe(false);
     expect(noticeMessages()).toContain(
-      "Unable to cut: the selected nodes no longer exist in this project.",
+      "Unable to cut: the selection no longer exists in this project.",
     );
     expect(noticeMessages().some((message) => message.startsWith("Cut "))).toBe(false);
 
     harness.host.removeNodes.mockReturnValue(true);
     expect(harness.controller.cutSelectedGraphNodes()).toBe(true);
-    expect(noticeMessages()).toContain("Cut 1 node.");
+    expect(noticeMessages()).toContain("Cut 1 item.");
   });
 
   it("classifies mixed vault drops and materializes media at the drop point", async () => {

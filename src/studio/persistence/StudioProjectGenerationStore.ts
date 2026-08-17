@@ -1,5 +1,11 @@
 import { deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "../paths";
-import { parseStudioPolicy, parseStudioProject, serializeStudioProject } from "../schema";
+import {
+  createDefaultStudioPolicy,
+  parseStudioPolicy,
+  parseStudioProject,
+  serializeStudioPolicy,
+  serializeStudioProject,
+} from "../schema";
 import { sha256HexFromArrayBuffer } from "../hash";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
 import {
@@ -130,34 +136,20 @@ export function validateProjectionLocator(locator: ProjectionLocator): Projectio
   return { vaultRelativeProjectPath: normalized };
 }
 
-function hasAllowedKeys(value: Record<string, unknown>, required: readonly string[], allowed: readonly string[]): boolean {
-  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key)) && Object.keys(value).every((key) => allowed.includes(key));
-}
-
 function validateClosedLegacyProject(raw: Record<string, unknown>, locator: ProjectionLocator): { projectId: string } {
-  const top = ["schema", "projectId", "name", "createdAt", "updatedAt", "engine", "graph", "permissionsRef", "settings", "migrations"];
-  if (!hasAllowedKeys(raw, top, [...top, "agentGuide", "nodeKindReference"])) throw new Error("Legacy Studio project root schema is not closed.");
-  const object = (value: unknown, label: string): Record<string, unknown> => { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; };
-  if (typeof raw.agentGuide !== "undefined" && object(raw.agentGuide, "agentGuide").schema !== "studio.agent-guide.v1") throw new Error("Legacy agent guide schema is invalid.");
-  if (typeof raw.nodeKindReference !== "undefined") {
-    const reference = object(raw.nodeKindReference, "nodeKindReference");
-    if (reference.schema !== "studio.node-kind-reference.v1" || !Array.isArray(reference.kinds)) throw new Error("Legacy node kind reference schema is invalid.");
+  // Adoption candidates pass the same strict document validation as agent
+  // edits, which routes on the schema field (v2 canvas documents and legacy
+  // v1 envelopes). The only adoption-specific rule is that a v1 envelope's
+  // policy reference must match where the file actually lives.
+  assertValidStudioProjectAgentDocumentStructure(raw);
+  if (raw.schema === "studio.project.v1") {
+    const permissions = raw.permissionsRef as Record<string, unknown>;
+    if (permissions.policyPath !== deriveStudioPolicyPath(locator.vaultRelativeProjectPath)) {
+      throw new Error("Legacy policy reference is invalid for the projection locator.");
+    }
   }
-  if (!hasExactKeys(object(raw.engine, "engine"), ["apiMode", "minPluginVersion"])) throw new Error("Legacy engine schema is not closed.");
-  const graph = object(raw.graph, "graph");
-  if (!hasExactKeys(graph, ["nodes", "edges", "entryNodeIds", "groups"]) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || !Array.isArray(graph.entryNodeIds) || !Array.isArray(graph.groups)) throw new Error("Legacy graph schema is not closed.");
-  for (const node of graph.nodes) if (!hasAllowedKeys(object(node, "node"), ["id", "kind", "version", "title", "position", "config"], ["id", "kind", "version", "title", "position", "size", "config", "continueOnError", "disabled"])) throw new Error("Legacy node schema is not closed.");
-  for (const edge of graph.edges) if (!hasExactKeys(object(edge, "edge"), ["id", "fromNodeId", "fromPortId", "toNodeId", "toPortId"])) throw new Error("Legacy edge schema is not closed.");
-  for (const group of graph.groups) if (!hasAllowedKeys(object(group, "group"), ["id", "name", "nodeIds"], ["id", "name", "color", "nodeIds"])) throw new Error("Legacy group schema is not closed.");
-  const permissions = object(raw.permissionsRef, "permissionsRef");
-  if (!hasExactKeys(permissions, ["policyVersion", "policyPath"]) || permissions.policyPath !== deriveStudioPolicyPath(locator.vaultRelativeProjectPath)) throw new Error("Legacy policy reference is invalid for the projection locator.");
-  const settings = object(raw.settings, "settings");
-  if (!hasExactKeys(settings, ["runConcurrency", "defaultFsScope", "retention"]) || !hasExactKeys(object(settings.retention, "retention"), ["maxRuns", "maxArtifactsMb"])) throw new Error("Legacy settings schema is not closed.");
-  const migrations = object(raw.migrations, "migrations");
-  if (!hasExactKeys(migrations, ["projectSchemaVersion", "applied"]) || !Array.isArray(migrations.applied)) throw new Error("Legacy migrations schema is not closed.");
-  for (const applied of migrations.applied) if (!hasExactKeys(object(applied, "migration"), ["id", "at"])) throw new Error("Legacy migration entry schema is not closed.");
-  parseStudioProject(decoder.decode(encoder.encode(JSON.stringify(raw))));
-  return { projectId: String(raw.projectId || "") };
+  const project = parseStudioProject(JSON.stringify(raw), { projectPath: locator.vaultRelativeProjectPath });
+  return { projectId: project.projectId };
 }
 
 // Operating systems drop metadata files into folders the user merely browses
@@ -278,12 +270,15 @@ export class StudioProjectGenerationStore {
     try { locator = validateProjectionLocator(locatorInput); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     let documentBytes: Uint8Array;
     let projectId: string;
+    let documentIsV2 = false;
     try {
       documentBytes = new Uint8Array(await this.adapter.readBinary(locator.vaultRelativeProjectPath));
       const parsed = JSON.parse(decoder.decode(documentBytes)) as Record<string, unknown>;
-      if (parsed.schema !== "studio.project.v1") return { status: String(parsed.schema || "").startsWith("studio.project.") ? "future_unsupported" : "invalid_candidate", message: "Unsupported legacy Studio project schema." };
-      projectId = String(parsed.projectId || ""); authority(projectId);
-    } catch (error) { return { status: "invalid_candidate", message: `Unable to parse legacy Studio project: ${String(error)}` }; }
+      const schema = String(parsed.schema || "");
+      documentIsV2 = schema === "studio.project.v2";
+      if (schema !== "studio.project.v1" && !documentIsV2) return { status: schema.startsWith("studio.project.") ? "future_unsupported" : "invalid_candidate", message: "Unsupported Studio project schema." };
+      projectId = String((documentIsV2 ? parsed.id : parsed.projectId) || ""); authority(projectId);
+    } catch (error) { return { status: "invalid_candidate", message: `Unable to parse Studio project: ${String(error)}` }; }
     return this.exclusive(projectId, async () => {
       const existing = await this.recover(projectId);
       if (existing.status === "ready") {
@@ -325,7 +320,14 @@ export class StudioProjectGenerationStore {
       const files = new Map<string, Uint8Array>(); files.set("project.systemsculpt", documentBytes);
       try { await this.captureTree(deriveStudioAssetsDir(locator.vaultRelativeProjectPath), "support", files); }
       catch (error) { return { status: "storage_unavailable", message: String(error) }; }
-      const policyBytes = files.get("support/policy/grants.json");
+      let policyBytes = files.get("support/policy/grants.json");
+      if (!policyBytes && documentIsV2) {
+        // A v2 file carries no machine bookkeeping, so a synced or
+        // hand-authored document legitimately arrives without a support tree.
+        // Adoption provisions the same default policy Studio writes on create.
+        policyBytes = encoder.encode(serializeStudioPolicy(createDefaultStudioPolicy()));
+        files.set("support/policy/grants.json", policyBytes);
+      }
       if (!policyBytes) return { status: "invalid_candidate", message: "Legacy project policy reference is missing from the support tree." };
       try { parseStudioPolicy(decoder.decode(policyBytes)); }
       catch (error) { return { status: "invalid_candidate", message: `Legacy policy is invalid: ${String(error)}` }; }
@@ -680,10 +682,10 @@ export class StudioProjectGenerationStore {
     const files = new Map(
       [...recovered.generation.files].map(([path, bytes]) => [path, bytes.slice()] as const)
     );
-    // agentGuide and nodeKindReference are generated descriptions of the
-    // current plugin, not user-authored project identity. Older backups can
-    // legitimately omit or contain stale copies. Preserve the validated
-    // canvas edit while restoring only those generated blocks.
+    // Generated content (the docs pointer and the file dialect itself)
+    // describes the current plugin, not user-authored project identity. Older
+    // backups can legitimately omit it or carry a stale dialect. Preserve the
+    // validated canvas edit while restoring the canonical serialization.
     files.set(
       "project.systemsculpt",
       generatedFieldsMatch

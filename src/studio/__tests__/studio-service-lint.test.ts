@@ -122,13 +122,13 @@ describe("StudioService lintProjectText", () => {
       disabled: false,
     });
     const rawDocument = JSON.parse(serializeStudioProject(project));
-    rawDocument.graph.nodes[0].position.x = "80";
+    rawDocument.canvas.nodes[0].x = "80";
 
     const result = service.lintProjectText(JSON.stringify(rawDocument));
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("position.x must be a finite number");
+      expect(result.error).toContain(".x must be a finite number");
     }
   });
 

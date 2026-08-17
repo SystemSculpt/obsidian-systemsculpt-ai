@@ -1,0 +1,255 @@
+/* ------------------------------------------------------------------ *
+ * Diagram layer — shapes and the arrows between them.
+ *
+ * This is the tldraw half of Studio and it shares nothing with the node
+ * graph but the canvas: no card chrome, no ports, no status row. A shape IS
+ * its drawn outline — an SVG path, not a CSS border, because a diamond, a
+ * cylinder and a folded note are shapes a border can never draw. An arrow
+ * runs border to border between two shapes.
+ * ------------------------------------------------------------------ */
+.ss-studio-shapes-layer {
+  position: absolute;
+  inset: 0;
+  /* Above the graph's edges (z 1 in workspace.css), below its node cards (z 2). */
+  z-index: 1;
+  /* The layer is a pass-through; only shapes and arrow hit paths take input. */
+  pointer-events: none;
+}
+
+.ss-studio-shape-arrows-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ss-studio-shape {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: var(--ss-space-2);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+/* The outline is painted behind the label and never takes the pointer: the
+ * shape's own box stays the hit target, so a thin diamond is still grabbable. */
+.ss-studio-shape-outline {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ss-studio-shape-outline-body {
+  fill: var(--ss-surface-1);
+  stroke: var(--ss-line-strong, var(--ss-line));
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* Cylinder rim and sticky-note fold: interior lines, never filled. */
+.ss-studio-shape-outline-detail {
+  fill: none;
+  stroke: var(--ss-line-strong, var(--ss-line));
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ss-studio-shape[data-shape="note"] .ss-studio-shape-outline-body {
+  fill: var(--ss-warning-tint);
+}
+
+.ss-studio-shape:hover .ss-studio-shape-outline-body,
+.ss-studio-shape:hover .ss-studio-shape-outline-detail {
+  stroke: var(--ss-line-accent);
+}
+
+.ss-studio-shape.is-selected .ss-studio-shape-outline-body,
+.ss-studio-shape.is-selected .ss-studio-shape-outline-detail {
+  stroke: var(--ss-accent);
+  stroke-width: 2;
+}
+
+/* Label inset per kind: a diamond and a hexagon lose their corners, and a
+ * cylinder loses the band its rim occupies. */
+.ss-studio-shape[data-shape="diamond"] {
+  padding: 18%;
+}
+
+.ss-studio-shape[data-shape="hexagon"] {
+  padding-inline: 20%;
+}
+
+.ss-studio-shape[data-shape="cylinder"] {
+  padding-block: var(--ss-space-5) var(--ss-space-3);
+}
+
+.ss-studio-shape-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-align: center;
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+  pointer-events: none;
+}
+
+/* In-place editing: the label element itself is contenteditable, so it must
+ * take the pointer and show a caret while every canvas gesture stays out. */
+.ss-studio-shape-label.is-editing,
+.ss-studio-shape-arrow-label.is-editing {
+  pointer-events: auto;
+  cursor: text;
+  user-select: text;
+  min-width: 2ch;
+  min-height: 1em;
+  outline: none;
+  box-shadow: none;
+}
+
+/* Corner handles, rendered only while the shape is selected. */
+.ss-studio-shape-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-accent);
+  border-radius: var(--ss-radius-xs);
+  pointer-events: auto;
+}
+
+.ss-studio-shape-handle[data-corner="nw"] {
+  inset-block-start: -5px;
+  inset-inline-start: -5px;
+  cursor: nwse-resize;
+}
+
+.ss-studio-shape-handle[data-corner="ne"] {
+  inset-block-start: -5px;
+  inset-inline-end: -5px;
+  cursor: nesw-resize;
+}
+
+.ss-studio-shape-handle[data-corner="sw"] {
+  inset-block-end: -5px;
+  inset-inline-start: -5px;
+  cursor: nesw-resize;
+}
+
+.ss-studio-shape-handle[data-corner="se"] {
+  inset-block-end: -5px;
+  inset-inline-end: -5px;
+  cursor: nwse-resize;
+}
+
+/* Arrows: a border-to-border connector with a solid triangular head. */
+.ss-studio-shape-arrow-line {
+  fill: none;
+  stroke: var(--ss-studio-link-stroke);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ss-studio-shape-arrow-head {
+  fill: var(--ss-studio-link-stroke);
+  stroke: none;
+}
+
+.ss-studio-shape-arrow-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-linecap: round;
+  pointer-events: stroke;
+}
+
+.ss-studio-shape-arrow:hover .ss-studio-shape-arrow-line {
+  stroke: var(--ss-studio-link-stroke-hover);
+}
+
+.ss-studio-shape-arrow:hover .ss-studio-shape-arrow-head {
+  fill: var(--ss-studio-link-stroke-hover);
+}
+
+.ss-studio-shape-arrow.is-selected .ss-studio-shape-arrow-line {
+  stroke: var(--ss-accent);
+  stroke-width: 2.4;
+}
+
+.ss-studio-shape-arrow.is-selected .ss-studio-shape-arrow-head {
+  fill: var(--ss-accent);
+}
+
+/* Arrow label: an HTML chip centered on the line's midpoint. It backs itself
+ * with the surface color so the text never fights the stroke under it. */
+.ss-studio-shape-arrow-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 220px;
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-xs);
+  background: var(--ss-surface-1);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-align: center;
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  color: var(--ss-ink);
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* An empty label has no chip to show — unless it is the one being typed in. */
+.ss-studio-shape-arrow-label:empty:not(.is-editing) {
+  display: none;
+}
+
+.ss-studio-shape-arrow-label.is-selected {
+  color: var(--ss-accent);
+}
+
+.ss-studio-shape-arrow-preview {
+  fill: none;
+  stroke: var(--ss-accent);
+  stroke-width: 2.2;
+  stroke-dasharray: 6 6;
+  stroke-linecap: round;
+  /* The preview ends under the cursor; it must never become the drop target. */
+  pointer-events: none;
+}
+
+/* A tool is armed: the canvas is in draw/connect mode, so the pointer reads
+ * as a crosshair over the surfaces that tool acts on. */
+.ss-studio-graph-viewport.is-arrow-tool .ss-studio-shape,
+.ss-studio-graph-viewport.is-shape-tool,
+.ss-studio-graph-viewport.is-shape-tool .ss-studio-graph-canvas {
+  cursor: crosshair;
+}
+
+/* Live freeform draw preview: canvas-space geometry written inline by the
+ * draw gesture, so it tracks the pointer under any zoom. */
+.ss-studio-shape-draw-preview {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.ss-studio-shape-draw-preview-outline {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.ss-studio-shape-draw-preview-path {
+  fill: var(--ss-accent-tint);
+  stroke: var(--ss-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  stroke-linejoin: round;
+}

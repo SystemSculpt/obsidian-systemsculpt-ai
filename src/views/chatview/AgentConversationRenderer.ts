@@ -1872,11 +1872,24 @@ export class AgentConversationRenderer extends Component {
     );
     if (state.label.textContent !== label) state.label.setText(label);
     this.updateActivityOverflowIcon(state.icon, state.latestNode);
+    // A pending approval blocks the turn, so the drawer must reveal it instead
+    // of parking it behind a disclosure the user has no reason to open.
+    const awaitingApproval = [
+      ...state.previousNodes,
+      ...(state.latestNode ? [state.latestNode] : []),
+    ].filter((node) => this.hasPendingApproval(node));
+    const visiblePrevious = expanded
+      ? state.previousNodes
+      : state.previousNodes.filter((node) => awaitingApproval.includes(node));
     const desired = state.latestNode
-      ? [...(expanded ? state.previousNodes : []), state.latestNode]
-      : [];
+      ? [...visiblePrevious, state.latestNode]
+      : [...visiblePrevious];
     this.reconcileChildren(state.body, desired);
-    state.body.toggleAttribute("hidden", !expanded);
+    state.body.toggleAttribute("hidden", !expanded && awaitingApproval.length === 0);
+  }
+
+  private hasPendingApproval(node: HTMLElement): boolean {
+    return Boolean(node.querySelector(".systemsculpt-agent-approval"));
   }
 
   private updateActivityOverflowIcon(icon: HTMLElement, latestNode: HTMLElement | null): void {

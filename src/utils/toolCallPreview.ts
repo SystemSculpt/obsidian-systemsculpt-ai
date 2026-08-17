@@ -1,15 +1,30 @@
-import { App, TFile } from "obsidian";
+import { App, TFile, normalizePath } from "obsidian";
 import { DiffViewer } from "../components/DiffViewer";
 import type { ToolCall } from "../types/toolCalls";
 import { getFunctionDataFromToolCall } from "./toolDisplay";
 import { extractPrimaryPathArg, splitToolName } from "./toolPolicy";
 import { generateDiff, DiffResult } from "./diffUtils";
+import { applyFileEdits } from "../tools/vault/editApplication";
+import { resolveExistingVaultFile } from "../tools/vault/folderNotes";
+import { normalizeLineEndings, normalizeVaultPath } from "../tools/vault/utils";
+import type { FileEdit, FileEditRange, SkippedEdit } from "../tools/vault/types";
+
+/**
+ * Why a preview shows no diff. Only "identical" means the change is genuinely
+ * a no-op; every other value is a reason the edit cannot be applied and must
+ * be said out loud before the user approves it.
+ */
+export type WriteEditPreviewStatus = "changed" | "identical" | "unmatched" | "missing";
 
 export interface WriteEditPreview {
   path: string;
   oldContent: string;
   newContent: string;
   diff: DiffResult;
+  status: WriteEditPreviewStatus;
+  requestedCount: number;
+  appliedCount: number;
+  skipped: SkippedEdit[];
 }
 
 export function isWriteOrEditTool(toolName: string): boolean {
@@ -58,14 +73,20 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   if (!path) return null;
 
   let oldContent = "";
-  const file = app.vault.getAbstractFileByPath(path);
+  const file = resolveExistingVaultFile(app, normalizePath(normalizeVaultPath(path)));
   if (file && file instanceof TFile) {
     try {
-      oldContent = await app.vault.read(file);
+      // The executor edits normalized text, so the preview must diff against the
+      // same normalization or a CRLF file reads as a whole-file rewrite.
+      oldContent = normalizeLineEndings(await app.vault.read(file));
     } catch {}
   }
 
   let newContent = "";
+  let status: WriteEditPreviewStatus = "changed";
+  let requestedCount = 0;
+  let appliedCount = 0;
+  let skipped: SkippedEdit[] = [];
   const { canonicalName: base } = splitToolName(fn.name);
   if (base === "write") {
     const content = String((fn.arguments as any).content ?? "");
@@ -79,157 +100,36 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
       newContent = content;
     }
   } else if (base === "edit") {
-    const edits = Array.isArray((fn.arguments as any).edits) ? (fn.arguments as any).edits : [];
-    newContent = applyEditsLocally(oldContent, edits);
+    const edits: FileEdit[] = Array.isArray((fn.arguments as any).edits)
+      ? (fn.arguments as any).edits
+      : [];
+    requestedCount = edits.length;
+    const applied = applyFileEdits(oldContent, edits, false);
+    newContent = applied.modifiedContent;
+    appliedCount = applied.appliedCount;
+    skipped = applied.skipped;
+    if (!file) status = "missing";
+    else if (appliedCount === 0 && requestedCount > 0) status = "unmatched";
   }
 
+  if (status === "changed" && newContent === oldContent) status = "identical";
+
   const diff = generateDiff(oldContent ?? "", newContent ?? "", 5);
-  return { path, oldContent, newContent, diff };
+  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped };
 }
 
 export type ToolEditOccurrence = "first" | "last" | "all";
 export type ToolEditMode = "exact" | "loose";
-export type ToolEditRange = {
-  startLine?: number | null;
-  endLine?: number | null;
-  startIndex?: number | null;
-  endIndex?: number | null;
-};
-export type ToolFileEdit = {
-  oldText: string;
-  newText: string;
-  isRegex?: boolean | null;
-  flags?: string | null;
-  occurrence?: ToolEditOccurrence | null;
-  mode?: ToolEditMode | null;
-  range?: ToolEditRange | null;
-  preserveIndent?: boolean | null;
-};
+export type ToolEditRange = FileEditRange;
+export type ToolFileEdit = FileEdit;
 
+/**
+ * Preview-side application of a tool's edits. Delegates to the executor's
+ * applier in non-strict mode so an unmatched edit is reported rather than
+ * silently returning the file unchanged.
+ */
 export function applyEditsLocally(original: string, edits: ToolFileEdit[]): string {
-  let result = original.replace(/\r\n/g, "\n");
-  for (const edit of edits) {
-    try {
-      result = applySingleEditPreview(result, edit);
-    } catch {
-      // Best-effort preview: ignore failures
-    }
-  }
-  return result;
-}
-
-function applySingleEditPreview(source: string, edit: ToolFileEdit): string {
-  const text = source;
-  const mode = edit.mode || "exact";
-  const preserveIndent = edit.preserveIndent !== false;
-  const { sliceStart, sliceEnd } = computeRange(text, edit.range);
-  const head = text.slice(0, sliceStart);
-  const target = text.slice(sliceStart, sliceEnd);
-  const tail = text.slice(sliceEnd);
-
-  const oldText = String(edit.oldText ?? "").replace(/\r\n/g, "\n");
-  const newText = String(edit.newText ?? "").replace(/\r\n/g, "\n");
-  const occurrence = (edit.occurrence ?? "first") as ToolEditOccurrence;
-
-  let replaced = target;
-  if (edit.isRegex) {
-    const flags = edit.flags || "g";
-    const regex = new RegExp(oldText, flags.includes("g") ? flags : flags + "g");
-    replaced = replaceByOccurrenceRegex(target, regex, newText, occurrence);
-  } else if (mode === "exact") {
-    replaced = replaceByOccurrenceString(target, oldText, newText, occurrence);
-  } else {
-    replaced = replaceLoose(target, oldText, newText, preserveIndent, occurrence);
-  }
-
-  return head + replaced + tail;
-}
-
-function computeRange(text: string, range?: ToolEditRange | null): { sliceStart: number; sliceEnd: number } {
-  const totalLength = text.length;
-  if (!range) return { sliceStart: 0, sliceEnd: totalLength };
-  if (typeof range.startIndex === "number" || typeof range.endIndex === "number") {
-    const startIndex = Math.max(0, Math.min(totalLength, range.startIndex ?? 0));
-    const endIndex = Math.max(startIndex, Math.min(totalLength, range.endIndex ?? totalLength));
-    return { sliceStart: startIndex, sliceEnd: endIndex };
-  }
-  const lines = text.split("\n");
-  const startLine = Math.max(1, range.startLine ?? 1);
-  const endLine = Math.max(startLine, range.endLine ?? lines.length);
-  let cursor = 0;
-  let sliceStart = 0;
-  let sliceEnd = totalLength;
-  for (let i = 1; i <= lines.length; i++) {
-    const line = lines[i - 1];
-    const next = cursor + line.length + (i < lines.length ? 1 : 0);
-    if (i === startLine) sliceStart = cursor;
-    if (i === endLine) { sliceEnd = next; break; }
-    cursor = next;
-  }
-  return { sliceStart, sliceEnd };
-}
-
-function replaceByOccurrenceString(target: string, find: string, replacement: string, occurrence: ToolEditOccurrence): string {
-  if (occurrence === "all") return target.split(find).join(replacement);
-  if (occurrence === "first") {
-    const idx = target.indexOf(find);
-    if (idx === -1) return target;
-    return target.slice(0, idx) + replacement + target.slice(idx + find.length);
-  }
-  if (occurrence === "last") {
-    const idx = target.lastIndexOf(find);
-    if (idx === -1) return target;
-    return target.slice(0, idx) + replacement + target.slice(idx + find.length);
-  }
-  return target;
-}
-
-function replaceByOccurrenceRegex(target: string, pattern: RegExp, replacement: string, occurrence: ToolEditOccurrence): string {
-  if (occurrence === "all") return target.replace(pattern, replacement);
-  const matches = Array.from(
-    target.matchAll(new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g"))
-  );
-  if (matches.length === 0) return target;
-  let which = 0;
-  if (occurrence === "first") which = 0;
-  else if (occurrence === "last") which = matches.length - 1;
-  const m = matches[which];
-  const start = m.index as number;
-  const end = start + m[0].length;
-  return (
-    target.slice(0, start) +
-    m[0].replace(new RegExp(pattern.source, pattern.flags.replace("g", "")), replacement) +
-    target.slice(end)
-  );
-}
-
-function replaceLoose(target: string, oldText: string, newText: string, preserveIndent: boolean, occurrence: ToolEditOccurrence): string {
-  const oldLines = oldText.split("\n");
-  const tgtLines = target.split("\n");
-  const found: number[] = [];
-  for (let i = 0; i <= tgtLines.length - oldLines.length; i++) {
-    const window = tgtLines.slice(i, i + oldLines.length);
-    const match = oldLines.every((line, idx) => line.trim() === (window[idx] ?? "").trim());
-    if (match) found.push(i);
-  }
-  if (found.length === 0) return target;
-  const doReplaceAt = (pos: number) => {
-    const originalIndent = tgtLines[pos].match(/^\s*/)?.[0] || "";
-    const newLines = newText.split("\n").map((line, j) => {
-      if (!preserveIndent) return line;
-      if (j === 0) return originalIndent + line.trimStart();
-      return originalIndent + line.trimStart();
-    });
-    tgtLines.splice(pos, oldLines.length, ...newLines);
-  };
-  if (occurrence === "all") {
-    for (let k = found.length - 1; k >= 0; k--) doReplaceAt(found[k]);
-  } else {
-    let indexToUse = 0;
-    if (occurrence === "last") indexToUse = found.length - 1;
-    doReplaceAt(found[indexToUse]);
-  }
-  return tgtLines.join("\n");
+  return applyFileEdits(original, edits, false).modifiedContent;
 }
 
 
@@ -247,6 +147,8 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
 
   const container = hostElement.createDiv({ cls: "systemsculpt-inline-diff" });
 
+  if (previews.length > 1) renderInlineDiffSummary(container, previews);
+
   for (const preview of previews) {
     const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
     const viewer = new DiffViewer({
@@ -255,11 +157,49 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
       fileName: preview.path,
       maxContextLines: 3,
       showLineNumbers: true,
+      emptyReason: preview.status === "changed" ? "identical" : preview.status,
+      emptyDetail: describeSkippedEdits(preview),
     });
     viewer.render();
   }
 
   return container;
+}
+
+function describeSkippedEdits(preview: WriteEditPreview): string | undefined {
+  if (preview.status === "changed" || preview.requestedCount === 0) return undefined;
+  const failed = preview.requestedCount - preview.appliedCount;
+  if (failed <= 0) return undefined;
+  return `${failed} of ${preview.requestedCount} edit${preview.requestedCount === 1 ? "" : "s"} did not match.`;
+}
+
+/**
+ * A multi-file change is approved as one unit, so the totals belong at the top.
+ * Without this the user has to scroll every file to learn whether anything is
+ * wrong with the batch.
+ */
+function renderInlineDiffSummary(container: HTMLElement, previews: readonly WriteEditPreview[]): void {
+  const additions = previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0);
+  const deletions = previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0);
+  const blocked = previews.filter((preview) => preview.status === "unmatched" || preview.status === "missing");
+
+  const summary = container.createDiv({ cls: "systemsculpt-inline-diff__summary" });
+  summary.createSpan({
+    cls: "systemsculpt-inline-diff__summary-count",
+    text: `${previews.length} files`,
+  });
+  if (additions > 0) {
+    summary.createSpan({ cls: "systemsculpt-diff-additions", text: `+${additions}` });
+  }
+  if (deletions > 0) {
+    summary.createSpan({ cls: "systemsculpt-diff-deletions", text: `-${deletions}` });
+  }
+  if (blocked.length > 0) {
+    summary.createSpan({
+      cls: "systemsculpt-inline-diff__summary-blocked",
+      text: `${blocked.length} can't apply`,
+    });
+  }
 }
 
 

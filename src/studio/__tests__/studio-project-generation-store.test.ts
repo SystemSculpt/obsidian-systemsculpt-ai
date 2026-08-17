@@ -195,6 +195,49 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
+  it("adopts a v2 canvas document with no support tree by provisioning the default policy", async () => {
+    const v2Project = JSON.stringify({
+      schema: "studio.project.v2",
+      id: "project_alpha",
+      name: "Alpha",
+      docs: "SystemSculpt/Studio/AGENTS.md",
+      canvas: { nodes: [], edges: [], groups: [], shapes: [], arrows: [] },
+    }, null, 2) + "\n";
+    const adapter = new MemoryAdapter();
+    await adapter.write(locator.vaultRelativeProjectPath, v2Project);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+
+    const adopted = await store.discoverAndAdopt(locator);
+    expect(adopted.status).toBe("committed");
+    if (adopted.status !== "committed") return;
+
+    // The visible file keeps its exact synced bytes.
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(v2Project);
+    expect(new TextDecoder().decode(adopted.generation.files.get("project.systemsculpt"))).toBe(v2Project);
+    // A v2 file carries no machine bookkeeping, so adoption provisions the
+    // same default policy Studio writes on create — in the generation and in
+    // the vault's support tree.
+    const policy = adopted.generation.files.get("support/policy/grants.json");
+    expect(policy).toBeDefined();
+    expect(await adapter.read("SystemSculpt/Studio/Alpha.systemsculpt-assets/policy/grants.json"))
+      .toBe(new TextDecoder().decode(policy));
+
+    const reopened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+  });
+
+  it("still refuses a Studio schema newer than this plugin understands", async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.write(locator.vaultRelativeProjectPath, JSON.stringify({
+      schema: "studio.project.v3",
+      id: "project_alpha",
+      name: "Alpha",
+    }));
+
+    const adopted = await new StudioProjectGenerationStore(adapter).discoverAndAdopt(locator);
+    expect(adopted.status).toBe("future_unsupported");
+  });
+
   it("rejects non-closed legacy schema and missing referenced policy before adoption", async () => {
     const extraAdapter = new MemoryAdapter();
     const withExtra = JSON.stringify({ ...JSON.parse(legacyProject), unexpected: true });
@@ -421,7 +464,7 @@ describe("StudioProjectGenerationStore", () => {
     expect(generations.folders).toHaveLength(1);
   });
 
-  it("loads an older valid project file and regenerates missing authoring references", async () => {
+  it("loads an older valid project file and restores the generated docs pointer", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const store = new StudioProjectGenerationStore(adapter, {
       now: () => "2026-07-11T01:02:03.004Z",
@@ -440,8 +483,7 @@ describe("StudioProjectGenerationStore", () => {
 
     const restoredDocument = JSON.parse(canonicalDocument);
     restoredDocument.name = "Restored older backup";
-    delete restoredDocument.agentGuide;
-    delete restoredDocument.nodeKindReference;
+    delete restoredDocument.docs;
     adapter.files.set(
       locator.vaultRelativeProjectPath,
       new TextEncoder().encode(`${JSON.stringify(restoredDocument, null, 2)}\n`)
@@ -457,8 +499,7 @@ describe("StudioProjectGenerationStore", () => {
     expect(opened.generation.metadata.commandKind).toBe("external_sync");
     const repaired = JSON.parse(await adapter.read(locator.vaultRelativeProjectPath));
     expect(repaired.name).toBe("Restored older backup");
-    expect(repaired.agentGuide?.schema).toBe("studio.agent-guide.v1");
-    expect(repaired.nodeKindReference?.schema).toBe("studio.node-kind-reference.v1");
+    expect(repaired.docs).toBe("SystemSculpt/Studio/AGENTS.md");
   });
 
   it("reconciles a valid direct edit on first open after restart", async () => {
@@ -614,9 +655,11 @@ describe("StudioProjectGenerationStore", () => {
     );
     const document = JSON.parse(await adapter.read(destination.vaultRelativeProjectPath));
     expect(document.name).toBe("Moved");
-    expect(document.permissionsRef.policyPath).toBe(
-      "SystemSculpt/Studio/Moved.systemsculpt-assets/policy/grants.json"
-    );
+    // The adopted rename rewrites the canonical v2 dialect: identity plus
+    // canvas only, with the policy path derived from the new location.
+    expect(document.schema).toBe("studio.project.v2");
+    expect(document.id).toBe("project_alpha");
+    expect(document.permissionsRef).toBeUndefined();
   });
 
   it("adopts a folder move when the previous parent no longer exists", async () => {
