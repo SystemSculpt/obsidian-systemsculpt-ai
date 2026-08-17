@@ -38,8 +38,28 @@ export async function openExternalUrl(url: string, ownerWindow?: Window): Promis
   } catch {
     // Fall back to window.open below.
   }
+  // No Electron (mobile host): a synthetic anchor click routes through the
+  // webview's external-link handling — the same path as tapping a link in a
+  // note. WKWebView on iOS silently ignores window.open with a features
+  // string, so the anchor is the reliable route; window.open stays last.
+  const doc = targetWindow?.document;
+  if (doc?.body && typeof doc.createElement === "function") {
+    const anchor = doc.createElement("a");
+    anchor.setAttribute("href", href);
+    anchor.setAttribute("target", "_blank");
+    anchor.setAttribute("rel", "noopener noreferrer");
+    doc.body.appendChild(anchor);
+    try {
+      anchor.click();
+      return true;
+    } catch {
+      // Fall through to window.open below.
+    } finally {
+      anchor.remove();
+    }
+  }
   if (typeof targetWindow?.open === "function") {
-    targetWindow.open(href, "_blank", "noopener,noreferrer");
+    targetWindow.open(href, "_blank");
     return true;
   }
   return false;

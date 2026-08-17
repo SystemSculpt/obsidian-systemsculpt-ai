@@ -21,6 +21,7 @@ export const TESTID_GRAMMAR = /^[a-z][a-z0-9-]*(\.([a-z0-9-]+|\*))+$/;
 /** Wrapper factories whose call sites carry a positional testid argument. */
 const POSITIONAL_WRAPPERS = [
   "addActionButton",
+  "addLink",
   "addSearchBar",
   "addStateAction",
   "createTabButton",
