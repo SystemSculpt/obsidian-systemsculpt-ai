@@ -383,6 +383,12 @@ class Plugin extends Component {
     this._editorExtensions.push(extension);
     return extension;
   }
+
+  registerObsidianProtocolHandler(action, handler) {
+    if (!this._protocolHandlers) this._protocolHandlers = new Map();
+    this._protocolHandlers.set(action, handler);
+    return handler;
+  }
 }
 
 class WorkspaceLeaf {

@@ -29,6 +29,7 @@ import { TranscriptionService } from "./services/TranscriptionService";
 import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
+import { AccountConnectService } from "./services/AccountConnectService";
 import type { ViewManager } from "./core/plugin/views";
 import type { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
@@ -181,6 +182,7 @@ export default class SystemSculptPlugin extends Plugin {
   private transcriptionService: TranscriptionService;
   private settingsManager: SettingsManager;
   private licenseManager: LicenseManager;
+  private accountConnectService: AccountConnectService | null = null;
   private viewManager: ViewManager | null = null;
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
@@ -424,6 +426,12 @@ export default class SystemSculptPlugin extends Plugin {
       await this.lifecycleCoordinator.runPhase("bootstrap");
 
       this.startCriticalAndDeferredPhases(tracer, logger);
+
+      // Browser sign-in returns through obsidian://systemsculpt-connect on
+      // both desktop and mobile. Cheap synchronous registration.
+      this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
+        void this.getAccountConnectService().handleProtocolCallback(params);
+      });
 
       this.registerLayoutReadyHandler(loadStart);
 
@@ -2213,6 +2221,13 @@ export default class SystemSculptPlugin extends Plugin {
 
   getLicenseManager(): LicenseManager {
     return this.licenseManager;
+  }
+
+  getAccountConnectService(): AccountConnectService {
+    if (!this.accountConnectService) {
+      this.accountConnectService = new AccountConnectService(this);
+    }
+    return this.accountConnectService;
   }
 
   getSettingsManager(): SettingsManager {

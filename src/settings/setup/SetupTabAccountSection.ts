@@ -18,6 +18,22 @@ export function renderAccountSection(
   const { plugin } = tabInstance;
   const userStatus = checkPremiumUserStatus(plugin.settings);
   const hasSavedLicense = (plugin.settings.licenseKey || "").trim().length > 0;
+  const connectService = plugin.getAccountConnectService();
+  const pendingSignIn = !isProActive && connectService.hasPendingRequest();
+  const signedInEmail = (plugin.settings.userEmail || "").trim();
+  const signedInWithoutPlan = !isProActive && !hasSavedLicense && signedInEmail.length > 0;
+
+  const beginConnect = async (
+    button: { setDisabled(disabled: boolean): unknown },
+    mode: "sign-in" | "sign-up"
+  ): Promise<void> => {
+    try {
+      button.setDisabled(true);
+      await connectService.begin(mode, ownerWindow);
+    } finally {
+      button.setDisabled(false);
+    }
+  };
 
   let validateCurrentLicense: () => Promise<LicenseValidationResult>;
   validateCurrentLicense = async (): Promise<LicenseValidationResult> => {
@@ -43,13 +59,14 @@ export function renderAccountSection(
     }
   };
 
+  const accountDesc = isProActive
+    ? userStatus.greeting || "Pro features enabled."
+    : signedInWithoutPlan
+      ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
+      : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
   const statusSetting = new Setting(root)
     .setName("Account")
-    .setDesc(
-      isProActive
-        ? userStatus.greeting || "Pro features enabled."
-        : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services."
-    );
+    .setDesc(pendingSignIn ? `${accountDesc} Waiting for browser sign-in…` : accountDesc);
 
   if (isProActive) {
     statusSetting.addButton((button) => {
@@ -80,10 +97,52 @@ export function renderAccountSection(
         .setTooltip("Manage account")
         .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow));
     });
+  } else if (signedInWithoutPlan) {
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText("View plans")
+        .setCta()
+        .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow));
+    });
+    statusSetting.addButton((button) => {
+      // Re-runs the browser connect; after a purchase the exchange returns
+      // the account's license key.
+      button
+        .setButtonText("Sync license")
+        .onClick(() => void beginConnect(button, "sign-in"));
+    });
+    statusSetting.addButton((button) => {
+      button.setButtonText("Sign out").onClick(async () => {
+        try {
+          button.setDisabled(true).setButtonText("Working...");
+          connectService.cancelPending();
+          await plugin.getSettingsManager().updateSettings({
+            userEmail: "",
+            userName: "",
+            displayName: "",
+            subscriptionStatus: "",
+          });
+          tabInstance.display();
+        } finally {
+          button.setDisabled(false).setButtonText("Sign out");
+        }
+      });
+    });
   } else {
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText("Sign in")
+        .setCta()
+        .onClick(() => void beginConnect(button, "sign-in"));
+    });
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText("Sign up")
+        .onClick(() => void beginConnect(button, "sign-up"));
+    });
     if (hasSavedLicense) {
       statusSetting.addButton((button) => {
-        button.setButtonText("Retry").setCta().onClick(async () => {
+        button.setButtonText("Retry").onClick(async () => {
           try {
             button.setDisabled(true).setButtonText("Working...");
             await validateCurrentLicense();
@@ -97,6 +156,46 @@ export function renderAccountSection(
       button
         .setButtonText("View plans")
         .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LIFETIME, ownerWindow));
+    });
+  }
+
+  if (pendingSignIn) {
+    const codeSetting = new Setting(root)
+      .setName("Connection code")
+      .setDesc("If Obsidian did not open automatically, paste the code shown in your browser.");
+    let codeInput: TextComponent | null = null;
+    let submitCode: (() => Promise<void>) | null = null;
+    codeSetting.addText((text) => {
+      codeInput = text;
+      text.setPlaceholder("Paste code");
+      tabInstance.registerListener(text.inputEl, "keydown", (event: KeyboardEvent) => {
+        if (event.key !== "Enter" || !submitCode) return;
+        event.preventDefault();
+        void submitCode();
+      });
+    });
+    codeSetting.addButton((button) => {
+      button.setButtonText("Complete sign-in").setCta();
+      submitCode = async () => {
+        const value = (codeInput?.getValue() || "").trim();
+        if (!value) {
+          new Notice("Paste the connection code from your browser first.");
+          return;
+        }
+        try {
+          button.setDisabled(true).setButtonText("Working...");
+          await connectService.submitManualCode(value);
+        } finally {
+          button.setDisabled(false).setButtonText("Complete sign-in");
+        }
+      };
+      button.onClick(() => void submitCode?.());
+    });
+    codeSetting.addButton((button) => {
+      button.setButtonText("Cancel").onClick(() => {
+        connectService.cancelPending();
+        tabInstance.display();
+      });
     });
   }
 

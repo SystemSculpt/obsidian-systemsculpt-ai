@@ -23,7 +23,7 @@ npm run build
 ## First-run setup
 
 1. Open `Settings -> SystemSculpt AI -> Account`.
-2. Enter and activate your SystemSculpt license key.
+2. Use `Sign in` (or `Sign up`) to connect your SystemSculpt account in the browser, or enter and activate a license key manually.
 3. Review credits and account status.
 4. Open docs or support links if you need help.
 

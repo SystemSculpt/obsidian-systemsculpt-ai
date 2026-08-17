@@ -35,6 +35,13 @@ const createPluginStub = () => {
     validateLicenseKeyDetailed: jest.fn().mockResolvedValue({ outcome: "valid", isValid: true }),
   };
 
+  const accountConnectService = {
+    hasPendingRequest: jest.fn(() => false),
+    cancelPending: jest.fn(),
+    begin: jest.fn().mockResolvedValue(undefined),
+    submitManualCode: jest.fn().mockResolvedValue(undefined),
+  };
+
   return {
     manifest: { version: "1.0.0" },
     settings: {
@@ -47,6 +54,8 @@ const createPluginStub = () => {
     },
     getSettingsManager: jest.fn(() => settingsManager),
     getLicenseManager: jest.fn(() => licenseManager),
+    getAccountConnectService: jest.fn(() => accountConnectService),
+    accountConnectService,
     openCreditsBalanceModal: jest.fn().mockResolvedValue(undefined),
     embeddingsManager: {
       isSuspended: jest.fn(() => false),
