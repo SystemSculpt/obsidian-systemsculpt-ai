@@ -69,6 +69,9 @@ export class AccountConnectService {
   private pending: PendingConnectRequest | null = null;
   private pollTimer: number | null = null;
   private pollInFlight = false;
+  private pollSettled: Promise<void> | null = null;
+  private lastOutcome: ConnectOutcome | null = null;
+  private exchangeInProgress = false;
   private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
 
   constructor(
@@ -86,6 +89,7 @@ export class AccountConnectService {
 
   public cancelPending(): void {
     this.pending = null;
+    this.lastOutcome = null;
     this.stopPolling();
   }
 
@@ -106,6 +110,7 @@ export class AccountConnectService {
     const state = base64UrlEncode(this.randomBytes());
     const verifier = base64UrlEncode(this.randomBytes());
     this.pending = { state, verifier, mode, createdAt: Date.now() };
+    this.lastOutcome = null;
     this.startPolling();
 
     const opened = await this.openUrl(await this.connectUrl(this.pending), ownerWindow);
@@ -158,6 +163,8 @@ export class AccountConnectService {
     }
     if (this.pollInFlight) return;
     this.pollInFlight = true;
+    let settle!: () => void;
+    this.pollSettled = new Promise((resolve) => { settle = resolve; });
     try {
       let response: Response;
       try {
@@ -186,9 +193,13 @@ export class AccountConnectService {
         success.status === "ok"
           ? await this.completeSignIn(success.licenseKey, success.account)
           : await this.completeWithoutLicense(success.account);
-      this.backgroundOutcomeHandler?.(outcome);
+      // When an exchange is awaiting this poll it delivers the outcome to
+      // its own modal — announcing here too would stack a second one.
+      if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
     } finally {
       this.pollInFlight = false;
+      this.pollSettled = null;
+      settle();
     }
   }
 
@@ -222,37 +233,56 @@ export class AccountConnectService {
       return { kind: "error", reason: "missing-code" };
     }
 
-    let response: Response;
+    this.exchangeInProgress = true;
     try {
-      response = await this.requestClient.request({
-        url: `${API_BASE_URL}/auth/exchange`,
-        method: "POST",
-        headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
-        body: { code, verifier: pending.verifier },
-      });
-    } catch {
-      // Keep the pending request so the manual code can be retried offline.
-      return { kind: "error", reason: "network" };
-    }
+      // A code in hand supersedes polling — but a poll fired on app-resume
+      // may already be consuming this sign-in server-side. Racing it for the
+      // single-use code would 401 here while the poll succeeds, so wait for
+      // it and adopt its outcome instead.
+      this.stopPolling();
+      if (this.pollSettled) await this.pollSettled;
+      if (this.pending !== pending) {
+        return this.lastOutcome ?? { kind: "error", reason: "expired" };
+      }
 
-    const payload = await this.readJson(response);
-    if (response.status === 200) {
-      const success = this.readExchangeSuccess(payload);
-      if (success?.status === "ok") {
-        return this.completeSignIn(success.licenseKey, success.account);
+      let response: Response;
+      try {
+        response = await this.requestClient.request({
+          url: `${API_BASE_URL}/auth/exchange`,
+          method: "POST",
+          headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
+          body: { code, verifier: pending.verifier },
+        });
+      } catch {
+        // Keep the pending request (and its polling guarantee) so the
+        // manual code can be retried offline.
+        this.startPolling();
+        return { kind: "error", reason: "network" };
       }
-      if (success?.status === "no_license") {
-        return this.completeWithoutLicense(success.account);
+
+      const payload = await this.readJson(response);
+      if (response.status === 200) {
+        const success = this.readExchangeSuccess(payload);
+        if (success?.status === "ok") {
+          return this.completeSignIn(success.licenseKey, success.account);
+        }
+        if (success?.status === "no_license") {
+          return this.completeWithoutLicense(success.account);
+        }
       }
+      if (response.status === 401) {
+        this.pending = null;
+        return { kind: "error", reason: "invalid-code" };
+      }
+      if (response.status === 429) {
+        this.startPolling();
+        return { kind: "error", reason: "rate-limited" };
+      }
+      this.startPolling();
+      return { kind: "error", reason: "unavailable" };
+    } finally {
+      this.exchangeInProgress = false;
     }
-    if (response.status === 401) {
-      this.pending = null;
-      return { kind: "error", reason: "invalid-code" };
-    }
-    if (response.status === 429) {
-      return { kind: "error", reason: "rate-limited" };
-    }
-    return { kind: "error", reason: "unavailable" };
   }
 
   private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<ConnectOutcome> {
@@ -266,12 +296,14 @@ export class AccountConnectService {
     });
     await this.plugin.getLicenseManager().validateLicenseKeyDetailed();
     this.refreshSettingsTab();
-    return {
+    const outcome: ConnectOutcome = {
       kind: "signed-in",
       name: account.name,
       email: account.email,
       licenseValid: this.plugin.settings.licenseValid === true,
     };
+    this.lastOutcome = outcome;
+    return outcome;
   }
 
   private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
@@ -286,7 +318,9 @@ export class AccountConnectService {
       subscriptionStatus: "",
     });
     this.refreshSettingsTab();
-    return { kind: "no-license", name: account.name, email: account.email };
+    const outcome: ConnectOutcome = { kind: "no-license", name: account.name, email: account.email };
+    this.lastOutcome = outcome;
+    return outcome;
   }
 
   private activePending(): PendingConnectRequest | null {
