@@ -205,6 +205,26 @@ describe("AccountConnectModal", () => {
     spy.mockRestore();
   });
 
+  it("replaces an already-open instance instead of stacking outcomes", async () => {
+    const outcome = {
+      kind: "signed-in" as const,
+      name: "User",
+      email: "user@example.com",
+      licenseValid: true,
+    };
+    const first = new AccountConnectModal({} as any, async () => outcome);
+    first.onOpen();
+    const closeSpy = jest.spyOn(first, "close");
+
+    const second = new AccountConnectModal({} as any, async () => outcome);
+    second.onOpen();
+    await flushPromises();
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(second.modalEl.textContent).toContain("Welcome, User!");
+    second.onClose();
+  });
+
   it("runs the get-started action after a successful sign-in", async () => {
     const onGetStarted = jest.fn();
     const modal = new AccountConnectModal(

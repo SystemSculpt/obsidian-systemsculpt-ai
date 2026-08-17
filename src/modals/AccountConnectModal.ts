@@ -38,6 +38,8 @@ export type AccountConnectActions = Readonly<{
  * error state from the resulting ConnectOutcome.
  */
 export class AccountConnectModal extends StandardModal {
+  private static current: AccountConnectModal | null = null;
+
   constructor(
     app: App,
     private readonly runExchange: () => Promise<ConnectOutcome>,
@@ -49,6 +51,12 @@ export class AccountConnectModal extends StandardModal {
   }
 
   onOpen(): void {
+    // Sign-in outcomes can arrive twice on app-resume (deep link + poll);
+    // the newest modal replaces any earlier one instead of stacking on it.
+    if (AccountConnectModal.current && AccountConnectModal.current !== this) {
+      AccountConnectModal.current.close();
+    }
+    AccountConnectModal.current = this;
     super.onOpen();
     this.renderAuthenticating();
 
@@ -59,6 +67,11 @@ export class AccountConnectModal extends StandardModal {
         if (!task.isCurrent()) return;
         this.renderOutcome(outcome);
       });
+  }
+
+  onClose(): void {
+    if (AccountConnectModal.current === this) AccountConnectModal.current = null;
+    super.onClose();
   }
 
   private renderOutcome(outcome: ConnectOutcome): void {

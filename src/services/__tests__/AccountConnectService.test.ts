@@ -350,25 +350,38 @@ describe("AccountConnectService background polling", () => {
     expect(service.hasPendingRequest()).toBe(false);
   });
 
-  it("ignores a poll result when an exchange already completed the sign-in", async () => {
+  it("a code submitted while a poll is in flight adopts the poll's outcome", async () => {
     const { service, plugin, outcomes } = createPollingService();
     let resolvePoll!: (response: Response) => void;
     request.mockImplementationOnce(
       () => new Promise<Response>((resolve) => { resolvePoll = resolve; }),
     );
-    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
 
     await service.begin("sign-in");
     await jest.advanceTimersByTimeAsync(3_500);
 
-    const manual = await service.submitManualCode("manual-code");
-    expect(manual).toMatchObject({ kind: "signed-in" });
-
+    const manual = service.submitManualCode("manual-code");
     resolvePoll(jsonResponse(200, successPayload));
-    await jest.advanceTimersByTimeAsync(0);
 
-    expect(outcomes).toHaveLength(0);
+    await expect(manual).resolves.toMatchObject({ kind: "signed-in" });
+    expect(request).toHaveBeenCalledTimes(1); // the poll was the only request
+    expect(outcomes).toHaveLength(0); // the awaiting caller owns the outcome
     expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.validateLicenseKeyDetailed).toHaveBeenCalledTimes(1);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("resumes polling after a network-failed exchange so sign-in still completes", async () => {
+    const { service, outcomes } = createPollingService();
+    request.mockRejectedValueOnce(new Error("offline"));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    const outcome = await service.submitManualCode("manual-code");
+    expect(outcome).toEqual({ kind: "error", reason: "network" });
+
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(service.hasPendingRequest()).toBe(false);
   });
 });
