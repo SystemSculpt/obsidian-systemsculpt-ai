@@ -6,6 +6,7 @@ import { SearchResult } from '../services/embeddings/types';
 import type { AgentChatView } from './chatview/AgentChatView';
 import { SystemSculptSettings } from '../types';
 import { EmbeddingsPendingFilesModal } from '../modals/EmbeddingsPendingFilesModal';
+import { UpgradePlanModal } from '../modals/UpgradePlanModal';
 import { SimilarNotesPresentation } from './SimilarNotesPresentation';
 import { buildChatSemanticQuery, buildNoteSemanticQuery } from '../services/embeddings/SemanticQuery';
 import {
@@ -110,6 +111,9 @@ export class EmbeddingsView extends ItemView {
     this.presentation = new SimilarNotesPresentation(this.contentEl, {
       onRefresh: () => this.refreshCurrentContext(),
       onOpenCredits: () => this.openCredits(),
+      onChoosePlan: () => {
+        UpgradePlanModal.openOnce(this.plugin, { feature: "Similar Notes" });
+      },
       onOpenSettings: () => this.plugin.openSettingsTab("knowledge"),
       onOpenPendingFiles: () => this.openPendingFilesModal(),
       onStartProcessing: () => this.startProcessing(),

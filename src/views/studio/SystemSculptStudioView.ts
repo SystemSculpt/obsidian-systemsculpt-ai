@@ -10,6 +10,8 @@ import {
   WorkspaceLeaf,
 } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { hasHostCapability, resolveElectronModule } from "../../platform/hostCapabilities";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { randomId } from "../../studio/utils";
@@ -1105,6 +1107,11 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private setError(error: unknown): void {
+    if (isPlanAccessError(error)) {
+      this.lastError = `Studio AI needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`;
+      UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });
+      return;
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     const message = this.normalizeEscapedNewlines(rawMessage);
     this.lastError = message;
@@ -2262,6 +2269,16 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
+    // AI nodes run on the managed service; gate before the run starts so a
+    // plan-less account gets the guided upgrade path instead of a failed run.
+    const needsManagedApi = scope.scopedProject.graph.nodes.some(
+      (node) => this.findNodeDefinition(node)?.capabilityClass === "api",
+    );
+    if (needsManagedApi && !hasActivePlan(this.plugin)) {
+      UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });
+      return;
+    }
+
     const scopedNodeIds = scope.scopedProject.graph.nodes.map((node) => node.id);
     const fromNodeId = String(options?.fromNodeId || "").trim();
     this.runPresentation.beginRun(scopedNodeIds, {
@@ -2301,12 +2318,16 @@ export class SystemSculptStudioView extends ItemView {
         );
       } else {
         const rawRunError = String(result.error || result.runId || "");
-        const runErrorSummary = this.summarizeMessageForNotice(rawRunError);
-        new Notice(
-          fromNodeId
-            ? `Studio run from node failed: ${runErrorSummary}. See console for details.`
-            : `Studio run failed: ${runErrorSummary}. See console for details.`
-        );
+        if (/license_required|license_rejected/i.test(rawRunError)) {
+          UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });
+        } else {
+          const runErrorSummary = this.summarizeMessageForNotice(rawRunError);
+          new Notice(
+            fromNodeId
+              ? `Studio run from node failed: ${runErrorSummary}. See console for details.`
+              : `Studio run failed: ${runErrorSummary}. See console for details.`
+          );
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

@@ -9,6 +9,7 @@ const mobileInteractionTests = [
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-css-contract.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/anchored-scroller.test.ts",
 	"<rootDir>/src/views/__tests__/similar-notes-css-contract.test.ts",
+	"<rootDir>/src/modals/__tests__/plan-modals-css-contract.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-node-insert-menu.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-run-host-preflight.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-context-menu-accessibility.test.ts",

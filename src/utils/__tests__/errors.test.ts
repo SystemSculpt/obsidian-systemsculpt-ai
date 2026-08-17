@@ -9,6 +9,9 @@ import {
   isAuthFailureMessage,
   isManagedLicenseFailure,
   isContextOverflowErrorMessage,
+  isPlanAccessError,
+  planRequiredError,
+  PLAN_REQUIRED_MESSAGE,
 } from "../errors";
 
 describe("errors", () => {
@@ -138,6 +141,31 @@ describe("errors", () => {
 
     it("does not flag rate limit messages", () => {
       expect(isAuthFailureMessage("Rate limit exceeded")).toBe(false);
+    });
+  });
+
+  describe("plan access classification", () => {
+    it("classifies the local pre-flight error", () => {
+      const error = planRequiredError("Chat");
+      expect(error.code).toBe(ERROR_CODES.PRO_REQUIRED);
+      expect(error.statusCode).toBe(401);
+      expect(error.message).toContain("Chat needs an active SystemSculpt plan.");
+      expect(error.message).toContain(PLAN_REQUIRED_MESSAGE);
+      expect(isPlanAccessError(error)).toBe(true);
+    });
+
+    it("classifies managed structured license failures", () => {
+      expect(isPlanAccessError({ code: "license_required", message: "x" })).toBe(true);
+      expect(isPlanAccessError({ code: "license_rejected", message: "x" })).toBe(true);
+      expect(isPlanAccessError(new SystemSculptError("x", ERROR_CODES.INVALID_LICENSE))).toBe(true);
+      expect(isPlanAccessError(new SystemSculptError("x", ERROR_CODES.LICENSE_EXPIRED))).toBe(true);
+    });
+
+    it("rejects unrelated errors", () => {
+      expect(isPlanAccessError(null)).toBe(false);
+      expect(isPlanAccessError(new Error("license mention only"))).toBe(false);
+      expect(isPlanAccessError({ code: "out_of_credits" })).toBe(false);
+      expect(isPlanAccessError({ code: "temporarily_unavailable" })).toBe(false);
     });
   });
 

@@ -2,6 +2,7 @@
 export const SYSTEMSCULPT_WEBSITE = {
   BASE_URL: "https://systemsculpt.com",
   LIFETIME: "https://systemsculpt.com/lifetime",
+  SUBSCRIBE: "https://systemsculpt.com/subscribe",
   DOCS: "https://systemsculpt.com/docs",
   SUPPORT: "https://systemsculpt.com/contact",
   LICENSE: "https://systemsculpt.com/pricing",

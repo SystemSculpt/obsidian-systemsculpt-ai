@@ -111,6 +111,39 @@ export function isManagedLicenseFailure(error: unknown): error is SystemSculptEr
   return error.code === ERROR_CODES.LICENSE_EXPIRED || error.code === ERROR_CODES.INVALID_LICENSE;
 }
 
+/** Single source for the "why is this locked" sentence shown across the plugin. */
+export const PLAN_REQUIRED_MESSAGE =
+  "You need a subscription, lifetime license, or credits to use SystemSculpt AI.";
+
+/** Pre-flight error thrown before contacting the server when no plan is active. */
+export function planRequiredError(feature: string): SystemSculptError {
+  return new SystemSculptError(
+    `${feature} needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`,
+    ERROR_CODES.PRO_REQUIRED,
+    401,
+  );
+}
+
+const PLAN_ACCESS_CODES = new Set<string>([
+  ERROR_CODES.PRO_REQUIRED,
+  ERROR_CODES.INVALID_LICENSE,
+  ERROR_CODES.LICENSE_EXPIRED,
+  ERROR_CODES.LICENSE_DISABLED,
+  "license_required",
+  "license_rejected",
+]);
+
+/**
+ * True when an error means the account has no usable plan or license —
+ * the local pre-flight error, client license codes, or the managed
+ * service's structured `license_required`/`license_rejected` payloads.
+ */
+export function isPlanAccessError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && PLAN_ACCESS_CODES.has(code);
+}
+
 /**
  * Get a user-friendly error message for the given error code
  */

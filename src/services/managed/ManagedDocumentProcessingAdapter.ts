@@ -116,7 +116,11 @@ export class ManagedDocumentProcessingAdapter {
 
     const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/documents" });
     throwIfAborted(signal);
-    if (lease.outcome !== "allowed") throw new Error(`Managed document processing is unavailable (${lease.outcome}).`);
+    if (lease.outcome !== "allowed") {
+      const error = new Error(`Managed document processing is unavailable (${lease.outcome}).`);
+      (error as Error & { code?: string }).code = lease.outcome;
+      throw error;
+    }
 
     const fingerprint = await source.fingerprint();
     throwIfAborted(signal);

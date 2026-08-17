@@ -4,6 +4,8 @@ import type SystemSculptPlugin from "../main";
 import type { PendingRecorderCapture } from "../types";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { logDebug, logError, logInfo } from "../utils/errorHandling";
+import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
+import { hasActivePlan, UpgradePlanModal } from "../modals/UpgradePlanModal";
 import { TranscriptionService, type TranscriptionTask } from "./TranscriptionService";
 import {
   ManagedTranscriptionInterruptedError,
@@ -173,7 +175,7 @@ export class RecorderService {
 
     const recoverable = pending.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
-      new Notice("A saved recording is waiting for transcription. Turn on automatic transcription or use transcribe an audio file.", 7000);
+      new Notice("A saved recording is waiting for transcription. Turn on automatic transcription in settings, or run \"transcribe an audio file\".", 7000);
       return;
     }
 
@@ -508,6 +510,23 @@ export class RecorderService {
     this.clearVisibilityResume();
     const capture = this.completedCapture;
     if (!capture || this.transcriptionTask || this.unloaded) return;
+
+    // The recording itself is local and already saved; only transcription is
+    // a managed AI feature. Gate here so the failure is guidance, not silence.
+    if (!hasActivePlan(this.plugin)) {
+      this.state = "warning";
+      this.renderRecovery({
+        phase: "warning",
+        status: `Audio saved. Transcription needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`,
+        durationMs: capture.result.durationMs,
+        sourcePath: capture.result.filePath,
+        canRetry: true,
+      });
+      if (intent === "manual") {
+        UpgradePlanModal.openOnce(this.plugin, { feature: "Transcription" });
+      }
+      return;
+    }
 
     try {
       // Persist intent before any remote dispatch. This closes the restart

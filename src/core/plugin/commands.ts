@@ -210,6 +210,11 @@ export class CommandManager {
     await this.ribbonManager.openAudioProcessor(initialTab);
   }
 
+  /** Opens a fresh chat tab; exposed for post-sign-in "Get started". */
+  public async openChatView(): Promise<void> {
+    await this.ribbonManager.openChatView();
+  }
+
   private registerAudioArtifactCommand(kind: AudioProcessorArtifactKind): void {
     const label = kind === "summary" ? "summary" : "transcript";
     this.plugin.addCommand({
@@ -408,17 +413,15 @@ export class CommandManager {
                   }
                 );
 
+                notice.hide();
                 if (title && title !== chatView.getChatTitle()) {
                   await chatView.setTitle(title);
-                  notice.setMessage("Chat title updated successfully!");
-                  notice.hide();
-                } else {
-                  notice.hide();
+                  new Notice("Chat title updated successfully!", 4000);
                 }
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                notice.setMessage(`Could not create title: ${errorMessage}`);
                 notice.hide();
+                new Notice(`Could not create title: ${errorMessage}`, 6000);
               }
             })();
           }
@@ -459,26 +462,23 @@ export class CommandManager {
                 }
               );
 
+              notice.hide();
               if (title && title !== activeFile.basename) {
                 try {
                   await this.renameTitleTargetFile(activeFile, title);
                   const successLabel = activeFile.extension.toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1)
                     ? "Studio project"
                     : "Note";
-                  notice.setMessage(`${successLabel} title updated successfully!`);
-                  notice.hide();
+                  new Notice(`${successLabel} title updated successfully!`, 4000);
                 } catch (error) {
                   const errorMessage = error instanceof Error ? error.message : String(error);
-                  notice.setMessage(`Failed to rename file: ${errorMessage}`);
-                  notice.hide();
+                  new Notice(`Failed to rename file: ${errorMessage}`, 6000);
                 }
-              } else {
-                notice.hide();
               }
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : String(error);
-              notice.setMessage(`Could not create title: ${errorMessage}`);
               notice.hide();
+              new Notice(`Could not create title: ${errorMessage}`, 6000);
             }
           })();
         }

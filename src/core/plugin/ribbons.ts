@@ -190,6 +190,8 @@ export class RibbonManager {
    * by the command palette entry.
    */
   public async openAudioProcessor(initialTab: "audio" | "youtube" = "audio"): Promise<void> {
+    const { requireActivePlan } = await import("../../modals/UpgradePlanModal");
+    if (!requireActivePlan(this.plugin, "Audio processing")) return;
     const {
       AudioProcessorModal,
       canOpenAudioProcessor,

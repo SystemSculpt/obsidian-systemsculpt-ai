@@ -10,6 +10,7 @@ import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
 import type { ProcessingProgress, SearchResult } from "../services/embeddings/types";
 import type { SemanticIndexSnapshot } from "../services/embeddings/SemanticIndexLifecycle";
 import { readEmbeddingErrorMessage } from "../services/embeddings/EmbeddingErrorMessage";
+import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 
 export type SimilarNotesViewModel =
   | Readonly<{ state: "idle" }>
@@ -28,6 +29,7 @@ export type SimilarNotesViewModel =
 export type SimilarNotesPresentationActions = Readonly<{
   onRefresh: () => void | Promise<void>;
   onOpenCredits: () => void | Promise<void>;
+  onChoosePlan: () => void;
   onOpenSettings: () => void;
   onOpenPendingFiles: () => void;
   onStartProcessing: () => void | Promise<void>;
@@ -141,6 +143,8 @@ export class SimilarNotesPresentation extends Component {
         this.actions.onOpenPendingFiles();
       } else if (target?.dataset.indexAction === "credits") {
         void this.actions.onOpenCredits();
+      } else if (target?.dataset.indexAction === "plan") {
+        this.actions.onChoosePlan();
       }
     });
 
@@ -197,27 +201,36 @@ export class SimilarNotesPresentation extends Component {
     let showProgress = false;
     let showPendingAction = false;
     let showCreditsAction = false;
+    let showPlanAction = false;
 
+    const licenseRequired = snapshot.lastError?.code === "license_required"
+      || snapshot.lastError?.code === "license_rejected";
     if (
-      snapshot.lastError?.code === "payment_required"
+      licenseRequired
+      || snapshot.lastError?.code === "payment_required"
       || snapshot.failed > 0
       || snapshot.phase === "error"
     ) {
       const paymentRequired = snapshot.lastError?.code === "payment_required";
       iconName = "circle-alert";
-      label = paymentRequired
-        ? "Indexing paused. Not enough credits."
-        : snapshot.failed > 0
-          ? `${snapshot.failed} ${snapshot.failed === 1 ? "note needs" : "notes need"} attention`
-          : "Semantic index needs attention";
-      detail = paymentRequired
-        ? "Not enough credits are available. Add credits to resume indexing."
-        : snapshot.lastError?.message
-          ? readEmbeddingErrorMessage(snapshot.lastError.message, "Try again from Remaining embeddings.")
-          : "Review the remaining files and retry.";
+      label = licenseRequired
+        ? "Indexing paused. Plan required."
+        : paymentRequired
+          ? "Indexing paused. Not enough credits."
+          : snapshot.failed > 0
+            ? `${snapshot.failed} ${snapshot.failed === 1 ? "note needs" : "notes need"} attention`
+            : "Semantic index needs attention";
+      detail = licenseRequired
+        ? PLAN_REQUIRED_MESSAGE
+        : paymentRequired
+          ? "Not enough credits are available. Add credits to resume indexing."
+          : snapshot.lastError?.message
+            ? readEmbeddingErrorMessage(snapshot.lastError.message, "Try again from Remaining embeddings.")
+            : "Review the remaining files and retry.";
       stateClass = "is-error";
-      showCreditsAction = paymentRequired;
-      showPendingAction = !paymentRequired;
+      showPlanAction = licenseRequired;
+      showCreditsAction = paymentRequired && !licenseRequired;
+      showPendingAction = !paymentRequired && !licenseRequired;
     } else if (snapshot.phase === "paused") {
       iconName = "pause";
       label = "Indexing paused";
@@ -265,7 +278,15 @@ export class SimilarNotesPresentation extends Component {
       progress.value = Math.min(snapshot.completed, total);
     }
 
-    if (showCreditsAction) {
+    if (showPlanAction) {
+      const action = createUiAction(this.indexStatusEl, {
+        label: "Choose a plan",
+        testId: "embeddings.index.choose-plan",
+        tone: "primary",
+        size: "small",
+      });
+      action.dataset.indexAction = "plan";
+    } else if (showCreditsAction) {
       const action = createUiAction(this.indexStatusEl, {
         label: "Add credits",
         testId: "embeddings.index.add-credits",

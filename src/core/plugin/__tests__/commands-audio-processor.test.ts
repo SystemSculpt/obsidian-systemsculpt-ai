@@ -58,7 +58,7 @@ describe("CommandManager Audio Processor commands", () => {
 
   it("registers both source entry points and resumes server-owned jobs", async () => {
     const addCommand = jest.fn();
-    const plugin = { addCommand } as any;
+    const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
     const manager = new CommandManager(plugin, app);
 
@@ -88,7 +88,7 @@ describe("CommandManager Audio Processor commands", () => {
 
   it("keeps both artifact commands available for legacy detailed notes", async () => {
     const addCommand = jest.fn();
-    const plugin = { addCommand } as any;
+    const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
     const manager = new CommandManager(plugin, app);
 
@@ -127,7 +127,7 @@ describe("CommandManager Audio Processor commands", () => {
     "hides the summary command but keeps the transcript command for a clean-transcript %s note",
     async (_noteKind, artifact) => {
       const addCommand = jest.fn();
-      const plugin = { addCommand } as any;
+      const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
       const app = new App();
       const manager = new CommandManager(plugin, app);
 
@@ -155,7 +155,7 @@ describe("CommandManager Audio Processor commands", () => {
 
   it("hides durable artifact commands outside a saved Audio Processor note", () => {
     const addCommand = jest.fn();
-    const plugin = { addCommand } as any;
+    const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const manager = new CommandManager(plugin, new App());
 
     (manager as any).registerAudioProcessorCommands();
@@ -169,7 +169,7 @@ describe("CommandManager Audio Processor commands", () => {
     availabilityMock.mockResolvedValue(false);
 
     const addCommand = jest.fn();
-    const plugin = { addCommand } as any;
+    const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
     const manager = new CommandManager(plugin, app);
 

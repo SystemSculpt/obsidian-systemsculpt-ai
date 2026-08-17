@@ -107,6 +107,8 @@ export interface SystemSculptSettings {
   licenseKey: string;
   licenseValid: boolean;
   suppressLicenseUpgradePrompt: boolean;
+  /** One-time first-run welcome/sign-in modal was shown (never repeats). */
+  accountOnboardingShown?: boolean;
   userName?: string;
   displayName?: string;
   userEmail?: string;
@@ -235,6 +237,7 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   licenseKey: "",
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
+  accountOnboardingShown: false,
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
   lastValidated: 0,

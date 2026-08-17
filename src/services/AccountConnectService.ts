@@ -1,4 +1,3 @@
-import { Notice } from "obsidian";
 import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import SystemSculptPlugin from "../main";
 import { PlatformRequestClient } from "./PlatformRequestClient";
@@ -17,11 +16,26 @@ type ExchangeSuccess =
   | Readonly<{ status: "ok"; licenseKey: string; account: ExchangeAccount }>
   | Readonly<{ status: "no_license"; account: ExchangeAccount }>;
 
+export type ConnectErrorReason =
+  | "expired"
+  | "state-mismatch"
+  | "missing-code"
+  | "network"
+  | "invalid-code"
+  | "rate-limited"
+  | "unavailable";
+
+/**
+ * Result of a callback or manual-code exchange. Presentation (the connect
+ * modal) owns the user-facing copy for each outcome.
+ */
+export type ConnectOutcome =
+  | Readonly<{ kind: "signed-in"; name: string | null; email: string | null; licenseValid: boolean }>
+  | Readonly<{ kind: "no-license"; name: string | null; email: string | null }>
+  | Readonly<{ kind: "error"; reason: ConnectErrorReason }>;
+
 /** Pending browser sign-in requests expire after ten minutes. */
 const PENDING_CONNECT_TTL_MS = 10 * 60_000;
-
-const EXPIRED_NOTICE =
-  "Sign-in session expired. Start sign-in again from SystemSculpt settings.";
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -62,8 +76,12 @@ export class AccountConnectService {
     this.pending = null;
   }
 
-  /** Starts a browser sign-in or sign-up and records the pending request. */
-  public async begin(mode: AccountConnectMode, ownerWindow?: Window): Promise<void> {
+  /**
+   * Starts a browser sign-in or sign-up and records the pending request.
+   * Resolves false when the browser could not be opened so callers can show
+   * the manual path instead of failing silently.
+   */
+  public async begin(mode: AccountConnectMode, ownerWindow?: Window): Promise<boolean> {
     const state = base64UrlEncode(this.randomBytes());
     const verifier = base64UrlEncode(this.randomBytes());
     const challenge = base64UrlEncode(await this.sha256(verifier));
@@ -72,22 +90,24 @@ export class AccountConnectService {
     const origin = new URL(API_BASE_URL).origin;
     const path = mode === "sign-up" ? "/sign-up" : "/sign-in";
     const redirect = `/plugin/connect?state=${state}&challenge=${challenge}`;
-    await this.openUrl(`${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`, ownerWindow);
+    const opened = await this.openUrl(
+      `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`,
+      ownerWindow,
+    );
     this.refreshSettingsTab();
+    return opened;
   }
 
   /** Handles the obsidian://systemsculpt-connect deep link from the website. */
-  public async handleProtocolCallback(params: Record<string, string>): Promise<void> {
+  public async handleProtocolCallback(params: Record<string, string>): Promise<ConnectOutcome> {
     const pending = this.activePending();
     if (!pending) {
-      new Notice(EXPIRED_NOTICE);
-      return;
+      return { kind: "error", reason: "expired" };
     }
     if ((params.state || "") !== pending.state) {
-      new Notice("Sign-in could not be verified. Start again from SystemSculpt settings.");
-      return;
+      return { kind: "error", reason: "state-mismatch" };
     }
-    await this.exchange((params.code || "").trim(), pending);
+    return this.exchange((params.code || "").trim(), pending);
   }
 
   /**
@@ -95,19 +115,17 @@ export class AccountConnectService {
    * check is skipped for manual entry; the in-memory verifier still binds the
    * exchange to this plugin instance.
    */
-  public async submitManualCode(code: string): Promise<void> {
+  public async submitManualCode(code: string): Promise<ConnectOutcome> {
     const pending = this.activePending();
     if (!pending) {
-      new Notice(EXPIRED_NOTICE);
-      return;
+      return { kind: "error", reason: "expired" };
     }
-    await this.exchange(code.trim(), pending);
+    return this.exchange(code.trim(), pending);
   }
 
-  private async exchange(code: string, pending: PendingConnectRequest): Promise<void> {
+  private async exchange(code: string, pending: PendingConnectRequest): Promise<ConnectOutcome> {
     if (!code) {
-      new Notice("Sign-in code was missing. Paste the code shown in your browser.");
-      return;
+      return { kind: "error", reason: "missing-code" };
     }
 
     let response: Response;
@@ -120,35 +138,30 @@ export class AccountConnectService {
       });
     } catch {
       // Keep the pending request so the manual code can be retried offline.
-      new Notice("Could not reach SystemSculpt. Check your connection and try the code again.");
-      return;
+      return { kind: "error", reason: "network" };
     }
 
     const payload = await this.readJson(response);
     if (response.status === 200) {
       const success = this.readExchangeSuccess(payload);
       if (success?.status === "ok") {
-        await this.completeSignIn(success.licenseKey, success.account);
-        return;
+        return this.completeSignIn(success.licenseKey, success.account);
       }
       if (success?.status === "no_license") {
-        await this.completeWithoutLicense(success.account);
-        return;
+        return this.completeWithoutLicense(success.account);
       }
     }
     if (response.status === 401) {
       this.pending = null;
-      new Notice("Sign-in code was invalid or expired. Start again from SystemSculpt settings.");
-      return;
+      return { kind: "error", reason: "invalid-code" };
     }
     if (response.status === 429) {
-      new Notice("Too many sign-in attempts. Wait a moment and try again.");
-      return;
+      return { kind: "error", reason: "rate-limited" };
     }
-    new Notice("Sign-in is temporarily unavailable. Try again.");
+    return { kind: "error", reason: "unavailable" };
   }
 
-  private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<void> {
+  private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<ConnectOutcome> {
     this.pending = null;
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey,
@@ -157,11 +170,16 @@ export class AccountConnectService {
       displayName: account.name ?? account.email ?? "",
     });
     await this.plugin.getLicenseManager().validateLicenseKeyDetailed();
-    new Notice("Signed in to SystemSculpt.");
     this.refreshSettingsTab();
+    return {
+      kind: "signed-in",
+      name: account.name,
+      email: account.email,
+      licenseValid: this.plugin.settings.licenseValid === true,
+    };
   }
 
-  private async completeWithoutLicense(account: ExchangeAccount): Promise<void> {
+  private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
     this.pending = null;
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey: "",
@@ -171,8 +189,8 @@ export class AccountConnectService {
       displayName: account.name ?? account.email ?? "",
       subscriptionStatus: "",
     });
-    new Notice("Signed in. Choose a plan to enable SystemSculpt AI features.");
     this.refreshSettingsTab();
+    return { kind: "no-license", name: account.name, email: account.email };
   }
 
   private activePending(): PendingConnectRequest | null {

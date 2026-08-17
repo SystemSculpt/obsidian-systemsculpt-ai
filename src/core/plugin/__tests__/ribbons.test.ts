@@ -28,7 +28,7 @@ const SYSTEMSCULPT_TOP_TITLES = [
 const createPlugin = () => {
   const app = new App();
   const plugin = new Plugin(app, { id: "systemsculpt", version: "0.0.0" }) as any;
-  plugin.settings = { selectedModelId: "model" };
+  plugin.settings = { selectedModelId: "model", licenseKey: "skss-test" };
   plugin.getViewManager = jest.fn(() => ({
     activateEmbeddingsView: jest.fn().mockResolvedValue(undefined),
   }));

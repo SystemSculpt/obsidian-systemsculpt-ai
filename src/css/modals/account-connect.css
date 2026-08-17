@@ -1,0 +1,62 @@
+/**
+ * Browser sign-in handoff modal — authenticating spinner, then the
+ * welcome / choose-a-plan / error result.
+ * Root: `.ss-account-connect-modal.ss-modal--small` (AccountConnectModal.ts).
+ */
+
+.ss-account-connect-modal {
+  max-width: 420px;
+}
+
+.ss-account-connect-modal .ss-modal__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-5);
+  text-align: center;
+}
+
+.ss-account-connect__status {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-3);
+  color: var(--ss-ink-muted);
+}
+
+.ss-account-connect__spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ss-line-strong);
+  border-top-color: var(--ss-accent);
+  border-radius: var(--ss-radius-full);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+.ss-account-connect__status-text {
+  font-size: var(--ss-text-lg);
+}
+
+.ss-account-connect__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-account-connect__icon svg {
+  width: 34px;
+  height: 34px;
+}
+
+.ss-account-connect__icon.is-success {
+  color: var(--ss-success);
+}
+
+.ss-account-connect__icon.is-error {
+  color: var(--ss-warning);
+}
+
+.ss-account-connect__detail {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-base);
+}

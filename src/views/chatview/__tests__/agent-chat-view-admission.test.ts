@@ -639,6 +639,7 @@ function createSavedChatLoadHarness(
     approvalMode: "ask",
     isFullyLoaded: true,
     plugin: {
+      settings: { licenseKey: "test-license" },
       getLogger: () => logger,
       getLoadedPluginBuildId: jest.fn(async () => `sha256:${"d".repeat(64)}`),
     },
@@ -3178,6 +3179,7 @@ describe("AgentChatView controls", () => {
     Object.assign(view, {
       app,
       workspace,
+      plugin: { settings: { licenseKey: "skss-test" } },
       agent: { cancel, disconnect, recordLifecycle, detach, subscribe },
       createAgentSession: () => ({
         cancel, disconnect, recordLifecycle, detach, subscribe,
@@ -3340,6 +3342,7 @@ describe("AgentChatView controls", () => {
     Object.assign(view, {
       app,
       workspace,
+      plugin: { settings: { licenseKey: "skss-test" } },
       agent: { cancel, disconnect, detach, subscribe },
       createAgentSession: () => ({ cancel, disconnect, detach, subscribe }),
       thinBootstrapRequest: { contract_version: "thin-agent-v1" },
@@ -3399,6 +3402,100 @@ describe("AgentChatView controls", () => {
     expect(detach).toHaveBeenCalledTimes(1);
     expect(retiredOperation.controller.signal.aborted).toBe(true);
     expect(retiredOperation.settled).toBe(true);
+    workspace.unload();
+  });
+
+  it("shows the plan reminder banner on a fresh chat without an active plan", async () => {
+    const parent = document.body.createDiv();
+    const app = new App();
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    const workspace = new AgentWorkspace(parent, {
+      app,
+      sourcePath: () => "",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const session = {
+      cancel: jest.fn(async () => undefined),
+      disconnect: jest.fn(),
+      detach: jest.fn(async () => undefined),
+      subscribe: jest.fn(() => () => undefined),
+    };
+    const settings: Record<string, string> = {};
+    Object.assign(view, {
+      app,
+      workspace,
+      plugin: { settings },
+      agent: session,
+      createAgentSession: () => session,
+      thinBootstrapRequest: null,
+      pendingThinConversationId: null,
+      conversationOriginToken: "old-origin",
+      pendingForkHistory: null,
+      suppressQueueDrain: false,
+      draftKey: "old-draft",
+      chatId: "",
+      chatTitle: "Unsaved chat",
+      chatVersion: 0,
+      queuedFollowUps: [],
+      queueHydrated: true,
+      queuePersistence: Promise.resolve(),
+      queueRepository: {
+        save: jest.fn(async () => undefined),
+        move: jest.fn(async () => undefined),
+      },
+      messageEditGeneration: 0,
+      pendingRetry: null,
+      pendingRejectedRetry: null,
+      sessionTrustedToolNames: new Set<string>(),
+      approvalMode: "ask",
+      contextLoading: false,
+      contextManager: {
+        clearPinnedFiles: jest.fn(),
+        getPinnedFiles: jest.fn(() => []),
+      },
+      transcript: {
+        reset: jest.fn(() => ({
+          chatId: "",
+          title: "New chat",
+          version: 0,
+          messages: [],
+          contextFiles: [],
+        })),
+      },
+      syncAttachments: jest.fn(),
+      updateViewState: jest.fn(),
+      prepareThinConversation: jest.fn(async () => undefined),
+      isFullyLoaded: true,
+    });
+    const banner = parent.querySelector<HTMLElement>(".systemsculpt-agent-banner")!;
+
+    await (view as any).startNewChat(false);
+    expect(banner.hasAttribute("hidden")).toBe(false);
+    expect(banner.classList.contains("is-error")).toBe(false);
+    expect(banner.textContent).toBe(
+      "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.",
+    );
+
+    settings.userEmail = "free@user.test";
+    await (view as any).startNewChat(false);
+    expect(banner.textContent).toBe(
+      "Your account has no active plan yet. Send a message to see plan options.",
+    );
+
+    settings.licenseKey = "skss-test";
+    await (view as any).startNewChat(false);
+    expect(banner.hasAttribute("hidden")).toBe(true);
+    expect(banner.textContent).toBe("");
     workspace.unload();
   });
 
