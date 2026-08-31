@@ -194,6 +194,7 @@ export class VaultFileCache {
       this.markdownFiles = this.vault.getMarkdownFiles();
       this.lastCacheUpdate = Date.now();
     } catch {
+      // The cache remains cold and will populate on demand.
       this.markdownFiles = [];
     }
   }
@@ -233,6 +234,7 @@ export class VaultFileCache {
       
       this.refreshFileStats();
     } catch {
+      // The cache remains cold and will populate on demand.
     }
   }
   

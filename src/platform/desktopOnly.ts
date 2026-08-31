@@ -1,5 +1,26 @@
 import { Platform } from "obsidian";
 
+export type DesktopCpuUsage = Readonly<{ user: number; system: number }>;
+
+export type DesktopProcess = Readonly<{
+  versions?: Readonly<{ node?: string }>;
+  env?: Record<string, string | undefined>;
+  memoryUsage?: () => Readonly<{
+    rss?: number;
+    external?: number;
+    heapUsed?: number;
+    heapTotal?: number;
+  }>;
+  cpuUsage?: () => DesktopCpuUsage;
+  getCPUUsage?: () => Readonly<{
+    percentCPUUsage?: number;
+    user?: number;
+    system?: number;
+  }>;
+}>;
+
+declare const process: DesktopProcess | undefined;
+
 /**
  * The one host seam for capabilities Obsidian only exposes on desktop.
  *
@@ -22,6 +43,10 @@ export function hasNodeRuntime(): boolean {
     typeof process.versions?.node === "string";
 }
 
+export function getDesktopProcess(): DesktopProcess | null {
+  return typeof process === "undefined" ? null : process;
+}
+
 /**
  * Lazily load a desktop-only module. The loader performs the `require` so
  * startup-sensitive Node modules remain demand-loaded.
@@ -41,40 +66,44 @@ type DesktopPath = typeof import("node:path");
 type DesktopOs = typeof import("node:os");
 type DesktopChildProcess = typeof import("node:child_process");
 
+type DesktopWindow = Window & {
+  require?: (specifier: string) => unknown;
+};
+
+function loadDesktopModule<T>(specifier: string, capability: string): T {
+  if (!Platform.isDesktop || !hasNodeRuntime()) {
+    throw new DesktopHostUnavailableError(capability);
+  }
+  const moduleLoader = (window as DesktopWindow).require;
+  if (typeof moduleLoader !== "function") {
+    throw new DesktopHostUnavailableError(capability);
+  }
+  return moduleLoader(specifier) as T;
+}
+
 /** Lazily loaded Node modules. Call only after the feature has entered a desktop path. */
 export const desktopHost = {
-  fs(): DesktopFs {
-    return loadDesktopOnly(
-      () => require("node:fs/promises") as DesktopFs,
-      "Local filesystem access",
-    );
+  async fs() {
+    return loadDesktopModule<DesktopFs>("node:fs/promises", "Local filesystem access");
   },
 
-  path(): DesktopPath {
-    return loadDesktopOnly(
-      () => require("node:path") as DesktopPath,
-      "Local filesystem paths",
-    );
+  async path() {
+    return loadDesktopModule<DesktopPath>("node:path", "Local filesystem paths");
   },
 
-  os(): DesktopOs {
-    return loadDesktopOnly(
-      () => require("node:os") as DesktopOs,
-      "Temporary local storage",
-    );
+  async os() {
+    return loadDesktopModule<DesktopOs>("node:os", "Temporary local storage");
   },
 
-  childProcess(): DesktopChildProcess {
-    return loadDesktopOnly(
-      () => require("node:child_process") as DesktopChildProcess,
-      "CLI execution",
-    );
+  async childProcess() {
+    return loadDesktopModule<DesktopChildProcess>("node:child_process", "CLI execution");
   },
 
   environment(): Record<string, string | undefined> {
-    if (!hasNodeRuntime()) {
+    const runtimeProcess = getDesktopProcess();
+    if (!hasNodeRuntime() || !runtimeProcess?.env) {
       throw new DesktopHostUnavailableError("CLI environment access");
     }
-    return process.env;
+    return runtimeProcess.env;
   },
 } as const;

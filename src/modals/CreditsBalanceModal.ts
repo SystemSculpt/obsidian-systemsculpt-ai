@@ -106,13 +106,13 @@ export class CreditsBalanceModal extends StandardModal {
     this.tabsHandle = createUiTabs(this.tabBarEl, [
       {
         id: "balance",
-        button: this.balanceTabButton!,
-        panel: this.balancePanelEl!,
+        button: this.balanceTabButton,
+        panel: this.balancePanelEl,
       },
       {
         id: "usage",
-        button: this.usageTabButton!,
-        panel: this.usagePanelEl!,
+        button: this.usageTabButton,
+        panel: this.usagePanelEl,
       },
     ], {
       activeId: this.activeTab,
@@ -133,7 +133,7 @@ export class CreditsBalanceModal extends StandardModal {
       },
       false,
       "refresh-cw"
-    ) as HTMLButtonElement;
+    );
 
     this.purchaseButton = this.addActionButton(
       "credits.buy",
@@ -141,7 +141,7 @@ export class CreditsBalanceModal extends StandardModal {
       () => this.openPurchasePage(),
       true,
       "external-link"
-    ) as HTMLButtonElement;
+    );
 
     this.addActionButton(
       "credits.open-account",

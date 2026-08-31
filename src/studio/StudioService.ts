@@ -1,5 +1,6 @@
 import { normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
+import { replaceControlCharacters } from "../utils/characterValidation";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
 import { StudioGraphCompiler } from "./StudioGraphCompiler";
@@ -48,8 +49,8 @@ const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
 function sanitizeImportedFileSegment(value: string): string {
   const trimmed = String(value || "").trim();
   const leaf = trimmed.split(/[\\/]/).pop() || "";
-  const sanitized = leaf
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+  const sanitized = replaceControlCharacters(leaf, " ")
+    .replace(/[<>:"/\\|?*]/g, " ")
     .replace(/\s+/g, "-")
     .replace(/[.-]+$/g, "")
     .trim()

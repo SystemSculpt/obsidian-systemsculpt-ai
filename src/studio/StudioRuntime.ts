@@ -279,10 +279,10 @@ export class StudioRuntime {
       if (Object.prototype.hasOwnProperty.call(inputs, edge.toPortId)) {
         const existing = inputs[edge.toPortId];
         if (Array.isArray(existing)) {
-          (existing as any[]).push(value);
-          inputs[edge.toPortId] = existing as any;
+          (existing as unknown[]).push(value);
+          inputs[edge.toPortId] = existing;
         } else {
-          inputs[edge.toPortId] = [existing, value] as any;
+          inputs[edge.toPortId] = [existing, value];
         }
       } else {
         inputs[edge.toPortId] = value;
@@ -409,11 +409,14 @@ export class StudioRuntime {
     const runningPromises = new Map<string, Promise<void>>();
     const abortController = new AbortController();
     const desktop = hasHostCapability("local-filesystem")
-      ? {
-          fs: desktopHost.fs(),
-          path: desktopHost.path(),
-          os: desktopHost.os(),
-        }
+      ? await (async () => {
+          const [fs, path, os] = await Promise.all([
+            desktopHost.fs(),
+            desktopHost.path(),
+            desktopHost.os(),
+          ]);
+          return { fs, path, os };
+        })()
       : null;
     const tempRootDir = desktop
       ? await desktop.fs.mkdtemp(desktop.path.join(desktop.os.tmpdir(), "systemsculpt-studio-"))
@@ -546,11 +549,7 @@ export class StudioRuntime {
               if (!file.path.toLowerCase().endsWith(".md")) {
                 throw new Error(`Vault markdown file required: ${vaultPath}`);
               }
-              const cachedRead = (this.app.vault as any).cachedRead;
-              if (typeof cachedRead === "function") {
-                return cachedRead.call(this.app.vault, file);
-              }
-              return this.app.vault.read(file);
+              return this.app.vault.cachedRead(file);
             },
             statVaultFileSize: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);

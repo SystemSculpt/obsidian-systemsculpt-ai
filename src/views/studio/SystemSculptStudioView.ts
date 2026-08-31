@@ -6,6 +6,7 @@ import {
   normalizePath,
   TAbstractFile,
   TFile,
+  type ViewStateResult,
   TFolder,
   WorkspaceLeaf,
 } from "obsidian";
@@ -15,16 +16,17 @@ import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { hasHostCapability, resolveElectronModule } from "../../platform/hostCapabilities";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { randomId } from "../../studio/utils";
-import type {
-  StudioAssetRef,
-  StudioJsonValue,
-  StudioNodeDefinition,
-  StudioNodeInstance,
-  StudioNodeOutputMap,
-  StudioNodeSize,
-  StudioProjectV1,
-  StudioRunEvent,
-  StudioShapeKind,
+import {
+  STUDIO_DISPLAY_NAME,
+  type StudioAssetRef,
+  type StudioJsonValue,
+  type StudioNodeDefinition,
+  type StudioNodeInstance,
+  type StudioNodeOutputMap,
+  type StudioNodeSize,
+  type StudioProjectV1,
+  type StudioRunEvent,
+  type StudioShapeKind,
 } from "../../studio/types";
 import { isStudioVisualOnlyNodeKind } from "../../studio/StudioNodeKinds";
 import {
@@ -387,7 +389,7 @@ export class SystemSculptStudioView extends ItemView {
     return this.projectSessionController.serializePersistentState();
   }
 
-  async setState(state: unknown, result: any): Promise<void> {
+  async setState(state: unknown, result: ViewStateResult): Promise<void> {
     await super.setState(state, result);
     const rawState = (state || {}) as SystemSculptStudioViewState;
     const filePath = this.projectSessionController.restorePersistentState(rawState);
@@ -600,7 +602,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private toggleTextGenerationOutputLock(nodeId: string): void {
     if (!this.currentProject) {
-      new Notice("Open a Studio project first.");
+      new Notice(`Open a ${STUDIO_DISPLAY_NAME} project first.`);
       return;
     }
 
@@ -691,7 +693,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private async copyTextGenerationPromptBundle(nodeId: string): Promise<void> {
     if (!this.currentProject) {
-      new Notice("Open a Studio project first.");
+      new Notice(`Open a ${STUDIO_DISPLAY_NAME} project first.`);
       return;
     }
 
@@ -962,11 +964,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private async readVaultMarkdownFile(file: TFile): Promise<string> {
-    const cachedRead = (this.app.vault as any).cachedRead;
-    if (typeof cachedRead === "function") {
-      return cachedRead.call(this.app.vault, file);
-    }
-    return this.app.vault.read(file);
+    return this.app.vault.cachedRead(file);
   }
 
   private async insertVaultNoteNodes(
@@ -1158,10 +1156,10 @@ export class SystemSculptStudioView extends ItemView {
             return value.toString();
           }
           if (value && typeof value === "object") {
-            if (seen.has(value as object)) {
+            if (seen.has(value)) {
               return "[Circular]";
             }
-            seen.add(value as object);
+            seen.add(value);
           }
           return value;
         },
@@ -3448,8 +3446,8 @@ export class SystemSculptStudioView extends ItemView {
     const electron = resolveElectronModule<{
       shell?: {
         showItemInFolder?: (path: string) => void;
-        openPath?: (path: string) => Promise<unknown> | unknown;
-        openExternal?: (url: string) => Promise<unknown> | unknown;
+        openPath?: (path: string) => unknown;
+        openExternal?: (url: string) => unknown;
       };
     }>(ownerWindow);
     const shell = electron?.shell;
@@ -3655,10 +3653,10 @@ export class SystemSculptStudioView extends ItemView {
    */
   private refreshLeafDisplay(): void {
     try {
-      this.leaf?.setViewState({
+      void this.leaf?.setViewState({
         type: this.getViewType(),
         state: this.getState(),
-      });
+      }).catch(() => undefined);
     } catch {
       // Best-effort – never block the caller.
     }

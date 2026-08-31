@@ -245,7 +245,7 @@ export function renderStudioGraphWorkspace(
   graphInteraction.registerViewportElement(viewport);
   viewport.addEventListener(
     "wheel",
-    (event) => graphInteraction.handleGraphViewportWheel(event as WheelEvent),
+    (event) => graphInteraction.handleGraphViewportWheel(event),
     { passive: false }
   );
   viewport.addEventListener("contextmenu", (event) => {
@@ -269,7 +269,7 @@ export function renderStudioGraphWorkspace(
     onOpenNodeContextMenu(contextEvent);
   });
   viewport.addEventListener("pointerdown", (event) => {
-    const pointerEvent = event as PointerEvent;
+    const pointerEvent = event;
     const target = pointerEvent.target as HTMLElement | null;
     if (!target) {
       return;
@@ -288,7 +288,7 @@ export function renderStudioGraphWorkspace(
     graphInteraction.startMarqueeSelection(pointerEvent);
   });
   viewport.addEventListener("dblclick", (event) => {
-    const dblEvent = event as MouseEvent;
+    const dblEvent = event;
     const target = dblEvent.target as HTMLElement | null;
     if (!target) {
       return;

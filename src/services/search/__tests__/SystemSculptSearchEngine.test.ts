@@ -51,6 +51,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
     app.vault.read.mockImplementation(app.vault.cachedRead);
     app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    app.workspace.offref = jest.fn();
 
     return { app, files };
   };

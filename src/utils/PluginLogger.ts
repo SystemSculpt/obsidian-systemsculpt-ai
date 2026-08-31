@@ -366,7 +366,7 @@ export class PluginLogger {
     }
     this.flushTimer = window.setTimeout(() => {
       this.flushTimer = null;
-      this.flushPendingEntries();
+      void this.flushPendingEntries().catch(() => undefined);
     }, this.flushIntervalMs);
   }
 
@@ -476,9 +476,9 @@ export class PluginLogger {
     if (this.plugin?.isPluginUnloading?.()) {
       return;
     }
-    const adapter: any = this.plugin.app?.vault?.adapter;
+    const adapter = this.plugin.app.vault.adapter;
     const storage = this.plugin.storage;
-    if (!adapter || typeof adapter.stat !== "function" || !storage) {
+    if (!storage) {
       return;
     }
 
@@ -949,7 +949,7 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
     isLifecycle
     && isThinAgentCommandKind(metadata.commandKind)
   ) {
-    projected.command_kind = metadata.commandKind as SupportDiagnosticEvent["command_kind"];
+    projected.command_kind = metadata.commandKind;
   }
   if (
     isLifecycle
@@ -1031,7 +1031,7 @@ function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnostic
       isCreditsRefreshReason(metadata.creditsRefreshReason)
     ) {
       projected.credits_refresh_reason = (
-        metadata.creditsRefreshReason as SupportDiagnosticEvent["credits_refresh_reason"]
+        metadata.creditsRefreshReason
       );
     }
     if (
@@ -1259,7 +1259,7 @@ function serializeError(error: unknown) {
       message: error.message,
     };
     if (error.stack) serialized.stack = error.stack;
-    const extra = error as any;
+    const extra = error as Error & { code?: unknown; status?: unknown };
     if (typeof extra.code !== "undefined") serialized.code = extra.code;
     if (typeof extra.status !== "undefined") serialized.status = extra.status;
     return serialized;

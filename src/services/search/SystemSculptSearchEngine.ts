@@ -1,6 +1,8 @@
 import { App, EventRef, TFile } from "obsidian";
-import SystemSculptPlugin from "../../main";
+import type SystemSculptPlugin from "../../main";
 import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../tools/vault/searchUtils";
+import { containsNonAscii } from "../../utils/characterValidation";
+import { toError } from "../../utils/errors";
 import { extractCanvasText } from "./canvasTextExtractor";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
@@ -345,13 +347,8 @@ export class SystemSculptSearchEngine {
   destroy(): void {
     this.eventRefs.forEach((ref) => this.app.vault.offref(ref));
     this.eventRefs = [];
-    const workspace = this.app.workspace as any;
     this.workspaceEventRefs.forEach((ref) => {
-      if (typeof workspace.offref === "function") {
-        workspace.offref(ref);
-      } else if (typeof (ref as any)?.unload === "function") {
-        (ref as any).unload();
-      }
+      this.app.workspace.offref(ref);
     });
     this.workspaceEventRefs = [];
     this.clearScheduledIndexing();
@@ -1038,7 +1035,7 @@ export class SystemSculptSearchEngine {
 
   private shouldUseSubstringCandidateFallback(queryTerms: QueryTerm[], phrase: string, candidateCount: number): boolean {
     if (!phrase) return false;
-    if (candidateCount === 0 && (/[^\x00-\x7F]/.test(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
+    if (candidateCount === 0 && (containsNonAscii(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
       return true;
     }
     return queryTerms.some((term) => this.needsSubstringFallback(term.value) && this.pathsForQueryTerm(term).size === 0);
@@ -1057,7 +1054,7 @@ export class SystemSculptSearchEngine {
     // token index directly — the body still contains the substring, so fall
     // back to the substring scan to recover the match.
     if (/[^\p{L}\p{N}\p{M}]/u.test(value)) return true;
-    return /[^\x00-\x7F]/.test(value) || this.tokenizeSearchText(value).size === 0;
+    return containsNonAscii(value) || this.tokenizeSearchText(value).size === 0;
   }
 
   private collectSubstringCandidateDocs(terms: string[], phrase: string, limit: number): IndexedDocument[] {
@@ -1285,9 +1282,9 @@ export class SystemSculptSearchEngine {
               origin: "semantic",
               updatedAt: item?.metadata?.lastModified ?? file.stat?.mtime ?? 0,
               size: file.stat?.size || 0,
-            } as SearchHit;
+            } satisfies SearchHit;
           })
-          .filter((hit: SearchHit | null): hit is SearchHit => hit !== null);
+          .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
       })();
 
       // Avoid long stalls; apply a timeout without leaking a dangling timer.
@@ -1307,7 +1304,7 @@ export class SystemSculptSearchEngine {
           if (settled) return;
           settled = true;
           cleanup();
-          reject(error);
+          reject(toError(error, "Search batch scheduling failed."));
         };
         const onAbort = () => finish([]);
         const timer = window.setTimeout(() => finish([]), this.SEMANTIC_TIMEOUT_MS);

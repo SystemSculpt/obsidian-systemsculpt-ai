@@ -1,6 +1,4 @@
-import * as obsidianApi from "obsidian";
-
-const { parseYaml } = obsidianApi as any;
+import { parseYaml } from "obsidian";
 
 export type ChatFrontmatterEnvelope = Readonly<{
   yamlContent: string;

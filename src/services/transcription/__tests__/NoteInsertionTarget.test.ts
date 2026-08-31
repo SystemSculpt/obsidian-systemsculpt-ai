@@ -32,6 +32,7 @@ describe("captureNoteInsertionTarget", () => {
     view.file = originFile;
     view.editor = editor;
     const leaf = { view } as any;
+    view.leaf = leaf;
     (app.workspace as any).activeLeaf = leaf;
     (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(view);
 
@@ -55,6 +56,7 @@ describe("captureNoteInsertionTarget", () => {
     view.file = file;
     view.editor = editor;
     const leaf = { view } as any;
+    view.leaf = leaf;
     (app.workspace as any).activeLeaf = leaf;
     (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(view);
 
@@ -75,6 +77,7 @@ describe("captureNoteInsertionTarget", () => {
     view.file = file;
     view.editor = editor;
     const leaf = { view } as any;
+    view.leaf = leaf;
     (app.workspace as any).activeLeaf = leaf;
     (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(view);
 

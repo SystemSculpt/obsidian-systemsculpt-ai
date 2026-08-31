@@ -20,7 +20,7 @@ function normalizeConfigObject(
   if (!isRecord(config)) {
     return {};
   }
-  return config as Record<string, StudioJsonValue>;
+  return config;
 }
 
 function toFiniteNumber(value: StudioJsonValue): number | null {
@@ -53,7 +53,7 @@ export function mergeNodeConfigWithDefaults(
   definition: StudioNodeDefinition,
   config: Record<string, StudioJsonValue> | undefined | null
 ): Record<string, StudioJsonValue> {
-  const defaults = cloneJsonValue(definition.configDefaults || {}) as Record<string, StudioJsonValue>;
+  const defaults = cloneJsonValue(definition.configDefaults || {});
   const normalized = normalizeConfigObject(config);
   return {
     ...defaults,

@@ -60,6 +60,7 @@ export default defineConfig(
           enforceCamelCaseLower: true,
           // Preserve product/technical names and exact quoted control labels.
           ignoreRegex: [
+            "^(Ask Approval|Full Access)$",
             "^SystemSculpt/Studio$",
             "^Show a vim-style line number gutter",
             "^SRT subtitle file",
@@ -71,6 +72,9 @@ export default defineConfig(
       // Runtime modules must remain loadable in Obsidian Mobile. Desktop Node
       // adapters are isolated in the host seam configured below.
       "obsidianmd/no-nodejs-modules": "error",
+      // Obsidian 1.13 treats definitions as the complete renderer. Keep the
+      // full imperative settings UI until every dynamic control has parity.
+      "obsidianmd/settings-tab/prefer-setting-definitions": "off",
     },
   },
   {

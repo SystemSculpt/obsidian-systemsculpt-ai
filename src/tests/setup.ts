@@ -120,6 +120,14 @@ if (typeof g.Response === "undefined") {
 if (typeof g.window === 'undefined') {
   g.window = {} as any;
 }
+if (g.window !== g && typeof g.window.fetch !== "function") {
+  Object.defineProperty(g.window, "fetch", {
+    configurable: true,
+    enumerable: true,
+    get: () => g.fetch,
+    set: (value) => { g.fetch = value; },
+  });
+}
 export {};
 
 function syncWindowTimers(win: any = g.window) {
@@ -171,6 +179,15 @@ function ensureAnimationFrameHelpers(win: any = g.window) {
   if (typeof g.cancelAnimationFrame !== "function") g.cancelAnimationFrame = cancelImpl;
   if (win && typeof win.requestAnimationFrame !== "function") win.requestAnimationFrame = requestImpl;
   if (win && typeof win.cancelAnimationFrame !== "function") win.cancelAnimationFrame = cancelImpl;
+}
+
+function ensureDesktopModuleLoader(win: any = g.window) {
+  if (!win || typeof win.require === "function") return;
+  Object.defineProperty(win, "require", {
+    configurable: true,
+    writable: true,
+    value: require,
+  });
 }
 
 // Default to real timers; tests opt-in to fake timers when needed
@@ -558,6 +575,7 @@ const syncRuntimeWindowGlobals = (win: any = g.window) => {
   ensureWindowCrypto(win);
   ensureBase64Helpers(win);
   ensureAnimationFrameHelpers(win);
+  ensureDesktopModuleLoader(win);
   ensureObsidianDomHelpers(win);
   syncGlobalDomFactories();
 };

@@ -246,7 +246,7 @@ export class AgentIncidentCoordinator {
       );
       this.armTerminalSegmentWait(state);
       this.notifyLookupStateChanged(state);
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
     } catch {
       // Diagnostics are observational and cannot affect the product lifecycle.
     }
@@ -311,7 +311,7 @@ export class AgentIncidentCoordinator {
       this.armFailureSurfaceWait(state);
       this.settleTerminalObservationAfterTurn(state);
       this.notifyLookupStateChanged(state);
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
       return receiptFor(reservedReportId);
     } catch {
       return null;
@@ -342,7 +342,7 @@ export class AgentIncidentCoordinator {
         capture.failureSurfacePaintOpportunityObserved = true;
         this.clearFailureSurfaceTimer(state);
       }
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
       this.notifyLookupStateChanged(state);
     } catch {
       // Failure-surface evidence is observational.
@@ -378,7 +378,7 @@ export class AgentIncidentCoordinator {
         }
       }
       this.clearSatisfiedTerminalSegmentWait(state);
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
     } catch {
       // Transport diagnostics are observational.
     }
@@ -424,7 +424,7 @@ export class AgentIncidentCoordinator {
   public async drain(): Promise<void> {
     try {
       for (const state of [...this.pendingRuns.values()]) {
-        this.scheduleFinalize(state);
+        void this.scheduleFinalize(state);
       }
       await this.waitForStableWork();
     } catch {
@@ -442,7 +442,7 @@ export class AgentIncidentCoordinator {
           this.clearTerminalSegmentTimer(state);
           this.clearFailureSurfaceTimer(state);
         }
-        this.scheduleFinalize(state);
+        void this.scheduleFinalize(state);
       }
       await this.waitForStableWork();
     } catch {
@@ -573,7 +573,7 @@ export class AgentIncidentCoordinator {
             failureSurfacePaintOpportunityObserved:
               capture.failureSurfacePaintOpportunityObserved,
           }),
-        }) as AgentIncidentCaptureContext,
+        }),
         capture.collectionFailures,
       );
     }
@@ -751,7 +751,7 @@ export class AgentIncidentCoordinator {
         } else {
           const signal = this.waitForLookup(kind, id);
           const afterRegistration = this.pendingForLookup(kind, id);
-          if (afterRegistration) this.scheduleFinalize(afterRegistration);
+          if (afterRegistration) void this.scheduleFinalize(afterRegistration);
           await signal;
         }
         const ready = this.memoryReport(kind, id);
@@ -918,7 +918,7 @@ export class AgentIncidentCoordinator {
     state.failureSurfaceTimer = window.setTimeout(() => {
       state.failureSurfaceTimer = undefined;
       state.failureSurfaceWaitExpired = true;
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
       this.notifyLookupStateChanged(state);
       this.notifyDrainWaiters();
     }, this.failureSurfaceWaitMs);
@@ -944,7 +944,7 @@ export class AgentIncidentCoordinator {
     state.terminalSegmentTimer = window.setTimeout(() => {
       state.terminalSegmentTimer = undefined;
       state.terminalSegmentWaitExpired = true;
-      this.scheduleFinalize(state);
+      void this.scheduleFinalize(state);
       this.notifyDrainWaiters();
     }, this.terminalSegmentWaitMs);
     this.notifyDrainWaiters();

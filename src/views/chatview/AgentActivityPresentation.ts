@@ -70,7 +70,7 @@ export function finalAgentAnswerPartIds(
     .map((part) => part.id));
   let terminalMessageId: string | null = null;
   for (let index = visibleParts.length - 1; index >= 0; index -= 1) {
-    const part = visibleParts[index]!;
+    const part = visibleParts[index];
     if (part.kind === "sources") continue;
     if (terminalMessageId === null) {
       if (part.kind === "activity") continue;

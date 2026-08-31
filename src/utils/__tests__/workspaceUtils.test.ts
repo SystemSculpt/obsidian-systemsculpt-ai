@@ -21,16 +21,20 @@ const createMockLeaf = (overrides: Partial<WorkspaceLeaf> = {}): WorkspaceLeaf =
   } as unknown as WorkspaceLeaf);
 
 // Create mock workspace
-const createMockWorkspace = (leaves: WorkspaceLeaf[] = []) => ({
-  iterateAllLeaves: jest.fn((callback: (leaf: WorkspaceLeaf) => void) => {
-    leaves.forEach(callback);
-  }),
-  activeLeaf: null as WorkspaceLeaf | null,
-  rootSplit: { id: "root" },
-  setActiveLeaf: jest.fn(),
-  getLeaf: jest.fn().mockReturnValue(createMockLeaf()),
-  createLeafBySplit: jest.fn().mockReturnValue(createMockLeaf()),
-});
+const createMockWorkspace = (leaves: WorkspaceLeaf[] = []) => {
+  const workspace = {
+    iterateAllLeaves: jest.fn((callback: (leaf: WorkspaceLeaf) => void) => {
+      leaves.forEach(callback);
+    }),
+    activeLeaf: null as WorkspaceLeaf | null,
+    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
+    rootSplit: { id: "root" },
+    setActiveLeaf: jest.fn(),
+    getLeaf: jest.fn().mockReturnValue(createMockLeaf()),
+    createLeafBySplit: jest.fn().mockReturnValue(createMockLeaf()),
+  };
+  return workspace;
+};
 
 // Create mock vault
 const createMockVault = () => ({

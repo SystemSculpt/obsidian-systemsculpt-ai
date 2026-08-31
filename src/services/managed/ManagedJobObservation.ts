@@ -32,15 +32,12 @@ export async function waitForManagedJob(
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => signal.removeEventListener("abort", onAbort);
-    // Managed polling is host-level work, not UI bound to a popout window.
-    // eslint-disable-next-line obsidianmd/no-global-this
-    const timeout = globalThis.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       cleanup();
       resolve();
     }, normalizedPollAfterMs(milliseconds));
     const onAbort = () => {
-      // eslint-disable-next-line obsidianmd/no-global-this
-      globalThis.clearTimeout(timeout);
+      window.clearTimeout(timeout);
       cleanup();
       reject(abortError());
     };

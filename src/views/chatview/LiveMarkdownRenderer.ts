@@ -47,7 +47,7 @@ type PreservedFocus = Readonly<{
 
 type PreservedCopyState = Readonly<{
   element: HTMLButtonElement;
-  html: string;
+  children: readonly Node[];
   copied: boolean;
   failed: boolean;
   ariaLabel: string | null;
@@ -158,7 +158,7 @@ function isDomInstance<T extends Element>(
   };
   return typeof obsidianNode.instanceOf === "function"
     ? obsidianNode.instanceOf(constructor)
-    : constructor.prototype.isPrototypeOf(node);
+    : Object.prototype.isPrototypeOf.call(constructor.prototype, node);
 }
 
 function pointOffset(
@@ -368,7 +368,7 @@ function captureDomState(root: HTMLElement): PreservedDomState {
       ".systemsculpt-agent-code-copy",
     )).map((element) => ({
       element,
-      html: element.innerHTML,
+      children: Array.from(element.childNodes, (child) => child.cloneNode(true)),
       copied: element.classList.contains("is-copied"),
       failed: element.classList.contains("is-copy-failed"),
       ariaLabel: element.getAttribute("aria-label"),
@@ -423,7 +423,9 @@ function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
     if (!target || target === entry.element) return;
     target.classList.toggle("is-copied", entry.copied);
     target.classList.toggle("is-copy-failed", entry.failed);
-    if (entry.copied || entry.failed) target.innerHTML = entry.html;
+    if (entry.copied || entry.failed) {
+      target.replaceChildren(...entry.children.map((child) => child.cloneNode(true)));
+    }
     if (entry.ariaLabel === null) target.removeAttribute("aria-label");
     else target.setAttribute("aria-label", entry.ariaLabel);
     if (entry.copyAttempt) target.dataset.copyAttempt = entry.copyAttempt;
@@ -509,7 +511,7 @@ function plainBlockRange(
   while (
     start < previous.length
     && start < incoming.length
-    && sameRenderedBlock(previous[start]!, incoming[start]!)
+    && sameRenderedBlock(previous[start], incoming[start])
   ) start += 1;
 
   let previousEnd = previous.length;
@@ -517,7 +519,7 @@ function plainBlockRange(
   while (
     previousEnd > start
     && incomingEnd > start
-    && sameRenderedBlock(previous[previousEnd - 1]!, incoming[incomingEnd - 1]!)
+    && sameRenderedBlock(previous[previousEnd - 1], incoming[incomingEnd - 1])
   ) {
     previousEnd -= 1;
     incomingEnd -= 1;
@@ -535,11 +537,11 @@ function plainBlockRange(
 
   const live = Array.from(target.childNodes);
   for (let index = 0; index < start; index += 1) {
-    if (!stableBlockMatchesLiveNode(previous[index]!, live[index])) return null;
+    if (!stableBlockMatchesLiveNode(previous[index], live[index])) return null;
   }
   for (let offset = 0; offset < previous.length - previousEnd; offset += 1) {
     const previousIndex = previousEnd + offset;
-    if (!stableBlockMatchesLiveNode(previous[previousIndex]!, live[previousIndex])) return null;
+    if (!stableBlockMatchesLiveNode(previous[previousIndex], live[previousIndex])) return null;
   }
   return { start, previousEnd, incomingEnd };
 }

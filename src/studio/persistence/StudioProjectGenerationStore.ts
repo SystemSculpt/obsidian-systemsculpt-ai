@@ -7,6 +7,7 @@ import {
   serializeStudioProject,
 } from "../schema";
 import { sha256HexFromArrayBuffer } from "../hash";
+import { containsControlCharacters } from "../../utils/characterValidation";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
@@ -119,7 +120,7 @@ function canonicalJson(value: unknown): string {
 
 function normalizeRelativePath(input: string): string {
   const path = String(input).replace(/\\/g, "/");
-  if (!path || path.startsWith("/") || /^[A-Za-z]:\//.test(path) || /[\u0000-\u001f\u007f]/.test(path)) throw new Error("Invalid generation relative path.");
+  if (!path || path.startsWith("/") || /^[A-Za-z]:\//.test(path) || containsControlCharacters(path)) throw new Error("Invalid generation relative path.");
   const segments = path.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) throw new Error("Invalid generation relative path.");
   if (path === "manifest.json" || path === "commit.json") throw new Error("Reserved generation path.");
@@ -128,7 +129,7 @@ function normalizeRelativePath(input: string): string {
 
 export function validateProjectionLocator(locator: ProjectionLocator): ProjectionLocator {
   const raw = String(locator?.vaultRelativeProjectPath || "").trim().replace(/\\/g, "/");
-  if (!raw || raw.startsWith("/") || /^[A-Za-z]:\//.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) throw new Error("Invalid Studio projection path.");
+  if (!raw || raw.startsWith("/") || /^[A-Za-z]:\//.test(raw) || containsControlCharacters(raw)) throw new Error("Invalid Studio projection path.");
   const segments = raw.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) throw new Error("Invalid Studio projection path.");
   const normalized = normalizeStudioProjectPath(raw);
@@ -254,8 +255,8 @@ export class StudioProjectGenerationStore {
   }
 
   private async exclusive<T>(projectId: string, action: () => Promise<T>): Promise<T> {
-    let map = StudioProjectGenerationStore.coordinators.get(this.adapter as object);
-    if (!map) { map = new Map(); StudioProjectGenerationStore.coordinators.set(this.adapter as object, map); }
+    let map = StudioProjectGenerationStore.coordinators.get(this.adapter);
+    if (!map) { map = new Map(); StudioProjectGenerationStore.coordinators.set(this.adapter, map); }
     const prior = map.get(projectId) || Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -740,7 +741,9 @@ export class StudioProjectGenerationStore {
           decoder.decode(document)
         );
         if (!visibleProjectMatched) {
-          try { await this.adapter.remove(directory); } catch {}
+          try { await this.adapter.remove(directory); } catch {
+            // Cleanup is best-effort; the incomplete generation is never committed.
+          }
           return { status: "read_only", message: "The project file changed before Studio could save; the file was left untouched." };
         }
       } else {
@@ -749,7 +752,9 @@ export class StudioProjectGenerationStore {
           locator.vaultRelativeProjectPath
         );
         if (!destinationCreated) {
-          try { await this.adapter.remove(directory); } catch {}
+          try { await this.adapter.remove(directory); } catch {
+            // Cleanup is best-effort; the incomplete generation is never committed.
+          }
           return { status: "read_only", message: "A project file already exists at the destination; it was left untouched." };
         }
       }
@@ -772,17 +777,17 @@ export class StudioProjectGenerationStore {
   private async validateGeneration(directory: string): Promise<ValidGeneration> {
     const rawManifest = await this.adapter.read(`${directory}/manifest.json`); const manifestBytes = encoder.encode(rawManifest); const manifest = JSON.parse(rawManifest) as GenerationManifest;
     if (manifest.schemaVersion !== 1) throw new Error("future schema");
-    if (!hasExactKeys(manifest as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
+    if (!hasExactKeys(manifest, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
     authority(manifest.projectId);
     if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt) || !["create", "discrete_save", "autosave", "policy", "manifest", "asset", "support", "run", "cache", "migration", "repair", "external_sync", "logical_rename"].includes(manifest.commandKind)) throw new Error("invalid manifest identity");
-    if (!hasExactKeys(manifest.projection as unknown as Record<string, unknown>, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
+    if (!hasExactKeys(manifest.projection, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
     if ((manifest.revision === 0) !== (manifest.parentRevision === null && manifest.parentGenerationHash === null)) throw new Error("invalid root lineage");
     if (manifest.revision > 0 && (!Number.isSafeInteger(manifest.parentRevision) || manifest.parentRevision !== manifest.revision - 1 || !HASH.test(String(manifest.parentGenerationHash)))) throw new Error("invalid descendant lineage");
     const expectedDirectory = `${generationRoot(manifest.projectId)}/${manifest.revision}-${manifest.generationHash}`;
     if (directory !== expectedDirectory) throw new Error("generation directory identity mismatch");
     const seen = new Set<string>(); let previousPath: string | null = null;
     for (const entry of manifest.entries) {
-      if (!hasExactKeys(entry as unknown as Record<string, unknown>, ["relativePath", "kind", "sizeBytes", "sha256"])) throw new Error("entry schema is not closed");
+      if (!hasExactKeys(entry, ["relativePath", "kind", "sizeBytes", "sha256"])) throw new Error("entry schema is not closed");
       const path = normalizeRelativePath(entry.relativePath); const folded = path.toLocaleLowerCase("en-US");
       if (seen.has(folded) || (previousPath !== null && compareUtf8(previousPath, path) >= 0) || (entry.kind !== "text" && entry.kind !== "binary") || !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0 || !HASH.test(entry.sha256)) throw new Error("invalid manifest entry");
       seen.add(folded); previousPath = path;
@@ -790,7 +795,7 @@ export class StudioProjectGenerationStore {
     const { generationHash, ...body } = manifest; if (await hash(encoder.encode(`studio-generation-v1\0${canonicalJson(body)}`)) !== generationHash) throw new Error("generation hash mismatch");
     if (rawManifest !== canonicalJson(manifest)) throw new Error("noncanonical manifest");
     const descriptorRaw = await this.adapter.read(`${directory}/commit.json`); const descriptor = JSON.parse(descriptorRaw) as CommitDescriptor;
-    if (!hasExactKeys(descriptor as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
+    if (!hasExactKeys(descriptor, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
     const rootListing = await this.adapter.list(directory);
     if (rootListing.files.filter((file) => !isIgnoredTreeFile(file)).sort(compareUtf8).join("\n") !== [`${directory}/commit.json`, `${directory}/manifest.json`].sort(compareUtf8).join("\n") || rootListing.folders.slice().sort(compareUtf8).join("\n") !== [`${directory}/files`].join("\n")) throw new Error("unmanifested generation metadata entry");
     // Filter both sides: listTreeFiles already ignores OS junk on disk, and
@@ -870,7 +875,9 @@ export class StudioProjectGenerationStore {
       `${locator.vaultRelativeProjectPath}.identity.json`,
       `${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`,
     ]) {
-      try { await this.adapter.remove(path); } catch {}
+      try { await this.adapter.remove(path); } catch {
+        // Legacy markers may already be absent.
+      }
     }
   }
 
@@ -967,7 +974,7 @@ export class StudioProjectGenerationStore {
     for (const file of listed.files) { const name = file.slice(root.length + 1); if (name === ".studio-projection.json" || isIgnoredTreeFile(file)) continue; output.set(`${prefix}/${name}`, new Uint8Array(await this.adapter.readBinary(file))); }
     for (const folder of listed.folders) { const name = folder.slice(root.length + 1); await this.captureTree(folder, `${prefix}/${name}`, output); }
   }
-  private async mkdirRecursive(path: string): Promise<void> { if (!path) return; let current = ""; for (const segment of path.split("/").filter(Boolean)) { current = current ? `${current}/${segment}` : segment; try { await this.adapter.mkdir(current); } catch {} } }
+  private async mkdirRecursive(path: string): Promise<void> { if (!path) return; let current = ""; for (const segment of path.split("/").filter(Boolean)) { current = current ? `${current}/${segment}` : segment; try { await this.adapter.mkdir(current); } catch { /* Existing ancestors are expected. */ } } }
 }
 
 function dirname(path: string): string { const at = path.lastIndexOf("/"); return at < 0 ? "" : path.slice(0, at); }

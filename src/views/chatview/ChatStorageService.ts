@@ -14,6 +14,13 @@ import type {
   ChatResumeDescriptor,
 } from "./storage/ChatPersistenceTypes";
 import { parseAgentConversationId } from "./storage/ChatPersistenceTypes";
+import type SystemSculptPlugin from "../../main";
+
+type AppWithPlugins = App & {
+  plugins?: {
+    plugins?: Record<string, SystemSculptPlugin | undefined>;
+  };
+};
 
 type LoadedChatRecord = {
   id: string;
@@ -161,8 +168,7 @@ export class ChatStorageService {
   constructor(app: App, chatDirectory: string) {
     this.app = app;
     this.chatDirectory = chatDirectory;
-    const adapter = (app as any)?.vault?.adapter;
-    this.attachmentStore = adapter ? new ChatAttachmentVaultStore(adapter) : null;
+    this.attachmentStore = new ChatAttachmentVaultStore(app.vault.adapter);
   }
 
   private normalizeTag(tag: string): string {
@@ -170,7 +176,7 @@ export class ChatStorageService {
   }
 
   private resolveDefaultChatTag(): string {
-    const systemSculptPlugin = (this.app as any)?.plugins?.plugins?.["systemsculpt-ai"];
+    const systemSculptPlugin = (this.app as AppWithPlugins).plugins?.plugins?.["systemsculpt-ai"];
     const rawTag = systemSculptPlugin?.settings?.defaultChatTag;
     if (typeof rawTag !== "string") return "";
     return this.normalizeTag(rawTag);
@@ -232,8 +238,7 @@ export class ChatStorageService {
     exclusiveCreate: boolean = false,
   ): Promise<{ filePath: string; version: number }> {
     let filePath = `[unknown-path]/${chatId}.md`;
-    try {
-      filePath = `${this.chatDirectory}/${chatId}.md`;
+    filePath = `${this.chatDirectory}/${chatId}.md`;
       const now = new Date().toISOString();
       const vault = this.app.vault;
       let fileExists = false;
@@ -308,10 +313,10 @@ export class ChatStorageService {
 
       const fullContent = `---\n${stringifyYaml(metadata)}---\n\n${messagesContent}`;
 
-      const SystemSculptPlugin = (this.app as any).plugins.plugins["systemsculpt-ai"];
+      const systemSculptPlugin = (this.app as AppWithPlugins).plugins?.plugins?.["systemsculpt-ai"];
 
-      if (SystemSculptPlugin && SystemSculptPlugin.directoryManager) {
-        await SystemSculptPlugin.directoryManager.ensureDirectoryByPath(this.chatDirectory);
+      if (systemSculptPlugin?.directoryManager) {
+        await systemSculptPlugin.directoryManager.ensureDirectoryByPath(this.chatDirectory);
       } else {
         const exists = await this.app.vault.adapter.exists(this.chatDirectory);
         if (!exists) {
@@ -326,9 +331,6 @@ export class ChatStorageService {
       }
       
       return { filePath, version: newVersion };
-    } catch (error) {
-      throw error;
-    }
   }
 
   async loadChats(): Promise<LoadedChatRecord[]> {
@@ -374,7 +376,7 @@ export class ChatStorageService {
             }
 
             return parsed;
-          } catch (error) {
+          } catch {
             return null;
           }
         },
@@ -385,7 +387,7 @@ export class ChatStorageService {
         .filter((chat): chat is NonNullable<typeof chat> => chat !== null);
 
       return successfulChats;
-    } catch (error) {
+    } catch {
       return [];
     }
   }

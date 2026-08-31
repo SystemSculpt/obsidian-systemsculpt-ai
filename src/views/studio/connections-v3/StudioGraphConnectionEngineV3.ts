@@ -320,7 +320,7 @@ export class StudioGraphConnectionEngineV3 {
   private openEdgeContextMenu(edgeId: string, clientX: number, clientY: number): void {
     const canvas = this.graphCanvasEl;
     if (!canvas) return;
-    const viewport = canvas.parentElement as HTMLElement | null;
+    const viewport = canvas.parentElement;
     if (!viewport) return;
     const viewportRect = viewport.getBoundingClientRect();
     const anchorX = Math.round(viewport.scrollLeft + (clientX - viewportRect.left));
@@ -368,7 +368,7 @@ export class StudioGraphConnectionEngineV3 {
     clientY: number
   ): void {
     if (!this.graphCanvasEl) return;
-    const viewport = this.graphCanvasEl.parentElement as HTMLElement | null;
+    const viewport = this.graphCanvasEl.parentElement;
     if (!viewport) return;
     if (!visible) {
       if (this.autoCreateHintEl) {
@@ -438,7 +438,7 @@ export class StudioGraphConnectionEngineV3 {
       this.portInteraction.getPortElement(nodeId, direction, portId) ??
       this.findPortElement(nodeId, direction, portId);
     if (!pin) return null;
-    const card = pin.closest(".ss-studio-node-card") as HTMLElement | null;
+    const card = pin.closest(".ss-studio-node-card");
     if (!card) return null;
     const cardRect = card.getBoundingClientRect();
     if (cardRect.width === 0 && cardRect.height === 0) return null;
@@ -457,7 +457,7 @@ export class StudioGraphConnectionEngineV3 {
   ): HTMLElement | null {
     if (!this.graphCanvasEl) return null;
     const selector = `.ss-studio-port-pin.is-${direction === "in" ? "input" : "output"}[data-node-id="${CSS.escape(nodeId)}"][data-port-id="${CSS.escape(portId)}"]`;
-    return this.graphCanvasEl.querySelector(selector) as HTMLElement | null;
+    return this.graphCanvasEl.querySelector(selector);
   }
 
   private cursorAnchorPoint(): { x: number; y: number } | null {

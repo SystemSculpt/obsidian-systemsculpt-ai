@@ -458,10 +458,7 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect(onEscape).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["composition", { isComposing: true }],
-    ["IME keyCode", { keyCode: 229 }],
-  ])("leaves %s Escape to the native editor", (_label, marker) => {
+  it("leaves composing Escape to the native editor", () => {
     const { app } = createFakeApp();
     const onEscape = jest.fn();
     const handle = createEmbeddableMarkdownEditor(app, document.body.createDiv(), {
@@ -474,11 +471,8 @@ describe("createEmbeddableMarkdownEditor", () => {
       key: "Escape",
       bubbles: true,
       cancelable: true,
-      isComposing: marker.isComposing ?? false,
+      isComposing: true,
     });
-    if (marker.keyCode) {
-      Object.defineProperty(event, "keyCode", { value: marker.keyCode });
-    }
 
     contentDOM.dispatchEvent(event);
 

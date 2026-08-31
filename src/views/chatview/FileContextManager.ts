@@ -30,7 +30,7 @@ export class FileContextManager {
   }
 
   private emitContextChanged(): void {
-    (this.app.workspace as any).trigger(FILE_CONTEXT_STATE_CHANGED_EVENT, {
+    this.app.workspace.trigger(FILE_CONTEXT_STATE_CHANGED_EVENT, {
       manager: this,
       kind: "context",
     } satisfies FileContextStateChangedEvent);

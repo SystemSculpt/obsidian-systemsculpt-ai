@@ -1,7 +1,6 @@
 import type {
   StudioAssetRef,
   StudioImageGenerationInput,
-  StudioJsonValue,
   StudioNodeDefinition,
   StudioNodeExecutionContext,
 } from "../types";
@@ -75,7 +74,7 @@ function resolveImagePrompt(context: StudioNodeExecutionContext): {
   // A wired prompt input wins; the node's own Prompt box is the fallback so
   // the node runs standalone without an upstream text node.
   const wiredPrompt = getText(rawPromptInput).trim();
-  const configuredPrompt = getText(context.node.config.prompt as StudioJsonValue).trim();
+  const configuredPrompt = getText(context.node.config.prompt).trim();
   return {
     prompt: clampImagePromptLength(wiredPrompt || configuredPrompt, IMAGE_PROMPT_MAX_CHARS),
     structuredInputImages: structured.inputImages,
@@ -219,12 +218,12 @@ export const imageGenerationNode: StudioNodeDefinition = {
           );
         }
         const inputImages = await resolveInputImages(context, structuredInputImages);
-        const countRaw = Number(context.node.config.count as StudioJsonValue);
+        const countRaw = Number(context.node.config.count);
         const count =
           Number.isFinite(countRaw) && countRaw > 0
             ? Math.min(IMAGE_OUTPUT_MAX_COUNT, Math.floor(countRaw))
             : 1;
-        const configuredAspectRatio = getText(context.node.config.aspectRatio as StudioJsonValue).trim();
+        const configuredAspectRatio = getText(context.node.config.aspectRatio).trim();
         const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
         return {
           prompt,
@@ -236,7 +235,7 @@ export const imageGenerationNode: StudioNodeDefinition = {
     });
     return {
       outputs: {
-        images: result.images as unknown as StudioJsonValue,
+        images: result.images,
       },
       artifacts: result.images,
       managedOperations: [result.operation],

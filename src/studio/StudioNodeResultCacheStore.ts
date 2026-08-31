@@ -11,7 +11,7 @@ const decoder = new TextDecoder();
 
 function normalizeNodeConfigForFingerprint(node: StudioNodeInstance): StudioNodeInstance["config"] {
   if (!isRecord(node.config)) return node.config;
-  const config = { ...(node.config as Record<string, StudioJsonValue>) }; const kind = String(node.kind || "").trim();
+  const config = { ...(node.config) }; const kind = String(node.kind || "").trim();
   if (kind === "studio.text_generation") { if (config.lockOutput !== true) { delete config.value; delete config.lockOutput; } delete config.textDisplayMode; }
   if (kind === "studio.transcription") { delete config.value; delete config.textDisplayMode; }
   if (kind === "studio.media_ingest" && isRecord(config.captionBoard)) { const board = { ...(config.captionBoard as Record<string, StudioJsonValue>) }; delete board.lastRenderedAsset; delete board.updatedAt; delete board.sourceAssetPath; config.captionBoard = board; }
@@ -27,7 +27,7 @@ function createEmptySnapshot(projectId: string): StudioNodeCacheSnapshotV1 { ret
 function normalizeEntry(raw: unknown): StudioNodeCacheEntry | null {
   if (!isRecord(raw)) return null;
   const required = ["nodeId", "nodeKind", "nodeVersion", "inputFingerprint", "updatedAt", "runId"] as const;
-  if (required.some((key) => typeof raw[key] !== "string" || !(raw[key] as string))) return null;
+  if (required.some((key) => typeof raw[key] !== "string" || !(raw[key]))) return null;
   return { nodeId: raw.nodeId as string, nodeKind: raw.nodeKind as string, nodeVersion: raw.nodeVersion as string, inputFingerprint: raw.inputFingerprint as string, outputs: isRecord(raw.outputs) ? raw.outputs as Record<string, StudioJsonValue> : {}, artifacts: Array.isArray(raw.artifacts) ? raw.artifacts as StudioNodeCacheEntry["artifacts"] : undefined, updatedAt: raw.updatedAt as string, runId: raw.runId as string };
 }
 

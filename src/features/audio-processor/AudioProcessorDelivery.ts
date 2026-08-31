@@ -1,5 +1,6 @@
 import { TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { replaceControlCharacters } from "../../utils/characterValidation";
 import { AUDIO_PROCESSOR_OUTPUT_DIRECTORY, type AudioProcessorArtifactKind } from "./types";
 
 type DeliveryArtifact = "full" | AudioProcessorArtifactKind;
@@ -313,8 +314,8 @@ function stableCollisionToken(jobId: string): string {
 function sanitizeMarkdownFilename(filename: string): string {
   const basename = filename.split(/[\\/]/).pop() ?? "Audio note";
   const withoutExtension = basename.replace(/\.md$/i, "");
-  const sanitized = withoutExtension
-    .replace(/[\x00-\x1f<>:"/\\|?*#[\]^]/g, "-")
+  const sanitized = replaceControlCharacters(withoutExtension, "-")
+    .replace(/[<>:"/\\|?*#[\]^]/g, "-")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")
     .trim()

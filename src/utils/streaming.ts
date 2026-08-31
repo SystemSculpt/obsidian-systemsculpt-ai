@@ -12,8 +12,8 @@ export async function postJsonStreaming(
   signal?: AbortSignal,
 ): Promise<Response> {
   const json = JSON.stringify(body);
-  if (!useBufferedFallback && typeof fetch === "function") {
-    return await fetch(url, {
+  if (!useBufferedFallback && typeof window.fetch === "function") {
+    return await window.fetch(url, {
       method: "POST",
       headers,
       body: json,

@@ -195,8 +195,8 @@ export function parseGraphClipboardPayload(raw: string): StudioGraphClipboardPay
   if (payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA) {
     return null;
   }
-  const nodes = Array.isArray(payload.nodes) ? (payload.nodes as StudioNodeInstance[]) : [];
-  const shapes = Array.isArray(payload.shapes) ? (payload.shapes as StudioShapeInstance[]) : [];
+  const nodes = Array.isArray(payload.nodes) ? (payload.nodes) : [];
+  const shapes = Array.isArray(payload.shapes) ? (payload.shapes) : [];
   if (nodes.length === 0 && shapes.length === 0) {
     return null;
   }
@@ -205,12 +205,12 @@ export function parseGraphClipboardPayload(raw: string): StudioGraphClipboardPay
     schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
     createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
     nodes,
-    edges: Array.isArray(payload.edges) ? (payload.edges as StudioEdge[]) : [],
-    groups: Array.isArray(payload.groups) ? (payload.groups as StudioNodeGroup[]) : [],
+    edges: Array.isArray(payload.edges) ? (payload.edges) : [],
+    groups: Array.isArray(payload.groups) ? (payload.groups) : [],
     shapes,
-    arrows: Array.isArray(payload.arrows) ? (payload.arrows as StudioShapeArrow[]) : [],
+    arrows: Array.isArray(payload.arrows) ? (payload.arrows) : [],
     selectedNodeIds: Array.isArray(payload.selectedNodeIds)
-      ? normalizeNodeIdList(payload.selectedNodeIds as string[])
+      ? normalizeNodeIdList(payload.selectedNodeIds)
       : [],
     anchor: {
       x:

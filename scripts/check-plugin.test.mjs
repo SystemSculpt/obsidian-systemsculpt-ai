@@ -16,6 +16,10 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(packageJson.scripts["check:all"], "npm run check:full");
   assert.equal(
+    packageJson.scripts["check:plugin:obsidian"],
+    "npm run lint:obsidian && npm run lint:obsidian:meta && npm run lint:community",
+  );
+  assert.equal(
     packageJson.scripts["check:ci"],
     "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
       + "&& npm run test:chatview:mutants "

@@ -1,4 +1,5 @@
 import { sha256HexFromArrayBuffer } from "../../../studio/hash";
+import { containsControlCharacters } from "../../../utils/characterValidation";
 import type { ManagedTransportResult } from "../../managed/ManagedTypes";
 import type { HostedTransportAdapter } from "../../managed/adapters/HostedTransportAdapter";
 
@@ -224,21 +225,23 @@ function parseGeneration(value: unknown): ManagedEmbeddingsIndexGeneration | nul
   if (
     typeof id !== "string"
     || !GENERATION_ID.test(id)
+    || typeof schemaVersion !== "number"
     || !Number.isInteger(schemaVersion)
-    || (schemaVersion as number) < 1
-    || (schemaVersion as number) > MAX_GENERATION_SCHEMA_VERSION
+    || schemaVersion < 1
+    || schemaVersion > MAX_GENERATION_SCHEMA_VERSION
+    || typeof dimensions !== "number"
     || !Number.isInteger(dimensions)
-    || (dimensions as number) < 1
-    || (dimensions as number) > MAX_VECTOR_DIMENSIONS
+    || dimensions < 1
+    || dimensions > MAX_VECTOR_DIMENSIONS
     || namespace !== `systemsculpt:managed:${id}:v${schemaVersion}:${dimensions}`
   ) {
     return null;
   }
   return {
     id,
-    indexSchemaVersion: schemaVersion as number,
-    indexNamespace: namespace as string,
-    dimensions: dimensions as number,
+    indexSchemaVersion: schemaVersion,
+    indexNamespace: namespace,
+    dimensions,
   };
 }
 
@@ -329,9 +332,10 @@ export class ManagedEmbeddingsIndexAdapter {
         ])
         || typeof payload.generation.id !== "string"
         || !GENERATION_ID.test(payload.generation.id)
+        || typeof payload.generation.index_schema_version !== "number"
         || !Number.isInteger(payload.generation.index_schema_version)
-        || (payload.generation.index_schema_version as number) < 1
-        || (payload.generation.index_schema_version as number) > MAX_GENERATION_SCHEMA_VERSION
+        || payload.generation.index_schema_version < 1
+        || payload.generation.index_schema_version > MAX_GENERATION_SCHEMA_VERSION
         || payload.generation.index_namespace_template
           !== `systemsculpt:managed:${payload.generation.id}:v${payload.generation.index_schema_version}:<dimensions>`
         || !isRecord(payload.limits)
@@ -350,8 +354,8 @@ export class ManagedEmbeddingsIndexAdapter {
         vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
         generation: {
           id: payload.generation.id,
-          indexSchemaVersion: payload.generation.index_schema_version as number,
-          indexNamespaceTemplate: payload.generation.index_namespace_template as string,
+          indexSchemaVersion: payload.generation.index_schema_version,
+          indexNamespaceTemplate: payload.generation.index_namespace_template,
         },
         limits: {
           maxSourceBytes: payload.limits.max_source_bytes as number,
@@ -381,7 +385,7 @@ export class ManagedEmbeddingsIndexAdapter {
       );
     }
     const querySha256 = await sha256HexFromArrayBuffer(
-      new TextEncoder().encode(normalized).buffer as ArrayBuffer,
+      new TextEncoder().encode(normalized).buffer,
     );
     if (signal?.aborted) throw requestCancelled();
 
@@ -477,7 +481,7 @@ export class ManagedEmbeddingsIndexAdapter {
     const body = encoded.buffer.slice(
       encoded.byteOffset,
       encoded.byteOffset + encoded.byteLength,
-    ) as ArrayBuffer;
+    );
     const contentSha256 = await sha256HexFromArrayBuffer(body);
     if (operation.signal?.aborted) throw requestCancelled();
 
@@ -572,7 +576,7 @@ export class ManagedEmbeddingsIndexAdapter {
         || typeof error.message !== "string"
         || error.message.length < 1
         || error.message.length > MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH
-        || /[\u0000-\u001f\u007f]/u.test(error.message)
+        || containsControlCharacters(error.message)
       ) return null;
       if (
         error.request_id !== undefined
@@ -622,7 +626,7 @@ export class ManagedEmbeddingsIndexAdapter {
         !== MANAGED_EMBEDDINGS_INDEX_CONTRACT
       || !requestId
       || requestId.length > 256
-      || /[\u0000-\u001f\u007f]/.test(requestId)
+      || containsControlCharacters(requestId)
     ) {
       throw this.invalidResponse(result);
     }

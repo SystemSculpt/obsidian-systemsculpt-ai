@@ -1,8 +1,9 @@
 import { App, Notice, TFile, normalizePath } from "obsidian";
-import type {
-  StudioNodeDefinition,
-  StudioNodeInstance,
-  StudioProjectV1,
+import {
+  STUDIO_DISPLAY_NAME,
+  type StudioNodeDefinition,
+  type StudioNodeInstance,
+  type StudioProjectV1,
 } from "../../../studio/types";
 import { mutateStudioDiagram } from "../../../studio/StudioShapes";
 import { randomId } from "../../../studio/utils";
@@ -457,7 +458,7 @@ export class StudioClipboardAndDropController {
       return;
     }
     if (dropped.folderPaths.length > 0) {
-      new Notice("Dropping folders into Studio is not supported yet.");
+      new Notice(`Dropping folders into ${STUDIO_DISPLAY_NAME} is not supported yet.`);
     }
 
     const anchor =
@@ -481,7 +482,7 @@ export class StudioClipboardAndDropController {
       handledSomething = true;
     }
     if (!handledSomething && dropped.unsupportedPaths.length > 0) {
-      new Notice("Only Markdown notes and media files can be dropped into Studio.");
+      new Notice(`Only Markdown notes and media files can be dropped into ${STUDIO_DISPLAY_NAME}.`);
     }
   }
 

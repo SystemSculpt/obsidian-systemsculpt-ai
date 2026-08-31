@@ -1,6 +1,6 @@
 /** Lightweight namespaced event emitter for plugin lifecycle events. */
 export class EventEmitter {
-  private events: Record<string, Array<(...args: any[]) => void>> = {};
+  private events: Record<string, Array<(...args: unknown[]) => void>> = {};
   
   // Track event listeners by namespace for easier management
   private namespaceListeners: Record<string, Set<string>> = {};
@@ -11,7 +11,7 @@ export class EventEmitter {
    * @param listener Function to call when event is emitted
    * @returns Unsubscribe function
    */
-  public on(event: string, listener: (...args: any[]) => void): () => void {
+  public on(event: string, listener: (...args: unknown[]) => void): () => void {
     if (!this.events[event]) {
       this.events[event] = [];
     }
@@ -33,8 +33,8 @@ export class EventEmitter {
    * @param listener Function to call when event is emitted
    * @returns Unsubscribe function
    */
-  public once(event: string, listener: (...args: any[]) => void): () => void {
-    const remove = this.on(event, (...args: any[]) => {
+  public once(event: string, listener: (...args: unknown[]) => void): () => void {
+    const remove = this.on(event, (...args: unknown[]) => {
       remove();
       listener(...args);
     });
@@ -46,7 +46,7 @@ export class EventEmitter {
    * @param event Event name
    * @param args Arguments to pass to listeners
    */
-  public emit(event: string, ...args: any[]): void {
+  public emit(event: string, ...args: unknown[]): void {
     const callbacks = this.events[event];
     if (callbacks) {
       callbacks.forEach(callback => callback(...args));

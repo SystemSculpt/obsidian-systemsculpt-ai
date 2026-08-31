@@ -1,6 +1,6 @@
 import { ERROR_CODES, type ErrorCode, SystemSculptError } from "../utils/errors";
 
-function retryAfterSeconds(response: Response, payload: Record<string, any>): number | undefined {
+function retryAfterSeconds(response: Response, payload: Record<string, unknown>): number | undefined {
   const raw = response.headers?.get?.("retry-after") ?? payload.retry_after_seconds ?? payload.retry_after;
   const numeric = Number(raw);
   if (Number.isFinite(numeric) && numeric >= 0) return Math.ceil(numeric);
@@ -11,7 +11,7 @@ function retryAfterSeconds(response: Response, payload: Record<string, any>): nu
   return undefined;
 }
 
-function decodePayload(text: string): Record<string, any> {
+function decodePayload(text: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(text);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -35,7 +35,11 @@ export class StreamingErrorHandler {
     context?: { endpoint?: string },
   ): Promise<never> {
     const payload = decodePayload(await response.text());
-    const nested = payload.error && typeof payload.error === "object" ? payload.error : {};
+    const nested: Record<string, unknown> = payload.error
+      && typeof payload.error === "object"
+      && !Array.isArray(payload.error)
+      ? payload.error as Record<string, unknown>
+      : {};
     const serverCode = String(nested.code ?? payload.code ?? "").trim().toLowerCase();
     const code = errorCode(response.status, serverCode);
     const message = String(nested.message ?? payload.message ?? "").trim() ||

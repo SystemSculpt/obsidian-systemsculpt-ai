@@ -19,6 +19,7 @@ import {
   serializeEmbeddingsIndex,
   type SerializedEmbeddingsIndex,
 } from './EmbeddingsIndexSerialization';
+import { toError } from "../../../utils/errors";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 const DB_VERSION = 11;
@@ -52,7 +53,7 @@ export class EmbeddingsStorage {
       const store = tx.objectStore(STORE_NAME);
       const req = store.count();
       req.onsuccess = () => resolve(typeof req.result === "number" ? req.result : 0);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
     });
   }
 
@@ -86,7 +87,7 @@ export class EmbeddingsStorage {
 
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open(this.dbName, DB_VERSION);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       request.onsuccess = () => {
         this.db = request.result;
         this.initialized = true;
@@ -152,7 +153,7 @@ export class EmbeddingsStorage {
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -167,7 +168,7 @@ export class EmbeddingsStorage {
       try {
         transaction = this.db!.transaction([STORE_NAME], 'readwrite');
       } catch (error) {
-        reject(error);
+        reject(toError(error, "IndexedDB initialization failed."));
         return;
       }
 
@@ -189,7 +190,7 @@ export class EmbeddingsStorage {
         }
         resolve();
       };
-      transaction.onerror = () => reject(transaction.error);
+      transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
       transaction.onabort = () =>
         reject(transaction.error || new Error('IndexedDB transaction aborted while storing vectors.'));
     });
@@ -237,7 +238,7 @@ export class EmbeddingsStorage {
         }
         for (const vector of vectors) store.put(vector);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (
@@ -251,7 +252,7 @@ export class EmbeddingsStorage {
         this.pathsSet.add(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path publication aborted."));
     });
   }
@@ -274,7 +275,7 @@ export class EmbeddingsStorage {
         for (const id of (request.result || []) as string[]) store.delete(id);
         for (const vector of vectors) store.put(vector);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.path === path) this.cache.delete(id);
@@ -288,7 +289,7 @@ export class EmbeddingsStorage {
         else this.pathsSet.delete(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path replacement aborted."));
     });
   }
@@ -311,8 +312,8 @@ export class EmbeddingsStorage {
           }
           resolve(items);
         };
-        req.onerror = () => reject(req.error);
-      } catch (e) {
+        req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
+      } catch {
         resolve([]);
       }
     });
@@ -341,7 +342,7 @@ export class EmbeddingsStorage {
         store.put(updated);
         store.delete(oldId);
       };
-      getOld.onerror = () => reject(getOld.error);
+      getOld.onerror = () => reject(toError(getOld.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         if (updated) {
           this.cache.delete(oldId);
@@ -350,7 +351,7 @@ export class EmbeddingsStorage {
         }
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB vector move aborted."));
     });
   }
@@ -478,7 +479,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STORE_NAME], "readonly");
       const request = tx.objectStore(STORE_NAME).getAll();
       request.onsuccess = () => resolve((request.result || []) as EmbeddingVector[]);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -520,7 +521,7 @@ export class EmbeddingsStorage {
           const results = (req.result || []) as EmbeddingVector[];
           resolve(results);
         };
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       } catch {
         resolve([]);
       }
@@ -557,12 +558,12 @@ export class EmbeddingsStorage {
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         if (!stopped && batch.length > 0 && !options.signal?.aborted) onBatch(batch);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -583,7 +584,7 @@ export class EmbeddingsStorage {
         resolve();
       };
 
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -602,7 +603,7 @@ export class EmbeddingsStorage {
     return new Promise((resolve, reject) => {
       const deleteRequest = indexedDB.deleteDatabase(this.dbName);
       deleteRequest.onsuccess = () => resolve();
-      deleteRequest.onerror = () => reject(deleteRequest.error);
+      deleteRequest.onerror = () => reject(toError(deleteRequest.error, "IndexedDB reset failed."));
       deleteRequest.onblocked = () => reject(new Error("IndexedDB reset was blocked by another open connection."));
     });
   }
@@ -627,7 +628,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readonly");
       const request = tx.objectStore(STATE_STORE_NAME).get(key);
       request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -637,7 +638,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readwrite");
       tx.objectStore(STATE_STORE_NAME).put(value, key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -647,7 +648,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readwrite");
       tx.objectStore(STATE_STORE_NAME).delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -672,7 +673,7 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB vector removal aborted."));
     });
   }
@@ -689,7 +690,7 @@ export class EmbeddingsStorage {
       req.onsuccess = () => {
         for (const key of (req.result || []) as string[]) store.delete(key);
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.path === path) this.cache.delete(id);
@@ -697,7 +698,7 @@ export class EmbeddingsStorage {
         this.pathsSet.delete(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path deletion aborted."));
     });
   }
@@ -719,13 +720,13 @@ export class EmbeddingsStorage {
           .filter((id) => id.startsWith(prefix) && !keepIds.has(id));
         for (const id of deletedIds) store.delete(id);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const id of deletedIds) this.cache.delete(id);
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB stale-chunk removal aborted."));
     });
   }
@@ -749,7 +750,7 @@ export class EmbeddingsStorage {
         }
         store.put(root);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.path === path && id.startsWith(prefix) && !keepIds.has(id)) this.cache.delete(id);
@@ -758,7 +759,7 @@ export class EmbeddingsStorage {
         this.pathsSet.add(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB note finalization aborted."));
     });
   }
@@ -791,7 +792,7 @@ export class EmbeddingsStorage {
           store.put(updated);
         }
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) if (vector.path === oldPath) this.cache.delete(id);
         for (const vector of updates) {
@@ -801,7 +802,7 @@ export class EmbeddingsStorage {
         if (updates.length > 0) this.pathsSet.add(newPath);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path rename aborted."));
     });
   }
@@ -829,11 +830,11 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB directory rename aborted."));
 
       const cursorRequest = store.index("by_path").openCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
+      cursorRequest.onerror = () => reject(toError(cursorRequest.error, "IndexedDB cursor failed."));
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
         if (!cursor) return;
@@ -886,11 +887,11 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB directory removal aborted."));
 
       const cursorRequest = store.index("by_path").openKeyCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
+      cursorRequest.onerror = () => reject(toError(cursorRequest.error, "IndexedDB cursor failed."));
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
         if (!cursor) return;
@@ -919,11 +920,11 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+      tx.onabort = () => reject(toError(tx.error, "IndexedDB transaction aborted."));
 
       const cursorRequest = index.openKeyCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
+      cursorRequest.onerror = () => reject(toError(cursorRequest.error, "IndexedDB cursor failed."));
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
         if (!cursor) return;
@@ -952,7 +953,7 @@ export class EmbeddingsStorage {
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.metadata.namespace.startsWith(prefix) && vector.metadata.namespace !== keepNamespace) {
@@ -962,7 +963,7 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
     return removed;
   }

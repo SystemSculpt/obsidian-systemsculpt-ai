@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import {
   getText,
   parseStructuredPromptInput,
@@ -35,7 +35,7 @@ export const textGenerationNode: StudioNodeDefinition = {
     if (lockOutput) {
       return {
         outputs: {
-          text: getText(context.node.config.value as StudioJsonValue),
+          text: getText(context.node.config.value),
         },
       };
     }
@@ -51,7 +51,7 @@ export const textGenerationNode: StudioNodeDefinition = {
         if (!prompt) {
           throw new Error(`Text generation node "${context.node.id}" requires a prompt input.`);
         }
-        const configuredTemplate = getText(context.node.config.systemPrompt as StudioJsonValue);
+        const configuredTemplate = getText(context.node.config.systemPrompt);
         const templateVariables = resolveTemplateVariables(context);
         const configuredSystemPrompt = renderTemplate(configuredTemplate, templateVariables).trim();
         const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim() || undefined;

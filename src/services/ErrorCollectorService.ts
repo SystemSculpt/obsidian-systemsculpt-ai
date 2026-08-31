@@ -18,7 +18,7 @@ export class ErrorCollectorService {
   private static earlyBuffer: CapturedLogEntry[] = [];
   private static maxEarlyLogs = 250;
   private static consolePatched = false;
-  private static originalConsole: Partial<Record<CapturedLevel, (...args: any[]) => void>> = {};
+  private static originalConsole: Partial<Record<CapturedLevel, (...args: unknown[]) => void>> = {};
   private static activeInstances: Set<ErrorCollectorService> = new Set();
 
   static initializeEarlyLogsCapture(maxLogs: number = 250): void {
@@ -27,10 +27,14 @@ export class ErrorCollectorService {
     }
 
     this.maxEarlyLogs = maxLogs;
+    const mutableConsole = console as Console & Record<
+      CapturedLevel,
+      (...args: unknown[]) => void
+    >;
     (["log", "info", "warn", "error", "debug"] as CapturedLevel[]).forEach((level) => {
-      const original = (console as any)[level]?.bind(console) ?? console.warn.bind(console);
+      const original = mutableConsole[level].bind(console);
       this.originalConsole[level] = original;
-      (console as any)[level] = (...args: any[]) => {
+      mutableConsole[level] = (...args: unknown[]) => {
         try {
           this.pushEarly(level, args);
         } catch {
@@ -42,7 +46,7 @@ export class ErrorCollectorService {
     this.consolePatched = true;
   }
 
-  private static pushEarly(level: CapturedLevel, args: any[]) {
+  private static pushEarly(level: CapturedLevel, args: unknown[]) {
     const first = args[0];
     const isSystemSculpt = typeof first === "string" && first.startsWith("[SystemSculpt");
     const entry: CapturedLogEntry = {
@@ -157,10 +161,14 @@ export class ErrorCollectorService {
     if (!ErrorCollectorService.consolePatched || typeof console === "undefined") {
       return;
     }
+    const mutableConsole = console as Console & Record<
+      CapturedLevel,
+      (...args: unknown[]) => void
+    >;
     (["log", "info", "warn", "error", "debug"] as CapturedLevel[]).forEach((level) => {
       const original = ErrorCollectorService.originalConsole[level];
       if (original) {
-        (console as any)[level] = original;
+        mutableConsole[level] = original;
       }
     });
     ErrorCollectorService.consolePatched = false;
@@ -169,7 +177,7 @@ export class ErrorCollectorService {
   }
 }
 
-function stringifyArgs(args: any[]): string {
+function stringifyArgs(args: unknown[]): string {
   try {
     const limited = args.slice(0, MAX_CONSOLE_ARGS);
     return limited

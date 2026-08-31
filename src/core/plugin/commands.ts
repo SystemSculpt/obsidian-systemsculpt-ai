@@ -1,5 +1,5 @@
 import { App, Notice, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
-import SystemSculptPlugin from "../../main";
+import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
@@ -8,7 +8,7 @@ import { showConfirm } from "../ui/notifications";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
-import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
+import { STUDIO_DISPLAY_NAME, STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import {
   isAudioFileExtension,
   isAutoDocumentConversionFileExtension,
@@ -19,6 +19,7 @@ import type {
   AudioProcessorArtifactKind,
   AudioProcessorOutputPreset,
 } from "../../features/audio-processor/types";
+import { AgentChatView } from "../../views/chatview/AgentChatView";
 
 type ActiveAudioArtifactReference = {
   artifactJobId: string;
@@ -44,16 +45,10 @@ type ChatCommandViewLike = {
   setTitle(title: string): Promise<void>;
 };
 
-type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
-
 async function loadTitleGenerationServiceModule(): Promise<
   typeof import("../../services/TitleGenerationService")
 > {
   return await import("../../services/TitleGenerationService");
-}
-
-function loadAgentChatViewModule(): AgentChatViewModule {
-  return require("../../views/chatview/AgentChatView");
 }
 
 export class CommandManager {
@@ -340,13 +335,14 @@ export class CommandManager {
         if (!supported) return false;
         if (!checking) {
           const leaf = this.app.workspace.getLeaf("tab");
-          const { AgentChatView } = loadAgentChatViewModule();
           const view = new AgentChatView(leaf, this.plugin);
-          leaf.open(view).then(async () => {
+          void leaf.open(view).then(async () => {
             await new Promise((resolve) => getSurfaceOwnerWindow(view.containerEl).setTimeout(resolve, 50));
             this.app.workspace.setActiveLeaf(leaf, { focus: true });
             await view.addFileToContext(activeFile);
             view.focusInput();
+          }).catch(() => {
+            new Notice("Unable to open chat with this file.", 5000);
           });
         }
         return true;
@@ -372,7 +368,7 @@ export class CommandManager {
           
           if (chatId) {
             // Resume the chat
-            this.plugin.resumeChatService.openChat(chatId, activeFile.path);
+            void this.plugin.resumeChatService.openChat(chatId, activeFile.path);
           } else {
             new Notice("Could not extract chat ID from this file.", 5000);
           }
@@ -397,7 +393,7 @@ export class CommandManager {
         if (chatView) {
           if (chatView.messages.length === 0) return false;
           if (!checking) {
-            (async () => {
+            void (async () => {
               // Show initial notice
               const notice = new Notice("Creating title from content...", 0);
 
@@ -432,7 +428,7 @@ export class CommandManager {
         const activeFile = this.resolveTitleTargetFile();
         if (!activeFile) {
           if (!checking) {
-            new Notice("You need to be within a note, Studio workflow, or chat view to change the title.", 5000);
+            new Notice(`You need to be within a note, ${STUDIO_DISPLAY_NAME} workflow, or chat view to change the title.`, 5000);
           }
           return false;
         }
@@ -446,7 +442,7 @@ export class CommandManager {
         }
 
         if (!checking) {
-          (async () => {
+          void (async () => {
             // Show initial notice
             const notice = new Notice("Creating title from content...", 0);
 
@@ -495,7 +491,8 @@ export class CommandManager {
         try {
           await this.plugin.getViewManager().activateEmbeddingsView();
         } catch (error) {
-          new Notice(`Error opening similar notes panel: ${error.message}`);
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Error opening similar notes panel: ${message}`);
         }
       },
     });
@@ -504,20 +501,21 @@ export class CommandManager {
   private registerSystemSculptStudioCommands() {
     this.plugin.addCommand({
       id: "new-systemsculpt-studio-project",
-      name: "New Studio project",
+      name: `New ${STUDIO_DISPLAY_NAME} project`,
       callback: async () => {
         try {
           const project = await this.createAndOpenStudioProject();
           new Notice(`Created Studio project: ${project.name}`);
-        } catch (error: any) {
-          new Notice(`Unable to create Studio project: ${error?.message || error}`);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Unable to create Studio project: ${message}`);
         }
       },
     });
 
     this.plugin.addCommand({
       id: "open-systemsculpt-studio",
-      name: "Open Studio",
+      name: `Open ${STUDIO_DISPLAY_NAME}`,
       callback: async () => {
         try {
           const activeFile = this.app.workspace.getActiveFile();
@@ -537,15 +535,16 @@ export class CommandManager {
           }
 
           await this.plugin.getViewManager().activateSystemSculptStudioView(fallbackStudioFile.path);
-        } catch (error: any) {
-          new Notice(`Unable to open Studio: ${error?.message || error}`);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Unable to open Studio: ${message}`);
         }
       },
     });
 
     this.plugin.addCommand({
       id: "run-systemsculpt-studio-project",
-      name: "Run current Studio project",
+      name: `Run current ${STUDIO_DISPLAY_NAME} project`,
       callback: async () => {
         try {
           const studio = this.plugin.getStudioService();
@@ -560,8 +559,9 @@ export class CommandManager {
           } else {
             new Notice(`Studio run failed: ${result.error || result.runId}`);
           }
-        } catch (error: any) {
-          new Notice(`Unable to run Studio project: ${error?.message || error}`);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Unable to run Studio project: ${message}`);
         }
       },
     });
@@ -599,9 +599,6 @@ export class CommandManager {
     this.plugin.addCommand({
       id: "copy-current-file-path",
       name: "Copy current file path",
-      // This workflow intentionally ships with the documented product shortcut.
-      // eslint-disable-next-line obsidianmd/commands/no-default-hotkeys
-      hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
       checkCallback: (checking: boolean) => {
         const currentFilePath = this.getCurrentActiveFilePath();
         if (!currentFilePath) {
@@ -718,12 +715,11 @@ export class CommandManager {
       return null;
     }
 
-    const getAbstractFileByPath = this.app.vault?.getAbstractFileByPath;
-    if (typeof getAbstractFileByPath !== "function") {
+    if (typeof this.app.vault?.getAbstractFileByPath !== "function") {
       return null;
     }
 
-    const abstractFile = getAbstractFileByPath.call(this.app.vault, normalizedPath);
+    const abstractFile = this.app.vault.getAbstractFileByPath(normalizedPath);
     if (!(abstractFile instanceof TFile)) {
       return null;
     }
@@ -808,7 +804,7 @@ export class CommandManager {
         if (!embeddingsEnabled) return false;
         
         if (!checking) {
-          this.showEmbeddingsDatabaseStats();
+          void this.showEmbeddingsDatabaseStats();
         }
         return true;
       }

@@ -12,6 +12,15 @@ import {
   wouldExceedCharLimit,
   fuzzyMatchScore,
 } from "../utils";
+import { desktopHost } from "../../../platform/desktopOnly";
+
+beforeEach(() => {
+  jest.spyOn(desktopHost, "fs").mockResolvedValue(require("node:fs/promises"));
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 describe("formatBytes", () => {
   it("returns '0 Bytes' for 0", () => {
@@ -523,11 +532,11 @@ describe("resolveAdapterPath", () => {
       expect(result).toContain("subfolder");
     });
 
-    it("allows paths that contain .. but stay within vault", () => {
+    it("rejects dot segments even when they would normalize inside the vault", () => {
       const adapter = { getBasePath: () => "/vault" };
-      // folder/sub/../file.md resolves to folder/file.md which is still in vault
-      const result = resolveAdapterPath(adapter, "folder/sub/../file.md");
-      expect(result).toBeDefined();
+      expect(() => resolveAdapterPath(adapter, "folder/sub/../file.md")).toThrow(
+        "Path traversal detected"
+      );
     });
 
     it("prevents prefix attack (vault-escape vs vault)", () => {

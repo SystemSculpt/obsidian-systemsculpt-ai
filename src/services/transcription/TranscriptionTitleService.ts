@@ -94,7 +94,7 @@ export class TranscriptionTitleService {
     try {
       await app.fileManager.renameFile(transcriptionFile, destinationPath);
       return destinationPath;
-    } catch (_) {
+    } catch {
       return transcriptionFile.path;
     }
   }

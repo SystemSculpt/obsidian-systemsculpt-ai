@@ -133,7 +133,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       }
       const revealPath = resolveMediaIngestRevealPath(
         node,
-        nodeRunState.outputs as Record<string, unknown> | null,
+        nodeRunState.outputs,
         ""
       );
       if (!revealPath) {
@@ -146,7 +146,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
 
   const mediaPreviewDescriptor = resolveNodeMediaPreview(
     node,
-    nodeRunState.outputs as Record<string, unknown> | null
+    nodeRunState.outputs
   );
   const mediaPreviewSrc =
     mediaPreviewDescriptor && resolveAssetPreviewSrc

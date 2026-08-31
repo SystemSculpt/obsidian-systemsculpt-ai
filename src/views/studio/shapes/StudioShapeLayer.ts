@@ -562,7 +562,7 @@ function resolveShapeIdAtPoint(canvasEl: HTMLElement, event: PointerEvent): stri
   const released = ownerDocument.elementFromPoint(event.clientX, event.clientY);
   const shapeEl =
     typeof released?.closest === "function"
-      ? (released.closest(".ss-studio-shape") as HTMLElement | null)
+      ? released.closest<HTMLElement>(".ss-studio-shape")
       : null;
   return shapeEl?.dataset.shapeId || null;
 }

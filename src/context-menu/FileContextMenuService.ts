@@ -35,6 +35,8 @@ import { tryCopyImageFileToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { isPlanAccessError } from "../utils/errors";
 import { requireActivePlan, UpgradePlanModal } from "../modals/UpgradePlanModal";
+import { STUDIO_DISPLAY_NAME } from "../studio/types";
+import { AgentChatView } from "../views/chatview/AgentChatView";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const COPYABLE_IMAGE_EXTENSIONS = new Set([
@@ -50,12 +52,6 @@ const NEW_STUDIO_PROJECT_NAME = "New Studio Project";
 const NEW_STUDIO_PROJECT_FILE_NAME = `${NEW_STUDIO_PROJECT_NAME}.systemsculpt`;
 
 type ProcessingFlow = "document" | "audio";
-
-type AgentChatViewModule = typeof import("../views/chatview/AgentChatView");
-
-function loadAgentChatViewModule(): AgentChatViewModule {
-  return require("../views/chatview/AgentChatView");
-}
 
 export interface DocumentProcessor {
   processDocument(
@@ -93,7 +89,6 @@ class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
 
   async open(file: TFile): Promise<void> {
     const leaf = this.app.workspace.getLeaf("tab");
-    const { AgentChatView } = loadAgentChatViewModule();
     const view = new AgentChatView(leaf, this.plugin);
     await leaf.open(view);
     await this.focusLeaf(leaf, view.containerEl);
@@ -129,9 +124,7 @@ export class FileContextMenuService {
       options.chatLauncher ?? new DefaultChatWithFileLauncher(this.app, this.plugin);
     this.pluginLogger =
       options.pluginLogger ??
-      (typeof (this.plugin as any).getPluginLogger === "function"
-        ? (this.plugin as any).getPluginLogger()
-        : null);
+      this.plugin.getPluginLogger();
     this.launchProcessingPanel = options.launchProcessingPanel ?? launchDocumentProcessingPanel;
 
     this.start();
@@ -147,7 +140,7 @@ export class FileContextMenuService {
       this.cleanupRegistered = true;
     }
 
-    const workspaceAny = this.app.workspace as any;
+    const workspace = this.app.workspace;
     const bindHandlers = () => {
       if (this.started) {
         return;
@@ -169,23 +162,23 @@ export class FileContextMenuService {
       this.awaitingLayoutReady = false;
 
       this.info("File context menu service started", {
-        layoutReady: Boolean(workspaceAny?.layoutReady),
+        layoutReady: workspace.layoutReady,
       });
     };
 
-    if (workspaceAny?.layoutReady) {
+    if (workspace.layoutReady) {
       bindHandlers();
       return;
     }
 
-    if (typeof workspaceAny?.onLayoutReady === "function") {
+    if (typeof workspace.onLayoutReady === "function") {
       if (this.awaitingLayoutReady) {
         this.debug("Layout ready listener already registered");
         return;
       }
 
       this.awaitingLayoutReady = true;
-      workspaceAny.onLayoutReady(() => {
+      workspace.onLayoutReady(() => {
         this.awaitingLayoutReady = false;
         bindHandlers();
       });
@@ -197,7 +190,7 @@ export class FileContextMenuService {
     }
 
     this.debug("Workspace missing onLayoutReady hook, binding immediately", {
-      typeofOnLayoutReady: typeof workspaceAny?.onLayoutReady,
+      typeofOnLayoutReady: typeof workspace.onLayoutReady,
     });
     bindHandlers();
   }
@@ -275,7 +268,7 @@ export class FileContextMenuService {
   private populateFolderMenu(menu: Menu, folder: TFolder, context: MenuContext): void {
     menu.addItem((item) => {
       item
-        .setTitle("New Studio project")
+        .setTitle(`New ${STUDIO_DISPLAY_NAME} project`)
         .setIcon("workflow")
         .setSection("action")
         .onClick(async () => {
@@ -530,8 +523,8 @@ export class FileContextMenuService {
         file,
         openOutput,
       });
-    } catch (error: any) {
-      if (controller.signal.aborted || error?.name === "AbortError") return;
+    } catch (error: unknown) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
       const message = error instanceof Error ? error.message : String(error);
       this.error("Document conversion failed", error, {
         filePath: file.path,

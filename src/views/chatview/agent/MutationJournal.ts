@@ -40,9 +40,7 @@ export function canonicalAgentToolInput(value: unknown): string {
 
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
-  // The vault journal is host-level state shared across popout windows.
-  // eslint-disable-next-line obsidianmd/no-global-this
-  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+  const digest = new Uint8Array(await window.crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

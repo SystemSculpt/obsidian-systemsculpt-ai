@@ -1181,7 +1181,7 @@ function validateRunSummary(value: CanonicalJson): CanonicalObject {
   validateLifecyclePhaseCounts(summary.lifecycle_phase_counts);
 
   if (summary.started_at !== undefined && summary.duration_ms !== undefined && summary.duration_clock_domain === "client_wall_clock_observed") {
-    const elapsed = Date.parse(summary.failed_at as string) - Date.parse(summary.started_at as string);
+    const elapsed = Date.parse(summary.failed_at) - Date.parse(summary.started_at);
     if (elapsed !== summary.duration_ms) invalidReport();
   }
   return summary;

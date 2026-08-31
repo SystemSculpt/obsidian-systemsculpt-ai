@@ -103,7 +103,7 @@ export function readStudioNodeCollapsedVisibilityOverrides(
   const parsed: Partial<Record<StudioCollapsedDetailSection, boolean>> = {};
   for (const section of ALL_COLLAPSED_DETAIL_SECTIONS) {
     if (typeof raw[section] === "boolean") {
-      parsed[section] = raw[section] as boolean;
+      parsed[section] = raw[section];
     }
   }
   return parsed;
@@ -142,7 +142,7 @@ export function writeStudioCollapsedSectionVisibilityOverride(options: {
   const config = node.config as Record<string, unknown>;
   const currentRaw = config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY];
   const previousOverrides = isRecord(currentRaw)
-    ? (currentRaw as Record<string, unknown>)
+    ? (currentRaw)
     : {};
   const nextOverrides: Record<string, unknown> = { ...previousOverrides };
   const defaultVisibility = resolveStudioCollapsedSectionDefaultVisibility(section);
@@ -155,7 +155,7 @@ export function writeStudioCollapsedSectionVisibilityOverride(options: {
   const normalized: Record<string, boolean> = {};
   for (const candidate of ALL_COLLAPSED_DETAIL_SECTIONS) {
     if (typeof nextOverrides[candidate] === "boolean") {
-      normalized[candidate] = nextOverrides[candidate] as boolean;
+      normalized[candidate] = nextOverrides[candidate];
     }
   }
 

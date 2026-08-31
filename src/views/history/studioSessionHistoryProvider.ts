@@ -41,7 +41,7 @@ async function toggleFavoriteStudioSession(plugin: SystemSculptPlugin, projectPa
   const next = Array.from(favorites).sort((a, b) => a.localeCompare(b));
   await plugin.getSettingsManager().updateSettings({
     favoriteStudioSessions: next,
-  } as any);
+  });
 
   return next.includes(normalizedPath);
 }

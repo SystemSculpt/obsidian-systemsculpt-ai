@@ -1144,11 +1144,11 @@ export class EmbeddingsManager {
 
   private async hydrateManagedIdentityFromStorage(): Promise<void> {
     const inferred = this.storage.peekCurrentManagedNamespace();
-    const listNamespaces = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
-    }).listManagedRootNamespaces;
-    const available = typeof listNamespaces === "function"
-      ? listNamespaces.call(this.storage).filter(isManagedNamespace)
+    };
+    const available = typeof storage.listManagedRootNamespaces === "function"
+      ? storage.listManagedRootNamespaces().filter(isManagedNamespace)
       : inferred && isManagedNamespace(inferred)
         ? [inferred]
         : [];
@@ -1188,35 +1188,39 @@ export class EmbeddingsManager {
   }
 
   private async readCommittedNamespace(): Promise<string | null> {
-    const readState = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       readState?: EmbeddingsStorage["readState"];
-    }).readState;
-    if (typeof readState !== "function") return null;
-    const stored = await readState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY) as CommittedNamespaceState | null;
-    return stored?.version === 1 && isManagedNamespace(stored.namespace)
-      ? stored.namespace
+    };
+    if (typeof storage.readState !== "function") return null;
+    const stored: unknown = await storage.readState(COMMITTED_NAMESPACE_STATE_KEY);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+    const candidate = stored as Record<string, unknown>;
+    return candidate.version === 1
+      && typeof candidate.namespace === "string"
+      && isManagedNamespace(candidate.namespace)
+      ? candidate.namespace
       : null;
   }
 
   private async writeCommittedNamespace(namespace: string): Promise<void> {
-    const writeState = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       writeState?: EmbeddingsStorage["writeState"];
-    }).writeState;
-    if (typeof writeState !== "function") return;
+    };
+    if (typeof storage.writeState !== "function") return;
     const state: CommittedNamespaceState = {
       version: 1,
       namespace,
       committedAt: Date.now(),
     };
-    await writeState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY, state);
+    await storage.writeState(COMMITTED_NAMESPACE_STATE_KEY, state);
   }
 
   private async deleteCommittedNamespace(): Promise<void> {
-    const deleteState = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       deleteState?: EmbeddingsStorage["deleteState"];
-    }).deleteState;
-    if (typeof deleteState === "function") {
-      await deleteState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY);
+    };
+    if (typeof storage.deleteState === "function") {
+      await storage.deleteState(COMMITTED_NAMESPACE_STATE_KEY);
     }
   }
 
@@ -1371,11 +1375,11 @@ export class EmbeddingsManager {
   private async pruneInactiveManagedNamespaces(): Promise<number> {
     const namespace = this.getSearchNamespace();
     if (!namespace) return 0;
-    const prune = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       removeNamespacesExcept?: EmbeddingsStorage["removeNamespacesExcept"];
-    }).removeNamespacesExcept;
-    return typeof prune === "function"
-      ? prune.call(this.storage, MANAGED_EMBEDDING_FAMILY_PREFIX, namespace)
+    };
+    return typeof storage.removeNamespacesExcept === "function"
+      ? storage.removeNamespacesExcept(MANAGED_EMBEDDING_FAMILY_PREFIX, namespace)
       : 0;
   }
 
@@ -1404,8 +1408,7 @@ export class EmbeddingsManager {
     const storage = this.storage as EmbeddingsStorage & {
       scanVectorsByNamespace?: EmbeddingsStorage["scanVectorsByNamespace"];
     };
-    const scan = storage.scanVectorsByNamespace;
-    if (typeof scan !== "function") {
+    if (typeof storage.scanVectorsByNamespace !== "function") {
       const vectors = await this.storage.getVectorsByNamespace(namespace);
       if (signal?.aborted) return queries.map(() => []);
       const eligiblePaths = this.collectSearchableRootPaths(vectors);
@@ -1433,7 +1436,7 @@ export class EmbeddingsManager {
       )),
     );
     const sets = queries.map(() => [] as SearchResult[]);
-    await scan.call(this.storage, namespace, (batch: EmbeddingVector[]) => {
+    await storage.scanVectorsByNamespace(namespace, (batch: EmbeddingVector[]) => {
       if (signal?.aborted) return;
       const candidates = batch.filter((vector) => (
         vector.metadata.isEmpty !== true

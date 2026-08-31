@@ -65,7 +65,7 @@ export function resolveTemplateVariables(context: StudioNodeExecutionContext): R
   const raw = context.node.config.variables;
   if (isRecord(raw)) {
     for (const [key, value] of Object.entries(raw)) {
-      out[key] = getText(value as StudioJsonValue);
+      out[key] = getText(value);
     }
   }
   return out;
@@ -120,7 +120,7 @@ function collectPromptTextFragments(value: StudioJsonValue | undefined, out: str
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      collectPromptTextFragments(entry as StudioJsonValue, out);
+      collectPromptTextFragments(entry, out);
     }
     return;
   }
@@ -172,7 +172,7 @@ function collectImageInputCandidates(value: StudioJsonValue | undefined, out: St
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      collectImageInputCandidates(entry as StudioJsonValue, out);
+      collectImageInputCandidates(entry, out);
     }
     return;
   }
@@ -229,7 +229,7 @@ export function parseStructuredPromptInput(value: StudioJsonValue | undefined): 
       prompt: payload.prompt,
       text: payload.text,
       message: payload.message,
-    } as StudioJsonValue);
+    });
     const systemPrompt =
       getText(payload.systemPrompt).trim() ||
       getText(payload.system_prompt).trim() ||

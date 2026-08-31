@@ -294,7 +294,7 @@ export class AudioProcessorModal extends StandardModal {
         type: "file",
         accept: Array.from(AUDIO_FILE_EXTENSIONS).map((extension) => `.${extension}`).join(","),
       },
-    }) as HTMLInputElement;
+    });
     dropzone.createEl("label", {
       cls: "ss-button ss-button--primary ss-audio-processor__choose-file",
       text: "Choose audio file",
@@ -354,7 +354,7 @@ export class AudioProcessorModal extends StandardModal {
         placeholder: "Paste a YouTube video URL",
         "aria-describedby": `${inputId}-status`,
       },
-    }) as HTMLInputElement;
+    });
     this.youtubeInputEl.spellcheck = false;
     this.youtubeInputEl.value = this.youtubeUrl;
     this.youtubeStatusEl = field.createDiv({
@@ -703,8 +703,8 @@ export class AudioProcessorModal extends StandardModal {
       && isAudioFileExtension(file.extension)
       && !!file.stat
       && Number.isFinite(file.stat.size)
-      && (file.stat.size as number) > 0
-      && (file.stat.size as number) <= AUDIO_PROCESSOR_MAX_AUDIO_BYTES
+      && (file.stat.size) > 0
+      && (file.stat.size) <= AUDIO_PROCESSOR_MAX_AUDIO_BYTES
       && Number.isFinite(file.stat.mtime);
   }
 

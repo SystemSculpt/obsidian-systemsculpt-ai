@@ -22,11 +22,11 @@ export class AutomaticBackupService {
         
         // Start the periodic check
         this.backupTimer = window.setInterval(() => {
-            this.checkAndCreateBackup();
+            void this.checkAndCreateBackup();
         }, this.CHECK_INTERVAL_MS);
 
         // Also check immediately on start
-        this.checkAndCreateBackup();
+        void this.checkAndCreateBackup();
     }
 
     /**
@@ -59,7 +59,8 @@ export class AutomaticBackupService {
             if (now - lastBackup >= intervalMs) {
                 await this.createAutomaticBackup();
             }
-        } catch (error) {
+        } catch {
+            // Scheduled backups retry at the next interval.
         }
     }
 
@@ -99,7 +100,7 @@ export class AutomaticBackupService {
             await this.cleanupOldBackups();
 
             return true;
-        } catch (error) {
+        } catch {
             new Notice("Failed to create automatic settings backup", 3000);
             return false;
         }
@@ -108,7 +109,7 @@ export class AutomaticBackupService {
     /**
      * Save backup to multiple locations for redundancy
      */
-    private async saveBackupToMultipleLocations(fileName: string, backupData: any): Promise<void> {
+    private async saveBackupToMultipleLocations(fileName: string, backupData: object): Promise<void> {
         const backupJson = JSON.stringify(backupData, null, 2);
         const errors: string[] = [];
 
@@ -119,7 +120,7 @@ export class AutomaticBackupService {
             // Ensure backup directory exists
             try {
                 await this.plugin.app.vault.createFolder(backupDir);
-            } catch (e) {
+            } catch {
                 // Directory might already exist, which is fine
             }
             
@@ -159,7 +160,8 @@ export class AutomaticBackupService {
             // Clean up from vault storage
             await this.cleanupVaultStorageBackups(cutoffTime);
 
-        } catch (error) {
+        } catch {
+            // Cleanup is best-effort and runs again after the next backup.
         }
     }
 
@@ -196,10 +198,12 @@ export class AutomaticBackupService {
                     if (stats && stats.mtime < cutoffTime) {
                         await this.plugin.app.vault.adapter.remove(filePath);
                     }
-                } catch (error) {
+                } catch {
+                    // Continue cleaning the remaining backups.
                 }
             }
-        } catch (error) {
+        } catch {
+            // A missing backup directory requires no cleanup.
         }
     }
 
@@ -234,10 +238,12 @@ export class AutomaticBackupService {
                             await this.plugin.storage.deleteFile('settings', `backups/${fileName}`);
                         }
                     }
-                } catch (error) {
+                } catch {
+                    // Continue cleaning the remaining backups.
                 }
             }
-        } catch (error) {
+        } catch {
+            // A missing backup directory requires no cleanup.
         }
     }
 

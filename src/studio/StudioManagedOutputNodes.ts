@@ -973,7 +973,7 @@ export function materializeImageOutputsAsMediaNodes(
       const existingManaged = readManagedMediaSlot(existingNode);
       const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
       const baseConfig = stripManagedPendingFields(
-        existingNode.config as Record<string, StudioJsonValue>
+        existingNode.config
       );
       const nextConfig = {
         ...baseConfig,
@@ -1126,7 +1126,7 @@ export function materializeTextOutputsAsTextNodes(
     const existingManaged = readManagedTextSlot(existingNode);
     const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
     const baseConfig = stripManagedPendingFields(
-      existingNode.config as Record<string, StudioJsonValue>
+      existingNode.config
     );
     const nextConfig = {
       ...baseConfig,

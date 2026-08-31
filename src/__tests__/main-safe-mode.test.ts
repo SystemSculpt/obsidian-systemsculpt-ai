@@ -33,6 +33,11 @@ function makePlugin(): any {
   return plugin;
 }
 
+function beginUnload(plugin: any): Promise<void> {
+  plugin.onunload();
+  return plugin.unloadPromise;
+}
+
 describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
   afterEach(() => {
     jest.useRealTimers();
@@ -104,7 +109,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(order).toEqual(["recorder", "settings"]);
     expect((plugin as any).recorderService).toBeNull();
@@ -131,7 +136,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unloadViews: jest.fn(() => { order.push("views"); }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
     expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
@@ -172,7 +177,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unloadViews: jest.fn(() => { order.push("views"); }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
     jest.advanceTimersByTime(1_499);
@@ -217,7 +222,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -265,7 +270,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(logger.flushBeforeUnload).toHaveBeenCalledTimes(1);
     expect(logger.dispose).toHaveBeenCalledTimes(1);
@@ -286,7 +291,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unload: jest.fn(() => { order.push("transcription"); }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(disposePanels).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["panels", "transcription"]);

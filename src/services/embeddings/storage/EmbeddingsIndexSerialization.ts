@@ -49,7 +49,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
     const slice = bytes.subarray(i, i + CHUNK);
-    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
+    binary += String.fromCharCode.apply(null, slice);
   }
   return btoa(binary);
 }

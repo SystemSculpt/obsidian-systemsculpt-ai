@@ -50,6 +50,7 @@ import {
   requiresUserApproval,
   type ToolApprovalPolicy,
 } from "../../../utils/toolPolicy";
+import { replaceControlCharacters } from "../../../utils/characterValidation";
 import type {
   AgentConversationSnapshot,
   AgentPart,
@@ -537,6 +538,15 @@ function managedError(
   };
 }
 
+function managedException(
+  error: unknown,
+  fallbackCode: string,
+  fallbackMessage: string,
+): Error & ManagedAgentError {
+  const details = managedError(error, fallbackCode, fallbackMessage);
+  return Object.assign(new Error(details.message), details);
+}
+
 function terminalError(terminal: Extract<ThinAgentRunTerminalData, { outcome: "failed" }>): ManagedAgentError {
   const incidentId = /^incident_(?!0{32}$)[a-f0-9]{32}$/u.test(terminal.incident_id)
     ? terminal.incident_id
@@ -773,7 +783,7 @@ function sanitizeVaultResultData(
   if (isRecord(value)) {
     return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [
       entryKey,
-      sanitizeVaultResultData(entry as AgentJsonValue, entryKey),
+      sanitizeVaultResultData(entry, entryKey),
     ]));
   }
   return value;
@@ -978,13 +988,12 @@ function safeSourceUrl(value: unknown): string | null {
 
 function markdownSourceTitle(value: unknown, fallback: string): string {
   const title = typeof value === "string" ? value : "";
-  return (title.trim() || fallback)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+  return replaceControlCharacters(title.trim() || fallback, " ")
     .replace(/\s+/g, " ")
     .slice(0, MAX_SOURCE_TITLE_LENGTH)
     .trim()
     .replace(/\\/g, "\\\\")
-    .replace(/([`*_\[\]<>])/g, "\\$1");
+    .replace(/([`*_[\]<>])/g, "\\$1");
 }
 
 function nativeSourceMarkdown(messages: readonly WireMessage[]): string {
@@ -1670,7 +1679,7 @@ function sequenceTerminalMetadata(
 ): Readonly<{ messageId: string; metadata: DurableTerminalMetadata }> | null {
   if (rootMessageId === null) return null;
   for (let messageIndex = sequence.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = sequence[messageIndex]!;
+    const message = sequence[messageIndex];
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const parsed = parseThinAgentDataPart(message.parts[partIndex]);
       if (
@@ -1699,7 +1708,7 @@ function durableServerHistory(
   const output: ChatMessage[] = [];
   let rootMessageId: string | null = null;
   for (let index = 0; index < messages.length;) {
-    const message = messages[index]!;
+    const message = messages[index];
     if (message.role === "user") {
       output.push(durableUserMessage(message));
       rootMessageId = message.id;
@@ -1707,7 +1716,7 @@ function durableServerHistory(
       continue;
     }
     const start = index;
-    while (index < messages.length && messages[index]!.role === "assistant") index += 1;
+    while (index < messages.length && messages[index].role === "assistant") index += 1;
     const sequence = messages.slice(start, index);
     const terminal = sequenceTerminalMetadata(sequence, rootMessageId);
     const sequenceStart = output.length;
@@ -1731,7 +1740,7 @@ function durableServerHistory(
         ...terminal.metadata,
       });
     } else if (terminal && output.length > sequenceStart) {
-      const tail = output[output.length - 1]!;
+      const tail = output[output.length - 1];
       output[output.length - 1] = { ...tail, ...terminal.metadata };
     }
     if (
@@ -1739,7 +1748,7 @@ function durableServerHistory(
       && rootMessageId === turnPresentation.rootMessageId
       && output.length > sequenceStart
     ) {
-      const tail = output[output.length - 1]!;
+      const tail = output[output.length - 1];
       output[output.length - 1] = {
         ...tail,
         responseDurationMs: turnPresentation.responseDurationMs,
@@ -1759,7 +1768,7 @@ function hasDurableAssistantContent(
     message.role === "user" && message.message_id === rootMessageId);
   if (rootIndex < 0) return false;
   for (let index = rootIndex + 1; index < messages.length; index += 1) {
-    const message = messages[index]!;
+    const message = messages[index];
     if (message.role === "user") break;
     if ((message.tool_calls?.length ?? 0) > 0) return true;
     if (message.messageParts?.some((part) =>
@@ -1837,7 +1846,7 @@ function terminalFromMessages(
 ): ThinAgentRunTerminalData | null {
   const turn = currentTurnMessages(messages, rootMessageId);
   for (let messageIndex = turn.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const message = turn[messageIndex]!;
+    const message = turn[messageIndex];
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const parsed = parseThinAgentDataPart(message.parts[partIndex]);
       if (
@@ -1867,7 +1876,7 @@ function restoreInterruptedTurnTail(
   const rootIndex = messages.findIndex((message) => message.id === active.turnId);
   if (rootIndex < 0) return messages;
   let end = rootIndex + 1;
-  while (end < messages.length && messages[end]!.role !== "user") end += 1;
+  while (end < messages.length && messages[end].role !== "user") end += 1;
   const turn = messages.slice(rootIndex + 1, end);
   const present = new Set(turn.map((message) => message.id));
   const missing = active.streamedTurnMessages.filter((message) =>
@@ -1889,7 +1898,7 @@ function restoreInterruptedTurnTail(
     }));
   if (missing.length === 0 && hasTerminalPart) return messages;
   if (!hasTerminalPart) {
-    const last = restored[restored.length - 1]!;
+    const last = restored[restored.length - 1];
     restored[restored.length - 1] = {
       ...last,
       parts: [
@@ -1911,7 +1920,7 @@ function restoreInterruptedTurnTail(
 
 function latestUserId(messages: readonly WireMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]!.role === "user") return messages[index]!.id;
+    if (messages[index].role === "user") return messages[index].id;
   }
   return null;
 }
@@ -2151,7 +2160,7 @@ export class AgentChatSession {
           status: responseStatus(error),
           retryable: true,
         });
-        throw managedError(
+        throw managedException(
           error,
           "response_start_failed",
           "SystemSculpt could not restore this chat. Retry in a moment.",
@@ -2256,7 +2265,7 @@ export class AgentChatSession {
         status: responseStatus(error),
         retryable: true,
       });
-      throw managedError(
+      throw managedException(
         error,
         "response_start_failed",
         "SystemSculpt could not restore this chat. Retry in a moment.",
@@ -4397,7 +4406,7 @@ export class AgentChatSession {
         acknowledged: false,
         acknowledgementRecorded: false,
       };
-    } catch (error) {
+    } catch {
       if (active.abort.signal.aborted || active.terminal) return;
       presentationResult = {
         success: false,

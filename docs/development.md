@@ -1,6 +1,6 @@
 # Plugin development
 
-Work from ~/gits/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
+Work from ~/gits/personal/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
 local and CI baseline; version managers can select it from .nvmrc.
 
 ## Setup
@@ -17,7 +17,7 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-check runs the canonical Obsidian source and metadata lint, production bundle,
+check runs the canonical Obsidian source, community-directory, and metadata lint, production bundle,
 CSS contracts, cheap architecture policy tests, focused mobile interactions,
 the ChatView critical-risk coverage gate, and an exact built-bundle mobile-host
 smoke. It is the normal edit loop, not a native-device or provider test.
@@ -279,11 +279,7 @@ revision recorded in release provenance. It always rebuilds the artifacts;
 there is no release CLI path that can bind stale pre-existing bytes to a newer
 source revision.
 
-Publishing a stable GitHub release runs `publish-release-metadata.yml`. The job
-checks out the release tag, requires its version and URL to match manifest.json,
-and writes only `plugin/releases/latest.json` to the release-metadata R2 bucket.
-It then waits through the API's 60-second cache and verifies the public endpoint.
-Drafts, prereleases, ordinary tags, and merges to main cannot announce a release.
+Publishing a stable GitHub release runs `publish-release-metadata.yml`. Its unprivileged verification job checks out and rebuilds the full tag, downloads `manifest.json`, `main.js`, and `styles.css` from the published release, requires byte-for-byte equality, and creates GitHub build-provenance attestations for those exact published assets. Only then can the environment-protected job write `plugin/releases/latest.json` to the release-metadata R2 bucket, wait through the API's 60-second cache, and verify the public endpoint. Drafts, prereleases, ordinary tags, mismatched assets, and merges to main cannot announce a release.
 
 Configure the `production-release-metadata` GitHub environment with:
 

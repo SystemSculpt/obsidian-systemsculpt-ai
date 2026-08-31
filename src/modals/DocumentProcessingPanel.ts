@@ -63,7 +63,7 @@ export interface DocumentProcessingFailurePayload {
 
 export function describeDocumentProcessingFailure(error: unknown): string {
   const code = typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code: unknown }).code)
+    ? String((error).code)
     : "";
   const messages: Record<string, string> = {
     license_required: "An active SystemSculpt Pro license is required.",
@@ -189,13 +189,13 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
         label: "Open Markdown",
         testId: "document.progress.open-markdown",
         variant: "primary",
-        onClick: async () => {
-          try {
-            await payload.openOutput();
-          } catch (error) {
-            new Notice("Unable to open converted file. See console for details.", 4000);
-          }
-          this.close();
+        onClick: () => {
+          void Promise.resolve()
+            .then(payload.openOutput)
+            .catch(() => {
+              new Notice("Unable to open converted file. See console for details.", 4000);
+            })
+            .finally(() => this.close());
         },
       },
       {
@@ -229,17 +229,18 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
-        onClick: async () => {
-          try {
-            const copied = await tryCopyToClipboard(message, this.panel.element);
-            new Notice(
-              copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
-              copied ? 2500 : 4000,
-            );
-          } catch (error) {
-            console.error(error);
-          }
-          this.close();
+        onClick: () => {
+          void tryCopyToClipboard(message, this.panel.element)
+            .then((copied) => {
+              new Notice(
+                copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
+                copied ? 2500 : 4000,
+              );
+            })
+            .catch((error: unknown) => {
+              console.error(error);
+            })
+            .finally(() => this.close());
         },
       },
       {
@@ -288,7 +289,7 @@ function clampPercentage(value: number): number {
 
 function resolveFailedTimelineStep(error: unknown): TimelineStep {
   const code = typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code: unknown }).code)
+    ? String((error).code)
     : "";
 
   if (code === "license_required" || code === "license_rejected" || code === "local_abort") {

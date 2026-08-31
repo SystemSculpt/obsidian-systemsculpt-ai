@@ -267,8 +267,18 @@ export class BackupRestoreModal {
     const backupSettings = await this.readBackupSettings(filePath);
     const details = this.describeBackupDetails(backupSettings);
 
-    if (backupSettings?._backupMeta?.type === "manual") {
-      const meta = backupSettings._backupMeta as { name: string; timestamp: number };
+    const backupMeta = backupSettings?._backupMeta;
+    if (
+      backupMeta
+      && typeof backupMeta === "object"
+      && "type" in backupMeta
+      && backupMeta.type === "manual"
+      && "name" in backupMeta
+      && typeof backupMeta.name === "string"
+      && "timestamp" in backupMeta
+      && typeof backupMeta.timestamp === "number"
+    ) {
+      const meta = backupMeta as { type: "manual"; name: string; timestamp: number };
       return {
         path: filePath,
         name: `📝 ${meta.name}`,
@@ -288,7 +298,7 @@ export class BackupRestoreModal {
 
     const datedBackup = fileName.match(/settings-backup-(\d{4}-\d{2}-\d{2})\.json/);
     if (datedBackup) {
-      const [_, dateString] = datedBackup;
+      const [, dateString] = datedBackup;
       const readableDate = new Date(dateString).toLocaleDateString(undefined, {
         weekday: "long",
         year: "numeric",
@@ -334,7 +344,7 @@ export class BackupRestoreModal {
     };
   }
 
-  private async readBackupSettings(filePath: string): Promise<Record<string, any> | null> {
+  private async readBackupSettings(filePath: string): Promise<Record<string, unknown> | null> {
     try {
       const backupData = await this.plugin.app.vault.adapter.read(filePath);
       return JSON.parse(backupData);
@@ -343,13 +353,14 @@ export class BackupRestoreModal {
     }
   }
 
-  private describeBackupDetails(backupSettings: Record<string, any> | null): string {
+  private describeBackupDetails(backupSettings: Record<string, unknown> | null): string {
     if (!backupSettings) {
       return "Could not read backup contents";
     }
 
     const hasLicense = backupSettings.licenseValid === true ? "Yes" : "No";
-    const schemaVersion = Number.isFinite(backupSettings.schemaVersion)
+    const schemaVersion = typeof backupSettings.schemaVersion === "number"
+      && Number.isFinite(backupSettings.schemaVersion)
       ? backupSettings.schemaVersion
       : "Legacy";
 
@@ -393,8 +404,8 @@ export class BackupRestoreModal {
   private async ensureBackupDirectory(backupDir: string): Promise<void> {
     try {
       await this.plugin.app.vault.createFolder(backupDir);
-    } catch (error: any) {
-      if (!error?.message?.includes("already exists")) {
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !error.message.includes("already exists")) {
         throw error;
       }
     }

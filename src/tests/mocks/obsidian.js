@@ -294,6 +294,7 @@ class App {
       renameFile: jest.fn(),
     };
     this.workspace = {
+      activeLeaf: null,
       on: jest.fn(() => ({ unload: jest.fn() })),
       off: jest.fn(),
       trigger: jest.fn(),
@@ -302,6 +303,7 @@ class App {
       getLeavesOfType: jest.fn(() => []),
       onLayoutReady: jest.fn((cb) => cb()),
     };
+    this.workspace.getMostRecentLeaf = jest.fn(() => this.workspace.activeLeaf);
     this.metadataCache = {
       getFileCache: jest.fn(() => null),
       getFirstLinkpathDest: jest.fn(() => null),

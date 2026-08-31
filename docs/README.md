@@ -17,6 +17,7 @@ Current user and engineering references for the Obsidian plugin.
 ## Engineering references
 
 - [Development, testing, and release](development.md)
+- [Obsidian community review](community-review.md)
 - [Managed chat request flow](chat-request-flow.md)
 - [Studio architecture](studio-foundation.md)
 - [CSS design-system contract](../src/css/README.md)

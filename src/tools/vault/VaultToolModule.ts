@@ -60,9 +60,9 @@ export class VaultToolModule {
    */
   async executeTool(
     toolName: string,
-    args: any,
+    args: unknown,
     chatView?: FirstPartyToolChatTarget,
-  ): Promise<any> {
+  ): Promise<unknown> {
     switch (toolName) {
       case "read":
         return await this.fileOps.readFiles(args as ReadFilesParams);

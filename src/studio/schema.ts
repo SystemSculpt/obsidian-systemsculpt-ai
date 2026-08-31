@@ -7,6 +7,7 @@ import {
   type StudioDiagram,
   type StudioEdge,
   type StudioNodeGroup,
+  type StudioJsonValue,
   type StudioPermissionPolicyV1,
   type StudioProjectV1,
 } from "./types";
@@ -47,6 +48,27 @@ export type StudioProjectParseContext = {
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function isStudioJsonValue(value: unknown): value is StudioJsonValue {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isStudioJsonValue);
+  return isRecord(value) && Object.values(value).every(isStudioJsonValue);
+}
+
+function readStudioJsonRecord(value: unknown): Record<string, StudioJsonValue> {
+  if (!isRecord(value)) return {};
+  if (!Object.values(value).every(isStudioJsonValue)) {
+    throw new Error("Invalid node config: expected JSON values.");
+  }
+  return value as Record<string, StudioJsonValue>;
+}
 
 function normalizeHexColor(value: string): string | null {
   const trimmed = String(value || "").trim();
@@ -93,10 +115,11 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   const kind = asString(raw.kind).trim();
   const version = asString(raw.version).trim() || "1.0.0";
   const title = asString(raw.title).trim() || kind || id;
-  const x = asNumber((raw.position as any)?.x) ?? 0;
-  const y = asNumber((raw.position as any)?.y) ?? 0;
+  const position = isRecord(raw.position) ? raw.position : {};
+  const x = asNumber(position.x) ?? 0;
+  const y = asNumber(position.y) ?? 0;
   const size = readNodeSize(raw.size);
-  const config = isRecord(raw.config) ? (raw.config as Record<string, any>) : {};
+  const config = readStudioJsonRecord(raw.config);
   const continueOnError = raw.continueOnError === true;
   const disabled = raw.disabled === true;
 
@@ -212,10 +235,10 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const createdAt = asString(raw.createdAt).trim() || nowIso();
   const updatedAt = asString(raw.updatedAt).trim() || createdAt;
   const graphRaw = isRecord(raw.graph) ? raw.graph : {};
-  const nodesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).nodes);
-  const edgesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).edges);
-  const entryNodeIdsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).entryNodeIds);
-  const groupsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).groups);
+  const nodesRaw = ensureArray<unknown>((graphRaw).nodes);
+  const edgesRaw = ensureArray<unknown>((graphRaw).edges);
+  const entryNodeIdsRaw = ensureArray<unknown>((graphRaw).entryNodeIds);
+  const groupsRaw = ensureArray<unknown>((graphRaw).groups);
 
   // Shapes are lifted out of the graph BEFORE edge validation: a project
   // written by the build where shapes were still a node kind carries shape
@@ -271,10 +294,10 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     throw new Error("Invalid Studio project: permissionsRef.policyPath is required.");
   }
 
-  const policyVersion = asNumber((permissionsRefRaw as Record<string, unknown>).policyVersion) ?? 1;
+  const policyVersion = asNumber((permissionsRefRaw).policyVersion) ?? 1;
   const settingsRaw = isRecord(raw.settings) ? raw.settings : {};
-  const retentionRaw = isRecord((settingsRaw as Record<string, unknown>).retention)
-    ? ((settingsRaw as Record<string, unknown>).retention as Record<string, unknown>)
+  const retentionRaw = isRecord((settingsRaw).retention)
+    ? ((settingsRaw).retention)
     : {};
 
   const maxRuns = Math.max(
@@ -286,6 +309,8 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     Math.floor(asNumber(retentionRaw.maxArtifactsMb) ?? DEFAULT_MAX_ARTIFACTS_MB)
   );
 
+  const engine = isRecord(raw.engine) ? raw.engine : {};
+  const migrations = isRecord(raw.migrations) ? raw.migrations : {};
   const project: StudioProjectV1 = {
     schema: STUDIO_PROJECT_SCHEMA_V1,
     projectId,
@@ -294,7 +319,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     updatedAt,
     engine: {
       apiMode: "systemsculpt_only",
-      minPluginVersion: asString((raw.engine as any)?.minPluginVersion).trim() || "0.0.0",
+      minPluginVersion: asString(engine.minPluginVersion).trim() || "0.0.0",
     },
     graph: {
       nodes,
@@ -317,7 +342,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     },
     migrations: {
       projectSchemaVersion: "1.0.0",
-      applied: ensureArray<unknown>((raw.migrations as any)?.applied)
+      applied: ensureArray<unknown>(migrations.applied)
         .filter(isRecord)
         .map((entry) => ({
           id: asString(entry.id).trim(),
@@ -351,7 +376,7 @@ function readNodeV2(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     title: asString(raw.title).trim() || compactStudioNodeKind(kind),
     position: { x: asNumber(raw.x) ?? 0, y: asNumber(raw.y) ?? 0 },
     ...(width !== null ? { size: { width, ...(height !== null ? { height } : {}) } } : {}),
-    config: isRecord(raw.config) ? (raw.config as Record<string, any>) : {},
+    config: readStudioJsonRecord(raw.config),
     continueOnError: raw.continueOnError === true,
     disabled: raw.disabled === true,
   };
@@ -599,10 +624,10 @@ function migrateLegacyProject(raw: Record<string, unknown>): StudioProjectV1 | n
         id,
         kind: "studio.input",
         version: "1.0.0",
-        title: asString(node.title).trim() || asString((node as any).text).trim() || `Node ${index + 1}`,
+        title: asString(node.title).trim() || asString(node.text).trim() || `Node ${index + 1}`,
         position: {
-          x: asNumber((node as any).x) ?? 0,
-          y: asNumber((node as any).y) ?? 0,
+          x: asNumber(node.x) ?? 0,
+          y: asNumber(node.y) ?? 0,
         },
         config: {},
         continueOnError: false,
@@ -614,8 +639,8 @@ function migrateLegacyProject(raw: Record<string, unknown>): StudioProjectV1 | n
   const edges = edgesRaw
     .filter(isRecord)
     .map((edge, index) => {
-      const fromNodeId = asString((edge as any).fromNodeId || (edge as any).fromNode).trim();
-      const toNodeId = asString((edge as any).toNodeId || (edge as any).toNode).trim();
+      const fromNodeId = asString(edge.fromNodeId || edge.fromNode).trim();
+      const toNodeId = asString(edge.toNodeId || edge.toNode).trim();
       if (!nodeIds.has(fromNodeId) || !nodeIds.has(toNodeId)) {
         return null;
       }

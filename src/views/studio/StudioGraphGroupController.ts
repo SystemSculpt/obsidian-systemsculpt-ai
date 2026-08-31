@@ -210,7 +210,7 @@ export class StudioGraphGroupController {
       frameEl.style.setProperty("--ss-studio-group-accent", this.resolveDisplayedGroupColor(group));
       frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       frameEl.addEventListener("pointerdown", (event) => {
-        this.startGroupDrag(group.id, event as PointerEvent, frameEl);
+        this.startGroupDrag(group.id, event, frameEl);
       });
 
       const tagEl = this.tagLayerEl.createDiv({ cls: "ss-studio-group-tag" });
@@ -945,7 +945,7 @@ export class StudioGraphGroupController {
     if (typeof event.getCoalescedEvents === "function") {
       const coalescedEvents = event.getCoalescedEvents();
       if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
-        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
+        return coalescedEvents[coalescedEvents.length - 1];
       }
     }
     return event;

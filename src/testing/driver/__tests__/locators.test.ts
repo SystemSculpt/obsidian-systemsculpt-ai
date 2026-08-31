@@ -13,7 +13,10 @@ import {
 function makeContext(settingsRoot?: () => HTMLElement | null): LocatorContext {
   return {
     app: {
-      workspace: { getLeavesOfType: () => [] },
+      workspace: {
+        getLeavesOfType: () => [],
+        getMostRecentLeaf: () => null,
+      },
     } as unknown as App,
     settingsRoot,
   };
@@ -94,6 +97,7 @@ describe("test driver locators", () => {
       app: {
         workspace: {
           getLeavesOfType: () => [{ view: { containerEl: chatContainer } }],
+          getMostRecentLeaf: () => null,
         },
       } as unknown as App,
     };
@@ -129,8 +133,8 @@ describe("test driver locators", () => {
     const ctx: LocatorContext = {
       app: {
         workspace: {
-          activeLeaf,
           getLeavesOfType: () => [mainLeaf, activeLeaf],
+          getMostRecentLeaf: () => activeLeaf,
         },
       } as unknown as App,
     };
@@ -158,8 +162,8 @@ describe("test driver locators", () => {
     const ctx: LocatorContext = {
       app: {
         workspace: {
-          activeLeaf,
           getLeavesOfType: () => [inactiveLeaf, activeLeaf],
+          getMostRecentLeaf: () => activeLeaf,
         },
       } as unknown as App,
     };
@@ -170,8 +174,8 @@ describe("test driver locators", () => {
     const ambiguousCtx: LocatorContext = {
       app: {
         workspace: {
-          activeLeaf: null,
           getLeavesOfType: () => [inactiveLeaf, activeLeaf],
+          getMostRecentLeaf: () => null,
         },
       } as unknown as App,
     };

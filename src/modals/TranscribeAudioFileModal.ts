@@ -239,7 +239,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         type: "file",
         accept: Array.from(AUDIO_FILE_EXTENSIONS).map((extension) => `.${extension}`).join(","),
       },
-    }) as HTMLInputElement;
+    });
 
     dropzone.createEl("label", {
       cls: "ss-button ss-button--primary ss-transcribe-audio__choose-file",
@@ -348,7 +348,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     const rememberInput = rememberRow.createEl("input", {
       cls: "ss-transcribe-audio__remember-checkbox",
       attr: { id: rememberId, type: "checkbox" },
-    }) as HTMLInputElement;
+    });
     rememberRow.createEl("label", {
       cls: "ss-transcribe-audio__remember-label",
       text: "Remember this format",

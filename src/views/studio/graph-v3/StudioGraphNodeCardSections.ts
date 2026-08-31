@@ -223,7 +223,7 @@ export function renderNodePorts(options: {
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
       pin.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
-        graphInteraction.startConnectionDrag(node.id, port.id, event as PointerEvent, pin);
+        graphInteraction.startConnectionDrag(node.id, port.id, event, pin);
       });
       pin.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -335,7 +335,7 @@ export function renderCollapsedVisibilityControls(options: {
           return;
         }
         commitPresentationMutation(
-          (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null) as StudioJsonValue | null
+          (draftNode.config[STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY] ?? null)
         );
         syncVisualState();
       },

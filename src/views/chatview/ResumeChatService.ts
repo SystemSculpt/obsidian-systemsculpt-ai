@@ -201,7 +201,7 @@ export class ResumeChatService {
         },
       });
       this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
-    } catch (e) {
+    } catch {
       new Notice("Error opening chat. Please try again.");
     }
   }

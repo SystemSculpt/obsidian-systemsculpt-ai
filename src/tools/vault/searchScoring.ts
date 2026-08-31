@@ -17,13 +17,39 @@ export interface ScoredResult {
     keywordsMissing: string[];
     matchLocations: ('filename' | 'path' | 'content' | 'metadata' | 'graph')[];
     reasoning: string;
-    entityMatches?: any[];
+    entityMatches?: unknown[];
     semanticSimilarity?: number;
   };
-  contexts?: any[];
+  contexts?: unknown[];
   created?: string;
   modified?: string;
   fileSize?: number;
+}
+
+export interface FormattedScoredResult {
+  file: string;
+  path: string;
+  score: number;
+  reasoning: string;
+  keywordsFound: string[];
+  keywordsMissing: string[];
+  contexts?: unknown[];
+  created?: string;
+  modified?: string;
+  fileSize?: number;
+}
+
+export interface FormattedScoredResults {
+  results: FormattedScoredResult[];
+  totalFound: number;
+  searchSummary: {
+    topScore: number;
+    averageScore: number;
+    confidenceLevel: "high" | "medium" | "low";
+  };
+  metaInfo?: unknown[];
+  truncated?: boolean;
+  notice?: string;
 }
 
 /**
@@ -202,7 +228,7 @@ export function sortByScore(results: ScoredResult[]): ScoredResult[] {
 export function formatScoredResults(
   results: ScoredResult[],
   maxResults: number = 25
-): any {
+): FormattedScoredResults {
   const topResults = results.slice(0, maxResults);
   
   return {

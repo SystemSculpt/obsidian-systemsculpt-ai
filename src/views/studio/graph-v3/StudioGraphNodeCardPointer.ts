@@ -53,7 +53,7 @@ export function bindNodeCardPointerDown(options: {
 }): void {
   const { nodeEl, nodeId, graphInteraction } = options;
   nodeEl.addEventListener("pointerdown", (event) => {
-    const pointerEvent = event as PointerEvent;
+    const pointerEvent = event;
     if (isStudioNodeCardInteractiveTarget(pointerEvent.target)) {
       return;
     }

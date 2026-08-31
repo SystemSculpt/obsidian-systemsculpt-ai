@@ -61,7 +61,7 @@ describe("JanitorConfirmationListModal", () => {
       ],
     });
 
-    const result = modal.open();
+    const result = modal.openAndWait();
 
     expect(modal.modalEl.getAttribute("role")).toBe("dialog");
     expect(modal.modalEl.getAttribute("aria-labelledby")).toBeTruthy();
@@ -93,12 +93,12 @@ describe("JanitorConfirmationListModal", () => {
     });
 
     const dismissed = createModal();
-    const dismissedResult = dismissed.open();
+    const dismissedResult = dismissed.openAndWait();
     dismissed.close();
     await expect(dismissedResult).resolves.toBe(false);
 
     const cancelled = createModal();
-    const cancelledResult = cancelled.open();
+    const cancelledResult = cancelled.openAndWait();
     findButton("Cancel").click();
     await expect(cancelledResult).resolves.toBe(false);
   });

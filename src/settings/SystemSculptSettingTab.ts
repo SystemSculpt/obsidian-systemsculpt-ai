@@ -5,6 +5,7 @@ import {
   Notice,
   setIcon,
   EventRef,
+  apiVersion,
 } from "obsidian";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import {
@@ -45,10 +46,6 @@ type SettingsSearchViewState = {
   results: SettingsSearchMatch[];
 };
 
-// Keep the imperative renderer until every dynamic control can be represented
-// declaratively. Obsidian 1.13 skips display() as soon as definitions exist, so
-// partial definitions would regress mobile settings to heading-only rows.
-// eslint-disable-next-line obsidianmd/settings-tab/prefer-setting-definitions
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
   private listeners: {
@@ -113,10 +110,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     );
 
     // Obsidian version
-    const obsidianVersion =
-      (this.app as any).apiVersion ||
-      (this.app as any).vault?.config?.version ||
-      "";
+    const obsidianVersion = apiVersion;
     if (obsidianVersion) {
       environmentInfo.push(`- Obsidian version: ${obsidianVersion}`);
     }
@@ -218,8 +212,8 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             debugMode: false,
           });
           new Notice("Recommended defaults restored.", 2500);
-          await this.display();
-        } catch (_) {
+          this.display();
+        } catch {
           new Notice("Failed to restore recommended defaults.", 4000);
         } finally {
           button.setDisabled(false);
@@ -280,7 +274,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }, delayMs);
   }
 
-  async display(): Promise<void> {
+  display(): void {
     this.invalidateRenderCleanups();
     this.clearSettingsIndexRebuild();
     this.removeAllListeners();
@@ -357,10 +351,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const tabConfigsAll = buildSettingsTabConfigs(this);
     const visibleTabs = tabConfigsAll;
-    const pendingFocusTabId =
-      typeof (this.plugin as any).consumePendingSettingsFocusTab === "function"
-        ? String((this.plugin as any).consumePendingSettingsFocusTab() || "").trim()
-        : "";
+    const pendingFocusTabId = String(
+      this.plugin.consumePendingSettingsFocusTab() || "",
+    ).trim();
 
     if (this.focusTabEventRef) {
       this.app.workspace.offref(this.focusTabEventRef);
@@ -370,13 +363,11 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       "systemsculpt:settings-focus-tab",
       (requestedTab: string) => {
         if (!requestedTab) return;
-        if (typeof (this.plugin as any).clearPendingSettingsFocusTab === "function") {
-          (this.plugin as any).clearPendingSettingsFocusTab(requestedTab);
-        }
+        this.plugin.clearPendingSettingsFocusTab(requestedTab);
         if (!this.tabContainerEl) return;
-        const target = this.tabContainerEl.querySelector(
+        const target = this.tabContainerEl.querySelector<HTMLButtonElement>(
           `button[data-tab="${requestedTab}"]`,
-        ) as HTMLElement | null;
+        );
         if (!target) return;
         this.clearSearch(false);
         this.activateTab(requestedTab);
@@ -416,15 +407,15 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     this.tabsHandle = createUiTabs(tabBar, tabBindings, {
       activeId: this.activeTabId,
-      onChange: (tabId, previousTabId) => {
-        this.handleTabChange(tabId, previousTabId);
+      onChange: (tabId) => {
+        this.handleTabChange(tabId);
       },
     });
 
     for (const cfg of visibleTabs) {
-      const sectionRoot = contentContainer.querySelector(
+      const sectionRoot = contentContainer.querySelector<HTMLElement>(
         `[data-tab="${cfg.id}"]`,
-      ) as HTMLElement | null;
+      );
       if (!sectionRoot) continue;
       sectionRoot.empty();
       for (const render of cfg.sections) {
@@ -472,15 +463,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   hide() {
     this.invalidateRenderCleanups();
     this.clearSettingsIndexRebuild();
-    // Clean up resources from the currently active tab before closing
-    const activeContent = this.containerEl.querySelector(
-      ".systemsculpt-tab-content.is-active",
-    ) as any;
-    if (activeContent && activeContent.cleanup) {
-      activeContent.cleanup();
-      activeContent.cleanup = null;
-    }
-
     this.removeAllListeners();
     this.tabsHandle?.destroy();
     this.tabsHandle = null;
@@ -506,19 +488,8 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.tabsHandle?.activate(tabId);
   }
 
-  private handleTabChange(tabId: string, previousTabId: string): void {
+  private handleTabChange(tabId: string): void {
     if (!this.contentContainerEl) return;
-    const activePanel = this.contentContainerEl.querySelector(
-      `.systemsculpt-tab-content[data-tab="${previousTabId}"]`,
-    ) as any;
-    if (activePanel && typeof activePanel?.cleanup === "function") {
-      try {
-        activePanel.cleanup();
-      } catch (_) {
-        // ignore cleanup failures
-      }
-    }
-
     this.activeTabId = tabId;
   }
 
@@ -883,7 +854,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         element.scrollIntoView({ behavior: "smooth", block: "center" });
         element.addClass("ss-search-highlight");
         ownerWindow.setTimeout(() => element.removeClass("ss-search-highlight"), 1200);
-      } catch (e) {
+      } catch {
         // If element no longer exists (mode switch), just ensure tab is visible
       }
     }, 50);

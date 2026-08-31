@@ -5,6 +5,7 @@ import type {
   MultiPartContent,
 } from "../../../types";
 import { sha256HexFromBytesPortable } from "../../../studio/hash";
+import { replaceControlCharacters } from "../../../utils/characterValidation";
 import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
   type ThinAgentInputLimits,
@@ -122,7 +123,7 @@ function extensionOf(name: string): string {
 
 function safeFileName(name: string): string {
   const leaf = name.split(/[\\/]/).pop() || "attachment";
-  const cleaned = leaf.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 180);
+  const cleaned = replaceControlCharacters(leaf, "", true).trim().slice(0, 180);
   return cleaned || "attachment";
 }
 

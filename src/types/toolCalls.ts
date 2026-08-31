@@ -34,11 +34,11 @@ export type ToolCancellationErrorCode =
 
 export interface ToolCallResult {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: {
-    code: string | ToolCancellationErrorCode;
+    code: string;
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
 

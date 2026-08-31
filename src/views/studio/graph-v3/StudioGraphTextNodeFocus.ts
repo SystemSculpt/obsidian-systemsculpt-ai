@@ -35,7 +35,6 @@ type CaretPositionDocument = Document & {
     x: number,
     y: number
   ) => { offsetNode: Node; offset: number } | null;
-  caretRangeFromPoint?: (x: number, y: number) => Range | null;
 };
 
 const HEADING_PATTERN = /^ {0,3}(#{1,6})[\t ]+(.*)$/;
@@ -296,7 +295,10 @@ function resolveRenderedTextOffset(
   const caretRange = caretPosition
     ? { node: caretPosition.offsetNode, offset: caretPosition.offset }
     : (() => {
-        const range = document.caretRangeFromPoint?.(x, y);
+        const legacyCaretRangeFromPoint = Reflect.get(document, "caretRangeFromPoint");
+        const range = typeof legacyCaretRangeFromPoint === "function"
+          ? Reflect.apply(legacyCaretRangeFromPoint, document, [x, y])
+          : null;
         return range
           ? { node: range.startContainer, offset: range.startOffset }
           : null;
@@ -350,7 +352,7 @@ function alignWikiAliases(raw: string): AlignedSource | undefined {
     if (aliasSeparator < 0) {
       // Simple unaliased targets render verbatim. Paths and subpaths have
       // host-specific labels, so leave those to the mounted editor.
-      if (/[\/#^]/.test(inner)) {
+      if (/[/#^]/.test(inner)) {
         return undefined;
       }
       const targetStart = start + 2;
@@ -460,6 +462,9 @@ function resolveSemanticSourceOffset(
   x: number,
   y: number
 ): number | undefined {
+  if (!(target instanceof displayEl.ownerDocument.defaultView!.Element)) {
+    return undefined;
+  }
   const blockEl = findTopLevelBlock(displayEl, target);
   if (!blockEl) {
     return undefined;
@@ -471,8 +476,7 @@ function resolveSemanticSourceOffset(
   }
 
   if (block.tag === "TABLE") {
-    const targetEl = target as Element;
-    const cell = targetEl.closest("th, td") as HTMLTableCellElement | null;
+    const cell = target.closest<HTMLTableCellElement>("th, td");
     const row = cell?.parentElement as HTMLTableRowElement | null;
     const sourceLine = row ? block.tableRows?.[row.rowIndex] : undefined;
     const sourceCell = sourceLine
@@ -494,8 +498,7 @@ function resolveSemanticSourceOffset(
   }
 
   if (block.tag === "UL" || block.tag === "OL") {
-    const targetEl = target as Element;
-    const item = targetEl.closest("li") as HTMLLIElement | null;
+    const item = target.closest<HTMLLIElement>("li");
     const itemIndex = item ? Array.from(blockEl.querySelectorAll("li")).indexOf(item) : -1;
     const sourceItem = itemIndex >= 0 ? block.listItems?.[itemIndex] : undefined;
     if (!item || !sourceItem) {

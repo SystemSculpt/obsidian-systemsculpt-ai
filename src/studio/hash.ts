@@ -70,11 +70,13 @@ export function sha256HexFromBytesPortable(input: Uint8Array): string {
 export async function sha256HexFromArrayBuffer(arrayBuffer: ArrayBuffer): Promise<string> {
   const bytes = new Uint8Array(arrayBuffer);
   try {
-    if (typeof crypto !== "undefined" && crypto.subtle) {
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
+    if (window.crypto?.subtle) {
+      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
       return bytesToHex(new Uint8Array(digest));
     }
-  } catch {}
+  } catch {
+    // The portable implementation below is deterministic on every host.
+  }
 
   return sha256HexFromBytesPortable(bytes);
 }

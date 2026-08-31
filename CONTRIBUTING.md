@@ -1,8 +1,6 @@
 # Contributing
 
-Work from `~/gits/systemsculpt/plugin`. The sibling website/API and operator
-repositories live at `~/gits/systemsculpt/website` and
-`~/gits/systemsculpt/systemsculpt-os`; do not copy their implementation into this client.
+Work from `~/gits/personal/systemsculpt/plugin`. The sibling website/API and operator repositories live at `~/gits/systemsculpt/website` and `~/gits/systemsculpt/systemsculpt-os`; do not copy their implementation into this client.
 
 ## Put each test at the interface it proves
 

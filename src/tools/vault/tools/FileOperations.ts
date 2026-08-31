@@ -74,20 +74,20 @@ export class FileOperations {
    * Read multiple files with windowing support
    */
   async readFiles(params: ReadFilesParams): Promise<{ files: Array<{ path: string; content: string; metadata?: FileReadMetadata; error?: string }> }> {
-    const raw = (params as any)?.paths;
+    const raw = params.paths;
     if (!Array.isArray(raw) || raw.length === 0) {
       throw new Error("Missing required 'paths'. Provide one or more file paths, e.g. {\"paths\":[\"Notes/Example.md\"]}.");
     }
     const paths = raw
-      .map((v: any) => (typeof v === "string" ? v : String(v ?? "")))
+      .map((v: unknown) => (typeof v === "string" ? v : String(v ?? "")))
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
     if (paths.length === 0) {
       throw new Error("Missing required 'paths'. Provide one or more file paths, e.g. {\"paths\":[\"Notes/Example.md\"]}.");
     }
 
-    const offset = Number((params as any)?.offset ?? 0);
-    const lengthArg = (params as any)?.length;
+    const offset = Number(params.offset ?? 0);
+    const lengthArg = params.length;
     
     // Limit number of files to prevent resource exhaustion
     const maxReadFiles = FILESYSTEM_LIMITS.MAX_READ_FILES ?? 10;
@@ -164,12 +164,12 @@ export class FileOperations {
             metadata
           });
           remainingContentBudget = Math.max(0, remainingContentBudget - windowContent.length);
-        } catch (err) {
+        } catch {
           files.push({ path, content: "", error: "Failed to read file" });
         }
       } else if (this.shouldUseAdapter(normalizedPath || path)) {
         try {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           const fullContent = await readAdapterText(adapter, normalizedPath || path);
           const stat = await statAdapterPath(adapter, normalizedPath || path);
           const fileSize = stat?.size ?? fullContent.length;
@@ -230,9 +230,9 @@ export class FileOperations {
   async writeFile(params: WriteFileParams): Promise<{ path: string, success: boolean }> {
     const path = params.path;
     const content = params.content;
-    const createDirs = (params as any).createDirs ?? true;
-    const ifExists = (params as any).ifExists ?? "overwrite";
-    const appendNewline = (params as any).appendNewline ?? false;
+    const createDirs = params.createDirs ?? true;
+    const ifExists = params.ifExists ?? "overwrite";
+    const appendNewline = params.appendNewline ?? false;
     
     if (!validatePath(path, this.allowedPaths)) {
       throw new Error(`Access denied: ${path}`);
@@ -292,7 +292,7 @@ export class FileOperations {
         }
       }
     } else if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter: any = this.app.vault.adapter as any;
+      const adapter = this.app.vault.adapter;
       const exists = await adapterPathExists(adapter, normalizedPath);
       if (exists && ifExists === "skip") {
         return { path: normalizedPath || path, success: true };
@@ -367,7 +367,7 @@ export class FileOperations {
   async editFile(params: EditFileParams): Promise<EditFileResult> {
     const filePath = params.path;
     const edits = params.edits;
-    const strict = (params as any).strict ?? true;
+    const strict = params.strict ?? true;
 
     if (!validatePath(filePath, this.allowedPaths)) {
       throw new Error(`Access denied: ${filePath}`);
@@ -382,7 +382,7 @@ export class FileOperations {
       mode: "edit",
     });
     if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter: any = this.app.vault.adapter as any;
+      const adapter = this.app.vault.adapter;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
 
       const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
@@ -508,7 +508,7 @@ export class FileOperations {
         let readCurrent: () => Promise<string>;
         let write: (content: string) => Promise<void>;
         if (this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           original = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
           readCurrent = async () => normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
           write = async (content) => writeAdapterText(adapter, normalizedPath, content);

@@ -17,6 +17,20 @@ import { extractSearchTerms, calculateScore, sortByScore, formatScoredResults, S
 import SystemSculptPlugin from "../../../main";
 
 type CompiledSearchPattern = Readonly<{ raw: string; source: string }>;
+type GrepContext = {
+  lines: number[];
+  matchCount: number;
+  context: string;
+};
+type GrepFileHit = {
+  file: string;
+  created: string;
+  modified: string;
+  totalMatches: number;
+  contexts: GrepContext[];
+  fileSize: number;
+  pathMatchOnly?: boolean;
+};
 const MAX_SEARCH_SCOPE_PATHS = 64;
 const MAX_SEARCH_SCOPE_PATH_LENGTH = 1024;
 
@@ -136,7 +150,7 @@ export class SearchOperations {
   private async listHiddenFiles(): Promise<Array<{ path: string; stat: { size: number; ctime: number; mtime: number } | null; __adapter: true }>> {
     const hiddenRoots = this.getHiddenAllowedPaths();
     if (hiddenRoots.length === 0) return [];
-    const adapter: any = this.app.vault.adapter as any;
+    const adapter = this.app.vault.adapter;
 
     const seen = new Set<string>();
     const results: Array<{ path: string; stat: { size: number; ctime: number; mtime: number } | null; __adapter: true }> = [];
@@ -167,13 +181,13 @@ export class SearchOperations {
   /**
    * Search for files and directories by name patterns - with intelligent scoring
    */
-  async findFiles(params: FindFilesParams): Promise<any> {
-    const patterns = this.normalizeStringArray((params as any)?.patterns);
+  async findFiles(params: FindFilesParams): Promise<unknown> {
+    const patterns = this.normalizeStringArray(params.patterns);
     if (patterns.length === 0) {
       throw new Error("Missing required 'patterns'. Provide one or more search terms, e.g., [\"systemsculpt\", \"API_TOKEN\"].");
     }
     const globalResultLimit = FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3;
-    const requestedMaxResults = (params as any)?.maxResults;
+    const requestedMaxResults = params.maxResults;
     if (
       requestedMaxResults !== undefined
       && requestedMaxResults !== null
@@ -258,13 +272,6 @@ export class SearchOperations {
               originalQuery
             });
             
-            // Add metadata if available
-            const created = (child as any).stat?.ctime ? new Date((child as any).stat.ctime).toISOString() : undefined;
-            const modified = (child as any).stat?.mtime ? new Date((child as any).stat.mtime).toISOString() : undefined;
-            
-            if (created) scoreResult.created = created;
-            if (modified) scoreResult.modified = modified;
-            
             scoredResults.push(scoreResult);
           }
           // Recursively search subfolders
@@ -315,20 +322,20 @@ export class SearchOperations {
   /**
    * Search within note contents using one or more search terms (regex supported) - with intelligent scoring
    */
-  async grepVault(params: GrepVaultParams): Promise<any> {
-    const patterns = this.normalizeStringArray((params as any)?.patterns);
-    const searchPaths = this.normalizeSearchPaths((params as any)?.paths);
-    const searchIn = (params as any)?.searchIn ?? 'content';
-    const requestedPatternMode = (params as any)?.patternMode;
+  async grepVault(params: GrepVaultParams): Promise<unknown> {
+    const patterns = this.normalizeStringArray(params.patterns);
+    const searchPaths = this.normalizeSearchPaths(params.paths);
+    const searchIn = params.searchIn ?? 'content';
+    const requestedPatternMode = params.patternMode;
     if (requestedPatternMode != null && requestedPatternMode !== "literal" && requestedPatternMode !== "regex") {
       throw new Error("patternMode must be either 'literal' or 'regex'.");
     }
     const patternMode: "literal" | "regex" = requestedPatternMode ?? "literal";
-    const requestedCursor = (params as any)?.cursor;
+    const requestedCursor = params.cursor;
     if (requestedCursor != null && (typeof requestedCursor !== "string" || requestedCursor.length > 4096)) {
       throw new Error("Search cursor must be a string no longer than 4096 characters.");
     }
-    const requestedPageTokens = Math.max(512, Math.min(4096, Number((params as any)?.pageTokens || FILESYSTEM_LIMITS.MAX_TOOL_RESULT_TOKENS)));
+    const requestedPageTokens = Math.max(512, Math.min(4096, Number(params.pageTokens || FILESYSTEM_LIMITS.MAX_TOOL_RESULT_TOKENS)));
     const bodyTokenBudget = Math.max(256, requestedPageTokens - FILESYSTEM_LIMITS.GREP_FOOTER_TOKENS);
     if (patterns.length === 0) {
       throw new Error("Missing required 'patterns'. Add one or more words or regex patterns, e.g., [\"systemsculpt\", \"api key\"].");
@@ -339,8 +346,8 @@ export class SearchOperations {
     const originalQuery = patterns.join(' ');
     const searchTerms = extractSearchTerms(originalQuery);
     // We keep two buckets: fileHits (actual matches) and metaResults (info, timeout, etc.)
-    const metaResults: any[] = [];
-    const fileHits: any[] = [];
+    const metaResults: unknown[] = [];
+    const fileHits: GrepFileHit[] = [];
     
     // Track serialized response size to ensure we never exceed the model-safe
     // limit. These counters are shared across the entire search operation so
@@ -367,21 +374,20 @@ export class SearchOperations {
     };
     
     const startTime = Date.now();
-    const adapter: any = this.app.vault.adapter as any;
+    const adapter = this.app.vault.adapter;
 
     type SearchFile = TFile | { path: string; stat: { size: number; ctime: number; mtime: number } | null; __adapter: true };
     const isAdapterFile = (file: SearchFile): file is { path: string; stat: { size: number; ctime: number; mtime: number } | null; __adapter: true } =>
-      Boolean((file as any).__adapter);
+      !(file instanceof TFile);
     const getStat = (file: SearchFile) => (isAdapterFile(file) ? file.stat : file.stat);
     const getSize = (file: SearchFile) => getStat(file)?.size ?? 0;
     
     // Search entire vault using cached access if available
     const getFiles = () => {
-      const plugin = (this.app as any).plugins?.plugins?.['systemsculpt-ai'];
       try {
-        return plugin?.vaultFileCache?.getAllFiles() || this.app.vault.getFiles();
-      } catch (_) {
-        return [] as any[];
+        return this.plugin.vaultFileCache?.getAllFiles() || this.app.vault.getFiles();
+      } catch {
+        return [];
       }
     };
     
@@ -456,7 +462,7 @@ export class SearchOperations {
       if (hasPathMatch) {
         const created = stat?.ctime ? new Date(stat.ctime).toISOString() : new Date().toISOString();
         const modified = stat?.mtime ? new Date(stat.mtime).toISOString() : new Date().toISOString();
-        const fileResult = {
+        const fileResult: GrepFileHit = {
           file: file.path,
           created,
           modified,
@@ -464,7 +470,7 @@ export class SearchOperations {
           contexts: [],
           fileSize,
           pathMatchOnly: true
-        } as any;
+        };
 
         if (!wouldExceedCharLimit(currentSize, fileResult, MAX_CHARS)) {
           fileHits.push(fileResult);
@@ -653,7 +659,7 @@ export class SearchOperations {
         
         // Clear content from memory immediately
         // Note: content variable will be garbage collected after this scope
-      } catch (err) {
+      } catch {
         metrics.filesSkipped++;
         // Silently skip problematic files
       }
@@ -727,7 +733,7 @@ export class SearchOperations {
       // Read a snippet of content for scoring (if not already loaded)
       let contentSnippet = '';
       if (hit.contexts && hit.contexts.length > 0) {
-        contentSnippet = hit.contexts.map((c: any) => c.context).join(' ');
+        contentSnippet = hit.contexts.map((context) => context.context).join(' ');
       }
       
       // Calculate intelligent score
@@ -795,7 +801,8 @@ export class SearchOperations {
 
     const order = buildOrder(allSnippets.length);
 
-    const encodeCursor = (state: any): string => {
+    type SearchCursor = Readonly<{ q: string; o: number }>;
+    const encodeCursor = (state: SearchCursor): string => {
       try {
         const bytes = new TextEncoder().encode(JSON.stringify(state));
         let binary = "";
@@ -805,12 +812,17 @@ export class SearchOperations {
         return "";
       }
     };
-    const decodeCursor = (cursor?: string): any | null => {
+    const decodeCursor = (cursor?: string): SearchCursor | null => {
       if (!cursor || typeof cursor !== 'string') return null;
       try {
         const binary = atob(cursor);
         const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        return JSON.parse(new TextDecoder().decode(bytes));
+        const decoded: unknown = JSON.parse(new TextDecoder().decode(bytes));
+        if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return null;
+        const candidate = decoded as Record<string, unknown>;
+        return typeof candidate.q === "string" && typeof candidate.o === "number"
+          ? { q: candidate.q, o: candidate.o }
+          : null;
       } catch {
         return null;
       }
@@ -819,7 +831,7 @@ export class SearchOperations {
       searchPaths === null ? "" : `|paths:${searchPaths.join("\u0001")}`
     }`;
     const rawCursor = requestedCursor;
-    const cursorState = decodeCursor(rawCursor);
+    const cursorState = decodeCursor(rawCursor ?? undefined);
     if (rawCursor && (!cursorState || cursorState.q !== qId || !Number.isFinite(cursorState.o))) {
       throw new Error("Invalid search cursor for this query.");
     }
@@ -870,7 +882,7 @@ export class SearchOperations {
         },
         snippets: included.map((snippet) => snippet.text),
         footer: remainingCount > 0 ? `...[omitted ${omittedTokens} tokens across ${remainingCount} matches]` : ''
-      } as any;
+      };
     };
 
     let response = buildResponse();

@@ -275,7 +275,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("returns a minimal managed resume descriptor", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockResolvedValue({
       id: "chat-9",
       messages: [{ role: "user" as ChatRole, content: "Hello" }],
@@ -294,7 +294,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("falls back to null when the saved chat note is corrupted", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockRejectedValue(
       new SavedChatCorruptedError("SystemSculpt/Chats/corrupt.md"),
     );
@@ -303,7 +303,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("does not hide an unexpected resume read failure as a missing chat", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockRejectedValue(new Error("vault unavailable"));
 
     await expect(service.getChatResumeDescriptor("unavailable"))

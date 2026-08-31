@@ -70,14 +70,15 @@ async function tryWebClipboardImageWrite(
   if (!ownerNavigator?.clipboard?.write) {
     return false;
   }
-  const ClipboardItemCtor = (hostWindow as any)?.ClipboardItem
+  const ownerWindow = hostWindow as (Window & typeof window) | undefined;
+  const ClipboardItemCtor = ownerWindow?.ClipboardItem
     ?? (typeof ClipboardItem !== "undefined" ? ClipboardItem : undefined);
   if (!ClipboardItemCtor) {
     return false;
   }
 
   try {
-    const BlobCtor = (hostWindow as any)?.Blob ?? Blob;
+    const BlobCtor = ownerWindow?.Blob ?? Blob;
     const blob = new BlobCtor([bytes], { type: mime });
     const item = new ClipboardItemCtor({ [mime]: blob });
     await ownerNavigator.clipboard.write([item]);
@@ -141,7 +142,9 @@ export async function tryCopyToClipboard(text: string, host?: Node): Promise<boo
       textarea.setCssStyles({ position: "fixed", opacity: "0" });
       ownerDocument.body.appendChild(textarea);
       textarea.select();
-      return ownerDocument.execCommand("copy");
+      const copyCommand = Reflect.get(ownerDocument, "execCommand");
+      return typeof copyCommand === "function"
+        && Reflect.apply(copyCommand, ownerDocument, ["copy"]) === true;
     } catch {
       return false;
     } finally {

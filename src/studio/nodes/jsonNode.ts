@@ -243,7 +243,7 @@ export const jsonNode: StudioNodeDefinition = {
     if (hasJsonInput && hasTextInput) {
       throw new Error('JSON node accepts either "json" or "text" input, not both at once.');
     }
-    const config = context.node.config as Record<string, StudioJsonValue>;
+    const config = context.node.config;
 
     let jsonValue: StudioJsonValue;
     if (hasJsonInput) {

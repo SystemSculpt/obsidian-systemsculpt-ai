@@ -487,7 +487,12 @@ export class SystemSculptService {
       });
     }
 
-    const payload = (await response.json()) as any;
+    const payloadValue: unknown = await response.json();
+    const payload: Record<string, unknown> = payloadValue
+      && typeof payloadValue === "object"
+      && !Array.isArray(payloadValue)
+      ? payloadValue as Record<string, unknown>
+      : {};
     const asNumber = (value: unknown): number => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -515,54 +520,61 @@ export class SystemSculptService {
       return "request";
     };
 
-    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
-    const items: CreditsUsageSnapshot[] = rawItems.map((item: any) => ({
-      id: asString(item?.id),
-      createdAt: asString(item?.created_at),
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const items: CreditsUsageSnapshot[] = rawItems.map((itemValue: unknown) => {
+      const item: Record<string, unknown> = itemValue
+        && typeof itemValue === "object"
+        && !Array.isArray(itemValue)
+        ? itemValue as Record<string, unknown>
+        : {};
+      return {
+      id: asString(item.id),
+      createdAt: asString(item.created_at),
       transactionType: "agent_turn",
-      endpoint: asNullableString(item?.endpoint),
-      usageKind: asUsageKind(item?.usage_kind),
-      durationSeconds: asNumber(item?.duration_seconds),
-      totalTokens: asNumber(item?.total_tokens),
-      inputTokens: asNumber(item?.input_tokens),
-      outputTokens: asNumber(item?.output_tokens),
-      cacheReadTokens: asNumber(item?.cache_read_tokens),
-      cacheWriteTokens: asNumber(item?.cache_write_tokens),
-      pageCount: asNumber(item?.page_count),
-      creditsCharged: asNumber(item?.credits_charged),
-      includedDelta: asNumber(item?.included_delta),
-      addOnDelta: asNumber(item?.add_on_delta),
-      totalDelta: asNumber(item?.total_delta),
-      includedBefore: asNumber(item?.included_before),
-      includedAfter: asNumber(item?.included_after),
-      addOnBefore: asNumber(item?.add_on_before),
-      addOnAfter: asNumber(item?.add_on_after),
-      totalBefore: asNumber(item?.total_before),
-      totalAfter: asNumber(item?.total_after),
-      rawUsd: asNumber(item?.raw_usd),
+      endpoint: asNullableString(item.endpoint),
+      usageKind: asUsageKind(item.usage_kind),
+      durationSeconds: asNumber(item.duration_seconds),
+      totalTokens: asNumber(item.total_tokens),
+      inputTokens: asNumber(item.input_tokens),
+      outputTokens: asNumber(item.output_tokens),
+      cacheReadTokens: asNumber(item.cache_read_tokens),
+      cacheWriteTokens: asNumber(item.cache_write_tokens),
+      pageCount: asNumber(item.page_count),
+      creditsCharged: asNumber(item.credits_charged),
+      includedDelta: asNumber(item.included_delta),
+      addOnDelta: asNumber(item.add_on_delta),
+      totalDelta: asNumber(item.total_delta),
+      includedBefore: asNumber(item.included_before),
+      includedAfter: asNumber(item.included_after),
+      addOnBefore: asNumber(item.add_on_before),
+      addOnAfter: asNumber(item.add_on_after),
+      totalBefore: asNumber(item.total_before),
+      totalAfter: asNumber(item.total_after),
+      rawUsd: asNumber(item.raw_usd),
       fileSizeBytes:
-        item?.file_size_bytes === null || item?.file_size_bytes === undefined
+        item.file_size_bytes === null || item.file_size_bytes === undefined
           ? null
-          : asNumber(item?.file_size_bytes),
-      fileFormat: asNullableString(item?.file_format),
-      billingFormulaVersion: asNullableString(item?.billing_formula_version),
+          : asNumber(item.file_size_bytes),
+      fileFormat: asNullableString(item.file_format),
+      billingFormulaVersion: asNullableString(item.billing_formula_version),
       billingCreditsPerUsd:
-        item?.billing_credits_per_usd === null || item?.billing_credits_per_usd === undefined
+        item.billing_credits_per_usd === null || item.billing_credits_per_usd === undefined
           ? null
-          : asNumber(item?.billing_credits_per_usd),
+          : asNumber(item.billing_credits_per_usd),
       billingMarkupMultiplier:
-        item?.billing_markup_multiplier === null || item?.billing_markup_multiplier === undefined
+        item.billing_markup_multiplier === null || item.billing_markup_multiplier === undefined
           ? null
-          : asNumber(item?.billing_markup_multiplier),
+          : asNumber(item.billing_markup_multiplier),
       billingCreditsExact:
-        item?.billing_credits_exact === null || item?.billing_credits_exact === undefined
+        item.billing_credits_exact === null || item.billing_credits_exact === undefined
           ? null
-          : asNumber(item?.billing_credits_exact),
-    }));
+          : asNumber(item.billing_credits_exact),
+      };
+    });
 
     return {
       items,
-      nextBefore: asNullableString(payload?.next_before),
+      nextBefore: asNullableString(payload.next_before),
     };
   }
   public async executeLocalVaultToolCall(options: {
@@ -571,7 +583,7 @@ export class SystemSculptService {
     timeoutMs?: number;
     signal?: AbortSignal;
   }): Promise<ToolCallResult> {
-    const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {}) as ToolCallRequest;
+    const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {});
     if (options.signal?.aborted) {
       return {
         success: false,
@@ -593,7 +605,7 @@ export class SystemSculptService {
     }
 
     const rawArguments = request?.function?.arguments;
-    let parsedArgs: any = {};
+    let parsedArgs: unknown = {};
     if (typeof rawArguments === "string" && rawArguments.trim().length > 0) {
       try {
         parsedArgs = JSON.parse(rawArguments);

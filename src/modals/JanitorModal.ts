@@ -51,7 +51,7 @@ export class JanitorModal extends StandardModal {
     this.createMainContainer();
     this.addActionButton("janitor.refresh", "Refresh", () => this.refreshData(), false, "refresh-cw");
     this.addActionButton("janitor.close", "Close", () => this.close(), false);
-    this.loadJanitorData();
+    void this.loadJanitorData();
   }
 
   private createMainContainer() {
@@ -77,7 +77,7 @@ export class JanitorModal extends StandardModal {
     
     // Get all files and folders in one operation
     const allFiles = this.app.vault.getFiles();
-    const allFolders = this.app.vault.getAllLoadedFiles().filter(f => f instanceof TFolder) as TFolder[];
+    const allFolders = this.app.vault.getAllLoadedFiles().filter(f => f instanceof TFolder);
     
     // Efficiently categorize files
     for (const file of allFiles) {
@@ -145,7 +145,7 @@ export class JanitorModal extends StandardModal {
       this.showLoading(false);
       this.populateAllSections(data);
       
-    } catch (error) {
+    } catch {
       if (task.isCurrent()) {
         this.showError("Failed to scan vault. Please try refreshing.");
       }
@@ -364,7 +364,7 @@ export class JanitorModal extends StandardModal {
    * Efficient refresh that clears cache and reloads
    */
   private refreshData() {
-    this.loadJanitorData();
+    void this.loadJanitorData();
   }
 
   /**
@@ -450,7 +450,7 @@ export class JanitorModal extends StandardModal {
       }],
     });
 
-    const result = await confirmModal.open();
+    const result = await confirmModal.openAndWait();
     if (result) {
       try {
         await this.cleanDirectory(directory);
@@ -497,7 +497,7 @@ export class JanitorModal extends StandardModal {
       ],
     });
 
-    const result = await confirmModal.open();
+    const result = await confirmModal.openAndWait();
     if (result) {
       try {
         // Delete empty files first

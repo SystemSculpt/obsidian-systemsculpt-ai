@@ -9,6 +9,7 @@ import {
   isFirstPartyToolName,
   type FirstPartyToolName,
 } from "./toolNames";
+import { toError } from "../utils/errors";
 
 export class FirstPartyToolService {
   private readonly vaultTools: VaultToolModule;
@@ -84,14 +85,18 @@ export class FirstPartyToolService {
       }
       execution.then(
         (value) => finish(() => resolve(value)),
-        (error) => finish(() => reject(error)),
+        (error) => finish(() => reject(toError(error, "Tool execution failed."))),
       );
     });
   }
 
   private mapVaultArgs(toolName: FirstPartyToolName, args: unknown): unknown {
     if (!this.vaultRoot || !args || typeof args !== "object") return args;
-    const input = args as Record<string, any>;
+    const input = args as Record<string, unknown>;
+    const asRecord = (value: unknown): Record<string, unknown> =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
     const mapPath = (path: string): string => this.normalizeVaultPath(path);
     const stringArray = (value: unknown): string[] => Array.isArray(value)
       ? value.map((entry) => String(entry ?? ""))
@@ -113,31 +118,40 @@ export class FirstPartyToolService {
         return Array.isArray(input.files)
           ? {
               ...input,
-              files: input.files.map((file: any) => ({
-                ...file,
-                path: mapPath(String(file?.path ?? "")),
-              })),
+              files: input.files.map((file: unknown) => {
+                const fileRecord = asRecord(file);
+                return {
+                  ...fileRecord,
+                  path: mapPath(String(fileRecord.path ?? "")),
+                };
+              }),
             }
           : args;
       case "move":
         return Array.isArray(input.items)
           ? {
               ...input,
-              items: input.items.map((item: any) => ({
-                ...item,
-                source: mapPath(String(item?.source ?? "")),
-                destination: mapPath(String(item?.destination ?? "")),
-              })),
+              items: input.items.map((item: unknown) => {
+                const itemRecord = asRecord(item);
+                return {
+                  ...itemRecord,
+                  source: mapPath(String(itemRecord.source ?? "")),
+                  destination: mapPath(String(itemRecord.destination ?? "")),
+                };
+              }),
             }
           : args;
       case "open":
         if (Array.isArray(input.files)) {
           return {
             ...input,
-            files: input.files.map((file: any) => ({
-              ...file,
-              path: mapPath(String(file?.path ?? "")),
-            })),
+            files: input.files.map((file: unknown) => {
+              const fileRecord = asRecord(file);
+              return {
+                ...fileRecord,
+                path: mapPath(String(fileRecord.path ?? "")),
+              };
+            }),
           };
         }
         return typeof input.path === "string"

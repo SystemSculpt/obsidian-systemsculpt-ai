@@ -56,6 +56,7 @@ const createMockPlugin = (manager = createMockManager()) => ({
       getActiveFile: jest.fn().mockReturnValue(null),
       getActiveViewOfType: jest.fn().mockReturnValue(null),
       activeLeaf: null,
+      getMostRecentLeaf: jest.fn().mockReturnValue(null),
       on: jest.fn().mockReturnValue({ id: "event-ref" }),
       getLeaf: jest.fn().mockReturnValue({ openFile: jest.fn().mockResolvedValue(undefined) }),
     },
@@ -572,9 +573,9 @@ describe("EmbeddingsView", () => {
       (view as any).currentFile = source;
       (view as any).currentResults = [{ path: "notes/related.md", score: 0.9 }];
       mockPlugin.app.workspace.getActiveFile.mockReturnValue(source);
-      mockPlugin.app.workspace.activeLeaf = {
+      mockPlugin.app.workspace.getMostRecentLeaf.mockReturnValue({
         view: { getViewType: () => EMBEDDINGS_VIEW_TYPE },
-      };
+      });
 
       (view as any).handleVaultDelete(source);
       (view as any).checkActiveFile();

@@ -171,7 +171,7 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
-    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!), { projectPath: newPath }) };
+    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")), { projectPath: newPath }) };
   }
 
   async adoptVisibleProjectRename(options: {
@@ -207,7 +207,7 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     const renamedProject = parseStudioProject(
-      decoder.decode(result.generation.files.get("project.systemsculpt")!),
+      decoder.decode(result.generation.files.get("project.systemsculpt")),
       { projectPath: newPath }
     );
     this.selectedByPath.delete(oldPath);
@@ -220,7 +220,7 @@ export class StudioProjectStore {
   }
 
   async readProjectRawText(projectPath: string): Promise<string | null> {
-    try { const selected = await this.openSelected(projectPath); return decoder.decode(selected.generation.files.get("project.systemsculpt")!); }
+    try { const selected = await this.openSelected(projectPath); return decoder.decode(selected.generation.files.get("project.systemsculpt")); }
     catch { return null; }
   }
 

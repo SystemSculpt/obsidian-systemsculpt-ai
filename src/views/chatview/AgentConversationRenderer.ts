@@ -1070,7 +1070,7 @@ export class AgentConversationRenderer extends Component {
           "data-activity-kind": "tool",
         },
       });
-      await this.renderTool(node, tool);
+      this.renderTool(node, tool);
       return;
     }
     if (part.type !== "content") return;
@@ -1141,7 +1141,7 @@ export class AgentConversationRenderer extends Component {
         const overflow = this.createActivityOverflow(
           parent,
           split.previous.length,
-          `overflow:${historicalPartKey(split.previous[0]!)}`,
+          `overflow:${historicalPartKey(split.previous[0])}`,
         );
         this.setActivityOverflowItems(
           overflow.element,
@@ -1547,8 +1547,8 @@ export class AgentConversationRenderer extends Component {
     finalAnswerPartIds: ReadonlySet<string>,
     elapsedMs?: number,
   ): Array<Readonly<{ key: string; node: HTMLElement }>> {
-    const finalAnswers = lanes.filter((_, index) => finalAnswerPartIds.has(parts[index]!.id));
-    const workLanes = lanes.filter((_, index) => !finalAnswerPartIds.has(parts[index]!.id));
+    const finalAnswers = lanes.filter((_, index) => finalAnswerPartIds.has(parts[index].id));
+    const workLanes = lanes.filter((_, index) => !finalAnswerPartIds.has(parts[index].id));
     const workParts = parts.filter((part) => !finalAnswerPartIds.has(part.id));
     const hasActivity = workParts.some(isAgentActivityPart);
     if (!hasActivity) return lanes;
@@ -1585,7 +1585,7 @@ export class AgentConversationRenderer extends Component {
   ): Array<Readonly<{ key: string; node: HTMLElement }>> {
     const result: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
     const timeline = groupAdjacentAgentActivity(
-      lanes.map((lane, index) => ({ lane, part: parts[index]! })),
+      lanes.map((lane, index) => ({ lane, part: parts[index] })),
       ({ part }) => isAgentActivityPart(part),
     );
     const wantedOverflowKeys = new Set<string>();
@@ -1596,7 +1596,7 @@ export class AgentConversationRenderer extends Component {
       }
       const split = splitPreviousAgentActivity(entry.items);
       if (split.previous.length > 0) {
-        const first = split.previous[0]!;
+        const first = split.previous[0];
         const key = `overflow:${first.lane.key}`;
         wantedOverflowKeys.add(key);
         let overflow = this.activeOverflowNodes.get(key);
@@ -1704,7 +1704,7 @@ export class AgentConversationRenderer extends Component {
           if (insertionParent) insertionParent.appendChild(node);
           else this.insertActiveNode(node);
         }
-        if (part.kind === "tool") this.startToolApprovalPreviewHydration(node);
+        if (part.kind === "tool") void this.startToolApprovalPreviewHydration(node);
       }
     }
     if (preservedFocusKey) {
@@ -1738,7 +1738,7 @@ export class AgentConversationRenderer extends Component {
         "data-agent-turn-fold": "",
         "data-activity-state": "settled",
       },
-    }) as HTMLDetailsElement;
+    });
     const header = element.createEl("summary", {
       cls: "systemsculpt-agent-activity-header",
       attr: {

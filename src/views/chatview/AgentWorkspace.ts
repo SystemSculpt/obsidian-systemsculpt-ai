@@ -883,7 +883,7 @@ export class AgentWorkspace extends Component {
       closest?: (selectors: string) => Element | null;
     }) | null;
     if (typeof target?.closest !== "function") return;
-    const summary = target.closest("summary") as HTMLElement | null;
+    const summary = target.closest("summary");
     if (!summary || !this.renderer.element.contains(summary)) return;
     if (event.type === "keydown" && target !== summary) return;
     const nestedControl = target.closest(

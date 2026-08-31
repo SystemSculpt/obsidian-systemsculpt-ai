@@ -403,7 +403,7 @@ export class StudioPortInteraction {
     const releasedOver = ownerDocument.elementFromPoint(event.clientX, event.clientY);
     const card =
       typeof releasedOver?.closest === "function"
-        ? (releasedOver.closest(".ss-studio-node-card") as HTMLElement | null)
+        ? releasedOver.closest<HTMLElement>(".ss-studio-node-card")
         : null;
     const nodeId = card?.dataset.nodeId;
     if (!nodeId || nodeId === drag.fromNodeId) {

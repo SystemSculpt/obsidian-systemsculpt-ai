@@ -604,7 +604,7 @@ function renderInlineConfigNoteSelectorField(options: {
     pathBrowseOptions,
   } = options;
 
-  const items = parseStudioNoteItems(node.config[field.key] as StudioJsonValue | undefined);
+  const items = parseStudioNoteItems(node.config[field.key]);
   const container = fieldEl.createDiv({ cls: "ss-studio-note-selector" });
   const toolbarEl = container.createDiv({ cls: "ss-studio-note-selector-toolbar" });
   const summaryEl = toolbarEl.createDiv({ cls: "ss-studio-note-selector-summary" });
@@ -935,24 +935,25 @@ function renderInlineConfigPathField(options: {
       "ss-studio-node-inline-config-path-button-label",
       "ss-studio-path-browse-button-label"
     );
-  browseButtonEl.addEventListener("click", async (event) => {
+  browseButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (interactionLocked) {
       return;
     }
-    const selected = await browseForNodeConfigPath(field, browseButtonEl, pathBrowseOptions);
-    if (!selected) {
-      return;
-    }
-    inputEl.value = selected;
-    commitInlineConfigValueChange({
-      node,
-      key: field.key,
-      value: selected,
-      onNodeConfigMutated,
-      onNodeConfigValueChange,
-      mutationOptions: { mode: "discrete" },
+    void browseForNodeConfigPath(field, browseButtonEl, pathBrowseOptions).then((selected) => {
+      if (!selected) {
+        return;
+      }
+      inputEl.value = selected;
+      commitInlineConfigValueChange({
+        node,
+        key: field.key,
+        value: selected,
+        onNodeConfigMutated,
+        onNodeConfigValueChange,
+        mutationOptions: { mode: "discrete" },
+      });
     });
   });
 }

@@ -1,5 +1,4 @@
 import type {
-  StudioJsonValue,
   StudioNodeInstance,
   StudioNodeOutputMap,
   StudioProjectV1,
@@ -67,7 +66,7 @@ export function syncDatasetOutputFieldsToProjectNodeConfig(options: {
 
   const nextFields = deriveDatasetOutputFieldsFromOutputs(options.event.outputs);
   const currentFields = readDatasetOutputFields(
-    sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY] as StudioJsonValue
+    sourceNode.config[DATASET_OUTPUT_FIELDS_CONFIG_KEY]
   );
   const unchanged =
     nextFields.length === currentFields.length &&

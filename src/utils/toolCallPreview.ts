@@ -79,7 +79,9 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
       // The executor edits normalized text, so the preview must diff against the
       // same normalization or a CRLF file reads as a whole-file rewrite.
       oldContent = normalizeLineEndings(await app.vault.read(file));
-    } catch {}
+    } catch {
+      // A missing source file produces an empty-before preview.
+    }
   }
 
   let newContent = "";
@@ -89,10 +91,10 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   let skipped: SkippedEdit[] = [];
   const { canonicalName: base } = splitToolName(fn.name);
   if (base === "write") {
-    const content = String((fn.arguments as any).content ?? "");
-    const ifExists = String((fn.arguments as any).ifExists ?? "overwrite");
+    const content = String(fn.arguments.content ?? "");
+    const ifExists = String(fn.arguments.ifExists ?? "overwrite");
     if (file && file instanceof TFile && ifExists === "append") {
-      const appendNewline = (fn.arguments as any).appendNewline === true;
+      const appendNewline = fn.arguments.appendNewline === true;
       newContent = oldContent + (appendNewline && !oldContent.endsWith("\n") ? "\n" : "") + content;
     } else if (file && file instanceof TFile && ifExists === "skip") {
       newContent = oldContent;
@@ -100,8 +102,8 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
       newContent = content;
     }
   } else if (base === "edit") {
-    const edits: FileEdit[] = Array.isArray((fn.arguments as any).edits)
-      ? (fn.arguments as any).edits
+    const edits: FileEdit[] = Array.isArray(fn.arguments.edits)
+      ? fn.arguments.edits as FileEdit[]
       : [];
     requestedCount = edits.length;
     const applied = applyFileEdits(oldContent, edits, false);
@@ -228,7 +230,7 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
   const fn = getFunctionDataFromToolCall(toolCall);
   if (!fn) return null;
   const base = splitToolName(fn.name).canonicalName;
-  const args = (fn.arguments ?? {}) as Record<string, any>;
+  const args = (fn.arguments ?? {});
 
   if (base === "move") {
     const destinationFallback =
@@ -246,13 +248,18 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
     // De-duplicate identical move pairs (source,destination)
     const seen = new Set<string>();
     const items = rawItems
-      .map((it: any) => ({
-        source: String(it?.source ?? it?.path ?? it?.from ?? ""),
-        destination: String(it?.destination ?? destinationFallback ?? ""),
-      }))
-      .filter((it: any) => it.source && it.destination)
-      .filter((it: any) => {
-        const key = `${it.source}\u0000${it.destination}`;
+      .map((item: unknown) => {
+        const record = item && typeof item === "object" && !Array.isArray(item)
+          ? item as Record<string, unknown>
+          : {};
+        return {
+          source: String(record.source ?? record.path ?? record.from ?? ""),
+          destination: String(record.destination ?? destinationFallback ?? ""),
+        };
+      })
+      .filter((item) => item.source && item.destination)
+      .filter((item) => {
+        const key = `${item.source}\u0000${item.destination}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -277,11 +284,11 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
     const raw = Array.isArray(args.paths) ? args.paths : [];
     const seen = new Set<string>();
     const items = raw
-      .map((p: any) => ({ path: String(p) }))
-      .filter((it: any) => !!it.path)
-      .filter((it: any) => {
-        if (seen.has(it.path)) return false;
-        seen.add(it.path);
+      .map((p: unknown) => ({ path: String(p) }))
+      .filter((item) => !!item.path)
+      .filter((item) => {
+        if (seen.has(item.path)) return false;
+        seen.add(item.path);
         return true;
       });
     if (items.length === 0) return null;
@@ -292,11 +299,11 @@ export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview 
     const raw = Array.isArray(args.paths) ? args.paths : [];
     const seen = new Set<string>();
     const items = raw
-      .map((p: any) => ({ path: String(p) }))
-      .filter((it: any) => !!it.path)
-      .filter((it: any) => {
-        if (seen.has(it.path)) return false;
-        seen.add(it.path);
+      .map((p: unknown) => ({ path: String(p) }))
+      .filter((item) => !!item.path)
+      .filter((item) => {
+        if (seen.has(item.path)) return false;
+        seen.add(item.path);
         return true;
       });
     if (items.length === 0) return null;

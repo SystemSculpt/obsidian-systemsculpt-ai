@@ -46,7 +46,7 @@ export async function loadStudioImageEditorSource(
   } else if (path && mimeType.startsWith("image/")) {
     try {
       const loaded = isLikelyAbsolutePath(path)
-        ? await desktopHost.fs().readFile(path)
+        ? await (await desktopHost.fs()).readFile(path)
         : await readVaultBinary(options.app, path);
       bytes = normalizeBinary(loaded);
       asset = await options.storeAsset(bytes, mimeType);

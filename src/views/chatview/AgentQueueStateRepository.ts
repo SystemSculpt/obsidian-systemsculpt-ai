@@ -1,4 +1,5 @@
 import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { containsControlCharacters } from "../../utils/characterValidation";
 import type { AgentQueuedFollowUp } from "./AgentWorkspace";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import {
@@ -194,7 +195,7 @@ export class AgentQueueStateRepository {
 
   private normalizeKey(key: string): string {
     const normalized = key.trim();
-    if (!normalized || normalized.length > 256 || /[\u0000-\u001f\u007f-\u009f]/.test(normalized)) {
+    if (!normalized || normalized.length > 256 || containsControlCharacters(normalized, true)) {
       throw new Error("Queued follow-ups require a valid chat draft key.");
     }
     return normalized;

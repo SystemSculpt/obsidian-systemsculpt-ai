@@ -69,6 +69,7 @@ function createPanel(options: { openOnComplete?: boolean; targetEditor?: any; pl
   activeView.editor = activeEditor;
   activeView.file = activeFile;
   const activeLeaf = { view: activeView };
+  activeView.leaf = activeLeaf as any;
   const leaf = { openFile: jest.fn(async () => undefined) };
   (app.workspace as any).activeLeaf = activeLeaf;
   (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeView);

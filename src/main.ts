@@ -24,14 +24,14 @@ import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plu
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
-import type { RecorderService } from "./services/RecorderService";
+import { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
-import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
+import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { AccountConnectService } from "./services/AccountConnectService";
-import type { ViewManager } from "./core/plugin/views";
-import type { CommandManager } from "./core/plugin/commands";
+import { ViewManager } from "./core/plugin/views";
+import { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
@@ -60,10 +60,10 @@ import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
-import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
+import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
-import type { StudioService } from "./studio/StudioService";
+import { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
 import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
@@ -77,45 +77,16 @@ import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
 
+declare const __SS_BUILD_STAMP__: string | undefined;
+declare const __SS_TEST_DRIVER__: boolean | undefined;
+
 export type ManagedCapabilityClientGraph = Readonly<{
   transport: HostedTransportAdapter;
   admission: ManagedAdmission;
   client: ManagedCapabilityClient;
 }>;
 
-type ViewManagerModule = typeof import("./core/plugin/views");
-type CommandManagerModule = typeof import("./core/plugin/commands");
-type StudioServiceModule = typeof import("./studio/StudioService");
-type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
-type RecorderServiceModule = typeof import("./services/RecorderService");
-type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
-
 const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
-
-function loadViewManagerModule(): ViewManagerModule {
-  return require("./core/plugin/views");
-}
-
-function loadCommandManagerModule(): CommandManagerModule {
-  return require("./core/plugin/commands");
-}
-
-function loadStudioServiceModule(): StudioServiceModule {
-  return require("./studio/StudioService");
-}
-
-function loadSystemSculptSearchEngineModule(): SystemSculptSearchEngineModule {
-  return require("./services/search/SystemSculptSearchEngine");
-}
-
-function loadRecorderServiceModule(): RecorderServiceModule {
-  return require("./services/RecorderService");
-}
-
-function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
-  return require("./context-menu/FileContextMenuService");
-}
-
 type PublicSupportResourceSample = Readonly<{
   captured_at?: string;
   heap_used_mb?: number;
@@ -189,6 +160,7 @@ export default class SystemSculptPlugin extends Plugin {
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private isUnloading = false;
+  private unloadPromise: Promise<void> | null = null;
   private isPreloadingDone = false;
   private failures: string[] = [];
   /** True once a fatal load failure has put the plugin into minimal recovery mode. */
@@ -287,7 +259,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   public getSearchEngine(): SystemSculptSearchEngine {
     if (!this.searchEngine) {
-      const { SystemSculptSearchEngine } = loadSystemSculptSearchEngineModule();
       this.searchEngine = new SystemSculptSearchEngine(this.app, this);
     }
     return this.searchEngine;
@@ -969,10 +940,7 @@ export default class SystemSculptPlugin extends Plugin {
   private maybeShowAccountOnboarding(): void {
     if (this.settings.accountOnboardingShown === true) return;
     if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-    const timer = typeof window !== "undefined" && typeof window.setTimeout === "function"
-      ? window.setTimeout
-      : setTimeout;
-    timer(() => {
+    window.setTimeout(() => {
       if (this.settings.accountOnboardingShown === true) return;
       if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
       void this.getSettingsManager().updateSettings({ accountOnboardingShown: true });
@@ -985,8 +953,7 @@ export default class SystemSculptPlugin extends Plugin {
       slowThresholdMs: 750,
       timeoutMs: 8000,
     });
-    const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
-    timer(() => {
+    window.setTimeout(() => {
       if (!this.storage) {
         storageBootstrapPhase.fail(new Error("Storage manager unavailable"));
         return;
@@ -1083,9 +1050,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private createDiagnosticsFileNonce(): string {
-    // Filename nonces are host-level work, not UI bound to a popout window.
-    // eslint-disable-next-line obsidianmd/no-global-this
-    const runtimeCrypto = globalThis.crypto;
+    const runtimeCrypto = window.crypto;
     if (typeof runtimeCrypto?.getRandomValues !== "function") {
       throw new Error("Secure diagnostics export identifiers are unavailable.");
     }
@@ -1583,7 +1548,6 @@ export default class SystemSculptPlugin extends Plugin {
       return;
     }
 
-    const { FileContextMenuService } = loadFileContextMenuServiceModule();
     this.fileContextMenuService = new FileContextMenuService({
       app: this.app,
       plugin: this,
@@ -1646,7 +1610,6 @@ export default class SystemSculptPlugin extends Plugin {
       return this.viewManager;
     }
 
-    const { ViewManager } = loadViewManagerModule();
     const viewManager = new ViewManager(this, this.app);
     viewManager.initialize();
     this.viewManager = viewManager;
@@ -1667,7 +1630,6 @@ export default class SystemSculptPlugin extends Plugin {
       return this.commandManager;
     }
 
-    const { CommandManager } = loadCommandManagerModule();
     const commandManager = new CommandManager(this, this.app);
     commandManager.registerCommands();
     this.commandManager = commandManager;
@@ -1777,7 +1739,11 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  async onunload() {
+  onunload(): void {
+    this.unloadPromise ??= this.unloadAsync();
+  }
+
+  private async unloadAsync(): Promise<void> {
     this.pluginUpdateService?.stop();
     this.pluginUpdateService = null;
 
@@ -1994,7 +1960,7 @@ export default class SystemSculptPlugin extends Plugin {
     return super.loadData();
   }
 
-  async saveData(data: any) {
+  async saveData(data: unknown) {
     return super.saveData(data);
   }
 
@@ -2118,9 +2084,13 @@ export default class SystemSculptPlugin extends Plugin {
     this.pendingSettingsFocusTab = normalizedTargetTab;
 
     try {
-      // @ts-ignore – Obsidian typings omit the settings API
-      const settingsApi: any = this.app.setting;
-      if (!settingsApi?.open || !settingsApi?.openTabById) {
+      type SettingsApi = {
+        activeTab?: { id?: string };
+        open(): void;
+        openTabById(id: string): void;
+      };
+      const settingsApi = (this.app as typeof this.app & { setting?: SettingsApi }).setting;
+      if (!settingsApi) {
         throw new Error("Settings API unavailable");
       }
 
@@ -2241,7 +2211,6 @@ export default class SystemSculptPlugin extends Plugin {
     if (!this.recorderService) {
       const logger = this.getLogger();
       try {
-        const { RecorderService } = loadRecorderServiceModule();
         const instance = RecorderService.getInstance(this.app, this);
         if (!instance) {
           throw new Error('RecorderService instance unavailable');
@@ -2333,7 +2302,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   getStudioService(): StudioService {
     if (!this.studioService) {
-      const { StudioService } = loadStudioServiceModule();
       this.studioService = new StudioService(this);
     }
     return this.studioService;

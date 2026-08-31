@@ -691,7 +691,7 @@ describe("AgentIncidentCoordinator", () => {
 
     const restarted = new AgentIncidentCoordinator({
       recorder: new AgentIncidentRecorder(),
-      store: new AgentIncidentStore(adapter),
+      store: new AgentIncidentStore(adapter, { now: () => BASE_TIME + 60_000 }),
     });
     await restarted.initialize();
     await expect(restarted.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);

@@ -62,16 +62,20 @@ function createDirectorySetting(
                     await handleDirectoryChange(tabInstance, value, settingKey, false);
                 });
 
-            text.inputEl.addEventListener('blur', async () => {
-                await handleDirectoryChange(tabInstance, text.inputEl.value, settingKey, true);
+            text.inputEl.addEventListener('blur', () => {
+                void handleDirectoryChange(tabInstance, text.inputEl.value, settingKey, true).catch(() => {
+                    new Notice("Couldn’t save that directory.");
+                });
             });
 
             attachFolderSuggester(
                 text.inputEl,
-                async (selectedPath: string) => {
+                (selectedPath: string) => {
                     if (validateDirectory(selectedPath)) {
                         text.setValue(selectedPath);
-                        await handleDirectoryChange(tabInstance, selectedPath, settingKey, true);
+                        void handleDirectoryChange(tabInstance, selectedPath, settingKey, true).catch(() => {
+                            new Notice("Couldn’t save that directory.");
+                        });
                     } else {
                         new Notice("Use a vault-relative path without '..' or a leading slash.");
                     }

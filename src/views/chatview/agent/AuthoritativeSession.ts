@@ -247,7 +247,7 @@ function unknownRunState(
 function cloneAndFreeze<TValue>(value: TValue): TValue {
   const cloned = structuredClone(value);
   if (cloned === null || typeof cloned !== "object") return cloned;
-  const pending: object[] = [cloned as object];
+  const pending: object[] = [cloned];
   const visited = new Set<object>();
   while (pending.length > 0) {
     const current = pending.pop()!;

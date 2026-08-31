@@ -46,7 +46,7 @@ export class StudioLinkAnimator {
       ((cb) =>
         typeof ownerWindow.requestAnimationFrame === "function"
           ? ownerWindow.requestAnimationFrame(cb)
-          : (ownerWindow.setTimeout(() => cb(this.now()), 16) as unknown as number));
+          : (ownerWindow.setTimeout(() => cb(this.now()), 16)));
     this.cancelFrame =
       options.cancelFrame ||
       ((handle) => {

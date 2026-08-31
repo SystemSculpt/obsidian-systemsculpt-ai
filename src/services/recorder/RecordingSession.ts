@@ -165,8 +165,8 @@ export class RecordingSession {
     this.options = options;
     this.app = options.app;
     this.hostDocument = options.hostContext.hostDocument;
-    this.hostWindow = options.hostContext.hostWindow as RecorderCaptureWindow;
-    this.hostNavigator = options.hostContext.hostWindow.navigator as RecorderWakeLockNavigator;
+    this.hostWindow = options.hostContext.hostWindow;
+    this.hostNavigator = options.hostContext.hostWindow.navigator;
     this.mediaDevices = this.hostNavigator.mediaDevices ?? null;
     this.maxEncodedBytes = Number.isFinite(options.maxEncodedBytes)
       && (options.maxEncodedBytes ?? 0) > 0

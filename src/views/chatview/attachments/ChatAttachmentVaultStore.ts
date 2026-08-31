@@ -188,7 +188,7 @@ export class ChatAttachmentVaultStore {
       results.push(Object.freeze({
         ...attachment,
         contentRef: ref,
-      }) as T & Readonly<{ contentRef: ChatAttachmentContentRef }>);
+      }));
     }
     return Object.freeze(results);
   }

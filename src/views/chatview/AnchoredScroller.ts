@@ -1,4 +1,5 @@
 import {
+  createSurfaceSvgElement,
   cancelSurfaceAnimationFrame,
   getSurfaceOwnerDocument,
   getSurfaceOwnerWindow,
@@ -142,9 +143,8 @@ export class AnchoredScroller {
     this.content.setAttribute("role", this.content.getAttribute("role") || "log");
     this.content.setAttribute("aria-relevant", this.content.getAttribute("aria-relevant") || "additions");
     // Intrinsic SVG height reserves prompt-follow space without inline styles.
-    // eslint-disable-next-line obsidianmd/prefer-create-el
-    this.submittedPromptSpacer = getSurfaceOwnerDocument(this.content).createElementNS(
-      "http://www.w3.org/2000/svg",
+    this.submittedPromptSpacer = createSurfaceSvgElement(
+      getSurfaceOwnerDocument(this.content),
       "svg",
     );
     this.submittedPromptSpacer.setAttribute("width", "0");
@@ -695,7 +695,7 @@ export class AnchoredScroller {
       const row = rowId ? this.rows.get(rowId) : null;
       return row?.element === rowElement && this.isRegisteredRowAvailable(row) ? row : null;
     }).filter((row): row is RegisteredRow => row !== null);
-    return rows.length === 1 ? rows[0]! : null;
+    return rows.length === 1 ? rows[0] : null;
   }
 
   private restoreDisclosureLayoutMutationAnchor(
@@ -730,7 +730,7 @@ export class AnchoredScroller {
       candidate.dataset.focusKey === anchor.focusKey
       && candidate.tagName === anchor.tagName,
     );
-    return matches.length === 1 ? matches[0]! : null;
+    return matches.length === 1 ? matches[0] : null;
   }
 
   private restoreLayoutMutationAnchor(anchor: LayoutMutationAnchor | null): boolean {

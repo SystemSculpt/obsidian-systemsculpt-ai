@@ -499,7 +499,7 @@ export class AgentChatView extends ItemView {
       : protocolId("client");
     this.aiService = SystemSculptService.getInstance(plugin);
     this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory);
-    this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter as any);
+    this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter);
     this.queueRepository = new AgentQueueStateRepository(plugin.app.vault.adapter, this.attachmentStore);
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
     this.chatId = initial.chatId?.trim() || "";
@@ -674,7 +674,7 @@ export class AgentChatView extends ItemView {
 
 
   public get messages(): ChatMessage[] {
-    return this.transcript.snapshot().messages.map((message) => ({ ...message })) as ChatMessage[];
+    return this.transcript.snapshot().messages.map((message) => ({ ...message }));
   }
 
   public getViewType(): string { return CHAT_VIEW_TYPE; }
@@ -832,7 +832,7 @@ export class AgentChatView extends ItemView {
       this.applyFontSize();
       this.workspace?.setApprovalMode(this.approvalMode);
       this.workspace?.setTitle(this.chatTitle);
-      await this.workspace?.setHistory(loaded.messages as readonly ChatMessage[]);
+      await this.workspace?.setHistory(loaded.messages);
       const recoverySnapshot = loaded.agentConversationId
         ? cachedTranscriptRecoverySnapshot(loaded.messages)
         : null;
@@ -1653,7 +1653,7 @@ export class AgentChatView extends ItemView {
     expectedConversationOriginToken?: string,
     clearComposerAfterAdmission = false,
     clientStartedAtMonotonicMs = this.clientMonotonicNow(),
-  ): void | Promise<void> {
+  ): void {
     if (this.blockLegacyHistoryAction()) return;
     const admissionOriginToken = expectedConversationOriginToken
       ?? this.conversationOriginToken;
@@ -1932,7 +1932,7 @@ export class AgentChatView extends ItemView {
       // the next run publishes. Later isCurrentSubmissionOperation guards
       // still fence conversation switches.
       void this.workspace?.setHistory(
-        this.transcript.snapshot().messages as readonly ChatMessage[],
+        this.transcript.snapshot().messages,
       ).catch(() => {});
       void this.workspace?.setAgentSnapshot(null).catch(() => {});
 
@@ -2112,7 +2112,7 @@ export class AgentChatView extends ItemView {
         // The optimistic bubble is withdrawn with the restored draft so the
         // same words never sit in the transcript and the composer at once.
         await this.workspace?.setHistory(
-          this.transcript.snapshot().messages as readonly ChatMessage[],
+          this.transcript.snapshot().messages,
         );
         if (result.kind === "failed") {
           this.pendingRejectedRetry = {
@@ -2165,7 +2165,7 @@ export class AgentChatView extends ItemView {
         // down to what history cannot carry: the error and its Retry.
         try {
           await this.workspace?.settleUnfinishedRun(
-            this.transcript.snapshot().messages as readonly ChatMessage[],
+            this.transcript.snapshot().messages,
           );
         } catch (error) {
           this.logAgentError(error, "unfinishedRunSettlement");
@@ -2244,7 +2244,7 @@ export class AgentChatView extends ItemView {
     ) {
       throw new Error("This chat changed before the request was admitted.");
     }
-    await this.workspace?.setHistory(snapshot.messages as readonly ChatMessage[]);
+    await this.workspace?.setHistory(snapshot.messages);
     if (
       !this.isCurrentConversationOrigin(expectedConversationOriginToken)
       || (operation && this.activeSubmissionOperation !== operation)
@@ -2620,7 +2620,7 @@ export class AgentChatView extends ItemView {
       return null;
     }
     const generation = ++this.messageEditGeneration;
-    const hydratedMessage = await this.attachmentStore.hydrateMessage(message as ChatMessage);
+    const hydratedMessage = await this.attachmentStore.hydrateMessage(message);
     if (
       generation !== this.messageEditGeneration
       || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
@@ -2655,7 +2655,7 @@ export class AgentChatView extends ItemView {
     };
     const pending: PendingHistoricalResubmit = {
       kind: "resend",
-      message: { ...message } as ChatMessage,
+      message: { ...message },
       targetMessageId: messageIdToRetry,
       expectedIndex: index,
       expectedVersion: snapshot.version,
@@ -3082,7 +3082,7 @@ export class AgentChatView extends ItemView {
   }
 
   private installWorkspaceBindings(): void {
-    this.registerEvent((this.app.workspace as any).on(
+    this.registerEvent(this.app.workspace.on(
       FILE_CONTEXT_STATE_CHANGED_EVENT,
       (event: FileContextStateChangedEvent) => {
         if (event?.manager === this.contextManager) this.syncAttachments();
@@ -3124,7 +3124,9 @@ export class AgentChatView extends ItemView {
 
     const current = this.getInputText();
     const combined = [current.trim(), text.trim()].filter(Boolean).join(current.trim() ? "\n\n" : "");
-    this.setInputText(combined, { focus: this.app.workspace.activeLeaf === this.leaf });
+    this.setInputText(combined, {
+      focus: this.app.workspace.getActiveViewOfType(AgentChatView) === this,
+    });
     if (this.plugin.settings.autoSubmitAfterTranscription && combined.trim()) {
       this.acceptComposerSubmission(
         { text: combined, mode: "send" },
@@ -3220,7 +3222,7 @@ export class AgentChatView extends ItemView {
       snapshot.chatId !== previousSnapshot.chatId
       || snapshot.version !== previousSnapshot.version
     ) {
-      await this.workspace?.setHistory(snapshot.messages as readonly ChatMessage[]);
+      await this.workspace?.setHistory(snapshot.messages);
     }
 
     if (

@@ -1295,7 +1295,7 @@ export class StudioGraphSelectionController {
     if (typeof event.getCoalescedEvents === "function") {
       const coalescedEvents = event.getCoalescedEvents();
       if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
-        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
+        return coalescedEvents[coalescedEvents.length - 1];
       }
     }
     return event;

@@ -189,15 +189,22 @@ export class SettingsManager {
   }
 
   // Migrate settings to ensure all fields are properly initialized
-  private migrateSettings(settingsToMigrate: any): SystemSculptSettings {
+  private migrateSettings(settingsToMigrate: unknown): SystemSculptSettings {
     // Settings migration - silent process
     // Deep merge with defaults to ensure nested objects are properly initialized
-    const migratedSettings = { ...settingsToMigrate };
+    const sourceSettings: Record<string, unknown> = settingsToMigrate
+      && typeof settingsToMigrate === "object"
+      && !Array.isArray(settingsToMigrate)
+      ? { ...settingsToMigrate as Record<string, unknown> }
+      : {};
+    const migratedSettings = {
+      ...DEFAULT_SETTINGS,
+      ...sourceSettings,
+    };
     const generateVaultInstanceId = (): string => {
-      try {
-        const globalCrypto: any = (window as any).crypto;
-        if (globalCrypto?.randomUUID) return globalCrypto.randomUUID();
-      } catch {}
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
       return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -299,7 +306,7 @@ export class SettingsManager {
       migratedSettings.studioJsonEditorDefaultMode = DEFAULT_SETTINGS.studioJsonEditorDefaultMode;
     }
     
-    return migratedSettings as SystemSculptSettings;
+    return migratedSettings;
   }
 
   /**
@@ -312,7 +319,7 @@ export class SettingsManager {
    * Checks both the new vault-based location and the old plugin directory location
    * @returns The restored settings or null if restoration failed
    */
-  private async restoreFromBackup(): Promise<any | null> {
+  private async restoreFromBackup(): Promise<Record<string, unknown> | null> {
     try {
       const hydrateBackup = (candidate: unknown): Record<string, unknown> | null => {
         if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
@@ -348,7 +355,8 @@ export class SettingsManager {
               return hydratedNewestBackup;
             }
           }
-        } catch (e) {
+        } catch {
+          // Continue with vault-root backups.
         }
       }
 
@@ -385,11 +393,12 @@ export class SettingsManager {
             return hydratedBackup;
           }
         }
-      } catch (e) {
+      } catch {
+        // No dated vault-root backup is available.
       }
 
       return null;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -399,7 +408,7 @@ export class SettingsManager {
     try {
       const loadedData = await this.plugin.loadData();
       raw = this.asSettingsRecord(loadedData);
-    } catch (loadError) {
+    } catch {
       const backupSettings = await this.restoreFromBackup();
       raw = this.asSettingsRecord(backupSettings);
     }
@@ -447,14 +456,14 @@ export class SettingsManager {
         this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
       }
       return migrated;
-    } catch (migrationError) {
-      await this.writePreMigrationBackup(raw, fromVersion).catch(() => {});
+    } catch {
+      await this.writePreMigrationBackup(raw, fromVersion).catch(() => undefined);
       try {
         // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
         // The user's original data is preserved both here (raw wins) and in the
         // pre-migration backup written above.
         return await this.validateSettingsAsync(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
-      } catch (fallbackError) {
+      } catch {
         // Last resort: pure defaults. Data is safe in the pre-migration backup.
         return { ...DEFAULT_SETTINGS };
       }
@@ -844,7 +853,7 @@ export class SettingsManager {
       // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
       const persistedSettings = await this.validateSettingsAsync({
         ...this.plugin._internal_settings_systemsculpt_plugin,
-      } as SystemSculptSettings);
+      });
       this.settings = persistedSettings;
       this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
       await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);

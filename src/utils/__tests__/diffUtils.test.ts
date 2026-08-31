@@ -2,6 +2,16 @@
  * @jest-environment jsdom
  */
 import { generateDiff, isFileOpen, getFileContent, DiffLine, DiffResult } from "../diffUtils";
+import { MarkdownView, TFile } from "obsidian";
+
+function createMarkdownView(path: string, editor: { getValue: jest.Mock } | null = null): MarkdownView {
+  const view = new MarkdownView();
+  Object.assign(view, {
+    file: new TFile({ path }),
+    editor,
+  });
+  return view;
+}
 
 describe("diffUtils", () => {
   describe("generateDiff", () => {
@@ -155,9 +165,7 @@ describe("diffUtils", () => {
         workspace: {
           getLeavesOfType: jest.fn().mockReturnValue([
             {
-              view: {
-                file: { path: "test.md" },
-              },
+              view: createMarkdownView("test.md"),
             },
           ]),
         },
@@ -213,12 +221,9 @@ describe("diffUtils", () => {
         workspace: {
           getLeavesOfType: jest.fn().mockReturnValue([
             {
-              view: {
-                file: { path: "test.md" },
-                editor: {
-                  getValue: jest.fn().mockReturnValue("editor content"),
-                },
-              },
+              view: createMarkdownView("test.md", {
+                getValue: jest.fn().mockReturnValue("editor content"),
+              }),
             },
           ]),
         },
@@ -233,7 +238,7 @@ describe("diffUtils", () => {
     });
 
     it("falls back to vault when file not in editor", async () => {
-      const mockFile = { path: "test.md", stat: {} };
+      const mockFile = new TFile({ path: "test.md" });
       const mockApp = {
         workspace: {
           getLeavesOfType: jest.fn().mockReturnValue([]),
@@ -264,7 +269,7 @@ describe("diffUtils", () => {
     });
 
     it("handles read error gracefully", async () => {
-      const mockFile = { path: "test.md", stat: {} };
+      const mockFile = new TFile({ path: "test.md" });
       const mockApp = {
         workspace: {
           getLeavesOfType: jest.fn().mockReturnValue([]),
@@ -280,15 +285,12 @@ describe("diffUtils", () => {
     });
 
     it("handles open file without editor", async () => {
-      const mockFile = { path: "test.md", stat: {} };
+      const mockFile = new TFile({ path: "test.md" });
       const mockApp = {
         workspace: {
           getLeavesOfType: jest.fn().mockReturnValue([
             {
-              view: {
-                file: { path: "test.md" },
-                editor: null,
-              },
+              view: createMarkdownView("test.md"),
             },
           ]),
         },

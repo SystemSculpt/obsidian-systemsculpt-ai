@@ -14,5 +14,5 @@ export async function openChatResumeDescriptor(
     active: true,
     state: buildChatLeafState(descriptor),
   });
-  plugin.app.workspace.revealLeaf(targetLeaf);
+  await plugin.app.workspace.revealLeaf(targetLeaf);
 }

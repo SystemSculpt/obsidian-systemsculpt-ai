@@ -1,4 +1,4 @@
-import { App, TFolder } from "obsidian";
+import { App, FileSystemAdapter, TFolder } from "obsidian";
 import SystemSculptPlugin from "../../main";
 
 /**
@@ -86,8 +86,6 @@ export class StorageManager {
       await this.initializationPromise;
       this.initialized = true;
       this.initializedBasePath = currentBasePath;
-    } catch (error) {
-      throw error;
     } finally {
       this.initializationPromise = null;
     }
@@ -97,29 +95,23 @@ export class StorageManager {
    * Internal initialization method
    */
   private async _initialize(): Promise<void> {
-    try {
-      // Ensure base hidden directory exists
-      await this.ensureDirectory(this.hiddenBasePath);
-      
-      // Create core subdirectories
-      await Promise.all([
-        this.ensureDirectory(this.getPath('settings')),
-        this.ensureDirectory(this.getPath('settings', 'backups')),
-        this.ensureDirectory(this.getPath('settings', 'emergency')),
-        this.ensureDirectory(this.getPath('cache')),
-        this.ensureDirectory(this.getPath('temp')),
-        this.ensureDirectory(this.getPath('diagnostics'), true)
-      ]);
-      
-      // Storage system initialized - silent success
-    } catch (error) {
-      throw error;
-    }
+    // Ensure base hidden directory exists
+    await this.ensureDirectory(this.hiddenBasePath);
+
+    // Create core subdirectories
+    await Promise.all([
+      this.ensureDirectory(this.getPath('settings')),
+      this.ensureDirectory(this.getPath('settings', 'backups')),
+      this.ensureDirectory(this.getPath('settings', 'emergency')),
+      this.ensureDirectory(this.getPath('cache')),
+      this.ensureDirectory(this.getPath('temp')),
+      this.ensureDirectory(this.getPath('diagnostics'), true)
+    ]);
   }
 
   private getAdapterBasePath(): string | null {
-    const adapter: any = this.app.vault.adapter as any;
-    if (!adapter || typeof adapter.getBasePath !== "function") {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
       return null;
     }
     try {
@@ -133,16 +125,14 @@ export class StorageManager {
     if (this.initializedBasePath && currentBasePath && this.initializedBasePath !== currentBasePath) {
       return true;
     }
-    const adapter: any = this.app.vault.adapter as any;
-    if (adapter && typeof adapter.exists === "function") {
-      try {
-        const exists = await adapter.exists(this.hiddenBasePath);
-        if (!exists) {
-          return true;
-        }
-      } catch {
+    const adapter = this.app.vault.adapter;
+    try {
+      const exists = await adapter.exists(this.hiddenBasePath);
+      if (!exists) {
         return true;
       }
+    } catch {
+      return true;
     }
     return false;
   }
@@ -300,7 +290,7 @@ export class StorageManager {
 
       const path = this.getPath(type, fileName);
       const payload = data.endsWith('\n') ? data : `${data}\n`;
-      const adapter: any = this.app.vault.adapter as any;
+      const adapter = this.app.vault.adapter;
 
       const exists = await this.app.vault.adapter.exists(path);
 
@@ -311,11 +301,8 @@ export class StorageManager {
 
       if (!exists) {
         await this.app.vault.adapter.write(path, payload);
-      } else if (typeof adapter.append === 'function') {
-        await adapter.append(path, payload);
       } else {
-        const existing = await this.app.vault.adapter.read(path);
-        await this.app.vault.adapter.write(path, `${existing}${payload}`);
+        await adapter.append(path, payload);
       }
 
       return { success: true, path };
@@ -332,7 +319,7 @@ export class StorageManager {
    * @param parseJson Whether to parse the file as JSON
    * @returns Promise resolving to file content or parsed object
    */
-  async readFile<T = any>(
+  async readFile<T = unknown>(
     type: StorageLocationType, 
     fileName: string, 
     parseJson: boolean = false
@@ -356,7 +343,7 @@ export class StorageManager {
       }
       
       return content;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -416,7 +403,7 @@ export class StorageManager {
       
       // Return only file names, not directories
       return files.files.map(f => f.split('/').pop() || '');
-    } catch (error) {
+    } catch {
       return [];
     }
   }

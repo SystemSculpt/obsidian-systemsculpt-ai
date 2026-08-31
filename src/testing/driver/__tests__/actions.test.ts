@@ -31,7 +31,7 @@ function makeContext(
         adapter: { read },
         getAbstractFileByPath,
       },
-      workspace: { getLeavesOfType: () => [] },
+      workspace: { getLeavesOfType: () => [], getMostRecentLeaf: () => null },
     } as unknown as App,
     pluginId: "systemsculpt-ai",
     pluginVersion: "0.0.0-test",
@@ -129,6 +129,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   const trashFile = jest.fn(async () => undefined);
   const workspace = {
     activeLeaf: leaf,
+    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
     getLeavesOfType: jest.fn(() => [leaf]),
     revealLeaf: jest.fn(async () => undefined),
     getLeaf: jest.fn(),

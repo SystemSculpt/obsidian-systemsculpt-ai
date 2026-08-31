@@ -458,7 +458,7 @@ function parseServerMessage(
     || value.parts.length > MAX_SERVER_MESSAGE_PARTS
   ) return fail("invalid_server_event", "The authoritative message is invalid.");
   if (value.role === "user") {
-    return parseAuthoritativeUserMessage(value) as unknown as Readonly<Record<string, unknown>>;
+    return parseAuthoritativeUserMessage(value);
   }
   return Object.freeze({
     id: value.id,
@@ -680,7 +680,7 @@ export function parseAgentCommand(
       type: THIN_AGENT_COMMAND_TYPE,
       version: 1,
       kind: "submit",
-      request_id: value.request_id as string,
+      request_id: value.request_id,
       user_message: userMessage,
       ...(value.context_ref === undefined ? {} : { context_ref: value.context_ref }),
     });
@@ -940,9 +940,9 @@ export function parseAgentServerEvent(
       || !safeId(value.message_id)
       || (value.part_kind !== "text" && value.part_kind !== "reasoning")
       || !safeInteger(value.part_ordinal)
-      || (value.part_ordinal as number) < 0
+      || (value.part_ordinal) < 0
       || !safeInteger(value.offset)
-      || (value.offset as number) < 0
+      || (value.offset) < 0
       || typeof value.delta !== "string"
       || value.delta.length < 1
       || value.delta.length > MAX_ASSISTANT_DELTA_CHARS
@@ -955,8 +955,8 @@ export function parseAgentServerEvent(
       request_id: value.request_id,
       message_id: value.message_id,
       part_kind: value.part_kind,
-      part_ordinal: value.part_ordinal as number,
-      offset: value.offset as number,
+      part_ordinal: value.part_ordinal,
+      offset: value.offset,
       delta: value.delta,
     });
   }

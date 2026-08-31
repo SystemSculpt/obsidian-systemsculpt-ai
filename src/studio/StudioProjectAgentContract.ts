@@ -126,7 +126,7 @@ function renderNodeKindSection(definition: StudioNodeDefinition): string {
     lines.push("Config:");
     lines.push(
       ...definition.configSchema.fields.map((field) =>
-        renderConfigFieldLine(field, definition.configDefaults as Record<string, StudioJsonValue>)
+        renderConfigFieldLine(field, definition.configDefaults)
       )
     );
   }

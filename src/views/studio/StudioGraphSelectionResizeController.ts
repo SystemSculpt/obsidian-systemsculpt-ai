@@ -113,7 +113,7 @@ export class StudioGraphSelectionResizeController {
         zoneEl.style.setProperty(property, value);
       }
       zoneEl.addEventListener("pointerdown", (event) => {
-        this.startGesture(zone, zoneEl, event as PointerEvent);
+        this.startGesture(zone, zoneEl, event);
       });
     }
     this.frameEl = frameEl;

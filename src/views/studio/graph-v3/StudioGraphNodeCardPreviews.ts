@@ -100,7 +100,7 @@ export function renderNodeMediaPreview(options: {
 
   const mediaPreview = resolveNodeMediaPreview(
     node,
-    nodeRunState.outputs as Record<string, unknown> | null
+    nodeRunState.outputs
   );
   if (!mediaPreview || !resolveAssetPreviewSrc) {
     return;
@@ -128,7 +128,7 @@ export function renderNodeMediaPreview(options: {
     if (canRevealInFileManager) {
       const revealPath = resolveMediaIngestRevealPath(
         node,
-        nodeRunState.outputs as Record<string, unknown> | null,
+        nodeRunState.outputs,
         mediaPreview.path
       );
       if (revealPath) {

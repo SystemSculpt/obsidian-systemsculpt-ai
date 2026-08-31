@@ -144,9 +144,7 @@ export class WorkflowEngineService {
     this.stopRequested = true;
     this.stopReason = reason;
     if (this.abortController && !this.abortController.signal.aborted) {
-      try {
-        this.abortController.abort();
-      } catch {}
+      this.abortController.abort();
     }
     if (this.progressWidget) {
       const status = reason.type === "user" ? "Stopping..." : "Stopping after error...";

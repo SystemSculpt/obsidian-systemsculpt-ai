@@ -13,9 +13,9 @@ type MobileHostLayoutController = {
   document: Document;
   observer: MutationObserver | null;
   scheduledFrame: number | null;
-  update(): void;
-  schedule(): void;
-  dispose(): void;
+  update: () => void;
+  schedule: () => void;
+  dispose: () => void;
 };
 
 export type MobileHostLayoutSnapshot = Readonly<{
@@ -33,7 +33,7 @@ function isOwnerElement(node: Node, ElementCtor: typeof Element): node is Elemen
   };
   return typeof obsidianNode.instanceOf === "function"
     ? obsidianNode.instanceOf(ElementCtor)
-    : ElementCtor.prototype.isPrototypeOf(node);
+    : Object.prototype.isPrototypeOf.call(ElementCtor.prototype, node);
 }
 
 function readVisibleNavbar(document: Document): HTMLElement | null {

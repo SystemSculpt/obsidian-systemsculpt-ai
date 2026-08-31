@@ -7,7 +7,7 @@ is a symlink to this file; edit this file only.
 
 The SystemSculpt workspace has three sibling repositories:
 
-- ~/gits/systemsculpt/plugin — this Obsidian client.
+- ~/gits/personal/systemsculpt/plugin — this Obsidian client.
 - ~/gits/systemsculpt/website — the customer website and first-party API.
 - ~/gits/systemsculpt/systemsculpt-os — growth and operator automation.
 
@@ -135,7 +135,7 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-check is the canonical fast gate: Obsidian lint, metadata lint, production
+check is the canonical fast gate: Obsidian lint, community-directory lint, metadata lint, production
 bundle, CSS contracts, cheap architecture policy tests, focused mobile
 interactions, the ChatView critical-risk coverage gate, and an exact built
 bundle smoke in a mobile Obsidian host.
@@ -185,8 +185,7 @@ npm run check:full
   Failed jobs retain those records, ChatView coverage, artifact inspection,
   build provenance, and exact plugin artifact bytes for 14 days. The exhaustive
   plugin lane also records mutation results when that gate is reached.
-- Release validation records the SHA-256 and size of manifest.json, main.js,
-  and styles.css plus the source revision and build environment identity.
+- Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 - Saved chat parsing fails closed. A malformed or truncated history must never
   become a shortened request. Leave the source note unchanged, open a fresh
   unsaved chat, and keep a visible corruption banner.

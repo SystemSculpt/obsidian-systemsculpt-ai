@@ -27,7 +27,7 @@ export async function openExternalUrl(url: string, ownerWindow?: Window): Promis
   const targetWindow = ownerWindow
     ?? (typeof window !== "undefined" ? window.activeWindow ?? window : undefined);
   const electron = resolveElectronModule<{
-    shell?: { openExternal?: (url: string) => Promise<unknown> | unknown };
+    shell?: { openExternal?: (url: string) => unknown };
   }>(targetWindow);
   const shell = electron?.shell;
   try {

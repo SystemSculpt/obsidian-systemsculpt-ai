@@ -515,7 +515,6 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       if (
         event.key !== "Escape"
         || event.isComposing
-        || event.keyCode === 229
       ) {
         return;
       }
@@ -547,7 +546,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       renderTextNodeDisplayContent(displayEl);
     }
     displayEl.addEventListener("pointerdown", (event) => {
-      const pointerEvent = event as PointerEvent;
+      const pointerEvent = event;
       if (pointerEvent.button !== 0) {
         return;
       }
@@ -594,7 +593,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       graphInteraction.ensureSingleSelection(node.id);
       onRequestTextNodeEdit(
         node.id,
-        resolveStudioTextNodeFocusTarget(textValue, displayEl, event as MouseEvent)
+        resolveStudioTextNodeFocusTarget(textValue, displayEl, event)
       );
     });
   }

@@ -29,7 +29,11 @@ const createPluginStub = () => {
     on: jest.fn(() => ({ unload: jest.fn() })),
     getCache: jest.fn(),
   };
-  const app = { workspace, metadataCache } as any;
+  const app = {
+    workspace,
+    metadataCache,
+    vault: { adapter: {} },
+  } as any;
   const plugin = {
     app,
     settings: {

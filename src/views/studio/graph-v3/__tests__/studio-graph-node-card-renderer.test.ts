@@ -624,10 +624,7 @@ describe("renderStudioGraphNodeCard", () => {
     expect(onStopTextNodeEdit).toHaveBeenCalledWith(node.id);
   });
 
-  it.each([
-    ["composition", { isComposing: true }],
-    ["IME keyCode", { keyCode: 229 }],
-  ])("does not end fallback text editing for %s Escape", (_label, marker) => {
+  it("does not end fallback text editing for composing Escape", () => {
     const { nodeEl, onStopTextNodeEdit } = renderNodeCardHarness({
       kind: "studio.text",
       config: { value: "draft" },
@@ -640,11 +637,8 @@ describe("renderStudioGraphNodeCard", () => {
       key: "Escape",
       bubbles: true,
       cancelable: true,
-      isComposing: marker.isComposing ?? false,
+      isComposing: true,
     });
-    if (marker.keyCode) {
-      Object.defineProperty(event, "keyCode", { value: marker.keyCode });
-    }
 
     editorEl?.dispatchEvent(event);
 

@@ -45,7 +45,7 @@ function jsonStringLiteral(value: string): string {
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       throw new Error("Incident JSON contains malformed Unicode.");
-    } else if (code === 0x22) serialized += "\\\"";
+    } else if (code === 0x22) serialized += '\\"';
     else if (code === 0x5c) serialized += "\\\\";
     else if (code === 0x08) serialized += "\\b";
     else if (code === 0x09) serialized += "\\t";
@@ -55,7 +55,7 @@ function jsonStringLiteral(value: string): string {
     else if (code <= 0x1f) serialized += `\\u${code.toString(16).padStart(4, "0")}`;
     else serialized += value[index];
   }
-  return `${serialized}\"`;
+  return `${serialized}"`;
 }
 
 function compareText(left: string, right: string): number {

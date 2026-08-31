@@ -11,6 +11,7 @@ import {
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
 } from "./attachments/ChatMessageAttachments";
+import { containsControlCharacters } from "../../utils/characterValidation";
 
 export type AgentComposerAttachment = Readonly<{
   id: string;
@@ -144,9 +145,7 @@ export class AgentComposer extends Component {
       cls: "dropdown systemsculpt-agent-approval-mode",
       attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
     });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "full-access", text: "Full Access" });
     this.micButton = options.onMic
       ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
@@ -543,7 +542,7 @@ export class AgentComposer extends Component {
   private async removeMessageAttachment(id: string): Promise<void> {
     if (this.readOnlyMessage) return;
     try {
-      await this.messageAttachments.remove(id);
+      this.messageAttachments.remove(id);
     } catch {
       new Notice("The attachment recovery record could not be cleaned up.", 5000);
     }
@@ -573,7 +572,7 @@ export class AgentComposer extends Component {
       const parsed: unknown = JSON.parse(transfer.getData("application/x-systemsculpt-similar-note"));
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
       const path = (parsed as Record<string, unknown>).path;
-      if (typeof path !== "string" || !path.trim() || path.length > 1024 || /[\u0000-\u001f\u007f-\u009f]/.test(path)) return null;
+      if (typeof path !== "string" || !path.trim() || path.length > 1024 || containsControlCharacters(path, true)) return null;
       return path.trim();
     } catch {
       return null;

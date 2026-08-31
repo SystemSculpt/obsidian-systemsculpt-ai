@@ -289,7 +289,7 @@ export class DiffViewer extends Component {
 
     // Handle empty lines
     if (!line.content && line.content !== '') {
-      content.innerHTML = '&nbsp;';
+      content.textContent = '\u00a0';
     }
   }
 

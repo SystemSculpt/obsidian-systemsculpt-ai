@@ -142,7 +142,7 @@ export class StudioRunPresentationState {
     }
 
     const allowedNodeIds = Array.isArray(options?.allowedNodeIds)
-      ? new Set(options!.allowedNodeIds.map((nodeId) => String(nodeId || "").trim()).filter(Boolean))
+      ? new Set(options.allowedNodeIds.map((nodeId) => String(nodeId || "").trim()).filter(Boolean))
       : null;
 
     for (const [nodeIdRaw, entry] of Object.entries(entries)) {

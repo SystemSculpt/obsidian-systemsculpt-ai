@@ -41,21 +41,22 @@ new Setting(containerEl)
             .addOption("large", "Large")
             .setValue(plugin.settings.chatFontSize || "medium")
             .onChange(async (value: string) => {
-                await plugin.getSettingsManager().updateSettings({ chatFontSize: value as any });
+                if (value !== "small" && value !== "medium" && value !== "large") return;
+                await plugin.getSettingsManager().updateSettings({ chatFontSize: value });
                 new Notice(`Default chat font size set to: ${value}`);
             });
 	    });
 
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
-    .setName("Honor OS reduced motion")
+    .setName("Honor reduced motion")
     .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
     .addToggle((toggle) => {
         toggle
             .setValue(plugin.settings.respectReducedMotion ?? true)
             .onChange(async (value) => {
                 await plugin.getSettingsManager().updateSettings({ respectReducedMotion: value });
-                new Notice(`Honor OS reduced motion ${value ? 'enabled' : 'disabled'}.`);
+                new Notice(`Reduced motion ${value ? 'enabled' : 'disabled'}.`);
             });
     });
 }

@@ -163,7 +163,7 @@ function migrateNodeGeometryToSize(
 } {
   let changed = false;
   const nextNodes = nodes.map((node) => {
-    const config = (node.config || {}) as Record<string, StudioJsonValue>;
+    const config = (node.config || {});
     const hasWidthKey = Object.prototype.hasOwnProperty.call(config, "width");
     const hasHeightKey = Object.prototype.hasOwnProperty.call(config, "height");
     if (!hasWidthKey && !hasHeightKey) {
@@ -225,7 +225,7 @@ function migrateTextGenerationNodes(
       return node;
     }
 
-    const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
+    const currentConfig = (node.config || {});
     const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
     for (const key of [
       "sourceMode", "localModelId", "modelId", "reasoningEffort", "provider", "providerId",
@@ -261,7 +261,7 @@ function migrateImageGenerationNodes(
       return node;
     }
 
-    const currentConfig = (node.config || {}) as Record<string, StudioJsonValue>;
+    const currentConfig = (node.config || {});
     const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
     for (const key of [
       "modelId", "provider", "providerId", "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",

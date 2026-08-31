@@ -480,6 +480,16 @@ function reportPath(sequence: number): string {
 }
 
 describe("AgentIncidentStore", () => {
+  let dateNow: jest.SpyInstance<number, []>;
+
+  beforeEach(() => {
+    dateNow = jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-13T12:02:00.000Z"));
+  });
+
+  afterEach(() => {
+    dateNow.mockRestore();
+  });
+
   it("round-trips an actual recorder report through canonical save and restart", async () => {
     const adapter = new MemoryAdapter();
     const conversationId = `conversation_${"1".repeat(32)}`;

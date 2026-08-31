@@ -43,8 +43,10 @@ export class StudioSandboxRunner {
     const args = Array.isArray(request.args) ? request.args.map((value) => String(value)) : [];
     const timeoutMs = Math.max(100, Math.floor(request.timeoutMs ?? 30_000));
     const maxOutputBytes = Math.max(1024, Math.floor(request.maxOutputBytes ?? 256 * 1024));
-    const childProcess = desktopHost.childProcess();
-    const path = desktopHost.path();
+    const [childProcess, path] = await Promise.all([
+      desktopHost.childProcess(),
+      desktopHost.path(),
+    ]);
 
     return await new Promise<StudioCliExecutionResult>((resolve, reject) => {
       let stdout = "";
@@ -65,7 +67,9 @@ export class StudioSandboxRunner {
       // runCli is non-interactive; close stdin so adapters that probe stdin can continue immediately.
       try {
         child.stdin?.end();
-      } catch {}
+      } catch {
+        // Some child-process adapters expose no writable stdin.
+      }
 
       const truncate = (value: string): string => {
         if (value.length <= maxOutputBytes) {
@@ -78,7 +82,9 @@ export class StudioSandboxRunner {
         timedOut = true;
         try {
           child.kill("SIGKILL");
-        } catch {}
+        } catch {
+          // The timeout result is still reported if the process already exited.
+        }
       }, timeoutMs);
 
       child.stdout.on("data", (chunk: Uint8Array | string) => {

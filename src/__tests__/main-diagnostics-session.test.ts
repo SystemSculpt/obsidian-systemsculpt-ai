@@ -225,7 +225,8 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
       dispose: jest.fn(),
     } as any);
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    plugin.onunload();
+    await expect((plugin as any).unloadPromise).resolves.toBeUndefined();
 
     expect(close).toHaveBeenCalledTimes(1);
   });

@@ -1,6 +1,5 @@
 import type { StudioJsonValue, StudioNodeInstance } from "../../../studio/types";
 import { createStudioAction } from "../StudioAction";
-import { createSurfaceElement } from "../../../core/ui/surface";
 import { getStudioOwnerWindow } from "../StudioDomContext";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
@@ -69,7 +68,7 @@ function isJsonObjectValue(
 }
 
 function readJsonNodeConfigValue(node: StudioNodeInstance): StudioJsonValue {
-  const config = node.config as Record<string, StudioJsonValue>;
+  const config = node.config;
   if (!Object.prototype.hasOwnProperty.call(config, JSON_VALUE_CONFIG_KEY)) {
     return {};
   }
@@ -78,7 +77,7 @@ function readJsonNodeConfigValue(node: StudioNodeInstance): StudioJsonValue {
 }
 
 function hasConfiguredJsonNodeValue(node: StudioNodeInstance): boolean {
-  const config = node.config as Record<string, StudioJsonValue>;
+  const config = node.config;
   return Object.prototype.hasOwnProperty.call(config, JSON_VALUE_CONFIG_KEY);
 }
 
@@ -140,16 +139,16 @@ function isLikelyHtmlFieldKey(key: string): boolean {
 }
 
 function sanitizeHtmlPreviewSource(rawHtml: string, ownerDocument: Document): string {
-  const template = createSurfaceElement(ownerDocument, "template");
-  template.innerHTML = rawHtml;
+  const Parser = ownerDocument.defaultView?.DOMParser ?? DOMParser;
+  const parsed = new Parser().parseFromString(rawHtml, "text/html");
 
   for (const selector of ["script", "iframe", "object", "embed", "meta", "base", "link"]) {
-    for (const element of Array.from(template.content.querySelectorAll(selector))) {
+    for (const element of Array.from(parsed.body.querySelectorAll(selector))) {
       element.remove();
     }
   }
 
-  for (const element of Array.from(template.content.querySelectorAll("*"))) {
+  for (const element of Array.from(parsed.body.querySelectorAll("*"))) {
     for (const attribute of Array.from(element.attributes)) {
       const attributeName = attribute.name.toLowerCase();
       const attributeValue = attribute.value;
@@ -174,7 +173,7 @@ function sanitizeHtmlPreviewSource(rawHtml: string, ownerDocument: Document): st
     }
   }
 
-  return template.innerHTML;
+  return parsed.body.innerHTML;
 }
 
 function writeJsonNodeConfigValue(node: StudioNodeInstance, value: StudioJsonValue): void {
@@ -426,7 +425,7 @@ function renderJsonOutputPreview(options: {
       return `${outputValue.length} items`;
     }
     if (outputValue && typeof outputValue === "object") {
-      return `${Object.keys(outputValue as Record<string, unknown>).length} keys`;
+      return `${Object.keys(outputValue).length} keys`;
     }
     if (typeof outputValue === "string") {
       return outputValue.trim() ? `${outputValue.length} chars` : "empty text";

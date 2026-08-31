@@ -22,6 +22,8 @@ export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
   constructor(private readonly options: HostedTransportOptions) { this.client = options.requestClient ?? new PlatformRequestClient(); }
 
+  get pluginVersion(): string { return this.options.pluginVersion; }
+
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
   private key(): string | undefined { const key = this.options.licenseKey().trim(); return key || undefined; }
 
@@ -34,7 +36,9 @@ export class HostedTransportAdapter {
   async getAdmission(): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
     const result = await this.send({ path: "/api/plugin/license/validate", method: "GET" }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
     let body: unknown;
-    try { body = await result.response.clone().json(); } catch {}
+    try { body = await result.response.clone().json(); } catch {
+      // Admission decoding handles an absent response body.
+    }
     return {
       outcome: decodeManagedAdmissionResponse(result.response.status, body).outcome,
       diagnostics: result.diagnostics,

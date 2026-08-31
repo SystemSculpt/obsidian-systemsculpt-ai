@@ -10,7 +10,7 @@ import {
   type StudioCaptionBoardState,
   writeStudioCaptionBoardState,
 } from "../../../../studio/StudioCaptionBoardState";
-import type { StudioJsonValue, StudioNodeInstance } from "../../../../studio/types";
+import type { StudioNodeInstance } from "../../../../studio/types";
 import type { StudioGraphNodeMutationOptions } from "../StudioGraphNodeCardTypes";
 import {
   ANNOTATION_MIN_HEIGHT,
@@ -358,7 +358,7 @@ export class StudioImageEditorModel {
       this.options.onNodeConfigValueChange(
         this.options.node.id,
         CONFIG_KEY,
-        (draftNode.config[CONFIG_KEY] ?? null) as StudioJsonValue,
+        (draftNode.config[CONFIG_KEY] ?? null),
         mutationOptions
       );
     } else {

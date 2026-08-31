@@ -291,9 +291,10 @@ export class BulkTranscriptionProgressWidget {
     return {
       label: "Copy error",
       testId: "bulk-transcribe.progress.copy-error",
-      onClick: async () => {
-        const copied = await tryCopyToClipboard(copyText);
-        new Notice(copied ? "Error copied to clipboard" : "Unable to copy error", 2500);
+      onClick: () => {
+        void tryCopyToClipboard(copyText).then((copied) => {
+          new Notice(copied ? "Error copied to clipboard" : "Unable to copy error", 2500);
+        });
       },
     };
   }

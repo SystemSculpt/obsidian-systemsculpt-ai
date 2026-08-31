@@ -1523,9 +1523,7 @@ function timelineForReport(state: ActiveIncident): AgentIncidentTimelineEvent[] 
     && state.conflictedServerLatencyCorrelationSegments.size === 0
   ) return [...state.timeline];
   return state.timeline.map((event) => {
-    const projected = { ...event } as {
-      -readonly [Key in keyof AgentIncidentTimelineEvent]: AgentIncidentTimelineEvent[Key];
-    };
+    const projected = { ...event };
     if (state.conflictedIdentifiers.has("runId")) delete projected.run_id;
     if (state.conflictedIdentifiers.has("serverRunId")) delete projected.server_run_id;
     if (state.conflictedServerLatencyCorrelationSegments.has(

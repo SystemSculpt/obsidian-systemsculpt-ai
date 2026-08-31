@@ -940,7 +940,7 @@ export class TranscriptionCoordinator {
       && "value" in value
       && "receipt" in value
     ) {
-      return value as Readonly<{ value: T; receipt?: ManagedLocalCommitReceipt }>;
+      return value;
     }
     return { value: value as T };
   }

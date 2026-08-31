@@ -105,14 +105,14 @@ export function extractPrimaryPathArg(
   const canonicalName = normalizeFirstPartyToolName(toolName);
   if (canonicalName === "move") {
     const items = (args as { items?: unknown }).items;
-    if (Array.isArray(items) && (items[0] as any)?.destination) {
-      return String((items[0] as any).destination);
+    if (Array.isArray(items) && (items[0])?.destination) {
+      return String((items[0]).destination);
     }
   }
   if (canonicalName === "multi_edit") {
     const files = (args as { files?: unknown }).files;
-    if (Array.isArray(files) && typeof (files[0] as any)?.path === "string") {
-      return String((files[0] as any).path);
+    if (Array.isArray(files) && typeof (files[0])?.path === "string") {
+      return String((files[0]).path);
     }
   }
   const argumentNames: Partial<Record<FirstPartyToolName, string>> = {

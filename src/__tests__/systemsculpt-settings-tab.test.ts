@@ -77,6 +77,8 @@ const createPluginStub = () => {
     customProviderService: {
       clearCache: jest.fn(),
     },
+    consumePendingSettingsFocusTab: jest.fn(() => null),
+    clearPendingSettingsFocusTab: jest.fn(),
   } as any;
 };
 

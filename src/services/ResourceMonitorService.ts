@@ -1,4 +1,8 @@
 import type SystemSculptPlugin from "../main";
+import {
+  getDesktopProcess,
+  type DesktopCpuUsage,
+} from "../platform/desktopOnly";
 import type { PluginLogger } from "../utils/PluginLogger";
 
 export interface ResourceSample {
@@ -37,6 +41,14 @@ interface MonitorOptions {
   sessionId?: string;
 }
 
+type PerformanceWithMemory = Performance & {
+  memory?: Readonly<{
+    usedJSHeapSize?: number;
+    totalJSHeapSize?: number;
+    jsHeapSizeLimit?: number;
+  }>;
+};
+
 const DEFAULT_METRICS_FILE = "resource-metrics.ndjson";
 const INCIDENT_TERMINAL_NOTE = "incident-terminal";
 const DEFAULT_INCIDENT_WINDOW_BEFORE_MS = 60_000;
@@ -67,7 +79,7 @@ export class ResourceMonitorService {
   private lagSampleInterval = 1000;
   private readonly samples: ResourceSample[] = [];
   private readonly maxSamples = 120;
-  private lastCpuUsage?: NodeJS.CpuUsage;
+  private lastCpuUsage?: DesktopCpuUsage;
   private lastCpuTimestamp?: number;
   private readonly lastAlertAt: Record<string, number> = {};
   private freezeEventHandler?: (event: Event) => void;
@@ -117,7 +129,7 @@ export class ResourceMonitorService {
       this.startupBurstIntervalId = null;
     }
     if (this.freezeEventHandler && typeof window !== "undefined") {
-      window.removeEventListener("systemsculpt:freeze-detected", this.freezeEventHandler as EventListener);
+      window.removeEventListener("systemsculpt:freeze-detected", this.freezeEventHandler);
       this.freezeEventHandler = undefined;
     }
   }
@@ -285,7 +297,9 @@ export class ResourceMonitorService {
 
   private readMemoryUsage() {
     const result: Partial<ResourceSample> = {};
-    const perfMemory = typeof performance !== "undefined" ? (performance as any).memory : undefined;
+    const perfMemory = typeof performance !== "undefined"
+      ? (performance as PerformanceWithMemory).memory
+      : undefined;
     if (perfMemory) {
       if (typeof perfMemory.usedJSHeapSize === "number") {
         result.heapUsedMB = perfMemory.usedJSHeapSize / 1024 / 1024;
@@ -298,7 +312,7 @@ export class ResourceMonitorService {
       }
     }
 
-    const proc: any = typeof process !== "undefined" ? process : null;
+    const proc = getDesktopProcess();
     if (proc?.memoryUsage) {
       const mem = proc.memoryUsage();
       if (typeof mem.rss === "number") {
@@ -319,7 +333,7 @@ export class ResourceMonitorService {
   }
 
   private captureCpuPercent(now: number): number | undefined {
-    const proc: any = typeof process !== "undefined" ? process : null;
+    const proc = getDesktopProcess();
     if (!proc) {
       return undefined;
     }
@@ -339,7 +353,7 @@ export class ResourceMonitorService {
     }
 
     if (typeof proc.cpuUsage === "function") {
-      const usage: NodeJS.CpuUsage = proc.cpuUsage();
+      const usage = proc.cpuUsage();
       if (!this.lastCpuUsage || !this.lastCpuTimestamp) {
         this.lastCpuUsage = usage;
         this.lastCpuTimestamp = now;
@@ -452,7 +466,7 @@ export class ResourceMonitorService {
         // Freeze reporting must never add a second failure to the application event loop.
       }
     };
-    window.addEventListener("systemsculpt:freeze-detected", this.freezeEventHandler as EventListener);
+    window.addEventListener("systemsculpt:freeze-detected", this.freezeEventHandler);
   }
 
   private startStartupBurstSampling(): void {

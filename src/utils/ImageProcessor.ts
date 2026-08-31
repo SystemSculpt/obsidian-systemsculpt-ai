@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
 import { isVaultImageContextFileExtension } from "../constants/fileTypes";
-import { SystemSculptError } from "./errors";
+import { SystemSculptError, toError } from "./errors";
 
 /**
  * Vision models tile images internally (typically 512px tiles), so anything
@@ -104,7 +104,7 @@ export class ImageProcessor {
       return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
+        reader.onerror = () => reject(toError(reader.error, "Failed to read image data."));
         reader.readAsDataURL(optimized);
       });
     }
