@@ -1,3 +1,4 @@
+import type { StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
 import type {
   StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
@@ -8,7 +9,7 @@ import type {
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
-import { renderInlineConfigPanel } from "./StudioGraphInlineConfigPanel";
+import { renderInlineConfigPanel, type StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
 import { renderJsonNodeEditor, type StudioJsonEditorMode } from "./StudioGraphJsonInlineEditor";
 import { isInlineTextNodeKind, renderTextNodeInlineEditor } from "./StudioGraphTextInlineEditor";
 import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
@@ -43,6 +44,9 @@ type RenderStudioNodeInlineEditorOptions = {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
+  openMediaModelPicker?: StudioMediaModelPickerOpener;
+  /** Per-model input plan for media nodes; hides fields the selected model cannot honour. */
+  mediaInputPlan?: StudioMediaNodeInputPlan | null;
   nodeDetailMode?: StudioNodeDetailMode;
   showTextEditor?: boolean;
   showSystemPromptField?: boolean;
@@ -53,12 +57,15 @@ type RenderStudioNodeInlineEditorOptions = {
 const INLINE_EDITOR_NODE_KINDS = new Set<string>([
   "studio.input",
   "studio.json",
+  "studio.collection",
   "studio.value",
   "studio.text",
   "studio.cli_command",
+  "studio.process",
   "studio.terminal",
   "studio.dataset",
   "studio.image_generation",
+  "studio.video_generation",
   "studio.media_ingest",
   "studio.audio_extract",
   "studio.note",
@@ -69,6 +76,7 @@ const INLINE_EDITOR_NODE_KINDS = new Set<string>([
 
 const OUTPUT_PREVIEW_SUPPRESSED_NODE_KINDS = new Set<string>([
   "studio.image_generation",
+  "studio.video_generation",
   "studio.json",
   "studio.value",
   "studio.media_ingest",
@@ -165,6 +173,8 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
     showFieldHelp = true,
     pathBrowseOptions,
     resolveDynamicSelectOptions,
+    openMediaModelPicker,
+    mediaInputPlan,
   } = options;
   const hiddenFieldKeys = new Set<string>();
   if (!showSystemPromptField) {
@@ -177,7 +187,8 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       nodeEl,
       node,
       definition,
-      orderedFieldKeys: ["prompt", "count", "aspectRatio"],
+      orderedFieldKeys: ["prompt", "model", "count", "aspectRatio", "imageSize", "quality"],
+      hiddenFieldKeys: new Set(mediaInputPlan?.hiddenFieldKeys ?? []),
       interactionLocked,
       onNodeConfigMutated,
       onNodeConfigValueChange,
@@ -185,6 +196,25 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
+    });
+  }
+
+  if (kind === "studio.video_generation") {
+    return renderInlineConfigPanel({
+      nodeEl,
+      node,
+      definition,
+      orderedFieldKeys: ["prompt", "model", "durationSeconds", "resolution", "aspectRatio", "generateAudio"],
+      hiddenFieldKeys: new Set(mediaInputPlan?.hiddenFieldKeys ?? []),
+      interactionLocked,
+      onNodeConfigMutated,
+      onNodeConfigValueChange,
+      panelClassName: "ss-studio-node-inline-config--video-generation",
+      showFieldHelp,
+      pathBrowseOptions,
+      resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -200,6 +230,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
     return true;
   }
@@ -215,6 +246,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       onNodeConfigValueChange,
       showFieldHelp,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -233,6 +265,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -250,6 +283,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -273,6 +307,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
     if (rendered && showOutputPreview) {
       renderDatasetOutputPreview({
@@ -314,6 +349,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -330,6 +366,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 
@@ -345,6 +382,7 @@ function renderNodeSpecificInlineConfig(options: RenderStudioNodeInlineEditorOpt
       showFieldHelp,
       pathBrowseOptions,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
     });
   }
 

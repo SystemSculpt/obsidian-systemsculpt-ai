@@ -115,4 +115,69 @@ describe("EmbeddingsIndexFile", () => {
     expect(adapter.files.has(".systemsculpt/embeddings/index.json.previous")).toBe(false);
     expect(adapter.files.has(".systemsculpt/embeddings/index.json.next")).toBe(false);
   });
+
+  it("falls back to the .previous checkpoint when the primary file is missing", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("falls back to the .previous checkpoint when the primary file is unparseable", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json", "{not json");
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("prefers the primary file over a stale .previous checkpoint", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json", JSON.stringify(sampleIndex()));
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify({ stale: true }));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("rethrows the original replace error and removes the temp file when rollback also fails", async () => {
+    const adapter = makeAdapter() as ReturnType<typeof makeAdapter> & {
+      rename: jest.Mock;
+      remove: jest.Mock;
+    };
+    const primary = ".systemsculpt/embeddings/index.json";
+    const previous = `${primary}.previous`;
+    const next = `${primary}.next`;
+    adapter.files.set(primary, JSON.stringify({ old: true }));
+    const renames: Array<[string, string]> = [];
+    adapter.rename = jest.fn(async (from: string, to: string) => {
+      renames.push([from, to]);
+      // 1: next -> primary refused because the target exists.
+      if (renames.length === 1) throw new Error("target exists");
+      // 2: primary -> previous succeeds.
+      if (renames.length === 2) {
+        adapter.files.set(to, adapter.files.get(from) as string);
+        adapter.files.delete(from);
+        return;
+      }
+      // 3: next -> primary fails; 4: rollback previous -> primary fails too.
+      throw new Error(renames.length === 3 ? "disk detached" : "rollback failed");
+    });
+    adapter.remove = jest.fn(async (path: string) => { adapter.files.delete(path); });
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await expect(file.write(sampleIndex())).rejects.toThrow("target exists");
+
+    expect(renames).toEqual([
+      [next, primary],
+      [primary, previous],
+      [next, primary],
+      [previous, primary],
+    ]);
+    expect(adapter.files.has(next)).toBe(false);
+    // The last good snapshot is still served through the .previous fallback.
+    expect(await file.read()).toEqual({ old: true });
+  });
 });

@@ -6,6 +6,7 @@ describe("StudioProjectRecoveryStore", () => {
   it("stores and consumes a blocked canvas snapshot exactly once", async () => {
     const files = new Map<string, string>();
     const adapter = {
+      exists: jest.fn(async (path: string) => files.has(path)),
       mkdir: jest.fn(async () => {}),
       write: jest.fn(async (path: string, data: string) => {
         files.set(path, data);
@@ -37,6 +38,7 @@ describe("StudioProjectRecoveryStore", () => {
   it("discards a recovery snapshot that already matches the current project", async () => {
     const files = new Map<string, string>();
     const adapter = {
+      exists: jest.fn(async (path: string) => files.has(path)),
       mkdir: jest.fn(async () => {}),
       write: jest.fn(async (path: string, data: string) => { files.set(path, data); }),
       read: jest.fn(async (path: string) => {

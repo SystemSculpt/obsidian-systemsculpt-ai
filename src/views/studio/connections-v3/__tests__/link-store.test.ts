@@ -20,18 +20,18 @@ describe("StudioLinkStore", () => {
     unsub();
   });
 
-  it("setEdgeStatus resets flare when transitioning to flowing", () => {
+  it("keeps the same edge object when an identity is unchanged", () => {
     const store = new StudioLinkStore();
     store.setEdges([
       { id: "e1", source: { nodeId: "a", portId: "out" }, target: { nodeId: "b", portId: "in" } },
     ]);
-    store.setEdgeStatus("e1", "completed", { flareT: 1 });
-    expect(store.getEdge("e1")?.flareT).toBe(1);
-    store.setEdgeStatus("e1", "flowing");
-    const edge = store.getEdge("e1");
-    expect(edge?.status).toBe("flowing");
-    expect(edge?.flareT).toBe(0);
-    expect(edge?.flowPhase).toBe(0);
+    const before = store.getEdge("e1");
+    store.setEdges([
+      { id: "e1", source: { nodeId: "a", portId: "out" }, target: { nodeId: "b", portId: "in" } },
+      { id: "e2", source: { nodeId: "b", portId: "out" }, target: { nodeId: "c", portId: "in" } },
+    ]);
+    expect(store.getEdge("e1")).toBe(before);
+    expect(store.listEdges().map((edge) => edge.id)).toEqual(["e1", "e2"]);
   });
 
   it("setDragState replaces the drag slice and emits", () => {

@@ -35,7 +35,7 @@ type AutomaticDiagnosticsArchive = AutomaticDiagnosticsFile & Readonly<{
 
 type DiagnosticsCleanupOperationResult<T> =
   | Readonly<{ kind: "success"; value: T }>
-  | Readonly<{ kind: "failed" | "stopped" | "timed_out" }>;
+  | Readonly<{ kind: "failed" | "missing" | "stopped" | "timed_out" }>;
 
 export type DiagnosticsSessionMetadata = Readonly<{
   schemaVersion: 2;
@@ -164,7 +164,7 @@ export class DiagnosticsSessionLifecycle {
         .then(operation)
         .then<DiagnosticsCleanupOperationResult<T>, DiagnosticsCleanupOperationResult<T>>(
           (value) => ({ kind: "success", value }),
-          () => ({ kind: "failed" }),
+          (error: unknown) => ({ kind: error instanceof Error && /ENOENT|not found|does not exist/i.test(error.message) ? "missing" : "failed" }),
         );
       const operationTimeout = new Promise<DiagnosticsCleanupOperationResult<T>>((resolve) => {
         operationTimer = window.setTimeout(() => resolve({ kind: "timed_out" }), DIAGNOSTICS_ARCHIVE_OPERATION_TIMEOUT_MS);
@@ -181,7 +181,7 @@ export class DiagnosticsSessionLifecycle {
       const chatDebugPath = `${prefix}${LEGACY_PRIVATE_CHAT_DEBUG_DIRECTORY_NAME}`;
       const listingResult = await runBoundedOperation(() => adapter.list(basePath));
       if (listingResult.kind !== "success") {
-        collectionFailureCount += 1;
+        if (listingResult.kind === "failed") collectionFailureCount += 1;
         return;
       }
 
@@ -209,7 +209,6 @@ export class DiagnosticsSessionLifecycle {
         let listedEntryCount = 0;
         try {
           listedEntryCount = Math.min(entries.length, allowedEntries);
-          if (entries.length > listedEntryCount) collectionFailureCount += 1;
         } catch {
           collectionFailureCount += 1;
           return;
@@ -250,7 +249,7 @@ export class DiagnosticsSessionLifecycle {
       if (hasChatDebugDirectory && !shouldStop()) {
         const chatListingResult = await runBoundedOperation(() => adapter.list(chatDebugPath));
         if (chatListingResult.kind !== "success") {
-          collectionFailureCount += 1;
+          if (chatListingResult.kind === "failed") collectionFailureCount += 1;
         } else {
           let chatFiles: unknown[] | null = null;
           try {
@@ -270,7 +269,6 @@ export class DiagnosticsSessionLifecycle {
       }
 
       const selectedCandidates = [...candidatesByPath.values()].sort(compareDiagnosticsCleanupCandidates).slice(0, DIAGNOSTICS_ARCHIVE_MAX_CANDIDATES);
-      if (candidatesByPath.size > DIAGNOSTICS_ARCHIVE_MAX_CANDIDATES) collectionFailureCount += 1;
 
       const removePaths = async (paths: readonly string[]): Promise<void> => {
         for (const path of paths) {
@@ -281,10 +279,9 @@ export class DiagnosticsSessionLifecycle {
             return true;
           });
           if (removeResult.kind === "stopped" || removeResult.kind === "timed_out") {
-            removalFailureCount += 1;
             break;
           }
-          if (removeResult.kind !== "success" || !removeResult.value) removalFailureCount += 1;
+          if (removeResult.kind === "failed" || (removeResult.kind === "success" && !removeResult.value)) removalFailureCount += 1;
         }
       };
 
@@ -305,9 +302,9 @@ export class DiagnosticsSessionLifecycle {
               await adapter.rmdir(chatDebugPath, false);
               return true;
             });
-            if (directoryRemovalResult.kind !== "success" || !directoryRemovalResult.value) removalFailureCount += 1;
+            if (directoryRemovalResult.kind === "failed" || (directoryRemovalResult.kind === "success" && !directoryRemovalResult.value)) removalFailureCount += 1;
           }
-        } else {
+        } else if (emptyCheckResult.kind === "failed") {
           collectionFailureCount += 1;
         }
       }
@@ -318,15 +315,16 @@ export class DiagnosticsSessionLifecycle {
         if (shouldStop()) break;
         const statResult = await runBoundedOperation(() => adapter.stat(file.path));
         if (statResult.kind === "stopped" || statResult.kind === "timed_out") {
-          collectionFailureCount += 1;
           break;
         }
+        if (statResult.kind === "missing") continue;
         if (statResult.kind !== "success") {
           collectionFailureCount += 1;
           continue;
         }
         const stat = statResult.value;
-        if (!stat || stat.type !== "file" || !Number.isFinite(stat.mtime) || !Number.isFinite(stat.size) || stat.size < 0) {
+        if (!stat) continue;
+        if (stat.type !== "file" || !Number.isFinite(stat.mtime) || !Number.isFinite(stat.size) || stat.size < 0) {
           collectionFailureCount += 1;
           continue;
         }
@@ -342,15 +340,14 @@ export class DiagnosticsSessionLifecycle {
           continue;
         }
         if (file.size > DIAGNOSTICS_ARCHIVE_MAX_INSPECTED_BYTES - inspectedBytes) {
-          collectionFailureCount += 1;
           break;
         }
         inspectedBytes += file.size;
         const readResult = await runBoundedOperation(() => adapter.read(file.path));
         if (readResult.kind === "stopped" || readResult.kind === "timed_out") {
-          collectionFailureCount += 1;
           break;
         }
+        if (readResult.kind === "missing") continue;
         if (readResult.kind !== "success") {
           collectionFailureCount += 1;
           continue;

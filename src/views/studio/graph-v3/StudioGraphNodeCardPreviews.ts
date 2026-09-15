@@ -108,6 +108,7 @@ export function renderNodeMediaPreview(options: {
 
   const previewSrc = resolveAssetPreviewSrc(mediaPreview.path);
   if (!previewSrc) {
+    nodeEl.createDiv({ cls: "ss-studio-source-empty", text: "Waiting for this media file to become available on this device…" });
     return;
   }
 
@@ -149,10 +150,16 @@ export function renderNodeMediaPreview(options: {
       cls: "ss-studio-node-media-preview-img",
     });
     imageEl.src = previewSrc;
+    imageEl.setAttribute("data-studio-asset-path", mediaPreview.path);
     imageEl.alt = `${node.title || node.kind} output image`;
     imageEl.loading = "lazy";
     imageEl.decoding = "async";
     imageEl.draggable = false;
+    imageEl.addEventListener("error", () => {
+      imageEl.removeAttribute("src");
+      imageEl.hidden = true;
+      previewEl.createDiv({ cls: "ss-studio-source-empty", text: "This image is not available on this device yet." });
+    }, { once: true });
     return;
   }
 

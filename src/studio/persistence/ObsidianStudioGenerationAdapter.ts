@@ -1,15 +1,22 @@
 import type { DataAdapter } from "obsidian";
 import type { StudioGenerationAdapter } from "./StudioProjectGenerationStore";
+import { resolveStudioEntry } from '../StudioEntry';
 
 /** Common vault DataAdapter wrapper. No Node APIs or rename-based authority. */
 export class ObsidianStudioGenerationAdapter implements StudioGenerationAdapter {
   constructor(private readonly adapter: DataAdapter) {}
+  get coordinationKey(): object { return this.adapter; }
   exists(path: string): Promise<boolean> { return this.adapter.exists(path); }
-  read(path: string): Promise<string> { return this.adapter.read(path); }
-  readBinary(path: string): Promise<ArrayBuffer> { return this.adapter.readBinary(path); }
+  async read(path: string): Promise<string> { return path.endsWith('.systemsculpt') ? (await resolveStudioEntry(this.adapter, path)).raw : this.adapter.read(path); }
+  async readBinary(path: string): Promise<ArrayBuffer> { return path.endsWith('.systemsculpt') ? new TextEncoder().encode(await this.read(path)).buffer : this.adapter.readBinary(path); }
   write(path: string, data: string): Promise<void> { return this.adapter.write(path, data); }
   writeBinary(path: string, data: ArrayBuffer): Promise<void> { return this.adapter.writeBinary(path, data); }
   async compareAndSwapText(path: string, expectedData: string, nextData: string): Promise<boolean> {
+    if (path.endsWith('.systemsculpt')) {
+      const resolved = await resolveStudioEntry(this.adapter, path);
+      if (resolved.entryRaw !== undefined && await this.adapter.read(path) !== resolved.entryRaw) return false;
+      path = resolved.path;
+    }
     let matched = false;
     await this.adapter.process(path, (currentData) => {
       if (currentData !== expectedData) return currentData;

@@ -31,18 +31,11 @@ describe("CommandManager copy-current-file-path command", () => {
   }) {
     const app = new App();
     (app.workspace.getActiveFile as jest.Mock).mockReturnValue(options?.activeFile ?? null);
-    (app.workspace.getActiveViewOfType as jest.Mock).mockImplementation((viewType: unknown) => {
-      const viewName =
-        typeof viewType === "function" && typeof viewType.name === "string"
-          ? viewType.name
-          : String(viewType);
-      if (options?.activeChatViewFile && viewName.includes("ChatView")) {
-        return {
-          getChatHistoryFilePath: jest.fn(() => options.activeChatViewFile),
-        };
-      }
-      return null;
-    });
+    // CommandManager reads the focused view through getActiveViewOfType(View)
+    // rather than the deprecated workspace.activeLeaf, so the harness resolves
+    // it from the leaf it builds below.
+    let activeLeafView: unknown = null;
+    (app.workspace.getActiveViewOfType as jest.Mock).mockImplementation(() => activeLeafView);
 
     if (options?.activeLeafViewFile || options?.activeLeafStateFile || options?.activeChatViewFile) {
       const activeLeaf = new WorkspaceLeaf(app);
@@ -66,7 +59,11 @@ describe("CommandManager copy-current-file-path command", () => {
           state: { file: options.activeLeafStateFile },
         };
       }
-      (app.workspace as any).activeLeaf = activeLeaf;
+      // A real leaf always has a view, even when the path only lives in its
+      // view state, and the view is how CommandManager reaches the leaf.
+      (activeLeaf as any).view = (activeLeaf as any).view ?? {};
+      (activeLeaf as any).view.leaf = activeLeaf;
+      activeLeafView = (activeLeaf as any).view;
     }
 
     const hasExplicitKnownVaultFiles = Array.isArray(options?.knownVaultFiles);

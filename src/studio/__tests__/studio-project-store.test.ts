@@ -1,3 +1,5 @@
+import { serializeStudioProject } from "../schema";
+import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
 import { deriveStudioAssetsDir, deriveStudioPolicyPath, sanitizeStudioProjectName } from "../paths";
 
@@ -285,5 +287,62 @@ describe("StudioProjectStore", () => {
     expect([...files.keys()].some((path) => path.includes("/retired/"))).toBe(true);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
+  });
+});
+
+
+describe("Studio concurrent workspace writers", () => {
+  async function workspace() {
+    const state = createStore();
+    const created = await state.store.createProject({ name: "Workspace", minPluginVersion: "6.7.2", maxRuns: 100, maxArtifactsMb: 1024 });
+    return { ...state, ...created };
+  }
+
+  it("saves a canvas edit while an asset arrives without deleting or rewriting the asset", async () => {
+    const { store, files, path, project } = await workspace();
+    const asset = `${deriveStudioAssetsDir(path)}/assets/sha256/ab/${"ab".repeat(32)}.png`;
+    files.set(asset, "arrived from another device");
+    project.name = "Canvas edit";
+    await expect(store.saveProject(path, project)).resolves.toMatchObject({ conflicts: [] });
+    expect(files.get(asset)).toBe("arrived from another device");
+    expect((await store.loadProject(path)).name).toBe("Canvas edit");
+  });
+
+  it("rebases a local edit onto a valid external document with unrelated new nodes", async () => {
+    const { store, files, path, project } = await workspace();
+    const base = cloneStudioProjectSnapshot(project);
+    const external = cloneStudioProjectSnapshot(project);
+    external.graph.nodes.push({ id: "remote", kind: "studio.text", version: "1.0.0", title: "Remote text", position: { x: 0, y: 0 }, config: { value: "external edit" } });
+    files.set(path, serializeStudioProject(external));
+    project.name = "Local title";
+    const saved = await store.saveProject(path, project, { baseProject: base });
+    expect(saved.conflicts).toEqual([]);
+    expect(saved.project.name).toBe("Local title");
+    expect(saved.project.graph.nodes[0].id).toBe("remote");
+    expect((await store.loadProject(path, { forceReload: true })).graph.nodes[0].id).toBe("remote");
+  });
+
+  it("archives the conflicting local value and saves independent local changes", async () => {
+    const { store, files, path, project } = await workspace();
+    const base = cloneStudioProjectSnapshot(project), external = cloneStudioProjectSnapshot(project);
+    external.name = "External title";
+    files.set(path, serializeStudioProject(external));
+    project.name = "Local title";
+    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
+    const saved = await store.saveProject(path, project, { baseProject: base });
+    expect(saved.conflicts).toEqual(["name"]);
+    expect(saved.project.name).toBe("External title");
+    expect(saved.project.graph.nodes[0].id).toBe("local");
+    const recoveries = [...files].filter(([file]) => file.startsWith(".systemsculpt/studio/recovery/"));
+    expect(recoveries.length).toBe(2);
+    expect(recoveries.every(([, raw]) => JSON.parse(raw).name === "Local title")).toBe(true);
+  });
+
+  it("keeps both node results when parallel runs publish caches from the same starting snapshot", async () => {
+    const { store, path, project } = await workspace();
+    const cache = (id: string) => new TextEncoder().encode(JSON.stringify({ schema: "studio.node-cache.v1", projectId: project.projectId, updatedAt: "2026-09-09T00:00:00.000Z", entries: { [id]: { nodeId: id, runId: `run_${id}`, updatedAt: "2026-09-09T00:00:00.000Z", outputs: { text: id } } } }));
+    await Promise.all([store.replaceCache(path, project.projectId, cache("a")), store.replaceCache(path, project.projectId, cache("b"))]);
+    const bytes = await store.readSupportFile(path, `${deriveStudioAssetsDir(path)}/cache/node-results.json`);
+    expect(Object.keys(JSON.parse(new TextDecoder().decode(bytes!)).entries).sort()).toEqual(["a", "b"]);
   });
 });

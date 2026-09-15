@@ -150,7 +150,6 @@ export class EmbeddingsView extends ItemView {
     
     // Also listen for direct file-open events which can fire without a leaf switch
     this.registerEvent(
-      // @ts-ignore - 'file-open' exists on workspace event bus
       this.app.workspace.on('file-open', (file) => {
         if (file instanceof TFile && file.path === this.deletedSourcePath) {
           this.deletedSourcePath = null;

@@ -7,13 +7,13 @@ import {
   buildStudioShapeArrowPath,
   buildStudioShapeArrowPreviewPath,
   type StudioShapeArrowFan,
+  type StudioArrowAnchor,
 } from "./StudioShapeGeometry";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
 
 /**
- * The diagram layer: shapes and the arrows between them, rendered and driven
- * entirely on its own. It shares the canvas element with the node graph and
- * nothing else — no ports, no links, no node selection, no run state.
+ * The diagram layer: shapes and visual arrows between canvas items. Node card
+ * bounds anchor arrows without involving ports, execution links, or run state.
  *
  * Gestures move/resize the local copy live and commit once on release, so a
  * drag is one history entry instead of one per pointer frame.
@@ -43,6 +43,7 @@ export type StudioShapeLayerOptions = {
   activeCanvasTool: StudioCanvasTool;
   selection: StudioShapeSelection;
   getGraphZoom: () => number;
+  getNodeAnchor?: (nodeId: string) => StudioArrowAnchor | null;
   onSelect: (target: StudioShapeTarget, options: { additive: boolean }) => void;
   /**
    * A drag started on a shape. The delta applies to the whole canvas selection
@@ -61,6 +62,9 @@ export type StudioShapeLayerOptions = {
  */
 export type StudioShapeLayerHandle = {
   el: HTMLElement;
+  startArrowGesture: (itemId: string, event: PointerEvent) => void;
+  cancelArrowGesture: () => void;
+  refreshArrows: () => void;
   applyShapePositions: (
     positions: ReadonlyArray<{ shapeId: string; position: { x: number; y: number } }>
   ) => void;
@@ -113,6 +117,10 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   const arrowElements = new Map<string, ArrowElements>();
   const arrowFans = resolveArrowFans(diagram);
   let previewPath: SVGPathElement | null = null;
+  let cancelArrowGesture = (): void => {};
+
+  const resolveAnchor = (itemId: string): StudioArrowAnchor | null =>
+    shapesById.get(itemId) ?? options.getNodeAnchor?.(itemId) ?? null;
 
   const graphPointFromClient = (clientX: number, clientY: number): { x: number; y: number } => {
     const zoom = resolveStudioGraphSafeZoom(getGraphZoom());
@@ -140,9 +148,14 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
 
   const renderArrows = (): void => {
     const seen = new Set<string>();
+    const anchors = new Map<string, StudioArrowAnchor | null>();
+    const anchor = (id: string): StudioArrowAnchor | null => {
+      if (!anchors.has(id)) anchors.set(id, resolveAnchor(id));
+      return anchors.get(id) ?? null;
+    };
     for (const arrow of diagram.arrows) {
-      const from = shapesById.get(arrow.fromShapeId);
-      const to = shapesById.get(arrow.toShapeId);
+      const from = anchor(arrow.fromShapeId);
+      const to = anchor(arrow.toShapeId);
       if (!from || !to) {
         continue;
       }
@@ -346,49 +359,65 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     ownerWindow.addEventListener("pointerup", onUp);
   };
 
-  const startArrowGesture = (shape: StudioShapeInstance, startEvent: PointerEvent): void => {
-    previewPath?.remove();
+  const startArrowGesture = (itemId: string, startEvent: PointerEvent): void => {
+    cancelArrowGesture();
+    const initialSource = resolveAnchor(itemId);
+    if (busy || !initialSource) return;
+    const source: StudioArrowAnchor = initialSource;
     previewPath = createStudioSvgElement(arrowsLayer, "path");
     previewPath.setAttribute("class", "ss-studio-shape-arrow-preview");
     arrowsLayer.appendChild(previewPath);
+    let settled = false;
 
     const finish = (event: PointerEvent | null): void => {
+      if (settled) return;
+      settled = true;
       ownerWindow.removeEventListener("pointermove", onMove);
       ownerWindow.removeEventListener("pointerup", onUp);
       ownerWindow.removeEventListener("pointercancel", onCancel);
+      ownerWindow.removeEventListener("keydown", onKeyDown, true);
+      ownerWindow.removeEventListener("blur", onBlur);
       previewPath?.remove();
       previewPath = null;
-      const targetId = event ? resolveShapeIdAtPoint(canvasEl, event) : null;
-      if (targetId && targetId !== shape.id) {
-        options.onConnectShapes(shape.id, targetId);
+      cancelArrowGesture = () => {};
+      const targetId = event ? resolveItemIdAtPoint(canvasEl, event) : null;
+      if (targetId && targetId !== itemId && resolveAnchor(targetId)) {
+        options.onConnectShapes(itemId, targetId);
       }
     };
 
     function onMove(event: PointerEvent): void {
-      if (event.pointerId !== startEvent.pointerId || !previewPath) {
-        return;
-      }
-      const cursor = graphPointFromClient(event.clientX, event.clientY);
-      previewPath.setAttribute("d", buildStudioShapeArrowPreviewPath(shape, cursor).line);
+      if (event.pointerId !== startEvent.pointerId || !previewPath) return;
+      const targetId = resolveItemIdAtPoint(canvasEl, event);
+      const target = targetId && targetId !== itemId ? resolveAnchor(targetId) : null;
+      const from = resolveAnchor(itemId) ?? source;
+      const path = target
+        ? buildStudioShapeArrowPath(from, target)
+        : buildStudioShapeArrowPreviewPath(from, graphPointFromClient(event.clientX, event.clientY));
+      previewPath.setAttribute("d", `${path.line} ${path.head}`);
     }
 
     function onUp(event: PointerEvent): void {
-      if (event.pointerId !== startEvent.pointerId) {
-        return;
-      }
-      finish(event);
+      if (event.pointerId === startEvent.pointerId) finish(event);
     }
 
     function onCancel(event: PointerEvent): void {
-      if (event.pointerId !== startEvent.pointerId) {
-        return;
-      }
-      finish(null);
+      if (event.pointerId === startEvent.pointerId) finish(null);
     }
 
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") finish(null);
+    }
+
+    function onBlur(): void { finish(null); }
+
+    cancelArrowGesture = () => finish(null);
     ownerWindow.addEventListener("pointermove", onMove);
     ownerWindow.addEventListener("pointerup", onUp);
     ownerWindow.addEventListener("pointercancel", onCancel);
+    ownerWindow.addEventListener("keydown", onKeyDown, true);
+    ownerWindow.addEventListener("blur", onBlur);
+    onMove(startEvent);
   };
 
   for (const shape of shapesById.values()) {
@@ -408,7 +437,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       event.stopPropagation();
       if (activeCanvasTool === "arrow") {
         event.preventDefault();
-        startArrowGesture(shape, event);
+        startArrowGesture(shape.id, event);
         return;
       }
       if (activeCanvasTool !== "select") {
@@ -436,7 +465,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     // does not stretch.
     const singleSelected =
       selectedShapeIds.size === 1 && selectedArrowIds.size === 0 && selectedShapeIds.has(shape.id);
-    if (singleSelected && !busy) {
+    if (singleSelected && !busy && activeCanvasTool === "select") {
       for (const corner of RESIZE_CORNERS) {
         const handle = shapeEl.createDiv({ cls: "ss-studio-shape-handle" });
         handle.dataset.corner = corner;
@@ -455,6 +484,9 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   renderArrows();
   return {
     el: layerEl,
+    startArrowGesture,
+    cancelArrowGesture: () => cancelArrowGesture(),
+    refreshArrows: renderArrows,
     applyShapePositions: (positions) => {
       for (const { shapeId, position } of positions) {
         const shape = shapesById.get(shapeId);
@@ -553,18 +585,12 @@ function createArrowElements(
   return { group, hit, line, head, label };
 }
 
-/** Shape under the release point, so an arrow lands anywhere on the target. */
-function resolveShapeIdAtPoint(canvasEl: HTMLElement, event: PointerEvent): string | null {
-  const ownerDocument = canvasEl.ownerDocument;
-  if (typeof ownerDocument?.elementFromPoint !== "function") {
-    return null;
-  }
-  const released = ownerDocument.elementFromPoint(event.clientX, event.clientY);
-  const shapeEl =
-    typeof released?.closest === "function"
-      ? released.closest<HTMLElement>(".ss-studio-shape")
-      : null;
-  return shapeEl?.dataset.shapeId || null;
+/** Visual arrows land anywhere on an item within this canvas, including its children. */
+function resolveItemIdAtPoint(canvasEl: HTMLElement, event: PointerEvent): string | null {
+  const released = canvasEl.ownerDocument.elementFromPoint?.(event.clientX, event.clientY);
+  const itemEl = released?.closest<HTMLElement>(".ss-studio-shape, .ss-studio-node-card");
+  if (!itemEl || !canvasEl.contains(itemEl)) return null;
+  return itemEl.dataset.shapeId || itemEl.dataset.nodeId || null;
 }
 
 /** jsdom has no innerText; normalize NBSP and CRLF so the model stays plain \n text. */

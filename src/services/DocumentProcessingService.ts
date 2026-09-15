@@ -9,6 +9,7 @@ import type {
 } from "../types/documentProcessing";
 import { sha256HexFromBytesPortable } from "../studio/hash";
 import { errorLogger } from "../utils/errorLogger";
+import { base64ToBytes } from "../utils/base64";
 import { ManagedJobClient } from "./managed/ManagedJobClient";
 import { ManagedJobRecoveryStore } from "./managed/ManagedJobRecoveryStore";
 import {
@@ -543,10 +544,7 @@ export class DocumentProcessingService {
 
   private base64ToArrayBuffer(value: string): ArrayBuffer {
     const base64 = value.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-    const binary = window.atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytes.buffer;
+    return base64ToBytes(base64).buffer as ArrayBuffer;
   }
 
   private recordImageMetadata(metadata: ImageMetadata): void {

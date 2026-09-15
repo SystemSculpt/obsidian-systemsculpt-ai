@@ -1,3 +1,8 @@
+import { studioAgentExecution } from './StudioCommandExecution';
+import type { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
+import { codexOptionsFromSettings, codexWorkingDirectory } from "../services/codex/CodexExecutionSettings";
+import { StudioCodexRuns, codexRunKey } from '../services/codex/StudioCodexRuns';
+import { answerCodexRequest } from '../services/codex/CodexRequestModal';
 import { App, normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
@@ -9,7 +14,7 @@ import { buildNodeInputFingerprint, StudioNodeResultCacheStore } from "./StudioN
 import { StudioPermissionManager } from "./StudioPermissionManager";
 import { StudioSandboxRunner } from "./StudioSandboxRunner";
 import { StudioProjectStore } from "./StudioProjectStore";
-import { scopeProjectForRun } from "./StudioRunScope";
+import { planStudioRun } from "./StudioRunScope";
 import type {
   StudioApiAdapter,
   StudioNodeCacheSnapshotV1,
@@ -25,6 +30,7 @@ import type {
 import { deriveStudioRunsDir } from "./paths";
 import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
 import { nowIso, randomId } from "./utils";
+import { StudioRunObserver } from "./StudioRunObserver";
 import { assertStudioNodeHostAvailable } from "./StudioHostCapabilities";
 
 type PendingRun = {
@@ -63,9 +69,14 @@ const PREVIEWABLE_MEDIA_EXTENSIONS = new Set([
 ]);
 
 export class StudioRuntime {
+  private readonly codexRuns = new StudioCodexRuns();
+  dispose(): void { this.codexRuns.dispose(); }
   private readonly projectQueues = new Map<string, PendingRun[]>();
   private readonly activeProjects = new Set<string>();
   private readonly nodeResultCacheStore: StudioNodeResultCacheStore;
+  readonly runs = new StudioRunObserver((error) => {
+    this.plugin.getLogger().warn("Studio run observer failed", { source: "StudioRuntime", metadata: { error: String(error) } });
+  });
 
   constructor(
     private readonly app: App,
@@ -74,7 +85,8 @@ export class StudioRuntime {
     private readonly registry: StudioNodeRegistry,
     private readonly compiler: StudioGraphCompiler,
     private readonly assetStore: StudioAssetStore,
-    private readonly apiAdapter: StudioApiAdapter
+    private readonly apiAdapter: StudioApiAdapter,
+    private readonly agentRuns?: StudioAgentRuns
   ) {
     this.nodeResultCacheStore = new StudioNodeResultCacheStore(projectStore);
   }
@@ -173,10 +185,59 @@ export class StudioRuntime {
     }
   }
 
+  /**
+   * The most recent output each node produced in a retained run. Covers
+   * projects whose never-cached nodes ran before every node's latest output
+   * was recorded in the cache: a generated image already on the canvas must
+   * feed a single-node run instead of being regenerated.
+   */
+  private async recordedOutputsFromRuns(projectPath: string, nodeIds: Set<string>): Promise<Map<string, StudioNodeOutputMap>> {
+    const found = new Map<string, StudioNodeOutputMap>();
+    if (nodeIds.size === 0) return found;
+    const runs = (await this.readRunIndex(projectPath)).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    for (const run of runs) {
+      if (found.size === nodeIds.size) break;
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(run.runId)) continue;
+      const bytes = await this.projectStore.readSupportFile(projectPath, normalizePath(`${deriveStudioRunsDir(projectPath)}/${run.runId}/events.ndjson`));
+      if (!bytes || bytes.byteLength > MAX_RECOVERY_EVENT_LOG_BYTES) continue;
+      const lines = new TextDecoder().decode(bytes).split("\n");
+      // Newest event first: the last output a node produced in that run wins.
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index].trim()) continue;
+        let event: { type?: unknown; nodeId?: unknown; outputs?: unknown };
+        try { event = JSON.parse(lines[index]); } catch { continue; }
+        if (event?.type !== "node.output" || typeof event.nodeId !== "string" || !nodeIds.has(event.nodeId) || found.has(event.nodeId)) continue;
+        if (!event.outputs || typeof event.outputs !== "object" || Array.isArray(event.outputs)) continue;
+        found.set(event.nodeId, event.outputs as StudioNodeOutputMap);
+      }
+    }
+    return found;
+  }
+
   async getNodeCacheSnapshot(projectPath: string): Promise<StudioNodeCacheSnapshotV1> {
     const normalizedPath = normalizePath(projectPath);
     const project = await this.projectStore.loadProject(normalizedPath);
     return this.nodeResultCacheStore.load(normalizedPath, project.projectId);
+  }
+
+  async getLatestRunEvents(projectPath: string): Promise<StudioRunEvent[]> {
+    const path = normalizePath(projectPath);
+    const latest = (await this.readRunIndex(path)).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    if (!latest || !/^[A-Za-z0-9_-]{1,128}$/.test(latest.runId)) return [];
+    const bytes = await this.projectStore.readSupportFile(path, normalizePath(`${deriveStudioRunsDir(path)}/${latest.runId}/events.ndjson`));
+    if (!bytes || bytes.byteLength > MAX_RECOVERY_EVENT_LOG_BYTES) return [];
+    const events: StudioRunEvent[] = [];
+    for (const line of new TextDecoder().decode(bytes).split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as StudioRunEvent;
+        if (event?.runId !== latest.runId || typeof event.at !== "string") continue;
+        if (!["run.started", "run.failed", "run.completed", "node.started", "node.progress", "node.cache_hit", "node.output", "node.failed"].includes(event.type)) continue;
+        if (event.type.startsWith("node.") && !("nodeId" in event && typeof event.nodeId === "string")) continue;
+        events.push(event);
+      } catch { /* A damaged history line must not hide intact outputs. */ }
+    }
+    return events;
   }
 
   private async enqueueRun(
@@ -200,22 +261,26 @@ export class StudioRuntime {
       const pending: PendingRun = {
         runId,
         startedAt,
-        execute: () =>
-          this.executeRun(
-            normalizedPath,
-            queuedProject,
-            runId,
-            startedAt,
-            scopedEntryNodeIds.length > 0 || scopedForceNodeIds.length > 0
-              ? {
-                  entryNodeIds: scopedEntryNodeIds.length > 0 ? scopedEntryNodeIds : undefined,
-                  forceNodeIds: scopedForceNodeIds.length > 0 ? scopedForceNodeIds : undefined,
-                  onEvent,
-                }
-              : onEvent
-                ? { onEvent }
-                : undefined
-          ),
+        execute: async () => {
+          const plan = planStudioRun(queuedProject, scopedEntryNodeIds, (node) => this.registry.get(node.kind, node.version)?.cachePolicy);
+          this.runs.begin({
+            projectPath: normalizedPath, runId,
+            nodeIds: plan.executeNodeIds,
+            fromNodeId: scopedEntryNodeIds[0] || null,
+          });
+          try {
+            return await this.executeRun(normalizedPath, queuedProject, runId, startedAt, {
+              entryNodeIds: scopedEntryNodeIds.length > 0 ? scopedEntryNodeIds : undefined,
+              forceNodeIds: scopedForceNodeIds.length > 0 ? scopedForceNodeIds : undefined,
+              onEvent,
+            });
+          } catch (error) {
+            // Includes validation and local publication failures before a terminal event.
+            this.runs.publish(normalizedPath, { type: "run.failed", runId, error: String(error instanceof Error ? error.message : error), at: nowIso() });
+            this.runs.publish(normalizedPath, { type: "run.completed", runId, status: "failed", at: nowIso() });
+            throw error;
+          }
+        },
         resolve,
         reject,
       };
@@ -344,7 +409,9 @@ export class StudioRuntime {
     options?: StudioRunOptions
   ): Promise<StudioRunSummary> {
     await this.retryPublishedTranscriptionCleanup(projectPath);
-    const project = scopeProjectForRun(cloneStudioProjectSnapshot(fullProject), options?.entryNodeIds);
+    const plan = planStudioRun(cloneStudioProjectSnapshot(fullProject), options?.entryNodeIds, (node) => this.registry.get(node.kind, node.version)?.cachePolicy);
+    const project = plan.project;
+    const providedNodeIds = new Set(plan.providedNodeIds);
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);
@@ -364,8 +431,8 @@ export class StudioRuntime {
     const stagedAssetFiles = new Map<string, Uint8Array>();
     const stagedAssetBytesByProjectionPath = new Map<string, Uint8Array>();
 
-    const emit = async (event: StudioRunEvent): Promise<void> => {
-      persistedEvents.push(`${JSON.stringify(event)}\n`);
+    const notify = async (event: StudioRunEvent): Promise<void> => {
+      this.runs.publish(projectPath, event);
       if (typeof options?.onEvent === "function") {
         try {
           await options.onEvent(event);
@@ -379,6 +446,11 @@ export class StudioRuntime {
           });
         }
       }
+    };
+
+    const emit = async (event: StudioRunEvent): Promise<void> => {
+      persistedEvents.push(`${JSON.stringify(event)}\n`);
+      await notify(event);
     };
 
     await emit({
@@ -442,6 +514,55 @@ export class StudioRuntime {
       }
     };
 
+    // Nodes that produce nothing because they are disabled, or because a
+    // disabled node starved one of their required inputs. Provided nodes are
+    // parked in the same "skipped" state but carry recorded outputs, so they
+    // are deliberately not tracked here.
+    const skippedUpstream = new Set<string>();
+
+    const skipNode = (nodeId: string): void => {
+      state.set(nodeId, "skipped");
+      skippedUpstream.add(nodeId);
+      dependencyCount.set(nodeId, 0);
+      markDependentsReady(nodeId);
+    };
+
+    /**
+     * The required input port, if any, whose every producer was skipped.
+     *
+     * A disabled node used to leave its downstream port simply absent from the
+     * input map, so the dependent ran on partial data: it either failed deep
+     * inside an adapter with an unrelated message, or produced output from an
+     * input the user had switched off. Skips propagate instead.
+     */
+    const starvedRequiredPort = (nodeId: string): string | null => {
+      const compiledNode = compiled.nodesById.get(nodeId);
+      if (!compiledNode) return null;
+      for (const port of compiledNode.definition.inputPorts) {
+        if (port.required !== true) continue;
+        const feeding = compiledNode.inboundEdges.filter((edge) => edge.toPortId === port.id);
+        if (feeding.length === 0) continue;
+        if (feeding.every((edge) => skippedUpstream.has(edge.fromNodeId))) return port.id;
+      }
+      return null;
+    };
+
+    // Provided nodes never execute here: their latest recorded outputs stand
+    // in, exactly as they were produced last time. A missing record surfaces
+    // when a dependent starts, naming the node to run first.
+    const unrecorded = new Set<string>();
+    for (const nodeId of providedNodeIds) {
+      if (!compiled.nodesById.has(nodeId)) continue;
+      const entry = nodeCacheSnapshot.entries[nodeId];
+      if (entry) outputsByNode.set(nodeId, entry.outputs || {});
+      else unrecorded.add(nodeId);
+      state.set(nodeId, "skipped");
+      markDependentsReady(nodeId);
+    }
+    for (const [nodeId, outputs] of await this.recordedOutputsFromRuns(projectPath, unrecorded)) {
+      outputsByNode.set(nodeId, outputs);
+    }
+
     const startNode = (nodeId: string): void => {
       const compiledNode = compiled.nodesById.get(nodeId)!;
       const nodeClass = compiledNode.definition.capabilityClass;
@@ -450,11 +571,15 @@ export class StudioRuntime {
 
       const promise = (async () => {
         assertStudioNodeHostAvailable(compiledNode.definition);
+        for (const edge of compiledNode.inboundEdges) {
+          if (!providedNodeIds.has(edge.fromNodeId) || outputsByNode.has(edge.fromNodeId)) continue;
+          const upstream = compiled.nodesById.get(edge.fromNodeId)?.node;
+          throw new Error(`Run "${upstream?.title || edge.fromNodeId}" first. It has no output yet, and Studio does not rerun it on your behalf.`);
+        }
         const inputs = this.mapNodeInputs(compiled, nodeId, outputsByNode);
         const cachePolicy = compiledNode.definition.cachePolicy || "by_inputs";
-        const inputFingerprint = cachePolicy === "by_inputs"
-          ? await buildNodeInputFingerprint(compiledNode.node, inputs)
-          : null;
+        // Every node records its latest outputs; only by-inputs nodes reuse them.
+        const inputFingerprint = await buildNodeInputFingerprint(compiledNode.node, inputs);
 
         if (cachePolicy === "by_inputs" && !forceNodeIds.has(nodeId)) {
           const cacheEntry = nodeCacheSnapshot.entries[nodeId];
@@ -494,12 +619,14 @@ export class StudioRuntime {
 
         await emit({ type: "node.started", runId, nodeId, at: nowIso() });
         const result = await compiledNode.definition.execute({
+          projectId: project.projectId,
           runId,
           projectPath,
           node: compiledNode.node,
           inputs,
           signal: abortController.signal,
           services: {
+            codex: (input, signal, log) => this.agentRuns ? this.agentRuns.run({ projectId: project.projectId, projectPath, nodeId, title: compiledNode.node.title, request: { ...input, ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings), ...input }) } }, signal) : this.codexRuns.run(codexRunKey(project.projectId, nodeId), { ...input, ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings), ...input }), workingDirectory: codexWorkingDirectory(this.app, input.workingDirectory) }, signal, { log, thread: () => {}, request: (method, params, requestSignal) => answerCodexRequest(this.app, method, params, requestSignal) }),
             api: this.apiAdapter,
             storeAsset: async (bytes, mimeType) => {
               const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);
@@ -553,6 +680,8 @@ export class StudioRuntime {
             },
             statVaultFileSize: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
+              const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
+              if (staged) return staged.byteLength;
               const file = this.app.vault.getAbstractFileByPath(vaultPath);
               if (!(file instanceof TFile)) {
                 throw new Error(`Vault file not found: ${vaultPath}`);
@@ -565,6 +694,8 @@ export class StudioRuntime {
             },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
+              const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
+              if (staged) return staged.slice().buffer;
               const file = this.app.vault.getAbstractFileByPath(vaultPath);
               if (!(file instanceof TFile)) {
                 throw new Error(`Vault file not found: ${vaultPath}`);
@@ -592,7 +723,7 @@ export class StudioRuntime {
               }
               return size;
             },
-            readLocalFileBinary: async (absolutePath: string) => {
+            readLocalFileBinary: async (absolutePath: string, maxBytes?: number) => {
               const normalized = String(absolutePath || "").trim();
               if (!desktop) {
                 throw new Error("Local filesystem reads require Obsidian Desktop.");
@@ -606,6 +737,24 @@ export class StudioRuntime {
                 );
               }
               permissions.assertFilesystemPath(normalized);
+              // Bounded process manifests/artifacts: read at most limit+1, even if a writer grows the file after stat.
+              if (typeof maxBytes === "number") {
+                if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new Error("Invalid local file read limit.");
+                const handle = await desktop.fs.open(normalized, "r");
+                try {
+                  const stat = await handle.stat();
+                  if (!stat.isFile() || stat.size > maxBytes) throw new Error("Local file exceeds the configured size limit or is not a regular file.");
+                  const bytes = new Uint8Array(Math.min(maxBytes + 1, stat.size + 1));
+                  let offset = 0;
+                  while (offset < bytes.length) {
+                    const result = await handle.read(bytes, offset, bytes.length - offset, null);
+                    if (result.bytesRead === 0) break;
+                    offset += result.bytesRead;
+                  }
+                  if (offset > maxBytes || offset > stat.size) throw new Error("Local file changed or exceeds the configured size limit.");
+                  return bytes.slice(0, offset).buffer;
+                } finally { await handle.close(); }
+              }
               const bytes = await desktop.fs.readFile(normalized);
               return bytes.buffer.slice(
                 bytes.byteOffset,
@@ -649,6 +798,11 @@ export class StudioRuntime {
             runCli: (request) => sandbox.runCli(request),
             assertFilesystemPath: (path) => permissions.assertFilesystemPath(path),
           },
+          reportProgress: (percent, message) => {
+            void emit({ type: "node.progress", runId, nodeId, percent, message, at: nowIso() }).catch((error) => {
+              this.plugin.getLogger().debug("Studio progress could not be recorded", { source: "StudioRuntime", metadata: { error: String(error) } });
+            });
+          },
           log: (message) => {
             this.plugin.getLogger().debug("Studio node log", {
               source: "StudioRuntime",
@@ -667,20 +821,16 @@ export class StudioRuntime {
         }
         state.set(nodeId, "done");
         executedNodeIds.push(nodeId);
-        if (cachePolicy === "by_inputs") {
-          nodeCacheSnapshot.entries[nodeId] = {
-            nodeId,
-            nodeKind: compiledNode.node.kind,
-            nodeVersion: compiledNode.node.version,
-            inputFingerprint: inputFingerprint!,
-            outputs: result.outputs,
-            artifacts: result.artifacts,
-            updatedAt: nowIso(),
-            runId,
-          };
-        } else {
-          delete nodeCacheSnapshot.entries[nodeId];
-        }
+        nodeCacheSnapshot.entries[nodeId] = {
+          nodeId,
+          nodeKind: compiledNode.node.kind,
+          nodeVersion: compiledNode.node.version,
+          inputFingerprint,
+          outputs: result.outputs,
+          artifacts: result.artifacts,
+          updatedAt: nowIso(),
+          runId,
+        };
         await emit({
           type: "node.output",
           runId,
@@ -731,10 +881,8 @@ export class StudioRuntime {
 
     const canStartNode = (nodeId: string): boolean => {
       const compiledNode = compiled.nodesById.get(nodeId)!;
-      if (compiledNode.node.disabled === true) {
-        state.set(nodeId, "skipped");
-        dependencyCount.set(nodeId, 0);
-        markDependentsReady(nodeId);
+      if (compiledNode.node.disabled === true || starvedRequiredPort(nodeId) !== null) {
+        skipNode(nodeId);
         return false;
       }
       const classLimit = CONCURRENCY_LIMITS[compiledNode.definition.capabilityClass];
@@ -786,6 +934,21 @@ export class StudioRuntime {
       }
     }
 
+    // The scheduler only exits with work outstanding when nothing was
+    // runnable — a dependency it can never satisfy. Reporting that as a
+    // success would hide a stuck graph behind a green run.
+    if (fatalError === null) {
+      const stalled = Array.from(state.entries())
+        .filter(([, nodeState]) => nodeState === "pending" || nodeState === "running")
+        .map(([nodeId]) => compiled.nodesById.get(nodeId)?.node.title || nodeId);
+      if (stalled.length > 0) {
+        fatalError = new Error(
+          `Studio run stopped before finishing: ${stalled.join(", ")} never ran. `
+          + "The graph has a dependency the scheduler cannot satisfy.",
+        );
+      }
+    }
+
     let status: StudioRunSummary["status"] = "success";
     let errorMessage: string | null = null;
     if (fatalError !== null) {
@@ -803,12 +966,14 @@ export class StudioRuntime {
       });
     }
 
-    await emit({
+    const completedEvent: StudioRunEvent = {
       type: "run.completed",
       runId,
       status: status === "success" ? "success" : "failed",
       at: nowIso(),
-    });
+    };
+    // Save the terminal record with its assets, then announce that they are ready.
+    persistedEvents.push(`${JSON.stringify(completedEvent)}\n`);
 
     const summary: StudioRunSummary = {
       runId,
@@ -850,6 +1015,7 @@ export class StudioRuntime {
       });
     }
 
+    await notify(completedEvent);
     if (status === "failed") {
       throw new Error(errorMessage || "Studio run failed.");
     }

@@ -41,7 +41,21 @@ interface PersistedDocumentContextEffect {
   notificationAcknowledged: boolean;
 }
 
-const DOCUMENT_CONTEXT_EFFECTS_KEY = "managedDocumentContextEffectsV1";
+/**
+ * Earlier releases kept this ledger under one key in data.json. SettingsManager
+ * also writes data.json from an in-memory copy loaded at startup, so any entry
+ * recorded after load was wiped by the next settings save. The ledger now owns
+ * its own vault file; the legacy key is imported once and never written back.
+ */
+const LEGACY_DOCUMENT_CONTEXT_EFFECTS_KEY = "managedDocumentContextEffectsV1";
+const DOCUMENT_CONTEXT_EFFECTS_DIR = ".systemsculpt/document-context";
+const DOCUMENT_CONTEXT_EFFECTS_PATH = `${DOCUMENT_CONTEXT_EFFECTS_DIR}/effects.json`;
+const DOCUMENT_CONTEXT_EFFECTS_SCHEMA_VERSION = 1;
+
+interface DocumentContextEffectLedgerFile {
+  schemaVersion: number;
+  effects: Record<string, PersistedDocumentContextEffect>;
+}
 
 /**
  * Centralized service for managing document context
@@ -52,6 +66,9 @@ export class DocumentContextManager {
   private app: App;
   private plugin: SystemSculptPlugin;
   private documentProcessingService: DocumentProcessingService;
+  // Ledger writes are read-modify-write on one vault file; serialize them so
+  // concurrent effects never clobber each other's entries.
+  private ledgerWriteTail: Promise<void> = Promise.resolve();
   
   private constructor(app: App, plugin: SystemSculptPlugin) {
     this.app = app;
@@ -82,9 +99,8 @@ export class DocumentContextManager {
   ): Promise<DocumentConversionContextEffectResult> {
     throwIfAborted(effect.signal);
     validateContextEffect(effect);
-    const data = ((await this.plugin.loadData?.()) ?? {}) as Record<string, unknown>;
+    const ledger = await this.loadContextEffectLedger();
     throwIfAborted(effect.signal);
-    const ledger = readContextEffectLedger(data[DOCUMENT_CONTEXT_EFFECTS_KEY]);
     const persisted = ledger[effect.effectId];
     const identity = {
       operationId: effect.operationId,
@@ -108,8 +124,7 @@ export class DocumentContextManager {
       notificationAcknowledged: false,
     };
     const persist = async () => {
-      ledger[effect.effectId] = { ...record };
-      await this.plugin.saveData({ ...data, [DOCUMENT_CONTEXT_EFFECTS_KEY]: ledger });
+      await this.persistContextEffect(effect.effectId, { ...record });
       throwIfAborted(effect.signal);
     };
     if (!persisted) await persist();
@@ -138,6 +153,102 @@ export class DocumentContextManager {
       await persist();
     }
     return wasPersisted ? "repaired" : "applied";
+  }
+
+  /**
+   * Reads the ledger from its vault file (or the `.previous` checkpoint left by
+   * an interrupted replace). When neither exists the legacy data.json entry is
+   * imported once; data.json itself is never written from here.
+   */
+  private async loadContextEffectLedger(): Promise<Record<string, PersistedDocumentContextEffect>> {
+    const fromFile = await this.readContextEffectLedgerFile();
+    if (fromFile) return fromFile;
+    return this.withLedgerWriteLock(() => this.loadContextEffectLedgerLocked());
+  }
+
+  private async loadContextEffectLedgerLocked(): Promise<Record<string, PersistedDocumentContextEffect>> {
+    // Re-read under the lock: an earlier writer may have created the file.
+    const fromFile = await this.readContextEffectLedgerFile();
+    if (fromFile) return fromFile;
+    let data: unknown = null;
+    try {
+      data = await this.plugin.loadData?.();
+    } catch {
+      return {};
+    }
+    const legacy = data && typeof data === "object" && !Array.isArray(data)
+      ? readContextEffectLedger((data as Record<string, unknown>)[LEGACY_DOCUMENT_CONTEXT_EFFECTS_KEY])
+      : {};
+    if (Object.keys(legacy).length > 0) await this.writeContextEffectLedger(legacy);
+    return legacy;
+  }
+
+  private async readContextEffectLedgerFile(): Promise<Record<string, PersistedDocumentContextEffect> | null> {
+    const adapter = this.app.vault.adapter;
+    for (const path of [DOCUMENT_CONTEXT_EFFECTS_PATH, `${DOCUMENT_CONTEXT_EFFECTS_PATH}.previous`]) {
+      if (!(await adapter.exists(path))) continue;
+      const parsed = parseContextEffectLedgerFile(await adapter.read(path));
+      if (parsed) return parsed;
+    }
+    return null;
+  }
+
+  private async persistContextEffect(
+    effectId: string,
+    record: PersistedDocumentContextEffect,
+  ): Promise<void> {
+    await this.withLedgerWriteLock(async () => {
+      const ledger = await this.loadContextEffectLedgerLocked();
+      ledger[effectId] = record;
+      await this.writeContextEffectLedger(ledger);
+    });
+  }
+
+  private withLedgerWriteLock<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.ledgerWriteTail.then(task, task);
+    this.ledgerWriteTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /**
+   * Atomic replace: write a temp file, then rename it over the ledger. Adapters
+   * that refuse to rename over an existing target get the current ledger parked
+   * at `.previous` (which reads fall back to) for the duration of the swap.
+   */
+  private async writeContextEffectLedger(
+    effects: Record<string, PersistedDocumentContextEffect>,
+  ): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    if (!(await adapter.exists(DOCUMENT_CONTEXT_EFFECTS_DIR))) await adapter.mkdir(DOCUMENT_CONTEXT_EFFECTS_DIR);
+    const file: DocumentContextEffectLedgerFile = {
+      schemaVersion: DOCUMENT_CONTEXT_EFFECTS_SCHEMA_VERSION,
+      effects,
+    };
+    const serialized = JSON.stringify(file, null, 2);
+    if (typeof adapter.rename !== "function") {
+      await adapter.write(DOCUMENT_CONTEXT_EFFECTS_PATH, serialized);
+      return;
+    }
+    const tempPath = `${DOCUMENT_CONTEXT_EFFECTS_PATH}.tmp`;
+    const previousPath = `${DOCUMENT_CONTEXT_EFFECTS_PATH}.previous`;
+    await adapter.write(tempPath, serialized);
+    try {
+      await adapter.rename(tempPath, DOCUMENT_CONTEXT_EFFECTS_PATH);
+    } catch (replaceError) {
+      try {
+        if (await adapter.exists(previousPath)) await adapter.remove(previousPath);
+        if (await adapter.exists(DOCUMENT_CONTEXT_EFFECTS_PATH)) {
+          await adapter.rename(DOCUMENT_CONTEXT_EFFECTS_PATH, previousPath);
+        }
+        await adapter.rename(tempPath, DOCUMENT_CONTEXT_EFFECTS_PATH);
+        if (await adapter.exists(previousPath)) await adapter.remove(previousPath);
+      } catch {
+        try {
+          if (await adapter.exists(tempPath)) await adapter.remove(tempPath);
+        } catch { /* temporary cleanup is best effort */ }
+        throw replaceError;
+      }
+    }
   }
 
   /**
@@ -428,4 +539,16 @@ function validateContextEffect(effect: DocumentConversionContextEffect): void {
 function readContextEffectLedger(value: unknown): Record<string, PersistedDocumentContextEffect> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return { ...(value as Record<string, PersistedDocumentContextEffect>) };
+}
+
+function parseContextEffectLedgerFile(raw: string): Record<string, PersistedDocumentContextEffect> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const file = parsed as Partial<DocumentContextEffectLedgerFile>;
+    if (typeof file.schemaVersion !== "number") return null;
+    return readContextEffectLedger(file.effects);
+  } catch {
+    return null;
+  }
 }

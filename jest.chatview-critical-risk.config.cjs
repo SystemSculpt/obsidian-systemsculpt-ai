@@ -1,9 +1,9 @@
 const base = require("./jest.config.cjs");
 
 const criticalRiskTests = [
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-codex.test.ts",
 	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentCoordinator.test.ts",
 	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentRecorder.test.ts",
-	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentRecorderStoreContract.test.ts",
 	"<rootDir>/src/core/diagnostics/__tests__/AgentIncidentStore.test.ts",
 	"<rootDir>/src/services/chat/__tests__/managed-tool-execution.test.ts",
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatMarkdownSerializer.test.ts",
@@ -60,6 +60,17 @@ module.exports = {
 	coverageDirectory: "<rootDir>/.cache/coverage-chatview-critical-risk",
 	coverageReporters: ["text-summary", "json", "json-summary"],
 	coverageThreshold: {
+		// Jest subtracts files that carry their own path threshold from the global
+		// pool, so this floor governs the remaining critical ChatView modules as
+		// one group. Measured on 2026-09-13 for that pool: statements 86.4%,
+		// branches 82.5%, functions 86.0%, lines 88.7%. The floor sits a few points
+		// below so it catches large regressions without ratcheting every edit.
+		global: {
+			statements: 82,
+			branches: 78,
+			functions: 82,
+			lines: 84,
+		},
 		"./src/core/diagnostics/AgentIncidentCoordinator.ts": {
 			statements: 80,
 			branches: 60,
@@ -84,95 +95,11 @@ module.exports = {
 			functions: 100,
 			lines: 100,
 		},
-		"./src/views/chatview/AgentChatView.ts": {
-			statements: -679,
-			branches: -794,
-			functions: -144,
-			lines: -602,
-		},
-		"./src/views/chatview/AgentConversationPresentation.ts": {
-			statements: -5,
-			branches: -8,
-			functions: 100,
-			lines: -4,
-		},
-		"./src/views/chatview/AgentTranscriptRepository.ts": {
-			statements: -50,
-			branches: -55,
-			functions: -12,
-			lines: -35,
-		},
-		"./src/views/chatview/AgentConversationRenderer.ts": {
-			statements: -65,
-			branches: -130,
-			functions: -12,
-			lines: -40,
-		},
-		"./src/views/chatview/LiveMarkdownRenderer.ts": {
-			statements: -54,
-			branches: -94,
-			functions: -1,
-			lines: -34,
-		},
-		"./src/views/chatview/ChatStorageService.ts": {
-			statements: -85,
-			branches: -90,
-			functions: -12,
-			lines: -70,
-		},
 		"./src/views/chatview/storage/ChatFrontmatterIdentity.ts": {
 			statements: 100,
 			branches: 100,
 			functions: 100,
 			lines: 100,
-		},
-		"./src/views/chatview/storage/ChatMarkdownSerializer.ts": {
-			statements: -45,
-			branches: -75,
-			functions: -5,
-			lines: -20,
-		},
-		"./src/views/chatview/agent/AuthoritativeSession.ts": {
-			statements: -52,
-			branches: -65,
-			functions: -2,
-			lines: -40,
-		},
-		"./src/views/chatview/agent/ChatSession.ts": {
-			statements: -217,
-			branches: -384,
-			functions: -18,
-			lines: -170,
-		},
-		"./src/views/chatview/agent/Lifecycle.ts": {
-			statements: -1,
-			branches: -1,
-			functions: 100,
-			lines: 100,
-		},
-		"./src/views/chatview/agent/MessageAdapter.ts": {
-			statements: -1,
-			branches: -2,
-			functions: 100,
-			lines: -1,
-		},
-		"./src/views/chatview/agent/MutationJournal.ts": {
-			statements: -24,
-			branches: -39,
-			functions: -4,
-			lines: -18,
-		},
-		"./src/views/chatview/agent/Protocol.ts": {
-			statements: -136,
-			branches: -188,
-			functions: -9,
-			lines: -125,
-		},
-		"./src/views/chatview/agent/StreamingTransport.ts": {
-			statements: -23,
-			branches: -29,
-			functions: -1,
-			lines: -15,
 		},
 	},
 };

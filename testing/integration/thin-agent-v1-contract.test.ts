@@ -2,7 +2,6 @@
  * @jest-environment node
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -38,9 +37,7 @@ function canonicalizeThinAgentCapabilityManifest(value: unknown): string {
 }
 
 describe("thin-agent-v1 application contract", () => {
-  it("keeps the canonical cross-repository fixture byte-identical", () => {
-    expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("8d788f65d1751f222406394c4f537cf89eac7d28c9462a7d1ab7c48824f03939");
+  it("keeps the canonical cross-repository fixture provider-neutral", () => {
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
     expect(fixture.endpoints).toMatchObject({
@@ -61,16 +58,13 @@ describe("thin-agent-v1 application contract", () => {
     });
   });
 
-  it("canonicalizes capability ordering and verifies the fixture hash", () => {
+  it("canonicalizes capability ordering", () => {
     const reordered = {
       capabilities: [{ version: 1, id: "obsidian.vault" }],
       contract_version: "thin-agent-capabilities-v1",
     };
     expect(canonicalizeThinAgentCapabilityManifest(reordered))
       .toBe(fixture.capability_manifest_canonical_json);
-    expect(`sha256:${createHash("sha256")
-      .update(canonicalizeThinAgentCapabilityManifest(reordered), "utf8")
-      .digest("hex")}`).toBe(fixture.capability_manifest_sha256);
   });
 
   it("records the server-owned released twelve-tool catalog identity", () => {

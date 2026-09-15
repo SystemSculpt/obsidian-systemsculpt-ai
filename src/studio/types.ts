@@ -6,16 +6,46 @@ export const STUDIO_PROJECT_SCHEMA_V1 = "studio.project.v1" as const;
 export const STUDIO_PROJECT_SCHEMA_V2 = "studio.project.v2" as const;
 export const STUDIO_POLICY_SCHEMA_V1 = "studio.policy.v1" as const;
 
-export type StudioPortDataType =
-  | "text"
-  | "number"
-  | "boolean"
-  | "json"
-  | "image_ref"
-  | "audio_ref"
-  | "video_ref"
-  | "binary_ref"
-  | "any";
+export const STUDIO_PORT_DATA_TYPES = [
+  'any',
+  'text',
+  'number',
+  'boolean',
+  'json',
+  'image_ref',
+  'audio_ref',
+  'video_ref',
+  'binary_ref'
+] as const
+
+export type StudioPortDataType = (typeof STUDIO_PORT_DATA_TYPES)[number]
+
+const STUDIO_PORT_DATA_TYPE_SET: ReadonlySet<string> = new Set(STUDIO_PORT_DATA_TYPES)
+
+export const STUDIO_DYNAMIC_PORT_MAX_COUNT = 32
+export const STUDIO_DYNAMIC_PORT_ID_SOURCE = '[A-Za-z][A-Za-z0-9_-]{0,63}'
+export const STUDIO_DYNAMIC_PORT_ID_PATTERN = new RegExp(`^${STUDIO_DYNAMIC_PORT_ID_SOURCE}$`)
+
+const STUDIO_FILE_REFERENCE_PORT_DATA_TYPES: ReadonlySet<string> = new Set([
+  'image_ref',
+  'audio_ref',
+  'video_ref',
+  'binary_ref'
+])
+
+export function isStudioPortDataType(value: unknown): value is StudioPortDataType {
+  return typeof value === 'string' && STUDIO_PORT_DATA_TYPE_SET.has(value)
+}
+
+export function isStudioDynamicPortId(value: unknown): value is string {
+  return typeof value === 'string' && STUDIO_DYNAMIC_PORT_ID_PATTERN.test(value)
+}
+
+export function isStudioFileReferencePortDataType(
+  value: unknown
+): value is Extract<StudioPortDataType, `${string}_ref`> {
+  return typeof value === 'string' && STUDIO_FILE_REFERENCE_PORT_DATA_TYPES.has(value)
+}
 
 export type StudioCapability = "cli" | "filesystem";
 export type StudioNodeCapabilityClass = "local_cpu" | "local_io" | "api";
@@ -52,12 +82,28 @@ export type StudioPortDefinition = {
   description?: string;
 };
 
+export const STUDIO_PROCESS_FIXED_OUTPUT_PORTS = [
+  { id: 'stdout', type: 'text', description: 'Captured standard output.' },
+  { id: 'stderr', type: 'text', description: 'Captured standard error.' },
+  { id: 'exit_code', type: 'number', description: 'The process exit code.' },
+  {
+    id: 'timed_out',
+    type: 'boolean',
+    description: 'Whether the configured timeout ended the process.'
+  }
+] as const satisfies readonly StudioPortDefinition[]
+
+export function isStudioProcessFixedOutputPortId(value: string): boolean {
+  return STUDIO_PROCESS_FIXED_OUTPUT_PORTS.some((port) => port.id === value)
+}
+
 export type StudioNodeConfigFieldType =
   | "text"
   | "textarea"
   | "number"
   | "boolean"
   | "json_object"
+  | "port_list"
   | "string_list"
   | "select"
   | "file_path"
@@ -78,8 +124,18 @@ export type StudioNodeConfigSelectOption = {
 export type StudioNodeConfigSelectPresentation =
   | "dropdown"
   | "button_group"
-  | "searchable_dropdown";
-export type StudioNodeConfigDynamicOptionsSource = never;
+  | "searchable_dropdown"
+  /** A catalog modal with search, sorting, favorites, and per-model detail. */
+  | "model_picker_modal";
+export type StudioNodeConfigDynamicOptionsSource =
+  | "image_models"
+  | "image_sizes"
+  | "image_aspect_ratios"
+  | "image_qualities"
+  | "video_generation_models"
+  | "video_generation_durations"
+  | "video_generation_resolutions"
+  | "video_generation_aspect_ratios";
 export type StudioNodeConfigFieldVisibilityRule = {
   key: string;
   equals: StudioPrimitiveValue | StudioPrimitiveValue[];
@@ -104,6 +160,7 @@ export type StudioNodeConfigFieldDefinition = {
   accept?: string;
   mediaKinds?: StudioNodeConfigMediaKind[];
   allowOutsideVault?: boolean;
+  portDirection?: "input" | "output";
 };
 
 export type StudioNodeConfigSchema = {
@@ -127,6 +184,8 @@ export type StudioNodeInstance = {
   version: string;
   title: string;
   position: StudioNodePosition;
+  /** Organizational parent; never an execution dependency. */
+  parentId?: string;
   /**
    * Rendered card size on the canvas. Layout geometry is canvas data (like
    * position), not node config; absent means "use the kind's default size"
@@ -164,6 +223,17 @@ export type StudioGraph = {
   edges: StudioEdge[];
   entryNodeIds: string[];
   groups?: StudioNodeGroup[];
+  layout?: StudioGraphLayout;
+};
+
+/** Presentation constraints; absent means the existing free-placement canvas. */
+export type StudioGraphLayout = {
+  mode: "manual" | "managed";
+  pinnedNodeIds?: string[];
+  direction?: "right" | "down";
+  columnGap?: number;
+  rowGap?: number;
+  sectionGap?: number;
 };
 
 /**
@@ -192,9 +262,10 @@ export type StudioShapeInstance = {
   style?: Record<string, StudioJsonValue>;
 };
 
-/** Shape-to-shape connector. Shapes have no ports, so arrows carry no port IDs. */
+/** Visual connector between nodes or shapes; never an executable graph edge. */
 export type StudioShapeArrow = {
   id: string;
+  /** Canvas item IDs (node or shape); field names retained for saved-project compatibility. */
   fromShapeId: string;
   toShapeId: string;
   /** Optional text drawn at the arrow's midpoint. */
@@ -291,6 +362,7 @@ export type StudioRunEvent =
   | { type: "run.started"; runId: string; at: string }
   | { type: "run.failed"; runId: string; error: string; errorStack?: string; at: string }
   | { type: "run.completed"; runId: string; status: "success" | "failed" | "cancelled"; at: string }
+  | { type: "node.progress"; runId: string; nodeId: string; percent: number; message?: string; at: string }
   | { type: "node.started"; runId: string; nodeId: string; at: string }
   | { type: "node.cache_hit"; runId: string; nodeId: string; cacheUpdatedAt: string; at: string }
   | {
@@ -332,11 +404,13 @@ export type StudioNodeCacheSnapshotV1 = {
 };
 
 export type StudioManagedOperationRef = {
-  capability: "text_generation" | "image_generation" | "transcription";
+  capability: "text_generation" | "image_generation" | "video_generation" | "transcription";
   operationId: string;
 };
 
 export type StudioTextGenerationRequest = {
+  projectId?: string;
+  log?: (text: string) => void;
   runId: string;
   nodeId: string;
   projectPath: string;
@@ -346,7 +420,7 @@ export type StudioTextGenerationRequest = {
 
 export type StudioTextGenerationResult = {
   text: string;
-  operation: StudioManagedOperationRef;
+  operation?: StudioManagedOperationRef;
 };
 
 export type StudioImageGenerationInput = {
@@ -361,6 +435,9 @@ export type StudioImageGenerationRequest = {
   signal: AbortSignal;
   buildPayload: () => Promise<{
     prompt: string;
+    model?: string;
+    imageSize?: string;
+    quality?: string;
     count?: number;
     aspectRatio?: string;
     inputImages?: StudioImageGenerationInput[];
@@ -370,6 +447,42 @@ export type StudioImageGenerationRequest = {
 
 export type StudioImageGenerationResult = {
   images: StudioAssetRef[];
+  operation: StudioManagedOperationRef;
+};
+
+export type StudioVideoFrameInput = {
+  role: "first_frame" | "last_frame";
+  asset: StudioAssetRef;
+  load: () => Promise<ArrayBuffer>;
+};
+
+/** Progress the server publishes while a video job runs. */
+export type StudioVideoGenerationProgress = {
+  status: string;
+  typicalDurationMs?: number;
+};
+
+export type StudioVideoGenerationRequest = {
+  runId: string;
+  nodeId: string;
+  projectPath: string;
+  signal: AbortSignal;
+  buildPayload: () => Promise<{
+    /** Server catalog model ID. Required: video generation has no server default. */
+    model: string;
+    prompt: string;
+    durationSeconds?: number;
+    resolution?: string;
+    aspectRatio?: string;
+    generateAudio?: boolean;
+    frameImages?: StudioVideoFrameInput[];
+  }>;
+  storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
+  onProgress?: (progress: StudioVideoGenerationProgress) => void;
+};
+
+export type StudioVideoGenerationResult = {
+  videos: StudioAssetRef[];
   operation: StudioManagedOperationRef;
 };
 
@@ -398,6 +511,11 @@ export type StudioCliExecutionRequest = {
   env?: Record<string, string>;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  input?: string;
+  requireExactCommandGrant?: boolean;
+  signal?: AbortSignal;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
 };
 
 export type StudioCliExecutionResult = {
@@ -405,17 +523,22 @@ export type StudioCliExecutionResult = {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  cancelled?: boolean;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 };
 
 export interface StudioApiAdapter {
   generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult>;
   generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult>;
+  generateVideo(request: StudioVideoGenerationRequest): Promise<StudioVideoGenerationResult>;
   transcribeAudio(request: StudioTranscriptionRequest): Promise<StudioTranscriptionResult>;
   beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
   completeLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
 }
 
 export interface StudioNodeExecutionServices {
+  codex?: (input: import("../services/codex/LocalCodexClient").CodexRequest, signal: AbortSignal, log: (text: string) => void) => Promise<import("../services/codex/LocalCodexClient").CodexResult>;
   api: StudioApiAdapter;
   storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
   readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
@@ -424,7 +547,7 @@ export interface StudioNodeExecutionServices {
   statVaultFileSize: (vaultPath: string) => Promise<number>;
   readVaultBinary: (vaultPath: string) => Promise<ArrayBuffer>;
   statLocalFileSize: (absolutePath: string) => Promise<number>;
-  readLocalFileBinary: (absolutePath: string) => Promise<ArrayBuffer>;
+  readLocalFileBinary: (absolutePath: string, maxBytes?: number) => Promise<ArrayBuffer>;
   writeTempFile: (
     bytes: ArrayBuffer,
     options?: {
@@ -438,13 +561,15 @@ export interface StudioNodeExecutionServices {
 }
 
 export type StudioNodeExecutionContext = {
+  projectId?: string;
   runId: string;
   projectPath: string;
   node: StudioNodeInstance;
   inputs: StudioNodeInputMap;
   signal: AbortSignal;
   services: StudioNodeExecutionServices;
-  log: (message: string) => void;
+  log: (message: string, stream?: "stdout" | "stderr" | "system") => void;
+  reportProgress?: (percent: number, message?: string) => void;
 };
 
 export type StudioNodeDefinition<TConfig = Record<string, StudioJsonValue>> = {

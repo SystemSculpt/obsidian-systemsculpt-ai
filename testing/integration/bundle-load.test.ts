@@ -163,13 +163,6 @@ describe("built bundle (main.js)", () => {
     );
   });
 
-  it("does not ship the retired Readwise integration", () => {
-    const code = readFileSync(BUNDLE_PATH, "utf8");
-
-    expect(code).not.toContain("ReadwiseService");
-    expect(code).not.toContain("ReadwiseSyncWidget");
-  });
-
   it("ships the exact Audio Processor output presets in the built artifact", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
 

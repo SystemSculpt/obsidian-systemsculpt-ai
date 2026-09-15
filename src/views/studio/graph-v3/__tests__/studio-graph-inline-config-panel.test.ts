@@ -183,3 +183,19 @@ describe("renderInlineConfigPanel", () => {
     expect(onNodeConfigMutated).not.toHaveBeenCalled();
   });
 });
+
+it("edits typed process port arrays without converting them to JSON objects", () => {
+  const root = document.createElement("div");
+  const node = createNode({ kind: "studio.process", config: { outputs: [{ id: "snapshot", type: "json", required: true }] } });
+  const onMutation = jest.fn();
+  renderInlineConfigPanel({ nodeEl: root, node, definition: createDefinition([{ key: "outputs", label: "Output ports", type: "port_list", portDirection: "output" }]), orderedFieldKeys: ["outputs"], interactionLocked: false, onNodeConfigMutated: onMutation });
+  const editor = root.querySelector("textarea")!;
+  expect(JSON.parse(editor.value)).toEqual(node.config.outputs);
+  editor.value = '[{"id":"report","type":"text","required":true}]';
+  editor.dispatchEvent(new Event("blur"));
+  expect(node.config.outputs).toEqual([{ id: "report", type: "text", required: true }]);
+  expect(onMutation).toHaveBeenCalledTimes(1);
+  editor.value = "[]";
+  editor.dispatchEvent(new Event("blur"));
+  expect(node.config.outputs).toEqual([]);
+});

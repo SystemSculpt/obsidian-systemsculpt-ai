@@ -1,5 +1,5 @@
 import type { StudioProjectV1 } from "../types";
-import { scopeProjectForRun } from "../StudioRunScope";
+import { planStudioRun, scopeProjectForRun } from "../StudioRunScope";
 
 function baseProject(): StudioProjectV1 {
   return {
@@ -214,5 +214,36 @@ describe("StudioRuntime scoped run projection", () => {
     expect(() => scopeProjectForRun(project, ["terminal_1"])).toThrow(
       'Cannot run from node "terminal_1" because "studio.terminal" is visual-only.'
     );
+  });
+});
+
+describe("planStudioRun", () => {
+  const policyOf = (never: string[]) => (node: { id: string }) => (never.includes(node.id) ? "never" : "by_inputs") as const;
+
+  it("runs the whole executable graph when no entry node is given", () => {
+    const project = projectWithBranchMerge();
+    const plan = planStudioRun(project, undefined, policyOf(["c"]));
+    expect(plan.executeNodeIds.sort()).toEqual(["a", "b", "c", "d", "orphan"]);
+    expect(plan.providedNodeIds).toEqual([]);
+  });
+
+  it("stops at a never-cached upstream node and provides its recorded output instead", () => {
+    const project = projectWithBranchMerge();
+    // d ← c ← {a, b}; c never caches (a generation-style node).
+    const plan = planStudioRun(project, ["d"], policyOf(["c"]));
+    expect(plan.executeNodeIds).toEqual(["d"]);
+    expect(plan.providedNodeIds).toEqual(["c"]);
+    expect(plan.project.graph.nodes.map((node) => node.id).sort()).toEqual(["c", "d"]);
+    expect(plan.project.graph.edges.map((edge) => edge.id)).toEqual(["e3"]);
+  });
+
+  it("walks through cacheable upstream nodes and runs a never-cached target itself", () => {
+    const project = projectWithBranchMerge();
+    const plan = planStudioRun(project, ["c"], policyOf(["c", "a"]));
+    expect(plan.executeNodeIds.sort()).toEqual(["b", "c"]);
+    expect(plan.providedNodeIds).toEqual(["a"]);
+    const cacheable = planStudioRun(project, ["d"], policyOf([]));
+    expect(cacheable.executeNodeIds.sort()).toEqual(["a", "b", "c", "d"]);
+    expect(cacheable.providedNodeIds).toEqual([]);
   });
 });

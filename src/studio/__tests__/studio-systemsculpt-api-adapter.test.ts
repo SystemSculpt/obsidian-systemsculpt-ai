@@ -28,7 +28,7 @@ function createPlugin() {
   Object.defineProperties(plugin, {
     aiService: { get: () => { throw new Error("legacy stream access"); } },
     modelService: { get: () => { throw new Error("model access"); } },
-    settings: { get: () => { throw new Error("provider/settings access"); } },
+    settings: { value: { textExecutionBackend: "systemsculpt" } },
   });
   return { plugin, generateText };
 }
@@ -59,7 +59,7 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
       text: "Be concise | Summarize",
       operation: { capability: "text_generation", operationId: "studio-text-run-1-node-a" },
     });
-    expect(second.operation.operationId).toBe("studio-text-run-1-node-b");
+    expect(second.operation!.operationId).toBe("studio-text-run-1-node-b");
     expect(generateText.mock.calls.map(call => call[0].purpose)).toEqual([
       "workflow_automation",
       "workflow_automation",
@@ -218,5 +218,44 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
 
     expect(imageComplete).toHaveBeenCalledWith("image-op", undefined);
     expect(transcriptionFinalize).toHaveBeenCalledWith("transcription-op", undefined);
+  });
+});
+
+describe("StudioApiExecutionAdapter per-model input limits", () => {
+  const catalog = () => ({
+    contract: "systemsculpt-media-models-v1", default_model_id: "maker/plain",
+    models: [
+      { id: "maker/plain", name: "Plain", best_for: "Text only.", supports_image_input: false, max_images_per_job: 2, estimated_cost_per_image_credits: 5, allowed_aspect_ratios: ["1:1"], allowed_image_sizes: [], input_schema: { inputs: [] } },
+      { id: "maker/refs", name: "Refs", best_for: "Edits.", supports_image_input: true, max_images_per_job: 4, estimated_cost_per_image_credits: 5, allowed_aspect_ratios: ["1:1"], allowed_image_sizes: [], input_schema: { inputs: [{ port: { id: "reference_images" }, route: "reference", maxItems: 1 }] } },
+    ],
+  });
+  function fixture() {
+    const { plugin } = createPlugin();
+    (plugin as { getManagedCapabilityGraph: unknown }).getManagedCapabilityGraph = () => ({
+      admission: {},
+      transport: { request: async ({ path }: { path: string }) => ({ response: new Response(JSON.stringify(path.includes("images/models") ? catalog() : { error: "no" }), { status: path.includes("images/models") ? 200 : 404 }) }) },
+    });
+    const adapter = new StudioApiExecutionAdapter(plugin as never);
+    const generate = jest.fn(async (operation: { buildPayload: () => Promise<Record<string, unknown>> }) => {
+      const payload = await operation.buildPayload();
+      return { operationId: "op", jobId: "job", outputs: [], payload };
+    });
+    Object.assign(adapter as object, { images: { generate } });
+    const reference = { asset: { hash: "a".repeat(64), mimeType: "image/png", sizeBytes: 1, path: "a.png" }, load: async () => new ArrayBuffer(1) };
+    const run = (payload: Record<string, unknown>) => adapter.generateImage({
+      runId: "run", nodeId: "node", projectPath: "Studio/Test.systemsculpt", signal: new AbortController().signal,
+      buildPayload: async () => payload as never, storeOutput: jest.fn(),
+    });
+    return { run, generate, reference };
+  }
+
+  it("refuses reference images a text-only model cannot take and caps counts to the model", async () => {
+    const { run, generate, reference } = fixture();
+    await expect(run({ prompt: "x", model: "maker/plain", inputImages: [reference] })).rejects.toThrow("Plain is text-only");
+    await expect(run({ prompt: "x", model: "maker/refs", inputImages: [reference, reference] })).rejects.toThrow("at most 1 reference image;");
+    await run({ prompt: "x", model: "maker/plain", count: 4 });
+    await expect(generate.mock.results.at(-1)!.value).resolves.toMatchObject({ payload: { count: 2 } });
+    // Blank model means the service default, so its limits apply too.
+    await expect(run({ prompt: "x", inputImages: [reference] })).rejects.toThrow("Plain is text-only");
   });
 });

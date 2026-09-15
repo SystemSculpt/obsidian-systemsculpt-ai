@@ -195,6 +195,26 @@ describe("StudioProjectGenerationStore", () => {
     }
   });
 
+  it("rejects a dangling pin before changing the project or committed generation", async () => {
+    const adapter = new MemoryAdapter();
+    await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    expect(root.status).toBe("committed");
+    if (root.status !== "committed") return;
+    const before = await adapter.read(locator.vaultRelativeProjectPath);
+    const filesBefore = [...adapter.files.keys()];
+    const project = parseStudioProject(before);
+    project.graph.layout = { mode: "managed", pinnedNodeIds: ["removed_placeholder"] };
+    const result = await store.commitWholeGeneration({ kind: "replace_project", projectId: project.projectId, reason: "discrete_save", projectDocument: new TextEncoder().encode(serializeStudioProject(project)) }, root.expectedGeneration);
+    expect(result.status).toBe("invalid_candidate");
+    expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(before);
+    expect([...adapter.files.keys()]).toEqual(filesBefore);
+    const reopened = await store.open(project.projectId, locator);
+    expect(reopened.status).toBe("ready");
+    if (reopened.status === "ready") expect(reopened.expectedGeneration).toEqual(root.expectedGeneration);
+  });
+
   it("adopts a v2 canvas document with no support tree by provisioning the default policy", async () => {
     const v2Project = JSON.stringify({
       schema: "studio.project.v2",
@@ -570,7 +590,7 @@ describe("StudioProjectGenerationStore", () => {
     allowDescriptorWriteToFinish();
 
     const saveResult = await studioSave;
-    expect(saveResult.status).not.toBe("committed");
+    expect(saveResult.status).toBe("committed");
     expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(agentEdit);
   });
 
@@ -762,7 +782,7 @@ describe("StudioProjectGenerationStore", () => {
       legacyProject,
       legacyProject
     );
-    expect(copyFileIfAbsent).not.toHaveBeenCalled();
+    expect(copyFileIfAbsent.mock.calls.every(([, destination]) => destination !== locator.vaultRelativeProjectPath)).toBe(true);
   });
 
   it("adopts a project file already moved by an ordinary vault rename", async () => {
@@ -930,7 +950,7 @@ describe("StudioProjectGenerationStore", () => {
     ).toBe(true);
   });
 
-  it("projection repair removes stale support files and validates exact output", async () => {
+  it("projection repair preserves independently arriving support files", async () => {
     const adapter = new MemoryAdapter(); await seedLegacy(adapter);
     const root = await new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" }).discoverAndAdopt(locator);
     if (root.status !== "committed") throw new Error("adoption failed");
@@ -939,7 +959,7 @@ describe("StudioProjectGenerationStore", () => {
     adapter.files.delete(locator.vaultRelativeProjectPath);
     const repaired = await new StudioProjectGenerationStore(adapter).repairProjection("project_alpha");
     expect(repaired.status).toBe("ready");
-    expect(adapter.files.has(stale)).toBe(false);
+    expect(adapter.files.has(stale)).toBe(true);
   });
 
   it("rejects unmanifested generation files and bounded scan overflow", async () => {
@@ -1240,4 +1260,41 @@ describe("StudioProjectGenerationStore", () => {
     if (reopened.status !== "ready") return;
     expect(new TextDecoder().decode(reopened.generation.files.get("project.systemsculpt"))).toBe(crossBuildProject);
   });
+});
+
+
+describe("independent native agent run records", () => {
+  it("preserves a completed agent record written after the project snapshot across autosave and reload", async () => {
+    const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+    const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+    const root = await store.discoverAndAdopt(locator);
+    if (root.status !== "committed") throw new Error("adoption failed");
+    const folder = "SystemSculpt/Studio/Alpha.systemsculpt-assets/agent-runs";
+    await adapter.mkdir(folder);
+    const path = `${folder}/agent_123_abcdef.json`, record = JSON.stringify({ status: "completed", result: "Keep this Scout result" });
+    await adapter.write(path, record);
+    const reloaded = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(reloaded.status).toBe("ready");
+    expect(await adapter.read(path)).toBe(record);
+    const saved = await store.commitWholeGeneration({ kind: "replace_project", projectId: "project_alpha", reason: "autosave", projectDocument: new TextEncoder().encode(legacyProject.replace('"Alpha"', '"Updated"')) }, root.expectedGeneration);
+    expect(saved.status).toBe("committed");
+    expect(await adapter.read(path)).toBe(record);
+    const reopened = await new StudioProjectGenerationStore(adapter).open("project_alpha", locator);
+    expect(reopened.status).toBe("ready");
+    expect(await adapter.read(path)).toBe(record);
+  });
+});
+
+
+it("never replays older generation-owned agent records over current runtime history", async () => {
+  const adapter = new MemoryAdapter(); await seedLegacy(adapter);
+  const store = new StudioProjectGenerationStore(adapter, { now: () => "2026-07-11T01:02:03.004Z" });
+  const root = await store.discoverAndAdopt(locator);
+  if (root.status !== "committed") throw new Error("adoption failed");
+  const path = "SystemSculpt/Studio/Alpha.systemsculpt-assets/agent-runs/agent_456_abcdef.json";
+  await adapter.mkdir("SystemSculpt/Studio/Alpha.systemsculpt-assets/agent-runs");
+  await adapter.write(path, "latest completed result");
+  const files = new Map(root.generation.files); files.set("support/agent-runs/agent_456_abcdef.json", new TextEncoder().encode("old running snapshot"));
+  await (store as any).writeProjection({ ...root.generation, files });
+  expect(await adapter.read(path)).toBe("latest completed result");
 });

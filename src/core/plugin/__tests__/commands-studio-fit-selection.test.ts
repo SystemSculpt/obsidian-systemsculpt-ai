@@ -7,14 +7,13 @@ import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../viewTypes";
 describe("CommandManager studio fit-selection command", () => {
   function registerStudioViewportCommands(activeStudioView: unknown = null) {
     const app = new App();
-    (app.workspace as any).activeLeaf = activeStudioView
+    const activeView = activeStudioView
       ? {
-          view: {
-            getViewType: () => SYSTEMSCULPT_STUDIO_VIEW_TYPE,
-            ...activeStudioView,
-          },
+          getViewType: () => SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+          ...activeStudioView,
         }
       : null;
+    (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeView);
 
     const addCommand = jest.fn();
     const plugin = {

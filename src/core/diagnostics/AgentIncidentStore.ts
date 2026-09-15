@@ -9,7 +9,7 @@ import {
   isToolDiagnosticFailureClass,
   isToolDiagnosticOutcome,
 } from "../../utils/ThinAgentLifecycleSchema";
-import { canonicalJsonStringify, utf8ByteLength } from "./AgentIncidentCanonicalJson";
+import { CanonicalJsonError, canonicalJsonStringify, utf8ByteLength } from "./AgentIncidentCanonicalJson";
 import {
   AGENT_INCIDENT_CAPTURE_FAILURE_CODES,
   AGENT_INCIDENT_EXCLUDED_DATA_CATEGORIES,
@@ -67,11 +67,8 @@ const VERSION_PATTERN = /^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$/;
 const RFC3339_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const TEMP_FILE_PATTERN = /\.tmp$/;
 const CORRUPT_REPORT_FILE_PATTERN = /\.json\.corrupt(?:-\d+)?$/;
-const MAX_SERIALIZATION_DEPTH = 64;
-const MAX_SERIALIZATION_VALUES = 100_000;
 const MAX_TOOL_ITEM_COUNT = 10_000;
 const MAX_TIMING_MS = 7 * 24 * 60 * 60 * 1_000;
-const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const CAPTURE_FAILURE_CODE_SET = new Set<string>(AGENT_INCIDENT_CAPTURE_FAILURE_CODES);
 
 interface AdapterCoordination {
@@ -268,35 +265,23 @@ export class AgentIncidentStore {
 
   /** Return canonical JSON without writing it. */
   public serialize(report: AgentIncidentStoreReport): string {
-    return this.serializeUnknown(report);
+    return this.canonicalize(report).serialized;
   }
 
   public async save<TReport extends AgentIncidentStoreReport>(
     report: TReport,
   ): Promise<AgentIncidentStoreSaveResult<TReport>> {
-    const serialized = this.serializeUnknown(report);
-    const sizeBytes = utf8ByteLength(serialized);
-    if (sizeBytes > this.limits.maxReportBytes) {
-      throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
-    }
-
-    const parsed = this.parseSerialized<TReport>(serialized);
+    const stored = this.canonicalize<TReport>(report);
     return this.exclusive(async () => {
       await this.ensureInitialized();
-      const path = this.reportPath(parsed.report.report_id);
-      const created = await this.persistWithRetry(path, serialized, parsed.report.report_id);
+      const path = this.reportPath(stored.report.report_id);
+      const created = await this.persistWithRetry(path, stored.serialized, stored.report.report_id);
       const retention = await this.enforceRetentionInternal(path);
-      const retained = await this.readCandidate(path, parsed.report.report_id, false);
-      if (retained.kind !== "valid" || retained.entry.serialized !== serialized) {
+      const retained = await this.readCandidate(path, stored.report.report_id, false);
+      if (retained.kind !== "valid" || retained.entry.serialized !== stored.serialized) {
         throw new AgentIncidentStoreError("persistence_unavailable", "The incident report did not survive local retention.");
       }
-      return Object.freeze({
-        report: parsed.report,
-        serialized,
-        sizeBytes,
-        created,
-        retention,
-      });
+      return Object.freeze({ ...stored, created, retention });
     });
   }
 
@@ -761,29 +746,39 @@ export class AgentIncidentStore {
     } catch {
       throw new AgentIncidentStoreError("invalid_report", "The incident report is not valid JSON.");
     }
-    const canonical = this.serializeUnknown(parsed);
-    const projected = canonicalProject(parsed, this.limits.maxReportBytes);
-    const report = deepFreeze(projected) as unknown as TReport;
-    return Object.freeze({ report, serialized: canonical, sizeBytes: utf8ByteLength(canonical) });
+    return this.canonicalize<TReport>(parsed);
   }
 
-  private serializeUnknown(value: unknown): string {
-    let projected: CanonicalJson;
+  /**
+   * Encode with the shared canonical serializer, then validate the persistence
+   * envelope on the parsed bytes. Those bytes are the only projection: the
+   * store never walks the caller's object itself, so recorder and store bytes
+   * agree by construction.
+   */
+  private canonicalize<TReport extends AgentIncidentStoreReport>(value: unknown): StoredAgentIncidentReport<TReport> {
+    let serialized: string;
     try {
-      projected = canonicalProject(value, this.limits.maxReportBytes);
-      validateEnvelope(projected);
+      serialized = canonicalJsonStringify(value, { maximumCodeUnits: this.limits.maxReportBytes });
     } catch (error) {
-      if (error instanceof AgentIncidentStoreError) throw error;
-      throw new AgentIncidentStoreError("invalid_report", "The incident report does not match the local persistence envelope.");
+      if (error instanceof CanonicalJsonError && error.reason === "too_large") {
+        throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
+      }
+      invalidReport();
     }
-    const serialized = canonicalJsonStringify(projected);
     const sizeBytes = utf8ByteLength(serialized);
     if (sizeBytes > this.limits.maxReportBytes) {
       throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
     }
-    const captureQuality = (projected as CanonicalObject).capture_quality;
+    const report = JSON.parse(serialized) as CanonicalJson;
+    try {
+      validateEnvelope(report);
+    } catch (error) {
+      if (error instanceof AgentIncidentStoreError) throw error;
+      invalidReport();
+    }
+    const captureQuality = (report as CanonicalObject).capture_quality;
     if (!isCanonicalObject(captureQuality) || captureQuality.report_bytes !== sizeBytes) invalidReport();
-    return serialized;
+    return Object.freeze({ report: deepFreeze(report) as unknown as TReport, serialized, sizeBytes });
   }
 
   private async isolateCorrupt(path: string, knownStat?: Stat, reportCreatedAtMs?: number): Promise<ArtifactEntry | null> {
@@ -2051,101 +2046,6 @@ function sameOptionalValue(left: CanonicalJson | undefined, right: CanonicalJson
 function isZeroPrefixedId(value: string): boolean {
   const separator = value.indexOf("_");
   return separator >= 0 && /^0+$/u.test(value.slice(separator + 1));
-}
-
-function canonicalProject(value: unknown, maximumCodeUnits: number): CanonicalJson {
-  const seen = new Set<object>();
-  const state = { values: 0, codeUnits: 0 };
-
-  const visit = (current: unknown, depth: number): CanonicalJson => {
-    state.values += 1;
-    if (state.values > MAX_SERIALIZATION_VALUES || depth > MAX_SERIALIZATION_DEPTH) invalidReport();
-    if (current === null || typeof current === "boolean") return current;
-    if (typeof current === "string") {
-      state.codeUnits += current.length;
-      if (state.codeUnits > maximumCodeUnits || !hasWellFormedUtf16(current)) reportTooLargeOrInvalid(state.codeUnits > maximumCodeUnits);
-      return current;
-    }
-    if (typeof current === "number") {
-      if (!Number.isFinite(current)) invalidReport();
-      return Object.is(current, -0) ? 0 : current;
-    }
-    if (typeof current !== "object") invalidReport();
-    if (seen.has(current)) invalidReport();
-
-    const prototype = Object.getPrototypeOf(current) as object | null;
-    if (Array.isArray(current)) {
-      if (prototype !== Array.prototype) invalidReport();
-      seen.add(current);
-      const keys = Reflect.ownKeys(current);
-      if (keys.length > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-      const lengthDescriptor = Object.getOwnPropertyDescriptor(current, "length");
-      if (!lengthDescriptor || !("value" in lengthDescriptor) || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-      if (keys.length !== lengthDescriptor.value + 1) invalidReport();
-      for (const key of keys) {
-        if (typeof key === "symbol") invalidReport();
-        if (key === "length") continue;
-        if (!/^\d+$/.test(key) || String(Number(key)) !== key || Number(key) >= lengthDescriptor.value) invalidReport();
-      }
-      const projected: CanonicalJson[] = [];
-      for (let index = 0; index < lengthDescriptor.value; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
-        if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) invalidReport();
-        projected.push(visit(descriptor.value, depth + 1));
-      }
-      seen.delete(current);
-      return projected;
-    }
-
-    if (prototype !== Object.prototype && prototype !== null) invalidReport();
-    seen.add(current);
-    const keys = Reflect.ownKeys(current);
-    if (keys.length > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-    if (keys.some((key) => typeof key === "symbol")) invalidReport();
-    const names = keys as string[];
-    for (const name of names) {
-      state.codeUnits += name.length;
-      if (state.codeUnits > maximumCodeUnits || !hasWellFormedUtf16(name)) reportTooLargeOrInvalid(state.codeUnits > maximumCodeUnits);
-    }
-    names.sort(compareText);
-    const projected: { [key: string]: CanonicalJson } = Object.create(null) as { [key: string]: CanonicalJson };
-    for (const name of names) {
-      if (RESERVED_KEYS.has(name)) invalidReport();
-      const descriptor = Object.getOwnPropertyDescriptor(current, name);
-      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) invalidReport();
-      projected[name] = visit(descriptor.value, depth + 1);
-    }
-    seen.delete(current);
-    return projected;
-  };
-
-  try {
-    return visit(value, 0);
-  } catch (error) {
-    if (error instanceof AgentIncidentStoreError) throw error;
-    invalidReport();
-  }
-}
-
-function hasWellFormedUtf16(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return false;
-      index += 1;
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function reportTooLargeOrInvalid(tooLarge: boolean): never {
-  if (tooLarge) {
-    throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
-  }
-  invalidReport();
 }
 
 function deepFreeze<T extends CanonicalJson>(value: T): T {

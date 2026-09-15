@@ -33,7 +33,7 @@ export const textNode: StudioNodeDefinition = {
       },
       {
         key: "fontSize",
-        label: "Font Size",
+        label: "Font size",
         type: "number",
         required: false,
         min: STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,

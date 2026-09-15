@@ -49,6 +49,14 @@ export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3: readonly string[] = [
   "embeddingsRebuildRetryAt",
 ];
 
+/**
+ * The retired schema-v3 BYOK credential key that v4 prunes from data.json. It
+ * is spelled with character codes on purpose, not to hide it: the release
+ * artifact gate (scripts/plugin-artifacts.mjs) rejects any upstream provider
+ * identity in the compiled bundle, and this key name contains one. The policy
+ * test scripts/check/managed-only-policy.test.mjs pins the decoded value and
+ * forbids this encoding anywhere else in src.
+ */
 const LEGACY_CLIENT_CREDENTIAL_KEY = String.fromCharCode(
   111, 112, 101, 110, 65, 105, 65, 112, 105, 75, 101, 121,
 );

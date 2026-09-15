@@ -1,3 +1,4 @@
+import { connectStudioShapes } from "../../../studio/StudioShapes";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import {
   cleanupStaleManagedOutputPlaceholders,
@@ -15,8 +16,11 @@ import {
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
   materializePendingImageOutputPlaceholders,
   materializePendingTextOutputPlaceholder,
+  materializePendingVideoOutputPlaceholders,
   materializeImageOutputsAsMediaNodes,
   materializeTextOutputsAsTextNodes,
+  materializeVideoOutputsAsMediaNodes,
+  readManagedPendingMediaKind,
   removeManagedTextOutputNodes,
   removePendingManagedOutputNodes,
 } from "../../../studio/StudioManagedOutputNodes";
@@ -68,6 +72,19 @@ function createImageSourceNode(): StudioNodeInstance {
     title: "Image Generation",
     position: { x: 100, y: 120 },
     config: {},
+    continueOnError: false,
+    disabled: false,
+  };
+}
+
+function createVideoSourceNode(): StudioNodeInstance {
+  return {
+    id: "video_node",
+    kind: "studio.video_generation",
+    version: "1.0.0",
+    title: "Video Generation",
+    position: { x: 100, y: 120 },
+    config: { model: "maker/clip-1" },
     continueOnError: false,
     disabled: false,
   };
@@ -363,6 +380,66 @@ describe("StudioManagedOutputNodes media outputs", () => {
   });
 });
 
+describe("StudioManagedOutputNodes video outputs", () => {
+  it("materializes one connected video card from the videos output and adopts its placeholder", () => {
+    const sourceNode = createVideoSourceNode();
+    const project = createProject(sourceNode);
+    let nodeIndex = 0;
+    let edgeIndex = 0;
+    const ids = { createNodeId: () => `video_media_${nodeIndex++}`, createEdgeId: () => `video_edge_${edgeIndex++}` };
+
+    const pending = materializePendingVideoOutputPlaceholders({ project, sourceNode, runId: "run_1", createdAt: "2026-02-23T00:00:00.000Z", ...ids });
+    expect(pending.createdNodeIds).toEqual(["video_media_0"]);
+    const placeholder = project.graph.nodes.find((node) => node.id === "video_media_0")!;
+    expect(isManagedOutputPlaceholderNode(placeholder)).toBe(true);
+    expect(readManagedPendingMediaKind(placeholder)).toBe("video");
+    expect(placeholder.title).toBe("Video Generation Video");
+    expect(project.graph.edges).toEqual([
+      expect.objectContaining({ fromNodeId: sourceNode.id, fromPortId: "videos", toNodeId: "video_media_0", toPortId: "media" }),
+    ]);
+
+    // The view retires the run's placeholders before projecting the output,
+    // so the clip lands as a fresh connected card in the same slot.
+    const removed = removePendingManagedOutputNodes({ project, sourceNodeId: sourceNode.id, runId: "run_1" });
+    expect(removed.removedNodeIds).toEqual(["video_media_0"]);
+    expect(project.graph.edges).toHaveLength(0);
+    const result = materializeVideoOutputsAsMediaNodes({
+      project,
+      sourceNode,
+      outputs: { videos: [{ path: "SystemSculpt/Assets/clip.mp4", mimeType: "video/mp4" }] },
+      ...ids,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.createdNodeIds).toEqual(["video_media_1"]);
+    expect(project.graph.nodes).toHaveLength(2);
+    const card = project.graph.nodes.find((node) => node.id === "video_media_1")!;
+    expect(card.title).toBe("Video Generation Video");
+    expect(card.disabled).toBe(false);
+    expect(card.config.sourcePath).toBe("SystemSculpt/Assets/clip.mp4");
+    expect(card.config[MANAGED_MEDIA_OWNER_KEY]).toBe(MANAGED_MEDIA_OWNER);
+    expect(card.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY]).toBe(sourceNode.id);
+    expect(card.config[MANAGED_MEDIA_SLOT_INDEX_KEY]).toBe(0);
+    expect(isManagedOutputPlaceholderNode(card)).toBe(false);
+    expect(readManagedPendingMediaKind(card)).toBe("image");
+    expect(project.graph.edges).toEqual([
+      expect.objectContaining({ fromNodeId: sourceNode.id, fromPortId: "videos", toNodeId: "video_media_1", toPortId: "media" }),
+    ]);
+  });
+
+  it("ignores image outputs on a video producer and stays idempotent", () => {
+    const sourceNode = createVideoSourceNode();
+    const project = createProject(sourceNode);
+    const ids = { createNodeId: () => "unexpected", createEdgeId: () => "unexpected_edge" };
+    expect(materializeVideoOutputsAsMediaNodes({ project, sourceNode, outputs: { images: [{ path: "a.png" }] }, ...ids }).changed).toBe(false);
+    expect(project.graph.nodes).toHaveLength(1);
+    const first = materializeVideoOutputsAsMediaNodes({ project, sourceNode, outputs: { videos: [{ path: "Assets/clip.mp4" }] }, createNodeId: () => "video_1", createEdgeId: () => "edge_1" });
+    expect(first.createdNodeIds).toEqual(["video_1"]);
+    const again = materializeVideoOutputsAsMediaNodes({ project, sourceNode, outputs: { videos: [{ path: "Assets/clip.mp4" }] }, ...ids });
+    expect(again.changed).toBe(false);
+    expect(project.graph.nodes).toHaveLength(2);
+  });
+});
+
 describe("StudioManagedOutputNodes text outputs", () => {
   it("creates one managed text node for text-generation output", () => {
     const sourceNode = createTextSourceNode();
@@ -628,6 +705,9 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     });
     expect(project.graph.nodes).toHaveLength(2);
 
+    project.graph.layout = { mode: "managed", pinnedNodeIds: [sourceNode.id, "pending_media_0"] };
+    sourceNode.parentId = "pending_media_0";
+    expect(connectStudioShapes(project, sourceNode.id, "pending_media_0")).toBe(true);
     const removed = removePendingManagedOutputNodes({
       project,
       sourceNodeId: sourceNode.id,
@@ -636,6 +716,9 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
 
     expect(removed.changed).toBe(true);
     expect(removed.removedNodeIds).toEqual(["pending_media_0"]);
+    expect(project.graph.layout?.pinnedNodeIds).toEqual([sourceNode.id]);
+    expect(sourceNode.parentId).toBeUndefined();
+    expect(project.diagram?.arrows).toEqual([]);
     expect(project.graph.nodes).toHaveLength(1);
     expect(project.graph.edges).toHaveLength(0);
   });
@@ -683,6 +766,8 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(true);
     expect(project.graph.groups?.[0]?.nodeIds.includes("managed_text_0")).toBe(true);
 
+    project.graph.layout = { mode: "managed", pinnedNodeIds: [sourceNode.id, "managed_text_0"] };
+    expect(connectStudioShapes(project, sourceNode.id, "managed_text_0")).toBe(true);
     const removed = removeManagedTextOutputNodes({
       project,
       sourceNodeId: sourceNode.id,
@@ -690,6 +775,8 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
 
     expect(removed.changed).toBe(true);
     expect(removed.removedNodeIds).toEqual(["managed_text_0"]);
+    expect(project.diagram?.arrows).toEqual([]);
+    expect(project.graph.layout?.pinnedNodeIds).toEqual([sourceNode.id]);
     expect(removed.removedEdgeIds).toEqual(["managed_text_edge_0"]);
     expect(project.graph.nodes.some((node) => node.id === "managed_text_0")).toBe(false);
     expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(false);

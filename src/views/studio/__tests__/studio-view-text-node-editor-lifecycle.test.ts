@@ -7,6 +7,7 @@ const viewPrototype = (SystemSculptStudioView as any).prototype;
 function createHarness(editingNodeIds: string[] = ["text_1"]): any {
   return {
     editingTextNodeIds: new Set(editingNodeIds),
+    nodeTeardowns: new Map(),
     textNodeEditorTeardowns: new Map(),
     textNodeEditorSnapshots: new Map(),
     registerTextNodeEditorTeardown: viewPrototype.registerTextNodeEditorTeardown,

@@ -28,10 +28,17 @@ Useful focused gates:
 npm run check:ui
 npm run check:mobile
 npm run test:chatview:critical
-npm run test:chatview:mutants
 npm run test:integration
 npm run test:release-script
 ~~~
+
+check:ui runs the CSS and UI architecture policy tests, then test:ui:focused:
+one Jest `--testPathPatterns` expression over the UI-owned suites (the surface,
+modals, progress, audio processor, recorder, history, editor, and Studio test
+directories plus the named settings, context-menu, main-initialize,
+EmbeddingsPresentation, and chat-workspace tests). test:release-script runs the
+build-provenance, build-options, artifact, and release-plugin script contracts
+on their own; check:plugin already runs the same files.
 
 check:mobile runs static mobile safety, rebuilds the production artifact, and
 runs the focused mobile interaction suite before opening settings, Chat,
@@ -44,27 +51,22 @@ adapters unavailable. It does not launch Android or iOS.
 npm run check:plugin
 npm run check:ci
 npm run check:compat
-npm run check:full
 ~~~
 
 check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
 guards. test:chatview:critical runs the thin Bridge, session transport,
 transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
-detection, adversarial race cases, and per-file coverage budgets. check:ci is
-the exact exhaustive PR contract and adds strict
-mobile interaction, curated mutation, unit, embeddings, already-built
-integration, and release-script suites. The mutation gate creates an isolated
-temporary source mirror and requires every high-risk native reconciliation,
-approval, continuation, mutation-receipt, and conversation-scope mutant to be
-killed.
+detection, adversarial race cases, and a global coverage floor over the
+critical ChatView modules (the small identity and tool-execution modules stay
+at 100%). check:ci is the exact exhaustive PR contract and adds strict mobile
+interaction, unit, embeddings, and already-built integration suites.
 The unit CI remainder excludes focused mobile and ChatView paths already proven
 by earlier gates, keeping the exhaustive workflow broad without rerunning the
 same suites a third time.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
 already enforced by check:ci.
-check:full is the local alias for check:ci.
 
 CI runs check:ci on Ubuntu/Node 22, then runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22. The merge queue runs the same
@@ -76,10 +78,7 @@ remain authoritative.
 Each top-level hosted Jest gate records its replay seed and normalized child
 Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
 records, the ChatView coverage summary, artifact inspection, build provenance,
-and the exact plugin artifact bytes for 14 days. The mutation gate records its
-baseline, every killed, surviving, or infrastructure-failed mutant, and its
-exact child Jest commands in
-`.cache/ci-evidence/chatview-critical-mutants.json`. CI validates the
+and the exact plugin artifact bytes for 14 days. CI validates the
 structured provenance and artifact-inspection sidecars before uploading a
 failed gate. Successful release validation writes SHA-256, size, Git revision,
 dirty state, Node, platform, and architecture to

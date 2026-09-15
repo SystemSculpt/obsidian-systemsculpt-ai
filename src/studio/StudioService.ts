@@ -1,3 +1,7 @@
+import { studioAgentExecution, readStudioCommandExecution } from './StudioCommandExecution';
+import { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
+import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettings';
+import type { StudioAgentRun } from '../services/codex/StudioAgentRunStore';
 import { normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { replaceControlCharacters } from "../utils/characterValidation";
@@ -7,7 +11,12 @@ import { StudioGraphCompiler } from "./StudioGraphCompiler";
 import { migrateStudioProjectToPathOnlyPorts } from "./StudioGraphMigrations";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
+import { desktopHost } from "../platform/desktopOnly";
+import { StudioPermissionManager } from "./StudioPermissionManager";
+import { readStudioScript } from "./StudioScript";
+import { resolveExecutableCandidate } from "./StudioProcessPaths";
 import { StudioRuntime } from "./StudioRuntime";
+import type { StudioObservedRun, StudioRunUpdate } from "./StudioRunObserver";
 import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
 import {
   StudioProjectSession,
@@ -25,6 +34,7 @@ import type {
   StudioNodeCacheSnapshotV1,
   StudioProjectLintResult,
   StudioProjectV1,
+  StudioRunEvent,
   StudioRunEventHandler,
   StudioRunSummary,
 } from "./types";
@@ -107,6 +117,7 @@ export class StudioService {
   private readonly assetStore: StudioAssetStore;
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
+  readonly agentRuns: StudioAgentRuns;
   private readonly projectSessionManager = new StudioProjectSessionManager();
   private readonly projectRecoveryStore: StudioProjectRecoveryStore;
   private readonly agentReferenceFile: StudioAgentReferenceFile;
@@ -118,6 +129,31 @@ export class StudioService {
     this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin);
+    this.agentRuns = new StudioAgentRuns(plugin, {
+      startPeer: (path, nodeId, objective, parentRunId, assignmentId) => this.startAgentRun(path, nodeId, { objective, parentRunId, assignmentId }),
+      workflowSpecification: async (projectPath, centerId, objective) => {
+        const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
+        const center = project.graph.nodes.find(node => node.id === centerId && node.kind === 'studio.command_center');
+        if (!center) throw new Error('Choose a Command Center in this Studio.');
+        return { projectId: project.projectId, projectPath: path, nodeId: centerId, title: 'Orchestrator', request: {
+          ...readStudioCommandExecution(center.config.execution), serviceTier: 'default', workingDirectory: '.',
+          prompt: `Owner objective:\n${objective}\n\nStudio path: ${path}. Read studio_context for resources and their machine-specific paths. Work only within the owner objective.`,
+        } };
+      },
+      context: async (path, nodeId) => {
+        const project = await this.agentProjectSnapshot(path);
+        if (nodeId) {
+          const node = project.graph.nodes.find(node => node.id === nodeId);
+          if (!node) throw new Error('Studio resource not found.');
+          const source = JSON.stringify(node);
+          if (source.length > 48000) return { id: node.id, title: node.title, note: 'This resource is too large for inline context. Read the saved Studio resource from disk.', projectPath: path };
+          return node;
+        }
+        return { projectPath: path, nodes: project.graph.nodes.slice(0, 300).map(node => ({ id: node.id, title: node.title, kind: node.kind, summary: JSON.stringify(node.config).slice(0, 500) })), truncated: project.graph.nodes.length > 300, recentRuns: this.agentRuns.list(project.projectId).slice(0, 20).map(run => ({ id: run.id, title: run.title, status: run.status, result: run.result.slice(-1500) })) };
+      },
+      prepare: record => this.prepareAgentInputs(record.projectPath, record.nodeId, record.request),
+      templates: async path => (await this.agentProjectSnapshot(path)).graph.nodes.filter(node => node.kind === 'studio.codex').map(node => ({ id: node.id, title: node.title })),
+    });
     this.runtime = new StudioRuntime(
       plugin.app,
       plugin,
@@ -125,7 +161,8 @@ export class StudioService {
       this.registry,
       this.compiler,
       this.assetStore,
-      this.apiAdapter
+      this.apiAdapter,
+      this.agentRuns
     );
 
     registerBuiltInStudioNodes(this.registry);
@@ -173,9 +210,9 @@ export class StudioService {
     const session = new StudioProjectSession({
       projectPath,
       project,
-      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite) => {
-        await this.projectStore.saveProject(nextProjectPath, nextProject, {
-          onBeforeProjectWrite,
+      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject) => {
+        return this.projectStore.saveProject(nextProjectPath, nextProject, {
+          onBeforeProjectWrite, baseProject,
         });
       },
       readProjectRawText: async (nextProjectPath) => {
@@ -244,10 +281,7 @@ export class StudioService {
         // snapshot. A failed file reload therefore leaves the current canvas
         // and its editor state untouched.
         const loaded = await this.loadProjectForSession(normalized, { forceReload: true });
-        existingSession.replaceProjectSnapshot(loaded.project, {
-          projectPath: normalized,
-          acceptedRawText: loaded.rawText,
-        });
+        await existingSession.reconcileExternalProject(loaded.project, loaded.rawText);
       }
 
       return await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
@@ -521,13 +555,13 @@ export class StudioService {
 
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
     const normalizedProjectPath = normalizeStudioProjectPath(projectPath);
-    await this.projectStore.saveProject(normalizedProjectPath, project);
+    const saved = await this.projectStore.saveProject(normalizedProjectPath, project);
     const session = this.projectSessionManager.getSession(normalizedProjectPath);
     if (!session) {
       return;
     }
     const rawText = await this.projectStore.readProjectRawText(normalizedProjectPath);
-    session.replaceProjectSnapshot(project, {
+    session.replaceProjectSnapshot(saved.project, {
       projectPath: normalizedProjectPath,
       acceptedRawText: rawText,
     });
@@ -562,6 +596,14 @@ export class StudioService {
       throw new Error("A valid Studio project path is required.");
     }
     return normalizeStudioProjectPath(rawPath);
+  }
+
+  subscribeRunEvents(listener: (update: StudioRunUpdate) => void): () => void {
+    return this.runtime.runs.subscribe(listener);
+  }
+
+  getActiveRun(projectPath: string): StudioObservedRun | null {
+    return this.runtime.runs.getActiveRun(this.requireProjectPath(projectPath));
   }
 
   async runProject(
@@ -612,6 +654,43 @@ export class StudioService {
     });
   }
 
+  private async agentProjectSnapshot(projectPath: string): Promise<StudioProjectV1> {
+    const session = this.projectSessionManager.getSession(projectPath);
+    if (session) await session.flushPendingSaveWork({ force: true });
+    return session?.getProjectSnapshot() || this.projectStore.loadProject(projectPath);
+  }
+
+  async startAgentRun(projectPath: string, nodeId: string, options?: { objective?: string; parentRunId?: string; assignmentId?: string }): Promise<StudioAgentRun> {
+    const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
+    const node = project.graph.nodes.find(node => node.id === nodeId && node.kind === 'studio.codex');
+    if (!node) throw new Error('Choose a Codex role in this project.');
+    const config = node.config;
+    const parent = options?.parentRunId ? this.agentRuns.get(options.parentRunId) : undefined;
+    if (options?.parentRunId && (!parent || parent.projectId !== project.projectId)) throw new Error('Parent run must belong to this project.');
+    const request = { ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings),
+      ...Object.fromEntries(['model', 'effort', 'serviceTier'].filter(key => typeof config[key] === 'string' && String(config[key]).trim()).map(key => [key, String(config[key])])) }, parent?.request),
+      prompt: `${String(config.prompt || '')}\n\nTask input:\n${JSON.stringify(config.input || {})}${options?.objective ? `\n\nObjective for this instance:\n${options.objective}` : ''}`,
+      workingDirectory: String(config.workingDirectory || '.'), threadId: options?.parentRunId ? '' : String(config.threadId || '') };
+    const inbound = project.graph.edges.filter(edge => edge.toNodeId === nodeId);
+    return this.agentRuns.start({ projectId: project.projectId, projectPath: path, nodeId, title: node.title, request, parentRunId: options?.parentRunId, assignmentId: options?.assignmentId,
+      ...(inbound.length ? { prepare: () => this.prepareAgentInputs(path, nodeId, request) } : {}),
+    });
+  }
+
+  private async prepareAgentInputs(path: string, nodeId: string, request: import('../services/codex/LocalCodexClient').CodexRequest): Promise<import('../services/codex/LocalCodexClient').CodexRequest> {
+    const project = await this.agentProjectSnapshot(path), inbound = project.graph.edges.filter(edge => edge.toNodeId === nodeId);
+    if (!inbound.length) return request;
+    const result = await this.runtime.runProjectSnapshot(path, project, { entryNodeIds: [...new Set(inbound.map(edge => edge.fromNodeId))] });
+    if (result.status !== 'success') throw new Error(result.error || 'Connected input preparation failed.');
+    const cache = await this.runtime.getNodeCacheSnapshot(path);
+    const inputs = Object.fromEntries(inbound.map(edge => [edge.toPortId, cache.entries[edge.fromNodeId]?.outputs[edge.fromPortId] ?? null]));
+    return { ...request, prompt: `${request.prompt}\n\nConnected context:\n${JSON.stringify(inputs)}` };
+  }
+
+  async getLatestRunEvents(projectPath: string): Promise<StudioRunEvent[]> {
+    return this.runtime.getLatestRunEvents(this.requireProjectPath(projectPath));
+  }
+
   async getRecentRuns(projectPath: string): Promise<StudioRunSummary[]> {
     const rawPath = String(projectPath || "").trim();
     if (!rawPath) return [];
@@ -653,6 +732,36 @@ export class StudioService {
     return this.assetStore.readArrayBuffer(asset);
   }
 
+  async restoreAssetFile(projectPath: string, assetPath: string): Promise<boolean> {
+    return this.projectStore.restoreAssetFile(projectPath, assetPath);
+  }
+
+  /** Imported projects never grant their own executable. UI review persists an exact project grant. */
+  async getProcessApprovalRequests(projectPath: string, project: StudioProjectV1): Promise<Array<{ command: string; nodeTitle: string; args: string[]; cwd: string }>> {
+    const nodes = project.graph.nodes.filter((node) => ["studio.process", "studio.script"].includes(node.kind) && !node.disabled);
+    if (nodes.length === 0) return [];
+    this.requireProjectPath(projectPath);
+    const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
+    const permissions = new StudioPermissionManager(policy);
+    const path = await desktopHost.path();
+    const adapter = this.plugin.app.vault.adapter as { getFullPath?: (relative: string) => string; basePath?: string };
+    const requests: Array<{ command: string; nodeTitle: string; args: string[]; cwd: string }> = [];
+    for (const node of nodes) {
+      const config = node.kind === "studio.script" ? readStudioScript(node.config.source).processConfig : node.config;
+      const configuredCwd = String(config.workingDirectory || ".").trim();
+      const cwd = path.isAbsolute(configuredCwd) ? configuredCwd
+        : adapter.getFullPath?.(configuredCwd) || (adapter.basePath ? path.resolve(adapter.basePath, configuredCwd) : "");
+      if (!cwd) throw new Error("Studio requires an absolute vault path to approve a process.");
+      const command = resolveExecutableCandidate(String(config.executable || "").trim(), cwd);
+      if (!command) throw new Error("A process executable is required.");
+      try { permissions.assertCliCommand(command, true); }
+      catch {
+        requests.push({ command, nodeTitle: node.title, cwd, args: node.kind === "studio.script" ? ["<inline JavaScript module>"] : Array.isArray(config.arguments) ? config.arguments.map(String) : [] });
+      }
+    }
+    return requests;
+  }
+
   async addCapabilityGrant(
     projectPath: string,
     grant: {
@@ -677,6 +786,9 @@ export class StudioService {
   }
 
   async dispose(): Promise<void> {
+    await this.agentRuns.dispose();
+    this.runtime.dispose();
+    this.apiAdapter.dispose();
     await this.projectSessionManager.closeAll();
   }
 

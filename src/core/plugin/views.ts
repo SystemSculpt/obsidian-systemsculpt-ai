@@ -7,6 +7,7 @@ import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioVie
 import { AgentChatView } from "../../views/chatview/AgentChatView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { isMobileLayout } from "../../platform/mobileLayout";
+import { restoreStudioReloadState } from "./StudioReloadState";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
@@ -67,6 +68,9 @@ export class ViewManager {
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
+      void restoreStudioReloadState(this.app).catch(() => {
+        new Notice("Studio could not restore an open tab yet. Its reload state has been retained.");
+      });
       try { (window as DiagnosticsWindow).FreezeMonitor?.mark?.('view-manager:onLayoutReady'); } catch {
         // Diagnostic markers must never block layout initialization.
       }
@@ -395,7 +399,8 @@ export class ViewManager {
   unloadViews() {
     this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EMBEDDINGS_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+    // Obsidian unregisters the view implementation. Keep its leaf in place so
+    // the next plugin instance can restore the same tab and split layout.
     this.ribbonManager.cleanup();
   }
 

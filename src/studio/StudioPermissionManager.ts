@@ -61,7 +61,7 @@ export class StudioPermissionManager {
     throw new Error(`Filesystem permission denied for path "${normalized}".`);
   }
 
-  public assertCliCommand(command: string): void {
+  public assertCliCommand(command: string, requireExact = false): void {
     const trimmed = String(command || "").trim();
     if (!trimmed) {
       throw new Error("CLI permission denied: command is empty.");
@@ -75,6 +75,7 @@ export class StudioPermissionManager {
         // SEC-03 defense-in-depth: a bare "*" matches every command. Even if a
         // policy bypassed parse-time stripping, never honor it as an allow-all.
         if (isBlanketCliCommandPattern(pattern)) continue;
+        if (requireExact && (pattern.trim() !== trimmed || /[*?]/.test(pattern))) continue;
         if (wildcardToRegExp(pattern.trim()).test(trimmed)) {
           return;
         }

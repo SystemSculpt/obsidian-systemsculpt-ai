@@ -21,9 +21,11 @@ export class AutomaticBackupService {
         this.stop(); // Clean up any existing timer
         
         // Start the periodic check
-        this.backupTimer = window.setInterval(() => {
+        // registerInterval also lets Obsidian clear the timer on plugin
+        // unload, so a teardown path that never reaches stop() cannot leak it.
+        this.backupTimer = this.plugin.registerInterval(window.setInterval(() => {
             void this.checkAndCreateBackup();
-        }, this.CHECK_INTERVAL_MS);
+        }, this.CHECK_INTERVAL_MS));
 
         // Also check immediately on start
         void this.checkAndCreateBackup();

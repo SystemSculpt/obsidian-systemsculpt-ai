@@ -23,7 +23,7 @@ npm run test:related -- <changed src files>
 
 Use the focused test command for the module being changed instead of the full
 suite. Add compiled integration only for bundle/composition changes. Run
-`npm run check:plugin` at substantial checkpoints and `npm run check:full`
+`npm run check:plugin` at substantial checkpoints and `npm run check:ci`
 before release.
 
 ## Conventions

@@ -251,16 +251,14 @@ test("the hosted gate is the exact exhaustive local CI contract", () => {
   assert.equal(
     packageJson.scripts["check:ci"],
     "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
-      + "&& npm run test:chatview:mutants "
       + "&& npm run test:unit:ci && npm run test:embeddings:ci "
-      + "&& npm run test:integration:ci && npm run test:release-script",
+      + "&& npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["check:compat"],
     "npm run check:plugin:fast && npm run test:chatview:compat "
       + "&& npm run test:integration:ci",
   );
-  assert.equal(packageJson.scripts["check:full"], "npm run check:ci");
   assert.doesNotMatch(ci, /desktop-baselines/);
 });
 

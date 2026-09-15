@@ -106,9 +106,11 @@ export class ResourceMonitorService {
     });
     void this.collectAndPersistSample("startup").catch(() => undefined);
     if (typeof window !== "undefined") {
-      this.intervalId = window.setInterval(() => {
+      // registerInterval ties the timer to plugin unload, so a teardown path
+      // that never reaches stop() cannot leave it ticking after a reload.
+      this.intervalId = this.plugin.registerInterval(window.setInterval(() => {
         void this.collectAndPersistSample().catch(() => undefined);
-      }, this.samplingIntervalMs);
+      }, this.samplingIntervalMs));
       this.startStartupBurstSampling();
       this.startLagProbe();
       this.subscribeToFreezeEvents();
@@ -410,13 +412,13 @@ export class ResourceMonitorService {
       return;
     }
     let lastTick = performance.now();
-    this.lagIntervalId = window.setInterval(() => {
+    this.lagIntervalId = this.plugin.registerInterval(window.setInterval(() => {
       const now = performance.now();
       const delta = now - lastTick;
       lastTick = now;
       const lag = Math.max(0, delta - this.lagSampleInterval);
       this.lastLagMs = lag;
-    }, this.lagSampleInterval);
+    }, this.lagSampleInterval));
   }
 
   private subscribeToFreezeEvents() {
@@ -474,7 +476,7 @@ export class ResourceMonitorService {
       return;
     }
     const stopAt = Date.now() + this.startupBurstDurationMs;
-    this.startupBurstIntervalId = window.setInterval(() => {
+    this.startupBurstIntervalId = this.plugin.registerInterval(window.setInterval(() => {
       if (Date.now() > stopAt) {
         if (this.startupBurstIntervalId) {
           window.clearInterval(this.startupBurstIntervalId);
@@ -483,7 +485,7 @@ export class ResourceMonitorService {
         return;
       }
       void this.collectAndPersistSample("startup-burst").catch(() => undefined);
-    }, this.startupBurstIntervalMs);
+    }, this.startupBurstIntervalMs));
   }
 
   private checkThresholds(sample: ResourceSample) {

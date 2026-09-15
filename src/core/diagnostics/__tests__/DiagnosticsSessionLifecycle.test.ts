@@ -746,4 +746,27 @@ describe("DiagnosticsSessionLifecycle", () => {
 
     expect(adapter.remove).not.toHaveBeenCalled();
   });
+  it("treats a file removed by sync during collection as an ordinary race", async () => {
+    const path = `${DIAGNOSTICS_PATH}/session-20260813-155957.json`;
+    const adapter = makeDiagnosticsAdapter({ [path]: { contents: "{}", mtime: NOW, size: 2 } });
+    adapter.stat.mockResolvedValue(null);
+    const app = new App(); (app.vault as any).adapter = adapter;
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    await makeLifecycle(app).run(NOW);
+    expect(warning).not.toHaveBeenCalled();
+    expect(adapter.remove).not.toHaveBeenCalled();
+  });
+
+  it("defers a slow cleanup without misreporting it as a failed file check", async () => {
+    jest.useFakeTimers();
+    const adapter = makeDiagnosticsAdapter({});
+    adapter.list.mockReturnValue(new Promise(() => undefined));
+    const app = new App(); (app.vault as any).adapter = adapter;
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const pending = makeLifecycle(app).run(NOW);
+    await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
+    await pending;
+    expect(warning).not.toHaveBeenCalled();
+  });
+
 });

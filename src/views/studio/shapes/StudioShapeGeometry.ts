@@ -2,6 +2,9 @@ import type { StudioShapeInstance } from "../../../studio/types";
 import type { LinkPoint } from "../connections-v3/LinkGeometry";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
 
+/** Visual bounds only: a node card can anchor an arrow without becoming a shape. */
+export type StudioArrowAnchor = Pick<StudioShapeInstance, "id" | "shape" | "position" | "size">;
+
 /**
  * Diagram arrow geometry. Shapes have no ports, so an arrow has no pinned
  * anchor; it is derived from the two shapes every time either one moves.
@@ -41,7 +44,7 @@ export type StudioShapeArrowPath = {
   mid: LinkPoint;
 };
 
-export function studioShapeCenter(shape: StudioShapeInstance): LinkPoint {
+export function studioShapeCenter(shape: StudioArrowAnchor): LinkPoint {
   return {
     x: shape.position.x + shape.size.width / 2,
     y: shape.position.y + shape.size.height / 2,
@@ -61,7 +64,7 @@ function format(value: number): string {
 }
 
 /** The shape's outline in canvas coordinates. */
-function outlinePolygon(shape: StudioShapeInstance): LinkPoint[] {
+function outlinePolygon(shape: StudioArrowAnchor): LinkPoint[] {
   return buildStudioShapeOutline(shape.shape, shape.size).polygon.map((point) => ({
     x: point.x + shape.position.x,
     y: point.y + shape.position.y,
@@ -96,7 +99,7 @@ function rayHit(polygon: LinkPoint[], origin: LinkPoint, direction: LinkPoint): 
 
 /** Bounding-box crossing: the fallback when an origin sits outside its outline. */
 function boundingBoxHit(
-  shape: StudioShapeInstance,
+  shape: StudioArrowAnchor,
   origin: LinkPoint,
   direction: LinkPoint
 ): LinkPoint {
@@ -116,7 +119,7 @@ function boundingBoxHit(
 }
 
 function anchorPoint(
-  shape: StudioShapeInstance,
+  shape: StudioArrowAnchor,
   origin: LinkPoint,
   direction: LinkPoint
 ): LinkPoint {
@@ -128,7 +131,7 @@ function anchorPoint(
  * outline. Falls back to the center when the two points coincide.
  */
 export function studioShapeBorderPoint(
-  shape: StudioShapeInstance,
+  shape: StudioArrowAnchor,
   towards: LinkPoint
 ): LinkPoint {
   const center = studioShapeCenter(shape);
@@ -197,7 +200,7 @@ function fanOffset(fan: StudioShapeArrowFan | undefined): number {
 
 /** Slides an anchor origin off-center without letting it leave the outline. */
 function spreadOrigin(
-  shape: StudioShapeInstance,
+  shape: StudioArrowAnchor,
   center: LinkPoint,
   horizontal: boolean,
   offset: number
@@ -215,8 +218,8 @@ function spreadOrigin(
  * shapes — without it the two directions of a round trip draw the same pixels.
  */
 export function buildStudioShapeArrowPath(
-  from: StudioShapeInstance,
-  to: StudioShapeInstance,
+  from: StudioArrowAnchor,
+  to: StudioArrowAnchor,
   fan?: StudioShapeArrowFan
 ): StudioShapeArrowPath {
   const fromCenter = studioShapeCenter(from);
@@ -240,7 +243,7 @@ export function buildStudioShapeArrowPath(
     const shared = horizontal
       ? (fromOrigin.y + toOrigin.y) / 2
       : (fromOrigin.x + toOrigin.x) / 2;
-    const originAt = (shape: StudioShapeInstance, center: LinkPoint): LinkPoint =>
+    const originAt = (shape: StudioArrowAnchor, center: LinkPoint): LinkPoint =>
       spreadOrigin(shape, center, horizontal, shared - (horizontal ? center.y : center.x));
     fromOrigin = originAt(from, fromCenter);
     toOrigin = originAt(to, toCenter);
@@ -265,7 +268,7 @@ export function buildStudioShapeArrowPath(
 
 /** In-flight arrow: anchored on the source shape, chasing the cursor. */
 export function buildStudioShapeArrowPreviewPath(
-  from: StudioShapeInstance,
+  from: StudioArrowAnchor,
   cursor: LinkPoint
 ): StudioShapeArrowPath {
   const center = studioShapeCenter(from);

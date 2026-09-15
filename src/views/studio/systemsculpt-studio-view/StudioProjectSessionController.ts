@@ -1,3 +1,4 @@
+import { resolveStudioEntry } from '../../../studio/StudioEntry';
 import {
   Notice,
   TAbstractFile,
@@ -18,7 +19,7 @@ import { repairStudioProjectForLoad } from "../../../studio/StudioProjectRepairs
 import {
   getSavedGraphViewState,
   getSavedNodeDetailMode,
-  normalizeGraphCoordinate,
+  normalizeWorldCoordinate,
   normalizeGraphZoom,
   parseGraphViewStateByProject,
   parseNodeDetailModeByProject,
@@ -59,7 +60,14 @@ type StudioProjectSessionControllerHost = {
   plugin: SystemSculptPlugin;
   graphInteraction: Pick<
     StudioGraphInteractionEngine,
-    "clearProjectState" | "fitSelectedNodesInViewport" | "getGraphZoom" | "getSelectedNodeIds" | "setGraphZoom" | "setSelectedNodeIds"
+    | "clearProjectState"
+    | "fitSelectedNodesInViewport"
+    | "getGraphZoom"
+    | "getSelectedNodeIds"
+    | "setGraphZoom"
+    | "setSelectedNodeIds"
+    | "getViewportWorldTopLeft"
+    | "setViewportWorldTopLeft"
   >;
   getGraphZoomMode: () => StudioGraphZoomMode;
   resetGraphZoomInteractionState: () => void;
@@ -99,6 +107,7 @@ export class StudioProjectSessionController {
   private currentProject: StudioProjectV1 | null = null;
   private currentProjectPath: string | null = null;
   private currentProjectSession: StudioProjectSession | null = null;
+  private unsubscribeProjectSession: (() => void) | null = null;
   private retainedProjectPath: string | null = null;
   private projectFileWarning: string | null = null;
   private graphViewStateByProjectPath: StudioGraphViewStateByProject = {};
@@ -177,9 +186,13 @@ export class StudioProjectSessionController {
       return;
     }
 
+    const topLeft = this.host.graphInteraction.getViewportWorldTopLeft();
+    if (!topLeft) {
+      return;
+    }
     const snapshot: StudioGraphViewState = {
-      scrollLeft: normalizeGraphCoordinate(viewport.scrollLeft),
-      scrollTop: normalizeGraphCoordinate(viewport.scrollTop),
+      x: normalizeWorldCoordinate(topLeft.x),
+      y: normalizeWorldCoordinate(topLeft.y),
       zoom: normalizeGraphZoom(options?.zoomOverride ?? this.host.graphInteraction.getGraphZoom()),
     };
     this.pendingViewportState = { ...snapshot, projectPath };
@@ -213,17 +226,15 @@ export class StudioProjectSessionController {
     this.host.resetGraphZoomInteractionState();
     this.host.graphInteraction.setGraphZoom(nextZoom, { mode: "interactive" });
 
-    const nextLeft = normalizeGraphCoordinate(restoredState.scrollLeft);
-    const nextTop = normalizeGraphCoordinate(restoredState.scrollTop);
-    viewport.scrollLeft = nextLeft;
-    viewport.scrollTop = nextTop;
+    const nextX = normalizeWorldCoordinate(restoredState.x);
+    const nextY = normalizeWorldCoordinate(restoredState.y);
+    this.host.graphInteraction.setViewportWorldTopLeft(nextX, nextY);
 
     requestStudioAnimationFrame(viewport, () => {
       if (this.host.getGraphViewportElement() !== viewport) {
         return;
       }
-      viewport.scrollLeft = nextLeft;
-      viewport.scrollTop = nextTop;
+      this.host.graphInteraction.setViewportWorldTopLeft(nextX, nextY);
     });
     return true;
   }
@@ -437,14 +448,29 @@ export class StudioProjectSessionController {
       const savedGraphView = getSavedGraphViewState(this.graphViewStateByProjectPath, projectPath);
       this.currentProjectPath = projectPath;
       this.currentProject = project;
+      this.unsubscribeProjectSession?.();
+      let recoveryRevision = session.getConflictRecovery()?.revision || 0;
+      this.unsubscribeProjectSession = session.subscribe(() => {
+        if (this.currentProjectSession !== session) return;
+        const recovery = session.getConflictRecovery();
+        const hasNewConflict = recovery && recovery.revision !== recoveryRevision;
+        if (hasNewConflict) {
+          recoveryRevision = recovery.revision;
+          this.host.preserveProjectAsUndo(recovery.project, this.host.graphInteraction.getSelectedNodeIds());
+          this.projectFileWarning = "Another edit changed the same field. Independent changes were merged; your canvas version is available in Undo and saved recovery history.";
+        }
+        if (!hasNewConflict && this.currentProject === session.getProject()) return;
+        this.currentProject = session.getProject();
+        this.host.render();
+      });
       this.host.graphInteraction.clearProjectState();
       this.host.graphInteraction.setGraphZoom(savedGraphView?.zoom ?? STUDIO_GRAPH_DEFAULT_ZOOM);
       this.host.clearRunPresentation();
       this.pendingViewportState = savedGraphView
         ? { ...savedGraphView, projectPath }
         : {
-            scrollLeft: 0,
-            scrollTop: 0,
+            x: 0,
+            y: 0,
             zoom: this.host.graphInteraction.getGraphZoom(),
             projectPath,
           };
@@ -536,9 +562,15 @@ export class StudioProjectSessionController {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
-    const modifiedPath = normalizePath(String(file.path || "").trim());
+    let modifiedPath = normalizePath(String(file.path || "").trim());
     if (!modifiedPath) {
       return;
+    }
+    if (modifiedPath !== this.currentProjectPath && modifiedPath.endsWith('.systemsculpt')) {
+      try {
+        const resolved = await resolveStudioEntry(this.host.app.vault.adapter, this.currentProjectPath);
+        if (resolved.path === modifiedPath) modifiedPath = this.currentProjectPath;
+      } catch { /* The direct entry event owns invalid-entry recovery. */ }
     }
     if (modifiedPath === this.currentProjectPath) {
       const bindingEpoch = this.projectBindingEpoch;
@@ -807,7 +839,7 @@ export class StudioProjectSessionController {
       return null;
     }
     try {
-      return await adapter.read(normalized);
+      return (await resolveStudioEntry({ read: (path) => adapter.read!(path) }, normalized)).raw;
     } catch {
       return null;
     }
@@ -1036,6 +1068,8 @@ export class StudioProjectSessionController {
   }
 
   private async releaseRetainedProjectSession(): Promise<void> {
+    this.unsubscribeProjectSession?.();
+    this.unsubscribeProjectSession = null;
     const retainedPath = this.retainedProjectPath;
     const retainedSession = this.currentProjectSession;
     if (!retainedPath) {

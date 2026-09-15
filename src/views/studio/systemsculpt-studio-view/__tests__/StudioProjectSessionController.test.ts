@@ -59,6 +59,8 @@ function projectFixture(node: StudioNodeInstance): StudioProjectV1 {
 function createControllerHarness(project: StudioProjectV1) {
   const cacheSnapshot: StudioNodeCacheSnapshotV1 | null = null;
   const session = {
+    subscribe: jest.fn(() => () => undefined),
+    getConflictRecovery: jest.fn(() => null),
     hasPendingLocalSaveWork: jest.fn(() => false),
     blockProjectFileWrites: jest.fn(),
     waitForInFlightSave: jest.fn(async () => {}),

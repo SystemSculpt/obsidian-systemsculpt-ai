@@ -38,7 +38,7 @@ export const cliCommandNode: StudioNodeDefinition = {
       },
       {
         key: "cwd",
-        label: "Working Directory",
+        label: "Working directory",
         type: "directory_path",
         required: true,
         allowOutsideVault: true,
@@ -54,7 +54,7 @@ export const cliCommandNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Output Bytes",
+        label: "Max output bytes",
         type: "number",
         required: true,
         min: 1024,

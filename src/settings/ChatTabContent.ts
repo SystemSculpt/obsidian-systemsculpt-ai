@@ -1,8 +1,11 @@
+import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
 import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 
+const codexSettingsCleanup = new WeakMap<HTMLElement, () => void>();
+
 export async function displayChatTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-    containerEl.empty();
+    codexSettingsCleanup.get(containerEl)?.(); containerEl.empty();
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "chat";
     }
@@ -14,6 +17,11 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         text: 'Use this tab for chat preferences and display choices.',
         cls: 'setting-item-description'
     });
+
+    const execution = containerEl.createDiv();
+    const cleanup = mountCodexExecutionControls(execution, plugin, {});
+    const unregister = tabInstance.registerRenderCleanup(cleanup);
+    codexSettingsCleanup.set(containerEl, () => { cleanup(); unregister(); });
 
     const normalizeDefaultChatTag = (value: string): string => value.trim().replace(/^#+/, "");
 

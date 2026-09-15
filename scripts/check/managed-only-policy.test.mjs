@@ -52,6 +52,21 @@ const LEGACY_ALLOWLIST = new Set([
 const TOOL_COMPATIBILITY_ALLOWLIST = new Set([
   "src/tools/toolNames.ts",
 ]);
+// Mirrors the OpenAI rule in scripts/plugin-artifacts.mjs so a provider
+// identity is rejected at the source, not only in the compiled bundle.
+const UPSTREAM_PROVIDER_IDENTITY = /\bopenai\b|openai(?:api|client|credential|key|model|provider|secret)|api\.openai\.com/i;
+// The retired BYOK credential key that schema v4 prunes from data.json. Its
+// name is an upstream provider identity, so SettingsMigrator spells it with
+// character codes instead of a literal. That is the ONLY sanctioned encoded
+// identifier in src: the named constant must decode to exactly this value, the
+// sanctioned file may hold no other encoded literal, and no other production
+// file may hard-code a character-code string at all.
+const ENCODED_IDENTIFIER_ALLOWLIST = new Map([
+  [
+    "src/core/settings/migrations/SettingsMigrator.ts",
+    { constant: "LEGACY_CLIENT_CREDENTIAL_KEY", decodes: "openAiApiKey" },
+  ],
+]);
 const RETIRED_CHAT_TOOL_PREFIX = /\bfilesystem_[a-z0-9_]+\b|\bmcp[-_:][a-z0-9_-]+/i;
 const CLIENT_CONTINUATION_POLICY = /\bautoContinue\b/;
 
@@ -275,6 +290,69 @@ function importedBindings(source, fileName) {
   return Array.from(bindings.values());
 }
 
+/**
+ * `String.fromCharCode(<numeric literals only>)` calls: the one way to smuggle
+ * a forbidden identifier past a text policy. Dynamic decoding (spread of a
+ * byte view, a loop variable) is ordinary binary handling and is not reported.
+ */
+function encodedStringLiterals(source, fileName) {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const found = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === "String"
+      && node.expression.name.text === "fromCharCode"
+      && node.arguments.length > 0
+      && node.arguments.every((argument) => ts.isNumericLiteral(argument))
+    ) {
+      const constant = ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
+        ? node.parent.name.text
+        : null;
+      found.push({
+        constant,
+        decoded: String.fromCharCode(...node.arguments.map((argument) => Number(argument.text))),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+function encodedIdentifierViolations(source, relative) {
+  const encoded = encodedStringLiterals(source, relative);
+  const describe = ({ constant, decoded }) =>
+    `${constant ?? "(inline)"} -> ${JSON.stringify(decoded)}`;
+  const allowed = ENCODED_IDENTIFIER_ALLOWLIST.get(relative);
+  if (!allowed) {
+    return encoded.map((entry) => `${relative}: encoded string literal ${describe(entry)}`);
+  }
+  const isSanctioned = ({ constant, decoded }) =>
+    constant === allowed.constant && decoded === allowed.decodes;
+  const findings = encoded
+    .filter((entry) => !isSanctioned(entry))
+    .map((entry) => `${relative}: encoded string literal ${describe(entry)} is not the sanctioned ${allowed.constant}`);
+  if (!encoded.some(isSanctioned)) {
+    findings.push(`${relative}: expected ${allowed.constant} to decode to ${JSON.stringify(allowed.decodes)}`);
+  }
+  return findings;
+}
+
+function upstreamProviderIdentityViolations(source, relative) {
+  return UPSTREAM_PROVIDER_IDENTITY.test(source)
+    ? [`${relative}: upstream provider identity`]
+    : [];
+}
+
 function vendorImportViolations(source, relative) {
   return importedBindings(source, relative).flatMap(({ specifier, binding }) => {
     if (!isForbiddenPackageSpecifier(specifier)) return [];
@@ -328,6 +406,8 @@ function authorityViolations(file) {
   const findings = [
     ...vendorImportViolations(source, relative),
     ...chatAuthorityConceptViolations(source, relative),
+    ...upstreamProviderIdentityViolations(source, relative),
+    ...encodedIdentifierViolations(source, relative),
   ];
   if (!LEGACY_ALLOWLIST.has(relative) && CUSTOM_PROVIDER.test(source)) {
     findings.push(`${relative}: custom-provider concept`);
@@ -450,6 +530,62 @@ test("chat authority policy rejects renamed client-owned orchestration mutations
     assert.ok(findings.length > 0, `${mutation.label} was not rejected`);
     assert.match(findings.join("\n"), new RegExp(mutation.label, "u"));
   }
+});
+
+test("encoded identifier policy sanctions only the retired credential key in SettingsMigrator", () => {
+  const sanctionedFile = "src/core/settings/migrations/SettingsMigrator.ts";
+  const encodedKey = "String.fromCharCode(111, 112, 101, 110, 65, 105, 65, 112, 105, 75, 101, 121)";
+  const sanctioned = `const LEGACY_CLIENT_CREDENTIAL_KEY = ${encodedKey};`;
+
+  assert.deepEqual(encodedIdentifierViolations(sanctioned, sanctionedFile), []);
+  assert.deepEqual(
+    encodedIdentifierViolations(
+      "const header = String.fromCharCode(...bytes.slice(0, 4));",
+      "src/studio/StudioCaptionBoardComposition.ts",
+    ),
+    [],
+    "dynamic decoding of a byte view is not an encoded literal",
+  );
+
+  const rejected = [
+    {
+      label: "the same constant in any other production file",
+      source: sanctioned,
+      relative: "src/views/chatview/FutureChatRuntime.ts",
+    },
+    {
+      label: "a renamed constant in the sanctioned file",
+      source: `const OTHER_KEY = ${encodedKey};`,
+      relative: sanctionedFile,
+    },
+    {
+      label: "a different decoded value in the sanctioned file",
+      source: "const LEGACY_CLIENT_CREDENTIAL_KEY = String.fromCharCode(97, 98, 99);",
+      relative: sanctionedFile,
+    },
+    {
+      label: "a second encoded literal in the sanctioned file",
+      source: `${sanctioned} const EXTRA = String.fromCharCode(97);`,
+      relative: sanctionedFile,
+    },
+    {
+      label: "an inline encoded literal in the sanctioned file",
+      source: `${sanctioned} keys.push(String.fromCharCode(97));`,
+      relative: sanctionedFile,
+    },
+  ];
+  for (const mutation of rejected) {
+    assert.ok(
+      encodedIdentifierViolations(mutation.source, mutation.relative).length > 0,
+      `${mutation.label} was not rejected`,
+    );
+  }
+
+  assert.deepEqual(
+    upstreamProviderIdentityViolations('const key = "openAiApiKey";', sanctionedFile),
+    [`${sanctionedFile}: upstream provider identity`],
+    "a plain provider-credential literal is rejected even in the sanctioned file",
+  );
 });
 
 test("managed production modules have only SystemSculpt network ownership", () => {

@@ -1,30 +1,36 @@
 import { buildCubicLinkCurve, buildChevronPath, curveTangentAtEnd } from "./LinkGeometry";
-import type { PortAnchor, StudioLinkStore, EdgeState } from "./StudioLinkStore";
+import type { PortAnchor, StudioLinkStore } from "./StudioLinkStore";
 import { createStudioSvgElement } from "../StudioDomContext";
+import type { StudioEdgeActivityPhase } from "../activity/StudioActivity";
+import { pulseStudioActivityElement } from "../activity/StudioActivityDomApplier";
 
 /**
  * Canonical Studio edge renderer.
  *
  * Rendering invariants:
- *  1. Dynamic visibility is inline — the status-driven stroke color/opacity
- *     and the drag-preview stroke/dash are set INLINE on the element so a
- *     line is never invisible because of a stylesheet regression. Static
- *     presentation (fill, stroke widths, caps/joins, pointer-events) lives
- *     on the `.ss-studio-edge-*` rules in views/studio/connections.css.
+ *  1. Visibility is inline — the base line's stroke is set INLINE through
+ *     `--ss-studio-edge-stroke` with concrete fallbacks, so a line is never
+ *     invisible because of a stylesheet regression. Activity colors, the
+ *     glow, the energy dots, and every animation live on the
+ *     `.ss-studio-edge-*` rules in views/studio/activity.css and
+ *     views/studio/connections.css.
  *  2. Edge classes are exclusively `ss-studio-edge*`, keeping their styling
  *     contract local to the connection implementation.
  *  3. Geometry comes from the caller's data-driven anchor resolver, so a line
  *     is drawn whenever both endpoint nodes exist — independent of DOM
  *     measurement, paint timing, or visibility.
- *
- * The element shape (group → hit/visible/arrow paths) matches what the flow
- * animator expects via getEdgeGroupElement().
+ *  4. Run activity is not stored here. Each group carries `data-activity`
+ *     from the activity snapshot; groups persist across geometry renders,
+ *     and a freshly created group asks `resolveEdgeActivity` so a lazily
+ *     rendered cable is right on first paint.
  */
 
 export type EdgeGroupElements = {
   group: SVGGElement;
   hitPath: SVGPathElement;
+  glowPath: SVGPathElement;
   visiblePath: SVGPathElement;
+  energyPath: SVGPathElement;
   arrowPath: SVGPathElement;
 };
 
@@ -38,23 +44,12 @@ export type StudioEdgeRendererOptions = {
   layer: SVGSVGElement;
   resolvePortAnchorPoint: EdgePortAnchorResolver;
   getCursorAnchorPoint: () => { x: number; y: number } | null;
+  resolveEdgeActivity?: (edgeId: string) => StudioEdgeActivityPhase;
 };
 
-// Status → stroke colour. CSS vars keep theme adaptivity, but every entry has a
-// concrete fallback so a line is NEVER invisible even if the var is undefined.
-function strokeForStatus(status: EdgeState["status"]): string {
-  switch (status) {
-    case "flowing":
-      return "var(--ss-studio-link-flow-a, var(--interactive-accent, #5b8def))";
-    case "completed":
-      return "var(--ss-studio-link-flow-b, var(--interactive-accent, #5b8def))";
-    case "failed":
-      return "var(--ss-studio-link-failed, var(--text-error, #e0566a))";
-    case "idle":
-    default:
-      return "var(--ss-studio-link-stroke, var(--text-muted, #8a8a8a))";
-  }
-}
+// Every entry has a concrete fallback so a line is NEVER invisible even if
+// the theme vars are undefined.
+const BASE_STROKE = "var(--ss-studio-edge-stroke, var(--ss-studio-link-stroke, var(--text-muted, #8a8a8a)))";
 
 function previewStroke(validity: string): string {
   switch (validity) {
@@ -96,11 +91,13 @@ export class StudioEdgeRenderer {
         group = this.createEdgeGroup(edge.id);
         this.groupsByEdgeId.set(edge.id, group);
         layer.appendChild(group.group);
+        this.applyEdgeActivity(edge.id, this.options.resolveEdgeActivity?.(edge.id) ?? "idle");
       }
 
-      this.applyEdgeStatus(group, edge);
       group.visiblePath.setAttribute("d", curve.path);
       group.hitPath.setAttribute("d", curve.path);
+      group.glowPath.setAttribute("d", curve.path);
+      group.energyPath.setAttribute("d", curve.path);
       group.arrowPath.setAttribute("d", arrow);
       seen.add(edge.id);
     }
@@ -112,6 +109,14 @@ export class StudioEdgeRenderer {
     }
 
     this.renderPreview(getCursorAnchorPoint);
+  }
+
+  /** Stamp a cable's phase; `pulse` marks a real transition for one-shot emphasis. */
+  applyEdgeActivity(edgeId: string, phase: StudioEdgeActivityPhase, options?: { pulse?: boolean }): void {
+    const group = this.groupsByEdgeId.get(edgeId);
+    if (!group) return;
+    group.group.dataset.activity = phase;
+    if (options?.pulse) pulseStudioActivityElement(group.group, phase);
   }
 
   clear(): void {
@@ -131,33 +136,35 @@ export class StudioEdgeRenderer {
     group.dataset.edgeId = edgeId;
 
     // Wide, transparent hit target for hover/right-click selection.
-    // Static presentation for all three paths lives in
-    // views/studio/connections.css.
+    // Static presentation for every path lives in views/studio/connections.css
+    // and views/studio/activity.css.
     const hitPath = createStudioSvgElement(this.options.layer, "path");
     hitPath.setAttribute("class", "ss-studio-edge-hit");
     hitPath.dataset.edgeId = edgeId;
     group.appendChild(hitPath);
 
+    // Soft halo under the line; only visible while power flows or has landed.
+    const glowPath = createStudioSvgElement(this.options.layer, "path");
+    glowPath.setAttribute("class", "ss-studio-edge-glow");
+    group.appendChild(glowPath);
+
     const visiblePath = createStudioSvgElement(this.options.layer, "path");
     visiblePath.setAttribute("class", "ss-studio-edge-line");
     visiblePath.dataset.edgeId = edgeId;
+    visiblePath.style.stroke = BASE_STROKE;
     group.appendChild(visiblePath);
+
+    // Bright dashes that travel source → target while the source works.
+    const energyPath = createStudioSvgElement(this.options.layer, "path");
+    energyPath.setAttribute("class", "ss-studio-edge-energy");
+    group.appendChild(energyPath);
 
     const arrowPath = createStudioSvgElement(this.options.layer, "path");
     arrowPath.setAttribute("class", "ss-studio-edge-arrow");
+    arrowPath.style.stroke = BASE_STROKE;
     group.appendChild(arrowPath);
 
-    return { group, hitPath, visiblePath, arrowPath };
-  }
-
-  private applyEdgeStatus(group: EdgeGroupElements, edge: EdgeState): void {
-    group.group.dataset.status = edge.status;
-    const stroke = strokeForStatus(edge.status);
-    const opacity = edge.status === "idle" ? "0.85" : "1";
-    group.visiblePath.style.stroke = stroke;
-    group.visiblePath.style.opacity = opacity;
-    group.arrowPath.style.stroke = stroke;
-    group.arrowPath.style.opacity = opacity;
+    return { group, hitPath, glowPath, visiblePath, energyPath, arrowPath };
   }
 
   private renderPreview(getCursorAnchorPoint: () => { x: number; y: number } | null): void {

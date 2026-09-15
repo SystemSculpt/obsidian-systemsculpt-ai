@@ -139,6 +139,40 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(282);
   });
 
+  it.each([
+    { deltaX: 0, deltaY: 64, deltaMode: 0, expectedX: 184 },
+    { deltaX: 0, deltaY: -64, deltaMode: 0, expectedX: 56 },
+    { deltaX: 48, deltaY: 0, deltaMode: 0, expectedX: 168 },
+    { deltaX: 48, deltaY: 64, deltaMode: 0, expectedX: 168 },
+    { deltaX: 0, deltaY: 3, deltaMode: 1, expectedX: 168 },
+    { deltaX: 0, deltaY: 1, deltaMode: 2, expectedX: 1520 },
+  ])("pans only horizontally with Shift+wheel: %j", ({ expectedX, ...deltas }) => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+    const event = new WheelEvent("wheel", { ...deltas, shiftKey: true, cancelable: true });
+
+    controller.handleGraphViewportWheel(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(viewport.scrollLeft).toBe(expectedX);
+    expect(viewport.scrollTop).toBe(240);
+    expect(controller.getGraphZoom()).toBe(1);
+  });
+
+  it("leaves a wheel event consumed by a child control alone", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+    const event = new WheelEvent("wheel", { deltaY: 64, shiftKey: true, cancelable: true });
+    event.preventDefault();
+
+    controller.handleGraphViewportWheel(event);
+
+    expect(viewport.scrollLeft).toBe(120);
+    expect(viewport.scrollTop).toBe(240);
+  });
+
   it("pans the canvas for wheel events over unfocused editable form controls", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
@@ -201,7 +235,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(336);
   });
 
-  it("keeps native scrolling for wheel events inside focused editable form controls", () => {
+  it.each([false, true])("keeps native scrolling in focused fields (Shift: %s)", (shiftKey) => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -216,6 +250,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
       },
       ctrlKey: false,
       metaKey: false,
+      shiftKey,
       deltaX: 0,
       deltaY: 84,
       deltaMode: 0,
@@ -231,7 +266,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(240);
   });
 
-  it("zooms the canvas for ctrl+wheel events inside editable form controls", () => {
+  it.each([false, true])("preserves ctrl+wheel zoom inside editable fields (Shift: %s)", (shiftKey) => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -244,6 +279,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
       },
       ctrlKey: true,
       metaKey: false,
+      shiftKey,
       deltaX: 0,
       deltaY: -80,
       deltaMode: 0,
@@ -404,9 +440,13 @@ describe("StudioGraphSelectionController fit selection", () => {
     const fitted = controller.fitSelectionInViewport({ paddingPx: 25 });
 
     expect(fitted).toBe(true);
-    expect(controller.getGraphZoom()).toBeCloseTo(950 / 700, 5);
-    expect(viewport.scrollLeft).toBeCloseTo(110.7142857, 5);
-    expect(viewport.scrollTop).toBeCloseTo(242.8571429, 5);
+    const zoom = controller.getGraphZoom();
+    expect(zoom).toBeCloseTo(950 / 700, 5);
+    // The canvas has no corner, so assert the world coordinate under the
+    // viewport's top-left: the selection centre (450, 400) minus half a viewport.
+    const topLeft = controller.getViewportWorldTopLeft()!;
+    expect(topLeft.x).toBeCloseTo(450 - 500 / zoom, 5);
+    expect(topLeft.y).toBeCloseTo(400 - 300 / zoom, 5);
   });
 
   it("returns false and keeps viewport state when nothing is selected", () => {
@@ -544,8 +584,11 @@ describe("StudioGraphSelectionController fit selection", () => {
 
     expect(controller.fitGraphInViewport({ paddingPx: 25 })).toBe(true);
     expect(controller.getGraphZoom()).toBe(1);
-    expect(viewport.scrollLeft).toBe(0);
-    expect(viewport.scrollTop).toBe(0);
+    // Centred at natural scale: the node's centre sits at the viewport centre.
+    const node = host.getCurrentProject()!.graph.nodes[0];
+    const topLeft = controller.getViewportWorldTopLeft()!;
+    expect(topLeft.x).toBeCloseTo(node.position.x + 120 - 500, 5);
+    expect(topLeft.y).toBeCloseTo(node.position.y + 80 - 300, 5);
   });
 });
 
@@ -740,6 +783,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
 
     const harness = installWindowPointerListenerHarness();
     const movePreventDefault = jest.fn();
+    const before = controller.getViewportWorldTopLeft()!;
     try {
       controller.startCanvasPan(startEvent);
       harness.emit(
@@ -765,8 +809,11 @@ describe("StudioGraphSelectionController drag behavior", () => {
 
     expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(movePreventDefault).toHaveBeenCalledTimes(1);
-    expect(viewport.scrollLeft).toBe(180);
-    expect(viewport.scrollTop).toBe(300);
+    // Dragging the canvas 60px up-left reveals 60 world px more on the right
+    // and bottom, whatever the elastic box did to the raw scroll offsets.
+    const after = controller.getViewportWorldTopLeft()!;
+    expect(after.x - before.x).toBeCloseTo(60, 5);
+    expect(after.y - before.y).toBeCloseTo(60, 5);
     expect(controller.consumeSuppressedCanvasClick()).toBe(true);
   });
 });

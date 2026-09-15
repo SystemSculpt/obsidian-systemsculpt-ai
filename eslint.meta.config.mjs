@@ -12,7 +12,7 @@ export default defineConfig([
     },
     language: "json/json",
     rules: {
-      "obsidianmd/validate-manifest": "warn",
+      "obsidianmd/validate-manifest": "error",
     },
   },
   {
@@ -24,7 +24,7 @@ export default defineConfig([
       parser: PlainTextParser,
     },
     rules: {
-      "obsidianmd/validate-license": "warn",
+      "obsidianmd/validate-license": "error",
     },
   },
 ]);

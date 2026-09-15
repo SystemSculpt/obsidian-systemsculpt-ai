@@ -74,6 +74,10 @@ export type AudioProcessorOutputPreset =
 export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
 export interface SystemSculptSettings {
+  codexModel?: string;
+  codexThinkingLevel?: string;
+  codexServiceTier?: string;
+  textExecutionBackend?: "systemsculpt" | "codex";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -163,6 +167,9 @@ export interface SystemSculptSettings {
 
   favoriteChats: string[];
   favoriteStudioSessions: string[];
+  /** Starred Studio generation models, per media kind (opaque catalog ids). */
+  favoriteImageModels: string[];
+  favoriteVideoModels: string[];
 
   /**
    * Remembers export preferences for chat exports (toggle selections, folder, etc.)
@@ -230,6 +237,8 @@ export interface SystemSculptSettings {
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
+  textExecutionBackend: "systemsculpt",
+  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -273,6 +282,8 @@ Please:
 
   favoriteChats: [],
   favoriteStudioSessions: [],
+  favoriteImageModels: [],
+  favoriteVideoModels: [],
 
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),

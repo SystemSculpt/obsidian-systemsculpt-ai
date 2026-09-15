@@ -139,7 +139,7 @@ describe("StudioRuntime session snapshot runs", () => {
         generationFiles.set("runs/index.json", command.runIndexDocument);
         generationFiles.set("cache/node-results.json", command.cacheDocument);
       }),
-      readSupportFile: jest.fn(async (_projectPath: string, path: string) => generationFiles.get(path) || null),
+      readSupportFile: jest.fn(async (_projectPath: string, path: string) => generationFiles.get(path.split(".systemsculpt-assets/").pop() || path) || null),
       loadPolicy: jest.fn(async () => ({
         schema: "studio.policy.v1",
         version: 1,
@@ -180,8 +180,16 @@ describe("StudioRuntime session snapshot runs", () => {
     };
     const project = projectFixture();
 
+    const observed = jest.fn((update) => {
+      if (update.event.type === "run.completed" && update.event.status === "success") {
+        expect(generationFiles.has("runs/index.json")).toBe(true);
+      }
+    });
+    runtime.runs.subscribe(observed);
     const summary = await runtime.runProjectSnapshot("Studio/Test.systemsculpt", project);
 
+    expect(observed.mock.calls.map(([update]) => update.event.type)).toEqual(["run.started", "run.completed"]);
+    expect(runtime.runs.getActiveRun("Studio/Test.systemsculpt")).toBeNull();
     expect(summary.status).toBe("success");
     expect(projectStore.loadProject).not.toHaveBeenCalled();
     expect(projectStore.publishRun).toHaveBeenCalledTimes(1);
@@ -206,6 +214,14 @@ describe("StudioRuntime session snapshot runs", () => {
       expect.objectContaining({ name: "Live Session Snapshot" }),
       expect.anything()
     );
+
+    expect((await runtime.getLatestRunEvents("Studio/Test.systemsculpt")).map(event => event.type)).toEqual(["run.started", "run.completed"]);
+    observed.mockClear();
+    projectStore.publishRun.mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(runtime.runProjectSnapshot("Studio/Test.systemsculpt", project)).rejects.toThrow("disk unavailable");
+    expect(observed.mock.calls.map(([update]) => update.event.type)).toEqual(["run.started", "run.failed", "run.completed"]);
+    expect(observed.mock.calls.at(-1)?.[0].event).toMatchObject({ status: "failed" });
+    expect(runtime.runs.getActiveRun("Studio/Test.systemsculpt")).toBeNull();
   });
 
   it("lets a downstream node consume an asset staged by an upstream node before the run commit", async () => {
@@ -216,7 +232,7 @@ describe("StudioRuntime session snapshot runs", () => {
     const projectStore = {
       supportRelativePath: (_projectPath: string, path: string) => path,
       readSupportFile: jest.fn(async () => null),
-      loadPolicy: jest.fn(async () => ({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-03-22T00:00:00.000Z", grants: [] })),
+      loadPolicy: jest.fn(async () => ({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-03-22T00:00:00.000Z", grants: [{ id: "preview-read", capability: "filesystem", scope: { allowedPaths: ["Studio/Test.systemsculpt-assets"] }, grantedAt: "2026-03-22T00:00:00.000Z", grantedByUser: true }] })),
       publishRun: jest.fn(async (_path: string, command: unknown) => { published.push(command); }),
     } as any;
     const bytes = new Uint8Array([7, 8, 9]);
@@ -227,14 +243,20 @@ describe("StudioRuntime session snapshot runs", () => {
     } as any;
     const producer = {
       node: { id: "producer", kind: "test.producer", version: "1", title: "Producer", position: { x: 0, y: 0 }, config: {} },
-      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services }: any) => ({ outputs: { asset: await services.storeAsset(bytes.buffer, "application/octet-stream") } }) },
+      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", inputPorts: [], outputPorts: [{ id: "asset", type: "any" }], execute: async ({ services }: any) => ({ outputs: { asset: await services.storeAsset(bytes.buffer, "application/octet-stream") } }) },
       inboundEdges: [], dependencyNodeIds: [],
     };
     const consumer = {
       node: { id: "consumer", kind: "test.consumer", version: "1", title: "Consumer", position: { x: 1, y: 1 }, config: {} },
-      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", execute: async ({ services, inputs }: any) => {
+      definition: { requiredHostCapabilities: [], capabilityClass: "local_io", cachePolicy: "none", inputPorts: [{ id: "asset", type: "any", required: true }], outputPorts: [{ id: "size", type: "any" }], execute: async ({ services, inputs }: any) => {
         const consumed = new Uint8Array(await services.readAsset(inputs.asset));
         expect(consumed).toEqual(bytes);
+        // Media previews use the vault path, before the run publishes its assets.
+        const preview = new Uint8Array(await services.readVaultBinary(inputs.asset.path));
+        expect(preview).toEqual(bytes);
+        expect(await services.statVaultFileSize(inputs.asset.path)).toBe(bytes.byteLength);
+        preview[0] = 0;
+        expect(new Uint8Array(await services.readVaultBinary(inputs.asset.path))).toEqual(bytes);
         return { outputs: { size: consumed.byteLength } };
       } },
       inboundEdges: [{ fromNodeId: "producer", fromPortId: "asset", toNodeId: "consumer", toPortId: "asset" }], dependencyNodeIds: ["producer"],

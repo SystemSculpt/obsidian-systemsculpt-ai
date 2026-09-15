@@ -1,0 +1,42 @@
+/* Compact chrome shared by code, form, and panel surfaces (media and text
+ * cards are chromeless). The surface policy lives in StudioNodeSurface.ts;
+ * the source toolbar only appears while a source definition is showing. */
+.ss-studio-surface-card { background: var(--ss-surface-0); overflow: visible; }
+.ss-studio-surface-card .ss-studio-node-header { display: flex; min-height: 36px; padding: var(--ss-space-1) var(--ss-space-2); border-bottom: 1px solid var(--ss-line); gap: 8px; }
+.ss-studio-node-type { flex: 0 0 auto; font: var(--ss-text-xs) var(--ss-font-mono); text-transform: uppercase; letter-spacing: .07em; color: var(--ss-accent); white-space: nowrap; }
+.ss-studio-surface-card .ss-studio-node-title-input { flex: 1 1 auto; font-size: var(--ss-text-sm); font-weight: var(--ss-weight-semibold); height: 24px; padding: 0 4px; }
+.ss-studio-surface-card .ss-studio-node-header button { min-height: 24px; height: 24px; padding: 2px 6px; font-size: var(--ss-text-xs); }
+.ss-studio-source-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--ss-space-2); padding: var(--ss-space-1) var(--ss-space-2); border-bottom: 1px solid var(--ss-line); min-height: var(--ss-control-height); }
+.ss-studio-source-toolbar[hidden] { display: none; }
+.ss-studio-source-language { font: var(--ss-text-xs) var(--ss-font-mono); color: var(--ss-ink-faint); }
+.ss-studio-source-actions { display: flex; align-items: center; gap: var(--ss-space-1); margin-inline-start: auto; }
+.ss-studio-source-actions button { min-height: 24px; height: 24px; padding: 2px var(--ss-space-2); font-size: var(--ss-text-xs); background: transparent; box-shadow: none; }
+.ss-studio-source-language[hidden], .ss-studio-source-actions[hidden], .ss-studio-source-message[hidden] { display: none; }
+.ss-studio-source-code { margin: 0; padding: 8px 12px 14px; overflow: auto; max-height: 340px; tab-size: 2; font: var(--ss-text-sm)/var(--ss-leading-relaxed) var(--ss-font-mono); white-space: pre; background: transparent; color: var(--ss-ink); user-select: text; }
+.ss-studio-source-code code { font: inherit; background: transparent; padding: 0; color: inherit; }
+.ss-studio-source-note, .ss-studio-source-message, .ss-studio-source-empty { padding: 6px 10px; font-size: var(--ss-text-xs); color: var(--ss-ink-muted); overflow-wrap: anywhere; }
+.ss-studio-source-message.is-error { color: var(--ss-danger); }
+.ss-studio-source-editor { font: var(--ss-text-sm)/var(--ss-leading-relaxed) var(--ss-font-mono); }
+.ss-studio-source-editor .cm-editor { background: transparent; }
+.ss-studio-source-editor .cm-scroller { overflow: auto; max-height: 420px; min-height: 180px; font: inherit; }
+.ss-studio-source-editor .cm-gutters { background: var(--ss-surface-sunken); border: none; color: var(--ss-ink-faint); }
+.ss-studio-source-editor .cm-content { color: var(--ss-ink); caret-color: var(--ss-accent); padding: 8px 0; }
+.ss-studio-source-editor .cm-activeLine, .ss-studio-source-editor .cm-activeLineGutter { background: var(--ss-accent-tint); }
+.ss-studio-source-editor .cm-selectionBackground { background: var(--ss-accent-tint); }
+.ss-studio-source-markdown { padding: 10px 14px; max-height: 400px; overflow: auto; }
+.ss-studio-surface-card .tok-keyword, .ss-studio-surface-card .tok-heading { color: var(--color-purple); }
+.ss-studio-surface-card .tok-string, .ss-studio-surface-card .tok-string2 { color: var(--color-green); }
+.ss-studio-surface-card .tok-number, .ss-studio-surface-card .tok-bool, .ss-studio-surface-card .tok-null { color: var(--color-orange); }
+.ss-studio-surface-card .tok-comment { color: var(--ss-ink-faint); font-style: italic; }
+.ss-studio-surface-card .tok-propertyName, .ss-studio-surface-card .tok-labelName { color: var(--color-cyan); }
+.ss-studio-surface-card .tok-function, .ss-studio-surface-card .tok-variableName { color: var(--ss-ink); }
+.ss-studio-surface-card.is-detail-collapsed .ss-studio-source-code { max-height: 160px; }
+@media (pointer: coarse) {
+  .ss-studio-surface-card .ss-studio-node-header button, .ss-studio-source-actions button { min-width: 44px; min-height: 44px; height: auto; }
+  .ss-studio-surface-card .ss-studio-node-title-input { min-height: 44px; }
+}
+/* Port rows and their edge-straddling pins live in node-runtime.css. Labels
+ * stay clear of the compact header: the inputs column starts flush left and
+ * the outputs column ends flush right, so the pins ride the card border. */
+.ss-studio-node-result { min-width: 0; }
+.ss-studio-surface-card .ss-studio-node-source-toggle.is-selected { color: var(--ss-ink-accent); background: var(--ss-accent-tint); }

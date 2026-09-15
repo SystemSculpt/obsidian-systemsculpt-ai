@@ -5,6 +5,9 @@ const STUDIO_GRAPH_EDITABLE_SELECTOR = [
   "textarea",
   "select",
   "[contenteditable='true']",
+  "[contenteditable='']",
+  "[contenteditable='plaintext-only']",
+  ".cm-editor",
   `[${STUDIO_GRAPH_EDITOR_SURFACE_ATTR}]`,
 ].join(", ");
 const STUDIO_GRAPH_MENU_SELECTOR = ".ss-studio-node-context-menu, .ss-studio-simple-context-menu";

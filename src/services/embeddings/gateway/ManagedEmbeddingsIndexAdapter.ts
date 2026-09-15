@@ -1,5 +1,6 @@
 import { sha256HexFromArrayBuffer } from "../../../studio/hash";
 import { containsControlCharacters } from "../../../utils/characterValidation";
+import { base64ToBytes, bytesToBase64 } from "../../../utils/base64";
 import type { ManagedTransportResult } from "../../managed/ManagedTypes";
 import type { HostedTransportAdapter } from "../../managed/adapters/HostedTransportAdapter";
 
@@ -179,20 +180,17 @@ function decodeFloat32Vector(value: unknown, dimensions: number): Float32Array |
     return null;
   }
 
-  let binary: string;
+  let bytes: Uint8Array;
   try {
-    binary = atob(value);
-    if (btoa(binary) !== value) return null;
+    bytes = base64ToBytes(value);
+    // Reject non-canonical encodings: the payload must round-trip exactly.
+    if (bytesToBase64(bytes) !== value) return null;
   } catch {
     return null;
   }
-  if (binary.length !== dimensions * 4) return null;
+  if (bytes.byteLength !== dimensions * 4) return null;
 
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  const view = new DataView(bytes.buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const vector = new Float32Array(dimensions);
   let magnitudeSquared = 0;
   for (let index = 0; index < dimensions; index += 1) {

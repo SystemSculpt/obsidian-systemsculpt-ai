@@ -2,7 +2,6 @@
  * @jest-environment jsdom
  */
 
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { disposeMobileHostLayoutStates } from "../../../platform/mobileHostLayout";
 import {
@@ -352,29 +351,4 @@ describe("RecorderUIManager state-driven contract", () => {
     }
   });
 
-  it("pins the mobile card above host chrome and provides coarse-pointer targets", () => {
-    const css = readFileSync("src/css/components/recorder.css", "utf8");
-    const shellCss = readFileSync("src/css/components/hover-shell.css", "utf8");
-    const tokensCss = readFileSync("src/css/foundation/tokens.css", "utf8");
-
-    expect(tokensCss).toMatch(/--ss-z-floating-workflow:\s*40;/);
-    expect(css).toMatch(
-      /\.ss-recorder-hover\s*\{[^}]*z-index:\s*var\(--ss-z-floating-workflow\);/s,
-    );
-    expect(css).toMatch(
-      /\.ss-mobile-layout \.ss-recorder-hover\s*\{[^}]*right:\s*max\([^;]*safe-area-inset-right[^;]*;[^}]*bottom:\s*var\(--ss-mobile-bottom-clearance\);[^}]*left:\s*max\([^;]*safe-area-inset-left/s,
-    );
-    expect(css).toMatch(
-      /@media \(pointer:\s*coarse\)\s*\{[\s\S]*\.ss-recorder-hover \.ss-hover-shell__action\s*\{[^}]*min-height:\s*44px;/,
-    );
-    expect(css).toMatch(
-      /@media \(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*transition:\s*none;/,
-    );
-    expect(shellCss).toMatch(
-      /\.ss-mobile-layout \.ss-hover-shell\s*\{[^}]*max-height:\s*calc\([^}]*100dvh[^}]*--ss-mobile-bottom-clearance[^}]*safe-area-inset-top/s,
-    );
-    expect(shellCss).toMatch(
-      /\.ss-mobile-layout \.ss-hover-shell__content\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none;/s,
-    );
-  });
 });

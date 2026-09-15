@@ -46,8 +46,7 @@ function readConfigNumber(value: unknown): number | null {
   return numeric;
 }
 function normalizeFieldLabel(field: StudioNodeConfigFieldDefinition): string {
-  const raw = String(field.label || field.key || "").trim();
-  return raw.toUpperCase();
+  return String(field.label || field.key || "").trim();
 }
 
 function fieldKeyToCssSuffix(key: string): string {
@@ -58,6 +57,14 @@ function fieldKeyToCssSuffix(key: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Host hook that opens the media model catalog modal for one field and commits the chosen id. */
+export type StudioMediaModelPickerOpener = (
+  source: StudioNodeConfigDynamicOptionsSource,
+  node: StudioNodeInstance,
+  currentValue: string,
+  onValueChange: (value: string, label?: string) => void,
+) => void;
+
 function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefinition): string {
   if (field.required !== true) {
     return "Default";
@@ -66,7 +73,7 @@ function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefiniti
   return raw ? `Select ${raw}` : "Select option";
 }
 
-function commitInlineConfigValueChange(options: {
+export function commitInlineConfigValueChange(options: {
   node: StudioNodeInstance;
   key: string;
   value: StudioJsonValue;
@@ -127,7 +134,7 @@ function buildOrderedFieldList(options: {
 }
 
 function isInlineConfigFieldFullWidth(field: StudioNodeConfigFieldDefinition): boolean {
-  if (field.type === "select" && field.selectPresentation === "button_group") {
+  if (field.type === "select" && (field.selectPresentation === "button_group" || field.selectPresentation === "model_picker_modal")) {
     return true;
   }
   if (
@@ -135,6 +142,7 @@ function isInlineConfigFieldFullWidth(field: StudioNodeConfigFieldDefinition): b
     field.type === "media_path" ||
     field.type === "directory_path" ||
     field.type === "string_list" ||
+    field.type === "port_list" ||
     field.type === "note_selector"
   ) {
     return true;
@@ -158,6 +166,7 @@ function renderInlineConfigSelectField(options: {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
+  openMediaModelPicker?: StudioMediaModelPickerOpener;
 }): void {
   const {
     node,
@@ -167,6 +176,7 @@ function renderInlineConfigSelectField(options: {
     onNodeConfigMutated,
     onNodeConfigValueChange,
     resolveDynamicSelectOptions,
+    openMediaModelPicker,
   } = options;
 
   if (field.selectPresentation === "button_group" && Array.isArray(field.options) && field.options.length > 0) {
@@ -206,7 +216,49 @@ function renderInlineConfigSelectField(options: {
     return;
   }
 
-  if (field.selectPresentation === "searchable_dropdown") {
+  if (field.selectPresentation === "model_picker_modal" && field.optionsSource && openMediaModelPicker) {
+    const source = field.optionsSource;
+    const currentValue = readConfigString(node.config[field.key]);
+    const triggerEl = fieldEl.createEl("button", {
+      cls: "ss-studio-media-model-picker-trigger",
+      attr: { type: "button", "aria-label": `${node.title || node.kind} ${field.label || field.key}`, "aria-haspopup": "dialog", "data-testid": "studio.media-model-picker.trigger" },
+    });
+    triggerEl.disabled = interactionLocked;
+    const labelEl = triggerEl.createSpan({ cls: "ss-studio-media-model-picker-trigger-label", text: currentValue || resolveSearchableSelectPlaceholder(field) });
+    const badgeEl = triggerEl.createSpan({ cls: "ss-studio-media-model-picker-trigger-badge" });
+    badgeEl.hidden = true;
+    triggerEl.createSpan({ cls: "ss-studio-media-model-picker-trigger-chevron", text: "↗" });
+    // The catalog resolves the stored id to its display name and price; until
+    // it answers, the raw id is still an honest label.
+    const showOption = (value: string, label?: string): void => {
+      labelEl.setText(label || value || resolveSearchableSelectPlaceholder(field));
+      if (!resolveDynamicSelectOptions) return;
+      void resolveDynamicSelectOptions(source, node).then((resolved) => {
+        const selected = resolved.find((option) => option.value === value);
+        if (!selected) return;
+        labelEl.setText(selected.label || selected.value);
+        badgeEl.setText(selected.badge ?? "");
+        badgeEl.hidden = !selected.badge;
+      }).catch(() => undefined);
+    };
+    showOption(currentValue);
+    triggerEl.addEventListener("click", () => {
+      openMediaModelPicker(source, node, readConfigString(node.config[field.key]), (value, label) => {
+        commitInlineConfigValueChange({
+          node,
+          key: field.key,
+          value,
+          onNodeConfigMutated,
+          onNodeConfigValueChange,
+          mutationOptions: { mode: "discrete" },
+        });
+        showOption(value, label);
+      });
+    });
+    return;
+  }
+
+  if (field.selectPresentation === "searchable_dropdown" || field.selectPresentation === "model_picker_modal") {
     const loadOptions = async (): Promise<StudioNodeConfigSelectOption[]> => {
       if (field.optionsSource && resolveDynamicSelectOptions) {
         const resolved = await resolveDynamicSelectOptions(field.optionsSource, node);
@@ -501,10 +553,12 @@ function renderInlineConfigJsonObjectField(options: {
   });
   textAreaEl.disabled = interactionLocked;
   const initial = node.config[field.key];
+  const isPortList = field.type === "port_list";
+  if (isPortList) textAreaEl.placeholder = '[{"id":"value","type":"json","required":true}]';
   textAreaEl.value =
-    initial && typeof initial === "object" && !Array.isArray(initial)
+    initial && typeof initial === "object" && (isPortList ? Array.isArray(initial) : !Array.isArray(initial))
       ? JSON.stringify(initial, null, 2)
-      : "{}";
+      : isPortList ? "[]" : "{}";
 
   const commit = (): void => {
     const raw = textAreaEl.value.trim();
@@ -512,7 +566,7 @@ function renderInlineConfigJsonObjectField(options: {
       commitInlineConfigValueChange({
         node,
         key: field.key,
-        value: {},
+        value: isPortList ? [] : {},
         onNodeConfigMutated,
         onNodeConfigValueChange,
         mutationOptions: { mode: "discrete" },
@@ -521,7 +575,7 @@ function renderInlineConfigJsonObjectField(options: {
     }
     try {
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      if (!parsed || typeof parsed !== "object" || (isPortList ? !Array.isArray(parsed) : Array.isArray(parsed))) {
         return;
       }
       commitInlineConfigValueChange({
@@ -980,6 +1034,7 @@ export function renderInlineConfigPanel(options: {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
+  openMediaModelPicker?: StudioMediaModelPickerOpener;
 }): boolean {
   const {
     nodeEl,
@@ -995,6 +1050,7 @@ export function renderInlineConfigPanel(options: {
     showFieldHelp = true,
     pathBrowseOptions,
     resolveDynamicSelectOptions,
+    openMediaModelPicker,
   } = options;
 
   const fields = buildOrderedFieldList({
@@ -1045,16 +1101,13 @@ export function renderInlineConfigPanel(options: {
       cls: `ss-studio-node-inline-config-field ss-studio-node-inline-config-field--${fieldKeySuffix}${fullWidth ? " is-full" : ""}`,
     });
     fieldWrappers.set(field.key, { field, wrapper: fieldEl });
-    fieldEl.createDiv({
+    const labelEl = fieldEl.createDiv({
       cls: "ss-studio-node-inline-config-label",
       text: normalizeFieldLabel(field),
     });
-
+    // Help lives in the label's tooltip; the card stays a form, not a manual.
     if (showFieldHelp && field.description) {
-      fieldEl.createDiv({
-        cls: "ss-studio-node-inline-config-help",
-        text: field.description,
-      });
+      labelEl.title = field.description;
     }
 
     if (field.type === "select") {
@@ -1066,6 +1119,7 @@ export function renderInlineConfigPanel(options: {
         onNodeConfigMutated: handleNodeConfigMutated,
         onNodeConfigValueChange: handleNodeConfigValueChange,
         resolveDynamicSelectOptions,
+        openMediaModelPicker,
       });
       renderedAnyField = true;
       continue;
@@ -1137,7 +1191,7 @@ export function renderInlineConfigPanel(options: {
       renderedAnyField = true;
       continue;
     }
-    if (field.type === "json_object") {
+    if (field.type === "json_object" || field.type === "port_list") {
       renderInlineConfigJsonObjectField({
         node,
         field,

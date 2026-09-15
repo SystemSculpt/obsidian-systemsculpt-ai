@@ -29,19 +29,48 @@ describe("StudioEdgeRenderer", () => {
     expect(line).not.toBeNull();
     expect(line!.getAttribute("d")).toBeTruthy();
     expect(line!.getAttribute("d")!.startsWith("M 100 100")).toBe(true);
-    // Dynamic status stroke/opacity are inline so no stylesheet regression
-    // can blank the line; static presentation (fill, stroke-width, caps)
-    // lives on .ss-studio-edge-* rules in
-    // src/css/views/studio/connections.css.
-    expect(line!.style.stroke).toBeTruthy();
-    expect(line!.style.opacity).toBeTruthy();
+    // The base stroke is inline (through --ss-studio-edge-stroke with
+    // fallbacks) so no stylesheet regression can blank the line; static
+    // presentation and run-state visuals live on .ss-studio-edge-* rules in
+    // src/css/views/studio/connections.css and activity.css.
+    expect(line!.style.stroke).toContain("--ss-studio-edge-stroke");
     expect(line!.style.display).not.toBe("none");
 
     const group = layer.querySelector(".ss-studio-edge-group") as SVGGElement;
-    expect(group.dataset.status).toBe("idle");
-    // hit target + arrow are present too
+    expect(group.dataset.activity).toBe("idle");
+    // hit target, glow, energy, and arrow are present too
     expect(layer.querySelector(".ss-studio-edge-hit")).not.toBeNull();
+    expect(layer.querySelector(".ss-studio-edge-glow")?.getAttribute("d")).toBe(line!.getAttribute("d"));
+    expect(layer.querySelector(".ss-studio-edge-energy")?.getAttribute("d")).toBe(line!.getAttribute("d"));
     expect(layer.querySelector(".ss-studio-edge-arrow")).not.toBeNull();
+  });
+
+  it("stamps activity on new groups from the resolver and patches existing ones in place", () => {
+    const store = new StudioLinkStore();
+    const layer = makeLayer();
+    let phase: "idle" | "surging" | "delivered" | "failed" = "surging";
+    const renderer = new StudioEdgeRenderer({
+      store,
+      layer,
+      resolvePortAnchorPoint: (_anchor, direction) =>
+        direction === "out" ? { x: 0, y: 0 } : { x: 100, y: 100 },
+      getCursorAnchorPoint: () => null,
+      resolveEdgeActivity: () => phase,
+    });
+    store.setEdges([edge("e1")]);
+    renderer.render();
+    const group = layer.querySelector(".ss-studio-edge-group") as SVGGElement;
+    expect(group.dataset.activity).toBe("surging");
+
+    phase = "delivered";
+    renderer.applyEdgeActivity("e1", "delivered", { pulse: true });
+    expect(group.dataset.activity).toBe("delivered");
+    expect(group.dataset.activityPulse).toBe("delivered");
+    // Geometry re-renders keep the same group and its phase.
+    renderer.render();
+    expect(layer.querySelector(".ss-studio-edge-group")).toBe(group);
+    expect(group.dataset.activity).toBe("delivered");
+    expect(() => renderer.applyEdgeActivity("missing", "failed")).not.toThrow();
   });
 
   it("creates every SVG node in the edge layer owner document", () => {

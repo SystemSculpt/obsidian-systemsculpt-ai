@@ -180,12 +180,23 @@ export class SettingsManager {
   // failing saves in quick succession) shows one Notice, not one per keystroke.
   private lastSaveFailureNoticeAt = 0;
   private static readonly SAVE_FAILURE_NOTICE_DEDUPE_MS = 5000;
+  // Every load, save, and update runs through this promise tail. Calls apply in
+  // order and each merge sees the previous result, so the ~100 fire-and-forget
+  // updateSettings callers cannot interleave a read-modify-write across awaits
+  // and drop keys. A rejected task never poisons the tail for the next caller.
+  private persistenceQueue: Promise<void> = Promise.resolve();
 
 
   constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
     this.settings = DEFAULT_SETTINGS;
     this.automaticBackupService = new AutomaticBackupService(plugin);
+  }
+
+  private enqueuePersistence<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.persistenceQueue.then(task, task);
+    this.persistenceQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   // Migrate settings to ensure all fields are properly initialized
@@ -262,6 +273,14 @@ export class SettingsManager {
 
     if (!Array.isArray(migratedSettings.favoriteStudioSessions)) {
       migratedSettings.favoriteStudioSessions = DEFAULT_SETTINGS.favoriteStudioSessions;
+    }
+
+    if (!Array.isArray(migratedSettings.favoriteImageModels)) {
+      migratedSettings.favoriteImageModels = DEFAULT_SETTINGS.favoriteImageModels;
+    }
+
+    if (!Array.isArray(migratedSettings.favoriteVideoModels)) {
+      migratedSettings.favoriteVideoModels = DEFAULT_SETTINGS.favoriteVideoModels;
     }
     
     // Ensure automatic backup settings are properly initialized (migration for existing users)
@@ -404,24 +423,60 @@ export class SettingsManager {
   }
 
   async loadSettings(): Promise<void> {
-    let raw: Record<string, unknown> = {};
-    try {
-      const loadedData = await this.plugin.loadData();
-      raw = this.asSettingsRecord(loadedData);
-    } catch {
+    return this.enqueuePersistence(() => this.loadSettingsNow());
+  }
+
+  private async loadSettingsNow(): Promise<void> {
+    let raw = await this.readPersistedSettings();
+    if (raw === null) {
+      // data.json is missing, unreadable, empty, or not an object. Consult the
+      // backup BEFORE defaults: the save below persists whatever we load, so
+      // defaulting here would overwrite the user's file with a blank config.
       const backupSettings = await this.restoreFromBackup();
       raw = this.asSettingsRecord(backupSettings);
+      if (backupSettings) this.logRestoredFromBackup();
     }
 
     this.settings = await this.migrateValidateWithRollback(raw);
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
     this.isInitialized = true;
-    await this.saveSettings();
+    await this.saveSettingsNow();
 
     this.plugin.app.workspace.trigger("systemsculpt:settings-loaded", this.settings);
 
     // Start automatic backup service after settings are loaded
     this.automaticBackupService.start();
+  }
+
+  /**
+   * The persisted settings record, or null when data.json cannot be loaded or
+   * does not hold a non-empty object (null, an array, `{}`, a scalar).
+   */
+  private async readPersistedSettings(): Promise<Record<string, unknown> | null> {
+    try {
+      const loadedData = await this.plugin.loadData();
+      return this.isNonEmptyRecord(loadedData) ? loadedData : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
+    return !!value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && Object.keys(value).length > 0;
+  }
+
+  private logRestoredFromBackup(): void {
+    try {
+      this.plugin.getLogger().warn(
+        "Restored SystemSculpt settings from backup because data.json was empty or unreadable",
+        { source: "SettingsManager", method: "loadSettings" },
+      );
+    } catch {
+      // Logging must never block settings load.
+    }
   }
 
   private asSettingsRecord(value: unknown): Record<string, unknown> {
@@ -757,6 +812,14 @@ export class SettingsManager {
       validatedSettings.favoriteStudioSessions = defaultSettings.favoriteStudioSessions;
     }
 
+    if (!Array.isArray(validatedSettings.favoriteImageModels)) {
+      validatedSettings.favoriteImageModels = defaultSettings.favoriteImageModels;
+    }
+
+    if (!Array.isArray(validatedSettings.favoriteVideoModels)) {
+      validatedSettings.favoriteVideoModels = defaultSettings.favoriteVideoModels;
+    }
+
     // Legacy/dead keys (cachedEmbeddingStats, selectedProvider, systemPrompt*, …)
     // are pruned once by the versioned migrator's v0→v1 step, not on every
     // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
@@ -811,8 +874,8 @@ export class SettingsManager {
    * storm. We log + notify rather than rethrow: `saveSettings` is invoked from the
    * load path and from ~100 fire-and-forget `updateSettings(...)` callers, so
    * rethrowing would convert disk-full/permission errors into uncaught rejections
-   * and could break plugin load. Observability is the fix here; serializing writes
-   * is tracked separately (BUG-09).
+   * and could break plugin load. Observability is the fix here; writes are
+   * serialized through the persistence queue.
    */
   private surfaceSaveFailure(error: unknown): void {
     try {
@@ -844,6 +907,10 @@ export class SettingsManager {
    * This ensures settings are properly saved with fallback options
    */
   async saveSettings(): Promise<void> {
+    return this.enqueuePersistence(() => this.saveSettingsNow());
+  }
+
+  private async saveSettingsNow(): Promise<void> {
     if (!this.isInitialized) {
       return;
     }
@@ -880,8 +947,12 @@ export class SettingsManager {
    * Update settings with partial changes
    */
   async updateSettings(newSettings: Partial<SystemSculptSettings>): Promise<void> {
+    return this.enqueuePersistence(() => this.updateSettingsNow(newSettings));
+  }
+
+  private async updateSettingsNow(newSettings: Partial<SystemSculptSettings>): Promise<void> {
     if (!this.isInitialized) {
-      await this.loadSettings(); // Ensure settings are loaded before update
+      await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
@@ -894,8 +965,9 @@ export class SettingsManager {
     // – persists the latest in-memory changes rather than stale data.
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
 
-    // Call saveSettings to persist, update plugin._settings, and dispatch event
-    await this.saveSettings();
+    // Persist, update plugin._settings, and dispatch the event. This already
+    // runs inside the persistence queue, so call the unqueued variant.
+    await this.saveSettingsNow();
     // Settings updated and saved - silent operation
   }
 

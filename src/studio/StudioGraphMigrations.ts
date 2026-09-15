@@ -152,7 +152,7 @@ function asFiniteGeometryNumber(value: StudioJsonValue | undefined): number | nu
  * kind rename, where a kind id was reused and only a stamp could
  * disambiguate), the pass is a no-op on already-migrated nodes, and no
  * production write path emits config geometry anymore (guarded by
- * studio-geometry-architecture-lint.test.ts). Migration is lossless: values
+ * studio-node-geometry.test.ts). Migration is lossless: values
  * move unclamped — the geometry resolvers clamp at read time.
  */
 function migrateNodeGeometryToSize(

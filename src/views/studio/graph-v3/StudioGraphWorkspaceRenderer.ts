@@ -1,3 +1,6 @@
+import type { StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
+import type { StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
+import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
 import type {
   StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
@@ -7,8 +10,6 @@ import type {
   StudioProjectV1,
 } from "../../../studio/types";
 import {
-  STUDIO_GRAPH_CANVAS_HEIGHT,
-  STUDIO_GRAPH_CANVAS_WIDTH,
   StudioGraphInteractionEngine,
 } from "../StudioGraphInteractionEngine";
 import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
@@ -36,6 +37,8 @@ import {
   type StudioShapeLayerOptions,
 } from "../shapes/StudioShapeLayer";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
+import { resolveStudioGraphNodeWidth, resolveStudioGraphNodeMinHeight, resolveStudioGraphSafeZoom } from "../../../studio/StudioNodeGeometry";
+import type { StudioNodeActivity } from "../activity/StudioActivity";
 
 type StudioWorkspaceControlOptions = Readonly<{
   label: string;
@@ -77,9 +80,12 @@ export type StudioGraphWorkspaceRendererOptions = {
   busy: boolean;
   currentProject: StudioProjectV1 | null;
   currentProjectPath: string | null;
+  agentRuns?: StudioAgentRuns;
   nodeDetailMode: StudioNodeDetailMode;
   graphInteraction: StudioGraphInteractionEngine;
   getNodeRunState: (nodeId: string) => StudioNodeRunDisplayState;
+  /** First-paint activity per node (views/studio/activity); the applier patches later changes. */
+  getNodeActivity?: (nodeId: string) => StudioNodeActivity | undefined;
   findNodeDefinition: (node: StudioNodeInstance) => StudioNodeDefinition | null;
   resolveAssetPreviewSrc?: (assetPath: string) => string | null;
   onOpenMediaPreview?: (options: {
@@ -108,6 +114,10 @@ export type StudioGraphWorkspaceRendererOptions = {
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomOverview: () => void;
+  onArrangeGraph?: () => void;
+  automaticLayout?: boolean;
+  onToggleAutomaticLayout?: () => void;
+  onToggleLayoutPins?: () => void;
   onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateTextNodeAtPosition: (position: { x: number; y: number }) => void;
@@ -116,6 +126,7 @@ export type StudioGraphWorkspaceRendererOptions = {
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
+  onNodeSourceApply?: (nodeId: string, source: string, expectedSource: string) => void;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,
@@ -143,6 +154,8 @@ export type StudioGraphWorkspaceRendererOptions = {
     source: StudioNodeConfigDynamicOptionsSource,
     node: StudioNodeInstance
   ) => Promise<StudioNodeConfigSelectOption[]>;
+  openMediaModelPicker?: StudioMediaModelPickerOpener;
+  resolveMediaNodeInputPlan?: (node: StudioNodeInstance) => StudioMediaNodeInputPlan | null;
   isTextNodeEditing: (nodeId: string) => boolean;
   consumeTextNodeAutoFocus: (nodeId: string) => boolean;
   consumeTextNodeFocusPoint: (nodeId: string) => StudioTextNodeFocusTarget | undefined;
@@ -156,6 +169,7 @@ export type StudioGraphWorkspaceRendererOptions = {
     nodeId: string,
     teardown: () => StudioTextNodeMarkdownEditorSnapshot
   ) => void;
+  registerNodeTeardown?: (nodeId: string, teardown: () => void) => void;
   onRevealPathInFinder: (path: string) => void;
   pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
@@ -182,6 +196,7 @@ export function renderStudioGraphWorkspace(
     nodeDetailMode,
     graphInteraction,
     getNodeRunState,
+    getNodeActivity,
     findNodeDefinition,
     resolveAssetPreviewSrc,
     onOpenMediaPreview,
@@ -202,6 +217,7 @@ export function renderStudioGraphWorkspace(
     onToggleTextGenerationOutputLock,
     onRemoveNode,
     onNodeTitleInput,
+    onNodeSourceApply,
     onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize,
@@ -213,6 +229,8 @@ export function renderStudioGraphWorkspace(
     renderMarkdownPreview,
     onNodeGeometryMutated,
     resolveDynamicSelectOptions,
+    openMediaModelPicker,
+    resolveMediaNodeInputPlan,
     isTextNodeEditing,
     consumeTextNodeAutoFocus,
     consumeTextNodeFocusPoint,
@@ -221,6 +239,7 @@ export function renderStudioGraphWorkspace(
     onStopTextNodeEdit,
     createTextNodeMarkdownEditor,
     registerTextNodeEditorTeardown,
+    registerNodeTeardown,
     onRevealPathInFinder,
     pathBrowseOptions,
     resolveNodeBadge,
@@ -300,28 +319,22 @@ export function renderStudioGraphWorkspace(
     ) {
       return;
     }
-    const rect = viewport.getBoundingClientRect();
-    const localX = dblEvent.clientX - rect.left;
-    const localY = dblEvent.clientY - rect.top;
-    if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+    const point = graphInteraction.graphPointFromClient(dblEvent.clientX, dblEvent.clientY);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
       return;
     }
-    const zoom = graphInteraction.getGraphZoom() || 1;
-    const graphX = (viewport.scrollLeft + localX) / zoom;
-    const graphY = (viewport.scrollTop + localY) / zoom;
-    onCreateTextNodeAtPosition({
-      x: graphX,
-      y: graphY,
-    });
+    onCreateTextNodeAtPosition({ x: point.x, y: point.y });
   });
 
   const surface = viewport.createDiv({ cls: "ss-studio-graph-surface" });
   graphInteraction.registerSurfaceElement(surface);
 
+  // The canvas is the scroll box; the world inside it is where every layer
+  // lives in world px, translated by the elastic origin (see
+  // StudioGraphWorldExtent). The interaction engine sizes both.
   const canvas = surface.createDiv({ cls: "ss-studio-graph-canvas" });
-  canvas.style.width = `${STUDIO_GRAPH_CANVAS_WIDTH}px`;
-  canvas.style.height = `${STUDIO_GRAPH_CANVAS_HEIGHT}px`;
-  graphInteraction.registerCanvasElement(canvas);
+  const world = canvas.createDiv({ cls: "ss-studio-graph-world" });
+  graphInteraction.registerCanvasElement(canvas, world);
 
   const marquee = viewport.createDiv({ cls: "ss-studio-marquee-select" });
   graphInteraction.registerMarqueeElement(marquee);
@@ -331,6 +344,11 @@ export function renderStudioGraphWorkspace(
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
   const graphRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-row" });
+  const commandCenter = currentProject.graph.nodes.find(node => node.kind === 'studio.command_center');
+  if (commandCenter) createStudioWorkspaceControl(graphRow, {
+    label: 'Home', testId: 'studio.workspace.command-center', ariaLabel: 'Go to Command Center', icon: 'house',
+    onSelect: () => { graphInteraction.setSelectedNodeIds([commandCenter.id]); graphInteraction.fitSelectedNodesInViewport(); },
+  });
   createStudioWorkspaceControl(graphRow, {
     label: "Run",
     testId: "studio.workspace.run",
@@ -357,6 +375,22 @@ export function renderStudioGraphWorkspace(
       }
       onOpenAddNodeMenuAtViewportCenter();
     },
+  });
+
+  if (options.onArrangeGraph) createStudioWorkspaceControl(graphRow, {
+    label: "Arrange", testId: "studio.workspace.arrange", ariaLabel: "Arrange graph from connections and groups",
+    onSelect: options.onArrangeGraph,
+  });
+  if (options.onToggleAutomaticLayout) {
+    const auto = createStudioWorkspaceControl(graphRow, {
+      label: options.automaticLayout ? "Auto on" : "Auto off", testId: "studio.workspace.auto-layout",
+      ariaLabel: "Toggle automatic layout", onSelect: options.onToggleAutomaticLayout,
+    });
+    auto.setAttribute("aria-pressed", String(Boolean(options.automaticLayout)));
+  }
+  if (options.onToggleLayoutPins) createStudioWorkspaceControl(graphRow, {
+    label: "Pin", testId: "studio.workspace.pin-layout", ariaLabel: "Pin or unpin selected nodes and their groups",
+    title: "Pin or unpin selection. Dragging in automatic mode pins the moved group.", onSelect: options.onToggleLayoutPins,
   });
 
   const zoomRow = graphRow.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });
@@ -405,8 +439,7 @@ export function renderStudioGraphWorkspace(
 
   // Second row — diagram tools. Each is an armed mode, not an immediate
   // action: the shape tools draw freeform on empty canvas, and the arrow tool
-  // connects one shape to another. They act on the diagram layer only; the
-  // node graph has no shape and the diagram has no node.
+  // visually connects nodes and shapes without creating workflow connections.
   const toolsRow = controls.createDiv({
     cls: "ss-studio-graph-workspace-control-row is-tools",
   });
@@ -422,21 +455,21 @@ export function renderStudioGraphWorkspace(
       label: "Select tool",
       icon: "mouse-pointer-2",
       testId: "studio.workspace.tool.select",
-      title: "Select (A): the plain cursor for selecting and moving",
+      title: "Select (S): select and move nodes and shapes",
     },
     {
       tool: "rectangle",
-      label: "Square tool",
+      label: "Box tool",
       icon: "square",
       testId: "studio.workspace.tool.square",
-      title: "Square: drag on the canvas",
+      title: "Box (B): drag on the canvas",
     },
     {
       tool: "ellipse",
       label: "Circle tool",
       icon: "circle",
       testId: "studio.workspace.tool.circle",
-      title: "Circle: drag on the canvas",
+      title: "Circle (C): drag on the canvas",
     },
     {
       tool: "diamond",
@@ -478,7 +511,7 @@ export function renderStudioGraphWorkspace(
       label: "Arrow tool",
       icon: "move-right",
       testId: "studio.workspace.tool.arrow",
-      title: "Draw an arrow: drag from one shape onto another",
+      title: "Arrow (A): drag between nodes or shapes to draw a visual connection",
     },
   ];
   for (const control of toolControls) {
@@ -507,30 +540,45 @@ export function renderStudioGraphWorkspace(
     graphInteraction.handleCanvasBackgroundClick(event.target as HTMLElement);
   });
 
-  const edgesLayer = createStudioSvgElement(canvas, "svg");
+  const edgesLayer = createStudioSvgElement(world, "svg");
   edgesLayer.setAttribute("class", "ss-studio-edges-layer");
-  edgesLayer.setAttribute("viewBox", `0 0 ${STUDIO_GRAPH_CANVAS_WIDTH} ${STUDIO_GRAPH_CANVAS_HEIGHT}`);
-  edgesLayer.setAttribute("width", String(STUDIO_GRAPH_CANVAS_WIDTH));
-  edgesLayer.setAttribute("height", String(STUDIO_GRAPH_CANVAS_HEIGHT));
-  canvas.appendChild(edgesLayer);
+  world.appendChild(edgesLayer);
   graphInteraction.registerEdgesLayerElement(edgesLayer);
 
-  // Diagram layer sits between the graph's edges and its node cards: shapes
-  // never occlude a node, and it owns its gestures outright — the node graph
-  // has no concept of a shape and vice versa.
+  // Diagram arrows use visual card bounds while remaining separate from ports.
   const { registerLayerHandle, ...shapeLayerOptions } = shapeLayer;
-  registerLayerHandle(
-    renderStudioShapeLayer({
-      canvasEl: canvas,
+  const nodesById = new Map(currentProject.graph.nodes.map((node) => [node.id, node]));
+  const shapeHandle = renderStudioShapeLayer({
+      canvasEl: world,
       diagram: readStudioDiagramFromProject(currentProject),
       busy,
       activeCanvasTool,
       getGraphZoom: () => graphInteraction.getGraphZoom(),
+      getNodeAnchor: (nodeId) => {
+        const node = nodesById.get(nodeId);
+        if (!node) return null;
+        const element = graphInteraction.getNodeElement(nodeId);
+        const rect = element?.getBoundingClientRect();
+        const origin = world.getBoundingClientRect();
+        const zoom = resolveStudioGraphSafeZoom(graphInteraction.getGraphZoom());
+        return {
+          id: nodeId,
+          shape: "rectangle",
+          position: {
+            x: rect?.width ? (rect.left - origin.left) / zoom : node.position.x,
+            y: rect?.height ? (rect.top - origin.top) / zoom : node.position.y,
+          },
+          size: {
+            width: element?.offsetWidth || resolveStudioGraphNodeWidth(node),
+            height: element?.offsetHeight || resolveStudioGraphNodeMinHeight(node),
+          },
+        };
+      },
       ...shapeLayerOptions,
-    })
-  );
+    });
+  registerLayerHandle(shapeHandle);
 
-  const nodeLayer = canvas.createDiv({ cls: "ss-studio-nodes-layer" });
+  const nodeLayer = world.createDiv({ cls: "ss-studio-nodes-layer" });
   graphInteraction.clearGraphElementMaps();
   const inboundEdgesByNode = new Map<
     string,
@@ -547,12 +595,18 @@ export function renderStudioGraphWorkspace(
   }
   for (const node of currentProject.graph.nodes) {
     renderStudioGraphNodeCard({
+      projectId: currentProject.projectId,
+      projectPath: currentProjectPath,
+      agentRuns: options.agentRuns,
+      projectNodes: currentProject.graph.nodes,
+      getRelatedNodeRunState: getNodeRunState,
       layer: nodeLayer,
       busy,
       node,
       nodeDetailMode,
       inboundEdges: inboundEdgesByNode.get(node.id) || [],
       nodeRunState: getNodeRunState(node.id),
+      nodeActivity: getNodeActivity?.(node.id),
       graphInteraction,
       findNodeDefinition,
       resolveAssetPreviewSrc,
@@ -562,6 +616,7 @@ export function renderStudioGraphWorkspace(
       onToggleTextGenerationOutputLock,
       onRemoveNode,
       onNodeTitleInput,
+      onNodeSourceApply,
       onNodeConfigMutated,
       onNodeConfigValueChange,
       onNodeResize,
@@ -573,6 +628,8 @@ export function renderStudioGraphWorkspace(
       renderMarkdownPreview,
       onNodeGeometryMutated,
       resolveDynamicSelectOptions,
+      openMediaModelPicker,
+      resolveMediaNodeInputPlan,
       isTextNodeEditing,
       consumeTextNodeAutoFocus,
       consumeTextNodeFocusPoint,
@@ -581,6 +638,7 @@ export function renderStudioGraphWorkspace(
       onStopTextNodeEdit,
       createTextNodeMarkdownEditor,
       registerTextNodeEditorTeardown,
+      registerNodeTeardown,
       onRevealPathInFinder,
       pathBrowseOptions,
       resolveNodeBadge,
@@ -591,5 +649,6 @@ export function renderStudioGraphWorkspace(
   graphInteraction.refreshNodeSelectionClasses();
   graphInteraction.applyGraphZoom();
   graphInteraction.refreshSelectionResizeFrame();
-  return { viewportEl: viewport, canvasEl: canvas };
+  shapeHandle.refreshArrows();
+  return { viewportEl: viewport, canvasEl: world };
 }

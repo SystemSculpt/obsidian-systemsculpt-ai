@@ -29,9 +29,6 @@ const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "")
 const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/verify-ci-failure-evidence.test.mjs",
-  "scripts/chatview-critical-mutants.test.mjs",
-  "scripts/check/chatview-critical-mutants-policy.test.mjs",
-  "scripts/check/test-gate-partition-policy.test.mjs",
   "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
   "scripts/plugin-release-metadata.test.mjs",
@@ -48,6 +45,7 @@ const FAST_SCRIPT_TESTS = [
 const NORMAL_SCRIPT_TESTS = [
   "scripts/mobile-compatibility.test.mjs",
   "scripts/dev-watcher-service.test.mjs",
+  "scripts/build-provenance.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
   "scripts/release-plugin.test.mjs",

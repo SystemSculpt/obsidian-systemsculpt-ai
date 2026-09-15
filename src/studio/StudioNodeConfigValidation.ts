@@ -1,3 +1,6 @@
+import { readStudioCommandExecution } from './StudioCommandExecution';
+import { readStudioCommandActions } from "./nodes/commandCenterNode";
+import { readStudioScript } from "./StudioScript";
 import type {
   StudioJsonValue,
   StudioNodeConfigFieldDefinition,
@@ -5,6 +8,7 @@ import type {
   StudioNodeDefinition,
 } from "./types";
 import { isRecord } from "./utils";
+import { isStudioDynamicPortId, isStudioPortDataType, isStudioProcessFixedOutputPortId, STUDIO_DYNAMIC_PORT_MAX_COUNT } from "./types";
 
 function cloneJsonValue<T>(value: T): T {
   try {
@@ -154,6 +158,9 @@ export function validateNodeConfig(
           });
           break;
         }
+        if (field.optionsSource === "image_aspect_ratios" && value !== "" && !/^(auto|match_input_image|[0-9]{1,2}(?:\.[0-9]{1,2})?:[0-9]{1,2}(?:\.[0-9]{1,2})?)$/.test(value)) {
+          errors.push({ fieldKey: field.key, message: "Must be an aspect ratio or the model default." });
+        }
         if (field.type === "select" && Array.isArray(field.options) && field.options.length > 0) {
           const allowed = new Set(field.options.map((option) => option.value));
           if (!allowed.has(value)) {
@@ -213,6 +220,58 @@ export function validateNodeConfig(
           });
         }
         break;
+      }
+      case 'port_list': {
+        if (!Array.isArray(value)) {
+          errors.push({ fieldKey: field.key, message: 'Must be a list of port definitions.' })
+          break
+        }
+        if (value.length > STUDIO_DYNAMIC_PORT_MAX_COUNT) {
+          errors.push({
+            fieldKey: field.key,
+            message: `Must have at most ${STUDIO_DYNAMIC_PORT_MAX_COUNT} ports.`
+          })
+          break
+        }
+        const seen = new Set<string>()
+        for (const entry of value) {
+          if (!isRecord(entry)) {
+            errors.push({ fieldKey: field.key, message: 'Every port must be an object.' })
+            break
+          }
+          const id = typeof entry.id === 'string' ? entry.id.trim() : ''
+          const type = entry.type
+          if (!isStudioDynamicPortId(id)) {
+            errors.push({
+              fieldKey: field.key,
+              message: 'Port names must start with a letter and use only letters, numbers, _ or -.'
+            })
+            break
+          }
+          if (
+            seen.has(id) ||
+            (field.portDirection === 'output' && isStudioProcessFixedOutputPortId(id))
+          ) {
+            errors.push({
+              fieldKey: field.key,
+              message: `Port name "${id}" is reserved or repeated.`
+            })
+            break
+          }
+          seen.add(id)
+          if (!isStudioPortDataType(type)) {
+            errors.push({ fieldKey: field.key, message: `Port "${id}" has an invalid type.` })
+            break
+          }
+          if (typeof entry.required !== 'undefined' && typeof entry.required !== 'boolean') {
+            errors.push({
+              fieldKey: field.key,
+              message: `Port "${id}" has an invalid required flag.`
+            })
+            break
+          }
+        }
+        break
       }
       case "string_list": {
         if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
@@ -282,6 +341,14 @@ export function validateNodeConfig(
         });
       }
     }
+  }
+
+  if (definition.kind === "studio.command_center") {
+    try { readStudioCommandExecution(merged.execution); } catch (error) { errors.push({ fieldKey: "execution", message: error instanceof Error ? error.message : "Invalid execution settings." }); }
+    try { readStudioCommandActions(merged.actions); } catch (error) { errors.push({ fieldKey: "actions", message: error instanceof Error ? error.message : "Invalid commands." }); }
+  }
+  if (definition.kind === "studio.script") {
+    try { readStudioScript(merged.source); } catch (error) { errors.push({ fieldKey: "source", message: error instanceof Error ? error.message : "Invalid script." }); }
   }
 
   return {

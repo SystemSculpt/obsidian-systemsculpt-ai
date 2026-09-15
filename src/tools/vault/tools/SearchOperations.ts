@@ -2,6 +2,7 @@ import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { FindFilesParams, GrepVaultParams } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import { countTextTokens } from "../../../utils/tokenCounting";
+import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import {
   createLineCalculator,
   wouldExceedCharLimit,
@@ -804,10 +805,7 @@ export class SearchOperations {
     type SearchCursor = Readonly<{ q: string; o: number }>;
     const encodeCursor = (state: SearchCursor): string => {
       try {
-        const bytes = new TextEncoder().encode(JSON.stringify(state));
-        let binary = "";
-        for (const byte of bytes) binary += String.fromCharCode(byte);
-        return btoa(binary);
+        return utf8ToBase64(JSON.stringify(state));
       } catch {
         return "";
       }
@@ -815,9 +813,7 @@ export class SearchOperations {
     const decodeCursor = (cursor?: string): SearchCursor | null => {
       if (!cursor || typeof cursor !== 'string') return null;
       try {
-        const binary = atob(cursor);
-        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        const decoded: unknown = JSON.parse(new TextDecoder().decode(bytes));
+        const decoded: unknown = JSON.parse(base64ToUtf8(cursor));
         if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return null;
         const candidate = decoded as Record<string, unknown>;
         return typeof candidate.q === "string" && typeof candidate.o === "number"

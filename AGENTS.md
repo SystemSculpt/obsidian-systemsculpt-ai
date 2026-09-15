@@ -7,8 +7,8 @@ is a symlink to this file; edit this file only.
 
 The SystemSculpt workspace has three sibling repositories:
 
-- ~/gits/personal/systemsculpt/plugin — this Obsidian client.
-- ~/gits/systemsculpt/website — the customer website and first-party API.
+- ~/gits/systemsculpt/plugin — this Obsidian client.
+- ~/gits/systemsculpt/systemsculpt-website — the customer website and first-party API.
 - ~/gits/systemsculpt/systemsculpt-os — growth and operator automation.
 
 The plugin is a thin, vault-native client. It owns Obsidian integration,
@@ -19,9 +19,11 @@ policy, provider retry, compaction, prompt caching, authoritative chat
 sessions, provider SDKs, provider credentials, model catalogs, marketing
 operations, or a local AI runtime.
 
-All AI traffic uses the first-party SystemSculpt API at
+Managed AI traffic uses the first-party SystemSculpt API at
 https://systemsculpt.com/api/plugin. OpenRouter and server agent
 implementation details stay behind that interface.
+
+Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product surface and retires development of the standalone desktop app. Personal agent execution uses Codex and T3 Code directly. Preserve saved projects, drafts, and history. Michael’s 2026-09-08 direction authorizes selectable on-machine Codex for ChatView, Studio text generation and desktop Studio Codex task cards through the installed Codex app-server and the machine’s existing Codex login, as in T3 Code. This is a thin local protocol client exception: Codex owns its agent loop, credentials, approval review, tools and authoritative thread history; never copy tokens or introduce a separate agent runtime. Michael’s 2026-09-08 run-board direction also authorizes independent explicit native Codex run instances and project-scoped message/handoff tools. The plugin projects public native activity, stores a bounded presentation cache, and forwards explicit messages as native turns; ordinary independent runs must not infer completion or schedule autonomous continuation. Michael’s 2026-09-08 Command Center direction authorizes owner-started native Codex orchestrators: persist the model-authored plan, dispatch bounded assignments, deliver child results and resume interrupted workflow threads. Codex chooses every next step and explicitly declares the objective outcome; Studio handles event delivery and recovery only. Managed SystemSculpt AI keeps the API boundary above. Preserve existing standalone work while reusing applicable portable Studio behavior here.
 
 ## Server-upgrade independence
 
@@ -147,13 +149,15 @@ npm run check:ui
 npm run check:mobile
 npm run test:integration
 npm run test:chatview:critical
-npm run test:chatview:mutants
 npm run check:plugin
 npm run check:ci
 npm run check:compat
-npm run check:full
 ~~~
 
+- check:ui runs the CSS and UI architecture policy tests, then test:ui:focused:
+  one Jest path pattern over the UI-owned suites (surface, modals, progress,
+  audio processor, recorder, history, editor, and Studio directories plus the
+  named settings, context-menu, main-initialize, and chat-workspace tests).
 - check:mobile runs the static mobile-safety policy, rebuilds the artifact, and
   runs focused narrow-pane, touch, accessibility, and Studio capability tests
   before opening settings, Chat, Similar Notes, and Studio from that artifact
@@ -163,16 +167,15 @@ npm run check:full
 - test:chatview:critical runs the persistence, managed-request projection,
   controller/runtime/transport, storage, and restored-history UI suites with
   strict console, randomized order, open-handle detection, seeded generative
-  histories, and per-file uncovered-code budgets.
-- test:chatview:mutants creates an isolated source mirror, applies 5 curated
-  compatibility, projection, session, durability, controller, replay, and
-  restored-history regressions, and requires focused tests to kill every one.
+  histories, and a global coverage floor over the critical ChatView modules
+  (the small identity and tool-execution modules stay at 100%).
 - check:ci is the exact exhaustive PR gate. It adds strict-console randomized
-  mobile interactions, critical ChatView coverage, curated mutation testing,
-  the partitioned unit remainder, embeddings, already-built integration,
-  open-handle detection, and release-script contracts. Focused mobile and
-  ChatView paths are excluded from the unit remainder so they are not run a
-  third time. check:full is its local alias.
+  mobile interactions, critical ChatView coverage, the partitioned unit
+  remainder, embeddings, already-built integration, and open-handle detection.
+  Focused mobile and ChatView paths are excluded from the unit remainder so
+  they are not run a third time. The release-script contracts (build
+  provenance, build options, artifacts, release-plugin) run inside check:plugin
+  and remain available standalone as test:release-script.
 - check:compat is the smaller compatibility contract used on Node 22.18,
   Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
   the same critical ChatView suites without repeating coverage instrumentation.
@@ -183,8 +186,7 @@ npm run check:full
   which fails unless every exhaustive and compatibility lane succeeds.
 - Top-level hosted Jest gates record replay-oriented child argv and seed.
   Failed jobs retain those records, ChatView coverage, artifact inspection,
-  build provenance, and exact plugin artifact bytes for 14 days. The exhaustive
-  plugin lane also records mutation results when that gate is reached.
+  build provenance, and exact plugin artifact bytes for 14 days.
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 - Saved chat parsing fails closed. A malformed or truncated history must never
   become a shortened request. Leave the source note unchanged, open a fresh
@@ -211,7 +213,7 @@ changing the release version used by server contracts. Use the official
 Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and
 visual verification.
 
-For mobile-sensitive changes, npm run check:mobile and npm run check:full are
+For mobile-sensitive changes, npm run check:mobile and npm run check:ci are
 the release gates. They validate the exact built main.js, manifest.json, and
 styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
 capability scenarios with desktop adapters unavailable. Simulator, emulator,
@@ -222,7 +224,7 @@ manual mobile exploration is performed.
 
 ## Product contracts
 
-- Approval modes are Ask Approval and Full Access.
+- Managed API approval modes are Ask Approval and Full Access. On-machine Codex inherits native configuration, including approval policy, sandbox, permission profiles and reviewer; never override these with plugin settings.
 - Read-only vault tools may run immediately; mutating tools follow the selected
   approval policy.
 - The client executes local vault tools but never orchestrates the agent that
@@ -231,8 +233,7 @@ manual mobile exploration is performed.
   transcript data is a cache/export surface only.
 - File and folder paths are vault-relative unless a desktop-only Studio node
   explicitly accepts an external path.
-- The API base is a build-time value. Settings never expose routing,
-  credentials, providers, or model selection.
+- The managed API base is a build-time value. The text execution selector may choose SystemSculpt API or the installed on-machine Codex; it never exposes managed API routing or credentials.
 - Release artifacts are exactly manifest.json, main.js, and styles.css.
 
 ## Repository hygiene

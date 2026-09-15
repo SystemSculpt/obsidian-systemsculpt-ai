@@ -1,3 +1,4 @@
+import { getStudioLayoutAnchoredNodeIds } from "./StudioGraphLayout";
 import { normalizePath } from "obsidian";
 import {
   STUDIO_POLICY_SCHEMA_V1,
@@ -5,6 +6,7 @@ import {
   STUDIO_PROJECT_SCHEMA_V2,
   type StudioCapabilityGrant,
   type StudioDiagram,
+  type StudioGraphLayout,
   type StudioEdge,
   type StudioNodeGroup,
   type StudioJsonValue,
@@ -136,6 +138,7 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     version,
     title,
     position: { x, y },
+    ...(typeof raw.parentId === "string" ? { parentId: raw.parentId } : {}),
     ...(size ? { size } : {}),
     config,
     continueOnError,
@@ -248,7 +251,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const lifted = convertLegacyShapeNodesToDiagram({ nodes: parsedNodes, edges: parsedEdges });
   const nodes = lifted ? lifted.nodes : parsedNodes;
   const edges = lifted ? lifted.edges : parsedEdges;
-  const diagram = mergeStudioDiagrams(readStudioDiagram(raw.diagram), lifted?.diagram);
+  const diagram = mergeStudioDiagrams(readStudioDiagram(raw.diagram, nodes.map((node) => node.id)), lifted?.diagram);
   const nodeIdSet = new Set(nodes.map((node) => node.id));
   for (const edge of edges) {
     if (!nodeIdSet.has(edge.fromNodeId)) {
@@ -326,6 +329,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
       edges,
       entryNodeIds,
       groups,
+      ...(isRecord(graphRaw.layout) ? { layout: graphRaw.layout as unknown as StudioGraphLayout } : {}),
     },
     diagram,
     permissionsRef: {
@@ -375,6 +379,7 @@ function readNodeV2(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     version: resolveBuiltInStudioNodeVersion(kind) || "1.0.0",
     title: asString(raw.title).trim() || compactStudioNodeKind(kind),
     position: { x: asNumber(raw.x) ?? 0, y: asNumber(raw.y) ?? 0 },
+    ...(typeof raw.parent === "string" ? { parentId: raw.parent } : {}),
     ...(width !== null ? { size: { width, ...(height !== null ? { height } : {}) } } : {}),
     config: readStudioJsonRecord(raw.config),
     continueOnError: raw.continueOnError === true,
@@ -546,7 +551,7 @@ function readProjectV2(
   const diagram = readStudioDiagram({
     shapes: ensureArray<unknown>(canvas.shapes).map(liftShapeV2),
     arrows: ensureArray<unknown>(canvas.arrows).map(liftArrowV2).filter(Boolean),
-  });
+  }, nodesById.keys());
 
   const nodeIdSet = new Set(nodes.map((node) => node.id));
   const diagramShapeIdSet = new Set(diagram.shapes.map((shape) => shape.id));
@@ -582,6 +587,7 @@ function readProjectV2(
       // them from executable-graph structure, so v2 never persists them.
       entryNodeIds: [],
       groups,
+      ...(isRecord(canvas.layout) ? { layout: canvas.layout as unknown as StudioGraphLayout } : {}),
     },
     diagram,
     permissionsRef: {
@@ -721,14 +727,14 @@ export function parseStudioProject(
   return readProjectV1(parsed);
 }
 
-function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Record<string, unknown> {
+function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number], includePosition = true): Record<string, unknown> {
   const hasConfig = Object.keys(node.config || {}).length > 0;
   return {
     id: node.id,
     kind: compactStudioNodeKind(node.kind),
     title: node.title,
-    x: node.position.x,
-    y: node.position.y,
+    ...(includePosition ? { x: node.position.x, y: node.position.y } : {}),
+    ...(node.parentId ? { parent: node.parentId } : {}),
     ...(node.size ? { width: node.size.width } : {}),
     ...(node.size && typeof node.size.height === "number" ? { height: node.size.height } : {}),
     ...(hasConfig ? { config: node.config } : {}),
@@ -743,13 +749,15 @@ function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Recor
  * Opening any older file and saving it upgrades it in place.
  */
 export function serializeStudioProject(project: StudioProjectV1): string {
+  const anchored = getStudioLayoutAnchoredNodeIds(project);
   const document = {
     schema: STUDIO_PROJECT_SCHEMA_V2,
     id: project.projectId,
     name: project.name,
     docs: STUDIO_AGENT_DOCS_PATH,
     canvas: {
-      nodes: project.graph.nodes.map(serializeNodeV2),
+      ...(project.graph.layout ? { layout: project.graph.layout } : {}),
+      nodes: project.graph.nodes.map((node) => serializeNodeV2(node, project.graph.layout?.mode !== "managed" || anchored.has(node.id))),
       edges: project.graph.edges.map(
         (edge) => `${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}`
       ),
@@ -803,6 +811,7 @@ export function createEmptyStudioProject(options: {
       edges: [],
       entryNodeIds: [],
       groups: [],
+      layout: { mode: "managed" },
     },
     diagram: createEmptyStudioDiagram(),
     permissionsRef: {

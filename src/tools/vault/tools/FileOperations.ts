@@ -32,6 +32,14 @@ import {
 } from "../../../studio/StudioProjectAgentFileGuard";
 
 /**
+ * Raised when a file changed between the read that produced an edit and the
+ * write that would apply it. Losing the other writer's bytes is worse than
+ * asking the caller to re-read.
+ */
+const EDIT_CONFLICT_MESSAGE =
+  "File changed while this edit was being prepared; nothing was overwritten. Read the file again and retry.";
+
+/**
  * File operations for first-party vault tools (read, write, edit).
  */
 export class FileOperations {
@@ -50,10 +58,18 @@ export class FileOperations {
    * an agent edit is being prepared, so a plain `modify` here could otherwise
    * overwrite that newer canvas state after validation has already finished.
    */
-  private async writeStudioProjectIfUnchanged(
+  /**
+   * Write `nextContent` only if the file still holds `expectedContent`.
+   *
+   * Every edit path here reads a file, derives new content from it, then
+   * writes. `vault.process` runs the comparison inside Obsidian's own file
+   * lock, so a concurrent writer cannot land between the read and the write.
+   */
+  private async writeIfUnchanged(
     file: TFile,
     expectedContent: string,
-    nextContent: string
+    nextContent: string,
+    conflictMessage: string
   ): Promise<void> {
     let changedBeforeWrite = false;
     await this.app.vault.process(file, (currentContent) => {
@@ -64,10 +80,21 @@ export class FileOperations {
       return nextContent;
     });
     if (changedBeforeWrite) {
-      throw new Error(
-        "Studio project changed while this edit was being prepared; nothing was overwritten. Read the file again and retry."
-      );
+      throw new Error(conflictMessage);
     }
+  }
+
+  private async writeStudioProjectIfUnchanged(
+    file: TFile,
+    expectedContent: string,
+    nextContent: string
+  ): Promise<void> {
+    await this.writeIfUnchanged(
+      file,
+      expectedContent,
+      nextContent,
+      "Studio project changed while this edit was being prepared; nothing was overwritten. Read the file again and retry."
+    );
   }
 
   /**
@@ -269,7 +296,7 @@ export class FileOperations {
         if (isStudioProjectDocumentPath(normalizedPath || path)) {
           await this.writeStudioProjectIfUnchanged(file, current, newContent);
         } else {
-          await this.app.vault.modify(file, newContent);
+          await this.writeIfUnchanged(file, current, newContent, EDIT_CONFLICT_MESSAGE);
         }
       } else {
         const previousContent = isStudioProjectDocumentPath(normalizedPath || path)
@@ -439,7 +466,12 @@ export class FileOperations {
           modifiedContent
         );
       } else {
-        await this.app.vault.modify(abstractFile, modifiedContent);
+        await this.writeIfUnchanged(
+          abstractFile,
+          originalContent,
+          modifiedContent,
+          EDIT_CONFLICT_MESSAGE
+        );
       }
     }
 
@@ -521,7 +553,7 @@ export class FileOperations {
           readCurrent = async () => normalizeLineEndings(await this.app.vault.read(file));
           write = isStudioProjectDocumentPath(resolvedPath)
             ? async (content) => this.writeStudioProjectIfUnchanged(file, rawOriginal, content)
-            : async (content) => this.app.vault.modify(file, content);
+            : async (content) => this.writeIfUnchanged(file, rawOriginal, content, EDIT_CONFLICT_MESSAGE);
         }
 
         const strict = entry.strict ?? true;

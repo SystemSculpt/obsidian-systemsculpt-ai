@@ -265,13 +265,18 @@ export class AudioProcessorDelivery {
     deliveryJobId: string,
     linkedPath?: string,
   ): Promise<void> {
+    // The markers are derived from the note's own text, so the write has to
+    // see the same bytes the transform ran on. `process` recomputes under
+    // Obsidian's file lock; the pre-read only exists to skip a no-op write.
+    const applyMarkers = (content: string): string => {
+      const withNavigation = linkedPath
+        ? addVaultNavigation(content, kind, linkedPath)
+        : content;
+      return addDeliveryJobMarker(withNavigation, deliveryJobId);
+    };
     const current = await this.plugin.app.vault.read(file);
-    const withNavigation = linkedPath
-      ? addVaultNavigation(current, kind, linkedPath)
-      : current;
-    const updated = addDeliveryJobMarker(withNavigation, deliveryJobId);
-    if (updated === current) return;
-    await this.plugin.app.vault.modify(file, updated);
+    if (applyMarkers(current) === current) return;
+    await this.plugin.app.vault.process(file, applyMarkers);
   }
 }
 

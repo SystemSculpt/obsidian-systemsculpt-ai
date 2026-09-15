@@ -51,7 +51,7 @@ function resolveMediaSourceField(
   return (
     declared || {
       key: MEDIA_SOURCE_CONFIG_KEY,
-      label: "Source Path",
+      label: "Source path",
       type: "media_path",
       allowOutsideVault: true,
       mediaKinds: ["image", "video", "audio"],

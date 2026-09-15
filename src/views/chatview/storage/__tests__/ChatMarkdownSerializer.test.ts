@@ -11,6 +11,7 @@ import { parseYaml } from "obsidian";
 
 // Mock obsidian's parseYaml
 jest.mock("obsidian", () => ({
+  ...jest.requireActual("obsidian"),
   parseYaml: jest.fn((content: string) => {
     // Simple YAML parser for tests
     const result: Record<string, any> = {};

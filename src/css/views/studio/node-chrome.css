@@ -7,13 +7,13 @@
   width: 280px;
   background-color: var(--ss-surface-0);
   border: 1px solid var(--ss-line);
-  border-left: 3px solid var(--ss-studio-accent-soft);
   border-radius: var(--ss-radius-lg);
   cursor: grab;
   touch-action: none;
   user-select: none;
   pointer-events: auto;
-  contain: layout style paint;
+  /* No paint containment: port pins straddle the card border. */
+  contain: layout style;
   transition: border-color var(--ss-dur-fast) var(--ss-ease), box-shadow var(--ss-dur-fast) var(--ss-ease);
 }
 
@@ -22,8 +22,6 @@
   z-index: 5;
   border-color: var(--ss-accent);
   box-shadow: var(--ss-elevation-2), var(--ss-ring);
-  /* Allow overlay chrome to overflow */
-  contain: layout style;
 }
 
 .ss-studio-node-card:active {
@@ -63,10 +61,6 @@
 
 .ss-studio-node-card.is-managed-pending {
   border-color: var(--ss-studio-info-bright);
-}
-
-.ss-studio-node-card.is-managed-pending .ss-studio-node-run-status {
-  animation: ss-studio-pending-pulse 1.4s var(--ss-ease) infinite;
 }
 
 /* Perf gating while interacting / scrolling / zooming */
@@ -140,7 +134,8 @@
 .ss-studio-node-remove,
 .ss-studio-node-run,
 .ss-studio-node-copy-prompt,
-.ss-studio-node-lock-output {
+.ss-studio-node-lock-output,
+.ss-studio-node-source-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -165,7 +160,8 @@
 }
 
 .ss-studio-node-copy-prompt:hover,
-.ss-studio-node-lock-output:hover {
+.ss-studio-node-lock-output:hover,
+.ss-studio-node-source-toggle:hover {
   background-color: var(--ss-state-hover);
   color: var(--ss-ink);
 }

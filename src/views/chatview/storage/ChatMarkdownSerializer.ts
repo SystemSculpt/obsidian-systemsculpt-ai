@@ -6,6 +6,7 @@ import {
   type ChatAttachmentMetadata,
 } from "../../../types";
 import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
+import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
 import { MessagePartList } from "../utils/MessagePartList";
 import {
@@ -496,19 +497,11 @@ export class ChatMarkdownSerializer {
   }
 
   private static encodeBase64Json(value: unknown): string {
-    const bytes = new TextEncoder().encode(JSON.stringify(value));
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)));
-    }
-    return btoa(binary);
+    return utf8ToBase64(JSON.stringify(value));
   }
 
   private static decodeBase64Json(value: string): unknown {
-    const binary = atob(value);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    return JSON.parse(base64ToUtf8(value)) as unknown;
   }
 
   private static extractAttachmentMetadata(

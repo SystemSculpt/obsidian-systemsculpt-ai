@@ -8,6 +8,8 @@ type InternalNodeRunState = {
   message: string;
   updatedAt: string | null;
   outputs: StudioNodeOutputMap | null;
+  /** 0..1 while the node reports determinate progress. */
+  progress: number | null;
   completeCounted: boolean;
 };
 
@@ -16,6 +18,8 @@ export type StudioNodeRunDisplayState = {
   message: string;
   updatedAt: string | null;
   outputs: StudioNodeOutputMap | null;
+  /** 0..1 while the node reports determinate progress; absent or null otherwise. */
+  progress?: number | null;
 };
 
 export type StudioRunProgressDisplayState = {
@@ -34,6 +38,7 @@ function createInternalNodeState(overrides?: Partial<InternalNodeRunState>): Int
     message: "",
     updatedAt: null,
     outputs: null,
+    progress: null,
     completeCounted: false,
     ...overrides,
   };
@@ -45,6 +50,7 @@ function toDisplayState(state: InternalNodeRunState): StudioNodeRunDisplayState 
     message: state.message,
     updatedAt: state.updatedAt,
     outputs: state.outputs,
+    progress: state.progress,
   };
 }
 
@@ -181,6 +187,7 @@ export class StudioRunPresentationState {
           status: "pending",
           message: "",
           updatedAt: null,
+          progress: null,
           completeCounted: false,
         })
       );
@@ -247,6 +254,7 @@ export class StudioRunPresentationState {
         status: "running",
         message: "",
         updatedAt: at,
+        progress: null,
       });
       this.progress = {
         ...this.progress,
@@ -257,11 +265,22 @@ export class StudioRunPresentationState {
       return;
     }
 
+    if (event.type === "node.progress") {
+      const percent = Number(event.percent);
+      this.setNodeState(event.nodeId, {
+        status: "running",
+        message: String(event.message || "").trim(),
+        updatedAt: at,
+        progress: Number.isFinite(percent) ? Math.min(1, Math.max(0, percent / 100)) : null,
+      });
+      return;
+    }
     if (event.type === "node.cache_hit") {
       this.setNodeState(event.nodeId, {
         status: "cached",
         message: "Cache hit",
         updatedAt: at,
+        progress: null,
       });
       this.markNodeCompleted(event.nodeId);
       this.progress = {
@@ -285,6 +304,7 @@ export class StudioRunPresentationState {
               : "Completed",
         updatedAt: at,
         outputs: event.outputs || current.outputs,
+        progress: null,
       });
       if (nextStatus !== "failed") {
         this.markNodeCompleted(event.nodeId);
@@ -301,6 +321,7 @@ export class StudioRunPresentationState {
         status: "failed",
         message: event.error || "Node failed.",
         updatedAt: at,
+        progress: null,
       });
       this.markNodeCompleted(event.nodeId);
       this.progress = {

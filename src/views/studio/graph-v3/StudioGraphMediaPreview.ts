@@ -68,7 +68,7 @@ export function resolveNodeMediaPreview(
   node: StudioNodeInstance,
   outputs: Record<string, unknown> | null
 ): StudioNodeMediaPreview | null {
-  if (node.kind === "studio.image_generation") {
+  if (node.kind === "studio.image_generation" || node.kind === "studio.video_generation") {
     return null;
   }
 

@@ -138,7 +138,7 @@ export const mediaIngestNode: StudioNodeDefinition = {
         // persisted with an empty sourcePath while a run is in flight).
         // execute() enforces the real contract: media input OR sourcePath.
         key: "sourcePath",
-        label: "Source Path",
+        label: "Source path",
         type: "media_path",
         allowOutsideVault: true,
         mediaKinds: ["image", "video", "audio"],

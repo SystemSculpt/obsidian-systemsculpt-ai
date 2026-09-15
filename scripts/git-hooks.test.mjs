@@ -20,7 +20,6 @@ test("pre-push runs the exact exhaustive hosted gate", () => {
   assert.match(prePush, /^#!\/usr\/bin\/env bash/);
   assert.match(prePush, /set -euo pipefail/);
   assert.match(prePush, /npm run check:ci/);
-  assert.equal(packageJson.scripts["check:full"], "npm run check:ci");
 });
 
 test("pre-commit scans staged paths without shell word splitting", () => {

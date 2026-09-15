@@ -1,3 +1,8 @@
+import { hasHostCapability } from "../../platform/hostCapabilities";
+import { mountCodexExecutionControls } from "../../services/codex/CodexExecutionControls";
+import { codexOptionsFromSettings, defaultTextBackend } from "../../services/codex/CodexExecutionSettings";
+import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
+import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { ItemView, normalizePath, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
@@ -56,7 +61,7 @@ import {
   type AgentUserCommitInput,
 } from "./AgentTranscriptRepository";
 import {
-  AgentChatSession,
+  AgentChatSession, type AgentChatSessionOptions,
   type AgentLifecycleCode,
   type AgentLifecyclePhase,
   type AgentRunResult,
@@ -435,7 +440,6 @@ export class AgentChatView extends ItemView {
   public approvalMode: ChatApprovalMode;
   public isFullyLoaded = false;
   public creditsBalance: CreditsBalanceSnapshot | null = null;
-
   private readonly transcript: AgentTranscriptRepository;
   private agent: AgentChatSession;
   private readonly agentBaseUrl: string;
@@ -498,7 +502,7 @@ export class AgentChatView extends ItemView {
       ? plugin.settings.thinAgentClientId!
       : protocolId("client");
     this.aiService = SystemSculptService.getInstance(plugin);
-    this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory);
+    this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory, plugin);
     this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter);
     this.queueRepository = new AgentQueueStateRepository(plugin.app.vault.adapter, this.attachmentStore);
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
@@ -564,8 +568,10 @@ export class AgentChatView extends ItemView {
    * Building a fresh session per conversation makes that unrepresentable, and
    * lets independent conversations run at the same time.
    */
+  private codexControlsCleanup?: () => void;
+  private chatExecutionBackend?: "systemsculpt" | "codex";
   private createAgentSession(): AgentChatSession {
-    return new AgentChatSession({
+    const create = (options: AgentChatSessionOptions) => (this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings)) === "codex" ? new CodexChatSession(this.app, options, () => this.pendingForkHistory?.prefix ?? [], () => codexOptionsFromSettings(this.plugin.settings)) : new AgentChatSession(options); return create({
       baseUrl: this.agentBaseUrl,
       pluginVersion: this.plugin.manifest.version,
       licenseKey: () => this.plugin.settings.licenseKey,
@@ -636,7 +642,6 @@ export class AgentChatView extends ItemView {
       monotonicNow: () => this.clientMonotonicNow(),
     });
   }
-
   private bindAgentSession(): void {
     if (this.agentSessionBinding) return;
     const binding = new AgentConversationSessionBinding<
@@ -670,8 +675,8 @@ export class AgentChatView extends ItemView {
     const binding = this.agentSessionBinding;
     if (!binding) throw new Error("The chat session binding is unavailable.");
     this.agent = await binding.replace(() => this.createAgentSession());
+    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: this.agent instanceof CodexChatSession ? "codex" : "systemsculpt", onProviderChange: () => this.plugin.openNewChat() }) : undefined;
   }
-
 
   public get messages(): ChatMessage[] {
     return this.transcript.snapshot().messages.map((message) => ({ ...message }));
@@ -727,7 +732,7 @@ export class AgentChatView extends ItemView {
     });
     this.addChild(this.workspace);
     this.bindAgentSession();
-    this.register(() => this.agentUnsubscribe?.());
+    this.register(() => this.agentUnsubscribe?.()); this.register(() => this.codexControlsCleanup?.());
     this.installRecorderBindings();
     this.installWorkspaceBindings();
     this.applyFontSize();
@@ -824,6 +829,8 @@ export class AgentChatView extends ItemView {
       this.contextLoading = true;
       try { await this.contextManager.setPinnedFiles([...loaded.contextFiles]); }
       finally { this.contextLoading = false; }
+      this.chatExecutionBackend = loaded.agentConversationId && await new CodexThreadLocator(this.app).read(loaded.agentConversationId) ? "codex" : "systemsculpt";
+      if ((this.agent instanceof CodexChatSession) !== (this.chatExecutionBackend === "codex")) await this.replaceAgentSession();
       this.applyTranscriptIdentity(loaded);
       this.draftKey = loaded.chatId;
       await this.hydrateQueue(this.draftKey);
@@ -839,6 +846,7 @@ export class AgentChatView extends ItemView {
       await this.workspace?.setAgentSnapshot(recoverySnapshot);
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
+      if (this.chatExecutionBackend === "codex" && !hasHostCapability("local-cli")) this.workspace?.setComposerReadOnly?.("Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.");
       let hydrationFailed = false;
       if (loaded.agentConversationId) {
         const conversationId = loaded.agentConversationId;
@@ -911,7 +919,6 @@ export class AgentChatView extends ItemView {
       }
     }
   }
-
   private async resetAfterFailedChatLoad(message: string): Promise<void> {
     await this.startNewChat(false);
     this.workspace?.setBanner(message, "error");
@@ -969,7 +976,6 @@ export class AgentChatView extends ItemView {
       throw error;
     }
   }
-
   private applyApprovalMode(mode: ChatApprovalMode): void {
     this.approvalMode = mode === "full-access" ? "full-access" : "ask";
     this.workspace?.setApprovalMode(this.approvalMode);
@@ -1069,7 +1075,7 @@ export class AgentChatView extends ItemView {
   public async refreshCreditsBalance(
     options: CreditsRefreshOptions = {},
   ): Promise<void> {
-    if (!this.plugin.settings.licenseKey?.trim()) {
+    if (this.agent instanceof CodexChatSession || !this.plugin.settings.licenseKey?.trim()) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return;
@@ -1077,7 +1083,6 @@ export class AgentChatView extends ItemView {
     if (options.requireFresh) return this.enqueueFreshCreditsRefresh(options);
     return this.startCreditsRefresh(options);
   }
-
   private enqueueFreshCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
     const predecessor = this.creditsFreshTail ?? this.creditsPromise;
     if (!predecessor) {
@@ -1092,7 +1097,6 @@ export class AgentChatView extends ItemView {
     });
     return this.trackFreshCreditsRefresh(queued);
   }
-
   private trackFreshCreditsRefresh(refresh: Promise<void>): Promise<void> {
     let tracked!: Promise<void>;
     tracked = refresh.finally(() => {
@@ -1101,7 +1105,6 @@ export class AgentChatView extends ItemView {
     this.creditsFreshTail = tracked;
     return tracked;
   }
-
   private startCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
     if (this.creditsPromise) return this.creditsPromise;
     const refreshSequence = (this.creditsRefreshSequence ?? 0) + 1;
@@ -1154,7 +1157,6 @@ export class AgentChatView extends ItemView {
     })().finally(() => { this.creditsPromise = null; });
     return this.creditsPromise;
   }
-
   private readCreditsRefreshMonotonicTime(): number | undefined {
     try {
       const value = this.clientMonotonicNow();
@@ -1163,14 +1165,12 @@ export class AgentChatView extends ItemView {
       return undefined;
     }
   }
-
   private creditsRefreshElapsedMs(startedAt: number | undefined): number | undefined {
     if (startedAt === undefined) return undefined;
     const finishedAt = this.readCreditsRefreshMonotonicTime();
     if (finishedAt === undefined || finishedAt < startedAt) return undefined;
     return finishedAt - startedAt;
   }
-
   private recordCreditsRefreshLifecycle(input: Readonly<{
     code: Extract<AgentLifecycleCode,
       "credits_refresh_started" | "credits_refresh_succeeded" | "credits_refresh_failed">;
@@ -1235,6 +1235,7 @@ export class AgentChatView extends ItemView {
    * usable and the first send opens the guided upgrade/sign-in modal.
    */
   private planReminderBanner(): string | null {
+    if (this.agent instanceof CodexChatSession) return null;
     if (hasActivePlan(this.plugin)) return null;
     const email = this.plugin.settings?.userEmail?.trim();
     return email
@@ -1624,7 +1625,7 @@ export class AgentChatView extends ItemView {
   }
 
   private hasAuthoritativeUnavailableBalance(): boolean {
-    if (!this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
+    if (this.agent instanceof CodexChatSession || !this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
     return (this.creditsBalance.availableUnreserved ?? this.creditsBalance.totalRemaining) <= 0;
   }
 
@@ -1979,7 +1980,7 @@ export class AgentChatView extends ItemView {
               ? new Set<string>()
               : this.sessionTrustedToolNames,
           };
-      if (!hasActivePlan(this.plugin)) {
+      if (!(this.agent instanceof CodexChatSession) && !hasActivePlan(this.plugin)) {
         throw planRequiredError("Chat");
       }
       const previousConversationId = this.transcript.snapshot().agentConversationId;
@@ -2918,7 +2919,7 @@ export class AgentChatView extends ItemView {
       // The old draft no longer owns preparation errors once New chat wins.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
-      await this.replaceAgentSession();
+      this.chatExecutionBackend = defaultTextBackend(this.plugin.settings); await this.replaceAgentSession();
       if (this.conversationOriginToken !== newChatOriginToken) return;
       this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");

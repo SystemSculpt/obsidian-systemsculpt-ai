@@ -500,7 +500,7 @@ export const datasetNode: StudioNodeDefinition = {
     fields: [
       {
         key: "workingDirectory",
-        label: "Working Directory",
+        label: "Working directory",
         description:
           "Folder where Studio runs your adapter command. Keep credentials there via env (for example .env.local/DATABASE_URL).",
         type: "directory_path",
@@ -510,7 +510,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "customQuery",
-        label: "Custom Query",
+        label: "Custom query",
         description: "Dataset query/request payload text sent to your adapter.",
         type: "textarea",
         required: true,
@@ -518,7 +518,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "adapterCommand",
-        label: "Adapter Command",
+        label: "Adapter command",
         description: "Command used to resolve this dataset (for example node, bun, python3, curl).",
         type: "text",
         required: true,
@@ -526,7 +526,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "adapterArgs",
-        label: "Adapter Arguments",
+        label: "Adapter arguments",
         description:
           "One argument per line. Use {{query}} to inject the query directly into args. Query is always available in STUDIO_DATASET_QUERY env.",
         type: "string_list",
@@ -534,7 +534,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "refreshHours",
-        label: "Refresh Hours",
+        label: "Refresh hours",
         type: "number",
         required: true,
         min: 1,
@@ -552,7 +552,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Output Bytes",
+        label: "Max output bytes",
         type: "number",
         required: true,
         min: 1024,

@@ -170,7 +170,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "outputFormat",
-        label: "Output Format",
+        label: "Output format",
         type: "select",
         required: true,
         options: [
@@ -182,7 +182,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "outputPath",
-        label: "Output Path",
+        label: "Output path",
         type: "text",
         required: false,
         placeholder: "Optional. Defaults to source path + selected output extension.",
@@ -197,7 +197,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Process Output Bytes",
+        label: "Max process output bytes",
         type: "number",
         required: true,
         min: 1024,

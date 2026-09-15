@@ -9,13 +9,12 @@ export type EdgeIdentity = {
   target: PortAnchor;
 };
 
-export type EdgeStatus = "idle" | "flowing" | "completed" | "failed";
-
-export type EdgeState = EdgeIdentity & {
-  status: EdgeStatus;
-  flowPhase: number;
-  flareT: number;
-};
+/**
+ * Edge identity as the link store tracks it. Run activity is not stored
+ * here: cables read their phase from the activity snapshot
+ * (src/views/studio/activity) through the connection engine.
+ */
+export type EdgeState = EdgeIdentity;
 
 export type DragValidity = "valid" | "near" | "invalid";
 
@@ -28,11 +27,6 @@ export type DragState = {
 };
 
 export type LinkStoreListener = () => void;
-
-type EdgeStatusOverrides = {
-  flareT?: number;
-  flowPhase?: number;
-};
 
 function edgeKey(edge: EdgeIdentity): string {
   return `${edge.id}|${edge.source.nodeId}:${edge.source.portId}->${edge.target.nodeId}:${edge.target.portId}`;
@@ -74,54 +68,11 @@ export class StudioLinkStore {
       if (existing && edgeKey(existing) === edgeKey(identity)) {
         nextMap.set(identity.id, existing);
       } else {
-        nextMap.set(identity.id, {
-          ...identity,
-          status: "idle",
-          flowPhase: 0,
-          flareT: 0,
-        });
+        nextMap.set(identity.id, { ...identity });
       }
     }
     this.edges = nextMap;
     this.emit();
-  }
-
-  setEdgeStatus(id: string, status: EdgeStatus, overrides?: EdgeStatusOverrides): void {
-    const edge = this.edges.get(id);
-    if (!edge) {
-      return;
-    }
-    const next: EdgeState = {
-      ...edge,
-      status,
-      flowPhase: status === "flowing" ? 0 : overrides?.flowPhase ?? edge.flowPhase,
-      flareT: status === "flowing" ? 0 : overrides?.flareT ?? edge.flareT,
-    };
-    if (
-      next.status === edge.status &&
-      next.flowPhase === edge.flowPhase &&
-      next.flareT === edge.flareT
-    ) {
-      return;
-    }
-    this.edges.set(id, next);
-    this.emit();
-  }
-
-  setEdgeFlowPhase(id: string, flowPhase: number): void {
-    const edge = this.edges.get(id);
-    if (!edge || edge.flowPhase === flowPhase) {
-      return;
-    }
-    this.edges.set(id, { ...edge, flowPhase });
-  }
-
-  setEdgeFlareT(id: string, flareT: number): void {
-    const edge = this.edges.get(id);
-    if (!edge || edge.flareT === flareT) {
-      return;
-    }
-    this.edges.set(id, { ...edge, flareT });
   }
 
   setDragState(next: DragState | null): void {

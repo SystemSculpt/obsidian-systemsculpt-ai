@@ -93,6 +93,18 @@ describe("SystemSculptStudioView remove honesty", () => {
     expect(context.render).not.toHaveBeenCalled();
   });
 
+  it("removes attached visual arrows with a node while preserving other diagram items", () => {
+    const project = projectWithNode("node_a");
+    project.diagram = {
+      shapes: [{ id: "shape_a", shape: "rectangle", position: { x: 0, y: 0 }, size: { width: 100, height: 100 }, label: "" }],
+      arrows: [{ id: "arrow_a", fromShapeId: "node_a", toShapeId: "shape_a" }],
+    };
+    const context = createRemoveNodesContext({ viewProject: project, commitTargetProject: project });
+    expect(removeNodesFn.call(context, ["node_a"])).toBe(true);
+    expect(project.diagram.arrows).toEqual([]);
+    expect(project.diagram.shapes).toHaveLength(1);
+  });
+
   it("reports success when the committed graph actually removed the ids", () => {
     const viewProject = projectWithNode("node_a");
     const context = createRemoveNodesContext({

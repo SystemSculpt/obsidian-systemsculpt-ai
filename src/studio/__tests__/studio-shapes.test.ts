@@ -8,8 +8,12 @@ import {
   resolveStudioShapeKind,
   removeStudioShape,
   removeStudioShapeArrow,
+  removeStudioArrowsForItems,
   setStudioShapeArrowLabel,
 } from "../StudioShapes";
+import { assertValidStudioProjectAgentDocumentStructure } from "../StudioProjectAgentDocumentValidation";
+import { buildGraphClipboardPayload, parseGraphClipboardPayload } from "../../views/studio/systemsculpt-studio-view/StudioGraphClipboardModel";
+import { materializeGraphClipboardPaste } from "../../views/studio/systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
 import { parseStudioProject, serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
 
@@ -36,6 +40,75 @@ function projectFixture(): StudioProjectV1 {
 }
 
 describe("Studio shapes", () => {
+
+  it("keeps node and mixed visual arrows across both saved formats without graph edges", () => {
+    const project = projectFixture();
+    project.graph.nodes = ["n1", "n2"].map((id) => ({
+      id, kind: "studio.text", version: "1.0.0", title: id,
+      position: { x: 0, y: 0 }, config: {},
+    }));
+    const shape = createStudioShape({ shape: "rectangle", position: { x: 200, y: 0 } });
+    project.diagram = { shapes: [shape], arrows: [] };
+    expect(connectStudioShapes(project, "n1", "n2")).toBe(true);
+    expect(connectStudioShapes(project, "n2", shape.id)).toBe(true);
+    expect(connectStudioShapes(project, shape.id, "n1")).toBe(true);
+    expect(connectStudioShapes(project, "n1", "n2")).toBe(false);
+    expect(connectStudioShapes(project, "n1", "n1")).toBe(false);
+    expect(connectStudioShapes(project, "n1", "missing")).toBe(false);
+    setStudioShapeArrowLabel(project, project.diagram.arrows[0].id, "visual only");
+
+    for (const serialized of [JSON.stringify(project), serializeStudioProject(project)]) {
+      expect(() => assertValidStudioProjectAgentDocumentStructure(JSON.parse(serialized))).not.toThrow();
+      const restored = parseStudioProject(serialized);
+      expect(restored.diagram?.arrows.map(({ fromShapeId, toShapeId, label }) => ({ fromShapeId, toShapeId, label })))
+        .toEqual(project.diagram.arrows.map(({ fromShapeId, toShapeId, label }) => ({ fromShapeId, toShapeId, label })));
+      expect(restored.graph.edges).toEqual([]);
+    }
+
+    project.graph.nodes = project.graph.nodes.filter((node) => node.id !== "n2");
+    expect(() => assertValidStudioProjectAgentDocumentStructure(project)).toThrow('missing canvas item "n2"');
+    expect(readStudioDiagram(project.diagram, ["n1"]).arrows).toEqual([project.diagram.arrows[2]]);
+    expect(removeStudioArrowsForItems(project, new Set(["n2"]))).toBe(true);
+    expect(removeStudioArrowsForItems(project, new Set(["n2"]))).toBe(false);
+    expect(project.diagram.arrows).toEqual([expect.objectContaining({ fromShapeId: shape.id, toShapeId: "n1" })]);
+  });
+
+  it("copies and remaps arrows only when both node or shape endpoints are copied", () => {
+    const project = projectFixture();
+    project.graph.nodes = ["n1", "n2", "n3"].map((id) => ({
+      id, kind: "studio.text", version: "1.0.0", title: id,
+      position: { x: 0, y: 0 }, config: {},
+    }));
+    const shape = createStudioShape({ shape: "ellipse", position: { x: 200, y: 0 } });
+    project.diagram = { shapes: [shape], arrows: [] };
+    connectStudioShapes(project, "n1", "n2");
+    connectStudioShapes(project, "n2", shape.id);
+    connectStudioShapes(project, shape.id, "n1");
+    connectStudioShapes(project, "n1", "n3");
+    setStudioShapeArrowLabel(project, project.diagram.arrows[0].id, "diagram");
+    const payload = buildGraphClipboardPayload({ project, selectedNodeIds: ["n1", "n2"], selectedShapeIds: [shape.id] })!;
+    expect(payload.arrows).toHaveLength(3);
+    const nodeOnly = buildGraphClipboardPayload({ project, selectedNodeIds: ["n1", "n2"] })!;
+    expect(nodeOnly.arrows).toHaveLength(1);
+    let nodeIndex = 0;
+    let arrowIndex = 0;
+    const pasted = materializeGraphClipboardPaste({
+      payload: parseGraphClipboardPayload(JSON.stringify(payload))!,
+      anchor: { x: 400, y: 300 }, pasteCount: 0,
+      normalizeNodePosition: (position) => position,
+      nextNodeId: () => `copy_n${++nodeIndex}`,
+      nextEdgeId: () => "copy_edge", nextGroupId: () => "copy_group",
+      nextShapeId: () => "copy_shape", nextArrowId: () => `copy_arrow${++arrowIndex}`,
+    })!;
+    expect(pasted.newArrows).toEqual([
+      { id: "copy_arrow1", fromShapeId: "copy_n1", toShapeId: "copy_n2", label: "diagram" },
+      { id: "copy_arrow2", fromShapeId: "copy_n2", toShapeId: "copy_shape" },
+      { id: "copy_arrow3", fromShapeId: "copy_shape", toShapeId: "copy_n1" },
+    ]);
+    expect(pasted.newEdges).toEqual([]);
+    expect(project.diagram.arrows).toHaveLength(4);
+  });
+
   it("keeps every drawable kind and falls back for anything it cannot draw", () => {
     expect(STUDIO_SHAPE_KINDS).toEqual([
       "rectangle",

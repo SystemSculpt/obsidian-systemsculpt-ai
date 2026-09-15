@@ -2,11 +2,12 @@ const PROJECT_SCHEMA_V1 = "studio.project.v1";
 const PROJECT_SCHEMA_V2 = "studio.project.v2";
 const ROOT_V2_FIELDS = new Set(["schema", "id", "name", "docs", "canvas"]);
 const ROOT_V2_REQUIRED_FIELDS = ["schema", "id", "name", "canvas"] as const;
-const CANVAS_FIELDS = new Set(["nodes", "edges", "groups", "shapes", "arrows"]);
+const CANVAS_FIELDS = new Set(["nodes", "edges", "groups", "shapes", "arrows", "layout"]);
 const NODE_V2_FIELDS = new Set([
   "id",
   "kind",
   "title",
+  "parent",
   "x",
   "y",
   "width",
@@ -15,7 +16,7 @@ const NODE_V2_FIELDS = new Set([
   "continueOnError",
   "disabled",
 ]);
-const NODE_V2_REQUIRED_FIELDS = ["id", "kind", "x", "y"] as const;
+const NODE_V2_REQUIRED_FIELDS = ["id", "kind"] as const;
 const SHAPE_V2_FIELDS = new Set(["id", "shape", "x", "y", "width", "height", "label", "style"]);
 const SHAPE_V2_REQUIRED_FIELDS = ["id", "shape", "x", "y", "width", "height", "label"] as const;
 const ARROW_V2_FIELDS = new Set(["from", "to", "label"]);
@@ -40,12 +41,13 @@ const ROOT_FIELDS = new Set([
   "nodeKindReference",
 ]);
 const ENGINE_FIELDS = new Set(["apiMode", "minPluginVersion"]);
-const GRAPH_FIELDS = new Set(["nodes", "edges", "entryNodeIds", "groups"]);
+const GRAPH_FIELDS = new Set(["nodes", "edges", "entryNodeIds", "groups", "layout"]);
 const NODE_FIELDS = new Set([
   "id",
   "kind",
   "version",
   "title",
+  "parentId",
   "position",
   "size",
   "config",
@@ -365,6 +367,8 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
     assertStrictNodeGeometry(node, nodeLabel);
   });
 
+  assertLayoutAndParents(graph, graph.nodes as unknown[], nodeIds, "parentId", "graph");
+
   const edgeIds = new Set<string>();
   (graph.edges as unknown[]).forEach((rawEdge, index) => {
     const edgeLabel = `graph.edges[${index}]`;
@@ -406,7 +410,7 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
 
   // The diagram is validated first because a group may frame shapes, and its
   // members have to resolve against a shape list that is already known good.
-  const shapeIds = assertStrictDiagram(document);
+  const shapeIds = assertStrictDiagram(document, nodeIds);
 
   const groupIds = new Set<string>();
   const groupByNodeId = new Map<string, string>();
@@ -493,7 +497,7 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
   });
 }
 
-function assertStrictDiagram(document: Record<string, unknown>): Set<string> {
+function assertStrictDiagram(document: Record<string, unknown>, nodeIds: ReadonlySet<string>): Set<string> {
   if (!hasOwn(document, "diagram")) {
     return new Set<string>();
   }
@@ -568,12 +572,12 @@ function assertStrictDiagram(document: Record<string, unknown>): Set<string> {
       throw new Error(`${label}.label must be a string.`);
     }
     for (const [field, shapeId] of [["fromShapeId", fromShapeId], ["toShapeId", toShapeId]] as const) {
-      if (!shapeIds.has(shapeId)) {
-        throw new Error(`${label}.${field} references missing shape "${shapeId}".`);
+      if (!shapeIds.has(shapeId) && !nodeIds.has(shapeId)) {
+        throw new Error(`${label}.${field} references missing canvas item "${shapeId}".`);
       }
     }
     if (fromShapeId === toShapeId) {
-      throw new Error(`${label} must connect two different shapes.`);
+      throw new Error(`${label} must connect two different canvas items.`);
     }
     const pair = `${fromShapeId}->${toShapeId}`;
     if (arrowPairs.has(pair)) {
@@ -605,6 +609,45 @@ function resolveEdgeStringEndpoint(
     return { ownerId: trimmed.slice(0, dot) };
   }
   throw new Error(`${label} references missing ${ownerNoun} "${trimmed}".`);
+}
+
+
+function assertLayoutAndParents(container: Record<string, unknown>, nodes: unknown[], ids: Set<string>, parentKey: string, label: string): void {
+  if (hasOwn(container, "layout")) {
+    const layout = assertClosedObject(container.layout, new Set(["mode", "pinnedNodeIds", "direction", "columnGap", "rowGap", "sectionGap"]), ["mode"], `${label}.layout`);
+    if (layout.mode !== "manual" && layout.mode !== "managed") throw new Error(`${label}.layout.mode must be manual or managed.`);
+    if (hasOwn(layout, "direction") && layout.direction !== "right" && layout.direction !== "down") throw new Error(`${label}.layout.direction must be right or down.`);
+    if (hasOwn(layout, "pinnedNodeIds")) {
+      if (!Array.isArray(layout.pinnedNodeIds)) throw new Error(`${label}.layout.pinnedNodeIds must be an array.`);
+      const seen = new Set<string>();
+      for (const id of layout.pinnedNodeIds) {
+        if (typeof id !== "string" || !ids.has(id) || seen.has(id)) throw new Error(`${label}.layout has a missing or duplicate pinned node.`);
+        seen.add(id);
+      }
+    }
+    for (const key of ["columnGap", "rowGap", "sectionGap"]) if (hasOwn(layout, key)) {
+      const value = assertFiniteNumberField(layout, key, `${label}.layout`);
+      if (value < 16 || value > 1000) throw new Error(`${label}.layout.${key} must be between 16 and 1000.`);
+    }
+  }
+  const parents = new Map<string, string>();
+  for (const raw of nodes) {
+    const node = raw as Record<string, unknown>;
+    if (!hasOwn(node, parentKey)) continue;
+    const parent = assertTrimmedStringField(node, parentKey, `${label}.node`);
+    if (!ids.has(parent)) throw new Error(`${label}.node.${parentKey} references missing node "${parent}".`);
+    parents.set(node.id as string, parent);
+  }
+  const done = new Set<string>();
+  for (const id of parents.keys()) {
+    const visiting = new Set<string>();
+    let current: string | undefined = id;
+    while (current && !done.has(current)) {
+      if (visiting.has(current)) throw new Error(`${label} contains a parent cycle.`);
+      visiting.add(current); current = parents.get(current);
+    }
+    for (const visited of visiting) done.add(visited);
+  }
 }
 
 function assertStrictProjectV2(document: Record<string, unknown>): void {
@@ -639,8 +682,12 @@ function assertStrictProjectV2(document: Record<string, unknown>): void {
     if (hasOwn(node, "title")) {
       assertTrimmedStringField(node, "title", nodeLabel);
     }
-    assertFiniteNumberField(node, "x", nodeLabel);
-    assertFiniteNumberField(node, "y", nodeLabel);
+    const managed = isRecord(canvas.layout) && canvas.layout.mode === "managed";
+    const pinned = isRecord(canvas.layout) && Array.isArray(canvas.layout.pinnedNodeIds) && canvas.layout.pinnedNodeIds.includes(nodeId);
+    if (!managed || pinned) assertRequiredFields(node, ["x", "y"], nodeLabel);
+    for (const field of ["x", "y"] as const) {
+      if (!managed || pinned || hasOwn(node, field)) assertFiniteNumberField(node, field, nodeLabel);
+    }
     if (hasOwn(node, "width") && assertFiniteNumberField(node, "width", nodeLabel) <= 0) {
       throw new Error(`${nodeLabel}.width must be greater than zero.`);
     }
@@ -661,6 +708,8 @@ function assertStrictProjectV2(document: Record<string, unknown>): void {
       }
     }
   });
+
+  assertLayoutAndParents(canvas, list("nodes"), nodeIds, "parent", "canvas");
 
   const edgeStrings = new Set<string>();
   list("edges").forEach((rawEdge, index) => {
@@ -741,16 +790,16 @@ function assertStrictProjectV2(document: Record<string, unknown>): void {
       }
     } else {
       throw new Error(
-        `${label} must be the string "fromShape -> toShape" or an object { from, to, label }.`
+        `${label} must be the string "fromItem -> toItem" or an object { from, to, label }.`
       );
     }
     for (const shapeId of [fromShapeId, toShapeId]) {
-      if (!shapeId || !shapeIds.has(shapeId)) {
-        throw new Error(`${label} references missing shape "${shapeId}".`);
+      if (!shapeId || (!shapeIds.has(shapeId) && !nodeIds.has(shapeId))) {
+        throw new Error(`${label} references missing canvas item "${shapeId}".`);
       }
     }
     if (fromShapeId === toShapeId) {
-      throw new Error(`${label} must connect two different shapes.`);
+      throw new Error(`${label} must connect two different canvas items.`);
     }
     const pair = `${fromShapeId}->${toShapeId}`;
     if (arrowPairs.has(pair)) {

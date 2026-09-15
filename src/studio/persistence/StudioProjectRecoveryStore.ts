@@ -1,6 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import { parseStudioProject, serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
+import { sha256HexFromArrayBuffer } from "../hash";
 
 const STUDIO_RECOVERY_ROOT = ".systemsculpt/studio/recovery";
 
@@ -17,10 +18,11 @@ export class StudioProjectRecoveryStore {
     // Recovery snapshots are internal machine state: persist the full in-memory
     // model (a valid v1 document) instead of the agent-facing v2 dialect so the
     // policy path, timestamps, and entry IDs come back byte-faithful.
-    await this.adapter.write(
-      this.recoveryPath(project.projectId),
-      `${JSON.stringify(project, null, 2)}\n`
-    );
+    const raw = `${JSON.stringify(project, null, 2)}\n`;
+    const hash = await sha256HexFromArrayBuffer(new TextEncoder().encode(raw).buffer);
+    const archivePath = this.recoveryPath(project.projectId).replace(/\.json$/, `-${hash}.json`);
+    if (!await this.adapter.exists(archivePath)) await this.adapter.write(archivePath, raw);
+    await this.adapter.write(this.recoveryPath(project.projectId), raw);
   }
 
   async consume(

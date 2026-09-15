@@ -367,4 +367,41 @@ describe("StudioProjectSession", () => {
       },
     );
   });
+  it("keeps keystrokes made during persistence and adopts unrelated reconciled fields", async () => {
+    const project = projectFixture();
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    let finish!: (result: { project: StudioProjectV1; conflicts: string[] }) => void;
+    let submitted!: StudioProjectV1;
+    const saveProject = jest.fn(async (_path: string, snapshot: StudioProjectV1) => {
+      submitted = snapshot;
+      return new Promise<{ project: StudioProjectV1; conflicts: string[] }>(resolve => { finish = resolve; });
+    });
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject });
+    session.mutate("node.config", current => { current.graph.nodes[0].config.value = "first edit"; });
+    await jest.advanceTimersByTimeAsync(40);
+    session.mutate("node.config", current => { current.graph.nodes[0].config.value = "second edit"; });
+    expect(submitted.graph.nodes[0].config.value).toBe("first edit");
+    submitted.name = "An external title";
+    finish({ project: submitted, conflicts: [] });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(session.getProject().graph.nodes[0].config.value).toBe("second edit");
+    expect(session.getProject().name).toBe("An external title");
+    expect(session.getDebugState().hasPendingLocalSaveWork).toBe(true);
+    session.blockProjectFileWrites();
+  });
+
+  it("rebases an async producer without erasing edits made while it awaited I/O", async () => {
+    const project = projectFixture();
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => undefined });
+    let resume!: () => void;
+    const waiting = new Promise<void>(resolve => { resume = resolve; });
+    const mutation = session.mutateAsync("runtime.projector", async draft => { await waiting; draft.graph.nodes[0].config.value = "generated result"; });
+    session.mutate("node.title", current => { current.name = "Typed while running"; });
+    resume(); await mutation;
+    expect(session.getProject().name).toBe("Typed while running");
+    expect(session.getProject().graph.nodes[0].config.value).toBe("generated result");
+    await session.close();
+  });
+
 });

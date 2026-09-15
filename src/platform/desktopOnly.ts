@@ -4,6 +4,8 @@ export type DesktopCpuUsage = Readonly<{ user: number; system: number }>;
 
 export type DesktopProcess = Readonly<{
   versions?: Readonly<{ node?: string }>;
+  platform?: string;
+  kill?: (pid: number, signal: string) => boolean;
   env?: Record<string, string | undefined>;
   memoryUsage?: () => Readonly<{
     rss?: number;
@@ -97,6 +99,19 @@ export const desktopHost = {
 
   async childProcess() {
     return loadDesktopModule<DesktopChildProcess>("node:child_process", "CLI execution");
+  },
+
+  supportsProcessGroups(): boolean {
+    const runtime = getDesktopProcess();
+    return hasNodeRuntime() && runtime?.platform !== "win32" && typeof runtime?.kill === "function";
+  },
+
+  killProcessGroup(pid: number): void {
+    const runtime = getDesktopProcess();
+    if (!this.supportsProcessGroups() || !Number.isSafeInteger(pid) || pid <= 0) {
+      throw new DesktopHostUnavailableError("Process group termination");
+    }
+    runtime!.kill!(-pid, "SIGKILL");
   },
 
   environment(): Record<string, string | undefined> {

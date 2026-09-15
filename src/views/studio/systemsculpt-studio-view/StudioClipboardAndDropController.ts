@@ -1,3 +1,4 @@
+import { pinStudioNodeForManagedLayout } from "../graph-v3/StudioGraphNodePlacement";
 import { App, Notice, TFile, normalizePath } from "obsidian";
 import {
   STUDIO_DISPLAY_NAME,
@@ -57,6 +58,9 @@ export interface StudioClipboardAndDropHost {
   removeDiagramSelection?(): boolean;
   selectPastedShapes?(shapeIds: string[]): void;
   getGraphZoom(): number;
+  /** Client point → world px (origin-aware). */
+  graphPointFromClient(clientX: number, clientY: number): { x: number; y: number } | null;
+  getViewportCenterWorldPoint(): { x: number; y: number } | null;
   getDefaultNodePosition(project: StudioProjectV1): StudioGraphPoint;
   normalizeNodePosition(position: StudioGraphPoint): StudioGraphPoint;
   commitNodeCreation(mutator: (project: StudioProjectV1) => boolean | void): boolean;
@@ -260,6 +264,7 @@ export class StudioClipboardAndDropController {
       materialized;
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...newNodes);
+      for (const created of newNodes) pinStudioNodeForManagedLayout(project, created.id);
       project.graph.edges.push(...newEdges);
       if (newGroups.length > 0) {
         if (!Array.isArray(project.graph.groups)) project.graph.groups = [];
@@ -366,6 +371,7 @@ export class StudioClipboardAndDropController {
     });
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(node);
+      pinStudioNodeForManagedLayout(project, node.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;
@@ -401,6 +407,7 @@ export class StudioClipboardAndDropController {
     if (nodes.length === 0 || !this.isScopeCurrent(scope)) return false;
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...nodes);
+      for (const created of nodes) pinStudioNodeForManagedLayout(project, created.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;
@@ -523,6 +530,7 @@ export class StudioClipboardAndDropController {
 
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...newNodes);
+      for (const created of newNodes) pinStudioNodeForManagedLayout(project, created.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;
@@ -591,13 +599,9 @@ export class StudioClipboardAndDropController {
     if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
       return { ...pointer };
     }
-    const viewport = this.viewportEl;
-    if (viewport) {
-      const zoom = this.host.getGraphZoom() || 1;
-      return {
-        x: (viewport.scrollLeft + viewport.clientWidth * 0.5) / zoom,
-        y: (viewport.scrollTop + viewport.clientHeight * 0.5) / zoom,
-      };
+    const center = this.viewportEl ? this.host.getViewportCenterWorldPoint() : null;
+    if (center) {
+      return { ...center };
     }
     const project = this.host.getCurrentProject();
     return project ? this.host.getDefaultNodePosition(project) : { x: 120, y: 120 };
@@ -607,17 +611,10 @@ export class StudioClipboardAndDropController {
     clientX: number,
     clientY: number,
   ): StudioGraphPoint | null {
-    const viewport = this.viewportEl;
-    if (!viewport) return null;
-    const rect = viewport.getBoundingClientRect();
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
-    if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
-    const zoom = this.host.getGraphZoom() || 1;
-    return {
-      x: (viewport.scrollLeft + localX) / zoom,
-      y: (viewport.scrollTop + localY) / zoom,
-    };
+    if (!this.viewportEl) return null;
+    const point = this.host.graphPointFromClient(clientX, clientY);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    return { x: point.x, y: point.y };
   }
 
   private resolveMarkdownVaultPathFromReference(reference: string): string | null {

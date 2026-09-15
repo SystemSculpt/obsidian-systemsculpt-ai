@@ -920,7 +920,9 @@ describe("AudioProcessorService", () => {
       signal: new AbortController().signal,
     })).resolves.toEqual(expect.objectContaining({ notePath: moved.path }));
 
-    expect(app.vault.read).toHaveBeenCalledTimes(2);
+    // Two reads per note: one to decide whether the delivery markers are
+    // already present, and one inside vault.process when they are not.
+    expect(app.vault.read).toHaveBeenCalledTimes(4);
     expect(api.downloadNote).not.toHaveBeenCalled();
     expect(app.vault.create).not.toHaveBeenCalled();
   });

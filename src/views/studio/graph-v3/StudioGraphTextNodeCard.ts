@@ -10,8 +10,12 @@ import {
   resolveStudioTextNodeHeight,
   resolveStudioTextNodeWidth,
   STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
+  isStudioTextNodeAutoWidth,
+  STUDIO_GRAPH_TEXT_NODE_AUTO_MAX_WIDTH,
+  STUDIO_GRAPH_TEXT_NODE_AUTO_MIN_WIDTH,
 } from "../../../studio/StudioNodeGeometry";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
+import { measureStudioTextGlyphExtent, resolveStudioTextAutoWidth } from "./StudioGraphTextNodeMeasure";
 import { STUDIO_GRAPH_EDITOR_SURFACE_ATTR } from "../StudioGraphDomTargeting";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 import {
@@ -420,9 +424,46 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   } = options;
 
   nodeEl.addClass("ss-studio-text-node-card");
-  // Width is the wrap width; height is INTRINSIC — the card auto-grows with
-  // its reflowed content (tldraw-style), so no explicit height is rendered.
-  nodeEl.style.width = `${resolveStudioTextNodeWidth(node)}px`;
+  // tldraw-style: the card hugs its longest line until the user drags a
+  // width, after which that width is the wrap width. Height is INTRINSIC —
+  // the card auto-grows with its reflowed content, so no explicit height is
+  // rendered.
+  const autoWidth = isStudioTextNodeAutoWidth(node);
+  nodeEl.classList.toggle("is-auto-width", autoWidth);
+  if (autoWidth) {
+    nodeEl.style.removeProperty("width");
+  } else {
+    nodeEl.style.width = `${resolveStudioTextNodeWidth(node)}px`;
+  }
+  // tldraw parity: once the text is laid out, hug its glyphs exactly. CSS
+  // intrinsic sizing hugs the paragraph box, which can run wider than the ink.
+  const fitAutoWidth = (): void => {
+    if (!autoWidth || isEditing || !textSurfaceEl || !nodeEl.isConnected) {
+      return;
+    }
+    const extent = measureStudioTextGlyphExtent(textSurfaceEl);
+    if (!extent) {
+      return;
+    }
+    const ownerWindow = getStudioOwnerWindow(nodeEl);
+    const surfaceStyle = ownerWindow.getComputedStyle(textSurfaceEl);
+    const cardStyle = ownerWindow.getComputedStyle(nodeEl);
+    const px = (value: string): number => { const parsed = parseFloat(value); return Number.isFinite(parsed) ? parsed : 0; };
+    const width = resolveStudioTextAutoWidth({
+      glyphWidth: extent.width,
+      zoom: graphInteraction.getGraphZoom(),
+      paddingInline: px(surfaceStyle.paddingLeft) + px(surfaceStyle.paddingRight),
+      borderInline: px(cardStyle.borderLeftWidth) + px(cardStyle.borderRightWidth),
+      minWidth: STUDIO_GRAPH_TEXT_NODE_AUTO_MIN_WIDTH,
+      maxWidth: STUDIO_GRAPH_TEXT_NODE_AUTO_MAX_WIDTH,
+    });
+    const next = `${width}px`;
+    if (nodeEl.style.width === next) {
+      return;
+    }
+    nodeEl.style.width = next;
+    onNodeGeometryMutated(node);
+  };
 
   // No chrome at all — tldraw parity: deleting goes through select +
   // Delete/Backspace/cut, and font size is drag-scaled via the resize frame
@@ -607,6 +648,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   function renderTextNodeDisplayContent(displayEl: HTMLElement): void {
     if (!renderMarkdownPreview) {
       displayEl.setText(textValue);
+      requestStudioAnimationFrame(displayEl, fitAutoWidth);
       return;
     }
     displayEl.addClass("is-markdown");
@@ -616,11 +658,12 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
       displayEl.removeClass("is-markdown");
       displayEl.empty();
       displayEl.setText(textValue);
+      fitAutoWidth();
     };
     try {
       void Promise.resolve(
         renderMarkdownPreview(node, textValue, displayEl)
-      ).catch(fallBackToPlainText);
+      ).then(fitAutoWidth, fallBackToPlainText);
     } catch {
       fallBackToPlainText();
     }
@@ -642,6 +685,8 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     onNodeGeometryMutated,
     // Text cards persist and render width only — height reflows from content.
     applySize: ({ width }) => {
+      // A dragged width ends auto sizing for this card.
+      nodeEl.classList.remove("is-auto-width");
       nodeEl.style.width = `${width}px`;
     },
     applyFontSize: (nextFontSize) => {
@@ -649,7 +694,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     },
     readFontSize: () => getCurrentFontSize() || STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE,
     readInitialSize: () => ({
-      width: resolveStudioTextNodeWidth(node),
+      width: autoWidth && nodeEl.offsetWidth > 0 ? nodeEl.offsetWidth : resolveStudioTextNodeWidth(node),
       // Prefer the live rendered height; the content estimate keeps
       // DOM-less environments (jsdom) deterministic.
       height: resolveStudioTextNodeHeight(node, nodeEl),

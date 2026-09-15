@@ -114,11 +114,12 @@ export function buildGraphClipboardPayload(options: {
     .filter((shape): shape is StudioShapeInstance => Boolean(shape))
     .map((shape) => JSON.parse(JSON.stringify(shape)) as StudioShapeInstance);
 
-  // An arrow travels only when both of its shapes travel, exactly like an edge.
+  // An arrow travels only when both endpoint items travel.
+  const selectedItemIds = new Set([...selectedNodeIdSet, ...selectedShapeIdSet]);
   const arrows = diagram.arrows
     .filter(
       (arrow) =>
-        selectedShapeIdSet.has(arrow.fromShapeId) && selectedShapeIdSet.has(arrow.toShapeId)
+        selectedItemIds.has(arrow.fromShapeId) && selectedItemIds.has(arrow.toShapeId)
     )
     .map((arrow) => ({ ...arrow }));
 

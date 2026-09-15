@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { App, TFile } from "obsidian";
+import { CodexThreadLocator } from "../../../services/codex/CodexThreadLocator";
+import { App, TFile, Platform } from "obsidian";
 import { AgentChatView } from "../AgentChatView";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import {
@@ -18,6 +19,8 @@ import type {
 } from "../agent/ChatSession";
 import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
+
+jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -5517,4 +5520,19 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     expect(sessionTrustedToolNames).toEqual(new Set(["write"]));
   });
+});
+
+it.each([false, true])('keeps saved native history on Codex and adapts its composer when mobile=%s', async (mobile) => {
+  const previousDesktop = Platform.isDesktopApp, previousMobile = Platform.isMobileApp;
+  const locator = jest.spyOn(CodexThreadLocator.prototype, 'read').mockResolvedValue('native-thread');
+  try {
+    Platform.isDesktopApp = !mobile; Platform.isMobileApp = mobile;
+    const messages: ChatMessage[] = [{ role: 'user', content: 'Native question', message_id: 'native-user' }, { role: 'assistant', content: 'Native answer', message_id: 'native-assistant' }];
+    const harness = createSavedChatLoadHarness(messages, { agentConversationId: 'native-conversation' });
+    await harness.view.loadChatById('legacy-chat');
+    expect((harness.view as any).chatExecutionBackend).toBe('codex');
+    expect(harness.workspace.setHistory).toHaveBeenCalledWith(messages);
+    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(mobile ? 'Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.' : null);
+    expect(harness.loaded.messages).toEqual(messages);
+  } finally { locator.mockRestore(); Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
 });

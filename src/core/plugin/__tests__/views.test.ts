@@ -204,7 +204,6 @@ describe("ViewManager", () => {
     expect(detachLeavesOfType.mock.calls).toEqual([
       [CHAT_VIEW_TYPE],
       [EMBEDDINGS_VIEW_TYPE],
-      [SYSTEMSCULPT_STUDIO_VIEW_TYPE],
     ]);
     expect(cleanup).toHaveBeenCalledTimes(1);
   });

@@ -1,4 +1,5 @@
 import type { StudioAssetRef } from "./types";
+import { bytesToBase64 } from "../utils/base64";
 import type {
   StudioCaptionBoardAnnotation,
   StudioCaptionBoardCrop,
@@ -215,21 +216,8 @@ function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string): Stud
   return null;
 }
 
-function base64FromArrayBuffer(bytes: ArrayBuffer): string {
-  const uint8 = new Uint8Array(bytes);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < uint8.length; index += chunkSize) {
-    binary += String.fromCharCode(...uint8.subarray(index, index + chunkSize));
-  }
-  if (typeof btoa !== "function") {
-    throw new Error("Base64 encoding is unavailable in this environment.");
-  }
-  return btoa(binary);
-}
-
 function arrayBufferToDataUrl(bytes: ArrayBuffer, mimeType: string): string {
-  return `data:${mimeType};base64,${base64FromArrayBuffer(bytes)}`;
+  return `data:${mimeType};base64,${bytesToBase64(new Uint8Array(bytes))}`;
 }
 
 function resolveTextAnchor(alignment: StudioCaptionBoardTextAlign): "start" | "middle" | "end" {

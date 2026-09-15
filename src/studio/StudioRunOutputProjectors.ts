@@ -4,7 +4,7 @@ import type {
   StudioProjectV1,
   StudioRunEvent,
 } from "./types";
-import { isStudioManagedOutputProducerKind } from "./StudioNodeKinds";
+import { isStudioManagedOutputProducerKind, resolveStudioManagedOutputKind } from "./StudioNodeKinds";
 import {
   DATASET_OUTPUT_FIELDS_CONFIG_KEY,
   deriveDatasetOutputFieldsFromOutputs,
@@ -13,6 +13,8 @@ import {
 import {
   materializeImageOutputsAsMediaNodes,
   materializePendingImageOutputPlaceholders,
+  materializePendingVideoOutputPlaceholders,
+  materializeVideoOutputsAsMediaNodes,
   removeManagedTextOutputNodes,
 } from "./StudioManagedOutputNodes";
 
@@ -24,6 +26,13 @@ function isTextGenerationOutputLocked(node: StudioNodeInstance | null): boolean 
     return false;
   }
   return node.config.lockOutput === true;
+}
+
+function resolveMediaMaterializer(kind: string): typeof materializeImageOutputsAsMediaNodes | null {
+  const outputKind = resolveStudioManagedOutputKind(kind);
+  if (outputKind === "video") return materializeVideoOutputsAsMediaNodes;
+  if (outputKind === "image") return materializeImageOutputsAsMediaNodes;
+  return null;
 }
 
 function findNode(project: StudioProjectV1, nodeId: string): StudioNodeInstance | null {
@@ -94,20 +103,19 @@ export function materializeManagedOutputPlaceholdersForStartedNode(options: {
     return false;
   }
 
-  let changed = false;
-  if (sourceNode.kind === "studio.image_generation") {
-    const placeholders = materializePendingImageOutputPlaceholders({
-      project: options.project,
-      sourceNode,
-      runId: options.event.runId,
-      createdAt: options.event.at,
-      createNodeId: options.createNodeId,
-      createEdgeId: options.createEdgeId,
-    });
-    changed = changed || placeholders.changed;
-  }
-
-  return changed;
+  const outputKind = resolveStudioManagedOutputKind(sourceNode.kind);
+  const materializePlaceholders = outputKind === "video"
+    ? materializePendingVideoOutputPlaceholders
+    : outputKind === "image" ? materializePendingImageOutputPlaceholders : null;
+  if (!materializePlaceholders) return false;
+  return materializePlaceholders({
+    project: options.project,
+    sourceNode,
+    runId: options.event.runId,
+    createdAt: options.event.at,
+    createNodeId: options.createNodeId,
+    createEdgeId: options.createEdgeId,
+  }).changed;
 }
 
 export function materializeManagedOutputNodesForNodeOutput(options: {
@@ -122,8 +130,9 @@ export function materializeManagedOutputNodesForNodeOutput(options: {
   }
 
   let changed = false;
-  if (sourceNode.kind === "studio.image_generation") {
-    const materializedMedia = materializeImageOutputsAsMediaNodes({
+  const materializeMedia = resolveMediaMaterializer(sourceNode.kind);
+  if (materializeMedia) {
+    const materializedMedia = materializeMedia({
       project: options.project,
       sourceNode,
       outputs: options.event.outputs || null,
@@ -164,8 +173,9 @@ export function materializeManagedOutputNodesFromCacheEntries(options: {
       continue;
     }
 
-    if (node.kind === "studio.image_generation") {
-      const materializedMedia = materializeImageOutputsAsMediaNodes({
+    const materializeMedia = resolveMediaMaterializer(node.kind);
+    if (materializeMedia) {
+      const materializedMedia = materializeMedia({
         project: options.project,
         sourceNode: node,
         outputs: cacheEntry.outputs,

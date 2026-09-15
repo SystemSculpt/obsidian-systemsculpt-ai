@@ -59,6 +59,7 @@ export default defineConfig(
         "warn",
         {
           ignoreRegex: ["^(Ask Approval|Full Access)$"],
+          ignoreWords: ["SystemSculpt", "Studio", "OS", "SRT", "Finder", "CEO", "Codex", "API"],
         },
       ],
     },

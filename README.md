@@ -10,7 +10,7 @@ SystemSculpt brings an agent workspace, semantic vault search, transcription, an
 - Find related notes with a portable semantic index.
 - Record or import audio and transcribe it to Markdown or SRT.
 - Process long audio and YouTube videos into transcripts and structured summaries.
-- Build text, image, document, media, and vault workflows in Studio.
+- Build text, image, video, document, media, and vault workflows in Studio.
 
 SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop.
 
@@ -58,7 +58,7 @@ npm install
 npm run check
 ~~~
 
-Use `npm run test:related -- <changed source files>` for focused verification, `npm run check:plugin` for a larger checkpoint, and `npm run check:full` for the exhaustive gate. `npm run lint:community` runs the official Obsidian community-directory source checker locally.
+Use `npm run test:related -- <changed source files>` for focused verification, `npm run check:plugin` for a larger checkpoint, and `npm run check:ci` for the exhaustive gate. `npm run lint:community` runs the official Obsidian community-directory source checker locally.
 
 Select each non-production API through its named development command:
 

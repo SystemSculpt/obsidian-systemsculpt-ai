@@ -26,7 +26,7 @@ export class ResumeChatService {
     this.app = plugin.app;
     this.schedulerWindow = window;
     this.settings = plugin.settings;
-    this.chatStorage = new ChatStorageService(this.app, this.settings.chatsDirectory || "SystemSculpt/Chats");
+    this.chatStorage = new ChatStorageService(this.app, this.settings.chatsDirectory || "SystemSculpt/Chats", plugin);
 
     // ResumeChatService initialized - silent success
 

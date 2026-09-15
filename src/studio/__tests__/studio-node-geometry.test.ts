@@ -27,6 +27,7 @@ import {
   STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT,
   STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH,
 } from "../StudioNodeGeometry";
+import { isStudioTextNodeAutoWidth, STUDIO_TEXT_NODE_WIDTH_MODE_KEY } from "../StudioNodeGeometry";
 
 function createNode(
   kind: string,
@@ -319,5 +320,17 @@ describe("shared screen→canvas drag math", () => {
         zoom: Number.NaN,
       })
     ).toEqual({ deltaX: 30, deltaY: -30 });
+  });
+});
+
+describe("isStudioTextNodeAutoWidth", () => {
+  it("hugs content for every text node until a drag stamps the fixed flag", () => {
+    expect(isStudioTextNodeAutoWidth({ kind: "studio.text", config: {} })).toBe(true);
+    expect(isStudioTextNodeAutoWidth({ kind: "studio.text", config: {}, size: { width: 240 } })).toBe(true);
+    expect(isStudioTextNodeAutoWidth({ kind: "studio.text", config: { [STUDIO_TEXT_NODE_WIDTH_MODE_KEY]: "fixed" }, size: { width: 240 } })).toBe(false);
+  });
+
+  it("never applies to other kinds", () => {
+    expect(isStudioTextNodeAutoWidth({ kind: "studio.json", config: {} })).toBe(false);
   });
 });

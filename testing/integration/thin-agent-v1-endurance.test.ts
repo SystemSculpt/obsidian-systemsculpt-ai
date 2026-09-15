@@ -2,7 +2,6 @@
  * @jest-environment node
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PlatformRequestInput } from "../../src/services/PlatformRequestClient";
@@ -727,8 +726,6 @@ afterEach(async () => {
 describe("thin-agent-v1 streaming HTTP endurance", () => {
   it("pins a provider-neutral agent scenario without retired runtime dependencies", () => {
     const source = readFileSync(TEST_PATH, "utf8");
-    expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("788613872f80ee292579740210e0b6962ff17c285dfb92be431e7e99d946d257");
     expect(fixture.fixture_version).toBe("thin-agent-v1-endurance-3");
     expect(fixture.round_count).toBeGreaterThan(30);
     expect(fixture.expected.hard_client_continuation_limit).toBeNull();

@@ -8,12 +8,6 @@ import type {
   StudioGraphInteractionHost,
   StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
-import {
-  STUDIO_GRAPH_CANVAS_HEIGHT,
-  STUDIO_GRAPH_CANVAS_WIDTH,
-} from "./StudioGraphInteractionTypes";
-
-export { STUDIO_GRAPH_CANVAS_HEIGHT, STUDIO_GRAPH_CANVAS_WIDTH };
 export type { PendingConnection };
 
 export class StudioGraphInteractionEngine {
@@ -61,6 +55,7 @@ export class StudioGraphInteractionEngine {
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
       getGraphZoom: () => this.selectionController.getGraphZoom(),
+      onGroupSelected: () => { this.selectionController.setSelectedNodeIds([]); this.host.clearDiagramSelection?.(); },
       getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
       notifyNodePositionsChanged: (options) => this.selectionController.notifyNodePositionsChanged(options),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
@@ -91,6 +86,7 @@ export class StudioGraphInteractionEngine {
     // The engine multiplexes selection changes: the multi-select resize
     // frame re-derives first, then the host's own listener runs.
     this.selectionController.setSelectionChangeListener(() => {
+      this.groupController.clearSelection();
       this.selectionResizeController.refreshSelectionFrame();
       this.externalSelectionChangeListener?.();
     });
@@ -148,6 +144,7 @@ export class StudioGraphInteractionEngine {
   }
 
   clearProjectState(): void {
+    this.groupController.clearSelection();
     this.selectionController.clearProjectState();
     this.connectionEngine.clearProjectState();
   }
@@ -171,6 +168,7 @@ export class StudioGraphInteractionEngine {
 
   registerViewportElement(viewport: HTMLElement): void {
     this.selectionController.registerViewportElement(viewport);
+    this.connectionEngine.registerViewportElement(viewport);
   }
 
   registerSurfaceElement(surface: HTMLElement): void {
@@ -189,11 +187,45 @@ export class StudioGraphInteractionEngine {
     this.selectionController.registerZoomLabelElement(label);
   }
 
-  registerCanvasElement(canvas: HTMLElement): void {
-    this.selectionController.registerCanvasElement(canvas);
-    this.connectionEngine.registerCanvasElement(canvas);
-    this.groupController.registerCanvasElement(canvas);
-    this.selectionResizeController.registerCanvasElement(canvas);
+  /**
+   * `canvas` is the scroll box; `world` is the translated layer inside it
+   * where every positioned element lives in world px. Sub-controllers that
+   * mount layers or measure positions work in the world.
+   */
+  registerCanvasElement(canvas: HTMLElement, world: HTMLElement = canvas): void {
+    this.selectionController.registerCanvasElement(canvas, world);
+    this.connectionEngine.registerCanvasElement(world);
+    this.groupController.registerCanvasElement(world);
+    this.selectionResizeController.registerCanvasElement(world);
+  }
+
+  /** Client (screen) point → world px. */
+  graphPointFromClient(clientX: number, clientY: number): { x: number; y: number } | null {
+    return this.selectionController.graphPointFromClient(clientX, clientY);
+  }
+
+  getViewportCenterWorldPoint(): { x: number; y: number } | null {
+    return this.selectionController.getViewportCenterWorldPoint();
+  }
+
+  getViewportWorldTopLeft(): { x: number; y: number } | null {
+    return this.selectionController.getViewportWorldTopLeft();
+  }
+
+  setViewportWorldTopLeft(x: number, y: number): void {
+    this.selectionController.setViewportWorldTopLeft(x, y);
+  }
+
+  /** Grow the scroll box when the view nears an edge; call from scroll handling. */
+  ensureWorldCoverage(): boolean {
+    return this.selectionController.ensureWorldCoverage();
+  }
+
+  zoomGraphAtViewportCenter(
+    nextZoom: number,
+    options?: { mode?: StudioGraphZoomMode; settled?: boolean; scheduleSettle?: boolean }
+  ): void {
+    this.selectionController.zoomGraphAtViewportCenter(nextZoom, options);
   }
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
@@ -230,6 +262,10 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.registerPortElement(nodeId, direction, portId, element);
   }
 
+  getPortElement(nodeId: string, direction: "in" | "out", portId: string): HTMLElement | null {
+    return this.connectionEngine.getPortElement(nodeId, direction, portId);
+  }
+
   refreshNodeSelectionClasses(): void {
     this.selectionController.refreshNodeSelectionClasses();
   }
@@ -263,7 +299,10 @@ export class StudioGraphInteractionEngine {
   }
 
   fitSelectedNodesInViewport(options?: { paddingPx?: number }): boolean {
-    return this.selectionController.fitSelectionInViewport(options);
+    const groupBounds = this.groupController.getSelectedGroupBounds();
+    return groupBounds
+      ? this.selectionController.fitBoundsInViewport(groupBounds, options)
+      : this.selectionController.fitSelectionInViewport(options);
   }
 
   fitGraphInViewport(options?: { paddingPx?: number }): boolean {
@@ -345,8 +384,9 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.renderEdgeLayer();
   }
 
-  applyRunEvent(event: import("../../studio/types").StudioRunEvent): void {
-    this.connectionEngine.applyRunEvent(event);
+  /** Cable phases from the activity applier; see views/studio/activity. */
+  setEdgeActivity(edges: ReadonlyMap<string, import("./activity/StudioActivityDomApplier").StudioEdgeActivityUpdate>): void {
+    this.connectionEngine.setEdgeActivity(edges);
   }
 
   notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean }): void {

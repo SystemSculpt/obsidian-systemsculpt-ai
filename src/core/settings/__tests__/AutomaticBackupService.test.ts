@@ -32,6 +32,7 @@ const createMockPlugin = () => {
   return {
     app,
     storage,
+    registerInterval: jest.fn((id: number) => id),
     getSettingsManager: () => ({
       getSettings: () => ({
         automaticBackupsEnabled: true,
@@ -95,6 +96,13 @@ describe("AutomaticBackupService", () => {
       service.start();
 
       expect(clearIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("registers the interval with the plugin so Obsidian clears it on unload", () => {
+      service.start();
+
+      const timerId = setIntervalSpy.mock.results[0].value;
+      expect(mockPlugin.registerInterval).toHaveBeenCalledWith(timerId);
     });
 
     it("checks for backup immediately on start", async () => {

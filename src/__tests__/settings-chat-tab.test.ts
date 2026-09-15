@@ -13,6 +13,7 @@ const createPluginStub = (app: App) => {
     emitter: { emit: jest.fn() },
     settings: {
       chatFontSize: "medium",
+      textExecutionBackend: "systemsculpt",
       settingsMode: "standard",
       defaultChatTag: "",
       respectReducedMotion: true,
@@ -37,6 +38,7 @@ describe("Chat tab native layout", () => {
       app,
       plugin,
       display: jest.fn(),
+      registerRenderCleanup: jest.fn(() => () => {}),
     };
     const container = document.createElement("div");
 

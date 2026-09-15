@@ -1,4 +1,4 @@
-import { App, Notice, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
+import { App, Notice, View, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
@@ -32,6 +32,7 @@ type StudioCommandViewLike = {
   getState(): unknown;
   fitSelectionInViewportFromCommand(): void;
   showGraphOverviewFromCommand(): void;
+  arrangeGraphFromCommand(): unknown;
 };
 
 type ChatCommandViewLike = {
@@ -62,9 +63,17 @@ export class CommandManager {
     this.ribbonManager = new RibbonManager(plugin, app);
   }
 
+  /**
+   * The active leaf's view, without the deprecated `workspace.activeLeaf`.
+   * The base `View` class matches any view type, which is what these callers
+   * want before they narrow structurally on `getViewType()`.
+   */
+  private getActiveView(): View | null {
+    return this.app.workspace.getActiveViewOfType(View);
+  }
+
   private getActiveChatView(): ChatCommandViewLike | null {
-    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
-    const activeView = activeLeaf?.view as ChatCommandViewLike | undefined;
+    const activeView = this.getActiveView() as ChatCommandViewLike | null;
     if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
       return null;
     }
@@ -582,6 +591,17 @@ export class CommandManager {
     });
 
     this.plugin.addCommand({
+      id: "arrange-systemsculpt-studio-graph",
+      name: "Studio: arrange graph automatically",
+      checkCallback: (checking: boolean) => {
+        const view = this.getActiveStudioView();
+        if (!view) return false;
+        if (!checking) view.arrangeGraphFromCommand();
+        return true;
+      },
+    });
+
+    this.plugin.addCommand({
       id: "overview-systemsculpt-studio-graph-in-viewport",
       name: "Studio: overview graph in viewport",
       checkCallback: (checking: boolean) => {
@@ -614,8 +634,7 @@ export class CommandManager {
   }
 
   private getActiveStudioView(): StudioCommandViewLike | null {
-    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
-    const activeView = activeLeaf?.view as StudioCommandViewLike | undefined;
+    const activeView = this.getActiveView() as StudioCommandViewLike | null;
     if (activeView?.getViewType?.() !== SYSTEMSCULPT_STUDIO_VIEW_TYPE) {
       return null;
     }
@@ -654,7 +673,7 @@ export class CommandManager {
   }
 
   private getCurrentActiveFilePath(): string | null {
-    const activeLeaf = (this.app.workspace as { activeLeaf?: WorkspaceLeaf | null }).activeLeaf ?? null;
+    const activeLeaf = this.getActiveView()?.leaf ?? null;
 
     const activeChatView = this.getActiveChatView();
     if (activeChatView) {

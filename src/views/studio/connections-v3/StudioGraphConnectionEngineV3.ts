@@ -1,5 +1,5 @@
 import { Notice } from "obsidian";
-import type { StudioNodeInstance, StudioProjectV1, StudioRunEvent } from "../../../studio/types";
+import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import { randomId } from "../../../studio/utils";
 import {
   resolveStudioPortAnchorWorldPoint,
@@ -12,11 +12,11 @@ import type {
 } from "../StudioGraphInteractionTypes";
 import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverlay";
 import { StudioLinkStore, type PortAnchor } from "./StudioLinkStore";
-import { StudioLinkFlowBridge } from "./StudioLinkFlowBridge";
 import { StudioEdgeRenderer } from "./StudioEdgeRenderer";
-import { StudioLinkAnimator } from "./StudioLinkAnimator";
 import { StudioPortInteraction } from "./StudioPortInteraction";
 import { getStudioOwnerWindow } from "../StudioDomContext";
+import type { StudioEdgeActivityPhase } from "../activity/StudioActivity";
+import type { StudioEdgeActivityUpdate } from "../activity/StudioActivityDomApplier";
 
 type PortDirection = "in" | "out";
 
@@ -26,12 +26,13 @@ type Host = StudioGraphInteractionHost & {
 
 export class StudioGraphConnectionEngineV3 {
   private readonly store = new StudioLinkStore();
-  private readonly flowBridge = new StudioLinkFlowBridge(this.store);
   private readonly edgeContextMenu = new StudioSimpleContextMenuOverlay();
   private readonly portInteraction: StudioPortInteraction;
   private renderer: StudioEdgeRenderer | null = null;
-  private animator: StudioLinkAnimator | null = null;
+  /** Latest cable phases from the activity snapshot, kept across re-renders. */
+  private readonly edgeActivity = new Map<string, StudioEdgeActivityPhase>();
   private graphCanvasEl: HTMLElement | null = null;
+  private graphViewportEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private autoCreateHintEl: HTMLElement | null = null;
   private boundEdgeLayer: SVGSVGElement | null = null;
@@ -67,7 +68,7 @@ export class StudioGraphConnectionEngineV3 {
 
   clearProjectState(): void {
     this.portInteraction.cancel();
-    this.flowBridge.resetAll();
+    this.edgeActivity.clear();
     this.store.clear();
     this.portOffsetCache.clear();
     this.closeEdgeContextMenu();
@@ -76,9 +77,10 @@ export class StudioGraphConnectionEngineV3 {
   clearRenderBindings(): void {
     this.disconnectEdgeLayerResizeObserver();
     this.graphCanvasEl = null;
+    this.graphViewportEl = null;
     this.graphEdgesLayerEl = null;
     this.portInteraction.clearRenderBindings();
-    this.detachAnimator();
+    this.detachStoreRender();
     this.renderer?.clear();
     this.renderer = null;
     this.unbindEdgeLayerListeners();
@@ -104,6 +106,11 @@ export class StudioGraphConnectionEngineV3 {
     }
   }
 
+  registerViewportElement(viewport: HTMLElement): void {
+    this.graphViewportEl = viewport;
+  }
+
+  /** The world layer: positioned children live in world px and its rect marks the world origin on screen. */
   registerCanvasElement(canvas: HTMLElement): void {
     this.graphCanvasEl = canvas;
     this.portInteraction.registerCanvas(canvas);
@@ -111,21 +118,15 @@ export class StudioGraphConnectionEngineV3 {
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
     this.graphEdgesLayerEl = layer;
-    this.detachAnimator();
+    this.detachStoreRender();
     this.renderer = new StudioEdgeRenderer({
       store: this.store,
       layer,
       resolvePortAnchorPoint: (anchor, direction) => this.resolvePortAnchorPoint(anchor, direction),
       getCursorAnchorPoint: () => this.cursorAnchorPoint(),
+      resolveEdgeActivity: (edgeId) => this.edgeActivity.get(edgeId) ?? "idle",
     });
-    this.storeUnsub?.();
     this.storeUnsub = this.store.subscribe(() => this.renderer?.render());
-    this.animator = new StudioLinkAnimator({
-      store: this.store,
-      getEdgeGroupElement: (edgeId) => this.renderer?.getEdgeGroupElement(edgeId) ?? null,
-      ownerWindow: getStudioOwnerWindow(layer),
-    });
-    this.animator.attach();
     this.bindEdgeLayerListeners(layer);
     this.observeCanvasForEdgeReresolve();
   }
@@ -171,6 +172,10 @@ export class StudioGraphConnectionEngineV3 {
     element: HTMLElement
   ): void {
     this.portInteraction.registerPortElement(nodeId, direction, portId, element);
+  }
+
+  getPortElement(nodeId: string, direction: PortDirection, portId: string): HTMLElement | null {
+    return this.portInteraction.getPortElement(nodeId, direction, portId);
   }
 
   clearPendingConnection(options?: { requestRender?: boolean }): void {
@@ -221,8 +226,18 @@ export class StudioGraphConnectionEngineV3 {
     this.renderer?.render();
   }
 
-  applyRunEvent(event: StudioRunEvent): void {
-    this.flowBridge.applyRunEvent(event);
+  /**
+   * Cable phases from the activity applier. Existing groups are patched in
+   * place; groups the renderer creates later read the remembered phase.
+   */
+  setEdgeActivity(edges: ReadonlyMap<string, StudioEdgeActivityUpdate>): void {
+    for (const edgeId of [...this.edgeActivity.keys()]) {
+      if (!edges.has(edgeId)) this.edgeActivity.delete(edgeId);
+    }
+    for (const [edgeId, update] of edges) {
+      this.edgeActivity.set(edgeId, update.phase);
+      this.renderer?.applyEdgeActivity(edgeId, update.phase, { pulse: update.pulse });
+    }
   }
 
   private commitConnectionFromSnap(target: PortAnchor): void {
@@ -318,9 +333,7 @@ export class StudioGraphConnectionEngineV3 {
   }
 
   private openEdgeContextMenu(edgeId: string, clientX: number, clientY: number): void {
-    const canvas = this.graphCanvasEl;
-    if (!canvas) return;
-    const viewport = canvas.parentElement;
+    const viewport = this.graphViewportEl;
     if (!viewport) return;
     const viewportRect = viewport.getBoundingClientRect();
     const anchorX = Math.round(viewport.scrollLeft + (clientX - viewportRect.left));
@@ -367,8 +380,7 @@ export class StudioGraphConnectionEngineV3 {
     clientX: number,
     clientY: number
   ): void {
-    if (!this.graphCanvasEl) return;
-    const viewport = this.graphCanvasEl.parentElement;
+    const viewport = this.graphViewportEl;
     if (!viewport) return;
     if (!visible) {
       if (this.autoCreateHintEl) {
@@ -482,11 +494,7 @@ export class StudioGraphConnectionEngineV3 {
     });
   }
 
-  private detachAnimator(): void {
-    if (this.animator) {
-      this.animator.detach();
-      this.animator = null;
-    }
+  private detachStoreRender(): void {
     if (this.storeUnsub) {
       this.storeUnsub();
       this.storeUnsub = null;

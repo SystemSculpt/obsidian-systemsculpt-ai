@@ -11,22 +11,24 @@ import {
   writeStudioCollapsedSectionVisibilityOverride,
   type StudioNodeDetailMode,
 } from "./StudioGraphNodeDetailMode";
-import {
-  statusLabelForNode,
-  type StudioNodeRunDisplayState,
-} from "../StudioRunPresentationState";
 import { createStudioAction } from "../StudioAction";
+import type { StudioNodeActivity } from "../activity/StudioActivity";
+import { renderStudioActivityBadge } from "../activity/StudioActivityBadge";
 
 export function renderNodeHeader(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   interactionLocked: boolean;
+  runUnavailableReason?: string;
+  runLocked?: boolean;
+  /** Panel surfaces expose their definition through one header toggle. */
+  sourceToggle?: { isActive: () => boolean; onToggle: () => void };
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onRunNode: (nodeId: string) => void;
   onCopyTextGenerationPromptBundle: (nodeId: string) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
-}): void {
+}): { sourceToggle: HTMLButtonElement | null } {
   const {
     nodeEl,
     node,
@@ -39,6 +41,7 @@ export function renderNodeHeader(options: {
   } = options;
 
   const header = nodeEl.createDiv({ cls: "ss-studio-node-header" });
+  header.createSpan({ cls: "ss-studio-node-type", text: node.kind.replace(/^studio\./u, "").replace(/_/gu, " "), attr: { "data-testid": "studio.node.type" } });
   const titleInput = header.createEl("input", {
     type: "text",
     cls: "ss-studio-node-title-input",
@@ -50,20 +53,21 @@ export function renderNodeHeader(options: {
   });
 
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  createStudioAction(header, {
+  const unavailable = node.kind === 'studio.workflow';
+  if (!["studio.button", "studio.command_center"].includes(node.kind)) createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
     testId: "studio.node.run",
     ariaLabel: isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node",
-    title: isVisualOnlyNode
+    title: options.runUnavailableReason || (unavailable ? 'Execution connection unavailable' : isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
-      : "Run node",
+      : "Run node"),
     size: "small",
-    disabled: interactionLocked || isVisualOnlyNode,
+    disabled: (options.runLocked ?? interactionLocked) || isVisualOnlyNode || unavailable || Boolean(options.runUnavailableReason),
     onSelect: () => {
-      if (!isVisualOnlyNode) {
+      if (!isVisualOnlyNode && !unavailable && !options.runUnavailableReason) {
         onRunNode(node.id);
       }
     },
@@ -95,6 +99,21 @@ export function renderNodeHeader(options: {
     });
   }
 
+  let sourceToggle: HTMLButtonElement | null = null;
+  if (options.sourceToggle) {
+    const toggle = options.sourceToggle;
+    sourceToggle = createStudioAction(header, {
+      className: "ss-studio-node-source-toggle",
+      label: "Source",
+      testId: "studio.node.source",
+      ariaLabel: "Show source definition",
+      title: "Show source definition",
+      size: "small",
+      selected: toggle.isActive(),
+      onSelect: () => toggle.onToggle(),
+    });
+  }
+
   createStudioAction(header, {
     className: "ss-studio-node-remove",
     label: "×",
@@ -105,49 +124,26 @@ export function renderNodeHeader(options: {
     disabled: interactionLocked,
     onSelect: () => onRemoveNode(node.id),
   });
+  return { sourceToggle };
 }
 
+/**
+ * The uniform activity row (views/studio/activity). Always rendered so run
+ * state can be patched in place; it hides itself while idle unless the node
+ * carries a note.
+ */
 export function renderNodeStatusRow(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
-  isPlaceholder: boolean;
-  nodeRunState: StudioNodeRunDisplayState;
+  activity: StudioNodeActivity;
   resolveNodeBadge?: (node: StudioNodeInstance) => {
     text: string;
     tone?: "neutral" | "warning";
     title?: string;
   } | null;
-}): void {
-  const { nodeEl, node, isPlaceholder, nodeRunState, resolveNodeBadge } = options;
-  const statusRow = nodeEl.createDiv({ cls: "ss-studio-node-run-status-row" });
-  const statusTone = isPlaceholder ? "pending" : nodeRunState.status;
-  const statusText = isPlaceholder ? "Generating" : statusLabelForNode(nodeRunState.status);
-  const statusEl = statusRow.createDiv({
-    cls: `ss-studio-node-run-status is-${statusTone}`,
-    text: statusText,
-  });
-  const statusMessage = isPlaceholder ? "" : nodeRunState.message.trim();
-  if (statusMessage) {
-    statusEl.title = statusMessage;
-  }
-  if (statusMessage) {
-    statusRow.createDiv({
-      cls: "ss-studio-node-run-message",
-      text: statusMessage,
-    });
-  }
-  const nodeBadge = resolveNodeBadge?.(node) || null;
-  if (nodeBadge && nodeBadge.text.trim().length > 0) {
-    const badgeEl = statusRow.createDiv({
-      cls: `ss-studio-node-badge is-${nodeBadge.tone || "neutral"}`,
-      text: nodeBadge.text.trim(),
-    });
-    const tooltip = String(nodeBadge.title || "").trim();
-    if (tooltip) {
-      badgeEl.title = tooltip;
-      badgeEl.setAttribute("aria-label", tooltip);
-    }
-  }
+}): HTMLElement {
+  const { nodeEl, node, activity, resolveNodeBadge } = options;
+  return renderStudioActivityBadge(nodeEl, { activity, note: resolveNodeBadge?.(node) || null });
 }
 
 export function renderNodePorts(options: {
@@ -156,9 +152,15 @@ export function renderNodePorts(options: {
   definition: StudioNodeDefinition | null;
   graphInteraction: StudioGraphInteractionEngine;
   interactionLocked: boolean;
+  /** Inputs the selected model does not accept; hidden unless something is wired to them. */
+  hiddenInputPortIds?: ReadonlySet<string>;
+  inputPortNotes?: Readonly<Record<string, string>>;
+  connectedInputPortIds?: ReadonlySet<string>;
 }): void {
   const { nodeEl, node, definition, graphInteraction, interactionLocked } = options;
-  const inputPorts = definition?.inputPorts || [];
+  const hidden = options.hiddenInputPortIds;
+  const connected = options.connectedInputPortIds;
+  const inputPorts = (definition?.inputPorts || []).filter(port => !hidden?.has(port.id) || connected?.has(port.id));
   const outputPorts = definition?.outputPorts || [];
   if (inputPorts.length === 0 && outputPorts.length === 0) {
     return;
@@ -172,12 +174,14 @@ export function renderNodePorts(options: {
   if (inputPorts.length > 0) {
     const inputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
     for (const port of inputPorts) {
-      const row = inputsCol.createDiv({ cls: "ss-studio-port-row" });
+      const unsupported = hidden?.has(port.id) === true;
+      const note = unsupported ? "Not accepted by the selected model." : options.inputPortNotes?.[port.id] || port.description;
+      const row = inputsCol.createDiv({ cls: `ss-studio-port-row${unsupported ? " is-unsupported" : ""}` });
       const pin = row.createEl("button", {
         cls: "ss-studio-port-pin is-input",
         attr: {
           type: "button",
-          title: `${port.id} (${port.type})`,
+          title: note ? `${port.id} (${port.type}) — ${note}` : `${port.id} (${port.type})`,
           "aria-label": `${port.id} input (${port.type})`,
         },
       });

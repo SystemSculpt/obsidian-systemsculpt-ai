@@ -16,12 +16,6 @@ import type {
 import { parseAgentConversationId } from "./storage/ChatPersistenceTypes";
 import type SystemSculptPlugin from "../../main";
 
-type AppWithPlugins = App & {
-  plugins?: {
-    plugins?: Record<string, SystemSculptPlugin | undefined>;
-  };
-};
-
 type LoadedChatRecord = {
   id: string;
   messages: ChatMessage[];
@@ -164,11 +158,20 @@ export class ChatStorageService {
   private app: App;
   private chatDirectory: string;
   private readonly attachmentStore: ChatAttachmentVaultStore | null;
+  private readonly plugin: SystemSculptPlugin | null;
 
-  constructor(app: App, chatDirectory: string) {
+  /**
+   * `plugin` is optional only because tests construct this service against a
+   * bare `App`. In the running plugin it is always supplied: reaching back
+   * through `app.plugins.plugins["systemsculpt-ai"]` to find our own instance
+   * is a self-lookup through a private API, and it silently returns undefined
+   * whenever the id or load order changes.
+   */
+  constructor(app: App, chatDirectory: string, plugin?: SystemSculptPlugin) {
     this.app = app;
     this.chatDirectory = chatDirectory;
     this.attachmentStore = new ChatAttachmentVaultStore(app.vault.adapter);
+    this.plugin = plugin ?? null;
   }
 
   private normalizeTag(tag: string): string {
@@ -176,8 +179,7 @@ export class ChatStorageService {
   }
 
   private resolveDefaultChatTag(): string {
-    const systemSculptPlugin = (this.app as AppWithPlugins).plugins?.plugins?.["systemsculpt-ai"];
-    const rawTag = systemSculptPlugin?.settings?.defaultChatTag;
+    const rawTag = this.plugin?.settings?.defaultChatTag;
     if (typeof rawTag !== "string") return "";
     return this.normalizeTag(rawTag);
   }
@@ -313,10 +315,9 @@ export class ChatStorageService {
 
       const fullContent = `---\n${stringifyYaml(metadata)}---\n\n${messagesContent}`;
 
-      const systemSculptPlugin = (this.app as AppWithPlugins).plugins?.plugins?.["systemsculpt-ai"];
-
-      if (systemSculptPlugin?.directoryManager) {
-        await systemSculptPlugin.directoryManager.ensureDirectoryByPath(this.chatDirectory);
+      const directoryManager = this.plugin?.directoryManager;
+      if (directoryManager) {
+        await directoryManager.ensureDirectoryByPath(this.chatDirectory);
       } else {
         const exists = await this.app.vault.adapter.exists(this.chatDirectory);
         if (!exists) {

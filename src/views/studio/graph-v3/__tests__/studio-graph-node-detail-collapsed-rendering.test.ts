@@ -174,7 +174,8 @@ describe("Studio collapsed detail rendering", () => {
       showSystemPromptField: false,
     });
 
-    expect(nodeEl.textContent).not.toContain("SYSTEM PROMPT");
+    expect(nodeEl.querySelector('.ss-studio-node-inline-config-field--systemprompt')).toBeNull();
+    expect(nodeEl.textContent?.toLowerCase()).not.toContain("system prompt");
   });
 
   it("hides field help copy when field help visibility is disabled", () => {

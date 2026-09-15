@@ -1,4 +1,5 @@
 import type { MultiPartContent } from "../../../types";
+import { base64ToBytes, bytesToBase64 } from "../../../utils/base64";
 
 const ATTACHED_TEXT_FILE = /^--- BEGIN ATTACHED FILE: (.+?) \((.+?)\) ---\n([\s\S]*)\n--- END ATTACHED FILE: \1 ---$/;
 const DATA_IMAGE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/;
@@ -11,20 +12,9 @@ export type ParsedAttachedTextPart = Readonly<{
   unavailable: boolean;
 }>;
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
-    const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength));
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(base64: string): Uint8Array | null {
+function base64ToBytesOrNull(base64: string): Uint8Array | null {
   try {
-    const binary = atob(base64);
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return base64ToBytes(base64);
   } catch {
     return null;
   }
@@ -73,7 +63,7 @@ export function createImageAttachmentPart(mimeType: string, bytes: Uint8Array): 
 
 export function parseImageDataUrl(url: string): Readonly<{ mimeType: string; bytes: Uint8Array }> | null {
   const match = url.match(DATA_IMAGE);
-  const bytes = match ? base64ToBytes(match[2]) : null;
+  const bytes = match ? base64ToBytesOrNull(match[2]) : null;
   if (!match || !bytes) return null;
   return Object.freeze({ mimeType: match[1], bytes });
 }

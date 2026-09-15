@@ -4,7 +4,7 @@ import type { StudioGraphProjectMutationOptions } from "./StudioGraphInteraction
 import {
   autoAlignGroupNodes,
   type GroupAutoAlignResult,
-} from "./graph-v3/StudioGraphGroupAutoLayout";
+} from "../../studio/StudioGraphGroupAutoLayout";
 import {
   computeStudioGraphGroupBounds,
   type StudioGraphGroupBounds,
@@ -79,6 +79,7 @@ type StudioGraphGroupControllerHost = {
   notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
+  onGroupSelected?: () => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
     mutator: (project: StudioProjectV1) => boolean | void,
@@ -118,7 +119,14 @@ export class StudioGraphGroupController {
   private openColorPaletteGroupId: string | null = null;
   private colorPaletteRadioGroup: UiRadioGroupHandle<string> | null = null;
   private dropTargetGroupId: string | null = null;
+  private selectedGroupId: string | null = null;
   private listenerWindow: Window | null = null;
+
+  private readonly onWindowSelectionPointerDown = (event: PointerEvent): void => {
+    const selected = this.selectedGroupId ? this.groupElsById.get(this.selectedGroupId) : null;
+    const pressed = event.target as Node | null;
+    if (selected && pressed && this.canvasEl?.contains(pressed) && !selected.frameEl.contains(pressed) && !selected.tagEl.contains(pressed)) this.clearSelection();
+  };
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.openColorPaletteGroupId) {
@@ -196,6 +204,7 @@ export class StudioGraphGroupController {
         (group.shapeIds || []).some((shapeId) => shapeIdSet.has(shapeId))
     );
     const visibleGroupIds = new Set(groups.map((group) => group.id));
+    if (this.selectedGroupId && !visibleGroupIds.has(this.selectedGroupId)) this.selectedGroupId = null;
     if (this.openColorPaletteGroupId && !visibleGroupIds.has(this.openColorPaletteGroupId)) {
       this.openColorPaletteGroupId = null;
       this.previewColorByGroupId.clear();
@@ -207,6 +216,15 @@ export class StudioGraphGroupController {
     for (const group of groups) {
       const frameEl = this.frameLayerEl.createDiv({ cls: "ss-studio-group-frame" });
       frameEl.dataset.groupId = group.id;
+      frameEl.tabIndex = 0;
+      frameEl.setAttribute("role", "button");
+      frameEl.setAttribute("aria-label", `Select group ${normalizeGroupName(group.name) || 'Untitled'}`);
+      frameEl.setAttribute("aria-pressed", String(group.id === this.selectedGroupId));
+      frameEl.classList.toggle("is-selected", group.id === this.selectedGroupId);
+      frameEl.addEventListener("keydown", event => {
+        if (event.isComposing || !["Enter", " "].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey) return;
+        event.preventDefault(); event.stopPropagation(); this.selectGroup(group.id);
+      });
       frameEl.style.setProperty("--ss-studio-group-accent", this.resolveDisplayedGroupColor(group));
       frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       frameEl.addEventListener("pointerdown", (event) => {
@@ -318,6 +336,36 @@ export class StudioGraphGroupController {
         elements.nameButtonEl.setText(normalizeGroupName(group.name) || nextDefaultGroupName(project));
       }
     }
+  }
+
+  /** Group focus is distinct from selecting its members: fit includes the entire colored frame. */
+  private selectGroup(groupId: string): void {
+    this.host.onGroupSelected?.();
+    this.selectedGroupId = groupId;
+    this.refreshSelectionClasses();
+  }
+
+  clearSelection(): void {
+    if (!this.selectedGroupId) return;
+    this.selectedGroupId = null;
+    this.refreshSelectionClasses();
+  }
+
+  private refreshSelectionClasses(): void {
+    for (const [id, { frameEl }] of this.groupElsById) {
+      frameEl.classList.toggle("is-selected", id === this.selectedGroupId);
+      frameEl.setAttribute("aria-pressed", String(id === this.selectedGroupId));
+    }
+  }
+
+  getSelectedGroupBounds(): { left: number; top: number; right: number; bottom: number } | null {
+    const group = this.host.getCurrentProject()?.graph.groups?.find(group => group.id === this.selectedGroupId);
+    if (!group) return null;
+    const bounds = this.computeGroupBounds(group);
+    if (!bounds) return null;
+    // The tag sits below the frame, translated down by 52% of its own height.
+    const tagHeight = this.groupElsById.get(group.id)?.tagEl.offsetHeight || 24;
+    return { left: bounds.left, top: bounds.top, right: bounds.left + bounds.width, bottom: bounds.top + bounds.height + tagHeight * 1.52 };
   }
 
   requestGroupNameEdit(groupId: string): void {
@@ -458,6 +506,7 @@ export class StudioGraphGroupController {
       return;
     }
     this.unbindWindowListeners();
+    ownerWindow.addEventListener("pointerdown", this.onWindowSelectionPointerDown, true);
     ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown);
     ownerWindow.addEventListener("keydown", this.onWindowKeyDown);
     this.listenerWindow = ownerWindow;
@@ -546,6 +595,7 @@ export class StudioGraphGroupController {
   }
 
   private unbindWindowListeners(): void {
+    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowSelectionPointerDown, true);
     this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown);
     this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown);
     this.listenerWindow = null;
@@ -770,6 +820,8 @@ export class StudioGraphGroupController {
 
     startEvent.preventDefault();
     startEvent.stopPropagation();
+    this.selectGroup(groupId);
+    dragSurfaceEl.focus({ preventScroll: true });
 
     const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
@@ -777,7 +829,7 @@ export class StudioGraphGroupController {
     const zoom = this.host.getGraphZoom() || 1;
     let pendingClientX = startX;
     let pendingClientY = startY;
-    let dragFrameRequested = false;
+    let dragFrameHandle: number | null = null;
     let captureHistoryOnNextMutation = false;
     const originByNodeId = new Map(
       dragNodes.map((node) => [
@@ -818,8 +870,8 @@ export class StudioGraphGroupController {
             if (!currentNode || !origin) {
               continue;
             }
-            const nextX = Math.max(24, Math.round(origin.x + deltaX));
-            const nextY = Math.max(24, Math.round(origin.y + deltaY));
+            const nextX = Math.round(origin.x + deltaX);
+            const nextY = Math.round(origin.y + deltaY);
             if (currentNode.position.x !== nextX || currentNode.position.y !== nextY) {
               currentNode.position.x = nextX;
               currentNode.position.y = nextY;
@@ -841,7 +893,7 @@ export class StudioGraphGroupController {
     };
 
     const flushDragFrame = (): void => {
-      dragFrameRequested = false;
+      dragFrameHandle = null;
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
@@ -878,13 +930,27 @@ export class StudioGraphGroupController {
     };
 
     const scheduleDragFrame = (): void => {
-      if (dragFrameRequested) {
+      if (dragFrameHandle !== null) {
         return;
       }
-      dragFrameRequested = true;
       if (typeof ownerWindow.requestAnimationFrame === "function") {
-        ownerWindow.requestAnimationFrame(flushDragFrame);
+        dragFrameHandle = ownerWindow.requestAnimationFrame(flushDragFrame);
         return;
+      }
+      flushDragFrame();
+    };
+
+    /**
+     * End-of-gesture flush. Cancelling the queued frame matters as much as
+     * running it: a callback left in the browser's queue fires after pointerup
+     * and re-applies stale pointer coordinates over the committed result.
+     */
+    const settleDragFrame = (): void => {
+      if (dragFrameHandle === null) {
+        return;
+      }
+      if (typeof ownerWindow.cancelAnimationFrame === "function") {
+        ownerWindow.cancelAnimationFrame(dragFrameHandle);
       }
       flushDragFrame();
     };
@@ -904,9 +970,7 @@ export class StudioGraphGroupController {
         return;
       }
 
-      if (dragFrameRequested) {
-        flushDragFrame();
-      }
+      settleDragFrame();
 
       ownerWindow.removeEventListener("pointermove", onPointerMove);
       ownerWindow.removeEventListener("pointerup", finishDrag);

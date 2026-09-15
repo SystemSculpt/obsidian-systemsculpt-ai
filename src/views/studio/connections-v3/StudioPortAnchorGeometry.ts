@@ -3,10 +3,10 @@ import { resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry"
 
 /**
  * Horizontal inset (world px) of a port pin's centre from the card's vertical
- * edge. Used only as a fallback before a pin has been measured: input pins sit
- * just inside the left edge, output pins just inside the right edge.
+ * edge. Used only as a fallback before a pin has been measured: pins straddle
+ * the card border, so their centres sit on the edge itself.
  */
-export const STUDIO_PORT_EDGE_INSET = 14;
+export const STUDIO_PORT_EDGE_INSET = 0;
 
 /**
  * Vertical offset (world px) of a port pin's centre from the card's top, used

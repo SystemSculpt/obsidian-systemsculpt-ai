@@ -65,6 +65,7 @@ import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
 import { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
+import { captureStudioReloadState, setStudioReloadBarrier } from "./core/plugin/StudioReloadState";
 import { API_BASE_URL } from "./constants/api";
 import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
 import { ManagedAdmission } from "./services/managed/ManagedAdmission";
@@ -1740,7 +1741,12 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   onunload(): void {
+    if (!this.unloadPromise) {
+      try { captureStudioReloadState(this.app); }
+      catch { /* A stale leaf must not prevent normal plugin teardown. */ }
+    }
     this.unloadPromise ??= this.unloadAsync();
+    setStudioReloadBarrier(this.app, this.unloadPromise);
   }
 
   private async unloadAsync(): Promise<void> {
@@ -1827,129 +1833,98 @@ export default class SystemSculptPlugin extends Plugin {
       timeoutMs: 10000,
     });
     const logger = this.getLogger();
-    // Plugin unloading silently
 
-    try {
-      // Embeddings cleanup
-      // Clean up error collector service
-      if (this.errorCollectorService) {
-        this.errorCollectorService.unload();
+    // Each teardown step is independent: one failing step must never skip the
+    // rest of unload. Steps keep their original order (embeddings before
+    // workflow/search/studio, then services in reverse initialization order).
+    const failedSteps: string[] = [];
+    const safely = async (label: string, step: () => unknown): Promise<void> => {
+      try {
+        await step();
+      } catch (error) {
+        failedSteps.push(label);
+        try {
+          logger.error(`Plugin unload step failed: ${label}`, error, {
+            source: "SystemSculptPlugin",
+            method: "onunload",
+          });
+        } catch {
+          // Logging is best-effort and must never block teardown.
+        }
       }
+    };
 
-      if (this.resourceMonitor) {
-        this.resourceMonitor.stop();
-        this.resourceMonitor = null;
-      }
-
-      // Clean up settings manager (stop automatic backups)
-      if (this.settingsManager) {
-        // Cleaning up settings manager silently
-        this.settingsManager.destroy();
-      }
-
+    await safely("error collector", () => this.errorCollectorService?.unload());
+    await safely("resource monitor", () => {
+      this.resourceMonitor?.stop();
+      this.resourceMonitor = null;
+    });
+    // Stops automatic settings backups.
+    await safely("settings manager", () => this.settingsManager?.destroy());
+    await safely("embeddings status bar", () => {
       if (this.embeddingsStatusBar) {
         this.removeChild(this.embeddingsStatusBar);
         this.embeddingsStatusBar = null;
       }
-
-      // Clean up embeddings manager
+    });
+    await safely("embeddings manager", async () => {
       if (this.embeddingsManager) {
         await this.embeddingsManager.cleanup();
         this.embeddingsManager = null;
       }
-
-      if (this.workflowEngineService) {
-        this.workflowEngineService.destroy();
-        this.workflowEngineService = null;
-      }
-
-      if (this.searchEngine) {
-        this.searchEngine.destroy();
-        this.searchEngine = null;
-      }
-
+    });
+    await safely("workflow engine", () => {
+      this.workflowEngineService?.destroy();
+      this.workflowEngineService = null;
+    });
+    await safely("search engine", () => {
+      this.searchEngine?.destroy();
+      this.searchEngine = null;
+    });
+    await safely("studio service", async () => {
       if (this.studioService) {
         await this.studioService.dispose().catch(() => {});
         this.studioService = null;
       }
+    });
+    // Commands and the settings tab are removed by Obsidian itself on unload.
+    await safely("file context menu", () => {
+      this.fileContextMenuService?.stop();
+      this.fileContextMenuService = null;
+    });
 
-      // Cleanup UI components first
-      if (this.settingsTab) {
-        // Settings tab is automatically cleaned up by Obsidian
-      }
+    this.managersInitialized = false;
+    this.managersInitializationPromise = null;
+    this.hasRegisteredStudioExtensions = false;
 
-      // Cleanup managers and views
-      if (this.commandManager) {
-        const commands = [
-          "toggle-audio-recorder",
-          "open-systemsculpt-chat",
-          "open-systemsculpt-history",
-          "open-systemsculpt-janitor",
-          "reload-obsidian",
-          "open-systemsculpt-settings",
-          "chat-with-file",
-          "suggest-edits",
-          "clear-suggested-edits"
-        ];
-        commands.forEach((id) => {
-          // @ts-ignore - removeCommand exists but isn't in the types
-          this.app.commands.removeCommand(`${this.manifest.id}:${id}`);
-        });
-      }
-
-      if (this.fileContextMenuService) {
-        this.fileContextMenuService.stop();
-        this.fileContextMenuService = null;
-      }
-
-      this.managersInitialized = false;
-      this.managersInitializationPromise = null;
-      this.hasRegisteredStudioExtensions = false;
-
-      // Embeddings manager already cleaned up above
-
-      // Cleanup services in reverse order of initialization. Recorder cleanup
-      // ran before every fallible teardown step above.
-      if (this.transcriptionService) {
-        this.transcriptionService.unload();
-      }
-
-      // Clean up resume chat service
-      if (this.resumeChatService) {
-        // Unloading resume chat service silently
-        this.resumeChatService.cleanup();
-      }
-
-      // System prompts are now handled locally, no need to clear cache
-
-      // Clean up vault file cache
-      if (this.vaultFileCache) {
-        // Destroying vault file cache silently
-        this.vaultFileCache.destroy();
-      }
-
-      // Clear singleton instances and static caches
-      SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
+    // Services in reverse order of initialization. Recorder cleanup ran before
+    // every fallible teardown step above.
+    await safely("transcription service", () => this.transcriptionService?.unload());
+    await safely("resume chat service", () => this.resumeChatService?.cleanup());
+    await safely("vault file cache", () => this.vaultFileCache?.destroy());
+    await safely("service singletons", () => {
+      SystemSculptService.clearInstance();
       this.managedCapabilityGraph = null;
-      
-      // Clear service references without reassignment
-      // @ts-ignore - Cleanup is handled by garbage collection
-      this._aiService = undefined;
+    });
 
-      // Plugin unloaded successfully silently
-      // The logger's flush timer was already disposed at the top of onunload.
-      this.pluginLogger = null;
+    // Clear service references without reassignment
+    // @ts-ignore - Cleanup is handled by garbage collection
+    this._aiService = undefined;
+
+    // The logger's flush timer was already disposed at the top of unload.
+    this.pluginLogger = null;
+    if (failedSteps.length === 0) {
       phase.complete();
       logger.info("SystemSculpt plugin unloaded", {
         source: "SystemSculptPlugin",
       });
-    } catch (error) {
+    } else {
+      const error = new Error(`Plugin unload steps failed: ${failedSteps.join(", ")}`);
       phase.fail(error);
       logger.error("Plugin unload encountered errors", error, {
         source: "SystemSculptPlugin",
       });
     }
-
   }
 
   public get isReady(): boolean {

@@ -13,7 +13,7 @@ import {
   type StudioImageInputCandidate,
 } from "./shared";
 
-const IMAGE_PROMPT_MAX_CHARS = 7_900;
+const IMAGE_PROMPT_MAX_CHARS = 8_000;
 const IMAGE_INPUT_MAX_COUNT = 4;
 const IMAGE_OUTPUT_MAX_COUNT = 4;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
@@ -42,12 +42,12 @@ function asExistingAssetRef(candidate: StudioImageInputCandidate): StudioAssetRe
   };
 }
 
-function clampImagePromptLength(prompt: string, maxChars: number = IMAGE_PROMPT_MAX_CHARS): string {
+function validateImagePromptLength(prompt: string): string {
   const trimmed = String(prompt || "").trim();
-  if (trimmed.length <= maxChars) {
-    return trimmed;
+  if (trimmed.length > IMAGE_PROMPT_MAX_CHARS) {
+    throw new Error(`Image generation accepts prompts up to ${IMAGE_PROMPT_MAX_CHARS.toLocaleString("en-US")} characters. Shorten the prompt before running it.`);
   }
-  return trimmed.slice(0, maxChars).trim();
+  return trimmed;
 }
 
 function resolveImagePrompt(context: StudioNodeExecutionContext): {
@@ -66,7 +66,7 @@ function resolveImagePrompt(context: StudioNodeExecutionContext): {
 
   if (userPrompt) {
     return {
-      prompt: clampImagePromptLength(userPrompt, IMAGE_PROMPT_MAX_CHARS),
+      prompt: validateImagePromptLength(userPrompt),
       structuredInputImages: structured.inputImages,
     };
   }
@@ -76,7 +76,7 @@ function resolveImagePrompt(context: StudioNodeExecutionContext): {
   const wiredPrompt = getText(rawPromptInput).trim();
   const configuredPrompt = getText(context.node.config.prompt).trim();
   return {
-    prompt: clampImagePromptLength(wiredPrompt || configuredPrompt, IMAGE_PROMPT_MAX_CHARS),
+    prompt: validateImagePromptLength(wiredPrompt || configuredPrompt),
     structuredInputImages: structured.inputImages,
   };
 }
@@ -92,12 +92,15 @@ async function resolveInputImages(
 
   const output: StudioImageGenerationInput[] = [];
   const seen = new Set<string>();
-  let ignoredOverflow = 0;
-  for (const candidate of merged) {
+  const addInput = (asset: StudioAssetRef) => {
+    if (seen.has(asset.hash)) return;
     if (output.length >= IMAGE_INPUT_MAX_COUNT) {
-      ignoredOverflow += 1;
-      continue;
+      throw new Error(`Image generation accepts at most ${IMAGE_INPUT_MAX_COUNT} distinct reference images. Remove extra references or split them into separate generation nodes.`);
     }
+    seen.add(asset.hash);
+    output.push({ asset, load: () => context.services.readAsset(asset) });
+  };
+  for (const candidate of merged) {
     const sourcePath = String(candidate.path || "").trim();
     if (!sourcePath) {
       continue;
@@ -105,13 +108,7 @@ async function resolveInputImages(
 
     const existing = asExistingAssetRef(candidate);
     if (existing) {
-      if (!seen.has(existing.hash)) {
-        seen.add(existing.hash);
-        output.push({
-          asset: existing,
-          load: () => context.services.readAsset(existing),
-        });
-      }
+      addInput(existing);
       continue;
     }
 
@@ -132,19 +129,7 @@ async function resolveInputImages(
       bytes = await context.services.readVaultBinary(sourcePath);
     }
     const stored = await context.services.storeAsset(bytes, mimeHint);
-    if (!seen.has(stored.hash)) {
-      seen.add(stored.hash);
-      output.push({
-        asset: stored,
-        load: () => context.services.readAsset(stored),
-      });
-    }
-  }
-
-  if (ignoredOverflow > 0) {
-    context.log(
-      `[studio.image_generation] Ignored ${ignoredOverflow} input image(s) beyond limit ${IMAGE_INPUT_MAX_COUNT}.`
-    );
+    addInput(stored);
   }
 
   return output;
@@ -163,6 +148,9 @@ export const imageGenerationNode: StudioNodeDefinition = {
   outputPorts: [{ id: "images", type: "json" }],
   configDefaults: {
     prompt: "",
+    model: "",
+    imageSize: "",
+    quality: "",
     count: 1,
     aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
   },
@@ -176,8 +164,21 @@ export const imageGenerationNode: StudioNodeDefinition = {
         placeholder: "Describe the image to generate — or how to edit the connected images. A wired prompt input overrides this.",
       },
       {
+        key: "model", label: "Image model", type: "select", required: false,
+        selectPresentation: "model_picker_modal", optionsSource: "image_models",
+        description: "Choose an available model. Estimates include the SystemSculpt service fee; the final charge follows actual usage. Reference images can add cost.",
+      },
+      {
+        key: "imageSize", label: "Image size", type: "select", required: false,
+        selectPresentation: "searchable_dropdown", optionsSource: "image_sizes",
+      },
+      {
+        key: "quality", label: "Quality", type: "select", required: false,
+        selectPresentation: "searchable_dropdown", optionsSource: "image_qualities",
+      },
+      {
         key: "count",
-        label: "Image Count",
+        label: "Image count",
         type: "number",
         required: true,
         min: 1,
@@ -186,19 +187,12 @@ export const imageGenerationNode: StudioNodeDefinition = {
       },
       {
         key: "aspectRatio",
-        label: "Aspect Ratio",
+        label: "Aspect ratio",
         type: "select",
         required: false,
         description: "Target output aspect ratio.",
-        options: [
-          { value: "16:9", label: "16:9 (YouTube)" },
-          { value: "1:1", label: "1:1" },
-          { value: "9:16", label: "9:16" },
-          { value: "4:3", label: "4:3" },
-          { value: "3:4", label: "3:4" },
-          { value: "3:2", label: "3:2" },
-          { value: "2:3", label: "2:3" },
-        ],
+        selectPresentation: "searchable_dropdown",
+        optionsSource: "image_aspect_ratios",
       },
     ],
     allowUnknownKeys: true,
@@ -224,9 +218,12 @@ export const imageGenerationNode: StudioNodeDefinition = {
             ? Math.min(IMAGE_OUTPUT_MAX_COUNT, Math.floor(countRaw))
             : 1;
         const configuredAspectRatio = getText(context.node.config.aspectRatio).trim();
-        const aspectRatio = configuredAspectRatio || DEFAULT_IMAGE_ASPECT_RATIO;
+        const aspectRatio = configuredAspectRatio || undefined;
         return {
           prompt,
+          model: getText(context.node.config.model).trim() || undefined,
+          imageSize: getText(context.node.config.imageSize).trim() || undefined,
+          quality: getText(context.node.config.quality).trim() || undefined,
           count,
           aspectRatio,
           inputImages,

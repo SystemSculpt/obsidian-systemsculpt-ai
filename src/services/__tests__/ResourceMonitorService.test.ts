@@ -42,6 +42,7 @@ describe("ResourceMonitorService", () => {
 
     mockPlugin = {
       getLogger: jest.fn().mockReturnValue(mockLogger),
+      registerInterval: jest.fn((id: number) => id),
       storage: {
         appendToFile: jest.fn().mockResolvedValue(undefined),
       },

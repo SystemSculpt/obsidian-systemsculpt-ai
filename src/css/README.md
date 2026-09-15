@@ -82,8 +82,12 @@ states in `states.css`, and every narrow-surface adjustment in `composer.css`.
 - `--ss-studio-group-accent`, `--ss-studio-chip-color`,
   `--ss-studio-swatch-color`, `--ss-studio-*-scale`,
   `--ss-studio-text-node-font-size`, `--ss-studio-annotation-color/-stroke`,
-  `--ss-link-flow-phase`, `--ss-link-flare-t` — Studio runtime
-- `--ss-studio-link-*` — read by StudioEdgeRenderer for inline SVG strokes
+  `--ss-activity-progress` — Studio runtime
+- `data-activity` / `data-activity-pulse` / `data-activity-progress` —
+  the Studio run-state grammar written by `src/views/studio/activity` and
+  styled only in `views/studio/activity.css`
+- `--ss-studio-link-*` / `--ss-studio-edge-stroke` — read by
+  StudioEdgeRenderer for the inline base SVG stroke
 - `.systemsculpt-agent-workspace.is-font-{small|medium|large}` — the agent
   workspace font-scale contract, toggled by the agent workspace view and
   implemented in `views/agent-workspace/shell.css`.

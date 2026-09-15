@@ -404,4 +404,103 @@ describe("SettingsManager managed settings contract", () => {
       expect.objectContaining({ source: "SettingsManager" }),
     );
   });
+
+  describe("empty or unreadable data.json", () => {
+    const LATEST_BACKUP = ".systemsculpt/settings-backups/settings-backup-latest.json";
+    const restoredBackup = {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatFontSize: "large",
+      defaultChatTag: "restored-from-backup",
+    };
+
+    function installLatestBackup(plugin: ReturnType<typeof createPlugin>) {
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path === LATEST_BACKUP);
+      plugin.app.vault.adapter.read.mockImplementation(async (path: string) => {
+        if (path !== LATEST_BACKUP) throw new Error(`ENOENT: ${path}`);
+        return JSON.stringify(restoredBackup);
+      });
+    }
+
+    it("restores the latest backup when loadData resolves null instead of saving defaults over it", async () => {
+      const plugin = createPlugin(null);
+      installLatestBackup(plugin);
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.chatFontSize).toBe("large");
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+      expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({
+        chatFontSize: "large",
+        defaultChatTag: "restored-from-backup",
+      }));
+      expect(plugin.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Restored SystemSculpt settings from backup"),
+        expect.objectContaining({ source: "SettingsManager" }),
+      );
+    });
+
+    it("consults the backup for an empty data.json object as well", async () => {
+      const plugin = createPlugin({});
+      installLatestBackup(plugin);
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+    });
+
+    it("still ends up with defaults on a fresh install with no data and no backup", async () => {
+      const plugin = createPlugin(null);
+      plugin.app.vault.adapter.list.mockRejectedValue(new Error("ENOENT: .systemsculpt/settings-backups"));
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+      expect(manager.settings.chatFontSize).toBe("medium");
+      expect(manager.settings.defaultChatTag).toBe("");
+      expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+      expect(plugin.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("serialized persistence", () => {
+    it("applies concurrent updates in order so no key is dropped", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      plugin.saveData.mockClear();
+
+      await Promise.all([
+        manager.updateSettings({ chatFontSize: "large" }),
+        manager.updateSettings({ defaultChatTag: "queued" }),
+        manager.saveSettings(),
+      ]);
+
+      expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
+      expect(plugin._internal_settings_systemsculpt_plugin).toMatchObject({
+        chatFontSize: "large",
+        defaultChatTag: "queued",
+      });
+      expect(plugin.saveData).toHaveBeenCalledTimes(3);
+      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large", "large"]);
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
+    });
+
+    it("keeps the queue usable after a failed save", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
+
+      const failing = manager.updateSettings({ chatFontSize: "large" });
+      const following = manager.updateSettings({ defaultChatTag: "after-failure" });
+
+      await expect(failing).resolves.toBeUndefined();
+      await expect(following).resolves.toBeUndefined();
+      expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "after-failure" });
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ defaultChatTag: "after-failure" });
+    });
+  });
 });

@@ -98,7 +98,7 @@ npm run lint:community
 npm run lint:community:fix
 ~~~
 
-The local mirror now reports zero source findings. Manifest validation, CSS policy, production bundle inspection, mobile compatibility, tests, and release guards run through `npm run check` and `npm run check:full`.
+The local mirror now reports zero source findings. Manifest validation, CSS policy, production bundle inspection, mobile compatibility, tests, and release guards run through `npm run check` and `npm run check:ci`.
 
 ## Required release handoff
 

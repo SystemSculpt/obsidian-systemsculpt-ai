@@ -25,6 +25,7 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
     settings,
     addStatusBarItem: jest.fn(() => statusBarEl),
     addCommand: jest.fn(),
+    registerInterval: jest.fn((id: number) => id),
     getSettingsManager: () => ({ updateSettings }),
     statusBarEl,
     updateSettings,

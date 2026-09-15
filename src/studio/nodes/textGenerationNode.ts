@@ -22,7 +22,7 @@ export const textGenerationNode: StudioNodeDefinition = {
     fields: [
       {
         key: "systemPrompt",
-        label: "System Prompt",
+        label: "System prompt",
         type: "textarea",
         required: false,
         placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
@@ -41,6 +41,8 @@ export const textGenerationNode: StudioNodeDefinition = {
     }
 
     const result = await context.services.api.generateText({
+      projectId: context.projectId,
+      log: context.log,
       runId: context.runId,
       nodeId: context.node.id,
       projectPath: context.projectPath,
@@ -62,7 +64,7 @@ export const textGenerationNode: StudioNodeDefinition = {
       outputs: {
         text: result.text,
       },
-      managedOperations: [result.operation],
+      managedOperations: result.operation ? [result.operation] : [],
     };
   },
 };

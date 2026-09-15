@@ -476,7 +476,11 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
       "studio.workspace.tool.arrow",
     ]);
 
-    click('button[aria-label="Square tool"]');
+    expect(root.querySelector('[aria-label="Select tool"]')?.getAttribute("title")).toContain("(S)");
+    expect(root.querySelector('[aria-label="Box tool"]')?.getAttribute("title")).toContain("(B)");
+    expect(root.querySelector('[aria-label="Circle tool"]')?.getAttribute("title")).toContain("(C)");
+    expect(root.querySelector('[aria-label="Arrow tool"]')?.getAttribute("title")).toContain("(A)");
+    click('button[aria-label="Box tool"]');
     click('button[aria-label="Circle tool"]');
     click('button[aria-label="Diamond tool"]');
     click('button[aria-label="Cylinder tool"]');

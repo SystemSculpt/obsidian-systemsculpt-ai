@@ -189,6 +189,44 @@ describe("ManagedJobRecoveryStore hardening", () => {
     await expect(store.acknowledgeImageCreated("img-1", imageDispatch.revision, "job-1")).resolves.toMatchObject({ phase: "processing", jobId: "job-1" });
   });
 
+  it("supports the video generation media lifecycle and forbids multipart metadata", async () => {
+    const adapter = new MemoryAdapter(); const store = new ManagedJobRecoveryStore(adapter);
+    let record = await create(store, { capability: "video_generation", operationId: "vid-1", source: { identity: "vault:video-request", fingerprint: `sha256:${"c".repeat(64)}` } });
+    record = await store.markContentReady("video_generation", "vid-1", record.revision);
+    record = await store.beginDispatch("video_generation", "vid-1", record.revision, { operation: "prepare", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" });
+    record = await store.acknowledgeVideoPrepared("vid-1", record.revision);
+    expect(record.phase).toBe("prepared");
+    await expect(store.beginDispatch("video_generation", "vid-1", record.revision, { operation: "part", requestId: "r", dispatchedAt: "2026-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "illegal_transition" });
+    await expect(store.beginDispatch("video_generation", "vid-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "vid-1:create", dispatchedAt: "2026-01-01T00:00:00Z", createRequest })).rejects.toMatchObject({ code: "invalid_record" });
+    record = await store.beginDispatch("video_generation", "vid-1", record.revision, { operation: "create", requestId: "r", idempotencyKey: "vid-1:create", dispatchedAt: "2026-01-01T00:00:00Z" });
+    await expect(store.acknowledgeVideoCreated("vid-1", record.revision, "job-9")).resolves.toMatchObject({ phase: "processing", jobId: "job-9" });
+    await expect(store.recordMultipartUpload("video_generation" as never, "vid-1", record.revision + 1, { createRequest, partSizeBytes: 1, totalParts: 1 })).rejects.toMatchObject({ code: "invalid_record" });
+  });
+
+  it("persists ordered media delivery timing until server acknowledgment succeeds", async () => {
+    const store = new ManagedJobRecoveryStore(new MemoryAdapter());
+    let record = await create(store, { capability: "video_generation", operationId: "vid-delivery", source: { identity: "studio:video", fingerprint: `sha256:${"d".repeat(64)}` } });
+    record = await store.markContentReady("video_generation", "vid-delivery", record.revision);
+    record = await store.beginDispatch("video_generation", "vid-delivery", record.revision, { operation: "create", requestId: "r", idempotencyKey: "vid-delivery:create", dispatchedAt: "2026-01-01T00:00:00Z" });
+    record = await store.acknowledgeVideoCreated("vid-delivery", record.revision, "job-delivery");
+    record = await store.applyReconciliation("video_generation", "vid-delivery", record.revision, "succeeded");
+    record = await store.recordMediaDownload("video_generation", "vid-delivery", record.revision, {
+      downloadStartedAt: "2026-01-01T00:00:10Z",
+      downloadCompletedOffsetMs: 100,
+      outputs: [{ index: 0, width: 1920, height: 1080, durationSeconds: 8 }],
+    });
+    await expect(store.recordMediaDisplayed("video_generation", "vid-delivery", record.revision, 99)).rejects.toMatchObject({ code: "invalid_record" });
+    record = await store.recordMediaDisplayed("video_generation", "vid-delivery", record.revision, 120);
+    record = await store.markLocalCommitPending("video_generation", "vid-delivery", record.revision);
+    record = await store.recordMediaVaultWrite("video_generation", "vid-delivery", record.revision, 150);
+    await expect(store.findMediaDeliveryAcknowledgmentPending()).resolves.toEqual([expect.objectContaining({
+      operationId: "vid-delivery",
+      mediaDelivery: expect.objectContaining({ displayedOffsetMs: 120, vaultWriteCompletedOffsetMs: 150 }),
+    })]);
+    await store.completeLocalCommit("video_generation", "vid-delivery", record.revision);
+    await expect(store.findMediaDeliveryAcknowledgmentPending()).resolves.toEqual([]);
+  });
+
   it("enforces exhaustive phase/pendingDispatch/capability canonical coherence", async () => {
     const baseAdapter = new MemoryAdapter(); const baseStore = new ManagedJobRecoveryStore(baseAdapter); const valid = await create(baseStore);
     const badRecords = [
@@ -226,7 +264,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
   it.each([
     ["transcription", "complete_dispatching", "queued", "upload_completed"], ["transcription", "complete_dispatching", "processing", "processing"], ["transcription", "complete_dispatching", "failed", "result_ready"],
     ["document_processing", "start_dispatching", "queued", "processing"], ["document_processing", "start_dispatching", "processing", "processing"], ["document_processing", "start_dispatching", "completed", "result_ready"],
-    ["transcription", "abort_dispatching", "failed", "upload_aborted"], ["image_generation", "create_dispatching", "queued", "blocked_ambiguous"],
+    ["transcription", "abort_dispatching", "failed", "upload_aborted"], ["image_generation", "create_dispatching", "queued", "blocked_ambiguous"], ["video_generation", "create_dispatching", "queued", "blocked_ambiguous"], ["video_generation", "prepare_dispatching", "processing", "blocked_ambiguous"],
   ] as const)("atomically applies reconciliation %s %s %s → %s", async (capability, phase, status, expected) => {
     const adapter = new MemoryAdapter(); const operation = phase.replace("_dispatching", "") as any; const id = `reconcile-${capability}`; const pending: any = { operation, requestId: "req-1", dispatchedAt: "2026-01-01T00:00:00Z" }; if (["create", "complete", "start"].includes(operation)) pending.idempotencyKey = `${id}:${operation}`;
     const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase, pendingDispatch: pending, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
@@ -238,7 +276,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
   it.each([
     ["transcription", -1, false], ["transcription", 0, false], ["transcription", 1, true], ["transcription", 50, true], ["transcription", 51, false],
     ["document_processing", -1, false], ["document_processing", 0, false], ["document_processing", 1, true], ["document_processing", 3, true], ["document_processing", 4, false],
-    ["image_generation", 1, false],
+    ["image_generation", 1, false], ["video_generation", 1, false],
   ] as const)("canonical pending part bound %s part %s valid=%s", async (capability, partNumber, valid) => {
     expect(MANAGED_MULTIPART_PART_LIMITS[capability]).toBe(capability === "transcription" ? 50 : capability === "document_processing" ? 3 : 0);
     const adapter = new MemoryAdapter(); const id = `pending-${capability}-${String(partNumber).replace("-", "n")}`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "part_dispatching", pendingDispatch: { operation: "part", requestId: "req-1", partNumber, dispatchedAt: "2026-01-01T00:00:00Z" }, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
@@ -250,6 +288,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
     ["transcription", "queued", "processing"], ["transcription", "processing", "processing"], ["transcription", "succeeded", "result_ready"], ["transcription", "failed", "result_ready"], ["transcription", "expired", "result_ready"],
     ["document_processing", "queued", "processing"], ["document_processing", "processing", "processing"], ["document_processing", "completed", "result_ready"], ["document_processing", "failed", "result_ready"],
     ["image_generation", "queued", "processing"], ["image_generation", "processing", "processing"], ["image_generation", "succeeded", "result_ready"], ["image_generation", "failed", "result_ready"], ["image_generation", "expired", "result_ready"],
+    ["video_generation", "queued", "processing"], ["video_generation", "processing", "processing"], ["video_generation", "succeeded", "result_ready"], ["video_generation", "failed", "result_ready"], ["video_generation", "expired", "result_ready"],
   ] as const)("reconciles acknowledged processing %s %s → %s", async (capability, status, expected) => {
     const adapter = new MemoryAdapter(); const id = `processing-${capability}-${status}`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
     adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const result = await new ManagedJobRecoveryStore(adapter).applyReconciliation(capability, id, 1, status); expect(result).toMatchObject({ phase: expected, revision: 2 });
@@ -259,6 +298,7 @@ describe("ManagedJobRecoveryStore hardening", () => {
     ["transcription", "uploading"], ["transcription", "completed"], ["transcription", "unknown"],
     ["document_processing", "uploading"], ["document_processing", "succeeded"], ["document_processing", "expired"], ["document_processing", "unknown"],
     ["image_generation", "uploading"], ["image_generation", "completed"], ["image_generation", "unknown"],
+    ["video_generation", "uploading"], ["video_generation", "completed"], ["video_generation", "unknown"],
   ] as const)("rejects invalid acknowledged processing status %s %s without mutation", async (capability, status) => {
     const adapter = new MemoryAdapter(); const id = `invalid-${capability}-${status}`; const path = `.systemsculpt/managed-jobs/${capability}/${id}.json`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }; adapter.files.set(path, JSON.stringify(record)); const store = new ManagedJobRecoveryStore(adapter);
     await expect(store.applyReconciliation(capability, id, 1, status)).rejects.toMatchObject({ code: "reconciliation_error" }); expect(JSON.parse(adapter.files.get(path)!).revision).toBe(1); expect(JSON.parse(adapter.files.get(path)!).phase).toBe("processing");
