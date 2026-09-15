@@ -1154,12 +1154,21 @@ export default class SystemSculptPlugin extends Plugin {
     try {
       const result = await protectLegacyPiCredentials(this.app.vault.adapter);
       if (result.legacyCredentialsPresent) {
+        const protectionStatus = result.ignoreRulePresent
+          ? "A Git ignore rule now blocks new untracked copies, but cannot clean up existing copies."
+          : "The Git ignore rule could not be installed, so this file is still at risk of being committed.";
         new Notice(
           "SystemSculpt found a retired provider credential file in .systemsculpt/pi-agent. " +
             "Rotate any keys it contains and remove it from Git history, sync history, and backups. " +
-            "A Git ignore rule now blocks new untracked copies, but cannot clean up existing copies.",
+            protectionStatus,
           0,
         );
+      }
+      if (result.protectionError) {
+        this.getLogger().warn("Legacy credential protection could not be applied", {
+          source: "SystemSculptPlugin",
+          metadata: { message: result.protectionError },
+        });
       }
     } catch (error) {
       this.getLogger().warn("Legacy credential protection could not be applied", {
@@ -2418,4 +2427,4 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-    }
+        }
