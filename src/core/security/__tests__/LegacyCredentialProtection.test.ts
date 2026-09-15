@@ -44,4 +44,14 @@ describe("protectLegacyPiCredentials", () => {
     });
     expect(target.write).not.toHaveBeenCalled();
   });
+  it("preserves credential detection when the ignore file cannot be written", async () => {
+    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}" });
+    target.write.mockRejectedValueOnce(new Error("read only"));
+
+    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({
+      legacyCredentialsPresent: true,
+      ignoreRulePresent: false,
+      protectionError: "read only",
+    });
+  });
 });
