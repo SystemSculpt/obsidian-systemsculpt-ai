@@ -36,6 +36,7 @@ import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { StorageManager } from "./core/storage";
+import { protectLegacyPiCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
@@ -1125,6 +1126,7 @@ export default class SystemSculptPlugin extends Plugin {
 
       const parallelTasks = [
         this.initializeDirectories(),
+        this.initializeLegacyCredentialProtection(),
         this.initializeVaultFileCache(),
         this.initializeBasicServices(),
       ];
@@ -1145,6 +1147,25 @@ export default class SystemSculptPlugin extends Plugin {
       });
 
       throw error;
+    }
+  }
+
+  private async initializeLegacyCredentialProtection(): Promise<void> {
+    try {
+      const result = await protectLegacyPiCredentials(this.app.vault.adapter);
+      if (result.legacyCredentialsPresent) {
+        new Notice(
+          "SystemSculpt found a retired provider credential file in .systemsculpt/pi-agent. " +
+            "Rotate any keys it contains and remove it from Git history, sync history, and backups. " +
+            "A Git ignore rule now blocks new untracked copies, but cannot clean up existing copies.",
+          0,
+        );
+      }
+    } catch (error) {
+      this.getLogger().warn("Legacy credential protection could not be applied", {
+        source: "SystemSculptPlugin",
+        metadata: { message: error instanceof Error ? error.message : String(error) },
+      });
     }
   }
 
@@ -2397,4 +2418,4 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-}
+    }
