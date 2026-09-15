@@ -70,7 +70,18 @@ export async function exerciseBuiltStudioGenerations(bundleModule: BuiltGenerati
   const productionAdapter = new bundleModule.ObsidianStudioGenerationAdapter(dataAdapter);
   const locator = { vaultRelativeProjectPath: "SystemSculpt/Studio/Bundle Proof.systemsculpt" };
   const projectId = "bundle_project";
-  const projectDocument = new TextEncoder().encode(JSON.stringify({ schema: "studio.project.v1", projectId, name: "Bundle Proof" }));
+  const projectDocument = new TextEncoder().encode(JSON.stringify({
+    schema: "studio.project.v1",
+    projectId,
+    name: "Bundle Proof",
+    createdAt: "2026-07-11T00:00:00.000Z",
+    updatedAt: "2026-07-11T00:00:00.000Z",
+    engine: { apiMode: "systemsculpt_only", minPluginVersion: "4.0.0" },
+    graph: { nodes: [], edges: [], entryNodeIds: [], groups: [] },
+    permissionsRef: { policyVersion: 1, policyPath: "SystemSculpt/Studio/Bundle Proof.systemsculpt-assets/policy/grants.json" },
+    settings: { runConcurrency: "adaptive", defaultFsScope: "vault", retention: { maxRuns: 100, maxArtifactsMb: 512 } },
+    migrations: { projectSchemaVersion: "1.0.0", applied: [] },
+  }));
   const policyDocument = new TextEncoder().encode(JSON.stringify({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-07-11T00:00:00.000Z", grants: [] }));
   const projectManifest = new TextEncoder().encode(JSON.stringify({ schema: "studio.manifest.v1", projectId }));
   const store = new bundleModule.StudioProjectGenerationStore(productionAdapter, { now: () => "2026-07-11T00:00:00.000Z" });
