@@ -34,9 +34,9 @@ npm run build
 
 ## On-machine Codex (desktop)
 
-Select **On-machine Codex** above the chat composer or in **Settings → SystemSculpt AI → Chat**. It requires an installed, signed-in Codex CLI and uses Codex’s own permissions and durable history. Model, reasoning, and speed controls apply to the next native turn. Switching execution backend opens a new chat and preserves the existing conversation and draft. Hosted media and Similar Notes still use SystemSculpt.
+Select **On-machine Codex** above the chat composer or in **Settings → SystemSculpt AI → Chat**. It requires an installed Codex CLI and uses Codex’s own permissions and durable history. By default it uses your existing login in `~/.codex`; custom providers that do not require an OpenAI login are also supported. Model, reasoning, and speed controls apply to the next native turn. Switching execution backend opens a new chat and preserves the existing conversation and draft. Hosted media and Similar Notes still use SystemSculpt.
 
-See [Studio workspaces and native execution](../studio-workspaces.md) for setup and recovery behavior.
+See [Studio workspaces and native execution](../studio-workspaces.md) for setup and recovery behavior, and [native Codex discovery](../development.md#native-codex-discovery) for custom executable and home settings.
 
 ## Add context
 
@@ -49,7 +49,7 @@ See [Studio workspaces and native execution](../studio-workspaces.md) for setup 
 ## Tool use
 
 - SystemSculpt can use built-in tools automatically when the current flow needs them.
-- Hosted chat uses your SystemSculpt account. Native Codex chat uses your existing Codex login and native approval controls.
+- Hosted chat uses your SystemSculpt account. Native Codex chat uses your configured Codex authentication and native approval controls.
 
 ## Enable Similar Notes (optional)
 

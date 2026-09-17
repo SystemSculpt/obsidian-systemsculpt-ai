@@ -1,5 +1,6 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
+import { resolveCodexLaunchOptions } from './CodexLaunch';
 export type CodexJson = Record<string, unknown>;
 export type CodexConnection = {
   request: (method: string, params: CodexJson) => Promise<CodexJson>;
@@ -15,13 +16,13 @@ type Callbacks = {
 /** A bounded JSON-RPC connection to the installed CLI, with its existing auth/config. */
 export async function connectCodex(workingDirectory: string, signal: AbortSignal, callbacks: Callbacks): Promise<CodexConnection> {
   if (signal.aborted) throw new Error('Codex run canceled.');
-  const [childProcess, fs, os, path] = await Promise.all([desktopHost.childProcess(), desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
+  const [childProcess, fs, path] = await Promise.all([desktopHost.childProcess(), desktopHost.fs(), desktopHost.path()]);
   if (!path.isAbsolute(workingDirectory) || !(await fs.stat(workingDirectory)).isDirectory()) throw new Error('Codex requires an existing absolute working directory.');
-  const environment = { ...desktopHost.environment() };
-  environment.PATH = [...new Set([...(environment.PATH || '').split(path.delimiter), '/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local/bin')])].filter(Boolean).join(path.delimiter);
+  const launch = await resolveCodexLaunchOptions();
+  if (signal.aborted) throw new Error('Codex run canceled.');
   // Start the transport from home; thread/start and thread/resume own the task cwd.
   // Some macOS application hosts stall CLI initialization in Documents subfolders.
-  const child = childProcess.spawn('codex', ['app-server'], { cwd: os.homedir(), env: environment, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = childProcess.spawn(launch.binary, ['app-server'], { cwd: launch.home, env: launch.environment, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const pending = new Map<number, { resolve: (value: CodexJson) => void; reject: (error: Error) => void; timer: number }>();
   const questions = new AbortController();
   let nextId = 0, buffer = '', stderr = '', stopped = false;
@@ -81,7 +82,7 @@ export async function connectCodex(workingDirectory: string, signal: AbortSignal
     await request('initialize', { clientInfo: { name: 'systemsculpt_studio', title: 'SystemSculpt Studio', version: '1.0.0' }, capabilities: { experimentalApi: true } });
     write({ method: 'initialized', params: {} });
     const account = await request('account/read', { refreshToken: false });
-    if (!isRecord(account.account)) throw new Error('Codex is not logged in. Run codex login on this machine, then try again.');
+    if (!isRecord(account.account) && account.requiresOpenaiAuth !== false) throw new Error(`Codex is not logged in for ${launch.codexHome}. Run codex login with that CODEX_HOME, then reconnect.`);
     return { request, close: () => stop(new Error('Codex transport closed.')) };
   } catch (error) { stop(error instanceof Error ? error : new Error(String(error))); throw error; }
 }
