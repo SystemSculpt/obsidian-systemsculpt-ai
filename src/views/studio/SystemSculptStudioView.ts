@@ -118,7 +118,7 @@ import {
   definitionKey,
   prettifyNodeKind,
 } from "./StudioViewHelpers";
-import { removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
+import { detachOrphanedManagedMediaOutputs, removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import {
   getStudioOwnerDocument,
@@ -2843,6 +2843,7 @@ export class SystemSculptStudioView extends ItemView {
         (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
       );
       removeNodesFromGroups(project, Array.from(idsToRemove));
+      detachOrphanedManagedMediaOutputs(project);
       removeStudioArrowsForItems(project, idsToRemove);
       return true;
     }, options);

@@ -111,6 +111,26 @@ function isManagedMediaNode(node: StudioNodeInstance): boolean {
   return String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() === MANAGED_MEDIA_OWNER;
 }
 
+function detachManagedMediaOutput(node: StudioNodeInstance): void {
+  delete node.config[MANAGED_MEDIA_OWNER_KEY];
+  delete node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY];
+  delete node.config[MANAGED_MEDIA_SLOT_INDEX_KEY];
+  delete node.config[MANAGED_OUTPUT_RUN_ID_KEY];
+}
+
+/** Keep completed media after producer deletion, with no stale ownership. */
+export function detachOrphanedManagedMediaOutputs(project: StudioProjectV1): boolean {
+  const nodeIds = new Set(project.graph.nodes.map(node => node.id));
+  let changed = false;
+  for (const node of project.graph.nodes) {
+    if (!isManagedMediaNode(node) || readManagedOutputPendingFlag(node)) continue;
+    if (nodeIds.has(readManagedMediaSourceNodeId(node))) continue;
+    detachManagedMediaOutput(node);
+    changed = true;
+  }
+  return changed;
+}
+
 /** Copies belong to the copied producer, or become independent media cards. */
 export function remapCopiedMediaOutputOwner(
   node: StudioNodeInstance,
@@ -122,9 +142,7 @@ export function remapCopiedMediaOutputOwner(
   if (copiedSourceId) {
     node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY] = copiedSourceId;
   } else {
-    delete node.config[MANAGED_MEDIA_OWNER_KEY];
-    delete node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY];
-    delete node.config[MANAGED_MEDIA_SLOT_INDEX_KEY];
+    detachManagedMediaOutput(node);
   }
   // A copied card never participates in an in-flight or completed original run.
   node.config = stripManagedPendingFields(node.config);

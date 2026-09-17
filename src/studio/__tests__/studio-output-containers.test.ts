@@ -1,3 +1,6 @@
+import { repairStudioProjectForLoad } from "../StudioProjectRepairs";
+import { reconcileStudioProject } from "../StudioProjectReconciliation";
+import { detachOrphanedManagedMediaOutputs } from "../StudioManagedOutputNodes";
 import { assignNodesToGroup, createGroupFromSelection, sanitizeGraphGroups } from "../StudioGraphGroupModel";
 import { createEmptyStudioProject, parseStudioProject, serializeStudioProject } from "../schema";
 import { arrangeManagedOutputContainers, materializeImageOutputsAsMediaNodes, materializePendingImageOutputPlaceholders, removePendingManagedOutputNodes } from "../StudioManagedOutputNodes";
@@ -113,4 +116,30 @@ it("rejects orphan offsets in both document dialects and discards them on legacy
   doc.canvas.groups[0].outputOffset = { x: 96, y: 0 };
   expect(() => assertValidStudioProjectAgentDocumentStructure(doc)).toThrow(/requires outputFor/);
   expect(parseStudioProject(JSON.stringify(doc)).graph.groups![0].outputOffset).toBeUndefined();
+});
+
+it.each(["deletion", "load", "reconciliation"])("preserves completed outputs as independent cards after producer %s", mode => {
+  const { project, source, options, outputs } = fixture();
+  materializeImageOutputsAsMediaNodes({ ...options, runId: "finished", outputs: outputs(["keep.png"]) });
+  const base = JSON.parse(JSON.stringify(project));
+  const output = project.graph.nodes[2];
+  const position = { ...output.position };
+  project.graph.nodes = project.graph.nodes.filter(node => node.id !== source.id);
+  project.graph.edges = project.graph.edges.filter(edge => edge.fromNodeId !== source.id && edge.toNodeId !== source.id);
+  let result = project;
+  if (mode === "deletion") {
+    expect(detachOrphanedManagedMediaOutputs(project)).toBe(true);
+  } else if (mode === "load") {
+    expect(repairStudioProjectForLoad(project)).toBe(true);
+  } else {
+    result = reconcileStudioProject(base, base, project).project;
+  }
+  const kept = result.graph.nodes.find(node => node.id === output.id)!;
+  expect(kept.position).toEqual(position);
+  expect(kept.config.sourcePath).toBe("keep.png");
+  for (const key of ["__studio_managed_by", "__studio_source_node_id", "__studio_source_output_index", "__studio_output_run_id"]) {
+    expect(kept.config[key]).toBeUndefined();
+  }
+  expect(detachOrphanedManagedMediaOutputs(result)).toBe(false);
+  expect(parseStudioProject(serializeStudioProject(result)).graph.nodes.find(node => node.id === kept.id)?.config).toEqual(kept.config);
 });

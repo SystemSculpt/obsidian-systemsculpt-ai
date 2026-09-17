@@ -41,4 +41,3 @@ function connectedTextPromptProject() {
       expect(pasted!.newGroups).toEqual([]);
     }
   });
-

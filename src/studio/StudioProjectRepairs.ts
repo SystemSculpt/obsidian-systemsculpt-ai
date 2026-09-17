@@ -1,6 +1,7 @@
 import { sanitizeGraphGroups } from "./StudioGraphGroupModel";
 import {
   cleanupStaleManagedOutputPlaceholders,
+  detachOrphanedManagedMediaOutputs,
   removeManagedTextOutputNodes,
 } from "./StudioManagedOutputNodes";
 import type { StudioProjectV1 } from "./types";
@@ -23,6 +24,7 @@ export function normalizeLegacyMediaNodeTitles(project: StudioProjectV1): boolea
 export function repairStudioProjectForLoad(project: StudioProjectV1): boolean {
   let changed = false;
   changed = sanitizeGraphGroups(project) || changed;
+  changed = detachOrphanedManagedMediaOutputs(project) || changed;
   changed = normalizeLegacyMediaNodeTitles(project) || changed;
   changed = cleanupStaleManagedOutputPlaceholders(project).changed || changed;
   changed = removeManagedTextOutputNodes({ project }).changed || changed;
