@@ -70,7 +70,7 @@ describe("ManagedImageGenerationAdapter", () => {
     const create = jest.fn(async body => {
       events.push("jobs:create");
       expect(body.input_images?.map(input => input.key)).toEqual(["key-a", "key-b"]);
-      expect(body.options).toEqual({ count: 2, aspect_ratio: "16:9" });
+      expect(body.options).toEqual({ count: 2, aspect_ratio: "16:9", image_size: "4K", quality: "max" });
       return { job: { id: "123e4567-e89b-42d3-a456-426614174000", status: "queued" as const } };
     });
     const metadata = {
@@ -109,6 +109,9 @@ describe("ManagedImageGenerationAdapter", () => {
         events.push("payload");
         return {
           prompt: "Draw a vault graph",
+          model: "maker/new-image",
+          imageSize: "4K",
+          quality: "max",
           count: 2,
           aspectRatio: "16:9",
           inputImages: [
@@ -124,7 +127,7 @@ describe("ManagedImageGenerationAdapter", () => {
     expect(result.outputs).toHaveLength(1);
     expect(prepareInputs).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: "Draw a vault graph" }),
+      expect.objectContaining({ prompt: "Draw a vault graph", model: "maker/new-image", options: { count: 2, aspect_ratio: "16:9", image_size: "4K", quality: "max" } }),
       "studio-image-run-node",
       expect.any(AbortSignal),
     );
@@ -165,6 +168,21 @@ describe("ManagedImageGenerationAdapter", () => {
     expect(fingerprints[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(fingerprints[1]).not.toBe(fingerprints[0]);
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it("includes model, size, and quality in durable replay identity", async () => {
+    const fingerprints: string[] = [];
+    const adapter = new ManagedImageGenerationAdapter({
+      admission: { acquireLease: async () => ({ outcome: "allowed" }) } as never,
+      recovery: { createAdmitted: async (input: { source: { fingerprint: string } }) => {
+        fingerprints.push(input.source.fingerprint); throw new Error("captured");
+      } } as never,
+      jobs: {} as never,
+    });
+    for (const selection of [{ model: "a/image" }, { model: "b/image" }, { model: "b/image", imageSize: "4K" }, { model: "b/image", imageSize: "4K", quality: "max" }]) {
+      await expect(adapter.generate({ operationId: "same-op", sourceIdentity: "same-source", buildPayload: () => ({ prompt: "same prompt", ...selection }) })).rejects.toThrow("captured");
+    }
+    expect(new Set(fingerprints).size).toBe(4);
   });
 
   it("removes each polling abort listener after a normal timer resolution", async () => {
@@ -237,25 +255,67 @@ describe("ManagedImageGenerationAdapter", () => {
     };
     const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 1, sha256: HASH_A, width: 1, height: 1 };
     const waits: number[] = [];
+    const create = jest.fn(async () => ({ job: { id: jobId, status: "queued" } }));
+    const downloadOutput = jest.fn(async () => ({ metadata, bytes: new Uint8Array([1]).buffer }));
     const adapter = new ManagedImageGenerationAdapter({
       admission: { acquireLease: jest.fn(async () => ({ outcome: "allowed" })) } as never,
       recovery,
       jobs: {
         prepareInputs: jest.fn(),
-        create: jest.fn(async () => ({ job: { id: jobId, status: "queued" } })),
+        create,
         status,
-        downloadOutput: jest.fn(async () => ({ metadata, bytes: new Uint8Array([1]).buffer })),
+        downloadOutput,
       } as never,
       createRequestId: () => "request-1",
       wait: async (milliseconds: number) => { waits.push(milliseconds); },
     });
-    const generate = () => adapter.generate({
+    const generate = (signal?: AbortSignal) => adapter.generate({
       operationId: "studio-image-run-node",
       sourceIdentity: "studio:project:run:node",
+      signal,
       buildPayload: () => ({ prompt: "Draw" }),
     });
-    return { generate, waits, metadata, jobId };
+    return { generate, waits, metadata, jobId, create, downloadOutput };
   }
+
+  it("retries a dropped output download without repeating generation", async () => {
+    const harness = pollHarness(jest.fn(async () => ({
+      job: { id: harness.jobId, status: "succeeded" }, outputs: [harness.metadata],
+    })));
+    harness.downloadOutput.mockRejectedValueOnce(new TypeError("connection reset"));
+    await expect(harness.generate()).resolves.toMatchObject({ jobId: harness.jobId });
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.downloadOutput).toHaveBeenCalledTimes(2);
+    expect(harness.downloadOutput.mock.calls[0]).toEqual(harness.downloadOutput.mock.calls[1]);
+    expect(harness.waits).toEqual([1_000]);
+  });
+
+  it("stops on invalid output metadata rather than retrying it", async () => {
+    const harness = pollHarness(jest.fn(async () => ({
+      job: { id: harness.jobId, status: "succeeded" }, outputs: [harness.metadata],
+    })));
+    harness.downloadOutput.mockRejectedValue(Object.assign(new Error("Output hash mismatch"), {
+      code: "malformed_response", retryable: false,
+    }));
+    await expect(harness.generate()).rejects.toMatchObject({ code: "malformed_response" });
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.downloadOutput).toHaveBeenCalledTimes(1);
+    expect(harness.waits).toEqual([]);
+  });
+
+  it("honors cancellation during output retrieval without another request", async () => {
+    const controller = new AbortController();
+    const harness = pollHarness(jest.fn(async () => ({
+      job: { id: harness.jobId, status: "succeeded" }, outputs: [harness.metadata],
+    })));
+    harness.downloadOutput.mockImplementationOnce(async () => {
+      controller.abort();
+      throw new TypeError("connection aborted");
+    });
+    await expect(harness.generate(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(harness.downloadOutput).toHaveBeenCalledTimes(1);
+    expect(harness.waits).toEqual([]);
+  });
 
   it("retries transient status failures with backoff instead of failing the run", async () => {
     const jobId = "123e4567-e89b-42d3-a456-426614174000";

@@ -115,4 +115,137 @@ describe("EmbeddingsIndexFile", () => {
     expect(adapter.files.has(".systemsculpt/embeddings/index.json.previous")).toBe(false);
     expect(adapter.files.has(".systemsculpt/embeddings/index.json.next")).toBe(false);
   });
+
+  it("falls back to the .previous checkpoint when the primary file is missing", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("falls back to the .previous checkpoint when the primary file is unparseable", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json", "{not json");
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("prefers the primary file over a stale .previous checkpoint", async () => {
+    const adapter = makeAdapter();
+    adapter.files.set(".systemsculpt/embeddings/index.json", JSON.stringify(sampleIndex()));
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify({ stale: true }));
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it.each(["missing", "corrupt"])("preserves the recovery checkpoint when the primary is %s and replacement fails", async (primaryState) => {
+    const adapter = {
+      ...makeAdapter(),
+      rename: jest.fn(async () => { throw new Error("disk detached"); }),
+      remove: jest.fn(async (path: string) => { adapter.files.delete(path); }),
+    };
+    adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+    if (primaryState === "corrupt") adapter.files.set(".systemsculpt/embeddings/index.json", "{truncated");
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await expect(file.write(sampleIndex())).rejects.toThrow("disk detached");
+
+    expect(await file.read()).toEqual(sampleIndex());
+  });
+
+  it("removes recovery and temporary snapshots along with the primary snapshot", async () => {
+    const adapter = {
+      ...makeAdapter(),
+      remove: jest.fn(async (path: string) => { adapter.files.delete(path); }),
+    };
+    const primary = ".systemsculpt/embeddings/index.json";
+    for (const path of [primary, `${primary}.previous`, `${primary}.next`]) {
+      adapter.files.set(path, JSON.stringify(sampleIndex()));
+    }
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await file.remove();
+
+    expect(await file.read()).toBeNull();
+    expect([...adapter.files.keys()]).toEqual([]);
+  });
+
+  it.each([
+    ["primary", "read"], ["previous", "read"], ["previous", "exists"],
+  ] as const)("preserves both snapshots when %s %s fails during replacement recovery", async (candidate, operation) => {
+    const adapter = {
+      ...makeAdapter(),
+      rename: jest.fn(async () => { throw new Error("target exists"); }),
+      remove: jest.fn(async (path: string) => { adapter.files.delete(path); }),
+    };
+    const primary = ".systemsculpt/embeddings/index.json";
+    const previous = `${primary}.previous`;
+    const primaryBytes = JSON.stringify({ ...sampleIndex(), createdAt: 20 });
+    const previousBytes = JSON.stringify({ ...sampleIndex(), createdAt: 10 });
+    adapter.files.set(primary, primaryBytes);
+    adapter.files.set(previous, previousBytes);
+    const failingPath = candidate === "primary" ? primary : previous;
+    if (operation === "read") {
+      adapter.read.mockImplementation(async path => {
+        if (path === failingPath) throw new Error("temporary read failure");
+        return adapter.files.get(path)!;
+      });
+    } else {
+      adapter.exists.mockImplementation(async path => {
+        if (path === failingPath) throw new Error("temporary stat failure");
+        return adapter.files.has(path) || adapter.dirs.has(path);
+      });
+    }
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await expect(file.write(sampleIndex())).rejects.toThrow("target exists");
+
+    expect(adapter.files.get(primary)).toBe(primaryBytes);
+    expect(adapter.files.get(previous)).toBe(previousBytes);
+    expect(adapter.files.has(`${primary}.next`)).toBe(false);
+    expect(adapter.rename).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows the original replace error and removes the temp file when rollback also fails", async () => {
+    const adapter = makeAdapter() as ReturnType<typeof makeAdapter> & {
+      rename: jest.Mock;
+      remove: jest.Mock;
+    };
+    const primary = ".systemsculpt/embeddings/index.json";
+    const previous = `${primary}.previous`;
+    const next = `${primary}.next`;
+    adapter.files.set(primary, JSON.stringify({ old: true }));
+    const renames: Array<[string, string]> = [];
+    adapter.rename = jest.fn(async (from: string, to: string) => {
+      renames.push([from, to]);
+      // 1: next -> primary refused because the target exists.
+      if (renames.length === 1) throw new Error("target exists");
+      // 2: primary -> previous succeeds.
+      if (renames.length === 2) {
+        adapter.files.set(to, adapter.files.get(from) as string);
+        adapter.files.delete(from);
+        return;
+      }
+      // 3: next -> primary fails; 4: rollback previous -> primary fails too.
+      throw new Error(renames.length === 3 ? "disk detached" : "rollback failed");
+    });
+    adapter.remove = jest.fn(async (path: string) => { adapter.files.delete(path); });
+    const file = new EmbeddingsIndexFile(adapter as never);
+
+    await expect(file.write(sampleIndex())).rejects.toThrow("target exists");
+
+    expect(renames).toEqual([
+      [next, primary],
+      [primary, previous],
+      [next, primary],
+      [previous, primary],
+    ]);
+    expect(adapter.files.has(next)).toBe(false);
+    // The last good snapshot is still served through the .previous fallback.
+    expect(await file.read()).toEqual({ old: true });
+  });
 });

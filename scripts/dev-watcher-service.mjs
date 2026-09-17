@@ -11,6 +11,7 @@ import {
   resolveSyncConfigPath,
 } from "./plugin-sync.mjs";
 import { resolvePluginBuildTarget } from "./plugin-build-options.mjs";
+import { assertCanonicalWatcherCheckout } from "./watcher-ownership.mjs";
 
 export const DEV_WATCHER_SERVICE_LABEL = "com.systemsculpt.obsidian-plugin-dev";
 
@@ -156,6 +157,7 @@ export function installDevWatcherService(options = {}) {
   const sleep = options.sleep || sleepSync;
   requireMac(platform);
   if (!Number.isInteger(uid) || uid < 0) throw new Error("Unable to resolve the current macOS user.");
+  assertCanonicalWatcherCheckout(root);
   if (!fs.existsSync(path.join(root, "run.sh"))) throw new Error(`run.sh is missing from ${root}.`);
   if (countConfiguredTargets({ root, configPath }) < 1) {
     throw new Error(`No plugin targets are configured in ${configPath}.`);

@@ -116,7 +116,7 @@ async function extractAudioAsset(
     result = await context.services.runCli({
       command: ffmpegCommand,
       args,
-      cwd: desktopHost.path().dirname(sourcePath),
+      cwd: (await desktopHost.path()).dirname(sourcePath),
       timeoutMs,
       maxOutputBytes,
     });
@@ -170,7 +170,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "outputFormat",
-        label: "Output Format",
+        label: "Output format",
         type: "select",
         required: true,
         options: [
@@ -182,7 +182,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "outputPath",
-        label: "Output Path",
+        label: "Output path",
         type: "text",
         required: false,
         placeholder: "Optional. Defaults to source path + selected output extension.",
@@ -197,7 +197,7 @@ export const audioExtractNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Process Output Bytes",
+        label: "Max process output bytes",
         type: "number",
         required: true,
         min: 1024,
@@ -212,8 +212,8 @@ export const audioExtractNode: StudioNodeDefinition = {
       throw new Error(`Audio extract node "${context.node.id}" requires a path input.`);
     }
     const sourcePath = context.services.resolveAbsolutePath(sourcePathInput);
-    const outputFormat = parseAudioOutputFormat(context.node.config.outputFormat as StudioJsonValue);
-    const configuredOutputPathRaw = getText(context.node.config.outputPath as StudioJsonValue).trim();
+    const outputFormat = parseAudioOutputFormat(context.node.config.outputFormat);
+    const configuredOutputPathRaw = getText(context.node.config.outputPath).trim();
     const configuredOutputPath = configuredOutputPathRaw
       ? context.services.resolveAbsolutePath(configuredOutputPathRaw)
       : "";
@@ -225,12 +225,12 @@ export const audioExtractNode: StudioNodeDefinition = {
     const outputPath = context.services.resolveAbsolutePath(preferredOutputPath);
 
     const extraction = await extractAudioAsset(context, {
-      ffmpegCommand: getText(context.node.config.ffmpegCommand as StudioJsonValue).trim() || "ffmpeg",
+      ffmpegCommand: getText(context.node.config.ffmpegCommand).trim() || "ffmpeg",
       sourcePath,
       outputFormat,
       outputPath,
-      timeoutMs: Number(context.node.config.timeoutMs as StudioJsonValue),
-      maxOutputBytes: Number(context.node.config.maxOutputBytes as StudioJsonValue),
+      timeoutMs: Number(context.node.config.timeoutMs),
+      maxOutputBytes: Number(context.node.config.maxOutputBytes),
     });
 
     return {

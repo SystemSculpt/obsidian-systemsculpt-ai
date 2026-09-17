@@ -55,7 +55,6 @@
   "managedMigrationState": {
     "phase": "auth_cleanup_pending",
     "receipt": {
-      "sourcePluginReleaseFixtureId": "release-5.11-schema-v1",
       "sourceSchemaVersion": 1,
       "targetSchemaVersion": 6,
       "timestamp": "2000-01-01T00:00:00.000Z",

@@ -54,8 +54,8 @@ function selectionMatches(
 }
 
 export function captureNoteInsertionTarget(app: App): NoteInsertionTarget {
-  const leaf = app.workspace.activeLeaf;
   const view = app.workspace.getActiveViewOfType(MarkdownView);
+  const leaf = view?.leaf ?? null;
   const file = view?.file ?? null;
   const editor = view?.editor ?? null;
   const selection = readSelection(editor);

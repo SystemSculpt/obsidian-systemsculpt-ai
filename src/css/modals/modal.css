@@ -72,12 +72,6 @@
   line-height: var(--ss-leading-tight);
 }
 
-.ss-modal__subtitle {
-  margin: var(--ss-space-1) 0 0;
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-muted);
-}
-
 .ss-modal__close-button {
   width: 28px;
   min-width: 28px;
@@ -301,19 +295,6 @@
   gap: var(--ss-space-2);
 }
 
-/* Plain stacked body copy for short modal content blocks. */
-.ss-modal__stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-3);
-  padding: var(--ss-space-4) var(--ss-space-5);
-}
-
-.ss-modal__stack p {
-  margin: 0;
-  line-height: var(--ss-leading-base);
-}
-
 .ss-modal__inline-code {
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-sm);
@@ -344,13 +325,6 @@
   background-color: var(--ss-surface-0);
 }
 
-.ss-modal__footer-group {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-}
-
 /* ------------------------------------------------------------------ *
  * Narrow desktop window
  * ------------------------------------------------------------------ */
@@ -373,8 +347,7 @@
   .ss-modal__header,
   .ss-modal__footer,
   .ss-modal__custom-content,
-  .ss-modal--scrollable .ss-modal__content,
-  .ss-modal__stack {
+  .ss-modal--scrollable .ss-modal__content {
     padding-inline: var(--ss-space-4);
   }
 
@@ -386,22 +359,18 @@
     padding-inline: var(--ss-space-4);
   }
 
-  .ss-modal__footer > .ss-button,
-  .ss-modal__footer-group > .ss-button {
+  .ss-modal__footer > .ss-button {
     flex: 1 1 12rem;
   }
 }
 
 @container ss-surface (max-width: 360px) {
-  .ss-modal__footer,
-  .ss-modal__footer-group {
+  .ss-modal__footer {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .ss-modal__footer-group,
-  .ss-modal__footer > .ss-button,
-  .ss-modal__footer-group > .ss-button {
+  .ss-modal__footer > .ss-button {
     width: 100%;
   }
 }

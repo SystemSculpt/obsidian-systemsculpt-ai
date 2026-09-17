@@ -7,11 +7,15 @@
   min-height: 0;
 }
 
+/* The viewport scrolls an elastic box (see StudioGraphWorldExtent): the world
+ * has no corner, so there are no scrollbars to suggest one. */
 .ss-studio-graph-viewport {
   position: relative;
   flex: 1;
   height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   touch-action: none;
   contain: layout style;
   background-color: var(--ss-surface-sunken);
@@ -20,6 +24,10 @@
     radial-gradient(color-mix(in srgb, var(--ss-line) 60%, transparent) 1px, transparent 1px);
   background-size: 400px 400px, 40px 40px;
   background-attachment: local;
+}
+
+.ss-studio-graph-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .ss-studio-graph-viewport.is-zoom-overview {
@@ -36,6 +44,18 @@
   transform-origin: 0 0;
 }
 
+/* The world layer is translated by the elastic origin so every child keeps
+ * its world coordinates; it has no box of its own. */
+.ss-studio-graph-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  transform-origin: 0 0;
+}
+
 /* Layers */
 .ss-studio-groups-layer {
   position: absolute;
@@ -44,9 +64,12 @@
   pointer-events: auto;
 }
 
+/* Positioned and sized by the interaction engine to cover the whole scroll
+ * box (its viewBox starts at the negative origin). */
 .ss-studio-edges-layer {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   z-index: 1;
   pointer-events: none;
   contain: layout paint style;

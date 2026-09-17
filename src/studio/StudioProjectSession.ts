@@ -11,8 +11,11 @@ import {
   type StudioProjectModifyDecision,
 } from "./StudioProjectLiveSync";
 import type { StudioProjectV1 } from "./types";
+import { reconcileStudioProject, type StudioProjectReconciliation } from "./StudioProjectReconciliation";
+import { serializeStudioProject } from "./schema";
 
 export type StudioProjectSessionAutosaveMode = "discrete" | "continuous";
+export type StudioProjectSessionChange = { kind: "project" | "save"; origin?: symbol };
 
 export type StudioProjectSessionMutationReason =
   | "node.config"
@@ -47,6 +50,8 @@ export type StudioProjectSessionExternalUpdateResult = {
 export type StudioProjectSessionMutateOptions = {
   mode?: StudioProjectSessionAutosaveMode;
   notifyListeners?: boolean;
+  /** Identifies the initiating editor without suppressing other subscribers. */
+  origin?: symbol;
 };
 
 export type StudioProjectSessionReplaceProjectOptions = {
@@ -71,8 +76,9 @@ type StudioProjectSessionOptions = {
   saveProject: (
     projectPath: string,
     project: StudioProjectV1,
-    onBeforeProjectWrite?: (rawText: string) => void
-  ) => Promise<void>;
+    onBeforeProjectWrite?: (rawText: string) => void,
+    baseProject?: StudioProjectV1
+  ) => Promise<void | StudioProjectReconciliation>;
   readProjectRawText?: (projectPath: string) => Promise<string | null>;
   saveBlockedProjectRecovery?: (
     projectPath: string,
@@ -91,6 +97,8 @@ type StudioProjectSessionAsyncMutator = (project: StudioProjectV1) => Promise<bo
 export class StudioProjectSession {
   private projectPath: string;
   private project: StudioProjectV1;
+  private baseProject: StudioProjectV1;
+  private conflictRecovery: { revision: number; project: StudioProjectV1; fields: string[] } | null = null;
   private saveTimer: number | null = null;
   private saveTimerMode: StudioProjectSessionAutosaveMode | null = null;
   private saveInFlight = false;
@@ -105,13 +113,14 @@ export class StudioProjectSession {
   private lastAcceptedSignature: string | null = null;
   private lastRejectedSignature: string | null = null;
   private expectedProjectWriteSignatures = new Set<string>();
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(change: StudioProjectSessionChange) => void>();
   private readonly discreteDelayMs: number;
   private readonly continuousDelayMs: number;
 
   constructor(private readonly options: StudioProjectSessionOptions) {
     this.projectPath = String(options.projectPath || "").trim();
     this.project = cloneStudioProjectSnapshot(options.project);
+    this.baseProject = cloneStudioProjectSnapshot(options.project);
     this.discreteDelayMs = Math.max(0, Math.floor(options.discreteDelayMs ?? DEFAULT_DISCRETE_DELAY_MS));
     this.continuousDelayMs = Math.max(
       this.discreteDelayMs,
@@ -142,6 +151,30 @@ export class StudioProjectSession {
     return cloneStudioProjectSnapshot(this.project);
   }
 
+  getEditingSnapshot(): { base: StudioProjectV1; project: StudioProjectV1 } {
+    return { base: cloneStudioProjectSnapshot(this.baseProject), project: this.getProjectSnapshot() };
+  }
+
+  getConflictRecovery(): { revision: number; project: StudioProjectV1; fields: string[] } | null {
+    return this.conflictRecovery ? { ...this.conflictRecovery, project: cloneStudioProjectSnapshot(this.conflictRecovery.project), fields: [...this.conflictRecovery.fields] } : null;
+  }
+
+  async restoreEditingSnapshot(snapshot: { base: StudioProjectV1; project: StudioProjectV1 }): Promise<void> {
+    if (this.disposed) return;
+    let reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
+    if (reconciled.conflicts.length > 0) {
+      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve edits from before the reload.");
+      await this.options.saveBlockedProjectRecovery(this.projectPath, snapshot.project);
+      if (this.disposed) return;
+      reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
+    }
+    if (serializeStudioProject(reconciled.project) === serializeStudioProject(this.project)) return;
+    this.project = reconciled.project;
+    this.schedulePersist({ reason: "project.reload" });
+    this.notifyListeners();
+    await this.flushPendingSaveWork();
+  }
+
   getReadonlyProjectSnapshot(): ReadonlyStudioProjectSnapshot {
     return readonlyStudioProjectSnapshot(this.project);
   }
@@ -158,7 +191,7 @@ export class StudioProjectSession {
     };
   }
 
-  subscribe(listener: () => void): () => void {
+  subscribe(listener: (change: StudioProjectSessionChange) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -180,7 +213,7 @@ export class StudioProjectSession {
     }
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {
-      this.notifyListeners();
+      this.notifyListeners({ kind: "project", origin: options?.origin });
     }
     return true;
   }
@@ -194,13 +227,25 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutateAsync:${reason}`);
       return false;
     }
-    const changed = (await mutator(this.project)) !== false;
-    if (!changed) {
+    const before = this.getProjectSnapshot();
+    const draft = cloneStudioProjectSnapshot(before);
+    const changed = (await mutator(draft)) !== false;
+    if (this.disposed) return false;
+    if (!changed || serializeStudioProject(before) === serializeStudioProject(draft)) {
       return false;
     }
+    let reconciled = reconcileStudioProject(before, draft, this.project);
+    if (reconciled.conflicts.length > 0) {
+      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve conflicting generated edits.");
+      await this.options.saveBlockedProjectRecovery(this.projectPath, draft);
+      if (this.disposed) return false;
+      // Recovery is asynchronous too: rebase against edits made during its I/O.
+      reconciled = reconcileStudioProject(before, draft, this.project);
+    }
+    this.project = reconciled.project;
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {
-      this.notifyListeners();
+      this.notifyListeners({ kind: "project", origin: options?.origin });
     }
     return true;
   }
@@ -224,6 +269,7 @@ export class StudioProjectSession {
       return;
     }
     this.project = cloneStudioProjectSnapshot(project);
+    this.baseProject = cloneStudioProjectSnapshot(project);
     this.projectPath = String(options?.projectPath || this.projectPath || "").trim();
     this.clearSaveTimer();
     this.saveQueued = false;
@@ -243,8 +289,38 @@ export class StudioProjectSession {
     }
   }
 
+  /** History is a new local edit against the accepted disk version, not a reload. */
+  applyHistorySnapshot(project: StudioProjectV1): boolean {
+    if (this.disposed) return false;
+    this.project = cloneStudioProjectSnapshot(project);
+    this.schedulePersist({ mode: "discrete", reason: "history.apply" });
+    this.notifyListeners();
+    return true;
+  }
+
   replaceProjectSnapshot(project: StudioProjectV1, options?: StudioProjectSessionReplaceProjectOptions): void {
     this.replaceProject(project, options);
+  }
+
+  async reconcileExternalProject(project: StudioProjectV1, rawText: string | null): Promise<void> {
+    if (this.disposed) return;
+    const beforeRecovery = this.getProjectSnapshot();
+    let reconciled = reconcileStudioProject(this.baseProject, beforeRecovery, project);
+    if (reconciled.conflicts.length > 0) {
+      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve conflicting canvas edits.");
+      await this.options.saveBlockedProjectRecovery(this.projectPath, beforeRecovery);
+      if (this.disposed) return;
+      // Only the intent that arrived after reconciliation takes precedence;
+      // the already-conflicting edit remains preserved in the recovery file.
+      reconciled = reconcileStudioProject(beforeRecovery, this.project, reconciled.project, { preferLocalConflicts: true });
+    }
+    this.replaceProject(project, { acceptedRawText: rawText, notifyListeners: false });
+    this.project = reconciled.project;
+    this.projectFileWriteBlocked = false;
+    if (serializeStudioProject(this.project) !== serializeStudioProject(project)) {
+      this.schedulePersist({ reason: "vault.sync" });
+    }
+    this.notifyListeners();
   }
 
   hasPendingLocalSaveWork(): boolean {
@@ -439,7 +515,11 @@ export class StudioProjectSession {
       }
       // Recovery persistence is a close gate. If it fails, this session stays
       // alive so the only remaining copy of the canvas is never discarded.
-      await this.options.saveBlockedProjectRecovery(this.projectPath, this.getProjectSnapshot());
+      while (true) {
+        const recoveryRevision = this.dirtyRevision;
+        await this.options.saveBlockedProjectRecovery(this.projectPath, this.getProjectSnapshot());
+        if (this.dirtyRevision === recoveryRevision) break;
+      }
     }
     if (flushError) {
       console.warn("[SystemSculpt Studio] Preserved a canvas version that lost a file-edit race", {
@@ -452,10 +532,10 @@ export class StudioProjectSession {
     this.listeners.clear();
   }
 
-  private notifyListeners(): void {
+  private notifyListeners(change: StudioProjectSessionChange = { kind: "project" }): void {
     for (const listener of this.listeners) {
       try {
-        listener();
+        listener(change);
       } catch {
         // Session listeners must never break the persistence pipeline.
       }
@@ -513,16 +593,26 @@ export class StudioProjectSession {
 
     this.saveInFlight = true;
     const revisionToPersist = this.dirtyRevision;
+    const snapshotToPersist = this.getProjectSnapshot();
+    const baseToPersist = cloneStudioProjectSnapshot(this.baseProject);
     let expectedWriteSignature: string | null = null;
     const savePromise = (async () => {
       try {
-        await this.options.saveProject(this.projectPath, this.project, (rawText) => {
+        const result = await this.options.saveProject(this.projectPath, cloneStudioProjectSnapshot(snapshotToPersist), (rawText) => {
           expectedWriteSignature = computeStudioProjectTextSignature(rawText);
           trackExpectedStudioProjectWriteSignature(
             this.expectedProjectWriteSignatures,
             expectedWriteSignature
           );
-        });
+        }, baseToPersist);
+        const persistedProject = result?.project || snapshotToPersist;
+        if (result?.conflicts.length) this.conflictRecovery = { revision: (this.conflictRecovery?.revision || 0) + 1, project: snapshotToPersist, fields: result.conflicts };
+        // An edit made while I/O was pending belongs to the next save. Rebase
+        // only that new intent onto the committed result; never replace it with
+        // the earlier snapshot or replay already accepted edits.
+        const rebased = reconcileStudioProject(snapshotToPersist, this.project, persistedProject, { preferLocalConflicts: true }).project;
+        if (serializeStudioProject(rebased) !== serializeStudioProject(this.project)) this.project = rebased;
+        this.baseProject = cloneStudioProjectSnapshot(persistedProject);
         this.saveFailurePaused = false;
         if (expectedWriteSignature) {
           this.markAcceptedProjectSignature(expectedWriteSignature);
@@ -558,7 +648,7 @@ export class StudioProjectSession {
           this.saveQueuedMode = null;
           this.startSaveTimer(queuedMode);
         }
-        this.notifyListeners();
+        this.notifyListeners({ kind: "save" });
       }
     })();
     this.saveInFlightPromise = savePromise;

@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import { postJsonStreaming } from "../utils/streaming";
+import { toError } from "../utils/errors";
 
 export type PlatformTransport = "fetch" | "requestUrl";
 
@@ -7,7 +8,7 @@ export type PlatformTransport = "fetch" | "requestUrl";
 // reserved for incremental SSE, where requestUrl can only return a buffered
 // response.
 function preferredTransport(stream: boolean): PlatformTransport {
-  return stream && typeof fetch === "function" ? "fetch" : "requestUrl";
+  return stream && typeof window.fetch === "function" ? "fetch" : "requestUrl";
 }
 
 export type PlatformRequestInput = {
@@ -146,15 +147,15 @@ export class PlatformRequestClient {
       );
     }
 
-    if (transport === "fetch" && typeof fetch === "function") {
+    if (transport === "fetch" && typeof window.fetch === "function") {
       try {
-        const response = await fetch(input.url, {
+        const response = await window.fetch(input.url, {
           method: input.method,
           headers,
           body,
           cache: input.cache ?? "no-store",
           signal: input.signal,
-        } as RequestInit);
+        });
         this.observeTransport(input, "fetch");
         return input.stream
           ? markResponseDeliveryMode(response, "fetch_stream")
@@ -262,7 +263,7 @@ export class PlatformRequestClient {
   }
 
   private async probeStreamingFetch(url: string, signal?: AbortSignal): Promise<boolean> {
-    if (typeof fetch !== "function") return false;
+    if (typeof window.fetch !== "function") return false;
     if (signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
 
     const cacheKey = this.streamingProbeCacheKey(url);
@@ -297,7 +298,7 @@ export class PlatformRequestClient {
     const timeout = window.setTimeout(() => controller.abort(), STREAMING_PROBE_TIMEOUT_MS);
 
     try {
-      const response = await fetch(url, {
+      const response = await window.fetch(url, {
         method: "GET",
         headers: { Accept: "application/json" },
         cache: "no-store",
@@ -339,7 +340,7 @@ export class PlatformRequestClient {
         },
         (error: unknown) => {
           signal.removeEventListener("abort", aborted);
-          reject(error);
+          reject(toError(error, "Streaming transport probe failed."));
         },
       );
     });

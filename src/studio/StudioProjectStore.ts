@@ -26,6 +26,9 @@ import {
   type StudioSupportGenerationFile,
 } from "./persistence/StudioProjectGenerationStore";
 import { ObsidianStudioGenerationAdapter } from "./persistence/ObsidianStudioGenerationAdapter";
+import { resolveStudioEntry } from './StudioEntry';
+import { reconcileStudioProject, type StudioProjectReconciliation } from "./StudioProjectReconciliation";
+import { StudioProjectRecoveryStore } from "./persistence/StudioProjectRecoveryStore";
 
 type CreateProjectOptions = {
   name: string;
@@ -80,8 +83,9 @@ function studioPersistenceError(
 }
 
 export class StudioProjectStore {
-  readonly generations: StudioProjectGenerationStore;
+  private readonly generations: StudioProjectGenerationStore;
   private readonly selectedByPath = new Map<string, { token: ExpectedGeneration; generation: SelectedGeneration }>();
+  private readonly projectWriteTails = new Map<string, Promise<unknown>>();
 
   constructor(private readonly app: App) {
     this.generations = new StudioProjectGenerationStore(
@@ -105,6 +109,7 @@ export class StudioProjectStore {
     return this.app.vault.getFiles().map((file) => file.path)
       .filter((path) => path.toLowerCase().endsWith(STUDIO_PROJECT_EXTENSION))
       .filter((path) => !path.startsWith(".systemsculpt/studio/projects/"))
+      .filter((path) => !/\.studio\/views\//u.test(path))
       .sort((a, b) => a.localeCompare(b));
   }
 
@@ -155,6 +160,8 @@ export class StudioProjectStore {
 
   async renameProject(projectPath: string, nextName: string, options?: { project?: StudioProjectV1 }): Promise<{ oldPath: string; newPath: string; project: StudioProjectV1 }> {
     const oldPath = normalizeStudioProjectPath(projectPath);
+    const entry = await resolveStudioEntry(this.app.vault.adapter, oldPath);
+    if (entry.entryRaw !== undefined) throw new Error('Rename this directory workspace through its connector configuration so its entry, modules and refresh destination stay together.');
     const slash = oldPath.lastIndexOf("/");
     const folder = slash < 0 ? "" : oldPath.slice(0, slash);
     const desired = normalizeStudioProjectPath(folder ? `${folder}/${nextName}` : nextName);
@@ -171,7 +178,7 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     this.selectedByPath.delete(oldPath); this.remember(newPath, result.expectedGeneration, result.generation);
-    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")!), { projectPath: newPath }) };
+    return { oldPath, newPath, project: parseStudioProject(decoder.decode(result.generation.files.get("project.systemsculpt")), { projectPath: newPath }) };
   }
 
   async adoptVisibleProjectRename(options: {
@@ -207,7 +214,7 @@ export class StudioProjectStore {
     }, selected.token);
     if (result.status !== "committed") throw studioPersistenceError("rename", result);
     const renamedProject = parseStudioProject(
-      decoder.decode(result.generation.files.get("project.systemsculpt")!),
+      decoder.decode(result.generation.files.get("project.systemsculpt")),
       { projectPath: newPath }
     );
     this.selectedByPath.delete(oldPath);
@@ -216,11 +223,11 @@ export class StudioProjectStore {
   }
 
   async readVisibleProjectRawText(projectPath: string): Promise<string> {
-    return await this.app.vault.adapter.read(normalizeStudioProjectPath(projectPath));
+    return (await resolveStudioEntry(this.app.vault.adapter, normalizeStudioProjectPath(projectPath))).raw;
   }
 
   async readProjectRawText(projectPath: string): Promise<string | null> {
-    try { const selected = await this.openSelected(projectPath); return decoder.decode(selected.generation.files.get("project.systemsculpt")!); }
+    try { const selected = await this.openSelected(projectPath); return decoder.decode(selected.generation.files.get("project.systemsculpt")); }
     catch { return null; }
   }
 
@@ -235,17 +242,39 @@ export class StudioProjectStore {
   async saveProject(
     projectPath: string,
     project: StudioProjectV1,
-    options?: { onBeforeProjectWrite?: (rawText: string) => void }
-  ): Promise<void> {
+    options?: { onBeforeProjectWrite?: (rawText: string) => void; baseProject?: StudioProjectV1 }
+  ): Promise<StudioProjectReconciliation> {
     const path = normalizeStudioProjectPath(projectPath);
-    const projectDocument = serializeStudioProject({ ...project, updatedAt: nowIso() });
-    options?.onBeforeProjectWrite?.(projectDocument);
-    await this.commitCommand(path, {
-      kind: "replace_project",
-      projectId: project.projectId,
-      reason: "discrete_save",
-      projectDocument: encoder.encode(projectDocument),
+    const local = cloneStudioProjectSnapshot(project);
+    const initial = await this.openSelected(path);
+    const base = options?.baseProject ? cloneStudioProjectSnapshot(options.baseProject)
+      : parseStudioProject(decoder.decode(initial.generation.files.get("project.systemsculpt")), { projectPath: path });
+    return this.serializeProjectWrite(path, async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const selected = await this.openSelected(path, { forceReload: true });
+        const external = parseStudioProject(decoder.decode(selected.generation.files.get("project.systemsculpt")), { projectPath: path });
+        const reconciled = reconcileStudioProject(base, local, external);
+        if (reconciled.conflicts.length > 0) await new StudioProjectRecoveryStore(this.app.vault.adapter).save(local);
+        const projectDocument = serializeStudioProject(reconciled.project);
+        options?.onBeforeProjectWrite?.(projectDocument);
+        const result = await this.generations.commitWholeGeneration({
+          kind: "replace_project", projectId: project.projectId, reason: "discrete_save",
+          projectDocument: encoder.encode(projectDocument),
+        }, selected.token);
+        if (result.status === "stale_revision" || result.status === "read_only") continue;
+        if (result.status !== "committed") throw studioPersistenceError("save", result);
+        this.remember(path, result.expectedGeneration, result.generation);
+        return reconciled;
+      }
+      throw new Error("Studio is receiving continuous file changes. Your canvas edits are still pending; try saving again when the file settles.");
     });
+  }
+
+  private async serializeProjectWrite<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const pending = (this.projectWriteTails.get(path) || Promise.resolve()).catch(() => undefined).then(operation);
+    this.projectWriteTails.set(path, pending);
+    try { return await pending; }
+    finally { if (this.projectWriteTails.get(path) === pending) this.projectWriteTails.delete(path); }
   }
 
   async loadPolicy(policyPath: string): Promise<StudioPermissionPolicyV1> {
@@ -272,6 +301,9 @@ export class StudioProjectStore {
   }
 
   async readSupportFile(projectPath: string, absolutePath: string): Promise<Uint8Array | null> {
+    this.relativeSupportPath(projectPath, absolutePath);
+    try { return new Uint8Array(await this.app.vault.adapter.readBinary(absolutePath)); }
+    catch { /* An arriving asset may still be available in the last committed snapshot. */ }
     const selected = await this.openSelected(projectPath);
     return selected.generation.files.get(this.relativeSupportPath(projectPath, absolutePath))?.slice() || null;
   }
@@ -283,6 +315,11 @@ export class StudioProjectStore {
       return this.readSupportFile(projectPath, absolutePath);
     }
     return null;
+  }
+
+  async restoreAssetFile(projectPath: string, assetPath: string): Promise<boolean> {
+    const selected = await this.openSelected(projectPath);
+    return this.generations.restoreAssetFile(selected.generation.metadata.projectId, { vaultRelativeProjectPath: projectPath }, assetPath);
   }
 
   async putAsset(projectPath: string, projectId: string, asset: StudioAssetGenerationFile): Promise<void> {

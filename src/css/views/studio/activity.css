@@ -1,0 +1,315 @@
+/* ------------------------------------------------------------------ *
+ * Studio activity — the one visual contract for "something is running".
+ *
+ * TS (src/views/studio/activity/**) writes `data-activity` on node cards,
+ * cable groups, port pins, Codex run cards and workflow steps, plus
+ * `--ss-activity-progress` / `data-activity-progress` for determinate bars
+ * and a one-shot `data-activity-pulse` on real transitions. Every color and
+ * motion for run state lives here; other Studio sheets do not style status.
+ *
+ * Loaded last among the Studio modules so a phase always wins over a
+ * surface's resting look.
+ * ------------------------------------------------------------------ */
+
+/* Phase → color, resolved once per element through --ss-activity-color. */
+.ss-studio-view {
+  --ss-activity-color-idle: var(--ss-ink-muted);
+  --ss-activity-color-queued: var(--ss-warning);
+  --ss-activity-color-active: var(--ss-accent);
+  --ss-activity-color-waiting: var(--ss-warning);
+  --ss-activity-color-done: var(--ss-success);
+  --ss-activity-color-cached: var(--ss-studio-accent-mid);
+  --ss-activity-color-failed: var(--ss-danger);
+  --ss-activity-color-stopped: var(--ss-ink-faint);
+  --ss-activity-color: var(--ss-activity-color-idle);
+  --ss-activity-surge-period: 900ms;
+  --ss-activity-breathe-period: 1600ms;
+  --ss-activity-pulse-duration: 640ms;
+}
+
+.ss-studio-view [data-activity="queued"] { --ss-activity-color: var(--ss-activity-color-queued); }
+.ss-studio-view [data-activity="active"],
+.ss-studio-view [data-activity="surging"] { --ss-activity-color: var(--ss-activity-color-active); }
+.ss-studio-view [data-activity="waiting"] { --ss-activity-color: var(--ss-activity-color-waiting); }
+.ss-studio-view [data-activity="done"],
+.ss-studio-view [data-activity="delivered"] { --ss-activity-color: var(--ss-activity-color-done); }
+.ss-studio-view [data-activity="cached"] { --ss-activity-color: var(--ss-activity-color-cached); }
+.ss-studio-view [data-activity="failed"] { --ss-activity-color: var(--ss-activity-color-failed); }
+.ss-studio-view [data-activity="stopped"] { --ss-activity-color: var(--ss-activity-color-stopped); }
+
+/* ------------------------------------------------------------------ *
+ * Node cards: breathing halo and progress bar (no stripes anywhere)
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card[data-activity="active"],
+.ss-studio-node-card[data-activity="waiting"] {
+  outline: 3px solid color-mix(in srgb, var(--ss-activity-color) 35%, transparent);
+  outline-offset: -1px;
+  animation: ss-studio-activity-breathe var(--ss-activity-breathe-period) var(--ss-ease) infinite;
+}
+
+.ss-studio-node-card[data-activity="failed"] {
+  border-color: var(--ss-danger-line);
+}
+
+/* Thin progress bar along the top edge. Determinate bars scale with the
+ * runtime property; indeterminate bars sweep. */
+.ss-studio-node-card[data-activity]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--ss-space-2);
+  right: var(--ss-space-2);
+  z-index: 6;
+  height: 2px;
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-activity-color);
+  transform-origin: left center;
+  transform: scaleX(0);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--ss-dur-base) var(--ss-ease), opacity var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-card[data-activity="active"]::before,
+.ss-studio-node-card[data-activity="waiting"]::before {
+  opacity: 1;
+  transform: none;
+  background-color: transparent;
+  background-image: linear-gradient(90deg, transparent, var(--ss-activity-color), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: ss-shimmer 1.6s linear infinite;
+}
+
+.ss-studio-node-card[data-activity="active"][data-activity-progress="determinate"]::before,
+.ss-studio-node-card[data-activity="waiting"][data-activity-progress="determinate"]::before {
+  background-color: var(--ss-activity-color);
+  background-image: none;
+  animation: none;
+  transform: scaleX(var(--ss-activity-progress, 0));
+}
+
+/* Transition emphasis: a ring that expands and fades once. */
+.ss-studio-node-card[data-activity-pulse] {
+  animation: ss-studio-activity-pulse-card var(--ss-activity-pulse-duration) var(--ss-ease-out) 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * Activity badge (status row)
+ * ------------------------------------------------------------------ */
+.ss-studio-node-activity {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  padding: 0 var(--ss-space-2) var(--ss-space-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-activity[hidden] {
+  display: none;
+}
+
+.ss-studio-node-activity-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--ss-radius-round);
+  border: 1.5px solid var(--ss-activity-color);
+  background-color: var(--ss-activity-color);
+  transition: border-color var(--ss-dur-fast) var(--ss-ease), background-color var(--ss-dur-fast) var(--ss-ease);
+}
+
+.ss-studio-node-activity[data-activity="idle"] .ss-studio-node-activity-dot,
+.ss-studio-node-activity[data-activity="queued"] .ss-studio-node-activity-dot,
+.ss-studio-node-activity[data-activity="stopped"] .ss-studio-node-activity-dot {
+  background-color: transparent;
+}
+
+/* Running: the dot becomes a spinner ring. */
+.ss-studio-node-activity[data-activity="active"] .ss-studio-node-activity-dot {
+  background-color: transparent;
+  border-color: color-mix(in srgb, var(--ss-activity-color) 25%, transparent);
+  border-top-color: var(--ss-activity-color);
+  animation: ss-spin 0.8s linear infinite;
+}
+
+.ss-studio-node-activity[data-activity="waiting"] .ss-studio-node-activity-dot {
+  animation: ss-pulse 1.2s var(--ss-ease) infinite;
+}
+
+.ss-studio-node-activity-label {
+  flex-shrink: 0;
+  color: var(--ss-activity-color);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-studio-node-activity[data-activity="idle"] .ss-studio-node-activity-label {
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-node-activity-progress {
+  flex-shrink: 0;
+  color: var(--ss-activity-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.ss-studio-node-activity-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-studio-node-activity-progress:empty,
+.ss-studio-node-activity-detail:empty {
+  display: none;
+}
+
+.ss-studio-node-activity .ss-studio-node-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Port pins: charged outputs, receiving inputs
+ * ------------------------------------------------------------------ */
+.ss-studio-port-pin[data-activity="emitting"] {
+  color: var(--ss-activity-color-active);
+  border-color: var(--ss-activity-color-active);
+  background-color: var(--ss-activity-color-active);
+  animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
+}
+
+.ss-studio-port-pin[data-activity="receiving"] {
+  border-color: var(--ss-activity-color-active);
+  animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
+  animation-delay: -0.55s;
+}
+
+/* ------------------------------------------------------------------ *
+ * Cables: base line color, glow halo, travelling energy
+ * ------------------------------------------------------------------ */
+.ss-studio-edge-group {
+  /* Read inline by StudioEdgeRenderer for the base line and arrow. */
+  --ss-studio-edge-stroke: var(--ss-studio-link-stroke);
+  --ss-studio-edge-energy: color-mix(in srgb, var(--ss-ink-on-accent) 85%, var(--ss-activity-color-active));
+}
+
+.ss-studio-edge-group .ss-studio-edge-line,
+.ss-studio-edge-group .ss-studio-edge-arrow {
+  opacity: 0.85;
+  transition: opacity var(--ss-dur-base) var(--ss-ease);
+}
+
+.ss-studio-edge-glow,
+.ss-studio-edge-energy {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.ss-studio-edge-glow {
+  stroke: var(--ss-studio-edge-stroke);
+  stroke-width: 7;
+  transition: opacity var(--ss-dur-base) var(--ss-ease);
+}
+
+.ss-studio-edge-energy {
+  stroke: var(--ss-studio-edge-energy);
+  stroke-width: 2.4;
+  stroke-dasharray: 3 15;
+}
+
+.ss-studio-edge-group:not([data-activity="idle"]) .ss-studio-edge-line,
+.ss-studio-edge-group:not([data-activity="idle"]) .ss-studio-edge-arrow {
+  opacity: 1;
+}
+
+.ss-studio-edge-group[data-activity="surging"] {
+  --ss-studio-edge-stroke: var(--ss-activity-color-active);
+}
+
+.ss-studio-edge-group[data-activity="surging"] .ss-studio-edge-line {
+  stroke-width: 2;
+}
+
+.ss-studio-edge-group[data-activity="surging"] .ss-studio-edge-glow {
+  opacity: 0.22;
+}
+
+.ss-studio-edge-group[data-activity="surging"] .ss-studio-edge-energy {
+  opacity: 1;
+  animation: ss-studio-surge var(--ss-activity-surge-period) linear infinite;
+}
+
+.ss-studio-edge-group[data-activity="delivered"] {
+  --ss-studio-edge-stroke: var(--ss-activity-color-done);
+}
+
+.ss-studio-edge-group[data-activity="delivered"] .ss-studio-edge-glow {
+  opacity: 0.12;
+}
+
+.ss-studio-edge-group[data-activity="failed"] {
+  --ss-studio-edge-stroke: var(--ss-activity-color-failed);
+}
+
+.ss-studio-edge-group[data-activity="failed"] .ss-studio-edge-line {
+  stroke-dasharray: 6 5;
+}
+
+.ss-studio-edge-group[data-activity-pulse] .ss-studio-edge-glow {
+  animation: ss-studio-activity-pulse-edge var(--ss-activity-pulse-duration) var(--ss-ease-out) 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * Codex run cards and workflow plans share the same stripe colors
+ * ------------------------------------------------------------------ */
+.ss-studio-run-card[data-activity]:not([data-activity="idle"]),
+.ss-studio-workflow-steps li[data-activity]:not([data-activity="idle"]) {
+  border-color: color-mix(in srgb, var(--ss-activity-color) 45%, var(--ss-line));
+}
+
+.ss-studio-workflow-card[data-activity] {
+  border-top-color: var(--ss-activity-color);
+}
+
+/* ------------------------------------------------------------------ *
+ * Perf gating and reduced motion
+ * ------------------------------------------------------------------ */
+.ss-studio-graph-viewport.is-interacting .ss-studio-edge-energy,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-edge-energy,
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-activity-dot,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-activity-dot,
+.ss-studio-graph-viewport.is-interacting .ss-studio-port-pin[data-activity],
+.ss-studio-graph-viewport.is-scrolling .ss-studio-port-pin[data-activity] {
+  animation-play-state: paused;
+}
+
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card[data-activity]::before,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card[data-activity]::before {
+  animation-play-state: paused;
+}
+
+/* foundation/surface.css collapses every animation under reduced motion; the
+ * resting frames below stay legible without movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ss-studio-node-card[data-activity="active"],
+  .ss-studio-node-card[data-activity="waiting"] {
+    outline-color: color-mix(in srgb, var(--ss-activity-color) 45%, transparent);
+  }
+
+  .ss-studio-node-card[data-activity="active"]::before,
+  .ss-studio-node-card[data-activity="waiting"]::before {
+    background-color: var(--ss-activity-color);
+    background-image: none;
+  }
+
+  .ss-studio-edge-group[data-activity="surging"] .ss-studio-edge-energy {
+    stroke-dasharray: 8 10;
+  }
+}

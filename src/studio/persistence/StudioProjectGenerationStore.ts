@@ -6,8 +6,10 @@ import {
   serializeStudioPolicy,
   serializeStudioProject,
 } from "../schema";
-import { sha256HexFromArrayBuffer } from "../hash";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
+import { containsControlCharacters } from "../../utils/characterValidation";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
+import { reconcileStudioSupportDocument } from "./StudioSupportReconciliation";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
   assertValidStudioProjectAgentDocumentStructure,
@@ -18,6 +20,7 @@ export type GenerationHash = string;
 export type ExpectedGeneration = { revision: number; generationHash: GenerationHash };
 export type ProjectionLocator = { vaultRelativeProjectPath: string };
 export type StudioGenerationAdapter = {
+  readonly coordinationKey?: object;
   exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   readBinary(path: string): Promise<ArrayBuffer>;
@@ -92,9 +95,11 @@ export type StudioProjectGenerationCommand =
       /** Exact bytes already moved to locator by an ordinary vault rename. */
       destinationProjectDocumentBeforeRename?: Uint8Array;
     };
-type InternalStudioProjectGenerationCommand = StudioProjectGenerationCommand | { kind: "external_sync"; projectId: string; projectDocument: Uint8Array; supportFiles: readonly { relativePath: string; bytes: Uint8Array }[] };
 
 type StudioGenerationCommandKind = "create" | "discrete_save" | "autosave" | "policy" | "manifest" | "asset" | "support" | "run" | "cache" | "migration" | "repair" | "external_sync" | "logical_rename";
+
+// Native run history is independently written by StudioAgentRunStore, never a generated projection.
+const isAgentRunFile = (path: string): boolean => path === "support/agent-runs" || path.startsWith("support/agent-runs/");
 
 const AUTHORITY_ROOT = ".systemsculpt/studio/projects";
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -119,7 +124,7 @@ function canonicalJson(value: unknown): string {
 
 function normalizeRelativePath(input: string): string {
   const path = String(input).replace(/\\/g, "/");
-  if (!path || path.startsWith("/") || /^[A-Za-z]:\//.test(path) || /[\u0000-\u001f\u007f]/.test(path)) throw new Error("Invalid generation relative path.");
+  if (!path || path.startsWith("/") || /^[A-Za-z]:\//.test(path) || containsControlCharacters(path)) throw new Error("Invalid generation relative path.");
   const segments = path.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) throw new Error("Invalid generation relative path.");
   if (path === "manifest.json" || path === "commit.json") throw new Error("Reserved generation path.");
@@ -128,7 +133,7 @@ function normalizeRelativePath(input: string): string {
 
 export function validateProjectionLocator(locator: ProjectionLocator): ProjectionLocator {
   const raw = String(locator?.vaultRelativeProjectPath || "").trim().replace(/\\/g, "/");
-  if (!raw || raw.startsWith("/") || /^[A-Za-z]:\//.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) throw new Error("Invalid Studio projection path.");
+  if (!raw || raw.startsWith("/") || /^[A-Za-z]:\//.test(raw) || containsControlCharacters(raw)) throw new Error("Invalid Studio projection path.");
   const segments = raw.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) throw new Error("Invalid Studio projection path.");
   const normalized = normalizeStudioProjectPath(raw);
@@ -217,6 +222,20 @@ export class StudioProjectGenerationStore {
     return () => set.delete(listener);
   }
 
+  async restoreAssetFile(projectId: string, locatorInput: ProjectionLocator, assetPath: string): Promise<boolean> {
+    const locator = validateProjectionLocator(locatorInput);
+    const supportRoot = deriveStudioAssetsDir(locator.vaultRelativeProjectPath);
+    if (!assetPath.startsWith(`${supportRoot}/`)) return false;
+    const relative = `support/${assetPath.slice(supportRoot.length + 1)}`;
+    if (!/^support\/assets\/sha256\/[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(relative)) return false;
+    const recovered = await this.recover(projectId);
+    if (recovered.status !== "ready" || !recovered.generation.files.has(relative) || recovered.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) return false;
+    const metadata = recovered.generation.metadata;
+    const source = `${generationRoot(projectId)}/${metadata.revision}-${metadata.generationHash}/files/${relative}`;
+    await this.mkdirRecursive(dirname(assetPath));
+    return await this.adapter.copyFileIfAbsent(source, assetPath) || await this.adapter.exists(assetPath);
+  }
+
   async isProjectionLocatorAvailable(locatorInput: ProjectionLocator): Promise<boolean> {
     const locator = validateProjectionLocator(locatorInput);
     const path = locator.vaultRelativeProjectPath;
@@ -254,8 +273,9 @@ export class StudioProjectGenerationStore {
   }
 
   private async exclusive<T>(projectId: string, action: () => Promise<T>): Promise<T> {
-    let map = StudioProjectGenerationStore.coordinators.get(this.adapter as object);
-    if (!map) { map = new Map(); StudioProjectGenerationStore.coordinators.set(this.adapter as object, map); }
+    const coordinationKey = this.adapter.coordinationKey || this.adapter;
+    let map = StudioProjectGenerationStore.coordinators.get(coordinationKey);
+    if (!map) { map = new Map(); StudioProjectGenerationStore.coordinators.set(coordinationKey, map); }
     const prior = map.get(projectId) || Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -434,13 +454,7 @@ export class StudioProjectGenerationStore {
     );
   }
 
-  async commit(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> { return this.commitWholeGeneration(command, expected); }
-
   async commitWholeGeneration(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
-    return this.commitInternal(command, expected);
-  }
-
-  private async commitInternal(command: InternalStudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
     return this.exclusive(command.projectId, async () => {
       const recovered = await this.recover(command.projectId);
       if (recovered.status !== "ready") return recovered;
@@ -449,12 +463,11 @@ export class StudioProjectGenerationStore {
         const adoptsVisibleRename =
           command.kind === "logical_rename"
           && command.destinationProjectDocumentBeforeRename !== undefined;
-        if (command.kind !== "external_sync" && !adoptsVisibleRename) {
-          const projection = await this.readProjection({ vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath });
-          if (!projection || !this.generationFilesEqual(recovered.generation.files, projection.files)) {
+        if (!adoptsVisibleRename) {
+          const projection = await this.readProjectDocument({ vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath });
+          if (!projection || !bytesEqual(recovered.generation.files.get("project.systemsculpt")!, projection)) {
             return { status: "read_only", message: "The project file changed before this Studio save could begin; the file was left untouched." };
           }
-          await this.ensureProjection(recovered.generation);
         }
         const files = this.applyCommand(command, recovered.generation.files);
         const locator = command.kind === "logical_rename" ? validateProjectionLocator(command.locator) : { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
@@ -479,14 +492,18 @@ export class StudioProjectGenerationStore {
     });
   }
 
-  private applyCommand(command: InternalStudioProjectGenerationCommand, current: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
-    const files = new Map([...current].map(([path, bytes]) => [path, bytes.slice()]));
+  private applyCommand(command: StudioProjectGenerationCommand, current: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
+    const files = new Map<string, Uint8Array>([...current].filter(([path]) => !isAgentRunFile(path)).map(([path, bytes]) => [path, bytes.slice()]));
+    const putIndex = (path: string, bytes: Uint8Array): void => {
+      const previous = files.get(path);
+      files.set(path, previous ? reconcileStudioSupportDocument(path, bytes, previous) || bytes.slice() : bytes.slice());
+    };
     switch (command.kind) {
       case "replace_project": files.set("project.systemsculpt", command.projectDocument.slice()); break;
       case "replace_policy": files.set("support/policy/grants.json", command.policyDocument.slice()); break;
       case "put_asset": files.set(assetGenerationPath(command.asset.contentAddressedPath), command.asset.bytes.slice()); break;
       case "put_support_file": files.set(supportGenerationPath(command.file.supportRelativePath), command.file.bytes.slice()); break;
-      case "replace_cache": files.set("support/cache/node-results.json", command.cacheDocument.slice()); break;
+      case "replace_cache": putIndex("support/cache/node-results.json", command.cacheDocument); break;
       case "replace_manifest": files.set("support/project.manifest.json", command.projectManifest.slice()); break;
       case "publish_run": {
         const runId = validateRunId(command.runId);
@@ -496,23 +513,23 @@ export class StudioProjectGenerationStore {
         }
         files.set(`support/runs/${runId}/snapshot.json`, command.snapshotDocument.slice());
         files.set(`support/runs/${runId}/events.ndjson`, command.eventsDocument.slice());
-        files.set("support/runs/index.json", command.runIndexDocument.slice());
-        files.set("support/cache/node-results.json", command.cacheDocument.slice());
+        putIndex("support/runs/index.json", command.runIndexDocument);
+        if (command.removeRunIds.length > 0) {
+          const index: unknown = JSON.parse(decoder.decode(files.get("support/runs/index.json")));
+          if (Array.isArray(index)) files.set("support/runs/index.json", encoder.encode(`${JSON.stringify(index.filter(entry => !command.removeRunIds.includes(String(entry?.runId))), null, 2)}\n`));
+        }
+        putIndex("support/cache/node-results.json", command.cacheDocument);
         for (const asset of command.assets) files.set(assetGenerationPath(asset.contentAddressedPath), asset.bytes.slice());
         break;
       }
       case "logical_rename": files.set("project.systemsculpt", command.projectDocument.slice()); files.set("support/project.manifest.json", command.projectManifest.slice()); break;
-      case "external_sync":
-        files.clear(); files.set("project.systemsculpt", command.projectDocument.slice());
-        for (const file of command.supportFiles) files.set(normalizeRelativePath(file.relativePath), file.bytes.slice());
-        break;
     }
     return files;
   }
 
-  private commandKind(command: InternalStudioProjectGenerationCommand): StudioGenerationCommandKind {
+  private commandKind(command: StudioProjectGenerationCommand): StudioGenerationCommandKind {
     if (command.kind === "replace_project") return command.reason;
-    return ({ replace_policy: "policy", put_asset: "asset", put_support_file: "support", replace_cache: "cache", replace_manifest: "manifest", publish_run: "run", logical_rename: "logical_rename", external_sync: "external_sync" } as const)[command.kind];
+    return ({ replace_policy: "policy", put_asset: "asset", put_support_file: "support", replace_cache: "cache", replace_manifest: "manifest", publish_run: "run", logical_rename: "logical_rename" } as const)[command.kind];
   }
 
   async open(projectId: string, locatorInput: ProjectionLocator): Promise<OpenResult> {
@@ -522,14 +539,8 @@ export class StudioProjectGenerationStore {
       const recovered = await this.recover(projectId);
       if (recovered.status !== "ready") return recovered;
       if (recovered.generation.metadata.projection.canonicalPath !== locator.vaultRelativeProjectPath) return { status: "read_only", message: "Projection locator does not match selected generation." };
-      const projection = await this.readProjection(locator);
-      const exact = projection !== null && this.generationFilesEqual(recovered.generation.files, projection.files);
-      if (projection && !exact && this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) {
-        try {
-          await this.writeProjection(recovered.generation);
-          return { ...recovered, projectionStatus: "repaired" };
-        } catch (error) { return { status: "storage_unavailable", message: String(error) }; }
-      }
+      const projection = await this.readProjectDocument(locator);
+      const exact = projection !== null && bytesEqual(recovered.generation.files.get("project.systemsculpt")!, projection);
       if (exact) {
         try {
           const status = await this.ensureProjection(recovered.generation);
@@ -585,10 +596,8 @@ export class StudioProjectGenerationStore {
   async repairProjection(projectId: string): Promise<OpenResult> {
     const recovered = await this.recover(projectId); if (recovered.status !== "ready") return recovered;
     const locator = { vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath };
-    const projection = await this.readProjection(locator);
-    if (projection && !this.generationFilesEqual(recovered.generation.files, projection.files)) {
-      if (!this.projectionIsAuthoritySubset(recovered.generation.files, projection.files)) return { status: "read_only", message: "Changed projection bytes were preserved for reconciliation." };
-    }
+    const projection = await this.readProjectDocument(locator);
+    if (projection && !bytesEqual(recovered.generation.files.get("project.systemsculpt")!, projection)) return { status: "read_only", message: "Changed projection bytes were preserved for reconciliation." };
     try {
       await this.writeProjection(recovered.generation, {
         createMissingProjectDocument: projection === null,
@@ -601,8 +610,7 @@ export class StudioProjectGenerationStore {
     let locator: ProjectionLocator;
     try { locator = validateProjectionLocator(candidate); } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
     try {
-      const projection = await this.readProjection(locator);
-      const document = projection?.files.get("project.systemsculpt");
+      const document = await this.readProjectDocument(locator);
       if (!document) return { status: "invalid_candidate", message: "The Studio project file is missing." };
       const rawText = decoder.decode(document);
       assertValidStudioProjectAgentDocumentStructure(JSON.parse(rawText));
@@ -621,15 +629,13 @@ export class StudioProjectGenerationStore {
   }
 
   private async reconcileProjectionUnlocked(locator: ProjectionLocator, recovered: Extract<RecoveryResult, { status: "ready" }>): Promise<CommitResult> {
-    const projection = await this.readProjection(locator);
-    if (!projection) return { status: "invalid_candidate", message: "The Studio project file is missing." };
-    if (this.generationFilesEqual(recovered.generation.files, projection.files)) {
+    const document = await this.readProjectDocument(locator);
+    if (!document) return { status: "invalid_candidate", message: "The Studio project file is missing." };
+    if (bytesEqual(recovered.generation.files.get("project.systemsculpt")!, document)) {
       try { await this.ensureProjection(recovered.generation); }
       catch (error) { return { status: "storage_unavailable", message: String(error) }; }
       return { status: "committed", expectedGeneration: recovered.expectedGeneration, generation: recovered.generation, logicallyCommitted: true };
     }
-    const document = projection.files.get("project.systemsculpt");
-    if (!document) return { status: "invalid_candidate", message: "The Studio project file is missing." };
     let project: ReturnType<typeof parseStudioProject>;
     let rawProjectDocument: unknown;
     try {
@@ -667,15 +673,6 @@ export class StudioProjectGenerationStore {
         };
       }
     }
-    if (recoveredDocument && bytesEqual(recoveredDocument, document)) {
-      try {
-        await this.writeProjection(recovered.generation);
-        return { status: "committed", expectedGeneration: recovered.expectedGeneration, generation: recovered.generation, logicallyCommitted: true };
-      } catch (error) {
-        return { status: "storage_unavailable", message: String(error) };
-      }
-    }
-
     // The project document is the user-editable source of truth. Support files
     // are private implementation data: recover them from the last valid
     // generation instead of requiring an agent to coordinate them.
@@ -715,10 +712,19 @@ export class StudioProjectGenerationStore {
       const createdAt = this.now(); if (!RFC3339_MS.test(createdAt)) throw new Error("Timestamp must be RFC3339 with milliseconds.");
       const files = new Map<string, Uint8Array>(); const folded = new Set<string>();
       for (const [rawPath, rawBytes] of inputFiles) {
-        const path = normalizeRelativePath(rawPath); if (isIgnoredTreeFile(path)) continue; const fold = path.toLocaleLowerCase("en-US");
+        const path = normalizeRelativePath(rawPath); if (isIgnoredTreeFile(path) || isAgentRunFile(path)) continue; const fold = path.toLocaleLowerCase("en-US");
         if (folded.has(fold)) throw new Error("Case-folding generation path collision."); folded.add(fold); files.set(path, rawBytes.slice());
       }
       if (!files.has("project.systemsculpt")) throw new Error("Generation is missing the project document.");
+      // Reject malformed candidates before writing the visible file or a commit
+      // marker. A successful internal save must always be reopenable.
+      try {
+        const raw = JSON.parse(decoder.decode(files.get("project.systemsculpt")));
+        assertValidStudioProjectAgentDocumentStructure(raw);
+        const candidate = parseStudioProject(JSON.stringify(raw), { projectPath: locator.vaultRelativeProjectPath });
+        if (candidate.projectId !== projectId) throw new Error("Project identity changed during publication.");
+      } catch (error) { return { status: "invalid_candidate", message: String(error) }; }
+
       const entries: GenerationManifestEntry[] = [];
       for (const [relativePath, bytes] of files) entries.push({ relativePath, kind: relativePath === "project.systemsculpt" || relativePath.endsWith(".json") || relativePath.endsWith(".ndjson") ? "text" : "binary", sizeBytes: bytes.byteLength, sha256: await hash(bytes) });
       entries.sort((a, b) => compareUtf8(a.relativePath, b.relativePath));
@@ -740,7 +746,9 @@ export class StudioProjectGenerationStore {
           decoder.decode(document)
         );
         if (!visibleProjectMatched) {
-          try { await this.adapter.remove(directory); } catch {}
+          try { await this.adapter.remove(directory); } catch {
+            // Cleanup is best-effort; the incomplete generation is never committed.
+          }
           return { status: "read_only", message: "The project file changed before Studio could save; the file was left untouched." };
         }
       } else {
@@ -749,15 +757,19 @@ export class StudioProjectGenerationStore {
           locator.vaultRelativeProjectPath
         );
         if (!destinationCreated) {
-          try { await this.adapter.remove(directory); } catch {}
+          try { await this.adapter.remove(directory); } catch {
+            // Cleanup is best-effort; the incomplete generation is never committed.
+          }
           return { status: "read_only", message: "A project file already exists at the destination; it was left untouched." };
         }
       }
       const descriptor: CommitDescriptor = { schemaVersion: 1, projectId, revision: body.revision, generationHash, manifestSha256: await hash(manifestBytes), entryCount: entries.length, logicallyCommittedAt: createdAt };
       await this.adapter.write(`${directory}/commit.json`, canonicalJson(descriptor));
       const validated = await this.validateGeneration(directory);
-      await this.writeProjection(selected(validated), { projectDocumentAlreadyWritten: true });
+      await this.writeProjection(selected(validated), { projectDocumentAlreadyWritten: true, previous: parent });
       if (parent && parent.projection.canonicalPath !== manifest.projection.canonicalPath) {
+        const visible = await this.readProjectDocument(locator);
+        if (!visible || !bytesEqual(visible, document)) throw new Error("Rename destination changed before verification; the original project was retained.");
         await this.retirePreviousProjection(
           parent,
           manifest,
@@ -772,17 +784,17 @@ export class StudioProjectGenerationStore {
   private async validateGeneration(directory: string): Promise<ValidGeneration> {
     const rawManifest = await this.adapter.read(`${directory}/manifest.json`); const manifestBytes = encoder.encode(rawManifest); const manifest = JSON.parse(rawManifest) as GenerationManifest;
     if (manifest.schemaVersion !== 1) throw new Error("future schema");
-    if (!hasExactKeys(manifest as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
+    if (!hasExactKeys(manifest, ["schemaVersion", "projectId", "revision", "parentRevision", "parentGenerationHash", "generationHash", "createdAt", "commandKind", "entries", "projection"])) throw new Error("manifest schema is not closed");
     authority(manifest.projectId);
     if (!HASH.test(manifest.generationHash) || !Number.isSafeInteger(manifest.revision) || manifest.revision < 0 || !RFC3339_MS.test(manifest.createdAt) || !["create", "discrete_save", "autosave", "policy", "manifest", "asset", "support", "run", "cache", "migration", "repair", "external_sync", "logical_rename"].includes(manifest.commandKind)) throw new Error("invalid manifest identity");
-    if (!hasExactKeys(manifest.projection as unknown as Record<string, unknown>, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
+    if (!hasExactKeys(manifest.projection, ["canonicalPath", "supportRoot"]) || validateProjectionLocator({ vaultRelativeProjectPath: manifest.projection.canonicalPath }).vaultRelativeProjectPath !== manifest.projection.canonicalPath || deriveStudioAssetsDir(manifest.projection.canonicalPath) !== manifest.projection.supportRoot) throw new Error("invalid manifest projection");
     if ((manifest.revision === 0) !== (manifest.parentRevision === null && manifest.parentGenerationHash === null)) throw new Error("invalid root lineage");
     if (manifest.revision > 0 && (!Number.isSafeInteger(manifest.parentRevision) || manifest.parentRevision !== manifest.revision - 1 || !HASH.test(String(manifest.parentGenerationHash)))) throw new Error("invalid descendant lineage");
     const expectedDirectory = `${generationRoot(manifest.projectId)}/${manifest.revision}-${manifest.generationHash}`;
     if (directory !== expectedDirectory) throw new Error("generation directory identity mismatch");
     const seen = new Set<string>(); let previousPath: string | null = null;
     for (const entry of manifest.entries) {
-      if (!hasExactKeys(entry as unknown as Record<string, unknown>, ["relativePath", "kind", "sizeBytes", "sha256"])) throw new Error("entry schema is not closed");
+      if (!hasExactKeys(entry, ["relativePath", "kind", "sizeBytes", "sha256"])) throw new Error("entry schema is not closed");
       const path = normalizeRelativePath(entry.relativePath); const folded = path.toLocaleLowerCase("en-US");
       if (seen.has(folded) || (previousPath !== null && compareUtf8(previousPath, path) >= 0) || (entry.kind !== "text" && entry.kind !== "binary") || !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0 || !HASH.test(entry.sha256)) throw new Error("invalid manifest entry");
       seen.add(folded); previousPath = path;
@@ -790,7 +802,7 @@ export class StudioProjectGenerationStore {
     const { generationHash, ...body } = manifest; if (await hash(encoder.encode(`studio-generation-v1\0${canonicalJson(body)}`)) !== generationHash) throw new Error("generation hash mismatch");
     if (rawManifest !== canonicalJson(manifest)) throw new Error("noncanonical manifest");
     const descriptorRaw = await this.adapter.read(`${directory}/commit.json`); const descriptor = JSON.parse(descriptorRaw) as CommitDescriptor;
-    if (!hasExactKeys(descriptor as unknown as Record<string, unknown>, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
+    if (!hasExactKeys(descriptor, ["schemaVersion", "projectId", "revision", "generationHash", "manifestSha256", "entryCount", "logicallyCommittedAt"]) || descriptor.schemaVersion !== 1 || descriptor.projectId !== manifest.projectId || descriptor.revision !== manifest.revision || descriptor.generationHash !== generationHash || descriptor.entryCount !== manifest.entries.length || descriptor.manifestSha256 !== await hash(manifestBytes) || !RFC3339_MS.test(descriptor.logicallyCommittedAt) || descriptorRaw !== canonicalJson(descriptor)) throw new Error("invalid commit descriptor");
     const rootListing = await this.adapter.list(directory);
     if (rootListing.files.filter((file) => !isIgnoredTreeFile(file)).sort(compareUtf8).join("\n") !== [`${directory}/commit.json`, `${directory}/manifest.json`].sort(compareUtf8).join("\n") || rootListing.folders.slice().sort(compareUtf8).join("\n") !== [`${directory}/files`].join("\n")) throw new Error("unmanifested generation metadata entry");
     // Filter both sides: listTreeFiles already ignores OS junk on disk, and
@@ -817,23 +829,18 @@ export class StudioProjectGenerationStore {
     } catch { return null; }
   }
 
-  private generationFilesEqual(expected: ReadonlyMap<string, Uint8Array>, actual: ReadonlyMap<string, Uint8Array>): boolean {
-    return expected.size === actual.size && this.projectionIsAuthoritySubset(expected, actual);
-  }
-
-  private projectionIsAuthoritySubset(authorityFiles: ReadonlyMap<string, Uint8Array>, projectionFiles: ReadonlyMap<string, Uint8Array>): boolean {
-    for (const [path, bytes] of projectionFiles) { const authorityBytes = authorityFiles.get(path); if (!authorityBytes || !bytesEqual(bytes, authorityBytes)) return false; }
-    return true;
+  private async readProjectDocument(locator: ProjectionLocator): Promise<Uint8Array | null> {
+    try { return new Uint8Array(await this.adapter.readBinary(locator.vaultRelativeProjectPath)); }
+    catch { return null; }
   }
 
   private async ensureProjection(generation: SelectedGeneration): Promise<"matching" | "repaired"> {
     const locator = { vaultRelativeProjectPath: generation.metadata.projection.canonicalPath };
-    const projection = await this.readProjection(locator);
+    const projection = await this.readProjectDocument(locator);
     await this.removeLegacyProjectionMarkers(locator);
-    if (projection && this.generationFilesEqual(generation.files, projection.files)) return "matching";
-    if (projection && !this.generationFilesEqual(generation.files, projection.files)) throw new Error("Projection bytes differ from authority and require reconciliation.");
+    if (projection && !bytesEqual(generation.files.get("project.systemsculpt")!, projection)) throw new Error("Project document changed and requires reconciliation.");
     await this.writeProjection(generation);
-    return "repaired";
+    return projection ? "matching" : "repaired";
   }
 
   private async writeProjection(
@@ -841,6 +848,7 @@ export class StudioProjectGenerationStore {
     options?: {
       projectDocumentAlreadyWritten?: boolean;
       createMissingProjectDocument?: boolean;
+      previous?: GenerationManifest | null;
     }
   ): Promise<void> {
     const document = generation.files.get("project.systemsculpt"); if (!document) throw new Error("Generation lacks project document.");
@@ -856,13 +864,50 @@ export class StudioProjectGenerationStore {
       );
       if (!matched) throw new Error("The project file changed before Studio could finish; the file was left untouched.");
     }
-    const expectedSupport = new Set([...generation.files.keys()].filter((entry) => entry.startsWith("support/")).map((entry) => `${supportRoot}/${entry.slice(8)}`));
-    const existing = await this.listTreeFiles(supportRoot);
-    for (const stale of existing) if (!expectedSupport.has(stale)) await this.adapter.remove(stale);
-    for (const [relativePath, bytes] of generation.files) if (relativePath.startsWith("support/")) { const target = `${supportRoot}/${relativePath.slice(8)}`; await this.mkdirRecursive(dirname(target)); await this.adapter.writeBinary(target, arrayBuffer(bytes)); }
+    const previousEntries = new Map(options?.previous?.entries.map(entry => [entry.relativePath, entry]) || []);
+    const retiredRuns = new Set<string>();
+    if (generation.metadata.commandKind === "run") {
+      for (const entry of previousEntries.values()) {
+        const match = /^support\/runs\/([^/]+)\/snapshot\.json$/.exec(entry.relativePath);
+        if (match && !generation.files.has(entry.relativePath)) retiredRuns.add(match[1]);
+      }
+    }
+    const directory = `${generationRoot(generation.metadata.projectId)}/${generation.metadata.revision}-${generation.metadata.generationHash}/files`;
+    for (const [relativePath, bytes] of generation.files) {
+      if (!relativePath.startsWith("support/") || isAgentRunFile(relativePath)) continue;
+      const target = `${supportRoot}/${relativePath.slice(8)}`;
+      await this.mkdirRecursive(dirname(target));
+      // Support files arrive independently through sync. An old canvas
+      // snapshot must never prune them or rewrite already present assets.
+      if (!await this.adapter.exists(target) && await this.adapter.copyFileIfAbsent(`${directory}/${relativePath}`, target)) continue;
+      const previous = previousEntries.get(relativePath);
+      if (relativePath === "support/policy/grants.json" || relativePath === "support/project.manifest.json") {
+        const current = new Uint8Array(await this.adapter.readBinary(target));
+        if (!bytesEqual(current, bytes)) await this.adapter.compareAndSwapText(target, decoder.decode(current), decoder.decode(bytes));
+        continue;
+      }
+      if (!options?.previous || previous?.sha256 === await hash(bytes)) continue;
+      const current = new Uint8Array(await this.adapter.readBinary(target));
+      if (bytesEqual(current, bytes)) continue;
+      if (reconcileStudioSupportDocument(relativePath, bytes, current)) {
+        let latest = current;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          let merged = reconcileStudioSupportDocument(relativePath, bytes, latest);
+          if (!merged || bytesEqual(merged, latest)) break;
+          if (relativePath === "support/runs/index.json" && retiredRuns.size > 0) {
+            const index: unknown = JSON.parse(decoder.decode(merged));
+            if (Array.isArray(index)) merged = encoder.encode(`${JSON.stringify(index.filter(entry => !retiredRuns.has(String(entry?.runId))), null, 2)}\n`);
+          }
+          if (await this.adapter.compareAndSwapText(target, decoder.decode(latest), decoder.decode(merged))) break;
+          latest = new Uint8Array(await this.adapter.readBinary(target));
+        }
+      } else if (previous && await hash(current) === previous.sha256 && previous.kind === "text") {
+        await this.adapter.compareAndSwapText(target, decoder.decode(current), decoder.decode(bytes));
+      }
+    }
     await this.removeLegacyProjectionMarkers({ vaultRelativeProjectPath: path });
-    const verified = await this.readProjection({ vaultRelativeProjectPath: path });
-    if (!verified || !this.generationFilesEqual(generation.files, verified.files)) throw new Error("Projection fresh-read validation failed.");
+    // The document CAS is the commit gate. Independent support writers and a
+    // subsequent document edit are normal workspace activity after that gate.
   }
 
   private async removeLegacyProjectionMarkers(locator: ProjectionLocator): Promise<void> {
@@ -870,7 +915,9 @@ export class StudioProjectGenerationStore {
       `${locator.vaultRelativeProjectPath}.identity.json`,
       `${deriveStudioAssetsDir(locator.vaultRelativeProjectPath)}/.studio-projection.json`,
     ]) {
-      try { await this.adapter.remove(path); } catch {}
+      try { await this.adapter.remove(path); } catch {
+        // Legacy markers may already be absent.
+      }
     }
   }
 
@@ -963,11 +1010,12 @@ export class StudioProjectGenerationStore {
   }
 
   private async captureTree(root: string, prefix: string, output: Map<string, Uint8Array>): Promise<void> {
+    if (isAgentRunFile(prefix)) return;
     let listed: { files: string[]; folders: string[] }; try { listed = await this.adapter.list(root); } catch { return; }
     for (const file of listed.files) { const name = file.slice(root.length + 1); if (name === ".studio-projection.json" || isIgnoredTreeFile(file)) continue; output.set(`${prefix}/${name}`, new Uint8Array(await this.adapter.readBinary(file))); }
     for (const folder of listed.folders) { const name = folder.slice(root.length + 1); await this.captureTree(folder, `${prefix}/${name}`, output); }
   }
-  private async mkdirRecursive(path: string): Promise<void> { if (!path) return; let current = ""; for (const segment of path.split("/").filter(Boolean)) { current = current ? `${current}/${segment}` : segment; try { await this.adapter.mkdir(current); } catch {} } }
+  private async mkdirRecursive(path: string): Promise<void> { if (!path) return; let current = ""; for (const segment of path.split("/").filter(Boolean)) { current = current ? `${current}/${segment}` : segment; try { await this.adapter.mkdir(current); } catch { /* Existing ancestors are expected. */ } } }
 }
 
 function dirname(path: string): string { const at = path.lastIndexOf("/"); return at < 0 ? "" : path.slice(0, at); }

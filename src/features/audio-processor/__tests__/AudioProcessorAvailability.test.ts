@@ -1,3 +1,4 @@
+import { getVideoGenerationAvailability } from "../../../services/videos/VideoGenerationAvailability";
 import {
   PlatformRequestClient,
   type PlatformRequestInput,
@@ -9,7 +10,7 @@ import {
 
 class QueueClient extends PlatformRequestClient {
   readonly inputs: PlatformRequestInput[] = [];
-  readonly responses: Response[] = [];
+  readonly responses: Array<Response | Promise<Response>> = [];
 
   override async request(input: PlatformRequestInput): Promise<Response> {
     this.inputs.push(input);
@@ -139,4 +140,93 @@ describe("AudioProcessorAvailability", () => {
     })).resolves.toBe(true);
     expect(requestClient.inputs).toHaveLength(2);
   });
+  it("shares the catalogue across public audio and video entry points", async () => {
+    const plugin = createPlugin();
+    const requestClient = new QueueClient();
+    requestClient.responses.push(json({
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_audio_processor: true, hosted_videos: false },
+    }));
+    const options = { requestClient, baseUrl: "https://systemsculpt.test/api/plugin" };
+    await expect(getAudioProcessorAvailability(plugin, options)).resolves.toEqual({ canOpen: true, authoritative: true });
+    await expect(getVideoGenerationAvailability(plugin, options)).resolves.toEqual({ canOpen: false, authoritative: true });
+    expect(requestClient.inputs).toHaveLength(1);
+  });
+
+  it.each(["license", "version", "baseUrl"])("invalidates cached config when %s changes", async (field) => {
+    const plugin = createPlugin();
+    const requestClient = new QueueClient();
+    for (const enabled of [false, true]) {
+      requestClient.responses.push(json({
+        contract: "systemsculpt-plugin-config-v1",
+        capabilities: { hosted_audio_processor: enabled },
+      }));
+    }
+    const options = { requestClient, baseUrl: "https://systemsculpt.test/api/plugin", now: () => 1_000 };
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    if (field === "license") plugin.settings.licenseKey = "new-account";
+    if (field === "version") plugin.manifest.version = "6.2.0";
+    if (field === "baseUrl") options.baseUrl = "https://systemsculpt.test/new-api";
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(true);
+    expect(requestClient.inputs).toHaveLength(2);
+  });
+
+  it("does not let an aborted probe poison another surface's cache", async () => {
+    const plugin = createPlugin();
+    const requestClient = new QueueClient();
+    requestClient.responses.push(json({
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_videos: false },
+    }));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(getAudioProcessorAvailability(plugin, { requestClient }, controller.signal))
+      .resolves.toEqual({ canOpen: true, authoritative: false });
+    await expect(getVideoGenerationAvailability(plugin, { requestClient }))
+      .resolves.toEqual({ canOpen: false, authoritative: true });
+    expect(requestClient.inputs).toHaveLength(1);
+  });
+
+  it("keeps a new account's cached config when an older account probe finishes late", async () => {
+    const plugin = createPlugin();
+    const requestClient = new QueueClient();
+    let finishOld!: (response: Response) => void;
+    requestClient.responses.push(new Promise((resolve) => { finishOld = resolve; }));
+    requestClient.responses.push(json({
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_audio_processor: false },
+    }));
+    const options = { requestClient, now: () => 1_000 };
+    const oldProbe = getAudioProcessorAvailability(plugin, options);
+    plugin.settings.licenseKey = "new-account";
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    finishOld(json({
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_audio_processor: true },
+    }));
+    await oldProbe;
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    expect(requestClient.inputs.map((input) => input.licenseKey)).toEqual(["license-123", "new-account"]);
+  });
+
+  it("a cache hit supersedes an older pending account probe", async () => {
+    const plugin = createPlugin();
+    const requestClient = new QueueClient();
+    requestClient.responses.push(json({
+      contract: "systemsculpt-plugin-config-v1", capabilities: { hosted_audio_processor: false },
+    }));
+    const options = { requestClient, now: () => 1_000 };
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    plugin.settings.licenseKey = "temporary-account";
+    let finishOther!: (response: Response) => void;
+    requestClient.responses.push(new Promise((resolve) => { finishOther = resolve; }));
+    const otherProbe = getAudioProcessorAvailability(plugin, options);
+    plugin.settings.licenseKey = "license-123";
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    finishOther(json({ contract: "systemsculpt-plugin-config-v1", capabilities: { hosted_audio_processor: true } }));
+    await otherProbe;
+    await expect(canOpenAudioProcessor(plugin, options)).resolves.toBe(false);
+    expect(requestClient.inputs).toHaveLength(2);
+  });
+
 });

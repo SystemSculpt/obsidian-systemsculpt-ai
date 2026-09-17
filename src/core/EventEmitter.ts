@@ -1,134 +1,48 @@
-/** Lightweight namespaced event emitter for plugin lifecycle events. */
-export class EventEmitter {
-  private events: Record<string, Array<(...args: any[]) => void>> = {};
-  
-  // Track event listeners by namespace for easier management
-  private namespaceListeners: Record<string, Set<string>> = {};
+type Listener = (...args: unknown[]) => void;
 
-  /**
-   * Register an event listener
-   * @param event Event name (supports namespacing like "systemsculpt:modelUpdated")
-   * @param listener Function to call when event is emitted
-   * @returns Unsubscribe function
-   */
-  public on(event: string, listener: (...args: any[]) => void): () => void {
-    if (!this.events[event]) {
-      this.events[event] = [];
-    }
-    this.events[event].push(listener);
-    
-    // Track namespace for management
-    this.trackNamespace(event);
-    
-    // Return unsubscribe function
+/** One listener registry; namespaces are views of the event names, not state. */
+export class EventEmitter {
+  private readonly events = new Map<string, Listener[]>();
+
+  public on(event: string, listener: Listener): () => void {
+    const listeners = this.events.get(event) ?? [];
+    listeners.push(listener);
+    this.events.set(event, listeners);
     return () => {
-      this.events[event] = this.events[event].filter(l => l !== listener);
-      this.cleanupNamespace(event);
+      const remaining = this.events.get(event)?.filter(callback => callback !== listener);
+      if (remaining?.length) this.events.set(event, remaining);
+      else this.events.delete(event);
     };
   }
 
-  /**
-   * Register a one-time event listener
-   * @param event Event name
-   * @param listener Function to call when event is emitted
-   * @returns Unsubscribe function
-   */
-  public once(event: string, listener: (...args: any[]) => void): () => void {
-    const remove = this.on(event, (...args: any[]) => {
+  public once(event: string, listener: Listener): () => void {
+    const remove = this.on(event, (...args) => {
       remove();
       listener(...args);
     });
     return remove;
   }
 
-  /**
-   * Emit an event
-   * @param event Event name
-   * @param args Arguments to pass to listeners
-   */
-  public emit(event: string, ...args: any[]): void {
-    const callbacks = this.events[event];
-    if (callbacks) {
-      callbacks.forEach(callback => callback(...args));
-    }
+  public emit(event: string, ...args: unknown[]): void {
+    this.events.get(event)?.forEach(callback => callback(...args));
   }
 
-  /**
-   * Remove all listeners for an event
-   * @param event Event name
-   */
   public off(event: string): void {
-    delete this.events[event];
+    this.events.delete(event);
   }
 
-  /**
-   * Remove all event listeners
-   */
   public clear(): void {
-    this.events = {};
-    this.namespaceListeners = {};
+    this.events.clear();
   }
 
-  /**
-   * Track namespace for an event
-   */
-  private trackNamespace(event: string): void {
-    const namespace = this.getNamespace(event);
-    if (namespace) {
-      if (!this.namespaceListeners[namespace]) {
-        this.namespaceListeners[namespace] = new Set();
-      }
-      this.namespaceListeners[namespace].add(event);
-    }
-  }
-
-  /**
-   * Clean up namespace tracking when event listeners are removed
-   */
-  private cleanupNamespace(event: string): void {
-    const namespace = this.getNamespace(event);
-    if (namespace && this.namespaceListeners[namespace]) {
-      // If this event has no more listeners, remove from namespace tracking
-      if (!this.events[event] || this.events[event].length === 0) {
-        this.namespaceListeners[namespace].delete(event);
-        
-        // If namespace has no more events, remove it
-        if (this.namespaceListeners[namespace].size === 0) {
-          delete this.namespaceListeners[namespace];
-        }
-      }
-    }
-  }
-
-  /**
-   * Extract namespace from event name (everything before first colon)
-   */
-  private getNamespace(event: string): string | null {
-    const parts = event.split(':');
-    return parts.length > 1 ? parts[0] : null;
-  }
-
-  /**
-   * Remove all listeners for a specific namespace
-   * @param namespace The namespace to clear (e.g., "systemsculpt", "custom")
-   */
   public clearNamespace(namespace: string): void {
-    if (this.namespaceListeners[namespace]) {
-      const events = Array.from(this.namespaceListeners[namespace]);
-      events.forEach(event => {
-        delete this.events[event];
-      });
-      delete this.namespaceListeners[namespace];
-    }
+    for (const event of this.getNamespaceEvents(namespace)) this.events.delete(event);
   }
 
-  /**
-   * Get all events in a namespace
-   * @param namespace The namespace to query
-   * @returns Array of event names in the namespace
-   */
   public getNamespaceEvents(namespace: string): string[] {
-    return this.namespaceListeners[namespace] ? Array.from(this.namespaceListeners[namespace]) : [];
+    return [...this.events.keys()].filter(event => (
+      namespace.length > 0 && event.startsWith(`${namespace}:`)
+      && event.indexOf(":") === namespace.length
+    ));
   }
-
 }

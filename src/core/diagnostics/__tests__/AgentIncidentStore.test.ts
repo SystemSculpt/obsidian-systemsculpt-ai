@@ -480,6 +480,16 @@ function reportPath(sequence: number): string {
 }
 
 describe("AgentIncidentStore", () => {
+  let dateNow: jest.SpyInstance<number, []>;
+
+  beforeEach(() => {
+    dateNow = jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-13T12:02:00.000Z"));
+  });
+
+  afterEach(() => {
+    dateNow.mockRestore();
+  });
+
   it("round-trips an actual recorder report through canonical save and restart", async () => {
     const adapter = new MemoryAdapter();
     const conversationId = `conversation_${"1".repeat(32)}`;
@@ -1213,6 +1223,39 @@ describe("AgentIncidentStore", () => {
       const adapter = new MemoryAdapter();
       const store = new AgentIncidentStore(adapter);
       await expect(store.save(incidentReport(250 + index, undefined, mutations[index])))
+        .rejects.toMatchObject({ code: "invalid_report" });
+      expect(adapter.writeCalls).toBe(0);
+    }
+  });
+
+  it("accepts truthful incomplete evidence but rejects omitted, invented, or reordered missing fields", async () => {
+    const absent = ["environment_loaded_bundle_sha256", "environment_plugin_version"];
+    const missingEvidence = (report: Record<string, unknown>) => {
+      const environment = report.environment as Record<string, unknown>;
+      delete environment.plugin_version;
+      delete environment.loaded_bundle_sha256;
+      const capture = report.capture_quality as Record<string, unknown>;
+      capture.complete = false;
+      capture.missing_fields = absent;
+    };
+    await expect(new AgentIncidentStore(new MemoryAdapter()).save(
+      incidentReport(280, undefined, missingEvidence),
+    )).resolves.toMatchObject({ created: true });
+
+    const claims = [
+      { complete: true, missing_fields: absent },
+      { complete: false, missing_fields: [] },
+      { complete: false, missing_fields: [absent[0]] },
+      { complete: false, missing_fields: [absent[0], "environment_obsidian_version", absent[1]] },
+      { complete: false, missing_fields: [...absent].reverse() },
+    ];
+    for (const [index, claim] of claims.entries()) {
+      const adapter = new MemoryAdapter();
+      const forged = incidentReport(281 + index, undefined, (report) => {
+        missingEvidence(report);
+        Object.assign(report.capture_quality as Record<string, unknown>, claim);
+      });
+      await expect(new AgentIncidentStore(adapter).save(forged))
         .rejects.toMatchObject({ code: "invalid_report" });
       expect(adapter.writeCalls).toBe(0);
     }

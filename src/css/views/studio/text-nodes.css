@@ -11,19 +11,17 @@
   box-shadow: none;
 }
 
-.ss-studio-node-card.ss-studio-text-node-card:hover {
-  border-color: transparent;
-  box-shadow: none;
-  outline: 1px solid var(--ss-line);
-  outline-offset: 2px;
-}
+/* Hover and selection read through an outline, since the card has no
+ * border: a light accent hairline on hover, a solid accent frame when
+ * selected (tldraw parity), both clear of the text. */
+.ss-studio-node-card.ss-studio-text-node-card:hover { border-color: transparent; box-shadow: none; outline: 1px solid color-mix(in srgb, var(--ss-accent) 55%, transparent); outline-offset: 2px; }
+.ss-studio-node-card.ss-studio-text-node-card.is-selected { border-color: transparent; box-shadow: none; outline: 2px solid var(--ss-accent); outline-offset: 2px; }
 
-.ss-studio-node-card.ss-studio-text-node-card.is-selected {
-  border-color: transparent;
-  box-shadow: none;
-  outline: 1px solid var(--ss-line-accent);
-  outline-offset: 2px;
-}
+/* tldraw parity: text hugs its glyphs until a width is dragged, then wraps
+ * at it. StudioGraphTextNodeMeasure.ts sets the exact width after render;
+ * this rule covers the first paint and editing (max: the auto token). */
+.ss-studio-node-card.ss-studio-text-node-card.is-auto-width { width: max-content; min-width: var(--ss-space-6); max-width: var(--ss-studio-text-node-auto-max-width); }
+.ss-studio-text-node-card.is-auto-width:has(.ss-studio-text-node-editor, .ss-studio-text-node-live-editor) .ss-studio-text-node-content { min-width: 14em; }
 
 /* Text-node height is intrinsic: the card auto-grows with its reflowed
  * content, so the display div and editing textarea both size to content —
@@ -47,9 +45,10 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  /* Keep block padding in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX. */
+  /* Keep block padding in sync with STUDIO_TEXT_NODE_VERTICAL_CHROME_PX.
+   * The end inset only clears the output pin that rides the right edge. */
   padding: var(--ss-space-1);
-  padding-inline-end: calc(var(--ss-space-1) + var(--ss-space-3));
+  padding-inline-end: var(--ss-space-3);
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: var(--ss-studio-text-node-font-size, inherit);

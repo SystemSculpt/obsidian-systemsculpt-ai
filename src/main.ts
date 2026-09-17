@@ -24,14 +24,14 @@ import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plu
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
-import type { RecorderService } from "./services/RecorderService";
+import { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
-import type { FileContextMenuService } from "./context-menu/FileContextMenuService";
+import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { AccountConnectService } from "./services/AccountConnectService";
-import type { ViewManager } from "./core/plugin/views";
-import type { CommandManager } from "./core/plugin/commands";
+import { ViewManager } from "./core/plugin/views";
+import { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
@@ -59,14 +59,16 @@ import { yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
-import { WorkflowEngineService } from "./services/workflow/WorkflowEngineService";
-import type { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
+import { InboxTranscriptionService } from "./features/inbox-transcription/InboxTranscriptionService";
+import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { type Extension } from "@codemirror/state";
-import type { StudioService } from "./studio/StudioService";
+import { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
+import { captureStudioReloadState, setStudioReloadBarrier } from "./core/plugin/StudioReloadState";
 import { API_BASE_URL } from "./constants/api";
-import { ManagedCapabilityClient } from "./services/managed/ManagedCapabilityClient";
+import { ManagedTextGenerationAdapter } from "./services/managed/ManagedTextGenerationAdapter";
+import { ManagedEmbeddingsIndexAdapter } from "./services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { ManagedAdmission } from "./services/managed/ManagedAdmission";
 import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
@@ -77,45 +79,17 @@ import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
 
-export type ManagedCapabilityClientGraph = Readonly<{
+declare const __SS_BUILD_STAMP__: string | undefined;
+declare const __SS_TEST_DRIVER__: boolean | undefined;
+
+export type ManagedCapabilityGraph = Readonly<{
   transport: HostedTransportAdapter;
   admission: ManagedAdmission;
-  client: ManagedCapabilityClient;
+  textGeneration: ManagedTextGenerationAdapter;
+  embeddingsIndex: ManagedEmbeddingsIndexAdapter;
 }>;
 
-type ViewManagerModule = typeof import("./core/plugin/views");
-type CommandManagerModule = typeof import("./core/plugin/commands");
-type StudioServiceModule = typeof import("./studio/StudioService");
-type SystemSculptSearchEngineModule = typeof import("./services/search/SystemSculptSearchEngine");
-type RecorderServiceModule = typeof import("./services/RecorderService");
-type FileContextMenuServiceModule = typeof import("./context-menu/FileContextMenuService");
-
 const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
-
-function loadViewManagerModule(): ViewManagerModule {
-  return require("./core/plugin/views");
-}
-
-function loadCommandManagerModule(): CommandManagerModule {
-  return require("./core/plugin/commands");
-}
-
-function loadStudioServiceModule(): StudioServiceModule {
-  return require("./studio/StudioService");
-}
-
-function loadSystemSculptSearchEngineModule(): SystemSculptSearchEngineModule {
-  return require("./services/search/SystemSculptSearchEngine");
-}
-
-function loadRecorderServiceModule(): RecorderServiceModule {
-  return require("./services/RecorderService");
-}
-
-function loadFileContextMenuServiceModule(): FileContextMenuServiceModule {
-  return require("./context-menu/FileContextMenuService");
-}
-
 type PublicSupportResourceSample = Readonly<{
   captured_at?: string;
   heap_used_mb?: number;
@@ -189,7 +163,7 @@ export default class SystemSculptPlugin extends Plugin {
   private commandManager: CommandManager;
   private fileContextMenuService: FileContextMenuService | null = null;
   private isUnloading = false;
-  private isPreloadingDone = false;
+  private unloadPromise: Promise<void> | null = null;
   private failures: string[] = [];
   /** True once a fatal load failure has put the plugin into minimal recovery mode. */
   private safeMode = false;
@@ -208,23 +182,19 @@ export default class SystemSculptPlugin extends Plugin {
   private agentIncidentCoordinator: AgentIncidentCoordinator | null = null;
   private agentIncidentLoadedBundleId: `sha256:${string}` | null = null;
   private lifecycleCoordinator: LifecycleCoordinator | null = null;
-  private diagnosticsSessionId: string | null = null;
-  private diagnosticsLogFileName = "systemsculpt-latest.log";
-  private diagnosticsMetricsFileName = "resource-metrics-latest.ndjson";
   private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
-  private workflowEngineService: WorkflowEngineService | null = null;
+  private inboxTranscriptionService: InboxTranscriptionService | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
-  private managedCapabilityGraph: ManagedCapabilityClientGraph | null = null;
+  private managedCapabilityGraph: ManagedCapabilityGraph | null = null;
   private pluginUpdateService: PluginUpdateService | null = null;
   /** Live-reconfigurable slot for the relative line number gutter editor extension. */
   private readonly relativeLineNumberExtensions: Extension[] = [];
   private relativeLineNumbersApplied = false;
   private pendingSettingsFocusTab: string | null = null;
+  private cancelPendingSettingsFocus: (() => void) | null = null;
+  private settingsFocusCleanupRegistered = false;
   // Removed complex settings callback system - embeddings are now completely on-demand
-
-  // Simple initialization tracking
-  private embeddingsInitialized = false;
 
   private criticalInitializationPromise: Promise<void> | null = null;
   private deferredInitializationPromise: Promise<void> | null = null;
@@ -240,19 +210,16 @@ export default class SystemSculptPlugin extends Plugin {
     return this._aiService;
   }
 
-  public getManagedCapabilityClient(): ManagedCapabilityClient {
-    return this.getManagedCapabilityGraph().client;
-  }
-
-  public getManagedCapabilityGraph(): ManagedCapabilityClientGraph {
+  public getManagedCapabilityGraph(): ManagedCapabilityGraph {
     if (!this.managedCapabilityGraph) {
       const licenseKey = () => this.settings.licenseKey;
       const transport = new HostedTransportAdapter({
         baseUrl: new URL(API_BASE_URL).origin, pluginVersion: this.manifest.version, licenseKey,
       });
       const admission = new ManagedAdmission({ transport, licenseKey });
-      const client = new ManagedCapabilityClient({ admission, transport });
-      this.managedCapabilityGraph = Object.freeze({ transport, admission, client });
+      const textGeneration = new ManagedTextGenerationAdapter({ admission, transport });
+      const embeddingsIndex = new ManagedEmbeddingsIndexAdapter(transport);
+      this.managedCapabilityGraph = Object.freeze({ transport, admission, textGeneration, embeddingsIndex });
     }
     return this.managedCapabilityGraph;
   }
@@ -264,18 +231,12 @@ export default class SystemSculptPlugin extends Plugin {
     if (!this.embeddingsManager) {
       this.embeddingsManager = new EmbeddingsManager(this.app, this);
 
-      // Initialize in background if not already done
-      if (!this.embeddingsInitialized) {
-        this.embeddingsInitialized = true;
-        this.embeddingsManager
-          .initialize()
-          .catch((error) => {
-            const logger = this.getLogger();
-            logger.error("Embeddings manager background initialization failed", error, {
-              source: "SystemSculptPlugin",
-            });
-          });
-      }
+      // The manager reference owns initialization admission.
+      this.embeddingsManager.initialize().catch((error) => {
+        this.getLogger().error("Embeddings manager background initialization failed", error, {
+          source: "SystemSculptPlugin",
+        });
+      });
     }
 
     const manager = this.embeddingsManager;
@@ -287,7 +248,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   public getSearchEngine(): SystemSculptSearchEngine {
     if (!this.searchEngine) {
-      const { SystemSculptSearchEngine } = loadSystemSculptSearchEngineModule();
       this.searchEngine = new SystemSculptSearchEngine(this.app, this);
     }
     return this.searchEngine;
@@ -305,84 +265,14 @@ export default class SystemSculptPlugin extends Plugin {
     return this.initializationTracer;
   }
 
-  private async waitForCriticalInitialization(): Promise<void> {
-    if (!this.criticalInitializationPromise) {
-      return;
-    }
-
-    await this.criticalInitializationPromise;
-  }
-
-  private async prepareDiagnosticsSession(): Promise<void> {
-    if (this.diagnosticsSessionId) {
-      return;
-    }
-
-    if (!this.storage) {
-      this.storage = new StorageManager(this.app, this);
-    }
-
-    try {
-      await this.storage.initialize();
-    } catch (error) {
-      console.warn("[SystemSculpt][Diagnostics] Failed to initialize storage", error);
-    }
-
-    const timestamp = this.formatDiagnosticsFileTimestamp(new Date());
-    this.diagnosticsSessionId = timestamp;
-
-    const header = `SystemSculpt diagnostics session ${timestamp} (plugin v${this.manifest.version})\n`;
-    await this.rotateDiagnosticsFile(this.diagnosticsLogFileName, `systemsculpt-${timestamp}.log`, header);
-    await this.rotateDiagnosticsFile(this.diagnosticsMetricsFileName, `resource-metrics-${timestamp}.ndjson`);
-
-    this.diagnosticsSessionLifecycle ??= new DiagnosticsSessionLifecycle({
+  private getDiagnosticsSessionLifecycle(): DiagnosticsSessionLifecycle {
+    this.storage ??= new StorageManager(this.app, this);
+    return this.diagnosticsSessionLifecycle ??= new DiagnosticsSessionLifecycle({
       adapter: this.app.vault.adapter,
       storage: this.storage,
       pluginVersion: this.manifest.version,
       getObsidianVersion: () => this.getObsidianApiVersion(),
     });
-    await this.diagnosticsSessionLifecycle.schedule({
-      sessionId: timestamp,
-      startedAt: new Date().toISOString(),
-    });
-
-    if (this.pluginLogger) {
-      this.pluginLogger.setLogFileName(this.diagnosticsLogFileName);
-    }
-  }
-
-  private async rotateDiagnosticsFile(latestName: string, archiveName: string, header?: string): Promise<void> {
-    if (!this.storage) {
-      return;
-    }
-    const adapter = this.app.vault.adapter;
-    if (!adapter) {
-      return;
-    }
-    const basePath = this.storage.getPath("diagnostics");
-    const latestPath = `${basePath}/${latestName}`;
-    const archivePath = `${basePath}/${archiveName}`;
-
-    try {
-      const exists = await adapter.exists(latestPath);
-      if (exists) {
-        await adapter.rename(latestPath, archivePath);
-      }
-    } catch (error) {
-      console.warn("[SystemSculpt][Diagnostics] Failed to rotate file", {
-        file: latestName,
-        error,
-      });
-    }
-
-    try {
-      await adapter.write(latestPath, header ?? "");
-    } catch (error) {
-      console.warn("[SystemSculpt][Diagnostics] Failed to reset file", {
-        file: latestName,
-        error,
-      });
-    }
   }
 
   async onload() {
@@ -629,10 +519,7 @@ export default class SystemSculptPlugin extends Plugin {
       id: "storage.prepare",
       label: "storage manager",
       run: async () => {
-        if (!this.storage) {
-          this.storage = new StorageManager(this.app, this);
-        }
-        await this.prepareDiagnosticsSession();
+        await this.getDiagnosticsSessionLifecycle().start();
       },
     });
 
@@ -744,8 +631,8 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         this.resourceMonitor = new ResourceMonitorService(this, {
-          metricsFileName: this.diagnosticsMetricsFileName,
-          sessionId: this.diagnosticsSessionId ?? undefined,
+          metricsFileName: this.getDiagnosticsSessionLifecycle().metricsFileName,
+          sessionId: this.getDiagnosticsSessionLifecycle().sessionId ?? undefined,
         });
         this.resourceMonitor.start();
       },
@@ -900,34 +787,17 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private bootstrapPostCriticalServices(tracer: InitializationTracer, logger: PluginLogger): void {
-    this.waitForCriticalInitialization()
-      .then(() => {
-        if (this.isUnloading) {
-          return;
-        }
-        try {
-          logger.debug("Starting file context menu service after critical initialization", {
-            source: "SystemSculptPlugin",
-          });
-          this.setupFileContextMenuService();
-          tracer.markMilestone("file-context-menu-ready");
-        } catch (error) {
-          this.failures.push("file context menu service");
-          logger.error("Failed to set up file context menu service after critical initialization", error, {
-            source: "SystemSculptPlugin",
-          });
-        }
-      })
-      .catch((error) => {
-        const failureError = error instanceof Error ? error : new Error(String(error ?? "critical initialization failed"));
-        logger.warn("File context menu service initialization skipped", {
-          source: "SystemSculptPlugin",
-          metadata: {
-            reason: "critical initialization failed",
-            error: failureError.message,
-          },
-        });
+    // This continuation is attached only to a successful critical phase.
+    if (this.isUnloading) return;
+    try {
+      this.setupFileContextMenuService();
+      tracer.markMilestone("file-context-menu-ready");
+    } catch (error) {
+      this.failures.push("file context menu service");
+      logger.error("Failed to set up file context menu service after critical initialization", error, {
+        source: "SystemSculptPlugin",
       });
+    }
   }
 
   private registerLayoutReadyHandler(loadStart: number): void {
@@ -969,10 +839,7 @@ export default class SystemSculptPlugin extends Plugin {
   private maybeShowAccountOnboarding(): void {
     if (this.settings.accountOnboardingShown === true) return;
     if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-    const timer = typeof window !== "undefined" && typeof window.setTimeout === "function"
-      ? window.setTimeout
-      : setTimeout;
-    timer(() => {
+    window.setTimeout(() => {
       if (this.settings.accountOnboardingShown === true) return;
       if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
       void this.getSettingsManager().updateSettings({ accountOnboardingShown: true });
@@ -985,8 +852,7 @@ export default class SystemSculptPlugin extends Plugin {
       slowThresholdMs: 750,
       timeoutMs: 8000,
     });
-    const timer = typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout : setTimeout;
-    timer(() => {
+    window.setTimeout(() => {
       if (!this.storage) {
         storageBootstrapPhase.fail(new Error("Storage manager unavailable"));
         return;
@@ -1083,9 +949,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private createDiagnosticsFileNonce(): string {
-    // Filename nonces are host-level work, not UI bound to a popout window.
-    // eslint-disable-next-line obsidianmd/no-global-this
-    const runtimeCrypto = globalThis.crypto;
+    const runtimeCrypto = window.crypto;
     if (typeof runtimeCrypto?.getRandomValues !== "function") {
       throw new Error("Secure diagnostics export identifiers are unavailable.");
     }
@@ -1218,7 +1082,7 @@ export default class SystemSculptPlugin extends Plugin {
     }
 
     try {
-      await this.initializeRemainingServices();
+      this.initializeRemainingServices();
       await this.initializeManagers();
 
       void this.initializeLicense().finally(() => {
@@ -1234,8 +1098,6 @@ export default class SystemSculptPlugin extends Plugin {
           });
         }
       });
-
-      await this.preloadDataInBackground();
 
       if (this.viewManager) {
         const restorePhase = tracer.startPhase("views.restore", {
@@ -1450,14 +1312,6 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   /**
-   * For backward compatibility with existing components
-   * Delegates to the createDirectory method
-   */
-  public async createDirectoryOnce(dirPath: string): Promise<void> {
-    await this.createDirectory(dirPath);
-  }
-
-  /**
    * Repair the directory structure
    * For user-initiated repairs from settings or command palette
    */
@@ -1488,102 +1342,54 @@ export default class SystemSculptPlugin extends Plugin {
     return await this.directoryManager.verifyDirectories();
   }
 
-  private async initializeRemainingServices() {
+  private initializeRemainingServices(): void {
     const tracer = this.getInitializationTracer();
     const phase = tracer.startPhase("services.remaining.initialize", {
       slowThresholdMs: 4000,
       timeoutMs: 20000,
     });
-    const logger = this.getLogger();
     const failures: string[] = [];
+    const services = [
+      ["transcription", "transcription service", () => {
+        this.transcriptionService = TranscriptionService.getInstance(this);
+      }],
+      ["fileContextMenu", "file context menu service", () => {
+        this.setupFileContextMenuService();
+      }],
+      ["workflowEngine", "workflow engine service", () => {
+        this.ensureInboxTranscriptionService();
+      }],
+    ] as const;
 
-    try {
-      if (this.criticalInitializationPromise) {
-        logger.debug("Awaiting critical initialization before remaining services", {
-          source: "SystemSculptPlugin",
-        });
-      }
-      await this.waitForCriticalInitialization();
-    } catch (error) {
-      const failureError = error instanceof Error ? error : new Error(String(error ?? "critical initialization failed"));
-      phase.fail(failureError, {
-        skipped: true,
-        reason: "critical-initialization-failed",
-      });
-
-      logger.warn("Remaining services skipped because critical initialization failed", {
-        source: "SystemSculptPlugin",
-        metadata: {
-          error: failureError.message,
-        },
-      });
-
-      throw failureError;
-    }
-
-    const wrap = <T>(key: string, displayName: string, action: () => T | Promise<T>): Promise<void> => {
-      const subPhase = tracer.startPhase(`services.${key}`, {
+    // The deferred phase starts only after critical initialization succeeds.
+    // These factories are synchronous; each failure remains independently recoverable.
+    for (const [key, displayName, initialize] of services) {
+      const servicePhase = tracer.startPhase(`services.${key}`, {
         slowThresholdMs: 1500,
         timeoutMs: 10000,
         successLevel: "debug",
       });
-
       try {
-        const result = action();
-        if (result instanceof Promise) {
-          return result
-            .then(() => {
-              subPhase.complete({ service: displayName });
-            })
-            .catch((error) => {
-              subPhase.fail(error, { service: displayName });
-              failures.push(displayName);
-              logger.error(`Failed to initialize ${displayName}`, error, {
-                source: "SystemSculptPlugin",
-              });
-            });
-        }
-
-        subPhase.complete({ service: displayName });
-        return Promise.resolve();
+        initialize();
+        servicePhase.complete({ service: displayName });
       } catch (error) {
-        subPhase.fail(error, { service: displayName });
+        servicePhase.fail(error, { service: displayName });
         failures.push(displayName);
-        logger.error(`Failed to initialize ${displayName}`, error, {
+        this.getLogger().error(`Failed to initialize ${displayName}`, error, {
           source: "SystemSculptPlugin",
         });
-        return Promise.resolve();
       }
-    };
-
-    await Promise.all([
-      wrap("transcription", "transcription service", () => {
-        this.transcriptionService = TranscriptionService.getInstance(this);
-      }),
-      wrap("fileContextMenu", "file context menu service", () => {
-        this.setupFileContextMenuService();
-      }),
-      wrap("workflowEngine", "workflow engine service", () => {
-        this.ensureWorkflowEngineService();
-      }),
-    ]);
-
-    if (failures.length > 0) {
-      this.failures.push(...failures);
     }
-
-    phase.complete({
-      failures: failures.length,
-    });
+    this.failures.push(...failures);
+    phase.complete({ failures: failures.length });
   }
 
-  private setupFileContextMenuService(forceRestart = false): void {
-    if (this.fileContextMenuService && !forceRestart) {
+  private setupFileContextMenuService(): void {
+    if (this.fileContextMenuService) {
       this.fileContextMenuService.start();
       return;
     }
 
-    const { FileContextMenuService } = loadFileContextMenuServiceModule();
     this.fileContextMenuService = new FileContextMenuService({
       app: this.app,
       plugin: this,
@@ -1646,7 +1452,6 @@ export default class SystemSculptPlugin extends Plugin {
       return this.viewManager;
     }
 
-    const { ViewManager } = loadViewManagerModule();
     const viewManager = new ViewManager(this, this.app);
     viewManager.initialize();
     this.viewManager = viewManager;
@@ -1667,7 +1472,6 @@ export default class SystemSculptPlugin extends Plugin {
       return this.commandManager;
     }
 
-    const { CommandManager } = loadCommandManagerModule();
     const commandManager = new CommandManager(this, this.app);
     commandManager.registerCommands();
     this.commandManager = commandManager;
@@ -1777,10 +1581,16 @@ export default class SystemSculptPlugin extends Plugin {
     }
   }
 
-  async onunload() {
-    this.pluginUpdateService?.stop();
-    this.pluginUpdateService = null;
+  onunload(): void {
+    if (!this.unloadPromise) {
+      try { captureStudioReloadState(this.app); }
+      catch { /* A stale leaf must not prevent normal plugin teardown. */ }
+    }
+    this.unloadPromise ??= this.unloadAsync();
+    setStudioReloadBarrier(this.app, this.unloadPromise);
+  }
 
+  private async unloadAsync(): Promise<void> {
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1790,7 +1600,18 @@ export default class SystemSculptPlugin extends Plugin {
     } catch {
       // Recorder teardown is internally best-effort; continue plugin unload.
     }
-    this.diagnosticsSessionLifecycle?.close();
+    try {
+      this.pluginUpdateService?.stop();
+    } catch {
+      // Update polling teardown must not prevent other services from stopping.
+    } finally {
+      this.pluginUpdateService = null;
+    }
+    try {
+      this.diagnosticsSessionLifecycle?.close();
+    } catch {
+      // Diagnostics teardown must not prevent the pending producer drain.
+    }
 
     // Stop non-view producers first. ChatView teardown must run while incident
     // admission remains open so its final accepted failure evidence is kept.
@@ -1861,141 +1682,98 @@ export default class SystemSculptPlugin extends Plugin {
       timeoutMs: 10000,
     });
     const logger = this.getLogger();
-    // Plugin unloading silently
 
-    try {
-      // Embeddings cleanup
-      // Clean up error collector service
-      if (this.errorCollectorService) {
-        this.errorCollectorService.unload();
+    // Each teardown step is independent: one failing step must never skip the
+    // rest of unload. Steps keep their original order (embeddings before
+    // workflow/search/studio, then services in reverse initialization order).
+    const failedSteps: string[] = [];
+    const safely = async (label: string, step: () => unknown): Promise<void> => {
+      try {
+        await step();
+      } catch (error) {
+        failedSteps.push(label);
+        try {
+          logger.error(`Plugin unload step failed: ${label}`, error, {
+            source: "SystemSculptPlugin",
+            method: "onunload",
+          });
+        } catch {
+          // Logging is best-effort and must never block teardown.
+        }
       }
+    };
 
-      if (this.resourceMonitor) {
-        this.resourceMonitor.stop();
-        this.resourceMonitor = null;
-      }
-
-      // Clean up settings manager (stop automatic backups)
-      if (this.settingsManager) {
-        // Cleaning up settings manager silently
-        this.settingsManager.destroy();
-      }
-
+    await safely("error collector", () => this.errorCollectorService?.unload());
+    await safely("resource monitor", () => {
+      this.resourceMonitor?.stop();
+      this.resourceMonitor = null;
+    });
+    // Stops automatic settings backups.
+    await safely("settings manager", () => this.settingsManager?.destroy());
+    await safely("embeddings status bar", () => {
       if (this.embeddingsStatusBar) {
         this.removeChild(this.embeddingsStatusBar);
         this.embeddingsStatusBar = null;
       }
-
-      // Clean up embeddings manager
+    });
+    await safely("embeddings manager", async () => {
       if (this.embeddingsManager) {
         await this.embeddingsManager.cleanup();
         this.embeddingsManager = null;
       }
-
-      if (this.workflowEngineService) {
-        this.workflowEngineService.destroy();
-        this.workflowEngineService = null;
-      }
-
-      if (this.searchEngine) {
-        this.searchEngine.destroy();
-        this.searchEngine = null;
-      }
-
+    });
+    await safely("workflow engine", () => {
+      this.inboxTranscriptionService?.destroy();
+      this.inboxTranscriptionService = null;
+    });
+    await safely("search engine", () => {
+      this.searchEngine?.destroy();
+      this.searchEngine = null;
+    });
+    await safely("studio service", async () => {
       if (this.studioService) {
         await this.studioService.dispose().catch(() => {});
         this.studioService = null;
       }
+    });
+    // Commands and the settings tab are removed by Obsidian itself on unload.
+    await safely("file context menu", () => {
+      this.fileContextMenuService?.stop();
+      this.fileContextMenuService = null;
+    });
 
-      // Cleanup UI components first
-      if (this.settingsTab) {
-        // Settings tab is automatically cleaned up by Obsidian
-      }
+    this.managersInitialized = false;
+    this.managersInitializationPromise = null;
+    this.hasRegisteredStudioExtensions = false;
 
-      // Cleanup managers and views
-      if (this.commandManager) {
-        const commands = [
-          "toggle-audio-recorder",
-          "open-systemsculpt-chat",
-          "open-systemsculpt-history",
-          "open-systemsculpt-janitor",
-          "reload-obsidian",
-          "open-systemsculpt-settings",
-          "chat-with-file",
-          "suggest-edits",
-          "clear-suggested-edits"
-        ];
-        commands.forEach((id) => {
-          // @ts-ignore - removeCommand exists but isn't in the types
-          this.app.commands.removeCommand(`${this.manifest.id}:${id}`);
-        });
-      }
-
-      if (this.fileContextMenuService) {
-        this.fileContextMenuService.stop();
-        this.fileContextMenuService = null;
-      }
-
-      this.managersInitialized = false;
-      this.managersInitializationPromise = null;
-      this.hasRegisteredStudioExtensions = false;
-
-      // Embeddings manager already cleaned up above
-
-      // Cleanup services in reverse order of initialization. Recorder cleanup
-      // ran before every fallible teardown step above.
-      if (this.transcriptionService) {
-        this.transcriptionService.unload();
-      }
-
-      // Clean up resume chat service
-      if (this.resumeChatService) {
-        // Unloading resume chat service silently
-        this.resumeChatService.cleanup();
-      }
-
-      // System prompts are now handled locally, no need to clear cache
-
-      // Clean up vault file cache
-      if (this.vaultFileCache) {
-        // Destroying vault file cache silently
-        this.vaultFileCache.destroy();
-      }
-
-      // Clear singleton instances and static caches
-      SystemSculptService.clearInstance(); // Clear SystemSculptService singleton
+    // Services in reverse order of initialization. Recorder cleanup ran before
+    // every fallible teardown step above.
+    await safely("transcription service", () => this.transcriptionService?.unload());
+    await safely("resume chat service", () => this.resumeChatService?.cleanup());
+    await safely("vault file cache", () => this.vaultFileCache?.destroy());
+    await safely("service singletons", () => {
+      SystemSculptService.clearInstance();
       this.managedCapabilityGraph = null;
-      
-      // Clear service references without reassignment
-      // @ts-ignore - Cleanup is handled by garbage collection
-      this._aiService = undefined;
+    });
 
-      // Plugin unloaded successfully silently
-      // The logger's flush timer was already disposed at the top of onunload.
-      this.pluginLogger = null;
+    // Clear service references without reassignment
+    // @ts-ignore - Cleanup is handled by garbage collection
+    this._aiService = undefined;
+
+    // The logger's flush timer was already disposed at the top of unload.
+    this.pluginLogger = null;
+    if (failedSteps.length === 0) {
       phase.complete();
       logger.info("SystemSculpt plugin unloaded", {
         source: "SystemSculptPlugin",
       });
-    } catch (error) {
+    } else {
+      const error = new Error(`Plugin unload steps failed: ${failedSteps.join(", ")}`);
       phase.fail(error);
       logger.error("Plugin unload encountered errors", error, {
         source: "SystemSculptPlugin",
       });
     }
-
-  }
-
-  public get isReady(): boolean {
-    return this.isPreloadingDone;
-  }
-
-  async loadData() {
-    return super.loadData();
-  }
-
-  async saveData(data: any) {
-    return super.saveData(data);
   }
 
   async saveSettings() {
@@ -2005,10 +1783,8 @@ export default class SystemSculptPlugin extends Plugin {
   public getLogger(): PluginLogger {
     if (!this.pluginLogger) {
       this.pluginLogger = new PluginLogger(this, {
-        logFileName: this.diagnosticsLogFileName,
+        logFileName: this.getDiagnosticsSessionLifecycle().logFileName,
       });
-    } else {
-      this.pluginLogger.setLogFileName(this.diagnosticsLogFileName);
     }
     return this.pluginLogger;
   }
@@ -2117,45 +1893,71 @@ export default class SystemSculptPlugin extends Plugin {
     const normalizedTargetTab = String(targetTab || "account").trim() || "account";
     this.pendingSettingsFocusTab = normalizedTargetTab;
 
+    this.cancelPendingSettingsFocus?.();
+    if (!this.settingsFocusCleanupRegistered) {
+      this.settingsFocusCleanupRegistered = true;
+      this.register(() => this.cancelPendingSettingsFocus?.());
+    }
+
+    let cancelled = false;
+    let pendingTimer: { ownerWindow: Window; id: number } | null = null;
+    const cancel = () => {
+      cancelled = true;
+      if (pendingTimer) pendingTimer.ownerWindow.clearTimeout(pendingTimer.id);
+      pendingTimer = null;
+      if (this.cancelPendingSettingsFocus === cancel) this.cancelPendingSettingsFocus = null;
+    };
+    this.cancelPendingSettingsFocus = cancel;
+
     try {
-      // @ts-ignore – Obsidian typings omit the settings API
-      const settingsApi: any = this.app.setting;
-      if (!settingsApi?.open || !settingsApi?.openTabById) {
-        throw new Error("Settings API unavailable");
-      }
+      type SettingsApi = {
+        activeTab?: { id?: string; containerEl?: HTMLElement };
+        open(): void;
+        openTabById(id: string): void;
+      };
+      const settingsApi = (this.app as typeof this.app & { setting?: SettingsApi }).setting;
+      if (!settingsApi) throw new Error("Settings API unavailable");
 
+      const isPluginTabReady = () => settingsApi.activeTab?.id === this.manifest.id
+        && (settingsApi.activeTab.containerEl?.isConnected ?? true);
+      const schedule = (callback: () => void, delay: number) => {
+        // Obsidian can host settings in a separate native window. Its active
+        // tab, rather than the main document's old modal, owns focus timing.
+        const ownerWindow = settingsApi.activeTab?.containerEl?.ownerDocument.defaultView
+          ?? this.settingsTab?.containerEl?.ownerDocument.defaultView
+          ?? window.activeWindow ?? window;
+        pendingTimer = { ownerWindow, id: ownerWindow.setTimeout(() => {
+          pendingTimer = null;
+          if (!cancelled && !this.isUnloading) callback();
+        }, delay) };
+      };
       const focusPluginTab = (attempt: number = 0) => {
-        const isSettingsModalOpen = !!document.querySelector(".modal.mod-settings");
-        if (!isSettingsModalOpen) {
-          if (attempt < 20) {
-            window.setTimeout(() => focusPluginTab(attempt + 1), 50);
-          }
-          return;
-        }
-
-        const activeSettingsTabId = String(settingsApi?.activeTab?.id ?? "");
-        if (activeSettingsTabId !== this.manifest.id) {
+        if (cancelled || this.isUnloading) return;
+        if (!isPluginTabReady()) {
           try {
             settingsApi.openTabById(this.manifest.id);
           } catch {
-            if (attempt < 20) {
-              window.setTimeout(() => focusPluginTab(attempt + 1), 50);
-            }
-            return;
+            // Older hosts throw until their settings surface has mounted.
           }
         }
-
-        const focusDelay = String(settingsApi?.activeTab?.id ?? "") === this.manifest.id ? 0 : 50;
-        window.setTimeout(() => {
-          this.app.workspace.trigger("systemsculpt:settings-focus-tab", normalizedTargetTab);
-        }, focusDelay);
+        if (isPluginTabReady()) {
+          schedule(() => {
+            if (isPluginTabReady()) {
+              this.app.workspace.trigger("systemsculpt:settings-focus-tab", normalizedTargetTab);
+            }
+            cancel();
+          }, 0);
+        } else if (attempt < 20) {
+          schedule(() => focusPluginTab(attempt + 1), 50);
+        } else {
+          cancel();
+        }
       };
 
-      if (!document.querySelector(".modal.mod-settings")) {
-        settingsApi.open();
-      }
+      if (!settingsApi.activeTab?.containerEl?.isConnected) settingsApi.open();
       focusPluginTab();
     } catch {
+      cancel();
       new Notice("Open SystemSculpt AI settings to manage your account and plugin preferences.", 6000);
     }
   }
@@ -2241,7 +2043,6 @@ export default class SystemSculptPlugin extends Plugin {
     if (!this.recorderService) {
       const logger = this.getLogger();
       try {
-        const { RecorderService } = loadRecorderServiceModule();
         const instance = RecorderService.getInstance(this.app, this);
         if (!instance) {
           throw new Error('RecorderService instance unavailable');
@@ -2267,13 +2068,13 @@ export default class SystemSculptPlugin extends Plugin {
     return this.ensureRecorderService();
   }
 
-  private ensureWorkflowEngineService(): WorkflowEngineService {
-    if (!this.workflowEngineService) {
-      this.workflowEngineService = new WorkflowEngineService(this);
-      this.workflowEngineService.initialize();
+  private ensureInboxTranscriptionService(): InboxTranscriptionService {
+    if (!this.inboxTranscriptionService) {
+      this.inboxTranscriptionService = new InboxTranscriptionService(this);
+      this.inboxTranscriptionService.initialize();
     }
 
-    return this.workflowEngineService;
+    return this.inboxTranscriptionService;
   }
 
   getTranscriptionService(): TranscriptionService {
@@ -2295,35 +2096,6 @@ export default class SystemSculptPlugin extends Plugin {
     return this.settingsManager;
   }
 
-  private async preloadDataInBackground() {
-    const tracer = this.getInitializationTracer();
-    const phase = tracer.startPhase("preload.background", {
-      slowThresholdMs: 400,
-      timeoutMs: 4000,
-      successLevel: "debug",
-    });
-    const logger = this.getLogger();
-
-    if (this.isUnloading) {
-      phase.complete({ skipped: true });
-      return;
-    }
-
-    this.isPreloadingDone = true;
-
-    logger.debug("Background preload completed", {
-      source: "SystemSculptPlugin",
-    });
-
-    phase.complete();
-  }
-
-  // Embeddings methods removed
-
-  // --- Status bar methods removed ---
-
-  // Embedding status polling methods removed
-
   /**
    * Public getter for the ViewManager instance.
    */
@@ -2333,7 +2105,6 @@ export default class SystemSculptPlugin extends Plugin {
 
   getStudioService(): StudioService {
     if (!this.studioService) {
-      const { StudioService } = loadStudioServiceModule();
       this.studioService = new StudioService(this);
     }
     return this.studioService;

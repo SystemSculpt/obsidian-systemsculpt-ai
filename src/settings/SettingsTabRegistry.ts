@@ -1,45 +1,12 @@
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-
-type SetupTabContentModule = typeof import("./SetupTabContent");
-type ChatTabContentModule = typeof import("./ChatTabContent");
-type RecorderTabContentModule = typeof import("./RecorderTabContent");
-type DirectoriesTabContentModule = typeof import("./DirectoriesTabContent");
-type BackupTabContentModule = typeof import("./BackupTabContent");
-type EmbeddingsTabContentModule = typeof import("./EmbeddingsTabContent");
-type ImageGenerationTabContentModule = typeof import("./ImageGenerationTabContent");
-type AdvancedTabContentModule = typeof import("./AdvancedTabContent");
-
-function loadSetupTabContentModule(): SetupTabContentModule {
-  return require("./SetupTabContent") as SetupTabContentModule;
-}
-
-function loadChatTabContentModule(): ChatTabContentModule {
-  return require("./ChatTabContent") as ChatTabContentModule;
-}
-
-function loadRecorderTabContentModule(): RecorderTabContentModule {
-  return require("./RecorderTabContent") as RecorderTabContentModule;
-}
-
-function loadDirectoriesTabContentModule(): DirectoriesTabContentModule {
-  return require("./DirectoriesTabContent") as DirectoriesTabContentModule;
-}
-
-function loadBackupTabContentModule(): BackupTabContentModule {
-  return require("./BackupTabContent") as BackupTabContentModule;
-}
-
-function loadEmbeddingsTabContentModule(): EmbeddingsTabContentModule {
-  return require("./EmbeddingsTabContent") as EmbeddingsTabContentModule;
-}
-
-function loadImageGenerationTabContentModule(): ImageGenerationTabContentModule {
-  return require("./ImageGenerationTabContent") as ImageGenerationTabContentModule;
-}
-
-function loadAdvancedTabContentModule(): AdvancedTabContentModule {
-  return require("./AdvancedTabContent") as AdvancedTabContentModule;
-}
+import { displaySetupTabContent } from "./SetupTabContent";
+import { displayChatTabContent } from "./ChatTabContent";
+import { displayRecorderTabContent } from "./RecorderTabContent";
+import { displayDirectoriesTabContent } from "./DirectoriesTabContent";
+import { displayBackupTabContent } from "./BackupTabContent";
+import { displayEmbeddingsTabContent } from "./EmbeddingsTabContent";
+import { displayImageGenerationTabContent } from "./ImageGenerationTabContent";
+import { displayAdvancedTabContent } from "./AdvancedTabContent";
 
 export interface SettingsTabConfig {
   id: string;
@@ -58,7 +25,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       sections: [
         (parent) => {
           const section = parent.createDiv();
-          loadSetupTabContentModule().displaySetupTabContent(section, tab, isProActive);
+          displaySetupTabContent(section, tab, isProActive);
         },
       ],
       anchor: {
@@ -75,7 +42,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       sections: [
         (parent) => {
           const section = parent.createDiv();
-          void loadChatTabContentModule().displayChatTabContent(section, tab);
+          void displayChatTabContent(section, tab);
         },
       ],
       anchor: {
@@ -89,7 +56,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       sections: [
         (parent) => {
           const section = parent.createDiv();
-          void loadRecorderTabContentModule().displayRecorderTabContent(section, tab);
+          void displayRecorderTabContent(section, tab);
         },
       ],
       anchor: {
@@ -102,7 +69,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       label: "Knowledge",
       sections: [
         (parent) => {
-          void loadEmbeddingsTabContentModule().displayEmbeddingsTabContent(parent, tab);
+          void displayEmbeddingsTabContent(parent, tab);
         },
       ],
       anchor: {
@@ -116,11 +83,11 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       sections: [
         (parent) => {
           const section = parent.createDiv();
-          loadDirectoriesTabContentModule().displayDirectoriesTabContent(section, tab);
+          displayDirectoriesTabContent(section, tab);
         },
         (parent) => {
           const section = parent.createDiv();
-          loadBackupTabContentModule().displayBackupTabContent(section, tab);
+          displayBackupTabContent(section, tab);
         },
       ],
       anchor: {
@@ -133,7 +100,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       label: "Studio",
       sections: [
         (parent) => {
-          void loadImageGenerationTabContentModule().displayImageGenerationTabContent(parent, tab);
+          displayImageGenerationTabContent(parent, tab);
         },
       ],
       anchor: {
@@ -146,7 +113,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       label: "Advanced",
       sections: [
         (parent) => {
-          loadAdvancedTabContentModule().displayAdvancedTabContent(parent, tab);
+          displayAdvancedTabContent(parent, tab);
         },
       ],
       anchor: {

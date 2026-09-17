@@ -1,3 +1,5 @@
+import { serializeStudioProject } from "../schema";
+import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
 import { deriveStudioAssetsDir, deriveStudioPolicyPath, sanitizeStudioProjectName } from "../paths";
 
@@ -127,6 +129,7 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
     dirs,
     files,
     store: new StudioProjectStore(app as any),
+    reopen: () => new StudioProjectStore(app as any),
   };
 }
 
@@ -202,7 +205,7 @@ describe("StudioProjectStore", () => {
   });
 
   it("force reload invalidates the selected generation and ingests a one-file external edit", async () => {
-    const { store, files } = createStore();
+    const { store, files, reopen } = createStore();
     const created = await store.createProject({ name: "Direct edit", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");
 
@@ -212,12 +215,8 @@ describe("StudioProjectStore", () => {
 
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");
     expect((await store.loadProject(created.path, { forceReload: true })).name).toBe("Edited outside Studio");
-    const recovered = await store.generations.recover(created.project.projectId);
-    expect(recovered.status).toBe("ready");
-    if (recovered.status === "ready") {
-      expect(recovered.expectedGeneration.revision).toBe(1);
-      expect(recovered.generation.metadata.commandKind).toBe("external_sync");
-    }
+    // A new consumer must see the accepted edit without the previous store's cache.
+    expect((await reopen().loadProject(created.path)).name).toBe("Edited outside Studio");
   });
 
   it("keeps persistence bookkeeping out of project-file errors", async () => {
@@ -285,5 +284,62 @@ describe("StudioProjectStore", () => {
     expect([...files.keys()].some((path) => path.includes("/retired/"))).toBe(true);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
+  });
+});
+
+
+describe("Studio concurrent workspace writers", () => {
+  async function workspace() {
+    const state = createStore();
+    const created = await state.store.createProject({ name: "Workspace", minPluginVersion: "6.7.2", maxRuns: 100, maxArtifactsMb: 1024 });
+    return { ...state, ...created };
+  }
+
+  it("saves a canvas edit while an asset arrives without deleting or rewriting the asset", async () => {
+    const { store, files, path, project } = await workspace();
+    const asset = `${deriveStudioAssetsDir(path)}/assets/sha256/ab/${"ab".repeat(32)}.png`;
+    files.set(asset, "arrived from another device");
+    project.name = "Canvas edit";
+    await expect(store.saveProject(path, project)).resolves.toMatchObject({ conflicts: [] });
+    expect(files.get(asset)).toBe("arrived from another device");
+    expect((await store.loadProject(path)).name).toBe("Canvas edit");
+  });
+
+  it("rebases a local edit onto a valid external document with unrelated new nodes", async () => {
+    const { store, files, path, project } = await workspace();
+    const base = cloneStudioProjectSnapshot(project);
+    const external = cloneStudioProjectSnapshot(project);
+    external.graph.nodes.push({ id: "remote", kind: "studio.text", version: "1.0.0", title: "Remote text", position: { x: 0, y: 0 }, config: { value: "external edit" } });
+    files.set(path, serializeStudioProject(external));
+    project.name = "Local title";
+    const saved = await store.saveProject(path, project, { baseProject: base });
+    expect(saved.conflicts).toEqual([]);
+    expect(saved.project.name).toBe("Local title");
+    expect(saved.project.graph.nodes[0].id).toBe("remote");
+    expect((await store.loadProject(path, { forceReload: true })).graph.nodes[0].id).toBe("remote");
+  });
+
+  it("archives the conflicting local value and saves independent local changes", async () => {
+    const { store, files, path, project } = await workspace();
+    const base = cloneStudioProjectSnapshot(project), external = cloneStudioProjectSnapshot(project);
+    external.name = "External title";
+    files.set(path, serializeStudioProject(external));
+    project.name = "Local title";
+    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
+    const saved = await store.saveProject(path, project, { baseProject: base });
+    expect(saved.conflicts).toEqual(["name"]);
+    expect(saved.project.name).toBe("External title");
+    expect(saved.project.graph.nodes[0].id).toBe("local");
+    const recoveries = [...files].filter(([file]) => file.startsWith(".systemsculpt/studio/recovery/"));
+    expect(recoveries.length).toBe(2);
+    expect(recoveries.every(([, raw]) => JSON.parse(raw).name === "Local title")).toBe(true);
+  });
+
+  it("keeps both node results when parallel runs publish caches from the same starting snapshot", async () => {
+    const { store, path, project } = await workspace();
+    const cache = (id: string) => new TextEncoder().encode(JSON.stringify({ schema: "studio.node-cache.v1", projectId: project.projectId, updatedAt: "2026-09-09T00:00:00.000Z", entries: { [id]: { nodeId: id, runId: `run_${id}`, updatedAt: "2026-09-09T00:00:00.000Z", outputs: { text: id } } } }));
+    await Promise.all([store.replaceCache(path, project.projectId, cache("a")), store.replaceCache(path, project.projectId, cache("b"))]);
+    const bytes = await store.readSupportFile(path, `${deriveStudioAssetsDir(path)}/cache/node-results.json`);
+    expect(Object.keys(JSON.parse(new TextDecoder().decode(bytes!)).entries).sort()).toEqual(["a", "b"]);
   });
 });

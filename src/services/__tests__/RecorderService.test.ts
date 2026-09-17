@@ -447,6 +447,7 @@ describe("RecorderService", () => {
       file: originFile,
     };
     const originLeaf = { view: originView } as any;
+    Object.assign(originView, { leaf: originLeaf });
     const otherLeaf = { view: { getViewType: () => CHAT_VIEW_TYPE } } as any;
     (app.workspace as any).activeLeaf = originLeaf;
     (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(originView);

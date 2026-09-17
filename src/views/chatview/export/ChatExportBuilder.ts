@@ -1,7 +1,7 @@
 import { ChatExportContext } from './ChatExportTypes';
 import { ChatExportOptions } from '../../../types/chatExport';
 import { MessagePartNormalizer } from '../utils/MessagePartNormalizer';
-import type { MessagePart, MultiPartContent } from '../../../types';
+import type { ChatMessage, MultiPartContent } from '../../../types';
 import type { ToolCall } from '../../../types/toolCalls';
 
 const OPTION_KEYS: Array<keyof ChatExportOptions> = [
@@ -208,11 +208,11 @@ export class ChatExportBuilder {
   }
 
   private renderMessageBody(
-    message: { content: string | MultiPartContent[] | null; role: string; messageParts?: MessagePart[] },
+    message: ChatMessage,
     options: ChatExportOptions
   ): string[] {
     const output: string[] = [];
-    const parts = MessagePartNormalizer.toParts(message as any);
+    const parts = MessagePartNormalizer.toParts(message);
 
     if (!parts || parts.length === 0) {
       this.appendContent(output, message.content, options);
@@ -238,12 +238,12 @@ export class ChatExportBuilder {
         case 'tool_call':
           flushReasoning();
           if (options.includeToolCalls) {
-            this.appendToolCall(output, part.data as ToolCall, options);
+            this.appendToolCall(output, part.data, options);
           }
           break;
         case 'content':
           flushReasoning();
-          this.appendContent(output, part.data as string | MultiPartContent[], options);
+          this.appendContent(output, part.data, options);
           break;
         default:
           flushReasoning();

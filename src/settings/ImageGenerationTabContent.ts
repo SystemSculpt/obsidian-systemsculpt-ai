@@ -1,5 +1,7 @@
 import { Notice, Setting } from "obsidian";
 import { attachFolderSuggester } from "../components/FolderSuggester";
+import { DEFAULT_STUDIO_PROJECTS_DIR } from "../studio/paths";
+import { STUDIO_DISPLAY_NAME } from "../studio/types";
 import type { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 
 export function displayImageGenerationTabContent(
@@ -15,10 +17,10 @@ export function displayImageGenerationTabContent(
   containerEl.createEl("h3", { text: "Studio" });
 
   new Setting(containerEl)
-    .setName("Open Studio")
+    .setName(`Open ${STUDIO_DISPLAY_NAME}`)
     .addButton((button) => {
       button
-        .setButtonText("Open Studio")
+        .setButtonText(`Open ${STUDIO_DISPLAY_NAME}`)
         .onClick(async () => {
           try {
             await plugin.getViewManager().activateSystemSculptStudioView();
@@ -30,17 +32,19 @@ export function displayImageGenerationTabContent(
 
   new Setting(containerEl)
     .setName("Projects folder")
-    .setDesc("Default vault folder for new Studio projects.")
+    .setDesc(`Default vault folder for new ${STUDIO_DISPLAY_NAME} projects.`)
     .addText((text) => {
       text
-        .setPlaceholder("SystemSculpt/Studio")
-        .setValue(plugin.settings.studioDefaultProjectsFolder || "SystemSculpt/Studio")
+        .setPlaceholder(DEFAULT_STUDIO_PROJECTS_DIR)
+        .setValue(plugin.settings.studioDefaultProjectsFolder || DEFAULT_STUDIO_PROJECTS_DIR)
         .onChange(async (value) => {
           await plugin.getSettingsManager().updateSettings({
-            studioDefaultProjectsFolder: value.trim() || "SystemSculpt/Studio",
+            studioDefaultProjectsFolder: value.trim() || DEFAULT_STUDIO_PROJECTS_DIR,
           });
         });
-      attachFolderSuggester(text.inputEl, (value) => text.setValue(value), tabInstance.app);
+      attachFolderSuggester(text.inputEl, (value) => {
+        text.setValue(value);
+      }, tabInstance.app);
     });
 
   new Setting(containerEl)

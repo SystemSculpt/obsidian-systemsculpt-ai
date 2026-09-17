@@ -2,7 +2,7 @@ import type { App, Editor } from "obsidian";
 import { TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
 import { DEFAULT_SETTINGS } from "../../types";
 import { MAX_FILE_SIZE, formatFileSize } from "../../utils/FileValidator";
 import { logError } from "../../utils/errorHandling";
@@ -940,7 +940,7 @@ export class TranscriptionCoordinator {
       && "value" in value
       && "receipt" in value
     ) {
-      return value as Readonly<{ value: T; receipt?: ManagedLocalCommitReceipt }>;
+      return value;
     }
     return { value: value as T };
   }

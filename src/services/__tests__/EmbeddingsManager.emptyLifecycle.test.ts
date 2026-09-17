@@ -46,12 +46,6 @@ const mockStorage = {
     }
     for (const vector of vectors) mockVectors.set(vector.id, vector);
   }),
-  removeByPathExceptIds: jest.fn(async (path: string, namespace: string, keepIds: Set<string>) => {
-    for (const [id, vector] of mockVectors) {
-      if (vector.path === path && vector.metadata.namespace === namespace && !keepIds.has(id)) mockVectors.delete(id);
-    }
-  }),
-  moveVectorId: jest.fn(async () => undefined),
   removeByPath: jest.fn(async (path: string) => {
     for (const [id, vector] of mockVectors) if (vector.path === path) mockVectors.delete(id);
   }),
@@ -188,8 +182,8 @@ function harness(initialContent: string) {
   const plugin = {
     settings,
     emitter: { emit: jest.fn() },
-    getManagedCapabilityClient: jest.fn(() => ({
-      getEmbeddingsIndex: () => indexAdapter,
+    getManagedCapabilityGraph: jest.fn(() => ({
+      embeddingsIndex: indexAdapter,
     })),
     getSettingsManager: jest.fn(() => ({ updateSettings })),
   };

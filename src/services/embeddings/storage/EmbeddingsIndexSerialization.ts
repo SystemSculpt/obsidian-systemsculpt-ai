@@ -42,28 +42,15 @@ export interface SerializedEmbeddingsIndex {
   vectors: SerializedEmbeddingVector[];
 }
 
-const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+import { base64ToBytes as decodeBase64, bytesToBase64 } from "../../../utils/base64";
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
-  }
-  return btoa(binary);
-}
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function base64ToBytes(base64: string): Uint8Array {
   if (!BASE64_PATTERN.test(base64)) {
     throw new Error("Invalid base64 payload.");
   }
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  return decodeBase64(base64);
 }
 
 function float32ToBase64(vector: Float32Array): string {

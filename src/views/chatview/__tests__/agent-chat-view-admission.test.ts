@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { App, TFile } from "obsidian";
+import { CodexThreadLocator } from "../../../services/codex/CodexThreadLocator";
+import { App, TFile, Platform } from "obsidian";
 import { AgentChatView } from "../AgentChatView";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import {
@@ -15,9 +16,11 @@ import type { ChatMessageAttachment } from "../attachments/ChatMessageAttachment
 import type {
   AgentRunInput,
   AgentRunResult,
-} from "../agent/ChatSession";
+} from "../../../chat/managed/ChatSession";
 import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
+
+jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -608,7 +611,7 @@ function createSavedChatLoadHarness(
     subscribe: jest.fn(() => jest.fn()),
   };
   const transcript = {
-    load: jest.fn(async () => loaded),
+    load: jest.fn(async (_chatId: string) => loaded),
     saveMetadata: jest.fn(async () => loaded),
     snapshot: jest.fn(() => loaded),
   };
@@ -4610,6 +4613,111 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect((harness.view as any).agent).toBe(finalAgent);
   });
 
+  it("does not replace a newer chat when an older locator lookup finishes late", async () => {
+    const harness = createSavedChatLoadHarness([], { agentConversationId: "conversation_0123456789abcdef0123456789abcdef" });
+    const started = deferred();
+    const lookup = deferred<string | undefined>();
+    const locator = jest.spyOn(CodexThreadLocator.prototype, "read").mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      return lookup.promise;
+    });
+    try {
+      const loading = harness.view.loadChatById("older-chat");
+      await started.promise;
+      (harness.view as any).conversationOriginToken = "newer-chat-origin";
+      lookup.resolve(undefined);
+      await loading;
+
+      expect((harness.view as any).applyTranscriptIdentity).not.toHaveBeenCalled();
+      expect(harness.workspace.setHistory).not.toHaveBeenCalled();
+      expect(harness.prepareThinConversation).not.toHaveBeenCalled();
+    } finally {
+      locator.mockRestore();
+    }
+  });
+
+  it.each(["success", "failure"])("keeps the latest chat's queue when an older queue read settles with %s", async (outcome) => {
+    const harness = createSavedChatLoadHarness([]);
+    const olderQueue = deferred<Array<{ id: string; text: string; includeContextFiles: boolean }>>();
+    const started = deferred();
+    const newestItems = [{ id: "newest-prompt", text: "For the newest chat", includeContextFiles: false }];
+    const view = harness.view as any;
+    delete view.hydrateQueue;
+    view.queueRepository = {
+      load: jest.fn(async (key: string) => {
+        if (key === "older-chat") {
+          started.resolve(undefined);
+          return olderQueue.promise;
+        }
+        return newestItems;
+      }),
+    };
+    view.workspace.setQueue = jest.fn();
+    view.reportQueuePersistenceError = jest.fn();
+    harness.transcript.load.mockImplementation(async (chatId: string) => ({ ...harness.loaded, chatId }));
+
+    const olderLoad = view.loadChatById("older-chat");
+    await started.promise;
+    await view.loadChatById("newer-chat");
+    view.workspace.setQueue.mockClear();
+    if (outcome === "success") olderQueue.resolve([{ id: "older-prompt", text: "For the old chat", includeContextFiles: false }]);
+    else olderQueue.reject(new Error("Older queue read failed"));
+    await olderLoad;
+
+    expect(view.queuedFollowUps).toEqual(newestItems);
+    expect(view.workspace.setQueue).not.toHaveBeenCalled();
+    expect(view.reportQueuePersistenceError).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a saved chat's execution locator is unreadable", async () => {
+    const harness = createSavedChatLoadHarness([{ role: "user", content: "Saved question", message_id: "saved-user" }], { agentConversationId: "conversation_0123456789abcdef0123456789abcdef" });
+    const locator = jest.spyOn(CodexThreadLocator.prototype, "read").mockRejectedValueOnce(new Error("Invalid saved Codex thread locator."));
+    const reset = jest.fn(async () => undefined);
+    (harness.view as any).resetAfterFailedChatLoad = reset;
+    try {
+      await expect(harness.view.loadChatById("broken-locator-chat")).resolves.toBeUndefined();
+
+      expect(reset).toHaveBeenCalledWith("This chat could not be loaded.");
+      expect(harness.workspace.setHistory).not.toHaveBeenCalled();
+      expect(harness.agent.hydrate).not.toHaveBeenCalled();
+      expect(harness.transcript.saveMetadata).not.toHaveBeenCalled();
+    } finally {
+      locator.mockRestore();
+    }
+  });
+
+  it("retires a failed-load reset when a newer chat wins its history render", async () => {
+    const harness = createSavedChatLoadHarness([]);
+    const view = harness.view as any;
+    const started = deferred();
+    const rendering = deferred();
+    view.workspace.resetComposerDraft = jest.fn();
+    view.workspace.setQueue = jest.fn();
+    view.contextManager.clearPinnedFiles = jest.fn();
+    view.queueRepository = { save: jest.fn(async () => undefined) };
+    view.transcript.reset = jest.fn(() => ({ chatId: "", title: "New chat", version: 0, messages: [] }));
+    harness.workspace.setHistory.mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      await rendering.promise;
+    });
+    harness.transcript.load.mockImplementation(async (chatId: string) => ({ ...harness.loaded, chatId }));
+
+    const reset = view.resetAfterFailedChatLoad("The old saved chat is corrupted.");
+    await started.promise;
+    await view.loadChatById("newer-chat");
+    harness.workspace.setBanner.mockClear();
+    harness.workspace.setAgentSnapshot.mockClear();
+    harness.prepareThinConversation.mockClear();
+    rendering.resolve(undefined);
+    await reset;
+
+    expect(view.chatId).toBe("newer-chat");
+    expect(harness.workspace.setAgentSnapshot).not.toHaveBeenCalled();
+    expect(harness.workspace.setBanner).not.toHaveBeenCalled();
+    expect(view.queueRepository.save).not.toHaveBeenCalled();
+    expect(harness.prepareThinConversation).not.toHaveBeenCalled();
+  });
+
   it("keeps an empty saved chat without a server conversation writable", async () => {
     const harness = createSavedChatLoadHarness([]);
 
@@ -4941,14 +5049,14 @@ describe("AgentChatView thin conversation lifecycle", () => {
       snapshot: jest.fn(() => durableSnapshot),
     };
     const promotion = { item: { id: "queued-after-recovery" } };
-    const promoteRecoveredQueuedSubmission = jest.fn();
+    const promoteQueuedSubmission = jest.fn();
     const runPromotedQueuedSubmission = jest.fn();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       conversationOriginToken: expectedOrigin,
       deferredRecoveredCompletion: null,
       transcript,
-      promoteRecoveredQueuedSubmission,
+      promoteQueuedSubmission,
       runPromotedQueuedSubmission,
     });
     const setDeferred = (overrides: Record<string, string> = {}) => {
@@ -4978,10 +5086,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
     setDeferred();
     (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
 
-    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+    expect(promoteQueuedSubmission).not.toHaveBeenCalled();
     expect((view as any).deferredRecoveredCompletion).toBeNull();
 
-    promoteRecoveredQueuedSubmission
+    promoteQueuedSubmission
       .mockReturnValueOnce(null)
       .mockReturnValueOnce(promotion);
     setDeferred();
@@ -4989,9 +5097,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
     setDeferred();
     (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
 
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledTimes(2);
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenNthCalledWith(
+    expect(promoteQueuedSubmission).toHaveBeenCalledTimes(2);
+    expect(promoteQueuedSubmission).toHaveBeenNthCalledWith(
       1,
+      null,
       expectedOrigin,
     );
     expect(runPromotedQueuedSubmission).toHaveBeenCalledWith(
@@ -5060,7 +5169,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       includeContextFiles: true,
     };
     const getSnapshot = jest.fn(() => ({ status: "running" }));
-    const promoteRecoveredQueuedSubmission = jest.fn(() => null);
+    const promoteQueuedSubmission = jest.fn(() => null);
     const runPromotedQueuedSubmission = jest.fn();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
@@ -5068,17 +5177,18 @@ describe("AgentChatView thin conversation lifecycle", () => {
       activeSubmissionOperation: null,
       queuedFollowUps: [queued],
       agent: { getSnapshot },
-      promoteRecoveredQueuedSubmission,
+      promoteQueuedSubmission,
       runPromotedQueuedSubmission,
     });
 
     (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
-    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+    expect(promoteQueuedSubmission).not.toHaveBeenCalled();
 
     getSnapshot.mockReturnValueOnce({ status: "idle" });
     (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
 
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledWith(
+    expect(promoteQueuedSubmission).toHaveBeenCalledWith(
+      null,
       "origin-hydration-guard",
     );
     expect(runPromotedQueuedSubmission).not.toHaveBeenCalled();
@@ -5517,4 +5627,19 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     expect(sessionTrustedToolNames).toEqual(new Set(["write"]));
   });
+});
+
+it.each([false, true])('keeps saved native history on Codex and adapts its composer when mobile=%s', async (mobile) => {
+  const previousDesktop = Platform.isDesktopApp, previousMobile = Platform.isMobileApp;
+  const locator = jest.spyOn(CodexThreadLocator.prototype, 'read').mockResolvedValue('native-thread');
+  try {
+    Platform.isDesktopApp = !mobile; Platform.isMobileApp = mobile;
+    const messages: ChatMessage[] = [{ role: 'user', content: 'Native question', message_id: 'native-user' }, { role: 'assistant', content: 'Native answer', message_id: 'native-assistant' }];
+    const harness = createSavedChatLoadHarness(messages, { agentConversationId: 'native-conversation' });
+    await harness.view.loadChatById('legacy-chat');
+    expect((harness.view as any).chatExecutionBackend).toBe('codex');
+    expect(harness.workspace.setHistory).toHaveBeenCalledWith(messages);
+    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(mobile ? 'Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.' : null);
+    expect(harness.loaded.messages).toEqual(messages);
+  } finally { locator.mockRestore(); Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
 });

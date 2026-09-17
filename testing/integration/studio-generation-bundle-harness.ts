@@ -70,10 +70,18 @@ export async function exerciseBuiltStudioGenerations(bundleModule: BuiltGenerati
   const productionAdapter = new bundleModule.ObsidianStudioGenerationAdapter(dataAdapter);
   const locator = { vaultRelativeProjectPath: "SystemSculpt/Studio/Bundle Proof.systemsculpt" };
   const projectId = "bundle_project";
-  const projectDocument = new TextEncoder().encode(JSON.stringify({ schema: "studio.project.v1", projectId, name: "Bundle Proof" }));
+  const projectDocument = new TextEncoder().encode(JSON.stringify({
+    schema: "studio.project.v2", id: projectId, name: "Bundle Proof",
+    canvas: { nodes: [], edges: [], groups: [], shapes: [], arrows: [] },
+  }));
   const policyDocument = new TextEncoder().encode(JSON.stringify({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-07-11T00:00:00.000Z", grants: [] }));
   const projectManifest = new TextEncoder().encode(JSON.stringify({ schema: "studio.manifest.v1", projectId }));
   const store = new bundleModule.StudioProjectGenerationStore(productionAdapter, { now: () => "2026-07-11T00:00:00.000Z" });
+  const malformedDocument = new TextEncoder().encode(JSON.stringify({ schema: "studio.project.v1", projectId, name: "Missing graph" }));
+  const rejected = await store.create({ kind: "create", projectId, projectDocument: malformedDocument, policyDocument, projectManifest }, locator);
+  expect(rejected.status).toBe("invalid_candidate");
+  expect(await dataAdapter.exists(locator.vaultRelativeProjectPath)).toBe(false);
+
   const created = await store.create({ kind: "create", projectId, projectDocument, policyDocument, projectManifest }, locator);
   expect(created.status).toBe("committed");
   if (created.status !== "committed") throw new Error("built generation create failed");

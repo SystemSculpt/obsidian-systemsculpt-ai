@@ -28,7 +28,7 @@ export interface LocatorContext {
 
 function chatContainer(app: App): HTMLElement | null {
   const leaves: WorkspaceLeaf[] = app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-  const activeLeaf = app.workspace.activeLeaf;
+  const activeLeaf = app.workspace.getMostRecentLeaf();
   const leaf = activeLeaf && leaves.includes(activeLeaf)
     ? activeLeaf
     : leaves.length === 1

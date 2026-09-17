@@ -37,6 +37,15 @@ export const ERROR_CODES = {
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
+export function toError(reason: unknown, fallbackMessage = "Operation failed."): Error {
+  if (reason instanceof Error) return reason;
+  const error = new Error(
+    typeof reason === "string" && reason.trim() ? reason : fallbackMessage,
+  ) as Error & { cause?: unknown };
+  error.cause = reason;
+  return error;
+}
+
 const AUTH_FAILURE_SNIPPETS = [
   "invalid license",
   "license key invalid",
@@ -94,7 +103,7 @@ export class SystemSculptError extends Error {
     message: string,
     public code: ErrorCode = ERROR_CODES.UNKNOWN_ERROR,
     public statusCode: number = 500,
-    public metadata?: Record<string, any>,
+    public metadata?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "SystemSculptError";

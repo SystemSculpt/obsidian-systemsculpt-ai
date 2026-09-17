@@ -1,4 +1,6 @@
+import { isRenderingSnapshot } from "./AgentIncidentRendering";
 import type { ListedFiles, Stat } from "obsidian";
+import { deriveAgentIncidentMissingFields, terminalTransportReference } from "./AgentIncidentCompleteness";
 import { isThinAgentCommandKind } from "../../services/managed/ThinAgentV1Contract";
 import { isFirstPartyToolName } from "../../tools/toolNames";
 import {
@@ -9,7 +11,7 @@ import {
   isToolDiagnosticFailureClass,
   isToolDiagnosticOutcome,
 } from "../../utils/ThinAgentLifecycleSchema";
-import { canonicalJsonStringify, utf8ByteLength } from "./AgentIncidentCanonicalJson";
+import { CanonicalJsonError, canonicalJsonStringify, utf8ByteLength } from "./AgentIncidentCanonicalJson";
 import {
   AGENT_INCIDENT_CAPTURE_FAILURE_CODES,
   AGENT_INCIDENT_EXCLUDED_DATA_CATEGORIES,
@@ -67,11 +69,8 @@ const VERSION_PATTERN = /^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$/;
 const RFC3339_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const TEMP_FILE_PATTERN = /\.tmp$/;
 const CORRUPT_REPORT_FILE_PATTERN = /\.json\.corrupt(?:-\d+)?$/;
-const MAX_SERIALIZATION_DEPTH = 64;
-const MAX_SERIALIZATION_VALUES = 100_000;
 const MAX_TOOL_ITEM_COUNT = 10_000;
 const MAX_TIMING_MS = 7 * 24 * 60 * 60 * 1_000;
-const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const CAPTURE_FAILURE_CODE_SET = new Set<string>(AGENT_INCIDENT_CAPTURE_FAILURE_CODES);
 
 interface AdapterCoordination {
@@ -238,7 +237,6 @@ export class AgentIncidentStore {
   private readonly coordination: AdapterCoordination;
   private readonly yieldToHost: () => Promise<void>;
   private initialized = false;
-  private initializationPromise: Promise<AgentIncidentRetentionResult> | null = null;
 
   constructor(
     private readonly adapter: AgentIncidentStoreAdapter,
@@ -268,35 +266,23 @@ export class AgentIncidentStore {
 
   /** Return canonical JSON without writing it. */
   public serialize(report: AgentIncidentStoreReport): string {
-    return this.serializeUnknown(report);
+    return this.canonicalize(report).serialized;
   }
 
   public async save<TReport extends AgentIncidentStoreReport>(
     report: TReport,
   ): Promise<AgentIncidentStoreSaveResult<TReport>> {
-    const serialized = this.serializeUnknown(report);
-    const sizeBytes = utf8ByteLength(serialized);
-    if (sizeBytes > this.limits.maxReportBytes) {
-      throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
-    }
-
-    const parsed = this.parseSerialized<TReport>(serialized);
+    const stored = this.canonicalize<TReport>(report);
     return this.exclusive(async () => {
       await this.ensureInitialized();
-      const path = this.reportPath(parsed.report.report_id);
-      const created = await this.persistWithRetry(path, serialized, parsed.report.report_id);
+      const path = this.reportPath(stored.report.report_id);
+      const created = await this.persistWithRetry(path, stored.serialized, stored.report.report_id);
       const retention = await this.enforceRetentionInternal(path);
-      const retained = await this.readCandidate(path, parsed.report.report_id, false);
-      if (retained.kind !== "valid" || retained.entry.serialized !== serialized) {
+      const retained = await this.readCandidate(path, stored.report.report_id, false);
+      if (retained.kind !== "valid" || retained.entry.serialized !== stored.serialized) {
         throw new AgentIncidentStoreError("persistence_unavailable", "The incident report did not survive local retention.");
       }
-      return Object.freeze({
-        report: parsed.report,
-        serialized,
-        sizeBytes,
-        created,
-        retention,
-      });
+      return Object.freeze({ ...stored, created, retention });
     });
   }
 
@@ -341,36 +327,23 @@ export class AgentIncidentStore {
 
   private async ensureInitialized(): Promise<AgentIncidentRetentionResult> {
     if (this.initialized) return emptyRetentionResult();
-    if (!this.initializationPromise) {
-      this.initializationPromise = this.initializeInternal();
-    }
-    try {
-      const result = await this.initializationPromise;
-      this.initialized = true;
-      return result;
-    } finally {
-      if (!this.initialized) this.initializationPromise = null;
-    }
-  }
-
-  private async initializeInternal(): Promise<AgentIncidentRetentionResult> {
+    // All callers hold the adapter queue, so no second initialization lock is needed.
     await this.ensureDirectoryWithRetry();
-    return this.enforceRetentionInternal();
+    const result = await this.enforceRetentionInternal();
+    this.initialized = true;
+    return result;
   }
 
   private async ensureDirectoryWithRetry(): Promise<void> {
-    let lastFailure = false;
     for (let attempt = 0; attempt < this.limits.writeAttempts; attempt += 1) {
       try {
         await this.ensureDirectory();
         return;
       } catch {
-        lastFailure = true;
+        // Retry bounded transient adapter failures.
       }
     }
-    if (lastFailure) {
-      throw new AgentIncidentStoreError("persistence_unavailable", "The local incident directory is unavailable.");
-    }
+    throw new AgentIncidentStoreError("persistence_unavailable", "The local incident directory is unavailable.");
   }
 
   private async ensureDirectory(): Promise<void> {
@@ -388,7 +361,6 @@ export class AgentIncidentStore {
   }
 
   private async persistWithRetry(path: string, serialized: string, reportId: string): Promise<boolean> {
-    let lastFailure = false;
     for (let attempt = 0; attempt < this.limits.writeAttempts; attempt += 1) {
       const tempPath = `${path}.tmp`;
       try {
@@ -421,11 +393,7 @@ export class AgentIncidentStore {
       } catch (error) {
         await this.removeIfPresent(tempPath);
         if (error instanceof AgentIncidentStoreError) throw error;
-        lastFailure = true;
       }
-    }
-    if (lastFailure) {
-      throw new AgentIncidentStoreError("persistence_unavailable", "The incident report could not be saved locally.");
     }
     throw new AgentIncidentStoreError("persistence_unavailable", "The incident report could not be saved locally.");
   }
@@ -608,53 +576,11 @@ export class AgentIncidentStore {
         continue;
       }
 
-      if (!fileName.endsWith(".json")) {
-        if (!CORRUPT_REPORT_FILE_PATTERN.test(fileName)) {
-          artifacts.push(await this.artifactEntry(path));
-          continue;
-        }
-        const stat = await this.safeStat(path);
-        if (!stat || stat.type !== "file") {
-          cleanupFailures += 1;
-          scanFailed = true;
-          continue;
-        }
-        const candidateBytes = boundedFileSize(stat.size, this.limits.maxReportBytes + 1);
-        if (candidateBytes > this.limits.maxScanBytes - inspectedBytes) {
-          scanFailed = true;
-          break;
-        }
-        inspectedBytes += candidateBytes;
-        artifacts.push(artifactFromStat(
-          path,
-          stat,
-          this.limits.maxTotalBytes,
-          await this.readArtifactReportTimestamp(path, stat),
-        ));
+      const isReport = fileName.endsWith(".json");
+      if (!isReport && !CORRUPT_REPORT_FILE_PATTERN.test(fileName)) {
+        artifacts.push(await this.artifactEntry(path));
         continue;
       }
-
-      const reportId = fileName.slice(0, -5);
-      if (!REPORT_ID_PATTERN.test(reportId)) {
-        const stat = await this.safeStat(path);
-        if (!stat || stat.type !== "file") {
-          cleanupFailures += 1;
-          scanFailed = true;
-          continue;
-        }
-        const candidateBytes = boundedFileSize(stat.size, this.limits.maxReportBytes + 1);
-        if (candidateBytes > this.limits.maxScanBytes - inspectedBytes) {
-          scanFailed = true;
-          break;
-        }
-        inspectedBytes += candidateBytes;
-        corruptReports += 1;
-        const artifact = await this.isolateCorrupt(path, stat, await this.readArtifactReportTimestamp(path, stat));
-        if (artifact) artifacts.push(artifact);
-        else if (await this.safeExists(path)) cleanupFailures += 1;
-        continue;
-      }
-
       const stat = await this.safeStat(path);
       if (!stat || stat.type !== "file") {
         cleanupFailures += 1;
@@ -667,6 +593,23 @@ export class AgentIncidentStore {
         break;
       }
       inspectedBytes += candidateBytes;
+      if (!isReport) {
+        artifacts.push(artifactFromStat(
+          path,
+          stat,
+          this.limits.maxTotalBytes,
+          await this.readArtifactReportTimestamp(path, stat),
+        ));
+        continue;
+      }
+      const reportId = fileName.slice(0, -5);
+      if (!REPORT_ID_PATTERN.test(reportId)) {
+        corruptReports += 1;
+        const artifact = await this.isolateCorrupt(path, stat, await this.readArtifactReportTimestamp(path, stat));
+        if (artifact) artifacts.push(artifact);
+        else if (await this.safeExists(path)) cleanupFailures += 1;
+        continue;
+      }
 
       const candidate = await this.readCandidate(path, reportId, true, stat);
       if (candidate.kind === "valid") reports.push(candidate.entry);
@@ -761,29 +704,39 @@ export class AgentIncidentStore {
     } catch {
       throw new AgentIncidentStoreError("invalid_report", "The incident report is not valid JSON.");
     }
-    const canonical = this.serializeUnknown(parsed);
-    const projected = canonicalProject(parsed, this.limits.maxReportBytes);
-    const report = deepFreeze(projected) as unknown as TReport;
-    return Object.freeze({ report, serialized: canonical, sizeBytes: utf8ByteLength(canonical) });
+    return this.canonicalize<TReport>(parsed);
   }
 
-  private serializeUnknown(value: unknown): string {
-    let projected: CanonicalJson;
+  /**
+   * Encode with the shared canonical serializer, then validate the persistence
+   * envelope on the parsed bytes. Those bytes are the only projection: the
+   * store never walks the caller's object itself, so recorder and store bytes
+   * agree by construction.
+   */
+  private canonicalize<TReport extends AgentIncidentStoreReport>(value: unknown): StoredAgentIncidentReport<TReport> {
+    let serialized: string;
     try {
-      projected = canonicalProject(value, this.limits.maxReportBytes);
-      validateEnvelope(projected);
+      serialized = canonicalJsonStringify(value, { maximumCodeUnits: this.limits.maxReportBytes });
     } catch (error) {
-      if (error instanceof AgentIncidentStoreError) throw error;
-      throw new AgentIncidentStoreError("invalid_report", "The incident report does not match the local persistence envelope.");
+      if (error instanceof CanonicalJsonError && error.reason === "too_large") {
+        throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
+      }
+      invalidReport();
     }
-    const serialized = canonicalJsonStringify(projected);
     const sizeBytes = utf8ByteLength(serialized);
     if (sizeBytes > this.limits.maxReportBytes) {
       throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
     }
-    const captureQuality = (projected as CanonicalObject).capture_quality;
+    const report = JSON.parse(serialized) as CanonicalJson;
+    try {
+      validateEnvelope(report);
+    } catch (error) {
+      if (error instanceof AgentIncidentStoreError) throw error;
+      invalidReport();
+    }
+    const captureQuality = (report as CanonicalObject).capture_quality;
     if (!isCanonicalObject(captureQuality) || captureQuality.report_bytes !== sizeBytes) invalidReport();
-    return serialized;
+    return Object.freeze({ report: deepFreeze(report) as unknown as TReport, serialized, sizeBytes });
   }
 
   private async isolateCorrupt(path: string, knownStat?: Stat, reportCreatedAtMs?: number): Promise<ArtifactEntry | null> {
@@ -917,7 +870,7 @@ function validateEnvelope(value: CanonicalJson): asserts value is AgentIncidentS
   validateGroupingConsistency(grouping, incident, runState);
   validateTerminalProvenance(incident, runSummary, runState);
   validateTools(tools, runSummary.observed_lifecycle_event_count);
-  const terminal = validateTimeline(timeline, incident, runSummary);
+  validateTimeline(timeline, incident, runSummary);
   validateTransportSegments(transportSegments);
   validateCorrelationTimelineConsistency(
     correlation,
@@ -934,7 +887,6 @@ function validateEnvelope(value: CanonicalJson): asserts value is AgentIncidentS
     runSummary,
     root.run_state,
     root.rendering,
-    terminal,
     timeline,
     timeline.length,
     resources.length,
@@ -1181,7 +1133,7 @@ function validateRunSummary(value: CanonicalJson): CanonicalObject {
   validateLifecyclePhaseCounts(summary.lifecycle_phase_counts);
 
   if (summary.started_at !== undefined && summary.duration_ms !== undefined && summary.duration_clock_domain === "client_wall_clock_observed") {
-    const elapsed = Date.parse(summary.failed_at as string) - Date.parse(summary.started_at as string);
+    const elapsed = Date.parse(summary.failed_at) - Date.parse(summary.started_at);
     if (elapsed !== summary.duration_ms) invalidReport();
   }
   return summary;
@@ -1552,97 +1504,15 @@ function validateRendering(value: CanonicalJson): void {
       && !evidence.failure_surface_dom_committed)
   ) invalidReport();
   if (evidence.before_terminal_publish !== undefined) {
-    validateRenderingSnapshot(evidence.before_terminal_publish);
+    if (!isRenderingSnapshot(evidence.before_terminal_publish)) invalidReport();
   }
   if (evidence.after_terminal_commit !== undefined) {
-    validateRenderingSnapshot(evidence.after_terminal_commit);
+    if (!isRenderingSnapshot(evidence.after_terminal_commit)) invalidReport();
   }
   if (
     evidence.failure_surface_dom_committed
     && evidence.after_terminal_commit === undefined
   ) invalidReport();
-}
-
-function validateRenderingSnapshot(value: CanonicalJson): void {
-  const rendering = exactObject(value, [
-    "render_state",
-    "render_pass_count",
-    "pending_render_count",
-    "last_render_duration_ms",
-    "max_render_duration_ms",
-    "first_dom_commit_observed",
-    "first_paint_opportunity_observed",
-    "registered_row_count",
-    "renderer",
-    "scroller",
-  ]);
-  if (!isOneOf(rendering.render_state, ["idle", "frame_pending", "queued", "rendering", "rendering_with_pending"])) invalidReport();
-  validateRenderCount(rendering.render_pass_count);
-  validateRenderCount(rendering.pending_render_count);
-  validateRenderDuration(rendering.last_render_duration_ms);
-  validateRenderDuration(rendering.max_render_duration_ms);
-  if (typeof rendering.first_dom_commit_observed !== "boolean" || typeof rendering.first_paint_opportunity_observed !== "boolean") invalidReport();
-  validateRenderCount(rendering.registered_row_count);
-
-  const renderer = exactObject(rendering.renderer, [
-    "render_pass_count",
-    "pending_render_pass_count",
-    "last_render_duration_ms",
-    "max_render_duration_ms",
-    "historical_row_count",
-    "historical_part_count",
-    "active_part_count",
-    "disclosure_count",
-    "open_disclosure_count",
-    "activity_disclosure_count",
-    "reasoning_disclosure_count",
-    "tool_disclosure_count",
-    "overflow_disclosure_count",
-    "pending_hydration_count",
-    "rendering_enabled",
-  ]);
-  for (const count of [
-    renderer.render_pass_count,
-    renderer.pending_render_pass_count,
-    renderer.historical_row_count,
-    renderer.historical_part_count,
-    renderer.active_part_count,
-    renderer.disclosure_count,
-    renderer.open_disclosure_count,
-    renderer.activity_disclosure_count,
-    renderer.reasoning_disclosure_count,
-    renderer.tool_disclosure_count,
-    renderer.overflow_disclosure_count,
-    renderer.pending_hydration_count,
-  ]) validateRenderCount(count);
-  validateRenderDuration(renderer.last_render_duration_ms);
-  validateRenderDuration(renderer.max_render_duration_ms);
-  if (typeof renderer.rendering_enabled !== "boolean") invalidReport();
-
-  const scroller = exactObject(rendering.scroller, [
-    "mode",
-    "distance_from_end_bucket",
-    "registered_row_count",
-    "pending_layout_mutation_count",
-    "layout_mutation_pending",
-    "geometry_update_pending",
-    "programmatic_scroll_pending",
-    "submitted_prompt_anchor_active",
-    "destroyed",
-  ]);
-  if (!isOneOf(scroller.mode, ["end", "manual"])) invalidReport();
-  if (!isOneOf(scroller.distance_from_end_bucket, ["at_end", "near_end", "within_viewport", "far_from_end", "unknown"])) invalidReport();
-  validateRenderCount(scroller.registered_row_count);
-  validateRenderCount(scroller.pending_layout_mutation_count);
-  for (const flag of [
-    scroller.layout_mutation_pending,
-    scroller.geometry_update_pending,
-    scroller.programmatic_scroll_pending,
-    scroller.submitted_prompt_anchor_active,
-    scroller.destroyed,
-  ]) {
-    if (typeof flag !== "boolean") invalidReport();
-  }
 }
 
 function validateResourceSamples(values: CanonicalJson[]): void {
@@ -1677,7 +1547,6 @@ function validateCaptureQuality(
   summary: CanonicalObject,
   runState: CanonicalJson | undefined,
   rendering: CanonicalJson | undefined,
-  terminal: CanonicalObject,
   timeline: CanonicalJson[],
   timelineLength: number,
   resourceLength: number,
@@ -1728,14 +1597,13 @@ function validateCaptureQuality(
 
   const missing = canonicalArray(capture.missing_fields);
   validateOrderedUniqueStrings(missing, AGENT_INCIDENT_MISSING_FIELD_CODES);
-  const expectedMissing = recomputeMissingFields({
+  const expectedMissing = deriveAgentIncidentMissingFields({
     incident,
     correlation,
     environment,
     summary,
     runState,
     rendering,
-    terminal,
     timeline,
     resourceLength,
     transportSegments,
@@ -1771,133 +1639,6 @@ function validateCaptureQuality(
   if (capture.complete !== (!expectedTruncated && missing.length === 0 && failures.length === 0)) invalidReport();
   if (resourceLength + capture.dropped_resource_sample_count > MAX_COUNT) invalidReport();
   if (transportSegmentLength + capture.dropped_transport_segment_count > MAX_COUNT) invalidReport();
-}
-
-function recomputeMissingFields(input: {
-  incident: CanonicalObject;
-  correlation: CanonicalObject;
-  environment: CanonicalObject;
-  summary: CanonicalObject;
-  runState: CanonicalJson | undefined;
-  rendering: CanonicalJson | undefined;
-  terminal: CanonicalObject;
-  timeline: CanonicalJson[];
-  resourceLength: number;
-  transportSegments: CanonicalJson[];
-}): string[] {
-  const missing = new Set<string>();
-  const partial = input.summary.partial_output as CanonicalObject;
-  if (input.summary.started_at === undefined) missing.add("run_started");
-  if (input.incident.incident_id === undefined) missing.add("server_incident_id");
-  if (input.incident.failure_code === undefined) missing.add("failure_code");
-  if (input.correlation.server_run_id === undefined) missing.add("server_run_id");
-  if (input.incident.failure_authority === "unknown") missing.add("failure_authority");
-  if (input.incident.failure_stage === "not_recorded") missing.add("failure_stage");
-  if (input.incident.failure_mechanism === "not_recorded") missing.add("failure_mechanism");
-  if (input.summary.terminal_validation === "not_recorded") missing.add("terminal_validation");
-  if (input.summary.host_process_state === "unknown") missing.add("host_process_state");
-  if (input.summary.chat_view_state === "unknown") missing.add("chat_view_state");
-  if (input.summary.duration_ms === undefined) missing.add("duration_ms");
-  if (partial.assistant_text_part_count === undefined) missing.add("assistant_text_part_count");
-  if (partial.assistant_text_streaming_part_count === undefined) missing.add("assistant_text_streaming_part_count");
-  if (partial.assistant_text_complete_part_count === undefined) missing.add("assistant_text_complete_part_count");
-  if (partial.assistant_text_character_count === undefined) missing.add("assistant_text_character_count");
-  if (partial.reasoning_part_count === undefined) missing.add("reasoning_part_count");
-  if (partial.reasoning_streaming_part_count === undefined) missing.add("reasoning_streaming_part_count");
-  if (partial.reasoning_complete_part_count === undefined) missing.add("reasoning_complete_part_count");
-  if (partial.reasoning_character_count === undefined) missing.add("reasoning_character_count");
-  if (partial.assistant_output_present_before_failure === undefined) missing.add("assistant_output_present_before_failure");
-  if (partial.assistant_output_retained_in_failed_projection === undefined) missing.add("assistant_output_retained_in_failed_projection");
-  if (input.runState === undefined) missing.add("run_state");
-  if (input.rendering === undefined) {
-    missing.add("rendering");
-    missing.add("rendering_before_terminal_publish");
-    missing.add("rendering_after_terminal_commit");
-    missing.add("failure_surface_dom_commit");
-    missing.add("failure_surface_paint_opportunity");
-  } else {
-    const rendering = input.rendering as CanonicalObject;
-    if (rendering.before_terminal_publish === undefined) {
-      missing.add("rendering_before_terminal_publish");
-    }
-    if (rendering.after_terminal_commit === undefined) {
-      missing.add("rendering_after_terminal_commit");
-    }
-    if (rendering.failure_surface_dom_committed !== true) {
-      missing.add("failure_surface_dom_commit");
-    }
-    if (rendering.failure_surface_paint_opportunity_observed !== true) {
-      missing.add("failure_surface_paint_opportunity");
-    }
-  }
-  if (input.resourceLength === 0) missing.add("resource_samples");
-  if (input.transportSegments.length === 0) missing.add("transport_segments");
-  const terminalTransport = terminalTransportReference(input.timeline);
-  if (!terminalTransport || !input.transportSegments.some((value) => (
-      isCanonicalObject(value)
-      && value.segment_ordinal === terminalTransport.segmentOrdinal
-      && (terminalTransport.commandKind === undefined || value.command_kind === terminalTransport.commandKind)
-      && (
-        terminalTransport.toolExecutionOrdinal === undefined
-        || value.tool_execution_ordinal === terminalTransport.toolExecutionOrdinal
-      )
-    ))) missing.add("terminal_transport_segment");
-  if (input.environment.plugin_version === undefined) missing.add("environment_plugin_version");
-  if (input.environment.plugin_build_id === undefined) missing.add("environment_plugin_build_id");
-  if (input.environment.loaded_bundle_sha256 === undefined) missing.add("environment_loaded_bundle_sha256");
-  if (input.environment.obsidian_version === undefined) missing.add("environment_obsidian_version");
-  if (input.environment.host_type === undefined || input.environment.host_type === "unknown") missing.add("environment_host_type");
-  if (input.environment.os_family === undefined || input.environment.os_family === "unknown") missing.add("environment_os_family");
-  if (input.timeline.some((value) => (
-    isCanonicalObject(value)
-    && typeof value.code === "string"
-    && isToolLifecycleCodeValue(value.code)
-    && value.tool_execution_ordinal === undefined
-  ))) {
-    missing.add("tool_execution_ordinal");
-  }
-  return AGENT_INCIDENT_MISSING_FIELD_CODES.filter((field) => missing.has(field));
-}
-
-function terminalTransportReference(
-  timeline: CanonicalJson[],
-): Readonly<{
-  segmentOrdinal: number;
-  commandKind?: string;
-  toolExecutionOrdinal?: number;
-}> | null {
-  let segmentOrdinal: number | undefined;
-  let commandKind: string | undefined;
-  let toolExecutionOrdinal: number | undefined;
-  for (const value of timeline) {
-    if (!isCanonicalObject(value)) continue;
-    if (value.code !== "response_result_received_failed" && value.code !== "run_finished_failed") continue;
-    if (typeof value.command_segment_ordinal !== "number") continue;
-    if (segmentOrdinal !== undefined && segmentOrdinal !== value.command_segment_ordinal) return null;
-    if (commandKind !== undefined && typeof value.command_kind === "string" && commandKind !== value.command_kind) return null;
-    if (
-      toolExecutionOrdinal !== undefined
-      && typeof value.tool_execution_ordinal === "number"
-      && toolExecutionOrdinal !== value.tool_execution_ordinal
-    ) return null;
-    segmentOrdinal = value.command_segment_ordinal;
-    commandKind = commandKind ?? (typeof value.command_kind === "string" ? value.command_kind : undefined);
-    toolExecutionOrdinal = toolExecutionOrdinal
-      ?? (typeof value.tool_execution_ordinal === "number" ? value.tool_execution_ordinal : undefined);
-  }
-  return segmentOrdinal === undefined
-    ? null
-    : {
-        segmentOrdinal,
-        ...(commandKind === undefined ? {} : { commandKind }),
-        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-      };
-}
-
-function isToolLifecycleCodeValue(code: string): boolean {
-  return code.startsWith("local_tool_")
-    || code.startsWith("tool_result_")
-    || code.startsWith("mutation_");
 }
 
 function validatePrivacy(value: CanonicalJson): void {
@@ -2018,14 +1759,6 @@ function hasAtMostThreeDecimalPlaces(value: number): boolean {
   return Number(value.toFixed(3)) === value;
 }
 
-function validateRenderCount(value: CanonicalJson): void {
-  if (!isIntegerMetricAtMost(value, MAX_RENDER_COUNT)) invalidReport();
-}
-
-function validateRenderDuration(value: CanonicalJson): void {
-  if (!isIntegerMetricAtMost(value, MAX_RENDER_DURATION_MS)) invalidReport();
-}
-
 function validateOptionalBoundedMetric(value: CanonicalJson | undefined, maximum: number): void {
   if (value !== undefined && !isBoundedMetric(value, maximum)) invalidReport();
 }
@@ -2051,101 +1784,6 @@ function sameOptionalValue(left: CanonicalJson | undefined, right: CanonicalJson
 function isZeroPrefixedId(value: string): boolean {
   const separator = value.indexOf("_");
   return separator >= 0 && /^0+$/u.test(value.slice(separator + 1));
-}
-
-function canonicalProject(value: unknown, maximumCodeUnits: number): CanonicalJson {
-  const seen = new Set<object>();
-  const state = { values: 0, codeUnits: 0 };
-
-  const visit = (current: unknown, depth: number): CanonicalJson => {
-    state.values += 1;
-    if (state.values > MAX_SERIALIZATION_VALUES || depth > MAX_SERIALIZATION_DEPTH) invalidReport();
-    if (current === null || typeof current === "boolean") return current;
-    if (typeof current === "string") {
-      state.codeUnits += current.length;
-      if (state.codeUnits > maximumCodeUnits || !hasWellFormedUtf16(current)) reportTooLargeOrInvalid(state.codeUnits > maximumCodeUnits);
-      return current;
-    }
-    if (typeof current === "number") {
-      if (!Number.isFinite(current)) invalidReport();
-      return Object.is(current, -0) ? 0 : current;
-    }
-    if (typeof current !== "object") invalidReport();
-    if (seen.has(current)) invalidReport();
-
-    const prototype = Object.getPrototypeOf(current) as object | null;
-    if (Array.isArray(current)) {
-      if (prototype !== Array.prototype) invalidReport();
-      seen.add(current);
-      const keys = Reflect.ownKeys(current);
-      if (keys.length > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-      const lengthDescriptor = Object.getOwnPropertyDescriptor(current, "length");
-      if (!lengthDescriptor || !("value" in lengthDescriptor) || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-      if (keys.length !== lengthDescriptor.value + 1) invalidReport();
-      for (const key of keys) {
-        if (typeof key === "symbol") invalidReport();
-        if (key === "length") continue;
-        if (!/^\d+$/.test(key) || String(Number(key)) !== key || Number(key) >= lengthDescriptor.value) invalidReport();
-      }
-      const projected: CanonicalJson[] = [];
-      for (let index = 0; index < lengthDescriptor.value; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
-        if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) invalidReport();
-        projected.push(visit(descriptor.value, depth + 1));
-      }
-      seen.delete(current);
-      return projected;
-    }
-
-    if (prototype !== Object.prototype && prototype !== null) invalidReport();
-    seen.add(current);
-    const keys = Reflect.ownKeys(current);
-    if (keys.length > MAX_SERIALIZATION_VALUES - state.values) invalidReport();
-    if (keys.some((key) => typeof key === "symbol")) invalidReport();
-    const names = keys as string[];
-    for (const name of names) {
-      state.codeUnits += name.length;
-      if (state.codeUnits > maximumCodeUnits || !hasWellFormedUtf16(name)) reportTooLargeOrInvalid(state.codeUnits > maximumCodeUnits);
-    }
-    names.sort(compareText);
-    const projected: { [key: string]: CanonicalJson } = Object.create(null) as { [key: string]: CanonicalJson };
-    for (const name of names) {
-      if (RESERVED_KEYS.has(name)) invalidReport();
-      const descriptor = Object.getOwnPropertyDescriptor(current, name);
-      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) invalidReport();
-      projected[name] = visit(descriptor.value, depth + 1);
-    }
-    seen.delete(current);
-    return projected;
-  };
-
-  try {
-    return visit(value, 0);
-  } catch (error) {
-    if (error instanceof AgentIncidentStoreError) throw error;
-    invalidReport();
-  }
-}
-
-function hasWellFormedUtf16(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return false;
-      index += 1;
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function reportTooLargeOrInvalid(tooLarge: boolean): never {
-  if (tooLarge) {
-    throw new AgentIncidentStoreError("report_too_large", "The incident report exceeds the local size limit.");
-  }
-  invalidReport();
 }
 
 function deepFreeze<T extends CanonicalJson>(value: T): T {

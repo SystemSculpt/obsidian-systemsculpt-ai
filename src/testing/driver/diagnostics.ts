@@ -76,7 +76,7 @@ export class DriverDiagnostics {
     });
     return {
       entries: filtered.slice(-limit),
-      lastSeq: this.logs.length > 0 ? this.logs[this.logs.length - 1]!.seq : 0,
+      lastSeq: this.logs.length > 0 ? this.logs[this.logs.length - 1].seq : 0,
       dropped: Math.max(0, filtered.length - limit),
     };
   }
@@ -91,7 +91,7 @@ export class DriverDiagnostics {
       : this.notices;
     return {
       entries: filtered.slice(-limit),
-      lastSeq: this.notices.length > 0 ? this.notices[this.notices.length - 1]!.seq : 0,
+      lastSeq: this.notices.length > 0 ? this.notices[this.notices.length - 1].seq : 0,
     };
   }
 
@@ -115,20 +115,19 @@ export class DriverDiagnostics {
     const levels: Array<DriverLogEntry["level"]> = ["log", "info", "warn", "error", "debug"];
     const originals = new Map<DriverLogEntry["level"], (...parts: unknown[]) => void>();
     for (const level of levels) {
-      // eslint-disable-next-line obsidianmd/rule-custom-message -- Dev-only capture wraps console without adding output.
-      const original = console[level].bind(console);
+      const method = Reflect.get(console, level);
+      if (typeof method !== "function") continue;
+      const original = method.bind(console) as (...parts: unknown[]) => void;
       originals.set(level, original);
-      // eslint-disable-next-line obsidianmd/rule-custom-message -- Dev-only capture wraps console without adding output.
-      console[level] = (...parts: unknown[]): void => {
+      Reflect.set(console, level, (...parts: unknown[]): void => {
         this.record(level, parts);
         original(...parts);
-      };
+      });
     }
     this.restoreConsole = () => {
       for (const level of levels) {
         const original = originals.get(level);
-        // eslint-disable-next-line obsidianmd/rule-custom-message -- Restores the original console methods.
-        if (original) console[level] = original;
+        if (original) Reflect.set(console, level, original);
       }
     };
   }

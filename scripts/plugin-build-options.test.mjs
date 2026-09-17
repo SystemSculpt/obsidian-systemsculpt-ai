@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import esbuild from "esbuild";
+import vm from "node:vm";
 import {
   CANONICAL_API_BASE_URL,
   LOCAL_AGENT_API_BASE_URL,
@@ -28,6 +29,21 @@ test("production API base is the build default", () => {
     options.define.__SYSTEMSCULPT_API_BASE_URL__,
     JSON.stringify(CANONICAL_API_BASE_URL),
   );
+});
+
+test("optimized production builds retain diagnostic class and function names", async () => {
+  const result = await esbuild.build(createPluginBuildOptions({
+    write: false,
+    overrides: {
+      entryPoints: [],
+      stdin: { contents: "export class DiagnosticProbe {}\nexport function describeProbe() { return DiagnosticProbe.name; }", loader: "ts" },
+    },
+  }));
+  const module = { exports: {} };
+  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports });
+  assert.equal(module.exports.DiagnosticProbe.name, "DiagnosticProbe");
+  assert.equal(module.exports.describeProbe.name, "describeProbe");
+  assert.equal(module.exports.describeProbe(), "DiagnosticProbe");
 });
 
 test("staging API base is a fixed first-party build target", () => {

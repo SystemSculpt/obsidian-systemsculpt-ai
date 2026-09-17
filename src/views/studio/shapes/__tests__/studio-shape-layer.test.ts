@@ -61,8 +61,8 @@ function mount(overrides?: Partial<StudioShapeLayerOptions>) {
     ...spies,
     ...overrides,
   };
-  renderStudioShapeLayer(options);
-  return { canvas, ...spies };
+  const handle = renderStudioShapeLayer(options);
+  return { canvas, handle, ...spies };
 }
 
 function shapeEl(canvas: HTMLElement, shapeId: string): HTMLElement {
@@ -213,6 +213,76 @@ describe("studio shape layer", () => {
     window.dispatchEvent(pointerEvent("pointerup", 450, 150));
 
     expect(onConnectShapes).toHaveBeenCalledWith("s1", "s2");
+    expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).toBeNull();
+  });
+
+  it("connects node cards visually and tracks their live bounds", () => {
+    const nodes = new Map([
+      ["n1", { id: "n1", shape: "rectangle" as const, position: { x: 100, y: 100 }, size: { width: 100, height: 100 } }],
+      ["n2", { id: "n2", shape: "rectangle" as const, position: { x: 400, y: 100 }, size: { width: 100, height: 100 } }],
+    ]);
+    const { canvas, handle, onConnectShapes, onMoveSelection } = mount({
+      activeCanvasTool: "arrow",
+      diagram: { shapes: [], arrows: [{ id: "a1", fromShapeId: "n1", toShapeId: "n2" }] },
+      getNodeAnchor: (id) => nodes.get(id) ?? null,
+    });
+    const target = canvas.createDiv({ cls: "ss-studio-node-card" });
+    target.dataset.nodeId = "n2";
+    const child = target.createDiv();
+    document.elementFromPoint = () => child;
+    const line = () => canvas.querySelector(".ss-studio-shape-arrow-line")?.getAttribute("d");
+    expect(line()).toBe("M 200.00 150.00 L 397.00 150.00");
+
+    nodes.get("n2")!.position.x = 500;
+    nodes.get("n1")!.size.width = 200;
+    handle.refreshArrows();
+    expect(line()).toBe("M 300.00 150.00 L 497.00 150.00");
+    handle.startArrowGesture("n1", pointerEvent("pointerdown", 150, 150));
+    window.dispatchEvent(pointerEvent("pointermove", 550, 150));
+    expect(canvas.querySelector(".ss-studio-shape-arrow-preview")?.getAttribute("d")).toContain("L 497.00 150.00");
+    window.dispatchEvent(pointerEvent("pointerup", 550, 150));
+    expect(onConnectShapes).toHaveBeenCalledWith("n1", "n2");
+    expect(onMoveSelection).not.toHaveBeenCalled();
+  });
+
+  it("connects shapes to node cards, accepting nested drop targets", () => {
+    const { canvas, onConnectShapes } = mount({
+      activeCanvasTool: "arrow",
+      getNodeAnchor: (id) => id === "n1" ? { id, shape: "rectangle", position: { x: 500, y: 100 }, size: { width: 100, height: 100 } } : null,
+    });
+    const target = canvas.createDiv({ cls: "ss-studio-node-card" });
+    target.dataset.nodeId = "n1";
+    document.elementFromPoint = () => target;
+    shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 150, 150));
+    window.dispatchEvent(pointerEvent("pointerup", 550, 150));
+    expect(onConnectShapes).toHaveBeenCalledWith("s1", "n1");
+  });
+
+  it.each(["escape", "cancel", "dispose", "blur"])("cancels arrow gestures on %s without a late commit", (reason) => {
+    const { canvas, handle, onConnectShapes } = mount({ activeCanvasTool: "arrow" });
+    document.elementFromPoint = () => shapeEl(canvas, "s2");
+    shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 150, 150));
+    if (reason === "escape") window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    if (reason === "cancel") window.dispatchEvent(pointerEvent("pointercancel", 450, 150));
+    if (reason === "dispose") handle.cancelArrowGesture();
+    if (reason === "blur") window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(pointerEvent("pointerup", 450, 150));
+    expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).toBeNull();
+    expect(onConnectShapes).not.toHaveBeenCalled();
+  });
+
+  it("does not link to items in another canvas or release on another pointer", () => {
+    const { canvas, onConnectShapes } = mount({ activeCanvasTool: "arrow" });
+    const other = document.body.createDiv({ cls: "ss-studio-shape" });
+    other.dataset.shapeId = "s2";
+    document.elementFromPoint = () => other;
+    shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 150, 150));
+    const secondPointer = new MouseEvent("pointerup", { clientX: 450, clientY: 150 });
+    Object.defineProperty(secondPointer, "pointerId", { value: 2 });
+    window.dispatchEvent(secondPointer);
+    expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).not.toBeNull();
+    window.dispatchEvent(pointerEvent("pointerup", 450, 150));
+    expect(onConnectShapes).not.toHaveBeenCalled();
     expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).toBeNull();
   });
 

@@ -5,9 +5,9 @@ import {
   MultiPartContent,
   type ChatAttachmentMetadata,
 } from "../../../types";
-import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
+import { parseAttachedTextContent } from "../../../chat/ChatAttachmentContent";
+import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
-import { MessagePartList } from "../utils/MessagePartList";
 import {
   hasChatIdentityMetadata,
   parseChatFrontmatterYaml,
@@ -21,6 +21,7 @@ import {
 import {
   normalizeFailedTerminalReceipt,
 } from "../FailedTerminalReceipt";
+import type { ToolCall } from "../../../types/toolCalls";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
 const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
@@ -148,12 +149,10 @@ export class ChatMarkdownSerializer {
       const parts: MessagePart[] = [];
       let ts = Date.now();
 
-      const extractedBlocks: Array<{
-        type: "reasoning" | "tool_calls";
-        data: any;
-        start: number;
-        end: number;
-      }> = [];
+      const extractedBlocks: Array<
+        | { type: "reasoning"; data: string; start: number; end: number }
+        | { type: "tool_calls"; data: ToolCall[]; start: number; end: number }
+      > = [];
 
       const reasoningRegex = /<!-- REASONING\r?\n([\s\S]*?)\r?\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
@@ -175,11 +174,16 @@ export class ChatMarkdownSerializer {
         const toolCallJson = toolCallMatch[1]?.trim();
         if (!toolCallJson) return { success: false, messages: [] };
         try {
-          const toolCallsArray = JSON.parse(toolCallJson);
-          if (!Array.isArray(toolCallsArray)) return { success: false, messages: [] };
+          const toolCallsValue: unknown = JSON.parse(toolCallJson);
+          if (
+            !Array.isArray(toolCallsValue)
+            || !toolCallsValue.every((value) => value && typeof value === "object" && !Array.isArray(value))
+          ) {
+            return { success: false, messages: [] };
+          }
           extractedBlocks.push({
             type: "tool_calls",
-            data: toolCallsArray,
+            data: toolCallsValue as ToolCall[],
             start: toolCallMatch.index,
             end: toolCallMatch.index + toolCallMatch[0].length,
           });
@@ -218,8 +222,8 @@ export class ChatMarkdownSerializer {
         if (block.type === "reasoning") {
           parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
         } else {
-          for (const toolCall of block.data as any[]) {
-            const toolId = (toolCall && typeof toolCall.id === "string") ? toolCall.id : String(ts);
+          for (const toolCall of block.data) {
+            const toolId = typeof toolCall.id === "string" ? toolCall.id : String(ts);
             const partId = toolId ? `tool_call_part-${toolId}` : `tool_call-${ts}`;
             parts.push({ id: partId, type: "tool_call", data: toolCall, timestamp: ts++ });
           }
@@ -259,15 +263,14 @@ export class ChatMarkdownSerializer {
   }
 
   private static reconstructMessageFromParts(role: ChatRole, message_id: string, messageParts: MessagePart[]): ChatMessage {
-    const list = new MessagePartList(messageParts);
-    return {
-      role,
-      message_id,
-      content: list.contentMarkdown(""),
-      reasoning: list.reasoningMarkdown(),
-      tool_calls: list.toolCalls,
-      messageParts,
-    };
+    let content = "", reasoning = "";
+    const tool_calls: ToolCall[] = [];
+    for (const part of messageParts) {
+      if (part.type === "content") content += String(part.data ?? "");
+      else if (part.type === "reasoning") reasoning += String(part.data ?? "");
+      else if (part.type === "tool_call") tool_calls.push(part.data);
+    }
+    return { role, message_id, content, reasoning, tool_calls, messageParts };
   }
 
   private static parseFramedMessagePayload(
@@ -469,7 +472,7 @@ export class ChatMarkdownSerializer {
       if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((part) => this.isStoredContentPart(part))) {
         return { state: "invalid", body, content: null };
       }
-      return { state: "valid", body: body.replace(match[0], ""), content: parsed as MultiPartContent[] };
+      return { state: "valid", body: body.replace(match[0], ""), content: parsed };
     } catch {
       return { state: "invalid", body, content: null };
     }
@@ -492,19 +495,11 @@ export class ChatMarkdownSerializer {
   }
 
   private static encodeBase64Json(value: unknown): string {
-    const bytes = new TextEncoder().encode(JSON.stringify(value));
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)));
-    }
-    return btoa(binary);
+    return utf8ToBase64(JSON.stringify(value));
   }
 
   private static decodeBase64Json(value: string): unknown {
-    const binary = atob(value);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    return JSON.parse(base64ToUtf8(value)) as unknown;
   }
 
   private static extractAttachmentMetadata(
@@ -597,14 +592,18 @@ export class ChatMarkdownSerializer {
     const versionRaw = parsed.version ?? 0;
 
     const processedContextFiles = Array.isArray(context_files)
-      ? context_files.map((file: any): NonNullable<ChatMetadata["context_files"]>[number] => {
+      ? context_files.map((file: unknown): NonNullable<ChatMetadata["context_files"]>[number] => {
           if (typeof file === "string") {
             const isExtraction = file.includes("/Extractions/");
             return { path: file, type: isExtraction ? "extraction" : "source" };
-          } else if (file && typeof file === "object" && file.path) {
+          } else if (file && typeof file === "object" && !Array.isArray(file)) {
+            const fileRecord = file as Record<string, unknown>;
+            if (typeof fileRecord.path !== "string" || !fileRecord.path) {
+              return { path: "", type: "source" };
+            }
             return {
-              path: file.path,
-              type: file.type || "source",
+              path: fileRecord.path,
+              type: fileRecord.type === "extraction" ? "extraction" : "source",
             };
           } else {
             return { path: "", type: "source" };
@@ -652,13 +651,14 @@ export class ChatMarkdownSerializer {
           case "reasoning":
             if (typeof part.data === "string") {
               // Preserve reasoning verbatim without trimming or normalization
-              messageBody += `\n<!-- REASONING\n${part.data as string}\n-->\n`;
+              messageBody += `\n<!-- REASONING\n${part.data}\n-->\n`;
             }
             break;
-          case "tool_call":
+          case "tool_call": {
             const toolCallArray = [part.data];
             messageBody += `\n<!-- TOOL-CALLS\n${JSON.stringify(toolCallArray, null, 2)}\n-->\n`;
             break;
+          }
         }
       });
     } else {

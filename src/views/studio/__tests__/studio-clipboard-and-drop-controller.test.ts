@@ -82,6 +82,7 @@ function createHarness(options?: {
   let projectPath: string | null = project ? "Studio/Clipboard.systemsculpt" : null;
   let id = 0;
   const copyText = jest.fn(async () => true);
+  let boundViewport: HTMLElement | null = null;
   const host: Harness["host"] = {
     isActive: jest.fn(() => true),
     isBusy: jest.fn(() => false),
@@ -94,6 +95,17 @@ function createHarness(options?: {
     removeDiagramSelection: jest.fn(() => true),
     selectPastedShapes: jest.fn(),
     getGraphZoom: jest.fn(() => 1),
+    // Mirror the engine: world = scroll-box px / zoom (origin 0 here, zoom 1).
+    graphPointFromClient: jest.fn((clientX: number, clientY: number) => {
+      if (!boundViewport) return null;
+      const rect = boundViewport.getBoundingClientRect();
+      return { x: boundViewport.scrollLeft + clientX - rect.left, y: boundViewport.scrollTop + clientY - rect.top };
+    }),
+    getViewportCenterWorldPoint: jest.fn(() =>
+      boundViewport
+        ? { x: boundViewport.scrollLeft + boundViewport.clientWidth * 0.5, y: boundViewport.scrollTop + boundViewport.clientHeight * 0.5 }
+        : null
+    ),
     getDefaultNodePosition: jest.fn(() => ({ x: 120, y: 240 })),
     normalizeNodePosition: jest.fn((position) => ({
       x: Math.round(position.x),
@@ -113,6 +125,11 @@ function createHarness(options?: {
     createId: (prefix) => `${prefix}_${++id}`,
     copyText,
   });
+  const bindViewport = controller.bindViewport.bind(controller);
+  controller.bindViewport = (viewport) => {
+    boundViewport = viewport;
+    bindViewport(viewport);
+  };
   return {
     app,
     controller,

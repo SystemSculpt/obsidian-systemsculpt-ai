@@ -17,7 +17,7 @@ export function coercePromptBundleText(value: unknown): string {
   }
 }
 
-export function coerceNotePreviewText(value: unknown, pathValue?: StudioJsonValue | undefined): string {
+export function coerceNotePreviewText(value: unknown, pathValue?: StudioJsonValue  ): string {
   const readPathAtIndex = (index: number): string => {
     if (typeof pathValue === "string") {
       return pathValue.trim();

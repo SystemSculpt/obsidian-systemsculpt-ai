@@ -1,10 +1,10 @@
 import type { App } from "obsidian";
 
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ChatMessage } from "../../types";
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
-import { canonicalAgentToolInput } from "../../views/chatview/agent/MutationJournal";
+import { canonicalAgentToolInput } from "../../chat/managed/MutationJournal";
 import { FILESYSTEM_LIMITS } from "../../tools/vault/constants";
 import type { DriverDiagnostics } from "./diagnostics";
 import {
@@ -57,6 +57,10 @@ function throwIfActionCancelled(ctx: ActionContext): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function asDriverActionError(error: unknown): Error {
+  return error instanceof Error ? error : new DriverActionError(errorMessage(error));
 }
 
 function continuationContentMetadata(text: string): Readonly<{
@@ -349,7 +353,7 @@ interface DevelopmentChatView {
 
 function activeChatView(ctx: ActionContext): DevelopmentChatView | null {
   const leaves = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-  const active = ctx.app.workspace.activeLeaf;
+  const active = ctx.app.workspace.getMostRecentLeaf();
   const leaf = active && leaves.includes(active) ? active : leaves.length === 1 ? leaves[0] : null;
   if (!leaf) return null;
   const view = leaf.view as Partial<DevelopmentChatView>;
@@ -3444,7 +3448,7 @@ async function assertExactToolPlanCleanClose(
       && resultDeliveryCommandProof(evidence).valid)
     && currentCommandSegments.every((ordinal): ordinal is number => ordinal !== null)
     && new Set(currentCommandSegments).size === proof.expectedTools.length
-    && sameOrdinalPlan(proof.commandSegmentOrdinals, currentCommandSegments as number[])
+    && sameOrdinalPlan(proof.commandSegmentOrdinals, currentCommandSegments)
     && sameOrdinalPlan(proof.toolExecutionOrdinals, currentToolExecutionOrdinals);
   if (!exactDeliverySurface) {
     throw new DriverActionError(
@@ -4402,13 +4406,12 @@ async function readCopiedIncidentReport(
 ): Promise<Readonly<{ reportId: string; serialized: string }>> {
   const ownerWindow = chatContainer(ctx.app)?.ownerDocument.defaultView ?? window;
   const clipboard = ownerWindow.navigator.clipboard;
-  const readText = clipboard?.readText;
-  if (typeof readText !== "function") {
+  if (typeof clipboard?.readText !== "function") {
     throw new DriverActionError("Clipboard reading is unavailable in this development build.");
   }
   let serialized: string;
   try {
-    serialized = await readText.call(clipboard);
+    serialized = await clipboard.readText();
   } catch {
     throw new DriverActionError("The copied incident report could not be read.");
   }
@@ -4748,8 +4751,8 @@ async function resetDevelopmentChatState(
         + `Previous-chat restoration failed: ${errorMessage(restoreError)}`,
     );
   }
-  if (cleanupError) throw cleanupError;
-  if (restoreError) throw restoreError;
+  if (cleanupError) throw asDriverActionError(cleanupError);
+  if (restoreError) throw asDriverActionError(restoreError);
   if (!complete) {
     throw new DriverActionError(
       "Development cleanup remains incomplete; exact ownership was retained for retry.",
@@ -5808,7 +5811,7 @@ interface DiagnosticsAdapter {
 }
 
 function diagnosticsAdapter(ctx: ActionContext): DiagnosticsAdapter {
-  return ctx.app.vault.adapter as unknown as DiagnosticsAdapter;
+  return ctx.app.vault.adapter;
 }
 
 function diagnosticsAttributionState(ctx: ActionContext): DiagnosticsExportAttribution {
@@ -5956,7 +5959,7 @@ async function attributeNewDiagnosticsExport(
     }
     await new Promise((resolve) => window.setTimeout(resolve, 100));
   }
-  const basename = fresh[0]!;
+  const basename = fresh[0];
   const path = `${DIAGNOSTICS_EXPORT_DIRECTORY}/${basename}`;
   const adapter = diagnosticsAdapter(ctx);
   const stat = await adapter.stat(path);
@@ -6040,7 +6043,7 @@ export async function runDriverAction(
     }
     case "chat.open": {
       const leaves = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-      const activeLeaf = ctx.app.workspace.activeLeaf;
+      const activeLeaf = ctx.app.workspace.getMostRecentLeaf();
       const existing = activeLeaf && leaves.includes(activeLeaf)
         ? activeLeaf
         : leaves[0];

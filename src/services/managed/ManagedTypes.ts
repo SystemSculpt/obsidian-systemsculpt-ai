@@ -1,4 +1,6 @@
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
+/** Maximum reference images supported by the current managed image client contract. */
+export const MANAGED_IMAGE_INPUT_MAX_COUNT = 4;
 export const MANAGED_IMAGE_OUTPUT_MAX_BYTES = 30 * 1024 * 1024;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
 
@@ -90,6 +92,10 @@ export interface ManagedTransportOperation {
 }
 
 export type ManagedJobCapability = "transcription" | "document_processing" | "image_generation";
+// Video generation rides the negotiated managed-job-protocol-v2 media path, so
+// widening ManagedJobCapability itself would force edits to the frozen v1
+// descriptor tables. Recovery records track both families.
+export type ManagedRecoveryCapability = ManagedJobCapability | "video_generation";
 export type ManagedImageOutputMetadata = Readonly<{
   index: number;
   mime_type: "image/png" | "image/jpeg" | "image/webp";
@@ -99,6 +105,24 @@ export type ManagedImageOutputMetadata = Readonly<{
   height: number | null;
 }>;
 export type ManagedImageOutputBytes = Readonly<{ metadata: ManagedImageOutputMetadata; bytes: ArrayBuffer }>;
+export type ManagedMediaDownloadTiming = Readonly<{
+  download_started_at: string;
+  download_completed_offset_ms: number;
+}>;
+export type ManagedDeliveredImageOutputBytes = ManagedImageOutputBytes & Readonly<{ delivery: ManagedMediaDownloadTiming }>;
+export const MANAGED_VIDEO_OUTPUT_MAX_BYTES = 256 * 1024 * 1024;
+export type ManagedVideoOutputMetadata = Readonly<{
+  index: number;
+  mime_type: "video/mp4" | "video/webm" | "video/quicktime";
+  size_bytes: number;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+}>;
+export type ManagedVideoOutputBytes = Readonly<{ metadata: ManagedVideoOutputMetadata; bytes: ArrayBuffer }>;
+export type ManagedDeliveredVideoOutputBytes = ManagedVideoOutputBytes & Readonly<{ delivery: ManagedMediaDownloadTiming }>;
+export type ManagedMediaUsage = Readonly<{ raw_usd: number; cost_source: string; estimated: boolean }>;
 export type ManagedJobStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired";
 export type ManagedRecoveryPhase =
   | "admitted" | "content_ready" | "prepare_dispatching" | "prepared" | "create_dispatching" | "created"
@@ -131,12 +155,26 @@ export interface ManagedLocalCommitReceipt {
   contentSha256: string;
   marker?: string;
 }
+/** Delivery timing the server reconciles once media reaches the vault. */
+export interface ManagedMediaDeliveryState {
+  downloadStartedAt: string;
+  downloadCompletedOffsetMs: number;
+  displayedOffsetMs?: number;
+  vaultWriteCompletedOffsetMs?: number;
+  outputs?: Array<{
+    index: number;
+    width: number | null;
+    height: number | null;
+    durationSeconds: number | null;
+  }>;
+}
 export interface ManagedJobRecoveryRecord {
-  schemaVersion: 1; revision: number; capability: ManagedJobCapability; operationId: string;
+  schemaVersion: 1; revision: number; capability: ManagedRecoveryCapability; operationId: string;
   source: { identity: string; fingerprint: string }; jobId?: string;
   multipartUpload?: ManagedMultipartUploadDescriptor;
   completedParts?: Array<{ partNumber: number; etag: string }>;
   phase: ManagedRecoveryPhase; pendingDispatch?: ManagedPendingDispatch;
   localCommitReceipt?: ManagedLocalCommitReceipt;
+  mediaDelivery?: ManagedMediaDeliveryState;
   createdAt: string; updatedAt: string;
 }

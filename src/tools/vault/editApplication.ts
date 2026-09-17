@@ -159,7 +159,7 @@ function replaceByOccurrenceRegex(
   if (occurrence === "first") which = 0;
   else if (occurrence === "last") which = matches.length - 1;
   const m = matches[which];
-  const start = m.index as number;
+  const start = m.index;
   const end = start + m[0].length;
   return (
     target.slice(0, start) +

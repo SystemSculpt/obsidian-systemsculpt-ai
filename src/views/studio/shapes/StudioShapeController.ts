@@ -63,6 +63,7 @@ export class StudioShapeController {
   private shapeIds = new Set<string>();
   private arrowIds = new Set<string>();
   private layerHandle: StudioShapeLayerHandle | null = null;
+  private cancelDraw: (() => void) | null = null;
   private translationOrigins: ShapeOrigin[] = [];
   private marqueeBaseline: StudioShapeSelection = EMPTY_STUDIO_SHAPE_SELECTION;
 
@@ -168,7 +169,32 @@ export class StudioShapeController {
   }
 
   registerLayerHandle(handle: StudioShapeLayerHandle | null): void {
+    this.cancelArrowGesture();
     this.layerHandle = handle;
+  }
+
+  startArrowGesture(event: PointerEvent): boolean {
+    if (this.host.isBusy() || !this.layerHandle) return false;
+    const target = event.target as HTMLElement | null;
+    const item = target?.closest?.<HTMLElement>(".ss-studio-shape, .ss-studio-node-card");
+    if (!item || !this.host.getCanvasEl()?.contains(item)) return false;
+    const itemId = item.dataset.shapeId || item.dataset.nodeId;
+    if (!itemId) return false;
+    this.layerHandle.startArrowGesture(itemId, event);
+    return true;
+  }
+
+  cancelArrowGesture(): void {
+    this.layerHandle?.cancelArrowGesture();
+  }
+
+  cancelDrawGesture(): void {
+    this.cancelDraw?.();
+    this.cancelDraw = null;
+  }
+
+  refreshArrows(): void {
+    this.layerHandle?.refreshArrows();
   }
 
   /**
@@ -235,7 +261,8 @@ export class StudioShapeController {
     if (!canvasEl) {
       return;
     }
-    startStudioShapeDrawGesture({
+    this.cancelDrawGesture();
+    this.cancelDraw = startStudioShapeDrawGesture({
       canvasEl,
       startEvent,
       shape,
@@ -245,6 +272,7 @@ export class StudioShapeController {
       defaultWidth: STUDIO_SHAPE_DEFAULT_WIDTH,
       defaultHeight: STUDIO_SHAPE_DEFAULT_HEIGHT,
       onCommit: (rect) => {
+        this.cancelDraw = null;
         const created = createStudioShape({
           shape,
           position: { x: rect.x, y: rect.y },
@@ -259,7 +287,7 @@ export class StudioShapeController {
         this.shapeIds.add(created.id);
         onSettled();
       },
-      onCancel: onSettled,
+      onCancel: () => { this.cancelDraw = null; onSettled(); },
     });
   }
 

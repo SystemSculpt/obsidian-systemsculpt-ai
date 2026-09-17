@@ -15,7 +15,7 @@ import { isThinAgentRequestId } from "../../../utils/ThinAgentLifecycleSchema";
 import type {
   AgentChatTransportSegmentSummaryEvent,
   AgentRunFailureCaptureEvent,
-} from "../../../views/chatview/agent/ChatSession";
+} from "../AgentIncidentCapture";
 
 const BASE_TIME = Date.parse("2026-08-13T18:00:00.000Z");
 const PLUGIN_BUILD_ID = `sha256:${"a".repeat(64)}`;
@@ -691,7 +691,7 @@ describe("AgentIncidentCoordinator", () => {
 
     const restarted = new AgentIncidentCoordinator({
       recorder: new AgentIncidentRecorder(),
-      store: new AgentIncidentStore(adapter),
+      store: new AgentIncidentStore(adapter, { now: () => BASE_TIME + 60_000 }),
     });
     await restarted.initialize();
     await expect(restarted.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
@@ -951,6 +951,41 @@ describe("AgentIncidentCoordinator", () => {
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 
+  it("snapshots lifecycle scalars once without enumerating content or retaining input", () => {
+    const { coordinator, recorder } = fakeDependencies();
+    const source = {
+      ...lifecycle(correlation(122), "run_started", 1),
+      credits_refresh_elapsed_ms: 42,
+      credits_refresh_clock_domain: "client_refresh_monotonic_duration" as const,
+      prompt: "private prompt",
+    };
+    const reads = new Set<PropertyKey>();
+    const event = new Proxy(source, {
+      ownKeys() { throw new Error("must not enumerate input"); },
+      get(target, key, receiver) {
+        if (reads.has(key)) throw new Error(`duplicate read: ${String(key)}`);
+        if (key === "prompt") throw new Error("private property read");
+        reads.add(key);
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
+    coordinator.recordLifecycle(event);
+
+    expect(recorder.record).toHaveBeenCalledTimes(1);
+    const snapshot = (recorder.record.mock.calls as unknown[][])[0][0] as SupportDiagnosticEvent;
+    expect(snapshot).toMatchObject({
+      code: "run_started",
+      credits_refresh_elapsed_ms: 42,
+      credits_refresh_clock_domain: "client_refresh_monotonic_duration",
+    });
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(snapshot).not.toHaveProperty("prompt");
+    expect(reads.has("prompt")).toBe(false);
+    source.credits_refresh_elapsed_ms = 99;
+    expect(snapshot.credits_refresh_elapsed_ms).toBe(42);
+  });
+
   it("projects transport through an explicit scalar allowlist", () => {
     const ids = correlation(123);
     const { coordinator, recorder } = fakeDependencies();
@@ -978,6 +1013,27 @@ describe("AgentIncidentCoordinator", () => {
         deliveredFrameCount: 14,
         metricsTruncated: false,
       },
+    );
+  });
+
+  it("reads a changing transport correlation getter once", () => {
+    const ids = correlation(124);
+    const { coordinator, recorder } = fakeDependencies();
+    let reads = 0;
+    const traceId = "a".repeat(32);
+    const event = {
+      ...transport(ids),
+      get serverLatencyCorrelationId() {
+        reads += 1;
+        if (reads > 1) throw new Error("getter-was-read-twice");
+        return traceId;
+      },
+    };
+    coordinator.recordTransport(event);
+    expect(reads).toBe(1);
+    expect(recorder.attachTransportSegment).toHaveBeenCalledWith(
+      { conversationId: ids.conversationId, requestId: ids.requestId },
+      expect.objectContaining({ serverLatencyCorrelationId: traceId }),
     );
   });
 

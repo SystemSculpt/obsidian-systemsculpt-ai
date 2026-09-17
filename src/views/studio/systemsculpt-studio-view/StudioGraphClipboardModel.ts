@@ -1,4 +1,3 @@
-import { cloneStudioProjectSnapshot, serializeStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 import type {
   StudioEdge,
@@ -31,11 +30,6 @@ export type StudioGraphClipboardPayload = {
   };
 };
 
-export type StudioGraphHistorySnapshot = {
-  project: StudioProjectV1;
-  selectedNodeIds: string[];
-};
-
 export function normalizeNodeIdList(nodeIds: string[]): string[] {
   return Array.from(
     new Set(
@@ -44,25 +38,6 @@ export function normalizeNodeIdList(nodeIds: string[]): string[] {
         .filter((nodeId) => nodeId.length > 0)
     )
   );
-}
-
-export const cloneProjectSnapshot = cloneStudioProjectSnapshot;
-export const serializeProjectSnapshot = serializeStudioProjectSnapshot;
-
-export function cloneHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
-  return {
-    project: cloneProjectSnapshot(snapshot.project),
-    selectedNodeIds: [...snapshot.selectedNodeIds],
-  };
-}
-
-export function trimHistorySnapshots(
-  snapshots: StudioGraphHistorySnapshot[],
-  maxSnapshots: number
-): void {
-  while (snapshots.length > maxSnapshots) {
-    snapshots.shift();
-  }
 }
 
 function resolveClipboardAnchor(
@@ -114,11 +89,12 @@ export function buildGraphClipboardPayload(options: {
     .filter((shape): shape is StudioShapeInstance => Boolean(shape))
     .map((shape) => JSON.parse(JSON.stringify(shape)) as StudioShapeInstance);
 
-  // An arrow travels only when both of its shapes travel, exactly like an edge.
+  // An arrow travels only when both endpoint items travel.
+  const selectedItemIds = new Set([...selectedNodeIdSet, ...selectedShapeIdSet]);
   const arrows = diagram.arrows
     .filter(
       (arrow) =>
-        selectedShapeIdSet.has(arrow.fromShapeId) && selectedShapeIdSet.has(arrow.toShapeId)
+        selectedItemIds.has(arrow.fromShapeId) && selectedItemIds.has(arrow.toShapeId)
     )
     .map((arrow) => ({ ...arrow }));
 
@@ -195,8 +171,8 @@ export function parseGraphClipboardPayload(raw: string): StudioGraphClipboardPay
   if (payload.schema !== STUDIO_GRAPH_CLIPBOARD_SCHEMA) {
     return null;
   }
-  const nodes = Array.isArray(payload.nodes) ? (payload.nodes as StudioNodeInstance[]) : [];
-  const shapes = Array.isArray(payload.shapes) ? (payload.shapes as StudioShapeInstance[]) : [];
+  const nodes = Array.isArray(payload.nodes) ? (payload.nodes) : [];
+  const shapes = Array.isArray(payload.shapes) ? (payload.shapes) : [];
   if (nodes.length === 0 && shapes.length === 0) {
     return null;
   }
@@ -205,12 +181,12 @@ export function parseGraphClipboardPayload(raw: string): StudioGraphClipboardPay
     schema: STUDIO_GRAPH_CLIPBOARD_SCHEMA,
     createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
     nodes,
-    edges: Array.isArray(payload.edges) ? (payload.edges as StudioEdge[]) : [],
-    groups: Array.isArray(payload.groups) ? (payload.groups as StudioNodeGroup[]) : [],
+    edges: Array.isArray(payload.edges) ? (payload.edges) : [],
+    groups: Array.isArray(payload.groups) ? (payload.groups) : [],
     shapes,
-    arrows: Array.isArray(payload.arrows) ? (payload.arrows as StudioShapeArrow[]) : [],
+    arrows: Array.isArray(payload.arrows) ? (payload.arrows) : [],
     selectedNodeIds: Array.isArray(payload.selectedNodeIds)
-      ? normalizeNodeIdList(payload.selectedNodeIds as string[])
+      ? normalizeNodeIdList(payload.selectedNodeIds)
       : [],
     anchor: {
       x:

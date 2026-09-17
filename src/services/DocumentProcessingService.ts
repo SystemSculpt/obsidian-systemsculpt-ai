@@ -7,8 +7,9 @@ import type {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
-import { sha256HexFromBytesPortable } from "../studio/hash";
+import { sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
+import { base64ToBytes } from "../utils/base64";
 import { ManagedJobClient } from "./managed/ManagedJobClient";
 import { ManagedJobRecoveryStore } from "./managed/ManagedJobRecoveryStore";
 import {
@@ -443,14 +444,28 @@ export class DocumentProcessingService {
     return Math.min(100, Math.max(0, value));
   }
 
-  private formatExtractionContent(data: any): string {
-    const title = data?.title ?? data?.metadata?.title ?? data?.document?.title ?? "Document Extraction";
-    let content = data?.content ?? data?.text ?? data?.document?.content ?? data?.document?.text ?? data?.markdown ?? data?.extraction ?? "";
-    if (!content && data && typeof data === "object") content = JSON.stringify(data, null, 2);
+  private formatExtractionContent(data: unknown): string {
+    const record = this.asRecord(data);
+    const metadata = this.asRecord(record.metadata);
+    const document = this.asRecord(record.document);
+    const title = this.firstNonEmptyString(
+      record.title,
+      metadata.title,
+      document.title,
+    ) ?? "Document Extraction";
+    let content = record.content
+      ?? record.text
+      ?? document.content
+      ?? document.text
+      ?? record.markdown
+      ?? record.extraction
+      ?? "";
+    if (!content && Object.keys(record).length > 0) content = JSON.stringify(record, null, 2);
     if (!content) content = "No content was extracted from this document. The server may be experiencing issues or the document format is not supported.";
     let imageNote = "";
-    if (data?.images && Object.keys(data.images).length > 0) {
-      const imageCount = Object.keys(data.images).length;
+    const rootImages = record.images;
+    if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
+      const imageCount = Object.keys(rootImages).length;
       let folderInfo = "the images folder";
       if (this.imageMetadataLog.length > 0) {
         const firstImage = this.imageMetadataLog[Math.max(0, this.imageMetadataLog.length - imageCount)];
@@ -462,26 +477,55 @@ export class DocumentProcessingService {
     return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }
 
-  private extractImagesFromData(data: any): Record<string, string> {
+  private extractImagesFromData(data: unknown): Record<string, string> {
     const images: Record<string, string> = {};
     const add = (name: unknown, value: unknown, index: number) => {
       if (typeof value === "string" && value) images[typeof name === "string" && name ? name : `image-${index}.png`] = value;
     };
-    if (!data) return images;
-    if (Array.isArray(data.images)) {
-      data.images.forEach((image: any, index: number) => {
+    const record = this.asRecord(data);
+    const rootImages = record.images;
+    if (Array.isArray(rootImages)) {
+      rootImages.forEach((image: unknown, index: number) => {
         if (typeof image === "string") add(undefined, image, index);
-        else add(image?.name ?? image?.filename, image?.data ?? image?.base64 ?? image?.content, index);
+        else {
+          const imageRecord = this.asRecord(image);
+          add(
+            imageRecord.name ?? imageRecord.filename,
+            imageRecord.data ?? imageRecord.base64 ?? imageRecord.content,
+            index,
+          );
+        }
       });
-    } else if (data.images && typeof data.images === "object") {
-      Object.entries(data.images).forEach(([name, value], index) => add(name, value, index));
+    } else if (rootImages && typeof rootImages === "object") {
+      Object.entries(rootImages).forEach(([name, value], index) => add(name, value, index));
     }
-    if (data.document?.images && typeof data.document.images === "object") {
-      Object.entries(data.document.images).forEach(([name, value], index) => add(name, value, index));
+    const documentImages = this.asRecord(record.document).images;
+    if (documentImages && typeof documentImages === "object") {
+      Object.entries(documentImages).forEach(([name, value], index) => add(name, value, index));
     }
-    if (Array.isArray(data.imageList)) data.imageList.forEach((image: any, index: number) => add(image?.name, image?.data, index));
-    if (Array.isArray(data.figures)) data.figures.forEach((image: any, index: number) => add(image?.name, image?.image, index));
+    if (Array.isArray(record.imageList)) {
+      record.imageList.forEach((image: unknown, index: number) => {
+        const imageRecord = this.asRecord(image);
+        add(imageRecord.name, imageRecord.data, index);
+      });
+    }
+    if (Array.isArray(record.figures)) {
+      record.figures.forEach((image: unknown, index: number) => {
+        const imageRecord = this.asRecord(image);
+        add(imageRecord.name, imageRecord.image, index);
+      });
+    }
     return images;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  }
+
+  private firstNonEmptyString(...values: unknown[]): string | undefined {
+    return values.find((value): value is string => typeof value === "string" && value.length > 0);
   }
 
   private generateUniqueImageName(baseName: string, imageName: string, imageData?: string): string {
@@ -500,10 +544,7 @@ export class DocumentProcessingService {
 
   private base64ToArrayBuffer(value: string): ArrayBuffer {
     const base64 = value.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
-    const binary = window.atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytes.buffer;
+    return base64ToBytes(base64).buffer as ArrayBuffer;
   }
 
   private recordImageMetadata(metadata: ImageMetadata): void {

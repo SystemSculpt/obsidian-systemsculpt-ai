@@ -1,3 +1,4 @@
+import { bytesToBase64 } from "./base64";
 import type { App, TFile } from "obsidian";
 import { resolveElectronModule } from "../platform/hostCapabilities";
 
@@ -39,22 +40,11 @@ function resolveElectron(hostWindow?: Window): ElectronLike | null {
     : null;
 }
 
-function toBase64(bytes: ArrayBuffer, hostWindow?: Window): string | null {
-  const uint8 = new Uint8Array(bytes);
-  const encodeBase64 = hostWindow?.btoa?.bind(hostWindow)
-    ?? (typeof btoa === "function" ? btoa : undefined);
-  if (!encodeBase64) {
-    return null;
-  }
-
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let i = 0; i < uint8.length; i += chunkSize) {
-    const chunk = uint8.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
+function toBase64(bytes: ArrayBuffer): string | null {
+  // Base64 does not depend on which window owns the surface, so the shared
+  // codec is correct for popouts too.
   try {
-    return encodeBase64(binary);
+    return bytesToBase64(new Uint8Array(bytes));
   } catch {
     return null;
   }
@@ -70,14 +60,15 @@ async function tryWebClipboardImageWrite(
   if (!ownerNavigator?.clipboard?.write) {
     return false;
   }
-  const ClipboardItemCtor = (hostWindow as any)?.ClipboardItem
+  const ownerWindow = hostWindow as (Window & typeof window) | undefined;
+  const ClipboardItemCtor = ownerWindow?.ClipboardItem
     ?? (typeof ClipboardItem !== "undefined" ? ClipboardItem : undefined);
   if (!ClipboardItemCtor) {
     return false;
   }
 
   try {
-    const BlobCtor = (hostWindow as any)?.Blob ?? Blob;
+    const BlobCtor = ownerWindow?.Blob ?? Blob;
     const blob = new BlobCtor([bytes], { type: mime });
     const item = new ClipboardItemCtor({ [mime]: blob });
     await ownerNavigator.clipboard.write([item]);
@@ -97,7 +88,7 @@ function tryElectronClipboardImageWrite(
     return false;
   }
 
-  const base64 = toBase64(bytes, hostWindow);
+  const base64 = toBase64(bytes);
   if (!base64) {
     return false;
   }
@@ -141,7 +132,9 @@ export async function tryCopyToClipboard(text: string, host?: Node): Promise<boo
       textarea.setCssStyles({ position: "fixed", opacity: "0" });
       ownerDocument.body.appendChild(textarea);
       textarea.select();
-      return ownerDocument.execCommand("copy");
+      const copyCommand = Reflect.get(ownerDocument, "execCommand");
+      return typeof copyCommand === "function"
+        && Reflect.apply(copyCommand, ownerDocument, ["copy"]) === true;
     } catch {
       return false;
     } finally {

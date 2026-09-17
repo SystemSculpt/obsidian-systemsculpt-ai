@@ -66,6 +66,12 @@ export function materializeGraphClipboardPaste(options: {
     newNodes.push(clonedNode);
   }
 
+  for (const node of newNodes) {
+    const parent = node.parentId ? nodeIdMap.get(node.parentId) : undefined;
+    if (parent) node.parentId = parent;
+    else delete node.parentId;
+  }
+
   const shapeIdMap = new Map<string, string>();
   const newShapes: StudioShapeInstance[] = [];
   for (const sourceShape of payload.shapes || []) {
@@ -89,10 +95,11 @@ export function materializeGraphClipboardPaste(options: {
     return null;
   }
 
+  const itemIdMap = new Map([...nodeIdMap, ...shapeIdMap]);
   const newArrows: StudioShapeArrow[] = [];
   for (const sourceArrow of payload.arrows || []) {
-    const fromShapeId = shapeIdMap.get(String(sourceArrow.fromShapeId || "").trim());
-    const toShapeId = shapeIdMap.get(String(sourceArrow.toShapeId || "").trim());
+    const fromShapeId = itemIdMap.get(String(sourceArrow.fromShapeId || "").trim());
+    const toShapeId = itemIdMap.get(String(sourceArrow.toShapeId || "").trim());
     if (!fromShapeId || !toShapeId || fromShapeId === toShapeId) {
       continue;
     }

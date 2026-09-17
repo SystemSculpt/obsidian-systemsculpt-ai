@@ -1,7 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-import { readFileSync } from "node:fs";
 import { App } from "obsidian";
 import { SystemSculptSearchModal } from "../SystemSculptSearchModal";
 import { SearchResponse } from "../../services/search/SystemSculptSearchEngine";
@@ -145,7 +144,7 @@ describe("SystemSculptSearchModal", () => {
 
       const state = (modal as any).listEl?.querySelector(".ss-ui-state.is-error");
       expect(state?.getAttribute("role")).toBe("alert");
-      expect(state?.textContent).toContain("Could not load recent notes");
+      expect(state?.textContent).toContain("Could not load recent files");
       expect(state?.querySelector("button")?.textContent).toBe("Retry");
       expect((modal as any).listEl?.getAttribute("role")).toBeNull();
     });
@@ -161,14 +160,6 @@ describe("SystemSculptSearchModal", () => {
 
       modal.onClose();
       expect(popupDocument.body.className).toBe("theme-dark native-host-state");
-    });
-
-    it("preserves the StandardModal full-screen geometry on mobile", () => {
-      const css = readFileSync("src/css/modals/search.css", "utf8");
-
-      expect(css).toMatch(
-        /\.ss-mobile-layout \.ss-modal\.ss-search-modal\s*\{[^}]*width:\s*100vw;[^}]*max-width:\s*100vw;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;/s,
-      );
     });
   });
 

@@ -210,27 +210,37 @@ export class AudioTranscriptionPanel {
     } catch (error) {
       if (this.disposed || this.task !== task) return;
       this.task = null;
-      if (error instanceof Error && error.name === "AbortError") {
-        const interruption = error instanceof ManagedTranscriptionInterruptedError
-          ? error
-          : null;
-        this.resumeOperationId = interruption?.retryDisposition === "resume"
-          ? interruption.operationId
+      const interrupted = error instanceof Error && error.name === "AbortError";
+      if (interrupted || error instanceof ManagedTranscriptionRetryError) {
+        const recovery = error instanceof ManagedTranscriptionInterruptedError
+          || error instanceof ManagedTranscriptionRetryError ? error : null;
+        this.resumeOperationId = recovery?.retryDisposition === "resume"
+          ? recovery.operationId
           : null;
         this.settled = false;
-        const blocked = interruption?.retryDisposition === "blocked";
-        const label = blocked
-          ? "Stopped; automatic retry is unavailable"
-          : this.resumeOperationId
-            ? "Stopped; server transcription is preserved"
-            : "Stopped; unfinished upload was cancelled";
-        const details = blocked
-          ? `Operation ${interruption.operationId} has an ambiguous dispatch state. It was preserved to prevent duplicate work.`
-          : this.resumeOperationId
-            ? "Resume continues the same operation without uploading again."
-            : "Your source audio is unchanged. Retry starts a fresh operation.";
+        const blocked = recovery?.retryDisposition === "blocked";
+        const label = interrupted
+          ? blocked
+            ? "Stopped; automatic retry is unavailable"
+            : this.resumeOperationId
+              ? "Stopped; server transcription is preserved"
+              : "Stopped; unfinished upload was cancelled"
+          : blocked
+            ? "Transcription paused in an ambiguous state"
+            : this.resumeOperationId
+              ? "Server transcription is preserved"
+              : "Transcription stopped safely";
+        const details = interrupted
+          ? blocked
+            ? `Operation ${recovery?.operationId} has an ambiguous dispatch state. It was preserved to prevent duplicate work.`
+            : this.resumeOperationId
+              ? "Resume continues the same operation without uploading again."
+              : "Your source audio is unchanged. Retry starts a fresh operation."
+          : blocked
+            ? `Operation ${recovery?.operationId} was preserved to prevent duplicate work. ${recovery?.message}`
+            : `${recovery?.message} Retry ${this.resumeOperationId ? "resumes the same" : "starts a fresh"} operation.`;
         if (blocked && (this.minimized || !this.panel)) {
-          new Notice(`${label}. ${details}`, 6500);
+          new Notice(`${label}. ${details}`, interrupted ? 6500 : 7000);
           this.finish();
           return;
         }
@@ -238,55 +248,7 @@ export class AudioTranscriptionPanel {
           this.minimized = false;
           this.render();
         }
-        this.updateStatus({
-          label,
-          icon: "alert-triangle",
-          progress: 100,
-          details,
-        });
-        this.setButtons([
-          ...(!blocked ? [{
-            label: this.resumeOperationId ? "Resume" : "Retry",
-            testId: "transcription.progress.retry",
-            variant: "primary" as const,
-            onClick: () => this.startTask(),
-          }] : []),
-          { label: "Close", testId: "transcription.progress.close", onClick: () => this.finish() },
-        ]);
-        return;
-      }
-
-      if (error instanceof ManagedTranscriptionRetryError) {
-        this.resumeOperationId = error.retryDisposition === "resume"
-          ? error.operationId
-          : null;
-        this.settled = false;
-        const blocked = error.retryDisposition === "blocked";
-        const label = blocked
-          ? "Transcription paused in an ambiguous state"
-          : error.retryDisposition === "resume"
-            ? "Server transcription is preserved"
-            : "Transcription stopped safely";
-        const details = blocked
-          ? `Operation ${error.operationId} was preserved to prevent duplicate work. ${error.message}`
-          : error.retryDisposition === "resume"
-            ? `${error.message} Retry resumes the same operation.`
-            : `${error.message} Retry starts a fresh operation.`;
-        if (blocked && (this.minimized || !this.panel)) {
-          new Notice(`${label}. ${details}`, 7000);
-          this.finish();
-          return;
-        }
-        if (this.minimized || !this.panel) {
-          this.minimized = false;
-          this.render();
-        }
-        this.updateStatus({
-          label,
-          icon: "alert-triangle",
-          progress: 100,
-          details,
-        });
+        this.updateStatus({ label, icon: "alert-triangle", progress: 100, details });
         this.setButtons([
           ...(!blocked ? [{
             label: this.resumeOperationId ? "Resume" : "Retry",

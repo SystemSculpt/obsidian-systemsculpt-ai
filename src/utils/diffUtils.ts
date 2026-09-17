@@ -2,6 +2,8 @@
  * Diff utilities for generating git-like diffs
  */
 
+import { App, MarkdownView, TFile } from "obsidian";
+
 export interface DiffLine {
   type: 'added' | 'removed' | 'unchanged';
   content: string;
@@ -151,31 +153,31 @@ function extractDiffSequence(
   
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      result.unshift({ type: 'unchanged', line: oldLines[i - 1] });
+      result.push({ type: 'unchanged', line: oldLines[i - 1] });
       i--;
       j--;
     } else if (j > 0 && (i === 0 || matrix[i][j - 1] >= matrix[i - 1][j])) {
-      result.unshift({ type: 'added', line: newLines[j - 1] });
+      result.push({ type: 'added', line: newLines[j - 1] });
       j--;
     } else if (i > 0) {
-      result.unshift({ type: 'removed', line: oldLines[i - 1] });
+      result.push({ type: 'removed', line: oldLines[i - 1] });
       i--;
     }
   }
   
-  return result;
+  return result.reverse();
 }
 
 /**
  * Check if a file is currently open in any Obsidian workspace leaf
  */
-export function isFileOpen(app: any, filePath: string): boolean {
+export function isFileOpen(app: App, filePath: string): boolean {
   // Check all markdown leaves to see if the file is open
   const markdownLeaves = app.workspace.getLeavesOfType('markdown');
   
   for (const leaf of markdownLeaves) {
     const view = leaf.view;
-    if (view && view.file && view.file.path === filePath) {
+    if (view instanceof MarkdownView && view.file?.path === filePath) {
       return true;
     }
   }
@@ -186,15 +188,15 @@ export function isFileOpen(app: any, filePath: string): boolean {
 /**
  * Get the content of an open file from the editor (if modified) or from vault
  */
-export async function getFileContent(app: any, filePath: string): Promise<string> {
+export async function getFileContent(app: App, filePath: string): Promise<string> {
   // First try to get from open editor (may have unsaved changes)
   const markdownLeaves = app.workspace.getLeavesOfType('markdown');
   
   for (const leaf of markdownLeaves) {
     const view = leaf.view;
-    if (view && view.file && view.file.path === filePath) {
+    if (view instanceof MarkdownView && view.file?.path === filePath) {
       // Get content from editor if available
-      if (view.editor) {
+      if (view.editor && typeof view.editor.getValue === "function") {
         return view.editor.getValue();
       }
     }
@@ -203,10 +205,11 @@ export async function getFileContent(app: any, filePath: string): Promise<string
   // Fallback to reading from vault
   try {
     const file = app.vault.getAbstractFileByPath(filePath);
-    if (file && file.stat) { // Check if it's a TFile
+    if (file instanceof TFile) {
       return await app.vault.read(file);
     }
-  } catch (error) {
+  } catch {
+    // Fall back to an empty comparison when the vault read fails.
   }
   
   return '';

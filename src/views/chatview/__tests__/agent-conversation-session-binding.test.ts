@@ -1,6 +1,5 @@
 import {
   AgentConversationSessionBinding,
-  type AgentConversationDetachConfirmation,
 } from "../AgentConversationSessionBinding";
 
 type Snapshot = Readonly<{ source: string }>;
@@ -37,33 +36,22 @@ function session(name: string, detach: () => Promise<void> = async () => undefin
 }
 
 describe("AgentConversationSessionBinding", () => {
-  it("requires confirmation from the exact outgoing binding before attach", async () => {
-    const first = session("first");
-    const other = session("other");
-    const next = session("next");
-    const firstBinding = new AgentConversationSessionBinding(
-      first,
-      jest.fn(),
+  it("can replace after an explicit detach without detaching the old session twice", async () => {
+    const outgoing = session("outgoing");
+    const incoming = session("incoming");
+    const presented: string[] = [];
+    const binding = new AgentConversationSessionBinding(
+      outgoing,
+      (_session, snapshot) => presented.push(snapshot.source),
     );
-    const otherBinding = new AgentConversationSessionBinding(
-      other,
-      jest.fn(),
-    );
-    const firstConfirmation = await firstBinding.detach();
-    const otherConfirmation = await otherBinding.detach();
 
-    expect(() => firstBinding.attach(next, undefined)).toThrow(
-      "exact outgoing session",
-    );
-    expect(() => firstBinding.attach(next, otherConfirmation)).toThrow(
-      "exact outgoing session",
-    );
-    expect(next.subscribe).not.toHaveBeenCalled();
+    await binding.detach();
+    outgoing.emitFromStaleTransport();
+    await expect(binding.replace(() => incoming)).resolves.toBe(incoming);
+    incoming.emit();
 
-    firstBinding.attach(next, firstConfirmation);
-
-    expect(first.detach).toHaveBeenCalledTimes(1);
-    expect(next.subscribe).toHaveBeenCalledTimes(1);
+    expect(outgoing.detach).toHaveBeenCalledTimes(1);
+    expect(presented).toEqual(["incoming"]);
   });
 
   it("does not attach until the outgoing session-specific detach barrier resolves", async () => {
@@ -131,11 +119,10 @@ describe("AgentConversationSessionBinding", () => {
     first.emitFromStaleTransport();
     second.emitFromStaleTransport();
 
-    expect(binding.currentSession).toBe(third);
     expect(presented).toEqual(["third"]);
   });
 
-  it("fails closed when detach rejects and never issues an attach confirmation", async () => {
+  it("fails closed for every later replacement and detach when the outgoing detach fails", async () => {
     const outgoing = session("outgoing", async () => {
       throw new Error("detach failed");
     });
@@ -147,9 +134,75 @@ describe("AgentConversationSessionBinding", () => {
 
     await expect(binding.replace(() => incoming)).rejects.toThrow("detach failed");
     expect(incoming.subscribe).not.toHaveBeenCalled();
-    expect(() => binding.attach(
-      incoming,
-      undefined as unknown as AgentConversationDetachConfirmation,
-    )).toThrow("exact outgoing session");
+    const createAnother = jest.fn(() => session("another"));
+    await expect(binding.replace(createAnother)).rejects.toThrow("detach failed");
+    await expect(binding.detach()).rejects.toThrow("detach failed");
+    expect(createAnother).not.toHaveBeenCalled();
+    expect(outgoing.detach).toHaveBeenCalledTimes(1);
   });
+
+  it("serializes close behind an in-flight replacement and closes the incoming session", async () => {
+    const releaseDetach = deferred();
+    const outgoing = session("outgoing", () => releaseDetach.promise);
+    const incoming = session("incoming");
+    const presented = jest.fn();
+    const binding = new AgentConversationSessionBinding(outgoing, presented);
+
+    const replacing = binding.replace(() => incoming);
+    const closing = binding.detach();
+    await Promise.resolve();
+    expect(incoming.detach).not.toHaveBeenCalled();
+
+    releaseDetach.resolve();
+    await replacing;
+    await closing;
+    incoming.emitFromStaleTransport();
+    outgoing.emitFromStaleTransport();
+
+    expect(incoming.detach).toHaveBeenCalledTimes(1);
+    expect(presented).not.toHaveBeenCalled();
+  });
+
+  it("keeps stale callbacks fenced when subscription cleanup throws", async () => {
+    const outgoing = session("outgoing");
+    const subscribe = outgoing.subscribe.getMockImplementation()!;
+    outgoing.subscribe.mockImplementation((listener) => {
+      subscribe(listener);
+      return () => { throw new Error("cleanup failed"); };
+    });
+    const incoming = session("incoming");
+    const presented: string[] = [];
+    const binding = new AgentConversationSessionBinding(
+      outgoing,
+      (_session, snapshot) => presented.push(snapshot.source),
+    );
+
+    binding.unsubscribe();
+    outgoing.emit();
+    await binding.replace(() => incoming);
+    outgoing.emitFromStaleTransport();
+    incoming.emit();
+
+    expect(presented).toEqual(["incoming"]);
+  });
+
+  it("allows another replacement after the incoming subscription rejects", async () => {
+    const outgoing = session("outgoing");
+    const broken = session("broken");
+    broken.subscribe.mockImplementation(() => { throw new Error("subscribe failed"); });
+    const incoming = session("incoming");
+    const presented: string[] = [];
+    const binding = new AgentConversationSessionBinding(
+      outgoing,
+      (_session, snapshot) => presented.push(snapshot.source),
+    );
+
+    await expect(binding.replace(() => broken)).rejects.toThrow("subscribe failed");
+    await binding.replace(() => incoming);
+    incoming.emit();
+
+    expect(outgoing.detach).toHaveBeenCalledTimes(1);
+    expect(presented).toEqual(["incoming"]);
+  });
+
 });

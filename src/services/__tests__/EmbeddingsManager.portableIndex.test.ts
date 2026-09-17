@@ -1,12 +1,13 @@
 jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
+  const state = new Map<string, unknown>();
   const storageMock = {
+    readState: jest.fn(async (key: string) => state.get(key) ?? null),
+    writeState: jest.fn(async (key: string, value: unknown) => { state.set(key, value); }),
+    deleteState: jest.fn(async (key: string) => { state.delete(key); }),
     initialize: jest.fn(),
     loadEmbeddings: jest.fn(),
     clear: jest.fn(),
     countVectors: jest.fn(async () => 0),
-    importFromLegacyGlobalDb: jest.fn(async () => ({ imported: 0, skipped: 0 })),
-    upgradeVectorsToCanonicalFormat: jest.fn(async () => ({ updated: 0, skipped: 0, removed: 0 })),
-    backfillRootCompleteness: jest.fn(async () => ({ updated: 0, skipped: 0 })),
     getAllVectors: jest.fn(() => []),
     peekCurrentManagedNamespace: jest.fn(() => null),
     size: jest.fn(() => 0),
@@ -27,7 +28,6 @@ jest.mock("../embeddings/processing/EmbeddingsProcessor", () => ({
   EmbeddingsProcessor: jest.fn().mockImplementation(() => ({
     processFiles: jest.fn(),
     cancel: jest.fn(),
-    setProvider: jest.fn(),
     setConfig: jest.fn(),
     cleanup: jest.fn(),
   })),
@@ -78,11 +78,11 @@ function createPluginStub(settingsOverrides: Record<string, unknown> = {}) {
     app: { vault },
     settings,
     emitter: { emit: jest.fn(), on: jest.fn(() => jest.fn()) },
-    getManagedCapabilityClient: jest.fn(() => ({
-      getEmbeddingsIndex: jest.fn(() => ({
+    getManagedCapabilityGraph: jest.fn(() => ({
+      embeddingsIndex: {
         activeGeneration: undefined,
         metadata: undefined,
-      })),
+      },
     })),
     getSettingsManager: jest.fn(() => ({ updateSettings: jest.fn(async () => {}) })),
   };

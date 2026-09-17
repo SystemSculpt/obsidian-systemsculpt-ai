@@ -571,11 +571,11 @@ export class SimilarNotesPresentation extends Component {
     if (chatContext) {
       const contextAction = createIconButton(accessories, "embeddings.result.pin", `Pin ${title} for every message`, "plus");
       contextAction.addClass("ss-similar-note__context-action");
-      contextAction.addEventListener("click", async (event) => {
+      contextAction.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        await this.actions.onAddToContext(result.path);
-        this.syncContextIndicators();
+        void Promise.resolve(this.actions.onAddToContext(result.path))
+          .then(() => this.syncContextIndicators());
       });
       row.setAttribute("draggable", "true");
       row.addClass("ss-similar-note--draggable");

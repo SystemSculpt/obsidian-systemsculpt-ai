@@ -2,6 +2,7 @@ import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import SystemSculptPlugin from "../main";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 import { openExternalUrl } from "../utils/externalUrl";
+import { bytesToBase64 } from "../utils/base64";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
 
@@ -47,11 +48,7 @@ const PENDING_CONNECT_TTL_MS = 10 * 60_000;
 const CONNECT_POLL_INTERVAL_MS = 3_500;
 
 function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 /**

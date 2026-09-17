@@ -4,9 +4,7 @@ import { getDevelopmentBuildIdentity } from "./DevelopmentBuildIdentity";
 const SHA256_DIGEST = /^[a-f0-9]{64}$/;
 
 async function sha256(bytes: ArrayBuffer): Promise<string> {
-  // Artifact hashing is host-level work, not UI bound to a popout window.
-  // eslint-disable-next-line obsidianmd/no-global-this
-  const crypto = globalThis.crypto;
+  const crypto = window.crypto;
   if (!crypto?.subtle) {
     throw new Error("This Obsidian host cannot verify the loaded plugin artifact.");
   }

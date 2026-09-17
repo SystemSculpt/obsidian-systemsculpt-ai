@@ -21,12 +21,14 @@ export class AutomaticBackupService {
         this.stop(); // Clean up any existing timer
         
         // Start the periodic check
-        this.backupTimer = window.setInterval(() => {
-            this.checkAndCreateBackup();
-        }, this.CHECK_INTERVAL_MS);
+        // registerInterval also lets Obsidian clear the timer on plugin
+        // unload, so a teardown path that never reaches stop() cannot leak it.
+        this.backupTimer = this.plugin.registerInterval(window.setInterval(() => {
+            void this.checkAndCreateBackup();
+        }, this.CHECK_INTERVAL_MS));
 
         // Also check immediately on start
-        this.checkAndCreateBackup();
+        void this.checkAndCreateBackup();
     }
 
     /**
@@ -59,7 +61,8 @@ export class AutomaticBackupService {
             if (now - lastBackup >= intervalMs) {
                 await this.createAutomaticBackup();
             }
-        } catch (error) {
+        } catch {
+            // Scheduled backups retry at the next interval.
         }
     }
 
@@ -99,7 +102,7 @@ export class AutomaticBackupService {
             await this.cleanupOldBackups();
 
             return true;
-        } catch (error) {
+        } catch {
             new Notice("Failed to create automatic settings backup", 3000);
             return false;
         }
@@ -108,40 +111,31 @@ export class AutomaticBackupService {
     /**
      * Save backup to multiple locations for redundancy
      */
-    private async saveBackupToMultipleLocations(fileName: string, backupData: any): Promise<void> {
-        const backupJson = JSON.stringify(backupData, null, 2);
-        const errors: string[] = [];
-
-        // Location 1: Vault root .systemsculpt directory  
+    private async saveBackupToMultipleLocations(fileName: string, backupData: object): Promise<void> {
+        let saved = false;
         try {
             const backupDir = ".systemsculpt/settings-backups";
-            
-            // Ensure backup directory exists
             try {
                 await this.plugin.app.vault.createFolder(backupDir);
-            } catch (e) {
-                // Directory might already exist, which is fine
+            } catch {
+                // The write below determines whether this location is usable.
             }
-            
-            const backupPath = `.systemsculpt/settings-backups/${fileName}`;
-            await this.plugin.app.vault.adapter.write(backupPath, backupJson);
-        } catch (error) {
-            errors.push(`Vault backup directory: ${error}`);
+            await this.plugin.app.vault.adapter.write(
+                `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
+            );
+            saved = true;
+        } catch {
+            // Still attempt the second independent backup location.
         }
-
-        // Location 2: Vault storage (if available)
-        try {
-            if (this.plugin.storage) {
-                await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
+        if (this.plugin.storage) {
+            try {
+                const result = await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
+                saved = result.success || saved;
+            } catch {
+                // A successful first copy remains a valid backup.
             }
-        } catch (error) {
-            errors.push(`Vault storage: ${error}`);
         }
-
-        // If all locations failed, throw error
-        if (errors.length === 2) {
-            throw new Error(`Failed to save backup to any location: ${errors.join(', ')}`);
-        }
+        if (!saved) throw new Error("Failed to save backup to any location.");
     }
 
     /**
@@ -159,7 +153,8 @@ export class AutomaticBackupService {
             // Clean up from vault storage
             await this.cleanupVaultStorageBackups(cutoffTime);
 
-        } catch (error) {
+        } catch {
+            // Cleanup is best-effort and runs again after the next backup.
         }
     }
 
@@ -196,10 +191,12 @@ export class AutomaticBackupService {
                     if (stats && stats.mtime < cutoffTime) {
                         await this.plugin.app.vault.adapter.remove(filePath);
                     }
-                } catch (error) {
+                } catch {
+                    // Continue cleaning the remaining backups.
                 }
             }
-        } catch (error) {
+        } catch {
+            // A missing backup directory requires no cleanup.
         }
     }
 
@@ -234,10 +231,12 @@ export class AutomaticBackupService {
                             await this.plugin.storage.deleteFile('settings', `backups/${fileName}`);
                         }
                     }
-                } catch (error) {
+                } catch {
+                    // Continue cleaning the remaining backups.
                 }
             }
-        } catch (error) {
+        } catch {
+            // A missing backup directory requires no cleanup.
         }
     }
 

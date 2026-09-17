@@ -1,0 +1,207 @@
+import { buildCubicLinkCurve, buildChevronPath, curveTangentAtEnd } from "./LinkGeometry";
+import type { PortAnchor, StudioLinkStore } from "./StudioLinkStore";
+import { createStudioSvgElement } from "../StudioDomContext";
+import type { StudioEdgeActivityPhase } from "../activity/StudioActivity";
+import { pulseStudioActivityElement } from "../activity/StudioActivityDomApplier";
+
+/**
+ * Canonical Studio edge renderer.
+ *
+ * Rendering invariants:
+ *  1. Visibility is inline — the base line's stroke is set INLINE through
+ *     `--ss-studio-edge-stroke` with concrete fallbacks, so a line is never
+ *     invisible because of a stylesheet regression. Activity colors, the
+ *     glow, the energy dots, and every animation live on the
+ *     `.ss-studio-edge-*` rules in views/studio/activity.css and
+ *     views/studio/connections.css.
+ *  2. Edge classes are exclusively `ss-studio-edge*`, keeping their styling
+ *     contract local to the connection implementation.
+ *  3. Geometry comes from the caller's data-driven anchor resolver, so a line
+ *     is drawn whenever both endpoint nodes exist — independent of DOM
+ *     measurement, paint timing, or visibility.
+ *  4. Run activity is not stored here. Each group carries `data-activity`
+ *     from the activity snapshot; groups persist across geometry renders,
+ *     and a freshly created group asks `resolveEdgeActivity` so a lazily
+ *     rendered cable is right on first paint.
+ */
+
+export type EdgeGroupElements = {
+  group: SVGGElement;
+  hitPath: SVGPathElement;
+  glowPath: SVGPathElement;
+  visiblePath: SVGPathElement;
+  energyPath: SVGPathElement;
+  arrowPath: SVGPathElement;
+};
+
+export type EdgePortAnchorResolver = (
+  anchor: PortAnchor,
+  direction: "in" | "out"
+) => { x: number; y: number } | null;
+
+export type StudioEdgeRendererOptions = {
+  store: StudioLinkStore;
+  layer: SVGSVGElement;
+  resolvePortAnchorPoint: EdgePortAnchorResolver;
+  getCursorAnchorPoint: () => { x: number; y: number } | null;
+  resolveEdgeActivity?: (edgeId: string) => StudioEdgeActivityPhase;
+};
+
+// Every entry has a concrete fallback so a line is NEVER invisible even if
+// the theme vars are undefined.
+const BASE_STROKE = "var(--ss-studio-edge-stroke, var(--ss-studio-link-stroke, var(--text-muted, #8a8a8a)))";
+
+function previewStroke(validity: string): string {
+  switch (validity) {
+    case "valid":
+      return "var(--interactive-accent, #5b8def)";
+    case "near":
+      return "var(--interactive-accent, #5b8def)";
+    case "invalid":
+    default:
+      return "var(--ss-studio-link-stroke, var(--text-muted, #8a8a8a))";
+  }
+}
+
+export class StudioEdgeRenderer {
+  private readonly groupsByEdgeId = new Map<string, EdgeGroupElements>();
+  private previewPath: SVGPathElement | null = null;
+
+  constructor(private readonly options: StudioEdgeRendererOptions) {}
+
+  getEdgeGroupElement(edgeId: string): SVGGElement | null {
+    return this.groupsByEdgeId.get(edgeId)?.group ?? null;
+  }
+
+  render(): void {
+    const { layer, store, resolvePortAnchorPoint, getCursorAnchorPoint } = this.options;
+    const seen = new Set<string>();
+
+    for (const edge of store.listEdges()) {
+      const source = resolvePortAnchorPoint(edge.source, "out");
+      const target = resolvePortAnchorPoint(edge.target, "in");
+      if (!source || !target) {
+        continue;
+      }
+      const curve = buildCubicLinkCurve(source, target);
+      const arrow = buildChevronPath(target, curveTangentAtEnd(curve), 6.5);
+
+      let group = this.groupsByEdgeId.get(edge.id);
+      if (!group) {
+        group = this.createEdgeGroup(edge.id);
+        this.groupsByEdgeId.set(edge.id, group);
+        layer.appendChild(group.group);
+        this.applyEdgeActivity(edge.id, this.options.resolveEdgeActivity?.(edge.id) ?? "idle");
+      }
+
+      group.visiblePath.setAttribute("d", curve.path);
+      group.hitPath.setAttribute("d", curve.path);
+      group.glowPath.setAttribute("d", curve.path);
+      group.energyPath.setAttribute("d", curve.path);
+      group.arrowPath.setAttribute("d", arrow);
+      seen.add(edge.id);
+    }
+
+    for (const [edgeId, group] of this.groupsByEdgeId) {
+      if (seen.has(edgeId)) continue;
+      group.group.remove();
+      this.groupsByEdgeId.delete(edgeId);
+    }
+
+    this.renderPreview(getCursorAnchorPoint);
+  }
+
+  /** Stamp a cable's phase; `pulse` marks a real transition for one-shot emphasis. */
+  applyEdgeActivity(edgeId: string, phase: StudioEdgeActivityPhase, options?: { pulse?: boolean }): void {
+    const group = this.groupsByEdgeId.get(edgeId);
+    if (!group) return;
+    group.group.dataset.activity = phase;
+    if (options?.pulse) pulseStudioActivityElement(group.group, phase);
+  }
+
+  clear(): void {
+    for (const group of this.groupsByEdgeId.values()) {
+      group.group.remove();
+    }
+    this.groupsByEdgeId.clear();
+    if (this.previewPath?.parentNode) {
+      this.previewPath.parentNode.removeChild(this.previewPath);
+    }
+    this.previewPath = null;
+  }
+
+  private createEdgeGroup(edgeId: string): EdgeGroupElements {
+    const group = createStudioSvgElement(this.options.layer, "g");
+    group.setAttribute("class", "ss-studio-edge-group");
+    group.dataset.edgeId = edgeId;
+
+    // Wide, transparent hit target for hover/right-click selection.
+    // Static presentation for every path lives in views/studio/connections.css
+    // and views/studio/activity.css.
+    const hitPath = createStudioSvgElement(this.options.layer, "path");
+    hitPath.setAttribute("class", "ss-studio-edge-hit");
+    hitPath.dataset.edgeId = edgeId;
+    group.appendChild(hitPath);
+
+    // Soft halo under the line; only visible while power flows or has landed.
+    const glowPath = createStudioSvgElement(this.options.layer, "path");
+    glowPath.setAttribute("class", "ss-studio-edge-glow");
+    group.appendChild(glowPath);
+
+    const visiblePath = createStudioSvgElement(this.options.layer, "path");
+    visiblePath.setAttribute("class", "ss-studio-edge-line");
+    visiblePath.dataset.edgeId = edgeId;
+    visiblePath.style.stroke = BASE_STROKE;
+    group.appendChild(visiblePath);
+
+    // Bright dashes that travel source → target while the source works.
+    const energyPath = createStudioSvgElement(this.options.layer, "path");
+    energyPath.setAttribute("class", "ss-studio-edge-energy");
+    group.appendChild(energyPath);
+
+    const arrowPath = createStudioSvgElement(this.options.layer, "path");
+    arrowPath.setAttribute("class", "ss-studio-edge-arrow");
+    arrowPath.style.stroke = BASE_STROKE;
+    group.appendChild(arrowPath);
+
+    return { group, hitPath, glowPath, visiblePath, energyPath, arrowPath };
+  }
+
+  private renderPreview(getCursorAnchorPoint: () => { x: number; y: number } | null): void {
+    const { layer, store, resolvePortAnchorPoint } = this.options;
+    const drag = store.getDragState();
+    if (!drag) {
+      if (this.previewPath?.parentNode) {
+        this.previewPath.parentNode.removeChild(this.previewPath);
+      }
+      this.previewPath = null;
+      return;
+    }
+
+    const source = resolvePortAnchorPoint(drag.source, "out");
+    if (!source) {
+      return;
+    }
+    let end = drag.snapTarget
+      ? resolvePortAnchorPoint(drag.snapTarget, "in")
+      : getCursorAnchorPoint();
+    if (!end) {
+      end = { x: drag.cursorWorld.x, y: drag.cursorWorld.y };
+    }
+
+    const curve = buildCubicLinkCurve(source, end);
+    if (!this.previewPath) {
+      // Static presentation lives on .ss-studio-edge-preview in
+      // views/studio/connections.css.
+      this.previewPath = createStudioSvgElement(layer, "path");
+      this.previewPath.setAttribute("class", "ss-studio-edge-preview");
+    }
+    this.previewPath.style.stroke = previewStroke(drag.validity);
+    this.previewPath.style.strokeDasharray = drag.validity === "valid" ? "none" : "6 6";
+    this.previewPath.setAttribute("d", curve.path);
+    this.previewPath.dataset.validity = drag.validity;
+    if (this.previewPath.parentNode !== layer) {
+      layer.appendChild(this.previewPath);
+    }
+  }
+}

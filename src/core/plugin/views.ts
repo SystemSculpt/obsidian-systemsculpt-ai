@@ -1,24 +1,29 @@
 import { App, WorkspaceLeaf, Notice, ItemView } from "obsidian";
-import SystemSculptPlugin from "../../main";
+import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { ChatState } from "../../types/index";
-import type { EmbeddingsView } from "../../views/EmbeddingsView";
-import type { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
+import { EmbeddingsView } from "../../views/EmbeddingsView";
+import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
+import { AgentChatView } from "../../views/chatview/AgentChatView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { isMobileLayout } from "../../platform/mobileLayout";
+import { restoreStudioReloadState } from "./StudioReloadState";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "./viewTypes";
 
-type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
-type EmbeddingsViewModule = typeof import("../../views/EmbeddingsView");
-type StudioViewModule = typeof import("../../views/studio/SystemSculptStudioView");
 const CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS = 1_000;
 type AppWithViewRegistry = App & {
   viewRegistry?: {
     viewByType?: Record<string, unknown>;
+  };
+};
+
+type DiagnosticsWindow = Window & {
+  FreezeMonitor?: {
+    mark?: (label: string) => void;
   };
 };
 
@@ -28,18 +33,6 @@ type ChatViewLike = ItemView & {
   quiesceIncidentProducers?: () => Promise<void>;
   leaf?: WorkspaceLeaf;
 };
-
-function loadAgentChatViewModule(): AgentChatViewModule {
-  return require("../../views/chatview/AgentChatView");
-}
-
-function loadEmbeddingsViewModule(): EmbeddingsViewModule {
-  return require("../../views/EmbeddingsView");
-}
-
-function loadStudioViewModule(): StudioViewModule {
-  return require("../../views/studio/SystemSculptStudioView");
-}
 
 interface ChatViewState {
   state: ChatState;
@@ -75,8 +68,13 @@ export class ViewManager {
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
-      try { (window as any).FreezeMonitor?.mark?.('view-manager:onLayoutReady'); } catch {}
-      this.initializeInBackground().catch(() => {});
+      void restoreStudioReloadState(this.app).catch(() => {
+        new Notice("Studio could not restore an open tab yet. Its reload state has been retained.");
+      });
+      try { (window as DiagnosticsWindow).FreezeMonitor?.mark?.('view-manager:onLayoutReady'); } catch {
+        // Diagnostic markers must never block layout initialization.
+      }
+      this.initializeInBackground().catch(() => undefined);
     });
 
     this.hasStarted = true;
@@ -108,7 +106,7 @@ export class ViewManager {
         if (!leaf) continue;
         this.restoreQueuedLeaves.delete(leaf);
 
-        if ((leaf.view as any)?.getViewType?.() !== CHAT_VIEW_TYPE) {
+        if (leaf.view.getViewType() !== CHAT_VIEW_TYPE) {
           continue;
         }
 
@@ -127,13 +125,14 @@ export class ViewManager {
       }
     })();
 
-    this.restorePromise = promise.finally(() => {
-      if (this.restorePromise === promise) {
+    const draining = promise.finally(() => {
+      if (this.restorePromise === draining) {
         this.restorePromise = null;
       }
     });
 
-    return this.restorePromise;
+    this.restorePromise = draining;
+    return draining;
   }
 
   private async initializeInBackground() {
@@ -167,13 +166,14 @@ export class ViewManager {
       this.plugin.registerEvent(
         this.app.workspace.on("active-leaf-change", (leaf) => {
           if (!leaf) return;
-          if ((leaf.view as any)?.getViewType?.() !== CHAT_VIEW_TYPE) return;
+          if (leaf.view.getViewType() !== CHAT_VIEW_TYPE) return;
           const view = leaf.view as ChatViewLike;
           if (view.isFullyLoaded) return;
           this.scheduleChatRestore(leaf, "high");
         })
       );
     } catch {
+      // Background initialization is retried by the next lifecycle entry point.
     } finally {
       this.isInitializing = false;
     }
@@ -230,38 +230,48 @@ export class ViewManager {
       }
 
       // At this point we know state.state exists and is valid
-      const chatState = state.state as ChatState;
+      const chatState = state.state;
       try {
         await this.retrySetState(view, chatState);
-      } catch (error) {
+      } catch {
         // Clean up invalid leaf to prevent future errors
         leaf.detach();
       }
     }
   }
 
-  private isValidChatState(state: any): state is ChatViewState {
-    // Must have at least a chatId
-    if (!state?.state?.chatId) {
+  private isValidChatState(state: unknown): state is ChatViewState {
+    if (!state || typeof state !== "object" || !("state" in state)) {
       return false;
     }
 
+    const chatState = state.state;
+    if (!chatState || typeof chatState !== "object" || !("chatId" in chatState)) {
+      return false;
+    }
+
+    if (typeof chatState.chatId !== "string" || !chatState.chatId) {
+      return false;
+    }
+
+    const mutableChatState = chatState as Record<string, unknown>;
+
     // Validate data types if they exist, but don't create them yet
-    if ("messages" in state.state) {
-      if (!Array.isArray(state.state.messages)) {
-        state.state.messages = [];
+    if ("messages" in mutableChatState) {
+      if (!Array.isArray(mutableChatState.messages)) {
+        mutableChatState.messages = [];
       }
     }
 
     // Only initialize empty arrays if they don't exist at all
-    if (!("messages" in state.state)) {
-      state.state.messages = [];
+    if (!("messages" in mutableChatState)) {
+      mutableChatState.messages = [];
     }
 
     return true;
   }
 
-  private async retrySetState(view: ChatViewLike, state: any, maxRetries: number = 3): Promise<void> {
+  private async retrySetState(view: ChatViewLike, state: ChatState, maxRetries: number = 3): Promise<void> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -271,11 +281,9 @@ export class ViewManager {
         }
 
         await view.setState(state);
-        if (attempt > 1) {
-        }
         return;
       } catch (error) {
-        lastError = error as Error;
+        lastError = error instanceof Error ? error : new Error(String(error));
       }
     }
 
@@ -286,7 +294,6 @@ export class ViewManager {
     this.registerViewType(
       CHAT_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        const { AgentChatView } = loadAgentChatViewModule();
         return new AgentChatView(leaf, this.plugin);
       }
     );
@@ -295,7 +302,6 @@ export class ViewManager {
     this.registerViewType(
       EMBEDDINGS_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        const { EmbeddingsView } = loadEmbeddingsViewModule();
         return new EmbeddingsView(leaf, this.plugin);
       }
     );
@@ -303,7 +309,6 @@ export class ViewManager {
     this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        const { SystemSculptStudioView } = loadStudioViewModule();
         return new SystemSculptStudioView(leaf, this.plugin);
       }
     );
@@ -317,7 +322,7 @@ export class ViewManager {
     
     if (existingLeaves.length > 0) {
       // Activate existing view
-      this.app.workspace.revealLeaf(existingLeaves[0]);
+      await this.app.workspace.revealLeaf(existingLeaves[0]);
       return existingLeaves[0].view as EmbeddingsView;
     }
     
@@ -335,7 +340,7 @@ export class ViewManager {
       active: true
     });
     
-    this.app.workspace.revealLeaf(targetLeaf);
+    await this.app.workspace.revealLeaf(targetLeaf);
     return targetLeaf.view as EmbeddingsView;
   }
 
@@ -349,7 +354,7 @@ export class ViewManager {
           ? ((state.state as { file?: string }).file || "")
           : "";
         if (file === normalizedTarget) {
-          this.app.workspace.revealLeaf(leaf);
+          await this.app.workspace.revealLeaf(leaf);
           return leaf.view as SystemSculptStudioView;
         }
       }
@@ -366,7 +371,7 @@ export class ViewManager {
       state: viewState,
     });
 
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
     return leaf.view as SystemSculptStudioView;
   }
 
@@ -395,7 +400,8 @@ export class ViewManager {
   unloadViews() {
     this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EMBEDDINGS_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+    // Obsidian unregisters the view implementation. Keep its leaf in place so
+    // the next plugin instance can restore the same tab and split layout.
     this.ribbonManager.cleanup();
   }
 

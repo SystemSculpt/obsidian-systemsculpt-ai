@@ -1,8 +1,7 @@
+import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
 import {
-  STUDIO_GRAPH_CANVAS_HEIGHT,
-  STUDIO_GRAPH_CANVAS_WIDTH,
   STUDIO_GRAPH_DEFAULT_ZOOM,
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
@@ -12,10 +11,10 @@ import {
   type StudioGraphZoomMode,
 } from "./StudioGraphInteractionTypes";
 import {
-  computeStudioGraphCanvasSize,
-  STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
-  STUDIO_GRAPH_CANVAS_MAX_WIDTH,
-} from "./graph-v3/StudioGraphCanvasBounds";
+  computeStudioWorldExtent,
+  type StudioWorldExtent,
+  type StudioWorldRect,
+} from "./canvas/StudioGraphWorldExtent";
 import {
   resolveMeasuredStudioNodeHeight,
   resolveMeasuredStudioNodeWidth,
@@ -28,8 +27,8 @@ import {
   STUDIO_SNAP_THRESHOLD_PX,
   type StudioSnapRect,
   type StudioSnapResult,
-} from "./graph-v3/StudioGraphSnapGuides";
-import { renderStudioGraphSnapGuidesLayer } from "./graph-v3/StudioGraphSnapGuidesOverlay";
+} from "./canvas/StudioGraphSnapGuides";
+import { renderStudioGraphSnapGuidesLayer } from "./canvas/StudioGraphSnapGuidesOverlay";
 import {
   isStudioGraphEditableFieldActive,
   shouldStudioGraphDeferWheelToNativeScroll,
@@ -53,6 +52,8 @@ const WHEEL_DOM_DELTA_LINE =
 const WHEEL_DOM_DELTA_PAGE =
   typeof WheelEvent !== "undefined" ? WheelEvent.DOM_DELTA_PAGE : 2;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
+const STUDIO_GRAPH_FALLBACK_VIEWPORT_WIDTH = 1200;
+const STUDIO_GRAPH_FALLBACK_VIEWPORT_HEIGHT = 800;
 const STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS = 160;
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
@@ -88,8 +89,14 @@ type NotifyNodePositionsChangedOptions = {
 export class StudioGraphSelectionController {
   private graphZoom = STUDIO_GRAPH_DEFAULT_ZOOM;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
-  private graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
-  private graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
+  /**
+   * The scroll box's coverage in world px. The world origin sits at
+   * (-left, -top) inside the box: `box px = world px + origin`. Grows in
+   * viewport-sized chunks as the view or content approaches an edge, so the
+   * canvas feels infinite while the DOM stays a few screens large.
+   */
+  private worldExtent: StudioWorldExtent | null = null;
+  private graphWorldEl: HTMLElement | null = null;
   private graphViewportEl: HTMLElement | null = null;
   private graphSurfaceEl: HTMLElement | null = null;
   private graphMarqueeEl: HTMLElement | null = null;
@@ -98,6 +105,9 @@ export class StudioGraphSelectionController {
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
   private graphOwnerWindow: Window | null = null;
+  private viewportResizeObserver: ResizeObserver | null = null;
+  private viewportWorldTopLeft: GraphPoint = { x: 0, y: 0 };
+  private viewportPositionNeedsRestore = false;
   private nodeElsById = new Map<string, HTMLElement>();
   private selectedNodeIds = new Set<string>();
   private nodeTranslationOrigins = new Map<string, GraphPoint>();
@@ -105,6 +115,7 @@ export class StudioGraphSelectionController {
   private onSelectionChange: (() => void) | null = null;
   private zoomSettleTimer: number | null = null;
   private zoomSettleWindow: Window | null = null;
+  private cancelPointerGesture: (() => void) | null = null;
 
   constructor(private readonly host: StudioGraphSelectionHost) {}
 
@@ -178,6 +189,7 @@ export class StudioGraphSelectionController {
   }
 
   clearProjectState(): void {
+    this.cancelPointerGesture?.();
     const hadSelection = this.selectedNodeIds.size > 0;
     this.selectedNodeIds.clear();
     this.cancelScheduledGraphZoomSettle();
@@ -188,17 +200,22 @@ export class StudioGraphSelectionController {
   }
 
   clearRenderBindings(): void {
+    this.cancelPointerGesture?.();
     this.cancelScheduledGraphZoomSettle();
+    this.viewportResizeObserver?.disconnect();
+    this.viewportResizeObserver = null;
+    this.viewportWorldTopLeft = { x: 0, y: 0 };
+    this.viewportPositionNeedsRestore = false;
     this.graphViewportEl = null;
     this.graphSurfaceEl = null;
     this.graphMarqueeEl = null;
     this.snapGuidesEl = null;
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
+    this.graphWorldEl = null;
     this.graphEdgesLayerEl = null;
     this.graphOwnerWindow = null;
-    this.graphCanvasWidth = STUDIO_GRAPH_CANVAS_WIDTH;
-    this.graphCanvasHeight = STUDIO_GRAPH_CANVAS_HEIGHT;
+    this.worldExtent = null;
     this.suppressNextCanvasClick = false;
     this.graphZoomMode = "interactive";
     this.nodeElsById.clear();
@@ -211,8 +228,21 @@ export class StudioGraphSelectionController {
   }
 
   registerViewportElement(viewport: HTMLElement): void {
+    this.viewportResizeObserver?.disconnect();
+    this.viewportResizeObserver = null;
     this.graphViewportEl = viewport;
     this.graphOwnerWindow = getStudioOwnerWindow(viewport);
+    const Observer = (this.graphOwnerWindow as Window & {
+      ResizeObserver?: typeof ResizeObserver;
+    }).ResizeObserver;
+    if (Observer) {
+      this.viewportResizeObserver = new Observer(() => {
+        if (this.graphViewportEl === viewport) {
+          this.getViewportWorldRect();
+        }
+      });
+      this.viewportResizeObserver.observe(viewport);
+    }
   }
 
   registerSurfaceElement(surface: HTMLElement): void {
@@ -231,24 +261,151 @@ export class StudioGraphSelectionController {
     this.graphZoomLabelEl = label;
   }
 
-  registerCanvasElement(canvas: HTMLElement): void {
+  registerCanvasElement(canvas: HTMLElement, world?: HTMLElement): void {
     this.graphCanvasEl = canvas;
+    this.graphWorldEl = world ?? null;
     this.graphOwnerWindow = getStudioOwnerWindow(canvas);
-    this.syncCanvasBounds({ force: true });
+    this.ensureWorldCoverage();
+    this.syncWorldGeometry();
   }
 
   registerEdgesLayerElement(layer: SVGSVGElement): void {
     this.graphEdgesLayerEl = layer;
-    this.syncCanvasBounds({ force: true });
+    this.syncWorldGeometry();
   }
 
   notifyNodePositionsChanged(options?: NotifyNodePositionsChangedOptions): void {
     const shouldRecomputeCanvasBounds = options?.recomputeCanvasBounds !== false;
-    if (shouldRecomputeCanvasBounds && this.syncCanvasBounds()) {
-      this.syncGraphSurfaceSize();
+    if (shouldRecomputeCanvasBounds) {
+      this.ensureWorldCoverage();
     }
     this.host.renderEdgeLayer();
     this.host.onNodePositionsChanged?.();
+  }
+
+  /** World px added to a position to reach scroll-box px. */
+  getWorldOrigin(): GraphPoint {
+    return { x: -(this.worldExtent?.left ?? 0), y: -(this.worldExtent?.top ?? 0) };
+  }
+
+  /** The viewport's visible rectangle in world px. */
+  getViewportWorldRect(): StudioWorldRect | null {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return null;
+    }
+    const measurable = viewport.clientWidth > 0 && viewport.clientHeight > 0;
+    // Hidden leaves report zero scroll offsets and ignore scroll writes. Keep
+    // their last/requested world position until the scroll box is laid out.
+    if (!measurable) {
+      this.viewportPositionNeedsRestore = true;
+    } else if (this.viewportPositionNeedsRestore) {
+      this.setViewportWorldTopLeft(this.viewportWorldTopLeft.x, this.viewportWorldTopLeft.y);
+    }
+    const zoom = resolveStudioGraphSafeZoom(this.graphZoom);
+    const origin = this.getWorldOrigin();
+    const width = Math.max(1, viewport.clientWidth || STUDIO_GRAPH_FALLBACK_VIEWPORT_WIDTH) / zoom;
+    const height = Math.max(1, viewport.clientHeight || STUDIO_GRAPH_FALLBACK_VIEWPORT_HEIGHT) / zoom;
+    const left = measurable ? viewport.scrollLeft / zoom - origin.x : this.viewportWorldTopLeft.x;
+    const top = measurable ? viewport.scrollTop / zoom - origin.y : this.viewportWorldTopLeft.y;
+    this.viewportWorldTopLeft = { x: left, y: top };
+    return { left, top, right: left + width, bottom: top + height };
+  }
+
+  /** World coordinate under the viewport's top-left corner, for persistence. */
+  getViewportWorldTopLeft(): GraphPoint | null {
+    const rect = this.getViewportWorldRect();
+    return rect ? { x: rect.left, y: rect.top } : null;
+  }
+
+  /** World coordinate at the viewport's centre. */
+  getViewportCenterWorldPoint(): GraphPoint | null {
+    const rect = this.getViewportWorldRect();
+    return rect ? { x: (rect.left + rect.right) * 0.5, y: (rect.top + rect.bottom) * 0.5 } : null;
+  }
+
+  /** Scroll so the viewport's top-left corner sits at a world coordinate, growing the box first. */
+  setViewportWorldTopLeft(x: number, y: number): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+    this.viewportWorldTopLeft = { x, y };
+    this.viewportPositionNeedsRestore = viewport.clientWidth <= 0 || viewport.clientHeight <= 0;
+    const zoom = resolveStudioGraphSafeZoom(this.graphZoom);
+    const width = Math.max(1, viewport.clientWidth || STUDIO_GRAPH_FALLBACK_VIEWPORT_WIDTH) / zoom;
+    const height = Math.max(1, viewport.clientHeight || STUDIO_GRAPH_FALLBACK_VIEWPORT_HEIGHT) / zoom;
+    this.ensureWorldCoverage({ view: { left: x, top: y, right: x + width, bottom: y + height }, compensateScroll: false });
+    if (this.viewportPositionNeedsRestore) {
+      return;
+    }
+    const origin = this.getWorldOrigin();
+    viewport.scrollLeft = (x + origin.x) * zoom;
+    viewport.scrollTop = (y + origin.y) * zoom;
+  }
+
+  /**
+   * Grow the scroll box when the view or the content nears its edge. The
+   * scroll position is compensated by the origin shift so nothing moves on
+   * screen. Returns true when the extent changed.
+   */
+  ensureWorldCoverage(options?: { view?: StudioWorldRect; compensateScroll?: boolean }): boolean {
+    const viewport = this.graphViewportEl;
+    const view = options?.view ?? this.getViewportWorldRect();
+    if (!view) {
+      return false;
+    }
+    const zoom = resolveStudioGraphSafeZoom(this.graphZoom);
+    const viewWidth = Math.max(1, view.right - view.left);
+    const viewHeight = Math.max(1, view.bottom - view.top);
+    const project = this.host.getCurrentProject();
+    const content = project ? this.computeNodeBounds(project) : null;
+    const next = computeStudioWorldExtent({
+      current: this.worldExtent,
+      content,
+      view,
+      margin: { x: viewWidth, y: viewHeight },
+      slack: { x: viewWidth * 2, y: viewHeight * 2 },
+    });
+    if (next === this.worldExtent) {
+      return false;
+    }
+    const previous = this.getWorldOrigin();
+    this.worldExtent = next;
+    this.syncWorldGeometry();
+    const origin = this.getWorldOrigin();
+    if (viewport && !this.viewportPositionNeedsRestore && options?.compensateScroll !== false) {
+      const dx = (origin.x - previous.x) * zoom;
+      const dy = (origin.y - previous.y) * zoom;
+      if (dx !== 0) viewport.scrollLeft += dx;
+      if (dy !== 0) viewport.scrollTop += dy;
+    }
+    return true;
+  }
+
+  /** Apply the extent and origin to the scroll box, the world layer, and the edge layer. */
+  private syncWorldGeometry(): void {
+    const extent = this.worldExtent;
+    if (!extent) {
+      return;
+    }
+    const origin = this.getWorldOrigin();
+    if (this.graphCanvasEl) {
+      this.graphCanvasEl.style.width = `${extent.width}px`;
+      this.graphCanvasEl.style.height = `${extent.height}px`;
+    }
+    if (this.graphWorldEl) {
+      this.graphWorldEl.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+    }
+    if (this.graphEdgesLayerEl) {
+      // The SVG lives in the world layer and must cover the whole scroll box.
+      this.graphEdgesLayerEl.style.left = `${-origin.x}px`;
+      this.graphEdgesLayerEl.style.top = `${-origin.y}px`;
+      this.graphEdgesLayerEl.setAttribute("viewBox", `${-origin.x} ${-origin.y} ${extent.width} ${extent.height}`);
+      this.graphEdgesLayerEl.setAttribute("width", String(extent.width));
+      this.graphEdgesLayerEl.setAttribute("height", String(extent.height));
+    }
+    this.syncGraphSurfaceSize();
   }
 
   clearNodeElements(): void {
@@ -313,7 +470,7 @@ export class StudioGraphSelectionController {
     });
   }
 
-  private fitBoundsInViewport(
+  fitBoundsInViewport(
     bounds: GraphBounds,
     options?: {
       paddingPx?: number;
@@ -354,8 +511,10 @@ export class StudioGraphSelectionController {
 
     const centerX = (bounds.left + bounds.right) * 0.5;
     const centerY = (bounds.top + bounds.bottom) * 0.5;
-    viewport.scrollLeft = Math.max(0, centerX * targetZoom - viewportWidth * 0.5);
-    viewport.scrollTop = Math.max(0, centerY * targetZoom - viewportHeight * 0.5);
+    this.setViewportWorldTopLeft(
+      centerX - viewportWidth * 0.5 / targetZoom,
+      centerY - viewportHeight * 0.5 / targetZoom
+    );
     this.applyGraphZoom({ settled: true });
     return true;
   }
@@ -368,7 +527,8 @@ export class StudioGraphSelectionController {
     return true;
   }
 
-  private graphPointFromClient(clientX: number, clientY: number): GraphPoint | null {
+  /** Client (screen) point → world px. */
+  graphPointFromClient(clientX: number, clientY: number): GraphPoint | null {
     const viewport = this.graphViewportEl;
     if (!viewport) {
       return null;
@@ -376,9 +536,10 @@ export class StudioGraphSelectionController {
 
     const rect = viewport.getBoundingClientRect();
     const zoom = this.graphZoom || 1;
+    const origin = this.getWorldOrigin();
     return {
-      x: (viewport.scrollLeft + clientX - rect.left) / zoom,
-      y: (viewport.scrollTop + clientY - rect.top) / zoom,
+      x: (viewport.scrollLeft + clientX - rect.left) / zoom - origin.x,
+      y: (viewport.scrollTop + clientY - rect.top) / zoom - origin.y,
     };
   }
 
@@ -437,11 +598,10 @@ export class StudioGraphSelectionController {
       return;
     }
 
+    this.cancelPointerGesture?.();
     startEvent.preventDefault();
     const viewport = this.graphViewportEl;
     const marquee = this.graphMarqueeEl;
-    const ownerWindow = getStudioOwnerWindow(viewport);
-    const pointerId = startEvent.pointerId;
     const additive = startEvent.shiftKey || startEvent.metaKey || startEvent.ctrlKey;
     const baselineSelection = additive ? new Set(this.selectedNodeIds) : new Set<string>();
     this.host.beginDiagramMarquee?.();
@@ -454,15 +614,6 @@ export class StudioGraphSelectionController {
     let lastClientY = startEvent.clientY;
     let pendingClientX = startEvent.clientX;
     let pendingClientY = startEvent.clientY;
-    let selectionFrameRequested = false;
-
-    if (typeof viewport.setPointerCapture === "function") {
-      try {
-        viewport.setPointerCapture(pointerId);
-      } catch {
-        // Pointer capture can fail in some environments; window listeners are fallback.
-      }
-    }
 
     const updateSelection = (clientX: number, clientY: number): void => {
       lastClientX = clientX;
@@ -481,9 +632,10 @@ export class StudioGraphSelectionController {
 
       marquee.classList.add("is-active");
       // Marquee is rendered inside the scrollable viewport content layer, so
-      // coordinates must stay in content-space (do not subtract scroll offsets).
-      marquee.style.left = `${x1 * zoom}px`;
-      marquee.style.top = `${y1 * zoom}px`;
+      // coordinates are scroll-box px: world plus origin, times zoom.
+      const origin = this.getWorldOrigin();
+      marquee.style.left = `${(x1 + origin.x) * zoom}px`;
+      marquee.style.top = `${(y1 + origin.y) * zoom}px`;
       marquee.style.width = `${(x2 - x1) * zoom}px`;
       marquee.style.height = `${(y2 - y1) * zoom}px`;
 
@@ -519,45 +671,17 @@ export class StudioGraphSelectionController {
     };
 
     const flushSelectionFrame = (): void => {
-      selectionFrameRequested = false;
       updateSelection(pendingClientX, pendingClientY);
     };
 
-    const scheduleSelectionFrame = (): void => {
-      if (selectionFrameRequested) {
-        return;
-      }
-      selectionFrameRequested = true;
-      if (typeof ownerWindow.requestAnimationFrame === "function") {
-        ownerWindow.requestAnimationFrame(flushSelectionFrame);
-        return;
-      }
-      flushSelectionFrame();
+    const cleanupSelection = (): void => {
+      this.cancelPointerGesture = null;
+      marquee.classList.remove("is-active");
+      marquee.setCssStyles({ width: "0px", height: "0px" });
     };
 
-    const finishSelection = (event: PointerEvent): void => {
-      if (event.pointerId !== pointerId) {
-        return;
-      }
-
-      if (selectionFrameRequested) {
-        flushSelectionFrame();
-      }
-
-      ownerWindow.removeEventListener("pointermove", onPointerMove);
-      ownerWindow.removeEventListener("pointerup", finishSelection);
-      ownerWindow.removeEventListener("pointercancel", finishSelection);
-      marquee.classList.remove("is-active");
-      marquee.setCssStyles({ width: "0px" });
-      marquee.setCssStyles({ height: "0px" });
-
-      if (typeof viewport.releasePointerCapture === "function") {
-        try {
-          viewport.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release errors; listeners are detached already.
-        }
-      }
+    const finishSelection = (): void => {
+      cleanupSelection();
 
       const movedDistance = Math.hypot(lastClientX - startEvent.clientX, lastClientY - startEvent.clientY);
       if (movedDistance > 3) {
@@ -570,19 +694,16 @@ export class StudioGraphSelectionController {
     };
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      const latestEvent = latestStudioPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
-      scheduleSelectionFrame();
     };
 
     updateSelection(startEvent.clientX, startEvent.clientY);
-    ownerWindow.addEventListener("pointermove", onPointerMove);
-    ownerWindow.addEventListener("pointerup", finishSelection);
-    ownerWindow.addEventListener("pointercancel", finishSelection);
+    this.cancelPointerGesture = startStudioPointerGesture({
+      element: viewport, event: startEvent, onMove: onPointerMove,
+      onFrame: flushSelectionFrame, onFinish: finishSelection, onCancel: cleanupSelection,
+    });
   }
 
   startCanvasPan(startEvent: PointerEvent): void {
@@ -595,67 +716,31 @@ export class StudioGraphSelectionController {
       return;
     }
 
+    this.cancelPointerGesture?.();
     startEvent.preventDefault();
-    const ownerWindow = getStudioOwnerWindow(viewport);
-    const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
-    const startScrollLeft = viewport.scrollLeft;
-    const startScrollTop = viewport.scrollTop;
     let pendingClientX = startX;
     let pendingClientY = startY;
     let lastClientX = startX;
     let lastClientY = startY;
-    let panFrameRequested = false;
-
-    if (typeof viewport.setPointerCapture === "function") {
-      try {
-        viewport.setPointerCapture(pointerId);
-      } catch {
-        // Pointer capture can fail in some environments; window listeners are fallback.
-      }
-    }
 
     const flushPanFrame = (): void => {
-      panFrameRequested = false;
+      // Incremental: the scroll box may grow (and its scroll be compensated)
+      // between frames, so pan by the pointer delta since the last frame.
+      viewport.scrollLeft -= pendingClientX - lastClientX;
+      viewport.scrollTop -= pendingClientY - lastClientY;
       lastClientX = pendingClientX;
       lastClientY = pendingClientY;
-      viewport.scrollLeft = startScrollLeft - (pendingClientX - startX);
-      viewport.scrollTop = startScrollTop - (pendingClientY - startY);
+      this.ensureWorldCoverage();
     };
 
-    const schedulePanFrame = (): void => {
-      if (panFrameRequested) {
-        return;
-      }
-      panFrameRequested = true;
-      if (typeof ownerWindow.requestAnimationFrame === "function") {
-        ownerWindow.requestAnimationFrame(flushPanFrame);
-        return;
-      }
-      flushPanFrame();
+    const cleanupPan = (): void => {
+      this.cancelPointerGesture = null;
     };
 
-    const finishPan = (event: PointerEvent): void => {
-      if (event.pointerId !== pointerId) {
-        return;
-      }
-
-      if (panFrameRequested) {
-        flushPanFrame();
-      }
-
-      ownerWindow.removeEventListener("pointermove", onPointerMove);
-      ownerWindow.removeEventListener("pointerup", finishPan);
-      ownerWindow.removeEventListener("pointercancel", finishPan);
-
-      if (typeof viewport.releasePointerCapture === "function") {
-        try {
-          viewport.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release errors; listeners are detached already.
-        }
-      }
+    const finishPan = (): void => {
+      cleanupPan();
 
       if (Math.hypot(lastClientX - startX, lastClientY - startY) > 3) {
         this.suppressNextCanvasClick = true;
@@ -663,21 +748,18 @@ export class StudioGraphSelectionController {
     };
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      const latestEvent = latestStudioPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
       if (typeof moveEvent.preventDefault === "function") {
         moveEvent.preventDefault();
       }
-      schedulePanFrame();
     };
 
-    ownerWindow.addEventListener("pointermove", onPointerMove);
-    ownerWindow.addEventListener("pointerup", finishPan);
-    ownerWindow.addEventListener("pointercancel", finishPan);
+    this.cancelPointerGesture = startStudioPointerGesture({
+      element: viewport, event: startEvent, onMove: onPointerMove,
+      onFrame: flushPanFrame, onFinish: finishPan, onCancel: cleanupPan,
+    });
   }
 
   private clampGraphZoom(value: number, mode: StudioGraphZoomMode = this.graphZoomMode): number {
@@ -768,8 +850,7 @@ export class StudioGraphSelectionController {
     const viewportRect = viewport.getBoundingClientRect();
     const localX = clientX - viewportRect.left;
     const localY = clientY - viewportRect.top;
-    const graphX = (viewport.scrollLeft + localX) / previousZoom;
-    const graphY = (viewport.scrollTop + localY) / previousZoom;
+    const world = this.graphPointFromClient(clientX, clientY);
 
     const settled = options?.settled !== false;
     if (settled) {
@@ -779,14 +860,44 @@ export class StudioGraphSelectionController {
     this.graphZoom = clampedNextZoom;
     this.applyGraphZoom({ settled });
 
-    viewport.scrollLeft = graphX * clampedNextZoom - localX;
-    viewport.scrollTop = graphY * clampedNextZoom - localY;
+    if (world) {
+      this.scrollWorldPointToLocal(world, localX, localY);
+    }
     if (options?.scheduleSettle) {
       this.scheduleSettledGraphZoom();
     }
   }
 
-  private normalizeWheelDelta(delta: number, deltaMode: number, viewport: HTMLElement): number {
+  /** Zoom keeping the viewport centre fixed in world space. */
+  zoomGraphAtViewportCenter(
+    nextZoom: number,
+    options?: { mode?: StudioGraphZoomMode; settled?: boolean; scheduleSettle?: boolean }
+  ): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      this.setGraphZoom(nextZoom, options);
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    this.zoomGraphAtClientPoint(
+      nextZoom,
+      rect.left + viewport.clientWidth * 0.5,
+      rect.top + viewport.clientHeight * 0.5,
+      options
+    );
+  }
+
+  /** Scroll so a world point lands at a viewport-local pixel, growing the box first. */
+  private scrollWorldPointToLocal(world: GraphPoint, localX: number, localY: number): void {
+    const viewport = this.graphViewportEl;
+    if (!viewport) {
+      return;
+    }
+    const zoom = resolveStudioGraphSafeZoom(this.graphZoom);
+    this.setViewportWorldTopLeft(world.x - localX / zoom, world.y - localY / zoom);
+  }
+
+  private normalizeWheelDelta(delta: number, deltaMode: number, pageSize: number): number {
     if (!Number.isFinite(delta) || delta === 0) {
       return 0;
     }
@@ -794,7 +905,7 @@ export class StudioGraphSelectionController {
       return delta * 16;
     }
     if (deltaMode === WHEEL_DOM_DELTA_PAGE) {
-      return delta * Math.max(1, viewport.clientHeight);
+      return delta * Math.max(1, pageSize);
     }
     return delta;
   }
@@ -805,7 +916,7 @@ export class StudioGraphSelectionController {
 
   handleGraphViewportWheel(event: WheelEvent): void {
     const viewport = this.graphViewportEl;
-    if (!viewport) {
+    if (!viewport || event.defaultPrevented) {
       return;
     }
 
@@ -825,15 +936,22 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    const deltaX = this.normalizeWheelDelta(event.deltaX, event.deltaMode, viewport);
-    const deltaY = this.normalizeWheelDelta(event.deltaY, event.deltaMode, viewport);
+    // Some mouse drivers already translate Shift + wheel into deltaX. Keep
+    // that horizontal gesture; otherwise route the vertical wheel sideways.
+    const horizontalDelta = event.shiftKey ? event.deltaX || event.deltaY : event.deltaX;
+    const verticalDelta = event.shiftKey ? 0 : event.deltaY;
+    const deltaX = this.normalizeWheelDelta(horizontalDelta, event.deltaMode, viewport.clientWidth);
+    const deltaY = this.normalizeWheelDelta(verticalDelta, event.deltaMode, viewport.clientHeight);
     if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) {
       return;
     }
 
     event.preventDefault();
+    this.getViewportWorldRect();
     viewport.scrollLeft += deltaX;
     viewport.scrollTop += deltaY;
+    // A tab can hide before the view's deferred scroll capture runs.
+    this.getViewportWorldRect();
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioNodeInstance | null {
@@ -881,8 +999,8 @@ export class StudioGraphSelectionController {
       if (!node) {
         continue;
       }
-      const nextX = Math.max(24, Math.round(origin.x + delta.x));
-      const nextY = Math.max(24, Math.round(origin.y + delta.y));
+      const nextX = Math.round(origin.x + delta.x);
+      const nextY = Math.round(origin.y + delta.y);
       if (node.position.x !== nextX || node.position.y !== nextY) {
         node.position.x = nextX;
         node.position.y = nextY;
@@ -914,7 +1032,6 @@ export class StudioGraphSelectionController {
     if (this.graphZoomMode === "overview") {
       return;
     }
-    const ownerWindow = getStudioOwnerWindow(dragSurfaceEl);
     const project = this.host.getCurrentProject();
     if (!project) {
       return;
@@ -924,6 +1041,7 @@ export class StudioGraphSelectionController {
       return;
     }
 
+    this.cancelPointerGesture?.();
     const shouldDragSelection = this.selectedNodeIds.has(nodeId) && this.selectedNodeIds.size > 0;
     let selectionChangedOnPointerDown = false;
     if (!shouldDragSelection) {
@@ -949,13 +1067,11 @@ export class StudioGraphSelectionController {
       return;
     }
 
-    const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
     const zoom = this.graphZoom;
     let pendingClientX = startX;
     let pendingClientY = startY;
-    let dragFrameRequested = false;
     let dragged = false;
     let captureHistoryOnNextMutation = false;
     let hoveredGroupId: string | null = null;
@@ -1008,14 +1124,6 @@ export class StudioGraphSelectionController {
       hoveredGroupId = nextGroupId;
       this.host.onNodeDragHoverGroupChange?.(hoveredGroupId, dragNodeIds);
     };
-    if (typeof dragSurfaceEl.setPointerCapture === "function") {
-      try {
-        dragSurfaceEl.setPointerCapture(pointerId);
-      } catch {
-        // Ignore capture errors and keep window listeners as fallback.
-      }
-    }
-
     const commitDraggedNodePositions = (options?: {
       captureHistory?: boolean;
       mode?: StudioGraphProjectMutationOptions["mode"];
@@ -1060,8 +1168,8 @@ export class StudioGraphSelectionController {
             if (!dragNode || !origin) {
               continue;
             }
-            const nextX = Math.max(24, Math.round(origin.x + deltaX));
-            const nextY = Math.max(24, Math.round(origin.y + deltaY));
+            const nextX = Math.round(origin.x + deltaX);
+            const nextY = Math.round(origin.y + deltaY);
             if (dragNode.position.x !== nextX || dragNode.position.y !== nextY) {
               dragNode.position.x = nextX;
               dragNode.position.y = nextY;
@@ -1078,7 +1186,6 @@ export class StudioGraphSelectionController {
     };
 
     const flushDragFrame = (): void => {
-      dragFrameRequested = false;
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
@@ -1112,24 +1219,9 @@ export class StudioGraphSelectionController {
       syncHoveredGroup();
     };
 
-    const scheduleDragFrame = (): void => {
-      if (dragFrameRequested) {
-        return;
-      }
-      dragFrameRequested = true;
-      if (typeof ownerWindow.requestAnimationFrame === "function") {
-        ownerWindow.requestAnimationFrame(flushDragFrame);
-        return;
-      }
-      flushDragFrame();
-    };
-
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
 
-      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      const latestEvent = latestStudioPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
       snapBypassed = Boolean(moveEvent.ctrlKey || moveEvent.metaKey);
@@ -1139,44 +1231,24 @@ export class StudioGraphSelectionController {
       ) {
         moveEvent.preventDefault();
       }
-      scheduleDragFrame();
     };
 
     // Pressing/releasing Ctrl or Cmd mid-drag toggles snapping immediately,
     // even while the pointer is stationary.
-    const onModifierChange = (keyEvent: KeyboardEvent): void => {
+    const onModifierChange = (keyEvent: KeyboardEvent): boolean => {
       const nextBypassed = Boolean(keyEvent.ctrlKey || keyEvent.metaKey);
-      if (nextBypassed === snapBypassed) {
-        return;
-      }
+      if (nextBypassed === snapBypassed) return false;
       snapBypassed = nextBypassed;
-      if (dragged) {
-        scheduleDragFrame();
-      }
+      return dragged;
     };
 
-    const finishDrag = (event: PointerEvent): void => {
-      if (event.pointerId !== pointerId) {
-        return;
-      }
-
-      if (dragFrameRequested) {
-        flushDragFrame();
-      }
-
-      ownerWindow.removeEventListener("pointermove", onPointerMove);
-      ownerWindow.removeEventListener("pointerup", finishDrag);
-      ownerWindow.removeEventListener("pointercancel", finishDrag);
-      ownerWindow.removeEventListener("keydown", onModifierChange);
-      ownerWindow.removeEventListener("keyup", onModifierChange);
+    const cleanupDrag = (): void => {
+      this.cancelPointerGesture = null;
       this.renderSnapGuides(null);
-      if (typeof dragSurfaceEl.releasePointerCapture === "function") {
-        try {
-          dragSurfaceEl.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release errors; drag listeners are already detached.
-        }
-      }
+    };
+
+    const finishDrag = (): void => {
+      cleanupDrag();
       if (dragged) {
         this.host.onNodeDragStateChange?.(false);
         this.host.onNodeDropToGroup?.(hoveredGroupId, dragNodeIds);
@@ -1198,11 +1270,18 @@ export class StudioGraphSelectionController {
       }
     };
 
-    ownerWindow.addEventListener("pointermove", onPointerMove);
-    ownerWindow.addEventListener("pointerup", finishDrag);
-    ownerWindow.addEventListener("pointercancel", finishDrag);
-    ownerWindow.addEventListener("keydown", onModifierChange);
-    ownerWindow.addEventListener("keyup", onModifierChange);
+    this.cancelPointerGesture = startStudioPointerGesture({
+      element: dragSurfaceEl, event: startEvent, onMove: onPointerMove,
+      onFrame: flushDragFrame, onFinish: finishDrag, onKeyChange: onModifierChange,
+      onCancel: () => {
+        cleanupDrag();
+        if (dragged) {
+          this.host.onNodeDragStateChange?.(false);
+          this.host.onNodeDragHoverGroupChange?.(null, dragNodeIds);
+          this.host.finishDiagramTranslation?.();
+        }
+      },
+    });
   }
 
   /**
@@ -1259,7 +1338,7 @@ export class StudioGraphSelectionController {
       return;
     }
     try {
-      renderStudioGraphSnapGuidesLayer(this.snapGuidesEl, result, this.graphZoom);
+      renderStudioGraphSnapGuidesLayer(this.snapGuidesEl, result, this.graphZoom, this.getWorldOrigin());
     } catch {
       // Guide rendering must never break an in-flight drag.
     }
@@ -1291,73 +1370,12 @@ export class StudioGraphSelectionController {
     }
   }
 
-  private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
-    if (typeof event.getCoalescedEvents === "function") {
-      const coalescedEvents = event.getCoalescedEvents();
-      if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
-        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
-      }
-    }
-    return event;
-  }
-
   private syncGraphSurfaceSize(): void {
-    if (!this.graphSurfaceEl) {
+    if (!this.graphSurfaceEl || !this.worldExtent) {
       return;
     }
     const zoom = this.graphZoom || 1;
-    this.graphSurfaceEl.style.width = `${Math.round(this.graphCanvasWidth * zoom)}px`;
-    this.graphSurfaceEl.style.height = `${Math.round(this.graphCanvasHeight * zoom)}px`;
-  }
-
-  private syncCanvasBounds(options?: { force?: boolean }): boolean {
-    const project = this.host.getCurrentProject();
-    const nodeById = project
-      ? new Map(project.graph.nodes.map((node) => [node.id, node] as const))
-      : new Map<string, StudioNodeInstance>();
-    const nextSize = computeStudioGraphCanvasSize(project, {
-      minWidth: STUDIO_GRAPH_CANVAS_WIDTH,
-      minHeight: STUDIO_GRAPH_CANVAS_HEIGHT,
-      maxWidth: STUDIO_GRAPH_CANVAS_MAX_WIDTH,
-      maxHeight: STUDIO_GRAPH_CANVAS_MAX_HEIGHT,
-      getNodeWidth: (nodeId) => {
-        const node = nodeById.get(nodeId);
-        const nodeEl = this.nodeElsById.get(nodeId);
-        if (!node) {
-          return nodeEl ? resolveMeasuredStudioNodeWidth(nodeEl.offsetWidth) : null;
-        }
-        return resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
-      },
-      getNodeHeight: (nodeId) => {
-        const nodeEl = this.nodeElsById.get(nodeId);
-        if (!nodeEl) {
-          return null;
-        }
-        return resolveMeasuredStudioNodeHeight(nodeEl.offsetHeight);
-      },
-    });
-
-    const changed =
-      options?.force === true ||
-      this.graphCanvasWidth !== nextSize.width ||
-      this.graphCanvasHeight !== nextSize.height;
-    if (!changed) {
-      return false;
-    }
-
-    this.graphCanvasWidth = nextSize.width;
-    this.graphCanvasHeight = nextSize.height;
-
-    if (this.graphCanvasEl) {
-      this.graphCanvasEl.style.width = `${this.graphCanvasWidth}px`;
-      this.graphCanvasEl.style.height = `${this.graphCanvasHeight}px`;
-    }
-    if (this.graphEdgesLayerEl) {
-      this.graphEdgesLayerEl.setAttribute("viewBox", `0 0 ${this.graphCanvasWidth} ${this.graphCanvasHeight}`);
-      this.graphEdgesLayerEl.setAttribute("width", String(this.graphCanvasWidth));
-      this.graphEdgesLayerEl.setAttribute("height", String(this.graphCanvasHeight));
-    }
-
-    return true;
+    this.graphSurfaceEl.style.width = `${Math.round(this.worldExtent.width * zoom)}px`;
+    this.graphSurfaceEl.style.height = `${Math.round(this.worldExtent.height * zoom)}px`;
   }
 }

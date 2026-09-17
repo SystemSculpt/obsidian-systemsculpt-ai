@@ -83,7 +83,7 @@ async function runResume(
   const uploadJobs = jobs.filter((job) => job.status === "uploading");
 
   await runWithConcurrencyLimit(terminalJobs, RESUME_CONCURRENCY, async (job) => {
-    await resumeObservedJob(plugin, service, job, { resumeAwaitingFundsOnce: true });
+    await resumeJob(plugin, service, job, "watch");
   });
 
   for (const job of jobs) {
@@ -104,10 +104,10 @@ async function runResume(
           });
           return;
         }
-        await resumeUploadJob(plugin, service, task.job);
+        await resumeJob(plugin, service, task.job, "upload");
         return;
       }
-      await resumeObservedJob(plugin, service, task.job, { resumeAwaitingFundsOnce: true });
+      await resumeJob(plugin, service, task.job, "watch");
     },
   );
   trackResumeTask(plugin, background);
@@ -119,7 +119,6 @@ async function runWithConcurrencyLimit<T>(
   worker: (item: T) => Promise<void>,
 ): Promise<void> {
   const concurrency = Math.max(1, Math.min(limit, items.length));
-  if (concurrency === 0) return;
 
   let index = 0;
   await Promise.all(Array.from({ length: concurrency }, async () => {
@@ -131,55 +130,31 @@ async function runWithConcurrencyLimit<T>(
   }));
 }
 
-async function resumeObservedJob(
+async function resumeJob(
   plugin: SystemSculptPlugin,
   service: AudioProcessorService,
   job: AudioProcessorJob,
-  options: Readonly<{ resumeAwaitingFundsOnce?: boolean }>,
+  kind: "upload" | "watch",
 ): Promise<void> {
   const jobController = new AbortController();
   plugin.register(() => jobController.abort());
   let userCancelled = false;
   const panel = new AudioProcessorPanel(
     plugin,
-    job.result?.filename ?? job.transcriptArtifact?.filename ?? "Active audio",
+    kind === "upload" ? "Resuming audio upload" : job.result?.filename ?? job.transcriptArtifact?.filename ?? "Active audio",
     () => {
       userCancelled = true;
       jobController.abort();
     },
   );
   try {
-    const note = await service.resume(job, {
+    const options = {
       signal: jobController.signal,
-      onProgress: (event) => panel.update(event),
-    }, options);
-    panel.succeed(note);
-  } catch (error) {
-    if (userCancelled || !jobController.signal.aborted) panel.fail(error);
-  }
-}
-
-async function resumeUploadJob(
-  plugin: SystemSculptPlugin,
-  service: AudioProcessorService,
-  job: AudioProcessorJob,
-): Promise<void> {
-  const jobController = new AbortController();
-  plugin.register(() => jobController.abort());
-  let userCancelled = false;
-  const panel = new AudioProcessorPanel(
-    plugin,
-    "Resuming audio upload",
-    () => {
-      userCancelled = true;
-      jobController.abort();
-    },
-  );
-  try {
-    const note = await service.resumeUpload(job, {
-      signal: jobController.signal,
-      onProgress: (event) => panel.update(event),
-    });
+      onProgress: (event: Parameters<AudioProcessorPanel["update"]>[0]) => panel.update(event),
+    };
+    const note = kind === "upload"
+      ? await service.resumeUpload(job, options)
+      : await service.resume(job, options, { resumeAwaitingFundsOnce: true });
     panel.succeed(note);
   } catch (error) {
     if (userCancelled || !jobController.signal.aborted) panel.fail(error);

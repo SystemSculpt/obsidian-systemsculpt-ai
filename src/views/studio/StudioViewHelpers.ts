@@ -7,20 +7,25 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
+  "studio.collection": "A live collection of records, grouped as a Kanban board.",
+  "studio.workflow": "A durable workflow with native agent tasks, linked evidence and reconnectable runs.",
   "studio.json":
-    "Build JSON payloads in Composer or Raw mode, pass through upstream JSON, or validate/parse text input into JSON.",
+    "Edit JSON source, pass through upstream JSON, or validate and parse connected text.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
   "studio.text": "Adds minimal freeform text that can feed downstream text inputs.",
   "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
   "studio.text_output": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
   "studio.image_generation": "Generates one or more images from your prompt.",
+  "studio.video_generation": "Generates a video clip from your prompt and optional frame images.",
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",
   "studio.transcription": "Transcribes audio media into text.",
   "studio.dataset":
     "Runs a custom query through a configurable adapter, caches results, and outputs text plus discovered structured fields.",
   "studio.retired_http_request": "Retired HTTP Request placeholder. This node cannot execute.",
+  "studio.script": "Edit and run JavaScript source with typed inputs and outputs.",
+  "studio.process": "Runs an approved local process with typed inputs and outputs.",
   "studio.cli_command": "Runs a local shell command and captures output.",
   "studio.terminal":
     "Legacy terminal placeholder kept so older Studio workflows still load. Interactive terminal sessions are no longer supported.",

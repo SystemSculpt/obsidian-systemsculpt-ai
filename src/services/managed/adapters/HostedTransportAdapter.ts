@@ -1,6 +1,6 @@
 import { PlatformRequestClient, type PlatformRequestInput } from "../../PlatformRequestClient";
 import {
-  MANAGED_ADMISSION_CONTRACT, MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES,
+  MANAGED_ADMISSION_CONTRACT, MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, MANAGED_VIDEO_OUTPUT_MAX_BYTES,
   ManagedServerOutcome, ManagedTransportOperation, ManagedTransportResult,
 } from "../ManagedTypes";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
@@ -22,6 +22,8 @@ export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
   constructor(private readonly options: HostedTransportOptions) { this.client = options.requestClient ?? new PlatformRequestClient(); }
 
+  get pluginVersion(): string { return this.options.pluginVersion; }
+
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
   private key(): string | undefined { const key = this.options.licenseKey().trim(); return key || undefined; }
 
@@ -34,7 +36,9 @@ export class HostedTransportAdapter {
   async getAdmission(): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
     const result = await this.send({ path: "/api/plugin/license/validate", method: "GET" }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
     let body: unknown;
-    try { body = await result.response.clone().json(); } catch {}
+    try { body = await result.response.clone().json(); } catch {
+      // Admission decoding handles an absent response body.
+    }
     return {
       outcome: decodeManagedAdmissionResponse(result.response.status, body).outcome,
       diagnostics: result.diagnostics,
@@ -59,6 +63,23 @@ export class HostedTransportAdapter {
       stream: false, preserveResponseHeaders: true,
       transport: "requestUrl", bodyEncoding: "raw",
     });
+  }
+
+  // managed-job-protocol-v2 media downloads: same identity-pinned path shape
+  // as the v1 image output companion, plus video outputs with their larger
+  // byte cap.
+  managedMediaOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {
+    const identity = /^\/api\/plugin\/(images|videos)\/generations\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/outputs\/[0-3]$/.exec(path);
+    if (!identity) return Promise.reject(new Error("Invalid managed media output path."));
+    return this.send(
+      { path, method: "GET", headers, signal },
+      headers, true, false,
+      {
+        transport: "requestUrl",
+        responseEncoding: "arrayBuffer",
+        maxResponseBytes: identity[1] === "videos" ? MANAGED_VIDEO_OUTPUT_MAX_BYTES : MANAGED_IMAGE_OUTPUT_MAX_BYTES,
+      },
+    );
   }
 
   managedImageOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {

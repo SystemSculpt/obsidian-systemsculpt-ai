@@ -188,6 +188,8 @@ export function isStudioExpandedTextNodeKind(kind: string): boolean {
   return (
     normalizedKind === "studio.image_generation" ||
     normalizedKind === "studio.json" ||
+    normalizedKind === "studio.script" ||
+    normalizedKind === "studio.process" ||
     normalizedKind === "studio.note" ||
     normalizedKind === "studio.text_output" ||
     normalizedKind === "studio.text_generation" ||
@@ -239,6 +241,9 @@ export function resolveStudioGraphNodeResizeBounds(
  */
 export function resolveStudioNodeDefaultSize(kind: string): StudioNodeSize {
   const normalizedKind = String(kind || "").trim();
+  if (normalizedKind === "studio.button") return { width: 360, height: 180 };
+  if (normalizedKind === "studio.command_center") return { width: 1160, height: 500 };
+  if (normalizedKind === "studio.collection" || normalizedKind === "studio.run_collection") return { width: 1600, height: 300 };
   if (normalizedKind === "studio.text") {
     return {
       width: STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
@@ -279,6 +284,22 @@ function readStoredNodeDimension(
   }
   // LEGACY read fallback — see doc comment above.
   return readFiniteNumber((node.config as Record<string, unknown>)?.[dimension]);
+}
+
+/**
+ * Text hugs its content (tldraw parity): the card sizes to its longest line
+ * up to STUDIO_GRAPH_TEXT_NODE_AUTO_MAX_WIDTH, then wraps. Only a width the
+ * user dragged turns the card fixed; that gesture stamps the presentation
+ * flag below, so widths the old renderer or a migration wrote never pin a
+ * text box.
+ */
+export const STUDIO_GRAPH_TEXT_NODE_AUTO_MAX_WIDTH = 720;
+/** Auto-sized text may be as narrow as a single glyph; the drag minimum only applies to fixed widths. */
+export const STUDIO_GRAPH_TEXT_NODE_AUTO_MIN_WIDTH = 24;
+export const STUDIO_TEXT_NODE_WIDTH_MODE_KEY = "__studio_text_width";
+export function isStudioTextNodeAutoWidth(node: StudioNodeGeometrySource): boolean {
+  if (!isStudioTextNode(node)) return false;
+  return (node.config as Record<string, unknown> | undefined)?.[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] !== "fixed";
 }
 
 export function resolveStudioTextNodeWidth(node: StudioNodeGeometrySource): number {

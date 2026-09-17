@@ -22,7 +22,6 @@
   display: flex;
   flex-direction: column;
   padding: 0;
-  border-left-width: 1px;
   /* No `paint` containment: the edge port pins straddle the card box. */
   contain: layout style;
 }
@@ -146,30 +145,25 @@
 
 .ss-studio-node-card[data-chrome-layout="media"] .ss-studio-port-pin {
   pointer-events: auto;
-  width: 10px;
-  height: 10px;
+  width: var(--ss-studio-port-size, 10px);
+  height: var(--ss-studio-port-size, 10px);
   box-shadow: var(--ss-elevation-1);
 }
 
-/* Status: quiet badge inside the top-left corner; only states that need
- * attention surface at all. Failure detail rides the pill's tooltip. */
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status-row {
+/* Activity: a quiet chip inside the top-left corner of the media; only live
+ * and failed phases surface at all (see activity.css for the row itself). */
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-activity {
   position: absolute;
   top: var(--ss-space-2);
   left: var(--ss-space-2);
   z-index: 5;
-  padding: 0;
+  padding: var(--ss-space-0) var(--ss-space-2);
+  border-radius: var(--ss-radius-full);
+  background-color: color-mix(in srgb, var(--ss-surface-0) 88%, transparent);
   pointer-events: none;
 }
 
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status {
-  background-color: color-mix(in srgb, var(--ss-surface-0) 88%, transparent);
-}
-
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-idle,
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-succeeded,
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-status.is-cached,
-.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-run-message {
+.ss-studio-node-card[data-chrome-layout="media"] .ss-studio-node-activity-detail {
   display: none;
 }
 

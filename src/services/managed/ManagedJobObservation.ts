@@ -2,6 +2,7 @@ const DEFAULT_POLL_AFTER_MS = 2_000;
 const MAX_POLL_AFTER_MS = 60 * 60 * 1_000;
 const TRANSIENT_RETRY_BASE_MS = 1_000;
 const TRANSIENT_RETRY_MAX_MS = 30_000;
+const DISPATCH_MAX_ATTEMPTS = 4;
 
 export type ManagedJobPollHint = Readonly<{
   poll_after_ms?: number;
@@ -32,15 +33,12 @@ export async function waitForManagedJob(
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => signal.removeEventListener("abort", onAbort);
-    // Managed polling is host-level work, not UI bound to a popout window.
-    // eslint-disable-next-line obsidianmd/no-global-this
-    const timeout = globalThis.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       cleanup();
       resolve();
     }, normalizedPollAfterMs(milliseconds));
     const onAbort = () => {
-      // eslint-disable-next-line obsidianmd/no-global-this
-      globalThis.clearTimeout(timeout);
+      window.clearTimeout(timeout);
       cleanup();
       reject(abortError());
     };
@@ -138,5 +136,47 @@ export async function* observeManagedJob<T>(
     );
     hasNext = false;
     next = undefined;
+  }
+}
+
+export type ManagedJobDispatchOptions<T> = Readonly<{
+  send: () => Promise<T>;
+  signal: AbortSignal;
+  isRetryableError?: (error: unknown) => boolean;
+  retryAfterMs?: (error: unknown) => number | undefined;
+  wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}>;
+
+/**
+ * Sends one idempotent managed job request, retrying while the server says the
+ * failure is transient.
+ *
+ * Polling already survives a blip because observeManagedJob retries; the
+ * request that starts the work did not, so a lock wait during credit
+ * reservation ended a whole Studio run. Every caller carries an idempotency
+ * key, so a replay returns the original job instead of paying twice. Attempts
+ * are bounded because, unlike polling, there is no server-side job yet to keep
+ * waiting on.
+ */
+export async function dispatchManagedJob<T>(
+  options: ManagedJobDispatchOptions<T>,
+): Promise<T> {
+  const wait = options.wait ?? waitForManagedJob;
+  const isRetryable = options.isRetryableError ?? isRetryableManagedJobObservationError;
+  let backoffMs = TRANSIENT_RETRY_BASE_MS;
+
+  for (let attempt = 1; ; attempt += 1) {
+    throwIfAborted(options.signal);
+    try {
+      return await options.send();
+    } catch (error) {
+      throwIfAborted(options.signal);
+      if (attempt >= DISPATCH_MAX_ATTEMPTS || !isRetryable(error)) throw error;
+      await wait(
+        normalizedPollAfterMs(options.retryAfterMs?.(error), backoffMs),
+        options.signal,
+      );
+      backoffMs = Math.min(TRANSIENT_RETRY_MAX_MS, backoffMs * 2);
+    }
   }
 }

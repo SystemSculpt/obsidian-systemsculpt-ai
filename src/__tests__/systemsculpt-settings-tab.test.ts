@@ -77,6 +77,8 @@ const createPluginStub = () => {
     customProviderService: {
       clearCache: jest.fn(),
     },
+    consumePendingSettingsFocusTab: jest.fn(() => null),
+    clearPendingSettingsFocusTab: jest.fn(),
   } as any;
 };
 
@@ -358,19 +360,26 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(knowledgePanelAfter?.getAttribute("role")).toBe("tabpanel");
   });
 
-  it("invalidates registered render work on rerender and hide", async () => {
+  it.each(["display", "hide"] as const)("invalidates each registered render task once on %s despite a failing cleanup", async (entry) => {
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);
-    const rerenderCleanup = jest.fn();
-    const hideCleanup = jest.fn();
-
-    tab.registerRenderCleanup(rerenderCleanup);
     await tab.display();
-    expect(rerenderCleanup).toHaveBeenCalledTimes(1);
+    const failedCleanup = jest.fn(() => { throw new Error("Cleanup failure"); });
+    const cleanup = jest.fn();
+    const unregisteredCleanup = jest.fn();
 
-    tab.registerRenderCleanup(hideCleanup);
+    tab.registerRenderCleanup(failedCleanup);
+    tab.registerRenderCleanup(cleanup);
+    const unregister = tab.registerRenderCleanup(unregisteredCleanup);
+    unregister();
+    await tab[entry]();
+    expect(failedCleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(unregisteredCleanup).not.toHaveBeenCalled();
+
     tab.hide();
-    expect(hideCleanup).toHaveBeenCalledTimes(1);
+    expect(failedCleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("cancels delayed settings indexing when the surface hides", async () => {

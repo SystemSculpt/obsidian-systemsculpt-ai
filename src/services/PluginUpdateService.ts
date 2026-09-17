@@ -133,7 +133,11 @@ export class PluginUpdateService {
     }
     if (typeof window !== "undefined") {
       window.addEventListener("focus", this.handleReturnToApp);
-      this.periodicCheck = window.setInterval(() => void this.checkForUpdates(), CHECK_INTERVAL_MS);
+      // Registered with the plugin so the poll cannot outlive an unload that
+      // skipped stop().
+      this.periodicCheck = this.plugin.registerInterval(
+        window.setInterval(() => void this.checkForUpdates(), CHECK_INTERVAL_MS),
+      );
     }
     void this.recordInstalledVersion();
     void this.checkForUpdates();

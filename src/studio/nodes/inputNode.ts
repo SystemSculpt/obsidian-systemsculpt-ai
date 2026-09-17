@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import { getText } from "./shared";
 
 export const inputNode: StudioNodeDefinition = {
@@ -28,7 +28,7 @@ export const inputNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const rawValue = context.node.config.value as StudioJsonValue;
+    const rawValue = context.node.config.value;
     return {
       outputs: {
         out: rawValue ?? "",

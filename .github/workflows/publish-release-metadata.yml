@@ -12,8 +12,71 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    if: ${{ github.event.release.draft == false && github.event.release.prerelease == false }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Build tagged release
+        env:
+          SYSTEMSCULPT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          revision="$(git rev-parse HEAD)"
+          node scripts/release-plugin.mjs \
+            --expected-revision="${revision}" \
+            --expected-tag="${SYSTEMSCULPT_RELEASE_TAG}"
+
+      - name: Compare published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYSTEMSCULPT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          published_dir="${RUNNER_TEMP}/published-release"
+          mkdir -p "${published_dir}"
+          gh release download "${SYSTEMSCULPT_RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir "${published_dir}" \
+            --pattern manifest.json \
+            --pattern main.js \
+            --pattern styles.css
+          for artifact in manifest.json main.js styles.css; do
+            if ! cmp --silent "${artifact}" "${published_dir}/${artifact}"; then
+              echo "Published ${artifact} does not match the tagged production build byte-for-byte." >&2
+              sha256sum "${artifact}" "${published_dir}/${artifact}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Attest exact published assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/published-release/manifest.json
+            ${{ runner.temp }}/published-release/main.js
+            ${{ runner.temp }}/published-release/styles.css
+
   publish:
     if: ${{ github.event.release.draft == false && github.event.release.prerelease == false }}
+    needs: verify
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production-release-metadata

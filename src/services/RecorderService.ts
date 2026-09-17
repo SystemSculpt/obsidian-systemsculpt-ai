@@ -1058,7 +1058,7 @@ export class RecorderService {
   }
 
   private captureOrigin(): RecordingOrigin {
-    const leaf = this.app.workspace.activeLeaf;
+    const leaf = this.app.workspace.getMostRecentLeaf();
     const isChat = leaf?.view?.getViewType?.() === CHAT_VIEW_TYPE;
     const noteTarget = isChat ? null : captureNoteInsertionTarget(this.app);
     const conversationOriginToken = isChat

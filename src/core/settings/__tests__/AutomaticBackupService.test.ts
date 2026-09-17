@@ -25,13 +25,14 @@ const createMockPlugin = () => {
   const app = { vault } as any;
   const updateSettings = jest.fn(async () => {});
   const storage = {
-    writeFile: jest.fn(async () => {}),
+    writeFile: jest.fn(async () => ({ success: true })),
     listFiles: jest.fn(async () => []),
     deleteFile: jest.fn(async () => {}),
   };
   return {
     app,
     storage,
+    registerInterval: jest.fn((id: number) => id),
     getSettingsManager: () => ({
       getSettings: () => ({
         automaticBackupsEnabled: true,
@@ -95,6 +96,13 @@ describe("AutomaticBackupService", () => {
       service.start();
 
       expect(clearIntervalSpy).toHaveBeenCalled();
+    });
+
+    it("registers the interval with the plugin so Obsidian clears it on unload", () => {
+      service.start();
+
+      const timerId = setIntervalSpy.mock.results[0].value;
+      expect(mockPlugin.registerInterval).toHaveBeenCalledWith(timerId);
     });
 
     it("checks for backup immediately on start", async () => {
@@ -365,6 +373,16 @@ describe("AutomaticBackupService", () => {
       const result = await service.createAutomaticBackup();
 
       expect(result).toBe(true);
+    });
+
+    it.each(["absent", "failed result"])("does not report a saved backup when primary write fails and storage is %s", async (state) => {
+      mockPlugin.app.vault.adapter.write.mockRejectedValue(new Error("disk full"));
+      if (state === "absent") mockPlugin.storage = null;
+      else mockPlugin.storage.writeFile.mockResolvedValue({ success: false, error: "disk full" });
+
+      expect(await service.createAutomaticBackup()).toBe(false);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.remove).not.toHaveBeenCalled();
     });
   });
 

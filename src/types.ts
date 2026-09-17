@@ -12,9 +12,6 @@ export type { ToolCall };
 export type {
   WorkflowEngineSettings,
   WorkflowSkipEntry,
-  WorkflowTrigger,
-  WorkflowCondition,
-  WorkflowStep,
 } from "./types/workflows";
 
 export { createDefaultWorkflowEngineSettings } from "./types/workflows";
@@ -74,6 +71,10 @@ export type AudioProcessorOutputPreset =
 export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
 export interface SystemSculptSettings {
+  codexModel?: string;
+  codexThinkingLevel?: string;
+  codexServiceTier?: string;
+  textExecutionBackend?: "systemsculpt" | "codex";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -163,6 +164,9 @@ export interface SystemSculptSettings {
 
   favoriteChats: string[];
   favoriteStudioSessions: string[];
+  /** Starred Studio generation models, per media kind (opaque catalog ids). */
+  favoriteImageModels: string[];
+  favoriteVideoModels: string[];
 
   /**
    * Remembers export preferences for chat exports (toggle selections, folder, etc.)
@@ -230,6 +234,8 @@ export interface SystemSculptSettings {
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
+  textExecutionBackend: "systemsculpt",
+  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -273,6 +279,8 @@ Please:
 
   favoriteChats: [],
   favoriteStudioSessions: [],
+  favoriteImageModels: [],
+  favoriteVideoModels: [],
 
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),
@@ -427,51 +435,4 @@ export interface ChatMessage {
   terminalFailureCode?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
-}
-
-export interface SystemSculptResponse {
-  id: string;
-  choices: {
-    message: ChatMessage;
-  }[];
-}
-
-export interface SystemSculptStreamChunk {
-  id?: string;
-  choices?: Array<{
-    delta?: {
-      content?: string;
-      text?: string;
-      reasoning?: string;
-      reasoning_details?: unknown[];
-      tool_calls?: Array<{
-        id?: string;
-        type?: "function";
-        function?: {
-          name?: string;
-          arguments?: string;
-        };
-      }>;
-    };
-    finish_reason?: string;
-  }>;
-  completion?: string;
-  delta?: {
-    text?: string;
-    reasoning?: string;
-  };
-	  error?: {
-	    code: string;
-	    message: string;
-	    statusCode?: number;
-	    model?: string;
-	  };
-	}
-
-export interface TextModificationState {
-  originalText: string;
-  modifiedText: string;
-  isStreaming: boolean;
-  streamComplete: boolean;
-  error?: string;
 }

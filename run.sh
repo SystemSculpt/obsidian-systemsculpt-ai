@@ -24,38 +24,6 @@ Options:
 EOF
 }
 
-cleanup() {
-  if [[ -f "$LOCK_FILE" ]] && [[ "$(cat "$LOCK_FILE" 2>/dev/null || true)" == "$$" ]]; then
-    rm -f "$LOCK_FILE"
-  fi
-}
-
-acquire_lock() {
-  local existing_pid=""
-  if [[ -f "$LOCK_FILE" ]]; then
-    existing_pid="$(cat "$LOCK_FILE" 2>/dev/null || true)"
-  fi
-
-  if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
-    if [[ $HEADLESS -eq 0 ]]; then
-      echo "[run.sh] Killing previous watcher (pid $existing_pid)..."
-    fi
-    kill "$existing_pid" 2>/dev/null || true
-    # Wait briefly for the process to exit
-    for _ in 1 2 3 4 5; do
-      kill -0 "$existing_pid" 2>/dev/null || break
-      sleep 0.2
-    done
-    # Force kill if still alive
-    if kill -0 "$existing_pid" 2>/dev/null; then
-      kill -9 "$existing_pid" 2>/dev/null || true
-    fi
-  fi
-
-  rm -f "$LOCK_FILE"
-  printf '%s\n' "$$" > "$LOCK_FILE"
-}
-
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -141,9 +109,8 @@ done
 
 require_cmd node
 require_cmd npm
+node scripts/watcher-ownership.mjs check "$ROOT_DIR"
 install_js_dependencies_if_needed
-acquire_lock
-trap cleanup EXIT INT TERM
 
 if [[ $HEADLESS -eq 0 ]]; then
   echo "[run.sh] Starting plugin build watcher"
@@ -188,9 +155,4 @@ if [[ $HEADLESS -eq 1 ]]; then
   CMD_ENV+=("SYSTEMSCULPT_AUTO_SYNC_QUIET=1")
 fi
 
-set +e
-env "${CMD_ENV[@]}" "${CMD[@]}"
-DEV_EXIT_CODE=$?
-set -e
-
-exit "$DEV_EXIT_CODE"
+exec node scripts/watcher-ownership.mjs run "$ROOT_DIR" "$LOCK_FILE" env "${CMD_ENV[@]}" "${CMD[@]}"

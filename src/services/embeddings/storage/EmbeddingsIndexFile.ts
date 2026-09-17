@@ -25,6 +25,8 @@ export interface EmbeddingsIndexFileOptions {
 export class EmbeddingsIndexFile {
   private readonly dir: string;
   private readonly filePath: string;
+  /** Last good snapshot parked here while a replace is in flight. */
+  private readonly previousPath: string;
 
   constructor(
     private readonly adapter: DataAdapter,
@@ -33,6 +35,7 @@ export class EmbeddingsIndexFile {
     this.dir = options.dir ?? DEFAULT_DIR;
     const fileName = options.fileName ?? DEFAULT_FILE_NAME;
     this.filePath = `${this.dir}/${fileName}`;
+    this.previousPath = `${this.filePath}.previous`;
   }
 
   public getPath(): string {
@@ -48,14 +51,34 @@ export class EmbeddingsIndexFile {
   }
 
   /**
-   * Read and JSON-parse the snapshot. Returns null when absent or unparseable
-   * (a partially-synced or hand-edited file must never crash startup).
+   * Read and JSON-parse the snapshot. Falls back to the `.previous` checkpoint
+   * that an interrupted replace leaves behind. Returns null when neither is
+   * present or parseable (a partially-synced or hand-edited file must never
+   * crash startup).
    */
   public async read(): Promise<SerializedEmbeddingsIndex | null> {
+    return (await this.readCandidate(this.filePath)) ?? this.readCandidate(this.previousPath);
+  }
+
+  private async readCandidate(
+    path: string,
+    options?: { failOnReadError: boolean },
+  ): Promise<SerializedEmbeddingsIndex | null> {
+    let text: string;
     try {
-      if (!(await this.adapter.exists(this.filePath))) return null;
-      const text = await this.adapter.read(this.filePath);
-      return JSON.parse(text) as SerializedEmbeddingsIndex;
+      if (!(await this.adapter.exists(path))) return null;
+      text = await this.adapter.read(path);
+    } catch (error) {
+      // Startup may fall back to a checkpoint on an unreadable file. A write
+      // must not mistake that uncertainty for corrupt bytes and delete it.
+      if (options?.failOnReadError) throw error;
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as SerializedEmbeddingsIndex
+        : null;
     } catch {
       return null;
     }
@@ -74,25 +97,38 @@ export class EmbeddingsIndexFile {
       await this.adapter.write(this.filePath, serialized);
       return;
     }
-    const backupPath = `${this.filePath}.previous`;
+    const backupPath = this.previousPath;
     try {
       await this.adapter.write(tempPath, serialized);
       await this.adapter.rename(tempPath, this.filePath);
     } catch (replaceError) {
       let movedPrevious = false;
       try {
-        if (await this.adapter.exists(backupPath)) await this.adapter.remove(backupPath);
         if (await this.adapter.exists(this.filePath)) {
-          await this.adapter.rename(this.filePath, backupPath);
-          movedPrevious = true;
+          if (await this.readCandidate(backupPath, { failOnReadError: true })
+            && !(await this.readCandidate(this.filePath, { failOnReadError: true }))) {
+            // Never rotate corrupt primary bytes over the only readable snapshot.
+            await this.adapter.remove(this.filePath);
+          } else {
+            if (await this.adapter.exists(backupPath)) await this.adapter.remove(backupPath);
+            await this.adapter.rename(this.filePath, backupPath);
+            movedPrevious = true;
+          }
         }
         await this.adapter.rename(tempPath, this.filePath);
         if (movedPrevious && await this.adapter.exists(backupPath)) {
           await this.adapter.remove(backupPath);
         }
       } catch {
-        if (movedPrevious && !(await this.adapter.exists(this.filePath))) {
-          await this.adapter.rename(backupPath, this.filePath);
+        // Rollback is best effort: if it fails, the last good snapshot still
+        // sits at `.previous`, which read() falls back to. Never let a
+        // rollback failure replace the original error or skip temp cleanup.
+        if (movedPrevious) {
+          try {
+            if (!(await this.adapter.exists(this.filePath))) {
+              await this.adapter.rename(backupPath, this.filePath);
+            }
+          } catch { /* the .previous checkpoint remains readable */ }
         }
         try {
           if (await this.adapter.exists(tempPath)) await this.adapter.remove(tempPath);
@@ -103,6 +139,9 @@ export class EmbeddingsIndexFile {
   }
 
   public async remove(): Promise<void> {
-    if (await this.adapter.exists(this.filePath)) await this.adapter.remove(this.filePath);
+    // Recovery candidates must not resurrect a deliberately removed snapshot.
+    for (const path of [this.previousPath, `${this.filePath}.next`, this.filePath]) {
+      if (await this.adapter.exists(path)) await this.adapter.remove(path);
+    }
   }
 }

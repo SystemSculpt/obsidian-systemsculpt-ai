@@ -65,9 +65,10 @@ export class StandardModal extends Modal {
   protected beginAsyncTask(key: string): ModalAsyncTaskScope {
     this.asyncTaskControllers.get(key)?.abort();
 
-    const AbortControllerCtor = (this.modalEl.ownerDocument.defaultView as any)?.AbortController
+    const ownerWindow = this.modalEl.ownerDocument.defaultView;
+    const AbortControllerCtor = ownerWindow?.AbortController
       ?? AbortController;
-    const controller = new AbortControllerCtor() as AbortController;
+    const controller = new AbortControllerCtor();
     const epoch = this.asyncTaskEpoch;
     this.asyncTaskControllers.set(key, controller);
 

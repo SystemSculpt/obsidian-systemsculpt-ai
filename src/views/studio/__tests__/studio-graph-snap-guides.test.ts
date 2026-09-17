@@ -3,7 +3,7 @@ import {
   resolveStudioGraphSnap,
   STUDIO_SNAP_THRESHOLD_PX,
   type StudioSnapRect,
-} from "../graph-v3/StudioGraphSnapGuides";
+} from "../canvas/StudioGraphSnapGuides";
 
 const THRESHOLD = STUDIO_SNAP_THRESHOLD_PX;
 

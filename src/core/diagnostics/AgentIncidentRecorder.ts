@@ -1,6 +1,7 @@
+import { projectRenderingSnapshot } from "./AgentIncidentRendering";
 import { isThinAgentCommandKind, type ThinAgentCommandKind } from "../../services/managed/ThinAgentV1Contract";
 import { isFirstPartyToolName, type FirstPartyToolName } from "../../tools/toolNames";
-import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
+import type { SupportDiagnosticEvent } from "../../utils/SupportDiagnosticEvent";
 import {
   boundedThinAgentTiming,
   boundedToolDiagnosticItemCount,
@@ -26,6 +27,11 @@ import {
 } from "../../utils/ThinAgentLifecycleSchema";
 import { canonicalJsonStringify, utf8ByteLength } from "./AgentIncidentCanonicalJson";
 import {
+  deriveAgentIncidentMissingFields,
+  terminalTransportReference,
+  type AgentIncidentMissingFieldCode,
+} from "./AgentIncidentCompleteness";
+import {
   AGENT_INCIDENT_CAPTURE_FAILURE_CODES,
   AGENT_INCIDENT_EXCLUDED_DATA_CATEGORIES,
   AGENT_INCIDENT_GROUPING_STRATEGY,
@@ -40,7 +46,6 @@ import {
   AGENT_INCIDENT_MAX_TRANSPORT_BYTES,
   AGENT_INCIDENT_MAX_TRANSPORT_OBSERVATION_COUNT,
   AGENT_INCIDENT_MAX_TRANSPORT_SEGMENTS,
-  AGENT_INCIDENT_MISSING_FIELD_CODES,
   AGENT_INCIDENT_SCHEMA_VERSION,
   AGENT_INCIDENT_TRANSPORT_SEGMENT_CLOSE_REASONS,
   buildAgentIncidentGroupingFingerprint,
@@ -95,7 +100,7 @@ const TRANSPORT_SEGMENT_CLOSE_REASON_SET = new Set<string>(
 const CAPTURE_FAILURE_CODE_SET = new Set<string>(CAPTURE_FAILURE_CODES);
 
 export type AgentIncidentCaptureFailureCode = typeof CAPTURE_FAILURE_CODES[number];
-export type AgentIncidentMissingFieldCode = typeof AGENT_INCIDENT_MISSING_FIELD_CODES[number];
+export type { AgentIncidentMissingFieldCode } from "./AgentIncidentCompleteness";
 export type AgentIncidentTerminalReceipt =
   | "client_received_server_terminal"
   | "client_emitted_local_failure"
@@ -610,9 +615,7 @@ export class AgentIncidentRecorder {
   private readonly frozenByIncidentId = new Map<string, AgentIncidentReport>();
   private readonly frozenByCorrelation = new Map<string, AgentIncidentReport>();
   private readonly frozenCorrelationByReportId = new Map<string, string>();
-  private readonly frozenOrder: string[] = [];
   private readonly settledNonFailure = new Set<string>();
-  private readonly settledNonFailureOrder: string[] = [];
   private readonly now: () => number;
   private readonly createReportId: () => string;
   private readonly maximumFrozenReports: number;
@@ -798,14 +801,6 @@ export class AgentIncidentRecorder {
     return isNonzeroIncidentId(incidentId)
       ? this.frozenByIncidentId.get(incidentId) ?? null
       : null;
-  }
-
-  public getReportByReportId(reportId: string): AgentIncidentReport | null {
-    return this.getByReportId(reportId);
-  }
-
-  public getReportByIncidentId(incidentId: string): AgentIncidentReport | null {
-    return this.getByIncidentId(incidentId);
   }
 
   private createActive(correlation: SafeCorrelation): ActiveIncident {
@@ -1137,9 +1132,8 @@ export class AgentIncidentRecorder {
     if (report.incident.incident_id) {
       this.frozenByIncidentId.set(report.incident.incident_id, report);
     }
-    this.frozenOrder.push(report.report_id);
-    while (this.frozenOrder.length > this.maximumFrozenReports) {
-      const oldestId = this.frozenOrder.shift();
+    while (this.frozenByReportId.size > this.maximumFrozenReports) {
+      const oldestId = this.frozenByReportId.keys().next().value;
       if (!oldestId) break;
       const oldest = this.frozenByReportId.get(oldestId);
       if (!oldest) continue;
@@ -1156,9 +1150,8 @@ export class AgentIncidentRecorder {
 
   private rememberNonFailureSettlement(key: string): void {
     this.settledNonFailure.add(key);
-    this.settledNonFailureOrder.push(key);
-    while (this.settledNonFailureOrder.length > AGENT_INCIDENT_MAX_SETTLED_CORRELATIONS) {
-      const oldest = this.settledNonFailureOrder.shift();
+    while (this.settledNonFailure.size > AGENT_INCIDENT_MAX_SETTLED_CORRELATIONS) {
+      const oldest = this.settledNonFailure.values().next().value;
       if (oldest) this.settledNonFailure.delete(oldest);
     }
   }
@@ -1321,7 +1314,6 @@ function buildReport(
   reportBytes: number,
 ): AgentIncidentReport {
   const terminal = state.terminal!;
-  const missingFields = collectMissingFields(state);
   const collectionFailures = CAPTURE_FAILURE_CODES.flatMap((code) => {
     const count = state.collectionFailures.get(code) ?? 0;
     return count > 0 ? [{ code, count }] : [];
@@ -1356,7 +1348,7 @@ function buildReport(
       lifecycle_event_count: tool.lifecycle_event_count,
     }));
 
-  return {
+  const report: AgentIncidentReport = {
     schema_version: AGENT_INCIDENT_SCHEMA_VERSION,
     report_id: reportId,
     created_at: createdAt,
@@ -1461,7 +1453,7 @@ function buildReport(
     ...(state.rendering ? { rendering: state.rendering } : {}),
     resource_samples: [...state.resources],
     capture_quality: {
-      complete: !truncated && missingFields.length === 0 && collectionFailures.length === 0,
+      complete: false,
       truncated,
       limits: {
         maximum_events: AGENT_INCIDENT_MAX_EVENTS,
@@ -1480,7 +1472,7 @@ function buildReport(
       dropped_resource_sample_count: state.droppedResourceSampleCount,
       dropped_tool_summary_count: state.droppedToolSummaryCount,
       dropped_transport_segment_count: state.droppedTransportSegmentCount,
-      missing_fields: missingFields,
+      missing_fields: [],
       collection_failures: collectionFailures,
     },
     privacy: {
@@ -1491,6 +1483,25 @@ function buildReport(
       host_sync: "may_sync_with_vault",
       automatic_upload: false,
       excluded_data_categories: [...EXCLUDED_DATA_CATEGORIES],
+    },
+  };
+  const missingFields = deriveAgentIncidentMissingFields({
+    incident: report.incident,
+    correlation: report.correlation,
+    environment: report.environment,
+    summary: report.run_summary,
+    runState: report.run_state,
+    rendering: report.rendering,
+    timeline: report.timeline,
+    resourceLength: report.resource_samples.length,
+    transportSegments: report.transport_segments,
+  }, state.explicitMissingFields);
+  return {
+    ...report,
+    capture_quality: {
+      ...report.capture_quality,
+      complete: !truncated && missingFields.length === 0 && collectionFailures.length === 0,
+      missing_fields: missingFields,
     },
   };
 }
@@ -1523,9 +1534,7 @@ function timelineForReport(state: ActiveIncident): AgentIncidentTimelineEvent[] 
     && state.conflictedServerLatencyCorrelationSegments.size === 0
   ) return [...state.timeline];
   return state.timeline.map((event) => {
-    const projected = { ...event } as {
-      -readonly [Key in keyof AgentIncidentTimelineEvent]: AgentIncidentTimelineEvent[Key];
-    };
+    const projected = { ...event };
     if (state.conflictedIdentifiers.has("runId")) delete projected.run_id;
     if (state.conflictedIdentifiers.has("serverRunId")) delete projected.server_run_id;
     if (state.conflictedServerLatencyCorrelationSegments.has(
@@ -1567,102 +1576,6 @@ function serverLatencyCorrelationIdForTerminal(
   }
   const values = new Set(state.serverLatencyCorrelationIdsBySegment.values());
   return values.size === 1 ? values.values().next().value : undefined;
-}
-
-function collectMissingFields(state: ActiveIncident): AgentIncidentMissingFieldCode[] {
-  const missing = new Set(state.explicitMissingFields);
-  if (!state.startedAt) missing.add("run_started");
-  if (!state.terminal?.incident_id) missing.add("server_incident_id");
-  if (!state.terminal?.failure_code) missing.add("failure_code");
-  if (!state.serverRunId) missing.add("server_run_id");
-  if (!state.failureAuthority || state.failureAuthority === "unknown") missing.add("failure_authority");
-  if (!state.failureStage) missing.add("failure_stage");
-  if (!state.failureMechanism) missing.add("failure_mechanism");
-  if (!state.terminalValidation) missing.add("terminal_validation");
-  if (!state.hostProcessState || state.hostProcessState === "unknown") missing.add("host_process_state");
-  if (!state.chatViewState || state.chatViewState === "unknown") missing.add("chat_view_state");
-  if (state.elapsedMs === undefined) missing.add("duration_ms");
-  if (state.assistantTextPartCount === undefined) missing.add("assistant_text_part_count");
-  if (state.assistantTextStreamingPartCount === undefined) missing.add("assistant_text_streaming_part_count");
-  if (state.assistantTextCompletePartCount === undefined) missing.add("assistant_text_complete_part_count");
-  if (state.assistantTextCharacterCount === undefined) missing.add("assistant_text_character_count");
-  if (state.reasoningPartCount === undefined) missing.add("reasoning_part_count");
-  if (state.reasoningStreamingPartCount === undefined) missing.add("reasoning_streaming_part_count");
-  if (state.reasoningCompletePartCount === undefined) missing.add("reasoning_complete_part_count");
-  if (state.reasoningCharacterCount === undefined) missing.add("reasoning_character_count");
-  if (state.assistantOutputPresentBeforeFailure === undefined) {
-    missing.add("assistant_output_present_before_failure");
-  }
-  if (state.assistantOutputRetainedInFailedProjection === undefined) {
-    missing.add("assistant_output_retained_in_failed_projection");
-  }
-  if (!state.runState) missing.add("run_state");
-  if (!state.rendering) missing.add("rendering");
-  if (!state.rendering?.before_terminal_publish) {
-    missing.add("rendering_before_terminal_publish");
-  }
-  if (!state.rendering?.after_terminal_commit) {
-    missing.add("rendering_after_terminal_commit");
-  }
-  if (!state.rendering?.failure_surface_dom_committed) {
-    missing.add("failure_surface_dom_commit");
-  }
-  if (!state.rendering?.failure_surface_paint_opportunity_observed) {
-    missing.add("failure_surface_paint_opportunity");
-  }
-  if (state.resources.length === 0) missing.add("resource_samples");
-  if (state.transportSegments.length === 0) missing.add("transport_segments");
-  const terminalTransport = terminalTransportReference(state.timeline);
-  if (!terminalTransport || !state.transportSegments.some((segment) => (
-    segment.segment_ordinal === terminalTransport.segmentOrdinal
-    && (terminalTransport.commandKind === undefined || segment.command_kind === terminalTransport.commandKind)
-    && (
-      terminalTransport.toolExecutionOrdinal === undefined
-      || segment.tool_execution_ordinal === terminalTransport.toolExecutionOrdinal
-    )
-  ))) {
-    missing.add("terminal_transport_segment");
-  }
-  if (!state.environment.plugin_version) missing.add("environment_plugin_version");
-  if (!state.environment.plugin_build_id) missing.add("environment_plugin_build_id");
-  if (!state.environment.loaded_bundle_sha256) missing.add("environment_loaded_bundle_sha256");
-  if (!state.environment.obsidian_version) missing.add("environment_obsidian_version");
-  if (!state.environment.host_type || state.environment.host_type === "unknown") missing.add("environment_host_type");
-  if (!state.environment.os_family || state.environment.os_family === "unknown") missing.add("environment_os_family");
-  return AGENT_INCIDENT_MISSING_FIELD_CODES.filter((field) => missing.has(field));
-}
-
-function terminalTransportReference(
-  timeline: readonly AgentIncidentTimelineEvent[],
-): Readonly<{
-  segmentOrdinal: number;
-  commandKind?: ThinAgentCommandKind;
-  toolExecutionOrdinal?: number;
-}> | null {
-  let segmentOrdinal: number | undefined;
-  let commandKind: ThinAgentCommandKind | undefined;
-  let toolExecutionOrdinal: number | undefined;
-  for (const event of timeline) {
-    if (event.code !== "response_result_received_failed" && event.code !== "run_finished_failed") continue;
-    if (event.command_segment_ordinal === undefined) continue;
-    if (segmentOrdinal !== undefined && segmentOrdinal !== event.command_segment_ordinal) return null;
-    if (commandKind !== undefined && event.command_kind !== undefined && commandKind !== event.command_kind) return null;
-    if (
-      toolExecutionOrdinal !== undefined
-      && event.tool_execution_ordinal !== undefined
-      && toolExecutionOrdinal !== event.tool_execution_ordinal
-    ) return null;
-    segmentOrdinal = event.command_segment_ordinal;
-    commandKind = commandKind ?? event.command_kind;
-    toolExecutionOrdinal = toolExecutionOrdinal ?? event.tool_execution_ordinal;
-  }
-  return segmentOrdinal === undefined
-    ? null
-    : {
-        segmentOrdinal,
-        ...(commandKind === undefined ? {} : { commandKind }),
-        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-      };
 }
 
 function projectTransportSegment(
@@ -1804,150 +1717,6 @@ function projectRunState(input: AgentIncidentRunStateInput): AgentIncidentRunSta
       pending_regenerate: raw.pendingRegenerate,
       counts_truncated: raw.countsTruncated,
       elapsed_ms_truncated: raw.elapsedMsTruncated,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function projectRenderingSnapshot(
-  input: AgentIncidentRenderingInput,
-): AgentIncidentRenderingSnapshot | null {
-  try {
-    if (!input) return null;
-    const rendererInput = input.renderer;
-    const scrollerInput = input.scroller;
-    if (!rendererInput || !scrollerInput) return null;
-    const raw = {
-      renderState: input.renderState,
-      renderPassCount: input.renderPassCount,
-      pendingRenderCount: input.pendingRenderCount,
-      lastRenderDurationMs: input.lastRenderDurationMs,
-      maxRenderDurationMs: input.maxRenderDurationMs,
-      firstDomCommitObserved: input.firstDomCommitObserved,
-      firstPaintOpportunityObserved: input.firstPaintOpportunityObserved,
-      registeredRowCount: input.registeredRowCount,
-    };
-    const renderer = {
-      renderPassCount: rendererInput.renderPassCount,
-      pendingRenderPassCount: rendererInput.pendingRenderPassCount,
-      lastRenderDurationMs: rendererInput.lastRenderDurationMs,
-      maxRenderDurationMs: rendererInput.maxRenderDurationMs,
-      historicalRowCount: rendererInput.historicalRowCount,
-      historicalPartCount: rendererInput.historicalPartCount,
-      activePartCount: rendererInput.activePartCount,
-      disclosureCount: rendererInput.disclosureCount,
-      openDisclosureCount: rendererInput.openDisclosureCount,
-      activityDisclosureCount: rendererInput.activityDisclosureCount,
-      reasoningDisclosureCount: rendererInput.reasoningDisclosureCount,
-      toolDisclosureCount: rendererInput.toolDisclosureCount,
-      overflowDisclosureCount: rendererInput.overflowDisclosureCount,
-      pendingHydrationCount: rendererInput.pendingHydrationCount,
-      renderingEnabled: rendererInput.renderingEnabled,
-    };
-    const scroller = {
-      mode: scrollerInput.mode,
-      distanceFromEndBucket: scrollerInput.distanceFromEndBucket,
-      registeredRowCount: scrollerInput.registeredRowCount,
-      pendingLayoutMutationCount: scrollerInput.pendingLayoutMutationCount,
-      layoutMutationPending: scrollerInput.layoutMutationPending,
-      geometryUpdatePending: scrollerInput.geometryUpdatePending,
-      programmaticScrollPending: scrollerInput.programmaticScrollPending,
-      submittedPromptAnchorActive: scrollerInput.submittedPromptAnchorActive,
-      destroyed: scrollerInput.destroyed,
-    };
-    const renderPassCount = boundedRenderCount(raw.renderPassCount);
-    const pendingRenderCount = boundedRenderCount(raw.pendingRenderCount);
-    const lastRenderDurationMs = boundedRenderDuration(raw.lastRenderDurationMs);
-    const maxRenderDurationMs = boundedRenderDuration(raw.maxRenderDurationMs);
-    const registeredRowCount = boundedRenderCount(raw.registeredRowCount);
-    const rendererRenderPassCount = boundedRenderCount(renderer.renderPassCount);
-    const rendererPendingRenderPassCount = boundedRenderCount(renderer.pendingRenderPassCount);
-    const rendererLastRenderDurationMs = boundedRenderDuration(renderer.lastRenderDurationMs);
-    const rendererMaxRenderDurationMs = boundedRenderDuration(renderer.maxRenderDurationMs);
-    const historicalRowCount = boundedRenderCount(renderer.historicalRowCount);
-    const historicalPartCount = boundedRenderCount(renderer.historicalPartCount);
-    const activePartCount = boundedRenderCount(renderer.activePartCount);
-    const disclosureCount = boundedRenderCount(renderer.disclosureCount);
-    const openDisclosureCount = boundedRenderCount(renderer.openDisclosureCount);
-    const activityDisclosureCount = boundedRenderCount(renderer.activityDisclosureCount);
-    const reasoningDisclosureCount = boundedRenderCount(renderer.reasoningDisclosureCount);
-    const toolDisclosureCount = boundedRenderCount(renderer.toolDisclosureCount);
-    const overflowDisclosureCount = boundedRenderCount(renderer.overflowDisclosureCount);
-    const pendingHydrationCount = boundedRenderCount(renderer.pendingHydrationCount);
-    const scrollerRegisteredRowCount = boundedRenderCount(scroller.registeredRowCount);
-    const pendingLayoutMutationCount = boundedRenderCount(scroller.pendingLayoutMutationCount);
-    if (
-      !isRenderState(raw.renderState)
-      || renderPassCount === undefined
-      || pendingRenderCount === undefined
-      || lastRenderDurationMs === undefined
-      || maxRenderDurationMs === undefined
-      || registeredRowCount === undefined
-      || rendererRenderPassCount === undefined
-      || rendererPendingRenderPassCount === undefined
-      || rendererLastRenderDurationMs === undefined
-      || rendererMaxRenderDurationMs === undefined
-      || historicalRowCount === undefined
-      || historicalPartCount === undefined
-      || activePartCount === undefined
-      || disclosureCount === undefined
-      || openDisclosureCount === undefined
-      || activityDisclosureCount === undefined
-      || reasoningDisclosureCount === undefined
-      || toolDisclosureCount === undefined
-      || overflowDisclosureCount === undefined
-      || pendingHydrationCount === undefined
-      || scrollerRegisteredRowCount === undefined
-      || pendingLayoutMutationCount === undefined
-      || typeof raw.firstDomCommitObserved !== "boolean"
-      || typeof raw.firstPaintOpportunityObserved !== "boolean"
-      || typeof renderer.renderingEnabled !== "boolean"
-      || !isScrollMode(scroller.mode)
-      || !isScrollDistanceBucket(scroller.distanceFromEndBucket)
-      || typeof scroller.layoutMutationPending !== "boolean"
-      || typeof scroller.geometryUpdatePending !== "boolean"
-      || typeof scroller.programmaticScrollPending !== "boolean"
-      || typeof scroller.submittedPromptAnchorActive !== "boolean"
-      || typeof scroller.destroyed !== "boolean"
-    ) return null;
-    return {
-      render_state: raw.renderState,
-      render_pass_count: renderPassCount,
-      pending_render_count: pendingRenderCount,
-      last_render_duration_ms: lastRenderDurationMs,
-      max_render_duration_ms: maxRenderDurationMs,
-      first_dom_commit_observed: raw.firstDomCommitObserved,
-      first_paint_opportunity_observed: raw.firstPaintOpportunityObserved,
-      registered_row_count: registeredRowCount,
-      renderer: {
-        render_pass_count: rendererRenderPassCount,
-        pending_render_pass_count: rendererPendingRenderPassCount,
-        last_render_duration_ms: rendererLastRenderDurationMs,
-        max_render_duration_ms: rendererMaxRenderDurationMs,
-        historical_row_count: historicalRowCount,
-        historical_part_count: historicalPartCount,
-        active_part_count: activePartCount,
-        disclosure_count: disclosureCount,
-        open_disclosure_count: openDisclosureCount,
-        activity_disclosure_count: activityDisclosureCount,
-        reasoning_disclosure_count: reasoningDisclosureCount,
-        tool_disclosure_count: toolDisclosureCount,
-        overflow_disclosure_count: overflowDisclosureCount,
-        pending_hydration_count: pendingHydrationCount,
-        rendering_enabled: renderer.renderingEnabled,
-      },
-      scroller: {
-        mode: scroller.mode,
-        distance_from_end_bucket: scroller.distanceFromEndBucket,
-        registered_row_count: scrollerRegisteredRowCount,
-        pending_layout_mutation_count: pendingLayoutMutationCount,
-        layout_mutation_pending: scroller.layoutMutationPending,
-        geometry_update_pending: scroller.geometryUpdatePending,
-        programmatic_scroll_pending: scroller.programmaticScrollPending,
-        submitted_prompt_anchor_active: scroller.submittedPromptAnchorActive,
-        destroyed: scroller.destroyed,
-      },
     };
   } catch {
     return null;
@@ -2221,40 +1990,10 @@ function isConnectionState(value: unknown): value is AgentIncidentRunState["conn
   return value === "idle" || value === "connecting" || value === "open" || value === "closed";
 }
 
-function isRenderState(value: unknown): value is AgentIncidentRenderingSnapshot["render_state"] {
-  return value === "idle"
-    || value === "frame_pending"
-    || value === "queued"
-    || value === "rendering"
-    || value === "rendering_with_pending";
-}
-
-function isScrollMode(value: unknown): value is AgentIncidentRenderingSnapshot["scroller"]["mode"] {
-  return value === "end" || value === "manual";
-}
-
-function isScrollDistanceBucket(
-  value: unknown,
-): value is AgentIncidentRenderingSnapshot["scroller"]["distance_from_end_bucket"] {
-  return value === "at_end"
-    || value === "near_end"
-    || value === "within_viewport"
-    || value === "far_from_end"
-    || value === "unknown";
-}
-
 function boundedWholeNumber(value: unknown, maximum: number): number | undefined {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum
     ? value as number
     : undefined;
-}
-
-function boundedRenderCount(value: unknown): number | undefined {
-  return boundedWholeNumber(value, AGENT_INCIDENT_MAX_RENDER_COUNT);
-}
-
-function boundedRenderDuration(value: unknown): number | undefined {
-  return boundedWholeNumber(value, AGENT_INCIDENT_MAX_RENDER_DURATION_MS);
 }
 
 function positiveInteger(value: unknown): number | undefined {

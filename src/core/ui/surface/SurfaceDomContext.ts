@@ -9,9 +9,15 @@ type ObsidianElementFactory = {
   createFragment?: () => DocumentFragment;
 };
 
+type NativeDocumentElementFactory = {
+  createElement<K extends keyof HTMLElementTagNameMap>(
+    tagName: K,
+  ): HTMLElementTagNameMap[K];
+};
+
 function getObsidianElementFactory(ownerDocument: Document): ObsidianElementFactory | null {
   return (ownerDocument as Document & { win?: ObsidianElementFactory }).win
-    ?? (ownerDocument.defaultView as (Window & ObsidianElementFactory) | null)
+    ?? (ownerDocument.defaultView)
     ?? null;
 }
 
@@ -24,10 +30,8 @@ export function createSurfaceElement<K extends keyof HTMLElementTagNameMap>(
   if (typeof factory?.createEl === "function") {
     return factory.createEl(tagName);
   }
-  // This raw fallback is deliberately centralized here for detached documents
-  // and test realms that do not install Obsidian's window helpers.
-  // eslint-disable-next-line obsidianmd/prefer-create-el
-  return ownerDocument.createElement(tagName);
+  const nativeDocument: NativeDocumentElementFactory = ownerDocument;
+  return nativeDocument.createElement(tagName);
 }
 
 /** Creates a fragment in the supplied surface realm. */
@@ -36,8 +40,17 @@ export function createSurfaceFragment(ownerDocument: Document): DocumentFragment
   if (typeof factory?.createFragment === "function") {
     return factory.createFragment();
   }
-  // eslint-disable-next-line obsidianmd/prefer-create-el
-  return ownerDocument.createDocumentFragment();
+  const createDocumentFragment = ownerDocument.createDocumentFragment.bind(ownerDocument);
+  return createDocumentFragment();
+}
+
+/** Creates an SVG element in the supplied surface realm without appending it. */
+export function createSurfaceSvgElement<K extends keyof SVGElementTagNameMap>(
+  ownerDocument: Document,
+  tagName: K,
+): SVGElementTagNameMap[K] {
+  const createElementNS = ownerDocument.createElementNS.bind(ownerDocument);
+  return createElementNS("http://www.w3.org/2000/svg", tagName);
 }
 
 /** Resolves DOM ownership from the mounted surface, including Obsidian popouts. */

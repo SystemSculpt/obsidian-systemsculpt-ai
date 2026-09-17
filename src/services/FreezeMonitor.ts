@@ -12,7 +12,7 @@
 export type Breadcrumb = {
   t: number;          // performance.now timestamp
   label: string;      // event label
-  data?: Record<string, any>; // optional metadata
+  data?: Record<string, unknown>; // optional metadata
 };
 
 export class FreezeMonitor {
@@ -53,7 +53,7 @@ export class FreezeMonitor {
     }
   }
 
-  public static mark(label: string, data?: Record<string, any>) {
+  public static mark(label: string, data?: Record<string, unknown>) {
     if (!this.enabled) return;
     const entry: Breadcrumb = { t: performance.now(), label, data };
     this.breadcrumbs.push(entry);
@@ -85,17 +85,18 @@ export class FreezeMonitor {
         }
       });
       window.dispatchEvent(event);
-    } catch {}
+    } catch {
+      // Freeze reporting must never affect the monitored UI thread.
+    }
   }
 }
 
-function safeJson(obj: Record<string, any>): string {
+function safeJson(obj: Record<string, unknown>): string {
   try {
     return JSON.stringify(obj);
-  } catch (_) {
+  } catch {
     return '[unserializable]';
   }
 }
-
 
 

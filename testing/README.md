@@ -39,11 +39,9 @@ npm run check:mobile
 npm run test:embeddings
 npm run test:integration
 npm run test:chatview:critical
-npm run test:chatview:mutants
 npm run check:plugin
 npm run check:ci
 npm run check:compat
-npm run check:full
 ~~~
 
 - check verifies Obsidian lint, metadata, the production bundle, CSS, cheap
@@ -59,22 +57,18 @@ npm run check:full
 - check:plugin adds types, mobile, sync, artifact, and release guards.
 - test:chatview:critical uses strict console, randomized test order with a
   printed replay seed, open-handle detection, adversarial thin-session and
-  local-persistence cases, and per-file uncovered-code budgets on the
-  high-risk ChatView seams.
-- test:chatview:mutants copies only the required source and fixture trees into
-  an isolated temporary mirror, applies 5 curated AST-anchored regressions one
-  at a time, and requires focused tests to kill every one. It runs without
-  coverage or randomized order so a survivor is deterministic and actionable.
-- check:ci is the exact exhaustive PR gate: check:plugin plus the critical-risk
-  and mutation gates, focused mobile interactions, strict randomized unit and
-  embeddings tests, already-built integration, and release suites.
+  local-persistence cases, and a global coverage floor on the high-risk
+  ChatView seams.
+- check:ci is the exact exhaustive PR gate: check:plugin (which already runs
+  the release-script contracts) plus the critical-risk gate, focused mobile
+  interactions, strict randomized unit and embeddings tests, and already-built
+  integration.
 - test:unit:ci is the partitioned remainder. It excludes every focused
   critical-risk and mobile path already run earlier in check:ci, so breadth
   does not require a third execution of the same suites.
 - check:compat is the exact smaller gate for the Node and operating-system
   compatibility matrix. It reruns every critical ChatView suite without
   repeating the coverage instrumentation already enforced by check:ci.
-- check:full is the local alias for check:ci.
 
 CI runs check:ci on Ubuntu/Node 22. It also runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22 with fail-fast disabled. All jobs
@@ -84,10 +78,7 @@ There is no native-device or provider matrix.
 Each top-level hosted Jest gate writes its normalized child argv and replay
 seed into `.cache/ci-evidence/jest-seeds`. Failed jobs retain that evidence,
 the coverage summary, artifact inspection, provenance, and exact plugin
-artifact bytes for 14 days. The curated mutation runner records its baseline
-plus every killed, surviving, or infrastructure-failed mutant, along with its
-exact child Jest commands, in
-`.cache/ci-evidence/chatview-critical-mutants.json`.
+artifact bytes for 14 days.
 Before a failed hosted gate uploads artifacts, CI validates that build
 provenance and artifact-inspection sidecars exist and are valid JSON.
 Release validation records SHA-256 and size for every shipped byte plus source

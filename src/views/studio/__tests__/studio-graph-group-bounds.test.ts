@@ -1,5 +1,5 @@
 import type { StudioProjectV1 } from "../../../studio/types";
-import { computeStudioGraphGroupBounds } from "../graph-v3/StudioGraphGroupBounds";
+import { computeStudioGraphGroupBounds } from "../canvas/StudioGraphGroupBounds";
 
 function createProject(): StudioProjectV1 {
   return {

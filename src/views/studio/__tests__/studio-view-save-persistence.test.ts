@@ -9,6 +9,12 @@ type FlushContext = {
 };
 
 type OnCloseContext = {
+  mediaModelPicker: { dispose: jest.Mock<void, []> };
+  shapeController: { cancelDrawGesture: jest.Mock; registerLayerHandle: jest.Mock };
+  assetPreviews: { dispose: jest.Mock<void, []> };
+  runObservation: { dispose: jest.Mock<void, []> };
+  activity: { dispose: jest.Mock<void, []> };
+  automaticLayout: { dispose: jest.Mock<void, []> };
   detachWindowMigration: jest.Mock<void, []> | null;
   unbindOwnerWindowEvents: jest.Mock<void, []>;
   unbindVaultEvents: jest.Mock<void, []>;
@@ -57,6 +63,12 @@ describe("SystemSculptStudioView save persistence", () => {
 
   it("closes through the project session controller and tears down UI overlays", async () => {
     const context: OnCloseContext = {
+      mediaModelPicker: { dispose: jest.fn() },
+      shapeController: { cancelDrawGesture: jest.fn(), registerLayerHandle: jest.fn() },
+      assetPreviews: { dispose: jest.fn() },
+      runObservation: { dispose: jest.fn() },
+      activity: { dispose: jest.fn() },
+      automaticLayout: { dispose: jest.fn() },
       detachWindowMigration: jest.fn(),
       unbindOwnerWindowEvents: jest.fn(),
       unbindVaultEvents: jest.fn(),
@@ -79,8 +91,14 @@ describe("SystemSculptStudioView save persistence", () => {
     const nodeContextDestroy = context.nodeContextMenuOverlay?.destroy;
     const nodeActionDestroy = context.nodeActionContextMenuOverlay?.destroy;
 
-    await onClose.call(context);
+    Object.assign(context, { closeStudioView: (SystemSculptStudioView as any).prototype.closeStudioView.bind(context) });
+    await Promise.all([onClose.call(context), onClose.call(context)]);
 
+    expect(context.shapeController.cancelDrawGesture).toHaveBeenCalledTimes(1);
+    expect(context.shapeController.registerLayerHandle).toHaveBeenCalledWith(null);
+    expect(context.runObservation.dispose).toHaveBeenCalledTimes(1);
+    expect(context.mediaModelPicker.dispose).toHaveBeenCalledTimes(1);
+    expect(context.activity.dispose).toHaveBeenCalledTimes(1);
     expect(context.projectSessionController.close).toHaveBeenCalledTimes(1);
     expect(context.clipboardAndDropController.dispose).toHaveBeenCalledTimes(1);
     expect(nodeContextDestroy).toHaveBeenCalledTimes(1);

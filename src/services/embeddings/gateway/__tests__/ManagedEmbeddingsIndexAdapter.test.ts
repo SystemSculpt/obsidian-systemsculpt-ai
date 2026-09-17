@@ -1,4 +1,4 @@
-import { sha256HexFromBytesPortable } from "../../../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../../../utils/sha256";
 import type { ManagedTransportResult } from "../../../managed/ManagedTypes";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,

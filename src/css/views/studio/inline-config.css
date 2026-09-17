@@ -8,13 +8,13 @@
  *         label / help / control
  * ------------------------------------------------------------------ */
 .ss-studio-node-inline-config {
-  padding: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-3);
 }
 
 .ss-studio-node-inline-config-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--ss-space-2);
+  gap: var(--ss-space-3) var(--ss-space-3);
 }
 
 .ss-studio-node-inline-config-field {
@@ -34,26 +34,25 @@
   display: none;
 }
 
+/* Sentence-case labels; any help text rides the label's tooltip. */
 .ss-studio-node-inline-config-label {
   font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
-  letter-spacing: var(--ss-tracking-wide);
-}
-
-.ss-studio-node-inline-config-help {
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
+  font-weight: var(--ss-weight-medium);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-studio-node-inline-config-input,
 .ss-studio-node-inline-config-select,
 .ss-studio-node-inline-config-path-input {
   width: 100%;
-  min-height: 26px;
+  min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-2);
   background-color: var(--ss-surface-sunken);
   border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
+  border-radius: var(--ss-radius-sm);
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
   transition: var(--ss-transition-colors);
@@ -68,13 +67,20 @@
 .ss-studio-node-inline-config-textarea {
   width: 100%;
   min-height: 60px;
-  padding: var(--ss-space-1) var(--ss-space-2);
+  padding: var(--ss-space-2);
   background-color: var(--ss-surface-sunken);
   border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
+  border-radius: var(--ss-radius-sm);
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
   resize: vertical;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-node-inline-config-textarea:focus {
+  border-color: var(--ss-accent);
+  outline: none;
 }
 
 .ss-studio-node-inline-config-select-button-group {
@@ -125,10 +131,10 @@
   align-items: center;
   gap: var(--ss-space-1);
   flex-shrink: 0;
-  min-height: 26px;
+  min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-2);
   border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
+  border-radius: var(--ss-radius-sm);
   background-color: var(--ss-surface-0);
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);

@@ -10,8 +10,6 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     storeVectors: jest.fn(),
     removeCurrentManagedGeneration: jest.fn(),
     removeByPath: jest.fn(),
-    removeByPathExceptIds: jest.fn(),
-    moveVectorId: jest.fn(),
     renameByPath: jest.fn(),
     renameByDirectory: jest.fn(),
     removeByDirectory: jest.fn(),
@@ -40,6 +38,7 @@ jest.mock("../embeddings/processing/EmbeddingsProcessor", () => {
 });
 
 import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
+import { TFile } from "obsidian";
 
 function createPluginStub(overrides?: Partial<any>) {
   const settings = {
@@ -77,11 +76,11 @@ function createPluginStub(overrides?: Partial<any>) {
       emit: jest.fn(),
       on: jest.fn(() => jest.fn()),
     },
-    getManagedCapabilityClient: jest.fn(() => ({
-      getEmbeddingsIndex: jest.fn(() => ({
+    getManagedCapabilityGraph: jest.fn(() => ({
+      embeddingsIndex: {
         activeGeneration: undefined,
         metadata: undefined,
-      })),
+      },
     })),
     ...(overrides || {}),
   };
@@ -90,6 +89,24 @@ function createPluginStub(overrides?: Partial<any>) {
 describe("EmbeddingsManager exclusions", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it.each([
+    ["Private/**/*.md", "Private/Note.md", true],
+    ["Private/**/*.md", "Private/Deep/Folder/Note.md", true],
+    ["Private/*.md", "Private/Deep/Note.md", false],
+    ["Private/?.md", "Private/A.md", true],
+    ["Private/?.md", "Private/AB.md", false],
+    ["[draft]*.md", "Notes/[draft] hello.md", true],
+    ["*.MD", "Notes/example.md", true],
+  ])("applies %s to %s through the file-index interface", (pattern, path, excluded) => {
+    const plugin = createPluginStub({ settings: {
+      embeddingsExclusions: { folders: [], patterns: [pattern], ignoreChatHistory: false },
+    } });
+    const file = new TFile({ path, name: path.split("/").pop(), extension: "md", stat: { mtime: 1, size: 10 } });
+    plugin.app.vault.getAbstractFileByPath.mockReturnValue(file);
+    const manager = new EmbeddingsManager(plugin.app as any, plugin as any);
+    expect(manager.getFileIndexSnapshot(path).state === "excluded").toBe(excluded);
   });
 
   it("excludes files in chatsDirectory and savedChatsDirectory when ignoreChatHistory is enabled", () => {

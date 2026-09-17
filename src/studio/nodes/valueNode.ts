@@ -22,7 +22,7 @@ export const valueNode: StudioNodeDefinition = {
   async execute(context) {
     const inputs = context.inputs as Record<string, StudioJsonValue>;
     const hasInput = hasKey(inputs, "value");
-    const config = context.node.config as Record<string, StudioJsonValue>;
+    const config = context.node.config;
     const hasSeed = hasKey(config, SEEDED_VALUE_CONFIG_KEY);
     const value = hasInput
       ? inputs.value

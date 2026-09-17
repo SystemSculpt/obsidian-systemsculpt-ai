@@ -1,6 +1,7 @@
+import { getStudioLayoutAnchoredNodeIds } from "./StudioGraphLayout";
 import type { StudioNodeInstance, StudioProjectV1 } from "./types";
 
-export type DeepReadonly<T> = T extends (...args: any[]) => any
+export type DeepReadonly<T> = T extends (...args: unknown[]) => unknown
   ? T
   : T extends readonly (infer U)[]
     ? readonly DeepReadonly<U>[]
@@ -16,9 +17,13 @@ export function cloneStudioProjectSnapshot(project: StudioProjectV1): StudioProj
 }
 
 export function readonlyStudioProjectSnapshot(project: StudioProjectV1): ReadonlyStudioProjectSnapshot {
-  return cloneStudioProjectSnapshot(project) as ReadonlyStudioProjectSnapshot;
+  return cloneStudioProjectSnapshot(project);
 }
 
 export function serializeStudioProjectSnapshot(project: StudioProjectV1): string {
-  return JSON.stringify(project);
+  if (project.graph.layout?.mode !== "managed") return JSON.stringify(project);
+  const snapshot = cloneStudioProjectSnapshot(project);
+  const anchored = getStudioLayoutAnchoredNodeIds(project);
+  for (const node of snapshot.graph.nodes) if (!anchored.has(node.id)) node.position = { x: 0, y: 0 };
+  return JSON.stringify(snapshot);
 }

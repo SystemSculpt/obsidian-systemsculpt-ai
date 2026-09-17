@@ -60,7 +60,7 @@ export class PostProcessingService {
     };
 
     try {
-      const result = await this.plugin.getManagedCapabilityClient().generateText(operation);
+      const result = await this.plugin.getManagedCapabilityGraph().textGeneration.generate(operation);
       const cleanedText = result.text.trim();
       if (result.finishReason !== "stop" || !cleanedText) {
         return {

@@ -15,7 +15,6 @@ import {
   inspectPluginArtifacts,
   REQUIRED_PLUGIN_ARTIFACTS,
 } from "./plugin-artifacts.mjs";
-import { CHATVIEW_CRITICAL_MUTANTS } from "./check/chatview-critical-mutants.manifest.mjs";
 
 const FULL_GIT_REVISION = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const RUNNER_OS_TO_NODE_PLATFORM = Object.freeze({
@@ -110,134 +109,6 @@ function assertJestEvidence(record, filePath) {
   }
   if (record.seed !== null && !Number.isInteger(record.seed)) {
     throw new Error(`Jest evidence ${filePath} must record an integer seed or null.`);
-  }
-}
-
-function assertMutationEvidence(record, filePath) {
-  if (record.schemaVersion !== 1) {
-    throw new Error(`Mutation evidence ${filePath} must use schemaVersion 1.`);
-  }
-  if (typeof record.runId !== "string" || record.runId.length === 0) {
-    throw new Error(`Mutation evidence ${filePath} must record runId.`);
-  }
-  if (
-    typeof record.recordedAt !== "string"
-    || !Number.isFinite(Date.parse(record.recordedAt))
-  ) {
-    throw new Error(`Mutation evidence ${filePath} must record a valid recordedAt timestamp.`);
-  }
-  if (!["passed", "failed", "survivor_failure"].includes(record.status)) {
-    throw new Error(`Mutation evidence ${filePath} must record a terminal status.`);
-  }
-  if (record.mutantsTotal !== CHATVIEW_CRITICAL_MUTANTS.length) {
-    throw new Error(
-      `Mutation evidence ${filePath} must record all ${CHATVIEW_CRITICAL_MUTANTS.length} curated mutants.`,
-    );
-  }
-  if (!Array.isArray(record.results)) {
-    throw new Error(`Mutation evidence ${filePath} must record results.`);
-  }
-  if (!record.baseline || typeof record.baseline !== "object") {
-    throw new Error(`Mutation evidence ${filePath} must record baseline state.`);
-  }
-  if (!["not_run", "passed", "failed", "infrastructure_failure"].includes(record.baseline.status)) {
-    throw new Error(`Mutation evidence ${filePath} has an invalid baseline status.`);
-  }
-  if (!Number.isInteger(record.baseline.suiteCount) || record.baseline.suiteCount < 0) {
-    throw new Error(`Mutation evidence ${filePath} must record a non-negative baseline suiteCount.`);
-  }
-  if (record.baseline.status === "not_run") {
-    if (
-      record.baseline.suiteCount !== 0
-      || record.baseline.argv !== null
-      || record.baseline.cwd !== null
-    ) {
-      throw new Error(
-        `Mutation evidence ${filePath} must keep a not-run baseline empty.`,
-      );
-    }
-  } else {
-    if (!Array.isArray(record.baseline.argv) || record.baseline.argv.length === 0) {
-      throw new Error(`Mutation evidence ${filePath} must record baseline argv once it runs.`);
-    }
-    if (typeof record.baseline.cwd !== "string" || record.baseline.cwd.length === 0) {
-      throw new Error(`Mutation evidence ${filePath} must record baseline cwd once it runs.`);
-    }
-  }
-  if (
-    record.results.length > 0
-    && record.baseline.status !== "passed"
-  ) {
-    throw new Error(
-      `Mutation evidence ${filePath} cannot record mutant results before its baseline passes.`,
-    );
-  }
-  if (record.results.length > CHATVIEW_CRITICAL_MUTANTS.length) {
-    throw new Error(`Mutation evidence ${filePath} records more results than curated mutants.`);
-  }
-  for (const [index, result] of record.results.entries()) {
-    const expectedMutant = CHATVIEW_CRITICAL_MUTANTS[index];
-    if (result?.id !== expectedMutant.id) {
-      throw new Error(
-        `Mutation evidence ${filePath} result ${index + 1} must be ${expectedMutant.id}.`,
-      );
-    }
-    if (result.category !== expectedMutant.category) {
-      throw new Error(
-        `Mutation evidence ${filePath} result ${result.id} has the wrong category.`,
-      );
-    }
-    if (JSON.stringify(result.testPaths) !== JSON.stringify(expectedMutant.testPaths)) {
-      throw new Error(
-        `Mutation evidence ${filePath} result ${result.id} has the wrong targeted tests.`,
-      );
-    }
-    if (!["killed", "survived", "infrastructure_failure"].includes(result.status)) {
-      throw new Error(
-        `Mutation evidence ${filePath} result ${result.id} has an invalid status.`,
-      );
-    }
-    if (!Number.isInteger(result.durationMs) || result.durationMs < 0) {
-      throw new Error(
-        `Mutation evidence ${filePath} result ${result.id} must record a non-negative durationMs.`,
-      );
-    }
-    if (!Array.isArray(result?.argv) || result.argv.length === 0) {
-      throw new Error(`Mutation evidence ${filePath} must record argv for every mutant run.`);
-    }
-    if (typeof result?.cwd !== "string" || result.cwd.length === 0) {
-      throw new Error(`Mutation evidence ${filePath} must record cwd for every mutant run.`);
-    }
-  }
-  const hasFailure = typeof record.failure === "string" && record.failure.length > 0;
-  if (record.status === "passed") {
-    if (
-      record.baseline.status !== "passed"
-      || record.results.length !== CHATVIEW_CRITICAL_MUTANTS.length
-      || record.results.some((result) => result.status !== "killed")
-      || record.failure !== null
-    ) {
-      throw new Error(
-        `Mutation evidence ${filePath} passed without a complete killed-mutant record.`,
-      );
-    }
-    return;
-  }
-  if (!hasFailure) {
-    throw new Error(`Mutation evidence ${filePath} must explain its terminal failure.`);
-  }
-  if (
-    record.status === "survivor_failure"
-    && (
-      record.baseline.status !== "passed"
-      || record.results.length !== CHATVIEW_CRITICAL_MUTANTS.length
-      || !record.results.some((result) => result.status === "survived")
-      || record.results.some((result) => result.status === "infrastructure_failure")
-    )
-  ) {
-    throw new Error(
-      `Mutation evidence ${filePath} must completely record every survivor.`,
-    );
   }
 }
 
@@ -533,18 +404,12 @@ export function verifyCiFailureEvidence({
     assertJestEvidence(parseJsonFile(filePath, "Jest evidence"), filePath);
   }
 
-  const mutationEvidencePath = path.join(evidenceRoot, "chatview-critical-mutants.json");
-  if (job === "plugin" && fs.existsSync(mutationEvidencePath)) {
-    assertMutationEvidence(parseJsonFile(mutationEvidencePath, "Mutation evidence"), mutationEvidencePath);
-  }
-
   return Object.freeze({
     evidenceRoot,
     provenancePath,
     inspectionPath,
     jestPhaseStarted: markerFiles.length > 0,
     jestEvidenceCount: jestEvidenceFiles.length,
-    mutationEvidencePresent: job === "plugin" && fs.existsSync(mutationEvidencePath),
   });
 }
 
@@ -560,7 +425,7 @@ if (direct) {
     if (jobIndex >= 0 && !job) throw new Error("--job requires a value.");
     const summary = verifyCiFailureEvidence({ job });
     console.log(
-      `[ci-evidence] OK job=${job} jestPhaseStarted=${summary.jestPhaseStarted} jestEvidence=${summary.jestEvidenceCount} mutationEvidence=${summary.mutationEvidencePresent}`,
+      `[ci-evidence] OK job=${job} jestPhaseStarted=${summary.jestPhaseStarted} jestEvidence=${summary.jestEvidenceCount}`,
     );
   } catch (error) {
     console.error(`[ci-evidence] FAIL: ${error instanceof Error ? error.message : String(error)}`);

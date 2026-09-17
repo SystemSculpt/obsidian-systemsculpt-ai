@@ -51,9 +51,31 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
     app.vault.read.mockImplementation(app.vault.cachedRead);
     app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    app.workspace.offref = jest.fn();
 
     return { app, files };
   };
+
+  it("invalidates pending index reads when destroyed", async () => {
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+    let releaseRead!: (text: string) => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    const pendingRead = new Promise<string>((resolve) => { releaseRead = resolve; });
+    (app.vault.cachedRead as jest.Mock).mockImplementation(() => {
+      readStarted();
+      return pendingRead;
+    });
+    const indexing = engine.startIndexing();
+    await started;
+    engine.destroy();
+    releaseRead("late orange content");
+    await indexing;
+    expect((engine as any).index.size).toBe(0);
+    expect((engine as any).tokenIndex.size).toBe(0);
+    expect((engine as any).contentIndexReady).toBe(false);
+  });
 
   it("returns matches in Fast (lexical) mode for body content", async () => {
     const { app } = buildFixture();

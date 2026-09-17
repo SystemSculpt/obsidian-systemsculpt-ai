@@ -1,4 +1,5 @@
 import { normalizePath } from "obsidian";
+import { replaceControlCharacters } from "../utils/characterValidation";
 import { STUDIO_PROJECT_EXTENSION } from "./types";
 
 export const DEFAULT_STUDIO_PROJECTS_DIR = "SystemSculpt/Studio" as const;
@@ -14,9 +15,9 @@ export function sanitizeStudioProjectName(name: string): string {
     return DEFAULT_STUDIO_PROJECT_NAME;
   }
 
-  const safe = raw
+  const safe = replaceControlCharacters(raw, " ")
     // Block path separators and filesystem-reserved characters.
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+    .replace(/[<>:"/\\|?*]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")
     .trim();

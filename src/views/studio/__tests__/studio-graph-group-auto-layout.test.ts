@@ -1,5 +1,5 @@
 import type { StudioProjectV1 } from "../../../studio/types";
-import { autoAlignGroupNodes } from "../graph-v3/StudioGraphGroupAutoLayout";
+import { autoAlignGroupNodes } from "../../../studio/StudioGraphGroupAutoLayout";
 
 function createProject(): StudioProjectV1 {
   return {

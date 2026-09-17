@@ -3,14 +3,8 @@ import type {
   StudioProjectSessionAutosaveMode,
   StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
-import {
-  STUDIO_GRAPH_CANVAS_BASE_HEIGHT,
-  STUDIO_GRAPH_CANVAS_BASE_WIDTH,
-} from "./graph-v3/StudioGraphCanvasBounds";
-import type { StudioGraphNodeResizePatch } from "./graph-v3/StudioGraphNodeCardTypes";
+import type { StudioGraphNodeResizePatch } from "./canvas/StudioGraphNodeCardTypes";
 
-export const STUDIO_GRAPH_CANVAS_WIDTH = STUDIO_GRAPH_CANVAS_BASE_WIDTH;
-export const STUDIO_GRAPH_CANVAS_HEIGHT = STUDIO_GRAPH_CANVAS_BASE_HEIGHT;
 export const STUDIO_GRAPH_MIN_ZOOM = 0.02;
 export const STUDIO_GRAPH_OVERVIEW_MIN_ZOOM = 0.005;
 export const STUDIO_GRAPH_MAX_ZOOM = 5;
@@ -88,6 +82,7 @@ export type StudioGraphInteractionHost = {
    * Diagram half of the one canvas selection. The graph owns the marquee and
    * the node drag; these carry the selected shapes through the same gesture.
    */
+  clearDiagramSelection?: () => void;
   beginDiagramMarquee?: () => void;
   selectDiagramInBounds?: (
     bounds: { left: number; top: number; right: number; bottom: number },

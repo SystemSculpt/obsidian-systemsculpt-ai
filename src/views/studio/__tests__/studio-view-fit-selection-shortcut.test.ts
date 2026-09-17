@@ -1,11 +1,14 @@
 /** @jest-environment jsdom */
 
+import { App, Scope, type WorkspaceLeaf } from "obsidian";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
 type KeydownContext = {
   isActiveStudioView: jest.Mock<boolean, []>;
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   fitSelectedGraphNodesInViewport: jest.Mock<boolean, []>;
+  fitGraphOverviewInViewport: jest.Mock<boolean, []>;
+  arrangeGraphFromCommand: jest.Mock<unknown, []>;
   clipboardAndDropController: {
     copySelectedGraphNodes: jest.Mock<boolean, []>;
     cutSelectedGraphNodes: jest.Mock<boolean, []>;
@@ -43,6 +46,8 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     isActiveStudioView: jest.fn(() => true),
     isEditableKeyboardTarget: jest.fn(() => false),
     fitSelectedGraphNodesInViewport: jest.fn(() => true),
+    fitGraphOverviewInViewport: jest.fn(() => true),
+    arrangeGraphFromCommand: jest.fn(() => ({})),
     clipboardAndDropController: {
       copySelectedGraphNodes: jest.fn(() => false),
       cutSelectedGraphNodes: jest.fn(() => false),
@@ -77,6 +82,81 @@ function createKeydownEvent(overrides?: Partial<KeydownEventLike>): KeyboardEven
 }
 
 describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
+  it.each(["a", "f"])("handles Mod+%s in the view scope before host bindings, only once", (key) => {
+    const app = new App();
+    app.scope = new Scope();
+    const view = new SystemSculptStudioView({ app } as WorkspaceLeaf, {} as any);
+    jest.spyOn(view as any, "isActiveStudioView").mockReturnValue(true);
+    const fit = jest.spyOn(view as any, "fitSelectedGraphNodesInViewport").mockReturnValue(true);
+    const arrange = jest.spyOn(view, "arrangeGraphFromCommand").mockReturnValue({} as any);
+    const scope = view.scope as unknown as {
+      parent: Scope;
+      keys: { key: string; modifiers: string[]; func: (event: KeyboardEvent) => unknown }[];
+    };
+    const binding = scope.keys.find((entry) => entry.key === key)!;
+    const event = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
+
+    expect(scope.parent).toBe(app.scope);
+    expect(binding.modifiers).toEqual(["Mod"]);
+    expect(binding.func(event)).toBe(false);
+    (view as any).handleWindowKeyDown(event);
+    expect(key === "f" ? fit : arrange).toHaveBeenCalledTimes(1);
+
+    const fieldEvent = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
+    Object.defineProperty(fieldEvent, "target", { value: document.createElement("textarea") });
+    expect(binding.func(fieldEvent)).toBeUndefined();
+    expect(fieldEvent.defaultPrevented).toBe(false);
+    expect(key === "f" ? fit : arrange).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["metaKey", "ctrlKey"])("fits selected nodes with %s+F", (modifier) => {
+    const context = createContext();
+    const event = createKeydownEvent({
+      key: "f", code: "KeyF", metaKey: false, shiftKey: false, [modifier]: true,
+    });
+
+    handleWindowKeyDown.call(context, event);
+
+    expect(context.fitSelectedGraphNodesInViewport).toHaveBeenCalledTimes(1);
+    expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it("fits the whole graph with Mod+F when nothing is selected", () => {
+    const context = createContext({ fitSelectedGraphNodesInViewport: jest.fn(() => false) });
+    const event = createKeydownEvent({ key: "f", code: "KeyF", shiftKey: false });
+
+    handleWindowKeyDown.call(context, event);
+
+    expect(context.fitGraphOverviewInViewport).toHaveBeenCalledTimes(1);
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["a", "f"])("preserves Mod+%s in text fields and embedded editors", (key) => {
+    const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
+    const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
+
+    handleWindowKeyDown.call(context, event);
+
+    expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
+    expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
+    expect(context.arrangeGraphFromCommand).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it.each(["a", "f"])("ignores Mod+%s outside the active Studio view", (key) => {
+    const context = createContext({ isActiveStudioView: jest.fn(() => false) });
+    const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
+
+    handleWindowKeyDown.call(context, event);
+
+    expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
+    expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
+    expect(context.arrangeGraphFromCommand).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
   it("handles Mod+Shift+1 even when focus is inside an editable studio target", () => {
     const context = createContext({
       isEditableKeyboardTarget: jest.fn(() => true),

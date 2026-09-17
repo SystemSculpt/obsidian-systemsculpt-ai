@@ -1,3 +1,4 @@
+import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 import { retryAfterHeaderMs } from "./ManagedJobObservation";
@@ -60,6 +61,27 @@ export interface ManagedUploadedImageInput {
 }
 export interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
 type JsonObject = Record<string, unknown>;
+type PreparedImageInputsResponse = {
+  uploadId: string;
+  inputs: ManagedUploadedImageInput[];
+  internalUploads: Array<{
+    index: number;
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    size_bytes: number;
+  }>;
+};
+type ManagedImageJobResponse = {
+  job: {
+    id: string;
+    status: "queued" | "processing" | "succeeded";
+  };
+};
+type ManagedImageStatusResponse = ManagedImageJobResponse & {
+  outputs: ManagedImageOutputMetadata[];
+  poll_after_ms?: number;
+};
 const exact = (value: unknown, required: readonly string[], optional: readonly string[] = []): JsonObject => { if (!value || typeof value !== "object" || Array.isArray(value)) malformed(); const object = value as JsonObject; const allowed = new Set([...required, ...optional]); if (required.some(k => !(k in object)) || Object.keys(object).some(k => !allowed.has(k))) malformed(); return object; };
 const string = (v: unknown, max = 2048) => { if (typeof v !== "string" || v.length < 1 || v.length > max) malformed(); return v; };
 const integer = (v: unknown, min: number, max: number) => { if (!Number.isInteger(v) || (v as number) < min || (v as number) > max) malformed(); return v as number; };
@@ -81,13 +103,13 @@ export class ManagedJobClient {
   };
   readonly images = {
     prepareInputs: async (input_images: Array<{ mime_type: string; size_bytes: number; sha256: string }>, bytes: (index: number) => Promise<ArrayBuffer>, signal?: AbortSignal): Promise<{ uploadId: string; inputs: ManagedUploadedImageInput[] }> => {
-      this.imageInputs(input_images); const result = await this.call("image_generation", "input_prepare", { body: { input_images }, signal }) as any;
+      this.imageInputs(input_images); const result = await this.call<PreparedImageInputsResponse>("image_generation", "input_prepare", { body: { input_images }, signal });
       if (result.inputs.length !== input_images.length || result.inputs.some((item: ManagedUploadedImageInput, index: number) => !input_images[index] || input_images[index].mime_type !== item.mime_type || input_images[index].size_bytes !== item.size_bytes || input_images[index].sha256 !== item.sha256)) malformed("Prepared inputs do not match request.");
       for (const item of result.internalUploads) { const body = await bytes(item.index); if (!(body instanceof ArrayBuffer) || body.byteLength !== item.size_bytes) this.invalid("Input bytes do not match declared size."); await this.transport.uploadSignedInput(item.url, item.method, item.headers, body, signal); }
       return { uploadId: result.uploadId, inputs: result.inputs };
     },
-    create: (body: { prompt: string; input_images?: Array<{ type: "uploaded"; key: string; mime_type: string; size_bytes: number; sha256: string }>; options?: { count?: number; aspect_ratio?: string; image_size?: "1K"; seed?: number } }, operationId: string, signal?: AbortSignal) => { this.validateImageCreate(body); return this.call("image_generation", "generation_create", { body, operationId, signal }); },
-    status: (jobId: string, signal?: AbortSignal) => this.call("image_generation", "generation_status", { jobId, signal, imageOutputContract: true }),
+    create: (body: { prompt: string; model?: string; input_images?: Array<{ type: "uploaded"; key: string; mime_type: string; size_bytes: number; sha256: string }>; options?: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string; seed?: number } }, operationId: string, signal?: AbortSignal) => { this.validateImageCreate(body); return body.model || body.options?.quality || body.options?.image_size || body.options?.aspect_ratio ? this.createSelectedImage(body, operationId, signal) : this.call<ManagedImageJobResponse>("image_generation", "generation_create", { body, operationId, signal }); },
+    status: (jobId: string, signal?: AbortSignal) => this.call<ManagedImageStatusResponse>("image_generation", "generation_status", { jobId, signal, imageOutputContract: true }),
     downloadOutput: (jobId: string, outputIndex: number, expectedMetadata: ManagedImageOutputMetadata, signal?: AbortSignal) => this.downloadImageOutput(jobId, outputIndex, expectedMetadata, signal),
     list: (query: { limit?: number; before?: string; status?: "queued" | "processing" | "succeeded" | "failed" | "expired" } = {}, signal?: AbortSignal) => { const params = new URLSearchParams(); if (query.limit !== undefined) { if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100) this.invalid(); params.set("limit", String(query.limit)); } if (query.before !== undefined) { if (!Number.isFinite(Date.parse(query.before))) this.invalid(); params.set("before", query.before); } if (query.status !== undefined) { if (!["queued", "processing", "succeeded", "failed", "expired"].includes(query.status)) this.invalid(); params.set("status", query.status); } return this.call("image_generation", "generation_list", { query: params.toString(), signal, imageOutputContract: true }); }, resume: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image processing resume is unsupported."); }, cancel: async (_jobId: string) => { throw new ManagedJobError("unsupported_operation", "Image cancellation is unsupported."); },
   };
@@ -119,56 +141,13 @@ export class ManagedJobClient {
     if (mismatchedHeaders.length > 0) malformed(`Invalid managed image output headers: ${mismatchedHeaders.join(", ")}.`);
     const extension = expected.mime_type === "image/png" ? "png" : expected.mime_type === "image/jpeg" ? "jpg" : "webp";
     if (response.headers.get("content-disposition") !== `attachment; filename="systemsculpt-image-${outputIndex}.${extension}"`) malformed("Invalid managed image output disposition.");
-    const bytes = await this.readImageOutputBytes(response, expected.size_bytes, signal);
-    if (await this.sha256(bytes) !== expected.sha256) malformed("Managed image output integrity mismatch.");
+    const bytes = await readVerifiedManagedOutput(response, expected, signal, reason => malformed(`Managed image output ${reason}.`));
     return { metadata: expected, bytes };
-  }
-
-  private async readImageOutputBytes(response: Response, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
-    const body = response.body;
-    if (!body) malformed("Managed image output integrity mismatch.");
-    const reader = body.getReader();
-    const bytes = new Uint8Array(expectedBytes);
-    let offset = 0;
-    let completed = false;
-    const abortError = () => new DOMException("Aborted", "AbortError");
-    const abortReader = () => { void reader.cancel(abortError()).catch(() => undefined); };
-    signal?.addEventListener("abort", abortReader, { once: true });
-    try {
-      while (true) {
-        if (signal?.aborted) throw abortError();
-        let chunk: ReadableStreamReadResult<Uint8Array>;
-        try {
-          chunk = await reader.read();
-        } catch (error) {
-          if (signal?.aborted) throw abortError();
-          throw error;
-        }
-        if (signal?.aborted) throw abortError();
-        if (chunk.done) {
-          completed = true;
-          break;
-        }
-        if (!(chunk.value instanceof Uint8Array)) malformed("Managed image output body was malformed.");
-        if (chunk.value.byteLength > expectedBytes - offset) malformed("Managed image output exceeded expected size.");
-        bytes.set(chunk.value, offset);
-        offset += chunk.value.byteLength;
-      }
-    } finally {
-      signal?.removeEventListener("abort", abortReader);
-      if (!completed) {
-        try { await reader.cancel(); } catch {}
-      }
-      reader.releaseLock();
-    }
-    if (offset !== expectedBytes) malformed("Managed image output integrity mismatch.");
-    return bytes.buffer;
   }
 
   private validateImageOutputMetadata(value: ManagedImageOutputMetadata, response = false): void { if (!value || Object.keys(value).sort().join() !== "height,index,mime_type,sha256,size_bytes,width" || !Number.isInteger(value.index) || value.index < 0 || value.index > 3 || !["image/png", "image/jpeg", "image/webp"].includes(value.mime_type) || !Number.isInteger(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MANAGED_IMAGE_OUTPUT_MAX_BYTES || !/^[a-f0-9]{64}$/.test(value.sha256) || [value.width, value.height].some(v => v !== null && (!Number.isInteger(v) || v < 0))) { if (response) malformed("Malformed image output metadata."); this.invalid("Invalid expected image output metadata."); } }
   private imageOutputHeaders(requestId: string): Record<string, string> { return { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": requestId }; }
   private requestId(): string { const requestId = this.createRequestId(); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) throw new Error("Invalid generated request ID."); return requestId; }
-  private async sha256(bytes: ArrayBuffer): Promise<string> { const digest = await window.crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join(""); }
   private validateImageOutputResponseHeaders(response: Response, requestId: string): void { const expected = { "x-request-id": requestId, "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation" }; if (Object.entries(expected).some(([name, value]) => response.headers.get(name) !== value)) malformed("Invalid managed image output response headers."); }
   private async imageOutputError(result: ManagedTransportResult, requestId: string): Promise<never> { this.validateImageOutputResponseHeaders(result.response, requestId); let value: unknown; try { value = await result.response.json(); } catch { malformed("Malformed managed image output error response."); } const envelope = exact(value, ["contract_version", "code", "message", "request_id"]); if (envelope.contract_version !== MANAGED_IMAGE_OUTPUT_PROTOCOL || envelope.request_id !== requestId || typeof envelope.code !== "string" || typeof envelope.message !== "string") malformed("Malformed managed image output error response."); const descriptor = (MANAGED_IMAGE_OUTPUT_DESCRIPTOR.errors as Record<string, { status: number; message: string }>)[envelope.code]; if (!descriptor || descriptor.status !== result.response.status || descriptor.message !== envelope.message) malformed("Malformed managed image output error response."); const code = envelope.code as ErrorCode; throw new ManagedJobError(code, descriptor.message, descriptor.status, requestId, code === "rate_limited" || code === "temporarily_unavailable", null, retryAfterHeaderMs(result.response.headers.get("retry-after"))); }
 
@@ -188,15 +167,62 @@ export class ManagedJobClient {
   private partNumber(n: number, max: number) { if (!Number.isInteger(n) || n < 1 || n > max) this.invalid(); }
   private parts(parts: Array<{ partNumber: number; etag: string }>, max: number) { if (!Array.isArray(parts) || parts.length < 1 || parts.length > max || new Set(parts.map(p => p.partNumber)).size !== parts.length || parts.some(p => !Number.isInteger(p.partNumber) || p.partNumber < 1 || p.partNumber > max || typeof p.etag !== "string" || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(p.etag) || (p.etag.startsWith('"') !== p.etag.endsWith('"')))) this.invalid(); }
   private imageInputs(items: Array<{ mime_type: string; size_bytes: number; sha256: string }>) { if (!Array.isArray(items) || items.length < 1 || items.length > 4 || items.some(x => !x || Object.keys(x).sort().join() !== "mime_type,sha256,size_bytes" || !["image/png", "image/jpeg", "image/webp"].includes(x.mime_type) || !Number.isInteger(x.size_bytes) || x.size_bytes < 1 || x.size_bytes > 20971520 || !/^[a-f0-9]{64}$/.test(x.sha256))) this.invalid(); }
-  private validateImageCreate(body: { prompt: string; input_images?: Array<{ type: "uploaded"; key: string; mime_type: string; size_bytes: number; sha256: string }>; options?: { count?: number; aspect_ratio?: string; image_size?: "1K"; seed?: number } }) { if (!body || Object.keys(body).some(k => !["prompt", "input_images", "options"].includes(k)) || typeof body.prompt !== "string" || body.prompt.length < 1 || body.prompt.length > 8000) this.invalid(); if (body.input_images !== undefined && (!Array.isArray(body.input_images) || body.input_images.length > 4 || body.input_images.some(x => !x || Object.keys(x).sort().join() !== "key,mime_type,sha256,size_bytes,type" || x.type !== "uploaded" || typeof x.key !== "string" || x.key.length < 1 || x.key.length > 512 || !/^[A-Za-z0-9][A-Za-z0-9/_.-]*$/.test(x.key) || !["image/png", "image/jpeg", "image/webp"].includes(x.mime_type) || !Number.isInteger(x.size_bytes) || x.size_bytes < 1 || x.size_bytes > 20971520 || !/^[a-f0-9]{64}$/.test(x.sha256)))) this.invalid(); if (body.options !== undefined) { const o = body.options; if (!o || Object.keys(o).some(k => !["count", "aspect_ratio", "image_size", "seed"].includes(k)) || o.count !== undefined && (!Number.isInteger(o.count) || o.count < 1 || o.count > 4) || o.seed !== undefined && (!Number.isInteger(o.seed) || o.seed < 0 || o.seed > 2147483647) || o.aspect_ratio !== undefined && !["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "match_input_image"].includes(o.aspect_ratio) || o.image_size !== undefined && o.image_size !== "1K") this.invalid(); } }
+  private validateImageCreate(body: { prompt: string; model?: string; input_images?: Array<{ type: "uploaded"; key: string; mime_type: string; size_bytes: number; sha256: string }>; options?: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string; seed?: number } }) {
+    if (!body || Object.keys(body).some(key => !["prompt", "model", "input_images", "options"].includes(key)) || typeof body.prompt !== "string" || body.prompt.length < 1 || body.prompt.length > 8000) this.invalid();
+    if (body.model !== undefined && (typeof body.model !== "string" || body.model.length < 1 || body.model.length > 160)) this.invalid();
+    if (body.input_images !== undefined && (!Array.isArray(body.input_images) || body.input_images.length > 4 || body.input_images.some(input => !input || Object.keys(input).sort().join() !== "key,mime_type,sha256,size_bytes,type" || input.type !== "uploaded" || typeof input.key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9/_.-]{0,511}$/.test(input.key) || !["image/png", "image/jpeg", "image/webp"].includes(input.mime_type) || !Number.isInteger(input.size_bytes) || input.size_bytes < 1 || input.size_bytes > 20971520 || !/^[a-f0-9]{64}$/.test(input.sha256)))) this.invalid();
+    if (body.options !== undefined) {
+      const options = body.options;
+      if (!options || Object.keys(options).some(key => !["count", "aspect_ratio", "image_size", "quality", "seed"].includes(key))) this.invalid();
+      if (options.count !== undefined && (!Number.isInteger(options.count) || options.count < 1 || options.count > 4)) this.invalid();
+      if (options.seed !== undefined && (!Number.isInteger(options.seed) || options.seed < 0 || options.seed > 2147483647)) this.invalid();
+      if (options.aspect_ratio !== undefined && !/^(auto|match_input_image|[0-9]{1,2}(?:\.[0-9]{1,2})?:[0-9]{1,2}(?:\.[0-9]{1,2})?)$/.test(options.aspect_ratio)) this.invalid();
+      if (options.image_size !== undefined && !/^[0-9]{1,4}(?:\.[0-9]{1,2})?K?$/i.test(options.image_size)) this.invalid();
+      for (const value of [options.aspect_ratio, options.image_size, options.quality]) {
+        if (value !== undefined && (typeof value !== "string" || value.length < 1 || value.length > 32)) this.invalid();
+      }
+    }
+  }
 
-  private async call<T = any>(capability: ManagedJobCapability, operation: Operation, options: { jobId?: string; query?: string; body?: unknown; operationId?: string; signal?: AbortSignal; imageOutputContract?: boolean }): Promise<T> {
+  private async createSelectedImage(body: Parameters<ManagedJobClient["images"]["create"]>[0], operationId: string, signal?: AbortSignal): Promise<ManagedImageJobResponse> {
+    // Model selection negotiates the existing additive media contract. The
+    // released strict v1 parser and verified binary download contract stay intact.
+    if (!operationId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/.test(operationId)) this.invalid("A durable operation ID is required.");
+    const requestId = this.requestId();
+    const result = await this.transport.job({
+      path: "/api/plugin/images/generations/jobs", method: "POST", body, signal,
+      headers: {
+        "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT,
+        "x-systemsculpt-job-contract": "managed-job-protocol-v2",
+        "x-systemsculpt-capability": "image_generation",
+        "x-plugin-version": this.transport.pluginVersion,
+        "x-request-id": requestId,
+        "idempotency-key": `${operationId}:create`,
+      },
+    });
+    if (!result.response.ok) return this.parse("image_generation", "generation_create", result) as Promise<ManagedImageJobResponse>;
+    if (result.response.headers.get("x-request-id") !== requestId || result.response.headers.get("x-systemsculpt-job-contract") !== "managed-job-protocol-v2") malformed("Invalid image generation response contract.");
+    const value: unknown = await result.response.json();
+    if (!value || typeof value !== "object" || Array.isArray(value)) malformed();
+    const job = (value as JsonObject).job;
+    if (!job || typeof job !== "object" || Array.isArray(job)) malformed();
+    const data = job as JsonObject;
+    const id = string(data.id, 256);
+    const status = data.status;
+    if (status === "failed") throw new ManagedJobError("image_generation_failed", "Image generation failed.");
+    if (status === "expired") throw new ManagedJobError("job_expired", "Image generation expired.");
+    if (status !== "queued" && status !== "processing" && status !== "succeeded") malformed();
+    return { job: { id, status } };
+  }
+
+
+  private async call<T = unknown>(capability: ManagedJobCapability, operation: Operation, options: { jobId?: string; query?: string; body?: unknown; operationId?: string; signal?: AbortSignal; imageOutputContract?: boolean }): Promise<T> {
     const descriptor = MANAGED_JOB_DESCRIPTORS[capability], route = descriptor.paths[operation]; if (!route) throw new ManagedJobError("unsupported_operation", `${capability}.${operation} is unsupported.`);
     if (options.jobId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(options.jobId)) this.invalid("Invalid first-party job ID.");
     let path = route[1].replace("{jobId}", encodeURIComponent(options.jobId ?? "")).replace("{documentId}", encodeURIComponent(options.jobId ?? "")); if (options.query) path += `?${options.query}`;
     const headers: Record<string, string> = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": capability };
     if (options.imageOutputContract) Object.assign(headers, { "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": this.requestId() });
-    if (descriptor.version.includes(operation)) headers["x-plugin-version"] = (this.transport as any).options.pluginVersion;
+    if (descriptor.version.includes(operation)) headers["x-plugin-version"] = this.transport.pluginVersion;
     if (descriptor.idempotent.includes(operation)) { if (!options.operationId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.operationId)) this.invalid("A durable operation ID is required."); const idempotencyOperation = operation === "upload_complete" ? "complete" : operation === "generation_create" ? "create" : operation; const idempotencyKey = `${options.operationId}:${idempotencyOperation}`; if (idempotencyKey.length > 128) this.invalid("The durable operation ID is too long for the idempotency contract."); headers["idempotency-key"] = idempotencyKey; }
     const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal }, !options.imageOutputContract);
     const parsed = await this.parse(capability, operation, result, options.imageOutputContract ? headers["x-request-id"] : undefined) as T;
@@ -209,7 +235,7 @@ export class ManagedJobClient {
     ) {
       const pollAfterMs = retryAfterHeaderMs(result.response.headers.get("retry-after"));
       if (pollAfterMs !== undefined) {
-        return { ...parsed, poll_after_ms: pollAfterMs } as T;
+        return { ...parsed, poll_after_ms: pollAfterMs };
       }
     }
     return parsed;
@@ -230,11 +256,11 @@ export class ManagedJobClient {
     return parsed;
   }
 
-  private terminalError(c: ManagedJobCapability, value: any): ErrorCode | null { const holder = value?.job ?? value?.document; const status = holder?.status; if (status === "expired") return "job_expired"; if (status === "failed") return c === "transcription" ? "transcription_failed" : c === "document_processing" ? "document_processing_failed" : "image_generation_failed"; return null; }
+  private terminalError(c: ManagedJobCapability, value: unknown): ErrorCode | null { const root = value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {}; const holderValue = root.job ?? root.document; const holder = holderValue && typeof holderValue === "object" && !Array.isArray(holderValue) ? holderValue as JsonObject : {}; const status = holder.status; if (status === "expired") return "job_expired"; if (status === "failed") return c === "transcription" ? "transcription_failed" : c === "document_processing" ? "document_processing_failed" : "image_generation_failed"; return null; }
   private job(value: unknown, statuses: readonly ManagedJobStatus[], keys: string[]) { const x = exact(value, keys); string(x.id, 256); if (!statuses.includes(x.status as ManagedJobStatus)) malformed(); for (const key of keys) { const v = x[key]; if (["created_at", "expires_at"].includes(key)) date(v); else if (["processing_started_at", "completed_at"].includes(key) && v !== null) date(v); else if (["filename", "content_type"].includes(key)) string(v, 512); else if (key === "content_length_bytes") integer(v, 1, 524288000); else if (key === "attempt_count") integer(v, 0, 100); else if (key === "progress" && (typeof v !== "number" || v < 0 || v > 1)) malformed(); else if (key === "error" && v !== null && (typeof v !== "object" || Array.isArray(v))) malformed(); } return x; }
   private upload(value: unknown, document = false) { const keys = ["part_size_bytes", "total_parts", "part_url_expires_in_seconds", ...(document ? ["expires_at"] : [])]; const x = exact(value, keys); integer(x.part_size_bytes, 1, 524288000); integer(x.total_parts, 1, document ? 3 : 50); if (x.part_url_expires_in_seconds !== 900) malformed(); if (document) { const expiresAt = date(x.expires_at); if (Date.parse(expiresAt) <= this.now()) malformed(); } return x; }
   private validateResponse(c: ManagedJobCapability, op: Operation, value: unknown): unknown {
-    const statuses = ((MANAGED_JOB_OPERATION_STATUSES[c] as Record<string, readonly ManagedJobStatus[]>)[op] ?? MANAGED_JOB_DESCRIPTORS[c].statuses) as readonly ManagedJobStatus[];
+    const statuses = ((MANAGED_JOB_OPERATION_STATUSES[c] as Record<string, readonly ManagedJobStatus[]>)[op] ?? MANAGED_JOB_DESCRIPTORS[c].statuses);
     if (op === "part_url") { const root = exact(value, ["part"]), p = exact(root.part, ["part_number", "method", "url", "url_expires_in_seconds", "expected_content_length_bytes"]); const part_number = integer(p.part_number, 1, c === "document_processing" ? 3 : 50); if (p.method !== "PUT") malformed(); const signedUrl = string(p.url, 2048); if (!/^https:\/\//.test(signedUrl)) malformed(); if (p.url_expires_in_seconds !== 900) malformed(); const expected_content_length_bytes = integer(p.expected_content_length_bytes, 1, 524288000); return { internal: { partNumber: part_number, method: "PUT", url: signedUrl, expectedBytes: expected_content_length_bytes } }; }
     if (c === "transcription") {
       if (op === "create") { const root = exact(value, ["job", "upload"]); return { job: this.job(root.job, statuses, ["id", "status", "filename", "content_type", "content_length_bytes", "expires_at"]), upload: this.upload(root.upload) }; }
@@ -246,7 +272,7 @@ export class ManagedJobClient {
       if (op === "create") { const root = exact(value, ["document", "upload"]); return { document: this.job(root.document, statuses, ["id", "status"]), upload: this.upload(root.upload, true) }; }
       const root = exact(value, ["document"]); return { document: this.job(root.document, statuses, op === "status" ? ["id", "status", "error", "progress"] : ["id", "status"]) };
     }
-    if (op === "input_prepare") { const root = exact(value, ["contract", "upload_id", "expires_at", "input_uploads"]); if (root.contract !== MANAGED_JOB_PROTOCOL || !Array.isArray(root.input_uploads) || root.input_uploads.length < 1 || root.input_uploads.length > 4) malformed(); const uploadId = string(root.upload_id, 256); const prepareExpiresAt = date(root.expires_at); if (Date.parse(prepareExpiresAt) <= this.now() || Date.parse(prepareExpiresAt) - this.now() > 900_000 + 60_000) malformed(); const internalUploads: any[] = [], indexedInputs: Array<{ index: number; input: ManagedUploadedImageInput }> = [], indexes = new Set<number>(); for (const raw of root.input_uploads) { const item = exact(raw, ["index", "upload", "input_image"]), upload = exact(item.upload, ["method", "url", "headers", "expires_in_seconds", "expires_at"]), image = exact(item.input_image, ["type", "key", "mime_type", "size_bytes", "sha256"]); const index = integer(item.index, 0, 3); if (indexes.has(index)) malformed(); indexes.add(index); if (upload.method !== "PUT" || !upload.headers || typeof upload.headers !== "object" || Array.isArray(upload.headers) || Object.entries(upload.headers).some(([k, v]) => !/^[A-Za-z0-9-]{1,128}$/.test(k) || typeof v !== "string" || v.length > 2048)) malformed(); if (upload.expires_in_seconds !== 900) malformed(); const expiresAt = date(upload.expires_at); if (Date.parse(expiresAt) <= this.now() || Date.parse(expiresAt) > Date.parse(root.expires_at as string) + 1000) malformed(); if (image.type !== "uploaded") malformed(); const key = string(image.key, 512); const mime_type = string(image.mime_type, 32), size_bytes = integer(image.size_bytes, 1, 20971520), sha256 = string(image.sha256, 64); if (!/^[a-f0-9]{64}$/.test(sha256) || !["image/png", "image/jpeg", "image/webp"].includes(mime_type)) malformed(); const uploadUrl = string(upload.url, 2048); if (!/^https:\/\//.test(uploadUrl)) malformed(); internalUploads.push({ index, method: "PUT", url: uploadUrl, headers: upload.headers, size_bytes }); indexedInputs.push({ index, input: { type: "uploaded", key, mime_type: mime_type as ManagedUploadedImageInput["mime_type"], size_bytes, sha256 } }); } if (indexedInputs.length !== (root.input_uploads as unknown[]).length || [...indexes].some(index => index >= indexedInputs.length)) malformed(); const inputs = indexedInputs.sort((left, right) => left.index - right.index).map(entry => entry.input); return { uploadId, inputs, internalUploads }; }
+    if (op === "input_prepare") { const root = exact(value, ["contract", "upload_id", "expires_at", "input_uploads"]); if (root.contract !== MANAGED_JOB_PROTOCOL || !Array.isArray(root.input_uploads) || root.input_uploads.length < 1 || root.input_uploads.length > 4) malformed(); const uploadId = string(root.upload_id, 256); const prepareExpiresAt = date(root.expires_at); if (Date.parse(prepareExpiresAt) <= this.now() || Date.parse(prepareExpiresAt) - this.now() > 900_000 + 60_000) malformed(); const internalUploads: unknown[] = [], indexedInputs: Array<{ index: number; input: ManagedUploadedImageInput }> = [], indexes = new Set<number>(); for (const raw of root.input_uploads) { const item = exact(raw, ["index", "upload", "input_image"]), upload = exact(item.upload, ["method", "url", "headers", "expires_in_seconds", "expires_at"]), image = exact(item.input_image, ["type", "key", "mime_type", "size_bytes", "sha256"]); const index = integer(item.index, 0, 3); if (indexes.has(index)) malformed(); indexes.add(index); if (upload.method !== "PUT" || !upload.headers || typeof upload.headers !== "object" || Array.isArray(upload.headers) || Object.entries(upload.headers).some(([k, v]) => !/^[A-Za-z0-9-]{1,128}$/.test(k) || typeof v !== "string" || v.length > 2048)) malformed(); if (upload.expires_in_seconds !== 900) malformed(); const expiresAt = date(upload.expires_at); if (Date.parse(expiresAt) <= this.now() || Date.parse(expiresAt) > Date.parse(root.expires_at as string) + 1000) malformed(); if (image.type !== "uploaded") malformed(); const key = string(image.key, 512); const mime_type = string(image.mime_type, 32), size_bytes = integer(image.size_bytes, 1, 20971520), sha256 = string(image.sha256, 64); if (!/^[a-f0-9]{64}$/.test(sha256) || !["image/png", "image/jpeg", "image/webp"].includes(mime_type)) malformed(); const uploadUrl = string(upload.url, 2048); if (!/^https:\/\//.test(uploadUrl)) malformed(); internalUploads.push({ index, method: "PUT", url: uploadUrl, headers: upload.headers, size_bytes }); indexedInputs.push({ index, input: { type: "uploaded", key, mime_type: mime_type as ManagedUploadedImageInput["mime_type"], size_bytes, sha256 } }); } if (indexedInputs.length !== (root.input_uploads as unknown[]).length || [...indexes].some(index => index >= indexedInputs.length)) malformed(); const inputs = indexedInputs.sort((left, right) => left.index - right.index).map(entry => entry.input); return { uploadId, inputs, internalUploads }; }
     if (op === "generation_create") { const root = exact(value, ["job", "poll_url"]); string(root.poll_url, 2048); const job = this.job(root.job, statuses, ["id", "status", "created_at", "expires_at", "error"]); return { job }; }
     const root = exact(value, op === "generation_list" ? ["items", "next_before"] : ["job", "outputs", "usage"], op === "generation_status" ? ["poll_after_ms"] : []); const items = op === "generation_list" ? root.items : [{ job: root.job, outputs: root.outputs, usage: root.usage }]; if (!Array.isArray(items)) malformed(); const parsed = items.map(raw => { const item = exact(raw, ["job", "outputs", "usage"]); const job = this.job(item.job, statuses, ["id", "status", "created_at", "processing_started_at", "completed_at", "expires_at", "error", "attempt_count"]); if (!Array.isArray(item.outputs)) malformed(); const outputs = item.outputs.map(rawOutput => { const output = exact(rawOutput, ["index", "mime_type", "size_bytes", "sha256", "width", "height"]); const mime_type = string(output.mime_type, 32) as ManagedImageOutputMetadata["mime_type"]; const metadata: ManagedImageOutputMetadata = { index: integer(output.index, 0, 3), mime_type, size_bytes: integer(output.size_bytes, 1, 31457280), sha256: string(output.sha256, 64), width: output.width === null ? null : integer(output.width, 0, 32768), height: output.height === null ? null : integer(output.height, 0, 32768) }; this.validateImageOutputMetadata(metadata, true); return metadata; }); const rawUsage = exact(item.usage, ["raw_usd", "cost_source", "estimated"]); if (typeof rawUsage.raw_usd !== "number" || rawUsage.raw_usd < 0 || typeof rawUsage.estimated !== "boolean") malformed(); const usage: ManagedImageUsage = { raw_usd: rawUsage.raw_usd, cost_source: string(rawUsage.cost_source, 64), estimated: rawUsage.estimated }; const status = job.status as ManagedJobStatus; if (outputs.length > 4 || new Set(outputs.map(output => output.index)).size !== outputs.length) malformed(); if ((status === "queued" || status === "processing") && outputs.length !== 0 || status === "succeeded" && outputs.length < 1 || status === "failed" && outputs.length !== 0 || status === "expired" && outputs.length !== 0) malformed(); if (status === "processing" && job.processing_started_at === null || status === "queued" && job.processing_started_at !== null || status === "succeeded" && job.completed_at === null) malformed(); return { job, outputs, usage }; }); if (op === "generation_list") { if (root.next_before !== null) date(root.next_before); return { items: parsed, next_before: root.next_before }; } if (root.poll_after_ms !== undefined) integer(root.poll_after_ms, 0, 3600000); return { ...parsed[0], ...(root.poll_after_ms === undefined ? {} : { poll_after_ms: root.poll_after_ms }) };
   }

@@ -1,4 +1,4 @@
-import { sha256HexFromBytesPortable } from "../../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import type {
   ChatAttachmentContentRef,
   ChatAttachmentMetadata,
@@ -10,7 +10,7 @@ import {
   createImageAttachmentPart,
   createUnavailableAttachmentPart,
   parseAttachedTextContent,
-} from "./ChatAttachmentContent";
+} from "../../../chat/ChatAttachmentContent";
 
 const CHAT_ATTACHMENT_REF_SCHEMA = "systemsculpt-chat-attachment-v1" as const;
 export const CHAT_ATTACHMENT_STORE_ROOT = ".systemsculpt/chat-attachments";
@@ -188,7 +188,7 @@ export class ChatAttachmentVaultStore {
       results.push(Object.freeze({
         ...attachment,
         contentRef: ref,
-      }) as T & Readonly<{ contentRef: ChatAttachmentContentRef }>);
+      }));
     }
     return Object.freeze(results);
   }
@@ -210,28 +210,6 @@ export class ChatAttachmentVaultStore {
       throw new Error(`Attachment ${attachment.name} has an incompatible durable reference.`);
     }
     return Object.freeze(persisted);
-  }
-
-  public async hydratePersistedAttachment(
-    attachment: PersistedReadyAttachment,
-  ): Promise<RuntimeReadyAttachmentLike & Readonly<{ contentRef: ChatAttachmentContentRef }>> {
-    if (!isPersistedReadyAttachment(attachment)) {
-      throw new Error("Saved queued attachment metadata is invalid.");
-    }
-    this.claim(attachment.contentRef);
-    const contentPart = await this.hydrateContentPart({
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      contentRef: attachment.contentRef,
-    });
-    if (!contentPart || (attachment.kind === "image" ? contentPart.type !== "image_url" : contentPart.type !== "text")) {
-      throw new Error(`Attachment ${attachment.name} could not be restored.`);
-    }
-    return Object.freeze({
-      status: "ready" as const,
-      ...attachment,
-      contentPart,
-    });
   }
 
   /**
@@ -345,7 +323,7 @@ export class ChatAttachmentVaultStore {
           ? metadata.contentRef.payload === "image-bytes"
           : metadata.contentRef.payload === "utf8-content-part";
         part = compatible
-          ? await this.hydrateContentPart(metadata, { strict: false })
+          ? await this.hydrateContentPart(metadata)
           : createUnavailableAttachmentPart(metadata.name, metadata.mimeType);
       } else {
         part = baseParts[metadata.contentPartIndex];
@@ -363,15 +341,6 @@ export class ChatAttachmentVaultStore {
       content: rebuilt,
       ...(nextMetadata.length ? { attachmentMetadata: nextMetadata } : {}),
     };
-  }
-
-  public async hydrateMessages(messages: readonly Readonly<ChatMessage>[]): Promise<ChatMessage[]> {
-    const hydrated: ChatMessage[] = [];
-    // Serial reads avoid multiplying transient base64/ArrayBuffer pressure for
-    // large mixed attachment histories. The final request still contains only
-    // the bytes it actually needs.
-    for (const message of messages) hydrated.push(await this.hydrateMessage(message));
-    return hydrated;
   }
 
   /** Deletes only well-formed CAS files that no durable chat or queue refers to. */
@@ -469,9 +438,8 @@ export class ChatAttachmentVaultStore {
     return this.state.sweepInFlight.then(() => undefined);
   }
 
-  public async hydrateContentPart(
+  private async hydrateContentPart(
     metadata: Pick<ChatAttachmentMetadata, "name" | "mimeType" | "contentRef">,
-    options: Readonly<{ strict?: boolean }> = {},
   ): Promise<MultiPartContent | null> {
     if (!metadata.contentRef || !isChatAttachmentContentRef(metadata.contentRef)) return null;
     try {
@@ -482,8 +450,7 @@ export class ChatAttachmentVaultStore {
             type: "text" as const,
             text: new TextDecoder("utf-8", { fatal: false }).decode(bytes),
           });
-    } catch (error) {
-      if (options.strict !== false) throw error;
+    } catch {
       return createUnavailableAttachmentPart(metadata.name, metadata.mimeType);
     }
   }

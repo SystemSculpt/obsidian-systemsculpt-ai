@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
-import { createTextAttachmentPart } from "../attachments/ChatAttachmentContent";
+import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
 
 function user(id: string, content = id): ChatMessage {
   return { role: "user", content, message_id: id };
@@ -320,6 +320,29 @@ describe("AgentTranscriptRepository", () => {
       messages: [],
     });
     expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
+  it("lets a newer saved-chat load supersede an in-flight read", async () => {
+    const { repository, storage, records } = createHarness();
+    const older = { id: "older", title: "Older", messages: [user("older-user")], context_files: [] };
+    const newer = { id: "newer", title: "Newer", messages: [user("newer-user")], context_files: [] };
+    records.set("newer", newer);
+    const started = deferred<void>();
+    const read = deferred<typeof older>();
+    storage.loadChat.mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      return read.promise;
+    });
+    const first = repository.load("older");
+    const rejected = expect(first).rejects.toBeInstanceOf(AgentTranscriptConflictError);
+    await started.promise;
+    const second = repository.load("newer");
+    read.resolve(older);
+
+    await rejected;
+    await expect(second).resolves.toMatchObject({ chatId: "newer", messages: newer.messages });
+    expect(repository.snapshot()).toMatchObject({ chatId: "newer", messages: newer.messages });
     expect(storage.saveChat).not.toHaveBeenCalled();
   });
 

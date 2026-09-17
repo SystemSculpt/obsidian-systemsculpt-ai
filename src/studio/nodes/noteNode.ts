@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import {
   applyStudioNotePreface,
   applyStudioNotePrefaceToTextOutputs,
@@ -85,9 +85,9 @@ export const noteNode: StudioNodeDefinition = {
 
     return {
       outputs: {
-        text: textOutputs as unknown as StudioJsonValue,
-        path: results.map((r) => r.path) as unknown as StudioJsonValue,
-        title: results.map((r) => r.title) as unknown as StudioJsonValue,
+        text: textOutputs,
+        path: results.map((r) => r.path),
+        title: results.map((r) => r.title),
       },
     };
   },

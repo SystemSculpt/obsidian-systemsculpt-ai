@@ -1,4 +1,5 @@
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
+import { MANAGED_IMAGE_INPUT_MAX_COUNT } from "../managed/ManagedTypes";
 import type {
   ManagedJobError,
   ManagedUploadedImageInput,
@@ -15,7 +16,7 @@ import {
   observeManagedJob,
   waitForManagedJob,
 } from "../managed/ManagedJobObservation";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 
 const CAPABILITY = "image_generation" as const;
 
@@ -28,6 +29,9 @@ export type ManagedImageGenerationInput = Readonly<{
 
 export type ManagedImageGenerationPayload = Readonly<{
   prompt: string;
+  model?: string;
+  imageSize?: string;
+  quality?: string;
   inputImages?: readonly ManagedImageGenerationInput[];
   count?: number;
   aspectRatio?: string;
@@ -65,8 +69,9 @@ type ImageJobs = Readonly<{
   create: (
     body: {
       prompt: string;
+      model?: string;
       input_images?: ManagedUploadedImageInput[];
-      options?: { count?: number; aspect_ratio?: string; image_size?: "1K"; seed?: number };
+      options?: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string; seed?: number };
     },
     operationId: string,
     signal?: AbortSignal,
@@ -116,13 +121,14 @@ function defaultRequestId(): string {
 
 function normalizePayload(payload: ManagedImageGenerationPayload): {
   prompt: string;
+  model?: string;
   inputs: ManagedImageGenerationInput[];
-  options: { count?: number; aspect_ratio?: string };
+  options: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string };
 } {
   const prompt = String(payload.prompt || "").trim();
   if (!prompt || prompt.length > 8_000) throw new Error("Managed image generation requires a prompt of at most 8,000 characters.");
   const inputs = [...(payload.inputImages || [])];
-  if (inputs.length > 4) throw new Error("Managed image generation accepts at most four input images.");
+  if (inputs.length > MANAGED_IMAGE_INPUT_MAX_COUNT) throw new Error("Managed image generation accepts at most four input images.");
   for (const input of inputs) {
     if (
       !["image/png", "image/jpeg", "image/webp"].includes(input.mimeType)
@@ -135,8 +141,11 @@ function normalizePayload(payload: ManagedImageGenerationPayload): {
   }
   return {
     prompt,
+    ...(payload.model ? { model: payload.model } : {}),
     inputs,
     options: {
+      ...(payload.imageSize ? { image_size: payload.imageSize } : {}),
+      ...(payload.quality ? { quality: payload.quality } : {}),
       ...(payload.count === undefined ? {} : { count: payload.count }),
       ...(payload.aspectRatio ? { aspect_ratio: payload.aspectRatio } : {}),
     },
@@ -146,6 +155,7 @@ function normalizePayload(payload: ManagedImageGenerationPayload): {
 function contentFingerprint(payload: ReturnType<typeof normalizePayload>): string {
   const acceptedContent = JSON.stringify({
     prompt: payload.prompt,
+    ...(payload.model ? { model: payload.model } : {}),
     input_images: payload.inputs.map(input => ({
       mime_type: input.mimeType,
       size_bytes: input.sizeBytes,
@@ -219,6 +229,7 @@ export class ManagedImageGenerationAdapter {
     record = await this.beginDispatch(record, "create");
     const created = await this.dependencies.jobs.create({
       prompt: payload.prompt,
+    ...(payload.model ? { model: payload.model } : {}),
       ...(uploadedInputs && uploadedInputs.length > 0 ? { input_images: uploadedInputs } : {}),
       ...(Object.keys(payload.options).length > 0 ? { options: payload.options } : {}),
     }, operation.operationId, signal);
@@ -289,7 +300,18 @@ export class ManagedImageGenerationAdapter {
         const outputs: ManagedImageOutputBytes[] = [];
         for (const metadata of status.outputs) {
           throwIfAborted(signal);
-          outputs.push(await this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal));
+          // Retry only reading the same completed output. A dropped transfer
+          // must never cause another billable generation request.
+          for await (const output of observeManagedJob<ManagedImageOutputBytes>({
+            read: () => this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal),
+            signal,
+            isRetryableError: isRetryableManagedJobObservationError,
+            retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+            wait: this.wait,
+          })) {
+            outputs.push(output);
+            break;
+          }
         }
         return Object.freeze({ operationId: record.operationId, jobId, outputs: Object.freeze(outputs) });
       }

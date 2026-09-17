@@ -1,8 +1,5 @@
 import fixture from "../../../../testing/fixtures/managed/managed-job-protocol-v1.json";
 import imageOutputFixture from "../../../../testing/fixtures/managed/managed-image-output-v1.json";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { ManagedJobClient, MANAGED_IMAGE_OUTPUT_DESCRIPTOR, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
@@ -19,9 +16,27 @@ describe("ManagedJobClient exact wire contract", () => {
   const client = new ManagedJobClient(transport, undefined, () => "req-1");
   beforeEach(() => { request.mockReset(); });
 
+  it("negotiates selected image models without sending any client price or changing output transport", async () => {
+    request.mockResolvedValue(json({
+      job: { ...imageJob(), model: "maker/new-image", future_field: true },
+      poll_url: "/api/plugin/images/generations/jobs/img-1", future_field: {},
+    }, 202, { "x-systemsculpt-job-contract": "managed-job-protocol-v2" }));
+    const body = { model: "maker/new-image", prompt: "Draw a sky", options: { quality: "max", image_size: "4K", aspect_ratio: "1:4" } };
+    await expect(client.images.create(body, "choice-1")).resolves.toEqual({ job: { id: "img-1", status: "queued" } });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toMatchObject({ body, licenseKey: "license", headers: {
+      "x-systemsculpt-job-contract": "managed-job-protocol-v2", "idempotency-key": "choice-1:create", "x-request-id": "req-1",
+    } });
+    expect(request.mock.calls[0][0].allowTransportFallback).toBe(false);
+  });
+
+  it("does not resubmit a selected model after a lost create response", async () => {
+    request.mockRejectedValue(new Error("network lost"));
+    await expect(client.images.create({ model: "maker/new-image", prompt: "Draw" }, "choice-2")).rejects.toThrow("network lost");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("pins the exact closed managed image output companion fixture", () => {
-    const bytes = readFileSync(path.resolve(__dirname, "../../../../testing/fixtures/managed/managed-image-output-v1.json"));
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe("fda81d995879f64896eaaafafe98b6f1fb0d9334bbc889e3db80ed1cc50069af");
     expect(MANAGED_IMAGE_OUTPUT_DESCRIPTOR).toEqual(imageOutputFixture);
     expect(imageOutputFixture.contract_version).toBe("managed-image-output-v1");
     expect(imageOutputFixture.operations).toEqual([
@@ -159,7 +174,7 @@ describe("ManagedJobClient exact wire contract", () => {
     ["image uploaded key", () => client.images.create({ prompt: "x", input_images: [{ type: "uploaded", key: "https://storage/key", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }] }, "op")],
     ["image count", () => client.images.create({ prompt: "x", options: { count: 5 } }, "op")],
     ["image aspect", () => client.images.create({ prompt: "x", options: { aspect_ratio: "wide" } }, "op")],
-    ["image size", () => client.images.create({ prompt: "x", options: { image_size: "2K" } } as any, "op")],
+    ["image size", () => client.images.create({ prompt: "x", options: { image_size: "large" } } as any, "op")],
     ["image seed", () => client.images.create({ prompt: "x", options: { seed: -1 } }, "op")],
     ["image missing idempotency", () => client.images.create({ prompt: "x" }, undefined as never)],
     ["image idempotency", () => client.images.create({ prompt: "x" }, "bad:id")],

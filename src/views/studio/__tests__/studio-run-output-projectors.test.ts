@@ -7,6 +7,7 @@ import {
   MANAGED_TEXT_OWNER,
   MANAGED_TEXT_OWNER_KEY,
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
+  removePendingManagedOutputNodes,
 } from "../../../studio/StudioManagedOutputNodes";
 import {
   materializeManagedOutputNodesForNodeOutput,
@@ -184,6 +185,55 @@ describe("StudioRunOutputProjectors", () => {
 
     expect(changed).toBe(true);
     expect(project.graph.nodes.some((node) => node.id === managedText.id)).toBe(false);
+  });
+
+  it("materializes one video placeholder when a video node starts and swaps it for the clip", () => {
+    const source = nodeFixture("studio.video_generation", { model: "maker/clip-1" }, "node_video");
+    const project = projectFixture([source]);
+
+    const started = materializeManagedOutputPlaceholdersForStartedNode({
+      project,
+      event: { type: "node.started", runId: "run_v", nodeId: source.id, at: "2026-01-01T00:03:00.000Z" },
+      createNodeId: jest.fn().mockReturnValue("node_video_placeholder"),
+      createEdgeId: jest.fn().mockReturnValue("edge_video_placeholder"),
+    });
+    expect(started).toBe(true);
+    expect(project.graph.nodes.map((node) => node.id)).toEqual([source.id, "node_video_placeholder"]);
+    expect(project.graph.edges[0]).toMatchObject({ fromPortId: "videos", toNodeId: "node_video_placeholder" });
+
+    removePendingManagedOutputNodes({ project, sourceNodeId: source.id, runId: "run_v" });
+    const output = materializeManagedOutputNodesForNodeOutput({
+      project,
+      event: {
+        type: "node.output",
+        runId: "run_v",
+        nodeId: source.id,
+        outputRef: "ref_v",
+        outputs: { videos: [{ path: "Assets/clip.mp4", mimeType: "video/mp4" }] },
+        at: "2026-01-01T00:04:00.000Z",
+      },
+      createNodeId: jest.fn().mockReturnValue("node_video_card"),
+      createEdgeId: jest.fn().mockReturnValue("edge_video_card"),
+    });
+    expect(output).toBe(true);
+    expect(project.graph.nodes.map((node) => node.id)).toEqual([source.id, "node_video_card"]);
+    const card = project.graph.nodes.find((node) => node.id === "node_video_card")!;
+    expect(card.config.sourcePath).toBe("Assets/clip.mp4");
+    expect(card.disabled).toBe(false);
+    expect(project.graph.edges).toEqual([expect.objectContaining({ fromPortId: "videos", toNodeId: "node_video_card", toPortId: "media" })]);
+  });
+
+  it("materializes managed video outputs from cache entries", () => {
+    const source = nodeFixture("studio.video_generation", { model: "maker/clip-1" }, "node_video_source");
+    const project = projectFixture([source]);
+    const changed = materializeManagedOutputNodesFromCacheEntries({
+      project,
+      entries: { [source.id]: { outputs: { videos: [{ path: "Assets/generated.mp4" }] } } },
+      createNodeId: jest.fn().mockReturnValue("node_video_media"),
+      createEdgeId: jest.fn().mockReturnValue("edge_video_media"),
+    });
+    expect(changed).toBe(true);
+    expect(project.graph.nodes.some((node) => node.id === "node_video_media")).toBe(true);
   });
 
   it("materializes managed image outputs from cache entries", () => {

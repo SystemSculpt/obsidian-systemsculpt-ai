@@ -1,32 +1,7 @@
 import type SystemSculptPlugin from "../main";
-import {
-  isThinAgentCommandKind,
-  type ThinAgentCommandKind,
-} from "../services/managed/ThinAgentV1Contract";
-import { isFirstPartyToolName } from "../tools/toolNames";
 import { LogLevel } from "./errorHandling";
-import {
-  boundedThinAgentIdentifier,
-  boundedThinAgentTiming,
-  isAgentLifecycleCode,
-  isAgentLifecyclePhase,
-  isCreditsRefreshReason,
-  isHistorySyncKind,
-  isToolDiagnosticFailureClass,
-  isToolDiagnosticOutcome,
-  boundedToolDiagnosticItemCount,
-  isThinAgentClientInstanceId,
-  isThinAgentConversationId,
-  isThinAgentFailureCode,
-  isThinAgentIncidentId,
-  isThinAgentLatencyTraceId,
-  isThinAgentServerRunId,
-  type AgentLifecyclePhase,
-  type CreditsRefreshReason,
-  type HistorySyncKind,
-  type ToolDiagnosticFailureClass,
-  type ToolDiagnosticOutcome,
-} from "./ThinAgentLifecycleSchema";
+import { isAgentLifecyclePhase, isThinAgentIncidentId } from "./ThinAgentLifecycleSchema";
+import { projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
 
 export type PluginLogLevel = "info" | "warn" | "error" | "debug";
 
@@ -41,54 +16,7 @@ export interface PluginLogContext {
   metadata?: Record<string, unknown>;
 }
 
-export type SupportDiagnosticEvent = Readonly<{
-  timestamp: string;
-  severity: "info" | "error";
-  code: string;
-  phase: AgentLifecyclePhase;
-  origin?: string;
-  cause?: string;
-  sequence?: number;
-  conversation_id?: string;
-  request_id?: string;
-  client_instance_id?: string;
-  plugin_build_id?: string;
-  run_id?: string;
-  server_run_id?: string;
-  tool_name?: string;
-  status?: number;
-  retryable?: boolean;
-  incident_id?: string;
-  failure_code?: string;
-  latency_trace_id?: string;
-  command_kind?: ThinAgentCommandKind;
-  command_segment_ordinal?: number;
-  tool_execution_ordinal?: number;
-  tool_outcome?: ToolDiagnosticOutcome;
-  tool_failure_class?: ToolDiagnosticFailureClass;
-  tool_item_count?: number;
-  tool_completed_item_count?: number;
-  tool_failed_item_count?: number;
-  history_sync_kind?: HistorySyncKind;
-  history_sync_ordinal?: number;
-  response_delivery_mode?: "fetch_stream" | "request_url_buffered";
-  client_monotonic_offset_ms?: number;
-  client_clock_domain?: "client_turn_monotonic";
-  server_timing_app_ms?: number;
-  server_timing_auth_ms?: number;
-  server_timing_clock_domain?: "server_response_headers_monotonic_duration";
-  credits_refresh_reason?: CreditsRefreshReason;
-  credits_refresh_sequence?: number;
-  credits_refresh_transport?: "fetch" | "request_url";
-  credits_refresh_elapsed_ms?: number;
-  credits_refresh_clock_domain?: "client_refresh_monotonic_duration";
-  credits_refresh_server_auth_ms?: number;
-  credits_refresh_server_rate_limit_ms?: number;
-  credits_refresh_server_balance_store_ms?: number;
-  credits_refresh_server_total_ms?: number;
-  credits_refresh_server_timing_clock_domain?:
-    "server_response_headers_monotonic_duration";
-}>;
+export type { SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
 
 interface PluginLogEntry {
   timestamp: string;
@@ -114,8 +42,6 @@ const THIN_AGENT_FAILURE_INPUT_MESSAGE = "ChatView agent session failed";
 const THIN_AGENT_FAILURE_LOG_MESSAGE = "thin-agent:failure";
 const THIN_AGENT_FAILURE_DEDUPE_MS = 1_000;
 const MAX_RECENT_THIN_AGENT_FAILURES = 128;
-const MAX_TOOL_EXECUTION_ORDINAL = 512;
-const MAX_HISTORY_SYNC_ORDINAL = 2_048;
 const SAFE_THIN_AGENT_FAILURE_CODES = new Set([
   "agent_turn_failed",
   "approval_failed",
@@ -152,15 +78,18 @@ const SAFE_THIN_AGENT_FAILURE_CODES = new Set([
   "tool_result_display_failed",
   "web_search_unavailable",
 ]);
+const THIN_AGENT_FAILURE_METHODS: Readonly<Record<string, Readonly<{ phase: string; origin: string }>>> = {
+  approvalModeChange: { phase: "session", origin: "approval_mode_change" },
+  loadChatHydration: { phase: "start", origin: "chat_hydration" },
+  agentSession: { phase: "response", origin: "session_callback" },
+  reportAgentError: { phase: "response", origin: "session_callback" },
+  completedRunSettlement: { phase: "persistence", origin: "run_settlement" },
+  agentSnapshotRender: { phase: "render", origin: "snapshot_render" },
+  historicalResubmit: { phase: "unknown", origin: "historical_resubmit" },
+  warmThinConversation: { phase: "start", origin: "warm_bootstrap" },
+};
 const THIN_AGENT_FAILURE_ORIGINS = new Set([
-  "approval_mode_change",
-  "chat_hydration",
-  "historical_resubmit",
-  "run_settlement",
-  "session_callback",
-  "snapshot_render",
-  "unknown",
-  "warm_bootstrap",
+  "unknown", ...Object.values(THIN_AGENT_FAILURE_METHODS).map(({ origin }) => origin),
 ]);
 const THIN_AGENT_FAILURE_CAUSES = new Set([
   "aborted",
@@ -213,20 +142,17 @@ export class PluginLogger {
   }
 
   lifecycle(metadata: Record<string, unknown>): SupportDiagnosticEvent | null {
-    const sanitized = sanitizeLifecycleMetadata(metadata);
-    if (!sanitized) return null;
+    const projection = projectLifecycleMetadata(metadata);
+    if (!projection) return null;
     const entry = this.write("info", "thin-agent:lifecycle", undefined, {
       source: "AgentLifecycle",
-      metadata: redactPersistedLifecycleMetadata(sanitized),
+      metadata: projection.persisted,
     });
-    if (!entry) return null;
-    return projectSupportDiagnosticEvent({
-      ...entry,
-      context: {
-        source: "AgentLifecycle",
-        metadata: sanitized,
-      },
-    });
+    return entry ? Object.freeze({
+      timestamp: entry.timestamp,
+      severity: "info",
+      ...projection.fields,
+    }) : null;
   }
 
   warn(message: string, context?: PluginLogContext): void {
@@ -366,7 +292,7 @@ export class PluginLogger {
     }
     this.flushTimer = window.setTimeout(() => {
       this.flushTimer = null;
-      this.flushPendingEntries();
+      void this.flushPendingEntries().catch(() => undefined);
     }, this.flushIntervalMs);
   }
 
@@ -476,9 +402,9 @@ export class PluginLogger {
     if (this.plugin?.isPluginUnloading?.()) {
       return;
     }
-    const adapter: any = this.plugin.app?.vault?.adapter;
+    const adapter = this.plugin.app.vault.adapter;
     const storage = this.plugin.storage;
-    if (!adapter || typeof adapter.stat !== "function" || !storage) {
+    if (!storage) {
       return;
     }
 
@@ -546,548 +472,33 @@ function sanitizeContext(context: PluginLogContext): PluginLogContext {
   return safeContext;
 }
 
-function snapshotLifecycleMetadata(
-  metadata: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    code: metadata.code,
-    phase: metadata.phase,
-    sequence: metadata.sequence,
-    timestamp: metadata.timestamp,
-    conversationId: metadata.conversationId,
-    requestId: metadata.requestId,
-    clientInstanceId: metadata.clientInstanceId,
-    pluginBuildId: metadata.pluginBuildId,
-    runId: metadata.runId,
-    serverRunId: metadata.serverRunId,
-    toolName: metadata.toolName,
-    toolCallId: metadata.toolCallId,
-    status: metadata.status,
-    retryable: metadata.retryable,
-    incidentId: metadata.incidentId,
-    failureCode: metadata.failureCode,
-    latencyTraceId: metadata.latencyTraceId,
-    commandKind: metadata.commandKind,
-    commandSegmentOrdinal: metadata.commandSegmentOrdinal,
-    toolExecutionOrdinal: metadata.toolExecutionOrdinal,
-    toolOutcome: metadata.toolOutcome,
-    toolFailureClass: metadata.toolFailureClass,
-    toolItemCount: metadata.toolItemCount,
-    toolCompletedItemCount: metadata.toolCompletedItemCount,
-    toolFailedItemCount: metadata.toolFailedItemCount,
-    historySyncKind: metadata.historySyncKind,
-    historySyncOrdinal: metadata.historySyncOrdinal,
-    responseDeliveryMode: metadata.responseDeliveryMode,
-    clientMonotonicOffsetMs: metadata.clientMonotonicOffsetMs,
-    serverTimingAppMs: metadata.serverTimingAppMs,
-    serverTimingAuthMs: metadata.serverTimingAuthMs,
-    creditsRefreshReason: metadata.creditsRefreshReason,
-    creditsRefreshSequence: metadata.creditsRefreshSequence,
-    creditsRefreshTransport: metadata.creditsRefreshTransport,
-    creditsRefreshElapsedMs: metadata.creditsRefreshElapsedMs,
-    creditsRefreshServerAuthMs: metadata.creditsRefreshServerAuthMs,
-    creditsRefreshServerRateLimitMs: metadata.creditsRefreshServerRateLimitMs,
-    creditsRefreshServerBalanceStoreMs: metadata.creditsRefreshServerBalanceStoreMs,
-    creditsRefreshServerTotalMs: metadata.creditsRefreshServerTotalMs,
-  };
-}
-
-function redactPersistedLifecycleMetadata(
-  metadata: Record<string, unknown>,
-): Record<string, unknown> {
-  const persisted = { ...metadata };
-  delete persisted.conversationId;
-  delete persisted.requestId;
-  delete persisted.clientInstanceId;
-  delete persisted.toolCallId;
-  return persisted;
-}
-
-function sanitizeLifecycleMetadata(
-  input: Record<string, unknown>,
-): Record<string, unknown> | null {
-  let metadata: Record<string, unknown>;
+function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnosticEvent | null {
   try {
-    metadata = snapshotLifecycleMetadata(input);
+    const timestamp = validIsoTimestamp(entry.timestamp);
+    const metadata = entry.context?.metadata;
+    if (!timestamp || !metadata) return null;
+    if (entry.level === "info" && entry.message === "thin-agent:lifecycle" && entry.context?.source === "AgentLifecycle") {
+      const projection = projectLifecycleMetadata(metadata);
+      return projection ? Object.freeze({ timestamp, severity: "info", ...projection.fields }) : null;
+    }
+    if (entry.level !== "error" || entry.message !== THIN_AGENT_FAILURE_LOG_MESSAGE || entry.context?.source !== "ThinAgentClient") return null;
+    const { code, phase, origin, cause, sequence, status, retryable, incidentId } = metadata;
+    if (typeof code !== "string" || (!SAFE_THIN_AGENT_FAILURE_CODES.has(code) && code !== "client_failure") || !isAgentLifecyclePhase(phase)) return null;
+    return Object.freeze({
+      timestamp,
+      severity: "error",
+      code,
+      phase,
+      ...(typeof origin === "string" && THIN_AGENT_FAILURE_ORIGINS.has(origin) ? { origin } : {}),
+      ...(typeof cause === "string" && THIN_AGENT_FAILURE_CAUSES.has(cause) ? { cause } : {}),
+      ...(Number.isSafeInteger(sequence) && (sequence as number) > 0 ? { sequence: sequence as number } : {}),
+      ...(Number.isInteger(status) && (status as number) >= 100 && (status as number) <= 599 ? { status: status as number } : {}),
+      ...(typeof retryable === "boolean" ? { retryable } : {}),
+      ...(isThinAgentIncidentId(incidentId) ? { incident_id: incidentId } : {}),
+    });
   } catch {
     return null;
   }
-  const code = isAgentLifecycleCode(metadata.code)
-    ? metadata.code
-    : undefined;
-  const phase = isAgentLifecyclePhase(metadata.phase)
-    ? metadata.phase
-    : undefined;
-  if (!code || !phase) return null;
-
-  const sanitized: Record<string, unknown> = { code, phase };
-  if (Number.isSafeInteger(metadata.sequence) && (metadata.sequence as number) > 0) {
-    sanitized.sequence = metadata.sequence;
-  }
-  if (Number.isSafeInteger(metadata.timestamp) && (metadata.timestamp as number) >= 0) {
-    sanitized.timestamp = metadata.timestamp;
-  }
-  const conversationId = isThinAgentConversationId(metadata.conversationId)
-    ? metadata.conversationId
-    : undefined;
-  const requestId = boundedThinAgentIdentifier(metadata.requestId, 160);
-  const clientInstanceId = isThinAgentClientInstanceId(metadata.clientInstanceId)
-    ? metadata.clientInstanceId
-    : undefined;
-  const pluginBuildId = boundedThinAgentIdentifier(metadata.pluginBuildId, 160);
-  const runId = boundedThinAgentIdentifier(metadata.runId, 160);
-  const serverRunId = isThinAgentServerRunId(metadata.serverRunId)
-    ? metadata.serverRunId
-    : undefined;
-  const toolName = isFirstPartyToolName(metadata.toolName)
-    ? metadata.toolName
-    : undefined;
-  const toolCallId = boundedThinAgentIdentifier(metadata.toolCallId, 160);
-  if (conversationId) sanitized.conversationId = conversationId;
-  if (requestId) sanitized.requestId = requestId;
-  if (clientInstanceId) sanitized.clientInstanceId = clientInstanceId;
-  if (pluginBuildId) sanitized.pluginBuildId = pluginBuildId;
-  if (runId) sanitized.runId = runId;
-  if (serverRunId) sanitized.serverRunId = serverRunId;
-  if (toolName) sanitized.toolName = toolName;
-  if (toolCallId) sanitized.toolCallId = toolCallId;
-  if (
-    Number.isInteger(metadata.status)
-    && (metadata.status as number) >= 100
-    && (metadata.status as number) <= 599
-  ) {
-    sanitized.status = metadata.status;
-  }
-  if (typeof metadata.retryable === "boolean") {
-    sanitized.retryable = metadata.retryable;
-  }
-  if (isThinAgentIncidentId(metadata.incidentId)) {
-    sanitized.incidentId = metadata.incidentId;
-  }
-  if (isThinAgentFailureCode(metadata.failureCode)) {
-    sanitized.failureCode = metadata.failureCode;
-  }
-  if (isThinAgentLatencyTraceId(metadata.latencyTraceId)) {
-    sanitized.latencyTraceId = metadata.latencyTraceId;
-  }
-  if (
-    isThinAgentCommandKind(metadata.commandKind)
-  ) {
-    sanitized.commandKind = metadata.commandKind;
-  }
-  if (
-    Number.isSafeInteger(metadata.commandSegmentOrdinal)
-    && (metadata.commandSegmentOrdinal as number) > 0
-  ) {
-    sanitized.commandSegmentOrdinal = metadata.commandSegmentOrdinal;
-  }
-  if (
-    Number.isSafeInteger(metadata.toolExecutionOrdinal)
-    && (metadata.toolExecutionOrdinal as number) > 0
-    && (metadata.toolExecutionOrdinal as number) <= MAX_TOOL_EXECUTION_ORDINAL
-  ) {
-    sanitized.toolExecutionOrdinal = metadata.toolExecutionOrdinal;
-  }
-  if (isToolDiagnosticOutcome(metadata.toolOutcome)) {
-    sanitized.toolOutcome = metadata.toolOutcome;
-  }
-  if (isToolDiagnosticFailureClass(metadata.toolFailureClass)) {
-    sanitized.toolFailureClass = metadata.toolFailureClass;
-  }
-  for (const key of [
-    "toolItemCount",
-    "toolCompletedItemCount",
-    "toolFailedItemCount",
-  ] as const) {
-    const value = boundedToolDiagnosticItemCount(metadata[key]);
-    if (value !== undefined) sanitized[key] = value;
-  }
-  if (isHistorySyncKind(metadata.historySyncKind)) {
-    sanitized.historySyncKind = metadata.historySyncKind;
-  }
-  if (
-    Number.isSafeInteger(metadata.historySyncOrdinal)
-    && (metadata.historySyncOrdinal as number) > 0
-    && (metadata.historySyncOrdinal as number) <= MAX_HISTORY_SYNC_ORDINAL
-  ) {
-    sanitized.historySyncOrdinal = metadata.historySyncOrdinal;
-  }
-  if (
-    metadata.responseDeliveryMode === "fetch_stream"
-    || metadata.responseDeliveryMode === "request_url_buffered"
-  ) {
-    sanitized.responseDeliveryMode = metadata.responseDeliveryMode;
-  }
-  const clientMonotonicOffsetMs = boundedThinAgentTiming(
-    metadata.clientMonotonicOffsetMs,
-  );
-  if (clientMonotonicOffsetMs !== undefined) {
-    sanitized.clientMonotonicOffsetMs = clientMonotonicOffsetMs;
-    sanitized.clientClockDomain = "client_turn_monotonic";
-  }
-  const serverTimingAppMs = boundedThinAgentTiming(metadata.serverTimingAppMs);
-  const serverTimingAuthMs = boundedThinAgentTiming(metadata.serverTimingAuthMs);
-  if (serverTimingAppMs !== undefined) sanitized.serverTimingAppMs = serverTimingAppMs;
-  if (serverTimingAuthMs !== undefined) sanitized.serverTimingAuthMs = serverTimingAuthMs;
-  if (serverTimingAppMs !== undefined || serverTimingAuthMs !== undefined) {
-    sanitized.serverTimingClockDomain = "server_response_headers_monotonic_duration";
-  }
-  if (isCreditsRefreshReason(metadata.creditsRefreshReason)) {
-    sanitized.creditsRefreshReason = metadata.creditsRefreshReason;
-  }
-  if (
-    Number.isSafeInteger(metadata.creditsRefreshSequence)
-    && (metadata.creditsRefreshSequence as number) > 0
-  ) {
-    sanitized.creditsRefreshSequence = metadata.creditsRefreshSequence;
-  }
-  if (
-    metadata.creditsRefreshTransport === "fetch"
-    || metadata.creditsRefreshTransport === "request_url"
-  ) {
-    sanitized.creditsRefreshTransport = metadata.creditsRefreshTransport;
-  }
-  const creditsRefreshElapsedMs = boundedThinAgentTiming(
-    metadata.creditsRefreshElapsedMs,
-  );
-  if (creditsRefreshElapsedMs !== undefined) {
-    sanitized.creditsRefreshElapsedMs = creditsRefreshElapsedMs;
-    sanitized.creditsRefreshClockDomain = "client_refresh_monotonic_duration";
-  }
-  const creditsRefreshServerAuthMs = boundedThinAgentTiming(
-    metadata.creditsRefreshServerAuthMs,
-  );
-  const creditsRefreshServerRateLimitMs = boundedThinAgentTiming(
-    metadata.creditsRefreshServerRateLimitMs,
-  );
-  const creditsRefreshServerBalanceStoreMs = boundedThinAgentTiming(
-    metadata.creditsRefreshServerBalanceStoreMs,
-  );
-  const creditsRefreshServerTotalMs = boundedThinAgentTiming(
-    metadata.creditsRefreshServerTotalMs,
-  );
-  if (creditsRefreshServerAuthMs !== undefined) {
-    sanitized.creditsRefreshServerAuthMs = creditsRefreshServerAuthMs;
-  }
-  if (creditsRefreshServerRateLimitMs !== undefined) {
-    sanitized.creditsRefreshServerRateLimitMs = creditsRefreshServerRateLimitMs;
-  }
-  if (creditsRefreshServerBalanceStoreMs !== undefined) {
-    sanitized.creditsRefreshServerBalanceStoreMs = creditsRefreshServerBalanceStoreMs;
-  }
-  if (creditsRefreshServerTotalMs !== undefined) {
-    sanitized.creditsRefreshServerTotalMs = creditsRefreshServerTotalMs;
-  }
-  if (
-    creditsRefreshServerAuthMs !== undefined
-    || creditsRefreshServerRateLimitMs !== undefined
-    || creditsRefreshServerBalanceStoreMs !== undefined
-    || creditsRefreshServerTotalMs !== undefined
-  ) {
-    sanitized.creditsRefreshServerTimingClockDomain =
-      "server_response_headers_monotonic_duration";
-  }
-  return sanitized;
-}
-
-function projectSupportDiagnosticEvent(entry: PluginLogEntry): SupportDiagnosticEvent | null {
-  const timestamp = validIsoTimestamp(entry.timestamp);
-  const metadata = entry.context?.metadata;
-  if (!timestamp || !metadata) return null;
-
-  const isLifecycle = entry.level === "info"
-    && entry.message === "thin-agent:lifecycle"
-    && entry.context?.source === "AgentLifecycle";
-  const isFailure = entry.level === "error"
-    && entry.message === THIN_AGENT_FAILURE_LOG_MESSAGE
-    && entry.context?.source === "ThinAgentClient";
-  if (!isLifecycle && !isFailure) return null;
-
-  const code = typeof metadata.code === "string"
-    && (
-      (isLifecycle && isAgentLifecycleCode(metadata.code))
-      || (isFailure && (
-        SAFE_THIN_AGENT_FAILURE_CODES.has(metadata.code)
-        || metadata.code === "client_failure"
-      ))
-    )
-    ? metadata.code
-    : undefined;
-  const phase = isAgentLifecyclePhase(metadata.phase)
-    ? metadata.phase
-    : undefined;
-  if (!code || !phase) return null;
-
-  const projected: {
-    timestamp: string;
-    severity: "info" | "error";
-    code: string;
-    phase: AgentLifecyclePhase;
-    origin?: string;
-    cause?: string;
-    sequence?: number;
-    conversation_id?: string;
-    request_id?: string;
-    client_instance_id?: string;
-    plugin_build_id?: string;
-    run_id?: string;
-    server_run_id?: string;
-    tool_name?: string;
-    status?: number;
-    retryable?: boolean;
-    incident_id?: string;
-    failure_code?: string;
-    latency_trace_id?: string;
-    command_kind?: ThinAgentCommandKind;
-    command_segment_ordinal?: number;
-    tool_execution_ordinal?: number;
-    tool_outcome?: ToolDiagnosticOutcome;
-    tool_failure_class?: ToolDiagnosticFailureClass;
-    tool_item_count?: number;
-    tool_completed_item_count?: number;
-    tool_failed_item_count?: number;
-    history_sync_kind?: HistorySyncKind;
-    history_sync_ordinal?: number;
-    response_delivery_mode?: "fetch_stream" | "request_url_buffered";
-    client_monotonic_offset_ms?: number;
-    client_clock_domain?: "client_turn_monotonic";
-    server_timing_app_ms?: number;
-    server_timing_auth_ms?: number;
-    server_timing_clock_domain?: "server_response_headers_monotonic_duration";
-    credits_refresh_reason?: SupportDiagnosticEvent["credits_refresh_reason"];
-    credits_refresh_sequence?: number;
-    credits_refresh_transport?: "fetch" | "request_url";
-    credits_refresh_elapsed_ms?: number;
-    credits_refresh_clock_domain?: "client_refresh_monotonic_duration";
-    credits_refresh_server_auth_ms?: number;
-    credits_refresh_server_rate_limit_ms?: number;
-    credits_refresh_server_balance_store_ms?: number;
-    credits_refresh_server_total_ms?: number;
-    credits_refresh_server_timing_clock_domain?:
-      "server_response_headers_monotonic_duration";
-  } = {
-    timestamp,
-    severity: isLifecycle ? "info" : "error",
-    code,
-    phase,
-  };
-  if (
-    isFailure
-    && typeof metadata.origin === "string"
-    && THIN_AGENT_FAILURE_ORIGINS.has(metadata.origin)
-  ) {
-    projected.origin = metadata.origin;
-  }
-  if (
-    isFailure
-    && typeof metadata.cause === "string"
-    && THIN_AGENT_FAILURE_CAUSES.has(metadata.cause)
-  ) {
-    projected.cause = metadata.cause;
-  }
-  if (Number.isSafeInteger(metadata.sequence) && (metadata.sequence as number) > 0) {
-    projected.sequence = metadata.sequence as number;
-  }
-  if (
-    isLifecycle
-    && isThinAgentConversationId(metadata.conversationId)
-  ) {
-    projected.conversation_id = metadata.conversationId;
-  }
-  if (isLifecycle) {
-    const requestId = boundedThinAgentIdentifier(metadata.requestId, 160);
-    const pluginBuildId = boundedThinAgentIdentifier(metadata.pluginBuildId, 160);
-    const runId = boundedThinAgentIdentifier(metadata.runId, 160);
-    if (requestId) projected.request_id = requestId;
-    if (pluginBuildId) projected.plugin_build_id = pluginBuildId;
-    if (runId) projected.run_id = runId;
-  }
-  if (
-    isLifecycle
-    && isThinAgentClientInstanceId(metadata.clientInstanceId)
-  ) {
-    projected.client_instance_id = metadata.clientInstanceId;
-  }
-  if (
-    isLifecycle
-    && isThinAgentServerRunId(metadata.serverRunId)
-  ) {
-    projected.server_run_id = metadata.serverRunId;
-  }
-  if (
-    isLifecycle
-    && isFirstPartyToolName(metadata.toolName)
-  ) {
-    projected.tool_name = metadata.toolName;
-  }
-  if (
-    Number.isInteger(metadata.status)
-    && (metadata.status as number) >= 100
-    && (metadata.status as number) <= 599
-  ) {
-    projected.status = metadata.status as number;
-  }
-  if (typeof metadata.retryable === "boolean") {
-    projected.retryable = metadata.retryable;
-  }
-  if (isThinAgentIncidentId(metadata.incidentId)) {
-    projected.incident_id = metadata.incidentId;
-  }
-  if (
-    isLifecycle
-    && isThinAgentFailureCode(metadata.failureCode)
-  ) {
-    projected.failure_code = metadata.failureCode;
-  }
-  if (
-    isLifecycle
-    && isThinAgentLatencyTraceId(metadata.latencyTraceId)
-  ) {
-    projected.latency_trace_id = metadata.latencyTraceId;
-  }
-  if (
-    isLifecycle
-    && isThinAgentCommandKind(metadata.commandKind)
-  ) {
-    projected.command_kind = metadata.commandKind as SupportDiagnosticEvent["command_kind"];
-  }
-  if (
-    isLifecycle
-    && Number.isSafeInteger(metadata.commandSegmentOrdinal)
-    && (metadata.commandSegmentOrdinal as number) > 0
-  ) {
-    projected.command_segment_ordinal = metadata.commandSegmentOrdinal as number;
-  }
-  if (
-    isLifecycle
-    && Number.isSafeInteger(metadata.toolExecutionOrdinal)
-    && (metadata.toolExecutionOrdinal as number) > 0
-    && (metadata.toolExecutionOrdinal as number) <= MAX_TOOL_EXECUTION_ORDINAL
-  ) {
-    projected.tool_execution_ordinal = metadata.toolExecutionOrdinal as number;
-  }
-  if (isLifecycle && isToolDiagnosticOutcome(metadata.toolOutcome)) {
-    projected.tool_outcome = metadata.toolOutcome;
-  }
-  if (isLifecycle && isToolDiagnosticFailureClass(metadata.toolFailureClass)) {
-    projected.tool_failure_class = metadata.toolFailureClass;
-  }
-  const toolItemCount = boundedToolDiagnosticItemCount(metadata.toolItemCount);
-  const toolCompletedItemCount = boundedToolDiagnosticItemCount(
-    metadata.toolCompletedItemCount,
-  );
-  const toolFailedItemCount = boundedToolDiagnosticItemCount(
-    metadata.toolFailedItemCount,
-  );
-  if (isLifecycle && toolItemCount !== undefined) {
-    projected.tool_item_count = toolItemCount;
-  }
-  if (isLifecycle && toolCompletedItemCount !== undefined) {
-    projected.tool_completed_item_count = toolCompletedItemCount;
-  }
-  if (isLifecycle && toolFailedItemCount !== undefined) {
-    projected.tool_failed_item_count = toolFailedItemCount;
-  }
-  if (isLifecycle && isHistorySyncKind(metadata.historySyncKind)) {
-    projected.history_sync_kind = metadata.historySyncKind;
-  }
-  if (
-    isLifecycle
-    && Number.isSafeInteger(metadata.historySyncOrdinal)
-    && (metadata.historySyncOrdinal as number) > 0
-    && (metadata.historySyncOrdinal as number) <= MAX_HISTORY_SYNC_ORDINAL
-  ) {
-    projected.history_sync_ordinal = metadata.historySyncOrdinal as number;
-  }
-  if (
-    isLifecycle
-    && (
-      metadata.responseDeliveryMode === "fetch_stream"
-      || metadata.responseDeliveryMode === "request_url_buffered"
-    )
-  ) {
-    projected.response_delivery_mode = metadata.responseDeliveryMode;
-  }
-  if (isLifecycle) {
-    const clientMonotonicOffsetMs = boundedThinAgentTiming(
-      metadata.clientMonotonicOffsetMs,
-    );
-    const serverTimingAppMs = boundedThinAgentTiming(metadata.serverTimingAppMs);
-    const serverTimingAuthMs = boundedThinAgentTiming(metadata.serverTimingAuthMs);
-    if (clientMonotonicOffsetMs !== undefined) {
-      projected.client_monotonic_offset_ms = clientMonotonicOffsetMs;
-      projected.client_clock_domain = "client_turn_monotonic";
-    }
-    if (serverTimingAppMs !== undefined) {
-      projected.server_timing_app_ms = serverTimingAppMs;
-    }
-    if (serverTimingAuthMs !== undefined) {
-      projected.server_timing_auth_ms = serverTimingAuthMs;
-    }
-    if (serverTimingAppMs !== undefined || serverTimingAuthMs !== undefined) {
-      projected.server_timing_clock_domain = "server_response_headers_monotonic_duration";
-    }
-    if (
-      isCreditsRefreshReason(metadata.creditsRefreshReason)
-    ) {
-      projected.credits_refresh_reason = (
-        metadata.creditsRefreshReason as SupportDiagnosticEvent["credits_refresh_reason"]
-      );
-    }
-    if (
-      Number.isSafeInteger(metadata.creditsRefreshSequence)
-      && (metadata.creditsRefreshSequence as number) > 0
-    ) {
-      projected.credits_refresh_sequence = metadata.creditsRefreshSequence as number;
-    }
-    if (
-      metadata.creditsRefreshTransport === "fetch"
-      || metadata.creditsRefreshTransport === "request_url"
-    ) {
-      projected.credits_refresh_transport = metadata.creditsRefreshTransport;
-    }
-    const creditsRefreshElapsedMs = boundedThinAgentTiming(
-      metadata.creditsRefreshElapsedMs,
-    );
-    if (creditsRefreshElapsedMs !== undefined) {
-      projected.credits_refresh_elapsed_ms = creditsRefreshElapsedMs;
-      projected.credits_refresh_clock_domain = "client_refresh_monotonic_duration";
-    }
-    const creditsRefreshServerAuthMs = boundedThinAgentTiming(
-      metadata.creditsRefreshServerAuthMs,
-    );
-    const creditsRefreshServerRateLimitMs = boundedThinAgentTiming(
-      metadata.creditsRefreshServerRateLimitMs,
-    );
-    const creditsRefreshServerBalanceStoreMs = boundedThinAgentTiming(
-      metadata.creditsRefreshServerBalanceStoreMs,
-    );
-    const creditsRefreshServerTotalMs = boundedThinAgentTiming(
-      metadata.creditsRefreshServerTotalMs,
-    );
-    if (creditsRefreshServerAuthMs !== undefined) {
-      projected.credits_refresh_server_auth_ms = creditsRefreshServerAuthMs;
-    }
-    if (creditsRefreshServerRateLimitMs !== undefined) {
-      projected.credits_refresh_server_rate_limit_ms = creditsRefreshServerRateLimitMs;
-    }
-    if (creditsRefreshServerBalanceStoreMs !== undefined) {
-      projected.credits_refresh_server_balance_store_ms = creditsRefreshServerBalanceStoreMs;
-    }
-    if (creditsRefreshServerTotalMs !== undefined) {
-      projected.credits_refresh_server_total_ms = creditsRefreshServerTotalMs;
-    }
-    if (
-      creditsRefreshServerAuthMs !== undefined
-      || creditsRefreshServerRateLimitMs !== undefined
-      || creditsRefreshServerBalanceStoreMs !== undefined
-      || creditsRefreshServerTotalMs !== undefined
-    ) {
-      projected.credits_refresh_server_timing_clock_domain =
-        "server_response_headers_monotonic_duration";
-    }
-  }
-  return Object.freeze(projected);
 }
 
 function normalizeSupportLimit(limit: number): number {
@@ -1115,9 +526,7 @@ function normalizeThinAgentFailure(
   ) {
     return null;
   }
-  const candidate = error && typeof error === "object" && !Array.isArray(error)
-    ? error as Record<string, unknown>
-    : {};
+  const candidate = snapshotThinAgentError(error);
   const code = typeof candidate.code === "string"
     && SAFE_THIN_AGENT_FAILURE_CODES.has(candidate.code)
     ? candidate.code
@@ -1131,10 +540,12 @@ function normalizeThinAgentFailure(
   const incidentId = isThinAgentIncidentId(incidentCandidate)
     ? incidentCandidate
     : undefined;
-  const phase = thinAgentPhaseForMethod(context.method);
-  const origin = thinAgentOriginForMethod(context.method);
+  const method = context.method;
+  const { phase, origin } = method && Object.prototype.hasOwnProperty.call(THIN_AGENT_FAILURE_METHODS, method)
+    ? THIN_AGENT_FAILURE_METHODS[method]
+    : { phase: "unknown", origin: "unknown" };
   const cause = code === "client_failure"
-    ? thinAgentFailureCause(error)
+    ? thinAgentFailureCause(candidate)
     : undefined;
   const metadata: Record<string, unknown> = {
     code,
@@ -1156,33 +567,45 @@ function normalizeThinAgentFailure(
   };
 }
 
-function thinAgentOriginForMethod(method: string | undefined): string {
-  switch (method) {
-    case "approvalModeChange":
-      return "approval_mode_change";
-    case "loadChatHydration":
-      return "chat_hydration";
-    case "agentSession":
-    case "reportAgentError":
-      return "session_callback";
-    case "completedRunSettlement":
-      return "run_settlement";
-    case "agentSnapshotRender":
-      return "snapshot_render";
-    case "historicalResubmit":
-      return "historical_resubmit";
-    case "warmThinConversation":
-      return "warm_bootstrap";
-    default:
-      return "unknown";
+type ThinAgentErrorSnapshot = Readonly<{
+  isObject: boolean;
+  isError: boolean;
+  code?: unknown;
+  status?: unknown;
+  incidentId?: unknown;
+  requestId?: unknown;
+  retryable?: unknown;
+  name?: unknown;
+  message?: unknown;
+}>;
+
+function snapshotThinAgentError(error: unknown): ThinAgentErrorSnapshot {
+  try {
+    if (!error || typeof error !== "object" || Array.isArray(error)) {
+      return { isObject: false, isError: false };
+    }
+    const source = error as Record<string, unknown>;
+    return {
+      isObject: true,
+      isError: error instanceof Error,
+      code: source.code,
+      status: source.status,
+      incidentId: source.incidentId,
+      requestId: source.requestId,
+      retryable: source.retryable,
+      name: source.name,
+      message: source.message,
+    };
+  } catch {
+    // A hostile error must remain content-free, never fall back to raw logging.
+    return { isObject: true, isError: false };
   }
 }
 
-function thinAgentFailureCause(error: unknown): string {
-  if (!error || typeof error !== "object" || Array.isArray(error)) {
+function thinAgentFailureCause(candidate: ThinAgentErrorSnapshot): string {
+  if (!candidate.isObject) {
     return "non_error";
   }
-  const candidate = error as Record<string, unknown>;
   const name = typeof candidate.name === "string" ? candidate.name : "";
   const code = typeof candidate.code === "string" ? candidate.code : "";
   const message = typeof candidate.message === "string" ? candidate.message : "";
@@ -1228,27 +651,8 @@ function thinAgentFailureCause(error: unknown): string {
   if (/^message .+ not found$/u.test(message)) return "message_not_found";
   if (name === "TypeError") return "type_error";
   if (name === "SyntaxError") return "invalid_data";
-  if (error instanceof Error) return "generic_error";
+  if (candidate.isError) return "generic_error";
   return "object_error";
-}
-
-function thinAgentPhaseForMethod(method: string | undefined): string {
-  switch (method) {
-    case "approvalModeChange":
-      return "session";
-    case "loadChatHydration":
-    case "warmThinConversation":
-      return "start";
-    case "agentSession":
-    case "reportAgentError":
-      return "response";
-    case "completedRunSettlement":
-      return "persistence";
-    case "agentSnapshotRender":
-      return "render";
-    default:
-      return "unknown";
-  }
 }
 
 function serializeError(error: unknown) {
@@ -1259,7 +663,7 @@ function serializeError(error: unknown) {
       message: error.message,
     };
     if (error.stack) serialized.stack = error.stack;
-    const extra = error as any;
+    const extra = error as Error & { code?: unknown; status?: unknown };
     if (typeof extra.code !== "undefined") serialized.code = extra.code;
     if (typeof extra.status !== "undefined") serialized.status = extra.status;
     return serialized;

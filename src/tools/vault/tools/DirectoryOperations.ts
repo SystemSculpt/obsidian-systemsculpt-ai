@@ -59,7 +59,7 @@ export class DirectoryOperations {
       
       try {
         if (this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           await ensureAdapterFolder(adapter, normalizedPath);
         } else {
           await this.app.vault.createFolder(normalizedPath);
@@ -81,13 +81,13 @@ export class DirectoryOperations {
    */
   async listDirectories(params: ListDirectoriesParams): Promise<{ results: ListDirectoryResult[] }> {
     const { paths } = params;
-    const filter = (params as any).filter ?? "all";
-    const sort = (params as any).sort ?? "modified";
-    const recursive = (params as any).recursive ?? false;
-    const offset = Math.max(0, Math.floor(Number((params as any).offset ?? 0) || 0));
+    const filter = params.filter ?? "all";
+    const sort = params.sort ?? "modified";
+    const recursive = params.recursive ?? false;
+    const offset = Math.max(0, Math.floor(Number(params.offset ?? 0) || 0));
     const defaultPageSize = FILESYSTEM_LIMITS.DEFAULT_LIST_PAGE_SIZE ?? 25;
     const maxPageSize = FILESYSTEM_LIMITS.MAX_LIST_PAGE_SIZE ?? 50;
-    const requestedLimit = Math.floor(Number((params as any).limit ?? defaultPageSize) || defaultPageSize);
+    const requestedLimit = Math.floor(Number(params.limit ?? defaultPageSize) || defaultPageSize);
     const limit = Math.max(1, Math.min(maxPageSize, requestedLimit));
 
     if (!Array.isArray(paths) || paths.length === 0) {
@@ -99,7 +99,7 @@ export class DirectoryOperations {
     const pageOrders = new WeakMap<ListDirectoryResult, Array<{ type: "file" | "folder"; path: string }>>();
     
     // Semantic filter is no longer supported - removed complex search engine
-    if (typeof filter === 'object' && (filter as any).semantic) {
+    if (typeof filter === 'object' && (filter).semantic) {
       return { results: [{
         path: paths[0] || '',
         error: 'Semantic search has been disabled – use "Search Note Contents" instead',
@@ -119,7 +119,7 @@ export class DirectoryOperations {
         const normalizedCandidate = normalizePath(normalizeVaultPath(path));
         const normalizedPath = normalizedCandidate === "." ? "" : normalizedCandidate;
         if (normalizedPath && this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           const pathResult: ListDirectoryResult = { path, offset, totalItems: 0, nextOffset: null };
 
           if (filter === 'all' || filter === 'files') {
@@ -171,7 +171,7 @@ export class DirectoryOperations {
           }));
 
           items.sort((a, b) => {
-            const sortType = sort as "modified" | "size" | "name" | "created";
+            const sortType = sort;
             if (sortType === "name") {
               return a.path.localeCompare(b.path);
             }
@@ -282,24 +282,27 @@ export class DirectoryOperations {
         
         // Sort items based on the sort parameter
         allItems.sort((a, b) => {
-          const sortType = sort as "modified" | "size" | "name" | "created";
+          const sortType = sort;
           switch (sortType) {
-            case "size":
+            case "size": {
               // Folders don't have size, put them last
               const aSize = a instanceof TFile ? a.stat.size : -1;
               const bSize = b instanceof TFile ? b.stat.size : -1;
               return bSize - aSize || a.path.localeCompare(b.path); // Largest first
+            }
             case "name":
               return a.path.localeCompare(b.path);
-            case "created":
+            case "created": {
               const aCtime = a instanceof TFile ? a.stat.ctime : 0;
               const bCtime = b instanceof TFile ? b.stat.ctime : 0;
               return bCtime - aCtime || a.path.localeCompare(b.path); // Newest first
+            }
             case "modified":
-            default:
+            default: {
               const aMtime = a instanceof TFile ? a.stat.mtime : 0;
               const bMtime = b instanceof TFile ? b.stat.mtime : 0;
               return bMtime - aMtime || a.path.localeCompare(b.path); // Newest first
+            }
           }
         });
         
@@ -454,7 +457,7 @@ export class DirectoryOperations {
           }
 
           if (this.shouldUseAdapter(source) || this.shouldUseAdapter(destination)) {
-            const adapter: any = this.app.vault.adapter as any;
+            const adapter = this.app.vault.adapter;
             const destFolder = destination.split("/").slice(0, -1).join("/");
             if (destFolder) {
               await ensureAdapterFolder(adapter, destFolder);
@@ -489,8 +492,13 @@ export class DirectoryOperations {
           // Move/rename operation
           await this.app.fileManager.renameFile(sourceFile, normalizedDestination);
           results.push({ source, destination, success: true });
-        } catch (error: any) {
-          results.push({ source, destination, success: false, error: error?.message || String(error) });
+        } catch (error: unknown) {
+          results.push({
+            source,
+            destination,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
@@ -501,7 +509,9 @@ export class DirectoryOperations {
     const failed = results.length - ok;
     try {
       if (ok > 0) new Notice(`Moved ${ok} item${ok === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}.`);
-    } catch {}
+    } catch {
+      // Notices are optional in headless hosts.
+    }
 
     return { results };
   }
@@ -524,14 +534,13 @@ export class DirectoryOperations {
     });
 
     // Normalise results & map errors
-    const results = settled.map((res) => {
-      if (res && (res as any).success) return res as { path: string; success: boolean };
-      // An error was caught – convert to typed result object
-      const errObj = res as any;
+    const results = settled.map((result) => {
+      if ("success" in result && result.success) return result;
+      const error = "error" in result ? result.error : "Trash operation failed";
       return {
-        path: errObj?.path ?? "<unknown>",
+        path: result.path,
         success: false,
-        error: errObj?.error?.message ?? errObj?.message ?? String(errObj)
+        error: error instanceof Error ? error.message : String(error),
       };
     });
 

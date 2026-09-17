@@ -4,7 +4,8 @@ import type {
   ChatMessage,
   MultiPartContent,
 } from "../../../types";
-import { sha256HexFromBytesPortable } from "../../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../../utils/sha256";
+import { replaceControlCharacters } from "../../../utils/characterValidation";
 import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
   type ThinAgentInputLimits,
@@ -14,7 +15,7 @@ import {
   createTextAttachmentPart,
   parseAttachedTextContent,
   parseImageDataUrl,
-} from "./ChatAttachmentContent";
+} from "../../../chat/ChatAttachmentContent";
 
 const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, "image/png" | "image/jpeg" | "image/webp">> = Object.freeze({
   png: "image/png",
@@ -122,7 +123,7 @@ function extensionOf(name: string): string {
 
 function safeFileName(name: string): string {
   const leaf = name.split(/[\\/]/).pop() || "attachment";
-  const cleaned = leaf.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 180);
+  const cleaned = replaceControlCharacters(leaf, "", true).trim().slice(0, 180);
   return cleaned || "attachment";
 }
 

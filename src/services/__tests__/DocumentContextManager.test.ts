@@ -131,6 +131,8 @@ describe("DocumentContextManager", () => {
   });
 
   describe("document conversion context effects", () => {
+    const LEDGER_DIR = ".systemsculpt/document-context";
+    const LEDGER_PATH = `${LEDGER_DIR}/effects.json`;
     const effect = {
       effectId: "a".repeat(64), operationId: "operation-1", outputIdentity: "output-1",
       outputPath: "Extractions/document.md", markdownSha256: "b".repeat(64),
@@ -141,10 +143,44 @@ describe("DocumentContextManager", () => {
       projectionMutated, notificationAcknowledged,
     });
 
+    // The ledger lives in its own vault file, never in data.json. These tests
+    // back the mock adapter with an in-memory file map.
+    let files: Map<string, string>;
+    let dirs: Set<string>;
+    const adapter = () => mockApp.vault.adapter as unknown as Record<string, jest.Mock>;
+    const installLedgerAdapter = () => {
+      files = new Map();
+      dirs = new Set();
+      const a = adapter();
+      a.exists.mockImplementation(async (path: string) => files.has(path) || dirs.has(path));
+      a.read.mockImplementation(async (path: string) => {
+        if (!files.has(path)) throw new Error(`ENOENT: ${path}`);
+        return files.get(path);
+      });
+      a.write.mockImplementation(async (path: string, data: string) => { files.set(path, data); });
+      a.mkdir.mockImplementation(async (path: string) => { dirs.add(path); });
+      a.remove.mockImplementation(async (path: string) => { files.delete(path); });
+      a.rename.mockImplementation(async (from: string, to: string) => {
+        const value = files.get(from);
+        if (value === undefined) throw new Error(`ENOENT: ${from}`);
+        files.delete(from);
+        files.set(to, value);
+      });
+    };
+    const seedLedger = (effects: Record<string, unknown>, path = LEDGER_PATH) => {
+      files.set(path, JSON.stringify({ schemaVersion: 1, effects }));
+    };
+    const readLedger = () => JSON.parse(files.get(LEDGER_PATH) ?? "{}").effects ?? {};
+
+    beforeEach(() => {
+      installLedgerAdapter();
+    });
+
     it("persists identity, projection mutation, and notification acknowledgement in order", async () => {
       const order: string[] = [];
-      mockPlugin.saveData.mockImplementation(async (data: any) => {
-        const saved = data.managedDocumentContextEffectsV1[effect.effectId];
+      adapter().write.mockImplementation(async (path: string, data: string) => {
+        files.set(path, data);
+        const saved = JSON.parse(data).effects[effect.effectId];
         order.push(saved.notificationAcknowledged ? "ack" : saved.projectionMutated ? "projection-state" : "identity");
       });
       (mockContextManager.pinFile as jest.Mock).mockImplementation(() => { order.push("project"); return true; });
@@ -152,46 +188,160 @@ describe("DocumentContextManager", () => {
 
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
       expect(order).toEqual(["identity", "project", "projection-state", "notify", "ack"]);
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+    });
+
+    it("writes the ledger through a temp file and leaves no temp artifacts behind", async () => {
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+
+      expect(adapter().mkdir).toHaveBeenCalledWith(LEDGER_DIR);
+      expect(adapter().write.mock.calls.every(([path]) => path === `${LEDGER_PATH}.tmp`)).toBe(true);
+      expect([...files.keys()]).toEqual([LEDGER_PATH]);
+    });
+
+    it("replaces the ledger on adapters that cannot rename over an existing file", async () => {
+      adapter().rename.mockImplementation(async (from: string, to: string) => {
+        if (files.has(to)) throw new Error("target exists");
+        const value = files.get(from);
+        if (value === undefined) throw new Error(`ENOENT: ${from}`);
+        files.delete(from);
+        files.set(to, value);
+      });
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+      expect([...files.keys()]).toEqual([LEDGER_PATH]);
     });
 
     it("returns already_applied only after both durable phases and the link are present", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) } });
+      seedLedger({ [effect.effectId]: record(true, true) });
       (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
       expect(mockContextManager.pinFile).not.toHaveBeenCalled();
       expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+      expect(adapter().write).not.toHaveBeenCalled();
+      // The vault ledger is authoritative once it exists; data.json is not consulted.
+      expect(mockPlugin.loadData).not.toHaveBeenCalled();
       expect(mockPlugin.saveData).not.toHaveBeenCalled();
     });
 
+    it("falls back to the .previous checkpoint when the primary ledger is missing", async () => {
+      seedLedger({ [effect.effectId]: record(true, true) }, `${LEDGER_PATH}.previous`);
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
+      expect(adapter().write).not.toHaveBeenCalled();
+    });
+
+    it.each(["missing", "corrupt"])("preserves the recovery ledger when the primary is %s and replacement fails", async (primaryState) => {
+      seedLedger({ [effect.effectId]: record(true, false) }, `${LEDGER_PATH}.previous`);
+      if (primaryState === "corrupt") files.set(LEDGER_PATH, "{truncated");
+      const previous = files.get(`${LEDGER_PATH}.previous`);
+      adapter().rename.mockRejectedValue(new Error("disk detached"));
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager))
+        .rejects.toThrow("disk detached");
+
+      expect(files.get(`${LEDGER_PATH}.previous`)).toBe(previous);
+      expect(files.has(`${LEDGER_PATH}.tmp`)).toBe(false);
+    });
+
+    it.each(["primary", "previous"])("preserves both ledgers when the %s read fails during replacement recovery", async candidate => {
+      seedLedger({ [effect.effectId]: record(true, false) });
+      seedLedger({}, `${LEDGER_PATH}.previous`);
+      const primaryBytes = files.get(LEDGER_PATH);
+      const previousBytes = files.get(`${LEDGER_PATH}.previous`);
+      const failedPath = candidate === "primary" ? LEDGER_PATH : `${LEDGER_PATH}.previous`;
+      let replacing = false;
+      adapter().rename.mockImplementation(async () => {
+        replacing = true;
+        throw new Error("target exists");
+      });
+      adapter().read.mockImplementation(async (path: string) => {
+        if (replacing && path === failedPath) throw new Error("temporary read failure");
+        return files.get(path);
+      });
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager))
+        .rejects.toThrow("target exists");
+
+      expect(files.get(LEDGER_PATH)).toBe(primaryBytes);
+      expect(files.get(`${LEDGER_PATH}.previous`)).toBe(previousBytes);
+      expect(files.has(`${LEDGER_PATH}.tmp`)).toBe(false);
+      expect(adapter().rename).toHaveBeenCalledTimes(1);
+    });
+
+    it("imports the legacy data.json ledger into the vault file without writing data.json", async () => {
+      mockPlugin.loadData.mockResolvedValue({
+        settingsSentinel: true,
+        managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) },
+      });
+      (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("already_applied");
+
+      expect(readLedger()).toEqual({ [effect.effectId]: record(true, true) });
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
+      expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+    });
+
+    it("treats a corrupt ledger file as empty and rewrites it", async () => {
+      files.set(LEDGER_PATH, "{not json");
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("applied");
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+    });
+
     it("repairs notification after the link exists but triggerContextChange was never acknowledged", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
+      seedLedger({ [effect.effectId]: record(true, false) });
       (mockContextManager.hasPinnedFile as jest.Mock).mockReturnValue(true);
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
       expect(mockContextManager.pinFile).not.toHaveBeenCalled();
       expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
-      expect(mockPlugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
-        managedDocumentContextEffectsV1: { [effect.effectId]: record(true, true) },
-      }));
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+      expect(mockPlugin.saveData).not.toHaveBeenCalled();
     });
 
     it("repairs a missing link even when earlier state claimed projection", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: record(true, false) } });
+      seedLedger({ [effect.effectId]: record(true, false) });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
       expect(mockContextManager.pinFile).toHaveBeenCalledTimes(1);
       expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("persists and notifies a repaired link even when the previous context acknowledged it", async () => {
+      seedLedger({ [effect.effectId]: record(true, true) });
+
+      await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).resolves.toBe("repaired");
+
+      expect(mockContextManager.pinFile).toHaveBeenCalledTimes(1);
+      expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+    });
+
+    it("rejects conflicting effect identities submitted concurrently before either is persisted", async () => {
+      const conflicting = { ...effect, outputPath: "Extractions/different.md" };
+      const results = await Promise.allSettled([
+        manager.applyDocumentConversionContextEffect(effect, mockContextManager),
+        manager.applyDocumentConversionContextEffect(conflicting, createMockContextManager()),
+      ]);
+
+      expect(results[0].status).toBe("fulfilled");
+      expect(results[1]).toMatchObject({ status: "rejected", reason: new Error("Document context effect identity conflict.") });
+      expect(readLedger()[effect.effectId]).toEqual(record(true, true));
     });
 
     it("replays safely after cancellation at each mutation/ack boundary", async () => {
       const boundaries = ["identity", "projection", "projection-state", "notification"] as const;
       for (const boundary of boundaries) {
         jest.clearAllMocks();
-        let saved: any = { settingsSentinel: true };
+        installLedgerAdapter();
         let linkPresent = false;
         const controller = new AbortController();
-        mockPlugin.loadData.mockImplementation(async () => saved);
-        mockPlugin.saveData.mockImplementation(async (data: any) => {
-          saved = JSON.parse(JSON.stringify(data));
-          const state = data.managedDocumentContextEffectsV1[effect.effectId];
+        adapter().write.mockImplementation(async (path: string, data: string) => {
+          files.set(path, data);
+          const state = JSON.parse(data).effects[effect.effectId];
           if (boundary === "identity" && !state.projectionMutated) controller.abort();
           if (boundary === "projection-state" && state.projectionMutated && !state.notificationAcknowledged) controller.abort();
         });
@@ -214,13 +364,15 @@ describe("DocumentContextManager", () => {
         (replayContext.pinFile as jest.Mock).mockImplementation(() => { linkPresent = true; return true; });
         await expect(manager.applyDocumentConversionContextEffect(effect, replayContext)).resolves.toBe("repaired");
         expect((replayContext.pinFile as jest.Mock).mock.calls.length + additionsBeforeReplay).toBe(linkPresent ? 1 : 0);
-        expect(replayContext.triggerContextChange).toHaveBeenCalledTimes(boundary === "notification" ? 1 : 1);
+        expect(replayContext.triggerContextChange).toHaveBeenCalledTimes(1);
         expect(notificationsBeforeReplay).toBe(boundary === "notification" ? 1 : 0);
+        expect(readLedger()[effect.effectId]).toEqual(record(true, true));
+        expect(mockPlugin.saveData).not.toHaveBeenCalled();
       }
     });
 
     it("rejects effect ID reuse with different data", async () => {
-      mockPlugin.loadData.mockResolvedValue({ managedDocumentContextEffectsV1: { [effect.effectId]: { ...record(true, true), outputPath: "different.md" } } });
+      seedLedger({ [effect.effectId]: { ...record(true, true), outputPath: "different.md" } });
       await expect(manager.applyDocumentConversionContextEffect(effect, mockContextManager)).rejects.toThrow("identity conflict");
       expect(mockContextManager.pinFile).not.toHaveBeenCalled();
     });

@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import { getText } from "./shared";
 
 export const cliCommandNode: StudioNodeDefinition = {
@@ -38,7 +38,7 @@ export const cliCommandNode: StudioNodeDefinition = {
       },
       {
         key: "cwd",
-        label: "Working Directory",
+        label: "Working directory",
         type: "directory_path",
         required: true,
         allowOutsideVault: true,
@@ -54,7 +54,7 @@ export const cliCommandNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Output Bytes",
+        label: "Max output bytes",
         type: "number",
         required: true,
         min: 1024,
@@ -64,20 +64,20 @@ export const cliCommandNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const command = getText(context.node.config.command as StudioJsonValue).trim();
+    const command = getText(context.node.config.command).trim();
     if (!command) {
       throw new Error(`CLI command node "${context.node.id}" requires config.command.`);
     }
 
-    const cwd = getText(context.node.config.cwd as StudioJsonValue).trim();
+    const cwd = getText(context.node.config.cwd).trim();
     if (!cwd) {
       throw new Error(`CLI command node "${context.node.id}" requires config.cwd.`);
     }
 
     const argsRaw = Array.isArray(context.node.config.args) ? context.node.config.args : [];
-    const args = argsRaw.map((value) => getText(value as StudioJsonValue));
-    const timeoutMs = Number(context.node.config.timeoutMs as StudioJsonValue);
-    const maxOutputBytes = Number(context.node.config.maxOutputBytes as StudioJsonValue);
+    const args = argsRaw.map((value) => getText(value));
+    const timeoutMs = Number(context.node.config.timeoutMs);
+    const maxOutputBytes = Number(context.node.config.maxOutputBytes);
     const result = await context.services.runCli({
       command,
       args,

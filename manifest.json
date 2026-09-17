@@ -1,11 +1,11 @@
 {
   "author": "SystemSculpt",
   "authorUrl": "https://systemsculpt.com",
-  "description": "SystemSculpt AI chat, vault actions, transcription, semantic search, and Studio workflows inside Obsidian.",
+  "description": "Chat with your vault, run approved actions, transcribe audio, find related notes, and build visual AI workflows.",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
   "id": "systemsculpt-ai",
   "isDesktopOnly": false,
   "minAppVersion": "1.7.2",
   "name": "SystemSculpt AI",
-  "version": "6.7.2"
+  "version": "6.8.0"
 }

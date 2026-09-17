@@ -57,8 +57,9 @@ describe("Studio schema", () => {
       name: "Agent-readable",
       docs: STUDIO_AGENT_DOCS_PATH,
       canvas: {
+        layout: { mode: "managed" },
         nodes: [
-          { id: "prompt", kind: "text", title: "Prompt", x: 20, y: 20, width: 280, config: { value: "hello" } },
+          { id: "prompt", kind: "text", title: "Prompt", width: 280, config: { value: "hello" } },
         ],
         edges: [],
         groups: [],
@@ -77,8 +78,10 @@ describe("Studio schema", () => {
     expect(reference).toContain("- `value` (textarea");
     expect(reference).toContain("- `fontSize` (number");
     expect(reference).not.toMatch(
-      /external[_ -]?sync|projection|authority|candidate|marker|revision|sidecar|reconciliation/i
+      /external[_ -]?sync|commit marker|generation manifest|sqlite|sidecar|reconciliation/i
     );
+    expect(reference).toContain('studio.entry.v1');
+    expect(reference).toContain('Running workflows retain their original definition');
   });
 
   it("round-trips first-class node size, keeping width-only sizes", () => {

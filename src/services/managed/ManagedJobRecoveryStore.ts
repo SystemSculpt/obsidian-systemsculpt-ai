@@ -1,6 +1,7 @@
 import {
-  ManagedJobCapability,
   type ManagedJobRecoveryRecord,
+  type ManagedMediaDeliveryState,
+  ManagedRecoveryCapability,
   type ManagedLocalCommitReceipt,
   type ManagedMultipartCreateRequest,
   type ManagedMultipartUploadDescriptor,
@@ -17,18 +18,29 @@ export interface ManagedRecoveryAdapter {
 export class ManagedRecoveryError extends Error { constructor(public readonly code: "recovery_unavailable" | "recovery_corrupt" | "invalid_record" | "stale_revision" | "record_mismatch" | "illegal_transition" | "reconciliation_error", message: string) { super(message); this.name = "ManagedRecoveryError"; } }
 
 type WireStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired" | "unknown";
-type WriteJournal = { schemaVersion: 1; phase: "prepared" | "original_moved" | "promoted"; capability: ManagedJobCapability; operationId: string; fromRevision: number; toRevision: number };
-type DeleteJournal = { schemaVersion: 1; capability: ManagedJobCapability; operationId: string; revision: number; intent: "delete" };
-const capabilities: ManagedJobCapability[] = ["transcription", "document_processing", "image_generation"];
-export const MANAGED_MULTIPART_PART_LIMITS: Readonly<Record<ManagedJobCapability, number>> = { transcription: 50, document_processing: 3, image_generation: 0 };
+type WriteJournal = { schemaVersion: 1; phase: "prepared" | "original_moved" | "promoted"; capability: ManagedRecoveryCapability; operationId: string; fromRevision: number; toRevision: number };
+type DeleteJournal = { schemaVersion: 1; capability: ManagedRecoveryCapability; operationId: string; revision: number; intent: "delete" };
+const capabilities: ManagedRecoveryCapability[] = ["transcription", "document_processing", "image_generation", "video_generation"];
+// Media jobs (image and video) prepare inputs then create; they never upload
+// multipart parts and must report delivery timing after local commit.
+const mediaCapabilities: ManagedRecoveryCapability[] = ["image_generation", "video_generation"];
+const isMediaCapability = (c: ManagedRecoveryCapability): c is "image_generation" | "video_generation" => mediaCapabilities.includes(c);
+export const MANAGED_MULTIPART_PART_LIMITS: Readonly<Record<ManagedRecoveryCapability, number>> = { transcription: 50, document_processing: 3, image_generation: 0, video_generation: 0 };
 const phases: ManagedRecoveryPhase[] = ["admitted", "content_ready", "prepare_dispatching", "prepared", "create_dispatching", "created", "part_dispatching", "uploading", "abort_dispatching", "upload_aborted", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed", "blocked_ambiguous", "abandoned"];
-const recordKeys = new Set(["schemaVersion", "revision", "capability", "operationId", "source", "jobId", "multipartUpload", "completedParts", "phase", "pendingDispatch", "localCommitReceipt", "createdAt", "updatedAt"]);
+const recordKeys = new Set(["schemaVersion", "revision", "capability", "operationId", "source", "jobId", "multipartUpload", "completedParts", "phase", "pendingDispatch", "localCommitReceipt", "mediaDelivery", "createdAt", "updatedAt"]);
 const domainLocks = new Map<string, Map<string, Promise<void>>>();
-const dispatchLegality: Record<ManagedJobCapability, Partial<Record<ManagedRecoveryPhase, ManagedPendingDispatch["operation"][]>>> = {
+const dispatchLegality: Record<ManagedRecoveryCapability, Partial<Record<ManagedRecoveryPhase, ManagedPendingDispatch["operation"][]>>> = {
   transcription: { content_ready: ["create"], created: ["part", "complete", "abort"], part_dispatching: ["abort"], uploading: ["part", "complete", "abort"], complete_dispatching: ["abort"], upload_completed: ["start"] },
   document_processing: { content_ready: ["create"], created: ["part", "complete", "abort"], part_dispatching: ["abort"], uploading: ["part", "complete", "abort"], complete_dispatching: ["abort"], upload_completed: ["start"] },
   image_generation: { content_ready: ["prepare", "create"], prepared: ["create"] },
+  video_generation: { content_ready: ["prepare", "create"], prepared: ["create"] },
 };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
 export class ManagedJobRecoveryStore {
   private readonly root = ".systemsculpt/managed-jobs";
@@ -48,7 +60,7 @@ export class ManagedJobRecoveryStore {
     if (errors.length) throw errors[0];
   }
 
-  createAdmitted(input: { capability: ManagedJobCapability; operationId: string; source: { identity: string; fingerprint: string } }): Promise<ManagedJobRecoveryRecord> {
+  createAdmitted(input: { capability: ManagedRecoveryCapability; operationId: string; source: { identity: string; fingerprint: string } }): Promise<ManagedJobRecoveryRecord> {
     const path = this.path(input.capability, input.operationId);
     return this.serial(path, async () => {
       await this.recover(path); if (await this.adapter.exists(path)) throw new ManagedRecoveryError("stale_revision", "Operation already exists.");
@@ -56,8 +68,8 @@ export class ManagedJobRecoveryStore {
       this.validateRecord(record); await this.persist(path, record, 0); return record;
     });
   }
-  read(capability: ManagedJobCapability, operationId: string): Promise<ManagedJobRecoveryRecord> { const path = this.path(capability, operationId); return this.serial(path, async () => { await this.recover(path); return this.readRecord(path, capability, operationId); }); }
-  readOptional(capability: ManagedJobCapability, operationId: string): Promise<ManagedJobRecoveryRecord | null> {
+  read(capability: ManagedRecoveryCapability, operationId: string): Promise<ManagedJobRecoveryRecord> { const path = this.path(capability, operationId); return this.serial(path, async () => { await this.recover(path); return this.readRecord(path, capability, operationId); }); }
+  readOptional(capability: ManagedRecoveryCapability, operationId: string): Promise<ManagedJobRecoveryRecord | null> {
     const path = this.path(capability, operationId);
     return this.serial(path, async () => {
       await this.recover(path);
@@ -66,14 +78,14 @@ export class ManagedJobRecoveryStore {
     });
   }
   async findSourceIdentityMatches(
-    capability: ManagedJobCapability,
+    capability: ManagedRecoveryCapability,
     identity: string,
   ): Promise<ManagedJobRecoveryRecord[]> {
     const matches = await this.listCapabilityRecords(capability);
     return matches.filter((record) => record.source.identity === identity);
   }
   async findExactSourceMatches(
-    capability: ManagedJobCapability,
+    capability: ManagedRecoveryCapability,
     source: Readonly<{ identity: string; fingerprint: string }>,
   ): Promise<ManagedJobRecoveryRecord[]> {
     const matches = await this.listCapabilityRecords(capability);
@@ -82,24 +94,58 @@ export class ManagedJobRecoveryStore {
       && record.source.fingerprint === source.fingerprint
     ));
   }
-  markContentReady(c: ManagedJobCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "admitted") this.illegal(); return { ...r, phase: "content_ready" }; }); }
-  abandon(c: ManagedJobCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase === "completed" || r.phase === "abandoned") this.illegal(); return { ...r, phase: "abandoned", pendingDispatch: undefined }; }); }
-  markLocalCommitPending(c: ManagedJobCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "result_ready") this.illegal(); return { ...r, phase: "local_commit_pending" }; }); }
-  recordLocalCommitReceipt(c: ManagedJobCapability, id: string, rev: number, receipt: ManagedLocalCommitReceipt) {
+  markContentReady(c: ManagedRecoveryCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "admitted") this.illegal(); return { ...r, phase: "content_ready" }; }); }
+  abandon(c: ManagedRecoveryCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase === "completed" || r.phase === "abandoned") this.illegal(); return { ...r, phase: "abandoned", pendingDispatch: undefined }; }); }
+  markLocalCommitPending(c: ManagedRecoveryCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "result_ready") this.illegal(); return { ...r, phase: "local_commit_pending" }; }); }
+  recordLocalCommitReceipt(c: ManagedRecoveryCapability, id: string, rev: number, receipt: ManagedLocalCommitReceipt) {
     return this.mutate(c, id, rev, r => {
       if (!["local_commit_pending", "completed"].includes(r.phase)) this.illegal();
       return { ...r, localCommitReceipt: receipt };
     });
   }
-  recordMultipartUpload(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number, multipartUpload: ManagedMultipartUploadDescriptor) {
+  recordMultipartUpload(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number, multipartUpload: ManagedMultipartUploadDescriptor) {
     return this.mutate(c, id, rev, r => {
       if (!["created", "part_dispatching", "uploading", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed"].includes(r.phase)) this.illegal();
       return { ...r, multipartUpload };
     });
   }
-  completeLocalCommit(c: ManagedJobCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "local_commit_pending") this.illegal(); return { ...r, phase: "completed" }; }); }
+  completeLocalCommit(c: ManagedRecoveryCapability, id: string, rev: number) { return this.mutate(c, id, rev, r => { if (r.phase !== "local_commit_pending") this.illegal(); return { ...r, phase: "completed" }; }); }
+  recordMediaDownload(c: "image_generation" | "video_generation", id: string, rev: number, delivery: Pick<ManagedMediaDeliveryState, "downloadStartedAt" | "downloadCompletedOffsetMs" | "outputs">) {
+    return this.mutate(c, id, rev, r => {
+      if (!["result_ready", "local_commit_pending"].includes(r.phase)) this.illegal();
+      return { ...r, mediaDelivery: { ...delivery } };
+    });
+  }
+  recordMediaDisplayed(c: "image_generation" | "video_generation", id: string, rev: number, displayedOffsetMs: number) {
+    return this.mutate(c, id, rev, r => {
+      if (!["result_ready", "local_commit_pending"].includes(r.phase) || !r.mediaDelivery) this.illegal();
+      return { ...r, mediaDelivery: { ...r.mediaDelivery, displayedOffsetMs } };
+    });
+  }
+  recordMediaVaultWrite(c: "image_generation" | "video_generation", id: string, rev: number, vaultWriteCompletedOffsetMs: number) {
+    return this.mutate(c, id, rev, r => {
+      if (r.phase !== "local_commit_pending" || !r.mediaDelivery || r.mediaDelivery.displayedOffsetMs === undefined) this.illegal();
+      return { ...r, mediaDelivery: { ...r.mediaDelivery, vaultWriteCompletedOffsetMs } };
+    });
+  }
+  recordVideoOutputMeasurements(id: string, rev: number, outputs: NonNullable<ManagedMediaDeliveryState["outputs"]>) {
+    return this.mutate("video_generation", id, rev, r => {
+      if (!["result_ready", "local_commit_pending"].includes(r.phase) || !r.mediaDelivery) this.illegal();
+      return { ...r, mediaDelivery: { ...r.mediaDelivery, outputs } };
+    });
+  }
+  /** Media records whose delivery timing is complete but not yet acknowledged by the server. */
+  async findMediaDeliveryAcknowledgmentPending(): Promise<ManagedJobRecoveryRecord[]> {
+    const records = await Promise.all(mediaCapabilities.map(capability => this.listCapabilityRecords(capability)));
+    return records.flat().filter(record => (
+      record.phase === "local_commit_pending"
+      && typeof record.jobId === "string"
+      && record.mediaDelivery?.displayedOffsetMs !== undefined
+      && record.mediaDelivery.vaultWriteCompletedOffsetMs !== undefined
+    ));
+  }
 
-  beginDispatch(c: ManagedJobCapability, id: string, rev: number, pending: ManagedPendingDispatch) {
+  beginDispatch(c: ManagedRecoveryCapability, id: string, rev: number, pending: ManagedPendingDispatch) {
     return this.mutate(c, id, rev, r => {
       if (!dispatchLegality[c][r.phase]?.includes(pending.operation)) this.illegal("Impossible capability/phase operation.");
       const maxPart = MANAGED_MULTIPART_PART_LIMITS[c];
@@ -108,8 +154,8 @@ export class ManagedJobRecoveryStore {
       if (idemRequired && pending.idempotencyKey !== `${id}:${pending.operation}`) throw new ManagedRecoveryError("invalid_record", "Invalid deterministic idempotency key.");
       if (!idemRequired && pending.idempotencyKey) throw new ManagedRecoveryError("invalid_record", "Idempotency key is forbidden for this operation.");
       if (pending.operation === "create") {
-        if (c === "image_generation") {
-          if (pending.createRequest !== undefined) throw new ManagedRecoveryError("invalid_record", "Create request metadata is forbidden for image generation.");
+        if (isMediaCapability(c)) {
+          if (pending.createRequest !== undefined) throw new ManagedRecoveryError("invalid_record", "Create request metadata is forbidden for media generation.");
         } else if (!pending.createRequest) {
           throw new ManagedRecoveryError("invalid_record", "Create dispatch requires deterministic request metadata.");
         }
@@ -120,7 +166,7 @@ export class ManagedJobRecoveryStore {
     });
   }
   acknowledgeCreated(
-    c: ManagedJobCapability,
+    c: ManagedRecoveryCapability,
     id: string,
     rev: number,
     jobId: string,
@@ -133,12 +179,14 @@ export class ManagedJobRecoveryStore {
   }
   acknowledgeImageCreated(id: string, rev: number, jobId: string) { return this.ack("image_generation", id, rev, "create_dispatching", "processing", { jobId }); }
   acknowledgePrepared(id: string, rev: number) { return this.ack("image_generation", id, rev, "prepare_dispatching", "prepared"); }
-  acknowledgePart(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number, part: { partNumber: number; etag: string }) { return this.mutate(c, id, rev, r => { if (r.phase !== "part_dispatching" || r.pendingDispatch?.partNumber !== part.partNumber || !part.etag || part.etag.length > 1024) this.illegal(); return { ...r, phase: "uploading", pendingDispatch: undefined, completedParts: [...(r.completedParts ?? []).filter(x => x.partNumber !== part.partNumber), part] }; }); }
-  acknowledgeComplete(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number) { return this.ack(c, id, rev, "complete_dispatching", "upload_completed"); }
-  acknowledgeStarted(c: Exclude<ManagedJobCapability, "image_generation">, id: string, rev: number) { return this.ack(c, id, rev, "start_dispatching", "processing"); }
-  applyReconciliation(c: ManagedJobCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { const dispatching = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"].includes(r.phase); if (!dispatching && r.phase !== "processing") this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); if (!dispatching && phase === "blocked_ambiguous") throw new ManagedRecoveryError("reconciliation_error", "Invalid observed status for acknowledged processing job."); return { ...r, phase, pendingDispatch: undefined }; }); }
+  acknowledgeVideoCreated(id: string, rev: number, jobId: string) { return this.ack("video_generation", id, rev, "create_dispatching", "processing", { jobId }); }
+  acknowledgeVideoPrepared(id: string, rev: number) { return this.ack("video_generation", id, rev, "prepare_dispatching", "prepared"); }
+  acknowledgePart(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number, part: { partNumber: number; etag: string }) { return this.mutate(c, id, rev, r => { if (r.phase !== "part_dispatching" || r.pendingDispatch?.partNumber !== part.partNumber || !part.etag || part.etag.length > 1024) this.illegal(); return { ...r, phase: "uploading", pendingDispatch: undefined, completedParts: [...(r.completedParts ?? []).filter(x => x.partNumber !== part.partNumber), part] }; }); }
+  acknowledgeComplete(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number) { return this.ack(c, id, rev, "complete_dispatching", "upload_completed"); }
+  acknowledgeStarted(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number) { return this.ack(c, id, rev, "start_dispatching", "processing"); }
+  applyReconciliation(c: ManagedRecoveryCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { const dispatching = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"].includes(r.phase); if (!dispatching && r.phase !== "processing") this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); if (!dispatching && phase === "blocked_ambiguous") throw new ManagedRecoveryError("reconciliation_error", "Invalid observed status for acknowledged processing job."); return { ...r, phase, pendingDispatch: undefined }; }); }
 
-  delete(c: ManagedJobCapability, id: string, rev: number): Promise<void> {
+  delete(c: ManagedRecoveryCapability, id: string, rev: number): Promise<void> {
     const path = this.path(c, id); return this.serial(path, async () => {
       await this.recover(path); const record = await this.readRecord(path, c, id); this.cas(record, rev, c, id);
       if (!["abandoned", "upload_aborted", "completed"].includes(record.phase)) this.illegal("Only abandoned, upload-aborted, or completed records may be deleted.");
@@ -146,10 +194,10 @@ export class ManagedJobRecoveryStore {
     });
   }
 
-  static reconcile(c: ManagedJobCapability, phase: ManagedRecoveryPhase, status: WireStatus): ManagedRecoveryPhase {
-    const valid: Record<ManagedJobCapability, WireStatus[]> = { transcription: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], document_processing: ["uploading", "queued", "processing", "completed", "failed"], image_generation: ["queued", "processing", "succeeded", "failed", "expired"] };
+  static reconcile(c: ManagedRecoveryCapability, phase: ManagedRecoveryPhase, status: WireStatus): ManagedRecoveryPhase {
+    const valid: Record<ManagedRecoveryCapability, WireStatus[]> = { transcription: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], document_processing: ["uploading", "queued", "processing", "completed", "failed"], image_generation: ["queued", "processing", "succeeded", "failed", "expired"], video_generation: ["queued", "processing", "succeeded", "failed", "expired"] };
     if (!valid[c].includes(status)) return "blocked_ambiguous";
-    if (c === "image_generation") {
+    if (isMediaCapability(c)) {
       if (phase === "prepare_dispatching" || phase === "create_dispatching") return "blocked_ambiguous";
       if (phase === "processing") return status === "queued" || status === "processing" ? "processing" : "result_ready";
       return "blocked_ambiguous";
@@ -163,38 +211,156 @@ export class ManagedJobRecoveryStore {
     return "blocked_ambiguous";
   }
 
-  private ack(c: ManagedJobCapability, id: string, rev: number, from: ManagedRecoveryPhase, to: ManagedRecoveryPhase, extra: Partial<ManagedJobRecoveryRecord> = {}) { return this.mutate(c, id, rev, r => { if (r.phase !== from) this.illegal(); return { ...r, ...extra, phase: to, pendingDispatch: undefined }; }); }
-  private mutate(c: ManagedJobCapability, id: string, rev: number, fn: (r: ManagedJobRecoveryRecord) => ManagedJobRecoveryRecord): Promise<ManagedJobRecoveryRecord> { const path = this.path(c, id); return this.serial(path, async () => { await this.recover(path); const current = await this.readRecord(path, c, id); this.cas(current, rev, c, id); const proposed = fn(current); const next = { ...proposed, schemaVersion: 1 as const, revision: current.revision + 1, capability: current.capability, operationId: current.operationId, source: current.source, createdAt: current.createdAt, updatedAt: this.now() }; this.validateRecord(next); await this.persist(path, next, current.revision); return next; }); }
+  private ack(c: ManagedRecoveryCapability, id: string, rev: number, from: ManagedRecoveryPhase, to: ManagedRecoveryPhase, extra: Partial<ManagedJobRecoveryRecord> = {}) { return this.mutate(c, id, rev, r => { if (r.phase !== from) this.illegal(); return { ...r, ...extra, phase: to, pendingDispatch: undefined }; }); }
+  private mutate(c: ManagedRecoveryCapability, id: string, rev: number, fn: (r: ManagedJobRecoveryRecord) => ManagedJobRecoveryRecord): Promise<ManagedJobRecoveryRecord> { const path = this.path(c, id); return this.serial(path, async () => { await this.recover(path); const current = await this.readRecord(path, c, id); this.cas(current, rev, c, id); const proposed = fn(current); const next = { ...proposed, schemaVersion: 1 as const, revision: current.revision + 1, capability: current.capability, operationId: current.operationId, source: current.source, createdAt: current.createdAt, updatedAt: this.now() }; this.validateRecord(next); await this.persist(path, next, current.revision); return next; }); }
   private serial<T>(key: string, fn: () => Promise<T>): Promise<T> { const previous = this.locks.get(key) ?? Promise.resolve(); let release!: () => void; const gate = new Promise<void>(r => { release = r; }); const tail = previous.catch(() => undefined).then(() => gate); this.locks.set(key, tail); return previous.catch(() => undefined).then(fn).finally(() => { release(); if (this.locks.get(key) === tail) this.locks.delete(key); }); }
-  private path(c: ManagedJobCapability, id: string) { if (!capabilities.includes(c) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) throw new ManagedRecoveryError("invalid_record", "Invalid recovery identity."); return `${this.root}/${c}/${id}.json`; }
+  private path(c: ManagedRecoveryCapability, id: string) { if (!capabilities.includes(c) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) throw new ManagedRecoveryError("invalid_record", "Invalid recovery identity."); return `${this.root}/${c}/${id}.json`; }
   private illegal(message = "Illegal recovery transition."): never { throw new ManagedRecoveryError("illegal_transition", message); }
-  private cas(r: ManagedJobRecoveryRecord, rev: number, c: ManagedJobCapability, id: string) { if (r.revision !== rev) throw new ManagedRecoveryError("stale_revision", "Recovery revision changed."); if (r.capability !== c || r.operationId !== id) throw new ManagedRecoveryError("record_mismatch", "Recovery identity mismatch."); }
+  private cas(r: ManagedJobRecoveryRecord, rev: number, c: ManagedRecoveryCapability, id: string) { if (r.revision !== rev) throw new ManagedRecoveryError("stale_revision", "Recovery revision changed."); if (r.capability !== c || r.operationId !== id) throw new ManagedRecoveryError("record_mismatch", "Recovery identity mismatch."); }
 
   private validateRecord(v: unknown): asserts v is ManagedJobRecoveryRecord {
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new ManagedRecoveryError("invalid_record", "Record must be an object."); const x = v as any;
-    if (Object.keys(x).some(k => !recordKeys.has(k)) || x.schemaVersion !== 1 || !Number.isInteger(x.revision) || x.revision < 1 || !capabilities.includes(x.capability) || !phases.includes(x.phase)) throw new ManagedRecoveryError("invalid_record", "Invalid recovery schema.");
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(x.operationId) || typeof x.source?.identity !== "string" || x.source.identity.length < 1 || x.source.identity.length > 512 || /(?:https?:\/\/|\b(?:authorization|credential|headers?|prompt|content)\b)/i.test(x.source.identity) || !/^sha256:[a-f0-9]{64}$/.test(x.source.fingerprint)) throw new ManagedRecoveryError("invalid_record", "Invalid source identity/fingerprint.");
-    if (typeof x.createdAt !== "string" || !Number.isFinite(Date.parse(x.createdAt)) || typeof x.updatedAt !== "string" || !Number.isFinite(Date.parse(x.updatedAt)) || Date.parse(x.updatedAt) < Date.parse(x.createdAt)) throw new ManagedRecoveryError("invalid_record", "Invalid timestamps.");
-    if (x.jobId !== undefined && (typeof x.jobId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(x.jobId))) throw new ManagedRecoveryError("invalid_record", "Invalid first-party job ID.");
-    const maxCompletedPart = MANAGED_MULTIPART_PART_LIMITS[x.capability as ManagedJobCapability];
-    if (x.completedParts !== undefined && (!Array.isArray(x.completedParts) || x.completedParts.length > maxCompletedPart || new Set(x.completedParts.map((p: any) => p?.partNumber)).size !== x.completedParts.length || x.completedParts.some((p: any) => Object.keys(p).sort().join() !== "etag,partNumber" || !Number.isInteger(p.partNumber) || p.partNumber < 1 || p.partNumber > maxCompletedPart || typeof p.etag !== "string" || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(p.etag) || (p.etag.startsWith('"') !== p.etag.endsWith('"'))))) throw new ManagedRecoveryError("invalid_record", "Invalid completed parts.");
-    if (x.multipartUpload !== undefined) this.validateMultipartUpload(x.multipartUpload, x.capability as ManagedJobCapability);
+    const x = asRecord(v);
+    if (!x) {
+      throw new ManagedRecoveryError("invalid_record", "Record must be an object.");
+    }
+
+    const capability = x.capability;
+    const phase = x.phase;
+    if (
+      Object.keys(x).some((key) => !recordKeys.has(key))
+      || x.schemaVersion !== 1
+      || typeof x.revision !== "number"
+      || !Number.isInteger(x.revision)
+      || x.revision < 1
+      || typeof capability !== "string"
+      || !capabilities.includes(capability as ManagedRecoveryCapability)
+      || typeof phase !== "string"
+      || !phases.includes(phase as ManagedRecoveryPhase)
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Invalid recovery schema.");
+    }
+    const managedCapability = capability as ManagedRecoveryCapability;
+    const recoveryPhase = phase as ManagedRecoveryPhase;
+
+    const source = asRecord(x.source);
+    if (
+      typeof x.operationId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(x.operationId)
+      || !source
+      || typeof source.identity !== "string"
+      || source.identity.length < 1
+      || source.identity.length > 512
+      || /(?:https?:\/\/|\b(?:authorization|credential|headers?|prompt|content)\b)/i.test(source.identity)
+      || typeof source.fingerprint !== "string"
+      || !/^sha256:[a-f0-9]{64}$/.test(source.fingerprint)
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Invalid source identity/fingerprint.");
+    }
+
+    if (
+      typeof x.createdAt !== "string"
+      || !Number.isFinite(Date.parse(x.createdAt))
+      || typeof x.updatedAt !== "string"
+      || !Number.isFinite(Date.parse(x.updatedAt))
+      || Date.parse(x.updatedAt) < Date.parse(x.createdAt)
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Invalid timestamps.");
+    }
+    if (
+      x.jobId !== undefined
+      && (typeof x.jobId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(x.jobId))
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Invalid first-party job ID.");
+    }
+
+    const maxCompletedPart = MANAGED_MULTIPART_PART_LIMITS[managedCapability];
+    if (x.completedParts !== undefined) {
+      if (!Array.isArray(x.completedParts) || x.completedParts.length > maxCompletedPart) {
+        throw new ManagedRecoveryError("invalid_record", "Invalid completed parts.");
+      }
+      const partNumbers = new Set<number>();
+      for (const partValue of x.completedParts) {
+        const part = asRecord(partValue);
+        if (
+          !part
+          || Object.keys(part).sort().join() !== "etag,partNumber"
+          || typeof part.partNumber !== "number"
+          || !Number.isInteger(part.partNumber)
+          || part.partNumber < 1
+          || part.partNumber > maxCompletedPart
+          || partNumbers.has(part.partNumber)
+          || typeof part.etag !== "string"
+          || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(part.etag)
+          || (part.etag.startsWith('"') !== part.etag.endsWith('"'))
+        ) {
+          throw new ManagedRecoveryError("invalid_record", "Invalid completed parts.");
+        }
+        partNumbers.add(part.partNumber);
+      }
+    }
+
+    if (x.multipartUpload !== undefined) this.validateMultipartUpload(x.multipartUpload, managedCapability);
     if (x.localCommitReceipt !== undefined) this.validateLocalCommitReceipt(x.localCommitReceipt);
-    if (x.localCommitReceipt !== undefined && !["local_commit_pending", "completed"].includes(x.phase)) throw new ManagedRecoveryError("invalid_record", "Local commit receipts are only valid after remote completion.");
-    if (x.multipartUpload !== undefined && !["created", "part_dispatching", "uploading", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed", "abort_dispatching", "upload_aborted", "blocked_ambiguous", "abandoned"].includes(x.phase)) throw new ManagedRecoveryError("invalid_record", "Multipart upload metadata is only valid after create acknowledgement.");
+    if (x.localCommitReceipt !== undefined && !["local_commit_pending", "completed"].includes(recoveryPhase)) throw new ManagedRecoveryError("invalid_record", "Local commit receipts are only valid after remote completion.");
+    if (x.multipartUpload !== undefined && !["created", "part_dispatching", "uploading", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed", "abort_dispatching", "upload_aborted", "blocked_ambiguous", "abandoned"].includes(recoveryPhase)) throw new ManagedRecoveryError("invalid_record", "Multipart upload metadata is only valid after create acknowledgement.");
     const phaseOperation: Partial<Record<ManagedRecoveryPhase, ManagedPendingDispatch["operation"]>> = { prepare_dispatching: "prepare", create_dispatching: "create", part_dispatching: "part", abort_dispatching: "abort", complete_dispatching: "complete", start_dispatching: "start" };
-    const expectedOperation = phaseOperation[x.phase as ManagedRecoveryPhase]; if (expectedOperation) { if (x.pendingDispatch === undefined) throw new ManagedRecoveryError("invalid_record", "Dispatching phase requires metadata."); this.validateDispatch(x.pendingDispatch); if (x.pendingDispatch.operation !== expectedOperation) throw new ManagedRecoveryError("invalid_record", "Dispatch operation/phase mismatch."); if (expectedOperation === "part" ? !Number.isInteger(x.pendingDispatch.partNumber) || x.pendingDispatch.partNumber < 1 || x.pendingDispatch.partNumber > MANAGED_MULTIPART_PART_LIMITS[x.capability as ManagedJobCapability] : x.pendingDispatch.partNumber !== undefined) throw new ManagedRecoveryError("invalid_record", "Dispatch part-number mismatch."); const requiresIdem = ["create", "complete", "start"].includes(expectedOperation); if (requiresIdem && x.pendingDispatch.idempotencyKey !== `${x.operationId}:${expectedOperation}` || !requiresIdem && x.pendingDispatch.idempotencyKey !== undefined) throw new ManagedRecoveryError("invalid_record", "Dispatch idempotency mismatch."); } else if (x.pendingDispatch !== undefined) throw new ManagedRecoveryError("invalid_record", "Pending metadata outside dispatching phase.");
-    const imageForbidden: ManagedRecoveryPhase[] = ["part_dispatching", "uploading", "abort_dispatching", "upload_aborted", "complete_dispatching", "upload_completed", "start_dispatching"]; const multipartForbidden: ManagedRecoveryPhase[] = ["prepare_dispatching", "prepared"]; if (x.capability === "image_generation" ? imageForbidden.includes(x.phase) : multipartForbidden.includes(x.phase)) throw new ManagedRecoveryError("invalid_record", "Capability/phase mismatch.");
+    const expectedOperation = phaseOperation[recoveryPhase];
+    if (expectedOperation) {
+      if (x.pendingDispatch === undefined) throw new ManagedRecoveryError("invalid_record", "Dispatching phase requires metadata.");
+      this.validateDispatch(x.pendingDispatch);
+      const pending = x.pendingDispatch;
+      if (pending.operation !== expectedOperation) throw new ManagedRecoveryError("invalid_record", "Dispatch operation/phase mismatch.");
+      if (
+        expectedOperation === "part"
+          ? !Number.isInteger(pending.partNumber)
+            || (pending.partNumber as number) < 1
+            || (pending.partNumber as number) > MANAGED_MULTIPART_PART_LIMITS[managedCapability]
+          : pending.partNumber !== undefined
+      ) {
+        throw new ManagedRecoveryError("invalid_record", "Dispatch part-number mismatch.");
+      }
+      const requiresIdem = ["create", "complete", "start"].includes(expectedOperation);
+      if (
+        (requiresIdem && pending.idempotencyKey !== `${x.operationId}:${expectedOperation}`)
+        || (!requiresIdem && pending.idempotencyKey !== undefined)
+      ) {
+        throw new ManagedRecoveryError("invalid_record", "Dispatch idempotency mismatch.");
+      }
+    } else if (x.pendingDispatch !== undefined) {
+      throw new ManagedRecoveryError("invalid_record", "Pending metadata outside dispatching phase.");
+    }
+    const imageForbidden: ManagedRecoveryPhase[] = ["part_dispatching", "uploading", "abort_dispatching", "upload_aborted", "complete_dispatching", "upload_completed", "start_dispatching"];
+    const multipartForbidden: ManagedRecoveryPhase[] = ["prepare_dispatching", "prepared"];
+    if (x.mediaDelivery !== undefined) this.validateMediaDelivery(x.mediaDelivery, managedCapability, recoveryPhase);
+    if (
+      isMediaCapability(managedCapability)
+        ? imageForbidden.includes(recoveryPhase)
+        : multipartForbidden.includes(recoveryPhase)
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Capability/phase mismatch.");
+    }
   }
-  private validateDispatch(p: any) {
+  private validateDispatch(p: unknown): asserts p is ManagedPendingDispatch {
     const keys = new Set(["operation", "requestId", "idempotencyKey", "partNumber", "dispatchedAt", "createRequest"]);
-    if (!p || typeof p !== "object" || Object.keys(p).some(k => !keys.has(k)) || !["prepare", "create", "part", "abort", "complete", "start"].includes(p.operation) || typeof p.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(p.requestId) || !Number.isFinite(Date.parse(p.dispatchedAt))) throw new ManagedRecoveryError("invalid_record", "Invalid dispatch metadata.");
-    if (p.idempotencyKey !== undefined && (typeof p.idempotencyKey !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:(?:create|complete|start)$/.test(p.idempotencyKey))) throw new ManagedRecoveryError("invalid_record", "Invalid idempotency key.");
-    if (p.createRequest !== undefined) this.validateCreateRequest(p.createRequest);
+    const dispatch = asRecord(p);
+    if (
+      !dispatch
+      || Object.keys(dispatch).some((key) => !keys.has(key))
+      || typeof dispatch.operation !== "string"
+      || !["prepare", "create", "part", "abort", "complete", "start"].includes(dispatch.operation)
+      || typeof dispatch.requestId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(dispatch.requestId)
+      || typeof dispatch.dispatchedAt !== "string"
+      || !Number.isFinite(Date.parse(dispatch.dispatchedAt))
+    ) {
+      throw new ManagedRecoveryError("invalid_record", "Invalid dispatch metadata.");
+    }
+    if (dispatch.idempotencyKey !== undefined && (typeof dispatch.idempotencyKey !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:(?:create|complete|start)$/.test(dispatch.idempotencyKey))) throw new ManagedRecoveryError("invalid_record", "Invalid idempotency key.");
+    if (dispatch.createRequest !== undefined) this.validateCreateRequest(dispatch.createRequest);
   }
-  private validateCreateRequest(value: ManagedMultipartCreateRequest) {
+  private validateCreateRequest(value: unknown): asserts value is ManagedMultipartCreateRequest {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new ManagedRecoveryError("invalid_record", "Invalid create request metadata.");
-    const payload = value as unknown as Record<string, unknown>;
+    const payload = value as Record<string, unknown>;
     const keys = Object.keys(payload);
     if (keys.some((key) => !["filename", "contentType", "contentLengthBytes", "timestamped", "language"].includes(key))) throw new ManagedRecoveryError("invalid_record", "Invalid create request metadata.");
     if (typeof payload.filename !== "string" || !payload.filename.trim() || payload.filename.length > 255) throw new ManagedRecoveryError("invalid_record", "Invalid create request filename.");
@@ -203,26 +369,51 @@ export class ManagedJobRecoveryStore {
     if (payload.timestamped !== undefined && typeof payload.timestamped !== "boolean") throw new ManagedRecoveryError("invalid_record", "Invalid create request timestamped flag.");
     if (payload.language !== undefined && (typeof payload.language !== "string" || payload.language.length > 64)) throw new ManagedRecoveryError("invalid_record", "Invalid create request language.");
   }
-  private validateMultipartUpload(value: ManagedMultipartUploadDescriptor, capability: ManagedJobCapability) {
-    if (capability === "image_generation") throw new ManagedRecoveryError("invalid_record", "Image generation does not use multipart upload metadata.");
+  private validateMediaDelivery(value: unknown, capability: ManagedRecoveryCapability, phase: ManagedRecoveryPhase): asserts value is ManagedMediaDeliveryState {
+    if (!isMediaCapability(capability) || !["result_ready", "local_commit_pending", "completed"].includes(phase) || !value || typeof value !== "object" || Array.isArray(value)) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery state.");
+    const delivery = value as Record<string, unknown>;
+    if (Object.keys(delivery).some(key => !["downloadStartedAt", "downloadCompletedOffsetMs", "displayedOffsetMs", "vaultWriteCompletedOffsetMs", "outputs"].includes(key))) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery state.");
+    if (typeof delivery.downloadStartedAt !== "string" || !Number.isFinite(Date.parse(delivery.downloadStartedAt))) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery anchor.");
+    const offsets = [delivery.downloadCompletedOffsetMs, delivery.displayedOffsetMs, delivery.vaultWriteCompletedOffsetMs];
+    if (!Number.isSafeInteger(offsets[0]) || (offsets[0] as number) < 0 || (offsets[0] as number) > 604_800_000) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery offset.");
+    if (offsets[1] !== undefined && (!Number.isSafeInteger(offsets[1]) || (offsets[1] as number) < (offsets[0] as number) || (offsets[1] as number) > 604_800_000)) throw new ManagedRecoveryError("invalid_record", "Invalid media display offset.");
+    if (offsets[2] !== undefined && (!Number.isSafeInteger(offsets[2]) || offsets[1] === undefined || (offsets[2] as number) < (offsets[1] as number) || (offsets[2] as number) > 604_800_000)) throw new ManagedRecoveryError("invalid_record", "Invalid media vault-write offset.");
+    if (delivery.outputs !== undefined) {
+      if (capability !== "video_generation" || !Array.isArray(delivery.outputs) || delivery.outputs.length < 1 || delivery.outputs.length > 4) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery outputs.");
+      const indexes = new Set<number>();
+      for (const raw of delivery.outputs) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).sort().join() !== "durationSeconds,height,index,width") throw new ManagedRecoveryError("invalid_record", "Invalid media delivery output.");
+        const output = raw as Record<string, unknown>;
+        if (!Number.isInteger(output.index) || (output.index as number) < 0 || (output.index as number) > 3 || indexes.has(output.index as number)) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery output index.");
+        indexes.add(output.index as number);
+        for (const field of ["width", "height", "durationSeconds"] as const) {
+          const measured = output[field];
+          const max = field === "durationSeconds" ? 3_600 : 32_768;
+          if (measured !== null && (!Number.isInteger(measured) || (measured as number) < 1 || (measured as number) > max)) throw new ManagedRecoveryError("invalid_record", "Invalid media delivery output measurement.");
+        }
+      }
+    }
+  }
+  private validateMultipartUpload(value: unknown, capability: ManagedRecoveryCapability): asserts value is ManagedMultipartUploadDescriptor {
+    if (isMediaCapability(capability)) throw new ManagedRecoveryError("invalid_record", "Media generation does not use multipart upload metadata.");
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new ManagedRecoveryError("invalid_record", "Invalid multipart upload metadata.");
-    const payload = value as unknown as Record<string, unknown>;
+    const payload = value as Record<string, unknown>;
     const keys = Object.keys(payload);
     if (keys.some((key) => !["createRequest", "partSizeBytes", "totalParts"].includes(key))) throw new ManagedRecoveryError("invalid_record", "Invalid multipart upload metadata.");
-    this.validateCreateRequest(payload.createRequest as ManagedMultipartCreateRequest);
+    this.validateCreateRequest(payload.createRequest);
     const partSizeBytes = payload.partSizeBytes;
     const totalParts = payload.totalParts;
     if (!Number.isInteger(partSizeBytes) || (partSizeBytes as number) < 1 || !Number.isInteger(totalParts) || (totalParts as number) < 1 || (totalParts as number) > MANAGED_MULTIPART_PART_LIMITS[capability]) {
       throw new ManagedRecoveryError("invalid_record", "Invalid multipart upload layout.");
     }
-    const contentLengthBytes = (payload.createRequest as ManagedMultipartCreateRequest).contentLengthBytes;
+    const contentLengthBytes = payload.createRequest.contentLengthBytes;
     if (Math.ceil(contentLengthBytes / (partSizeBytes as number)) !== totalParts) {
       throw new ManagedRecoveryError("invalid_record", "Multipart upload layout does not match its create request.");
     }
   }
-  private validateLocalCommitReceipt(value: ManagedLocalCommitReceipt) {
+  private validateLocalCommitReceipt(value: unknown): asserts value is ManagedLocalCommitReceipt {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new ManagedRecoveryError("invalid_record", "Invalid local commit receipt.");
-    const receipt = value as unknown as Record<string, unknown>;
+    const receipt = value as Record<string, unknown>;
     const keys = Object.keys(receipt);
     if (keys.some((key) => !["kind", "outputPath", "contentSha256", "marker"].includes(key))) throw new ManagedRecoveryError("invalid_record", "Invalid local commit receipt.");
     if (!["marker", "exact"].includes(String(receipt.kind))) throw new ManagedRecoveryError("invalid_record", "Invalid local commit receipt kind.");
@@ -232,11 +423,11 @@ export class ManagedJobRecoveryStore {
     if (receipt.kind === "marker" && typeof receipt.marker !== "string") throw new ManagedRecoveryError("invalid_record", "Marker receipts require a marker.");
     if (receipt.kind === "exact" && receipt.marker !== undefined) throw new ManagedRecoveryError("invalid_record", "Exact receipts must not include a marker.");
   }
-  private async readRecord(path: string, c: ManagedJobCapability, id: string) { let parsed: unknown; try { parsed = JSON.parse(await this.adapter.read(path)); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed recovery record."); } try { this.validateRecord(parsed); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery record."); } this.cas(parsed, (parsed as ManagedJobRecoveryRecord).revision, c, id); return parsed as ManagedJobRecoveryRecord; }
+  private async readRecord(path: string, c: ManagedRecoveryCapability, id: string): Promise<ManagedJobRecoveryRecord> { let parsed: unknown; try { parsed = JSON.parse(await this.adapter.read(path)); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed recovery record."); } try { this.validateRecord(parsed); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery record."); } this.cas(parsed, parsed.revision, c, id); return parsed; }
 
-  private journal(raw: string, path: string): WriteJournal { let x: any; try { x = JSON.parse(raw); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed write journal."); } const identity = this.identity(path); if (!x || Object.keys(x).sort().join() !== "capability,fromRevision,operationId,phase,schemaVersion,toRevision" || x.schemaVersion !== 1 || !["prepared", "original_moved", "promoted"].includes(x.phase) || x.capability !== identity.capability || x.operationId !== identity.operationId || !Number.isInteger(x.fromRevision) || x.toRevision !== x.fromRevision + 1) throw new ManagedRecoveryError("recovery_corrupt", "Invalid write journal."); return x; }
-  private parseDeleteJournal(raw: string, path: string): DeleteJournal { let x: any; try { x = JSON.parse(raw); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed delete journal."); } const identity = this.identity(path); if (!x || Object.keys(x).sort().join() !== "capability,intent,operationId,revision,schemaVersion" || x.schemaVersion !== 1 || x.intent !== "delete" || x.capability !== identity.capability || x.operationId !== identity.operationId || !Number.isInteger(x.revision) || x.revision < 1) throw new ManagedRecoveryError("recovery_corrupt", "Invalid delete journal."); return x; }
-  private identity(path: string) { const match = path.match(/\/([^/]+)\/([^/]+)\.json$/); if (!match || !capabilities.includes(match[1] as ManagedJobCapability)) throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery path."); return { capability: match[1] as ManagedJobCapability, operationId: match[2] }; }
+  private journal(raw: string, path: string): WriteJournal { let value: unknown; try { value = JSON.parse(raw); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed write journal."); } const x = asRecord(value); const identity = this.identity(path); if (!x || Object.keys(x).sort().join() !== "capability,fromRevision,operationId,phase,schemaVersion,toRevision" || x.schemaVersion !== 1 || typeof x.phase !== "string" || !["prepared", "original_moved", "promoted"].includes(x.phase) || x.capability !== identity.capability || x.operationId !== identity.operationId || typeof x.fromRevision !== "number" || !Number.isInteger(x.fromRevision) || x.toRevision !== x.fromRevision + 1) throw new ManagedRecoveryError("recovery_corrupt", "Invalid write journal."); return x as WriteJournal; }
+  private parseDeleteJournal(raw: string, path: string): DeleteJournal { let value: unknown; try { value = JSON.parse(raw); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Malformed delete journal."); } const x = asRecord(value); const identity = this.identity(path); if (!x || Object.keys(x).sort().join() !== "capability,intent,operationId,revision,schemaVersion" || x.schemaVersion !== 1 || x.intent !== "delete" || x.capability !== identity.capability || x.operationId !== identity.operationId || typeof x.revision !== "number" || !Number.isInteger(x.revision) || x.revision < 1) throw new ManagedRecoveryError("recovery_corrupt", "Invalid delete journal."); return x as DeleteJournal; }
+  private identity(path: string) { const match = path.match(/\/([^/]+)\/([^/]+)\.json$/); if (!match || !capabilities.includes(match[1] as ManagedRecoveryCapability)) throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery path."); return { capability: match[1] as ManagedRecoveryCapability, operationId: match[2] }; }
 
   private async persist(path: string, record: ManagedJobRecoveryRecord, fromRevision: number) {
     await this.adapter.mkdir(path.slice(0, path.lastIndexOf("/"))); const temp = `${path}.tmp`, journalPath = `${path}.journal`, backup = `${path}.bak`;
@@ -251,7 +442,7 @@ export class ManagedJobRecoveryStore {
       if (await this.adapter.exists(backup)) await this.adapter.remove(backup); await this.adapter.remove(journalPath);
     } catch (e) { if (e instanceof ManagedRecoveryError) throw e; throw new ManagedRecoveryError("recovery_unavailable", "Atomic recovery write interrupted."); }
   }
-  private async readCandidate(path: string) { let x: unknown; try { x = JSON.parse(await this.adapter.read(path)); this.validateRecord(x); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery candidate."); } return x as ManagedJobRecoveryRecord; }
+  private async readCandidate(path: string) { let x: unknown; try { x = JSON.parse(await this.adapter.read(path)); this.validateRecord(x); } catch { throw new ManagedRecoveryError("recovery_corrupt", "Invalid recovery candidate."); } return x; }
 
   private async deleteRecord(path: string, record: ManagedJobRecoveryRecord): Promise<void> {
     const journal: DeleteJournal = { schemaVersion: 1, capability: record.capability, operationId: record.operationId, revision: record.revision, intent: "delete" };
@@ -279,7 +470,7 @@ export class ManagedJobRecoveryStore {
     if (record.phase !== "completed") return false;
     return !record.localCommitReceipt;
   }
-  private async listCapabilityRecords(capability: ManagedJobCapability): Promise<ManagedJobRecoveryRecord[]> {
+  private async listCapabilityRecords(capability: ManagedRecoveryCapability): Promise<ManagedJobRecoveryRecord[]> {
     const directory = `${this.root}/${capability}`;
     await this.adapter.mkdir(directory);
     const listed = await this.adapter.list(directory);

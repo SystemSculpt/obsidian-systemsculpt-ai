@@ -1,7 +1,23 @@
-import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
+import { joinFilesystemPath } from "../../utils/vaultPathUtils";
 import { FILESYSTEM_LIMITS } from "./constants";
 export { fuzzyMatchScore, shouldExcludeFromSearch } from "./searchUtils";
+
+type VaultDataAdapter = DataAdapter & {
+  getBasePath?: () => string;
+};
+
+type DesktopDirectoryEntry = {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+};
+
+export type ConcurrencyFailure = {
+  error: unknown;
+  path: string;
+};
 
 /**
  * Utility functions for first-party vault tools.
@@ -12,17 +28,6 @@ export { fuzzyMatchScore, shouldExcludeFromSearch } from "./searchUtils";
  * stay demand-loaded instead of adding work to plugin startup. Vault APIs
  * remain the fallback when an adapter does not expose an absolute base path.
  */
-type NodeFsPromises = typeof import("node:fs/promises");
-type NodePath = typeof import("node:path");
-
-function nodeFs(): NodeFsPromises {
-  return desktopHost.fs();
-}
-
-function nodePath(): NodePath {
-  return desktopHost.path();
-}
-
 /**
  * Format bytes to human readable string
  */
@@ -68,44 +73,25 @@ export function isHiddenSystemPath(path: string): boolean {
 }
 
 /**
- * Ensures a resolved path stays within the base directory.
- * Throws an error if the path would escape the base directory via traversal sequences.
- */
-function assertWithinBase(nodePathMod: NodePath, basePath: string, resolvedPath: string): void {
-  const realBase = nodePathMod.resolve(basePath);
-  const realResolved = nodePathMod.resolve(resolvedPath);
-
-  // Allow exact match (accessing base directory itself)
-  if (realResolved === realBase) return;
-
-  // Ensure resolved path is within base (with path separator to prevent prefix attacks)
-  if (!realResolved.startsWith(realBase + nodePathMod.sep)) {
-    throw new Error("Path traversal detected: path escapes vault directory");
-  }
-}
-
-/**
  * Resolve a vault path to an absolute filesystem path for the Node fast-path
  * (desktop only). Returns null when there is no Node runtime or the adapter
  * exposes no base path — callers then fall back to the adapter API.
  */
-export function resolveAdapterPath(adapter: any, vaultPath: string): string | null {
+export function resolveAdapterPath(adapter: VaultDataAdapter, vaultPath: string): string | null {
   if (!hasNodeRuntime() || !adapter || typeof adapter.getBasePath !== "function") return null;
-  const nodePathMod = nodePath();
-  if (!nodePathMod) return null;
   const basePath = adapter.getBasePath();
   if (!basePath) return null;
   const normalized = normalizeVaultPath(String(vaultPath ?? ""));
   if (!normalized) return basePath;
-
-  const resolved = nodePathMod.join(basePath, normalized);
-  assertWithinBase(nodePathMod, basePath, resolved);
-  return resolved;
+  if (normalized.split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new Error("Path traversal detected: path escapes vault directory");
+  }
+  return joinFilesystemPath(basePath, normalized);
 }
 
-export async function ensureAdapterFolder(adapter: any, folderPath: string): Promise<void> {
+export async function ensureAdapterFolder(adapter: VaultDataAdapter, folderPath: string): Promise<void> {
   const fullPath = resolveAdapterPath(adapter, folderPath);
-  const fsMod = fullPath ? nodeFs() : null;
+  const fsMod = fullPath ? await desktopHost.fs() : null;
   if (fullPath && fsMod) {
     await fsMod.mkdir(fullPath, { recursive: true });
     return;
@@ -138,9 +124,9 @@ export async function ensureAdapterFolder(adapter: any, folderPath: string): Pro
   }
 }
 
-export async function adapterPathExists(adapter: any, vaultPath: string): Promise<boolean> {
+export async function adapterPathExists(adapter: VaultDataAdapter, vaultPath: string): Promise<boolean> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? nodeFs() : null;
+  const fsMod = fullPath ? await desktopHost.fs() : null;
   if (fullPath && fsMod) {
     try {
       await fsMod.access(fullPath);
@@ -159,9 +145,9 @@ export async function adapterPathExists(adapter: any, vaultPath: string): Promis
   return false;
 }
 
-export async function readAdapterText(adapter: any, vaultPath: string): Promise<string> {
+export async function readAdapterText(adapter: VaultDataAdapter, vaultPath: string): Promise<string> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? nodeFs() : null;
+  const fsMod = fullPath ? await desktopHost.fs() : null;
   if (fullPath && fsMod) {
     return await fsMod.readFile(fullPath, "utf8");
   }
@@ -171,9 +157,9 @@ export async function readAdapterText(adapter: any, vaultPath: string): Promise<
   throw new Error("Adapter base path unavailable");
 }
 
-export async function writeAdapterText(adapter: any, vaultPath: string, content: string): Promise<void> {
+export async function writeAdapterText(adapter: VaultDataAdapter, vaultPath: string, content: string): Promise<void> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? nodeFs() : null;
+  const fsMod = fullPath ? await desktopHost.fs() : null;
   if (fullPath && fsMod) {
     await fsMod.writeFile(fullPath, content, "utf8");
     return;
@@ -185,9 +171,9 @@ export async function writeAdapterText(adapter: any, vaultPath: string, content:
   throw new Error("Adapter base path unavailable");
 }
 
-export async function statAdapterPath(adapter: any, vaultPath: string): Promise<{ size: number; ctime: number; mtime: number } | null> {
+export async function statAdapterPath(adapter: VaultDataAdapter, vaultPath: string): Promise<{ size: number; ctime: number; mtime: number } | null> {
   const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? nodeFs() : null;
+  const fsMod = fullPath ? await desktopHost.fs() : null;
   if (fullPath && fsMod) {
     const stat = await fsMod.stat(fullPath);
     return { size: stat.size, ctime: stat.ctimeMs, mtime: stat.mtimeMs };
@@ -204,26 +190,28 @@ export async function statAdapterPath(adapter: any, vaultPath: string): Promise<
   return null;
 }
 
-export async function listAdapterFiles(adapter: any, root: string): Promise<string[]> {
+export async function listAdapterFiles(adapter: VaultDataAdapter, root: string): Promise<string[]> {
   const basePath = resolveAdapterPath(adapter, "");
   const rootPath = resolveAdapterPath(adapter, root);
-  const fsMod = basePath && rootPath ? nodeFs() : null;
-  const nodePathMod = basePath && rootPath ? nodePath() : null;
-  if (basePath && rootPath && fsMod && nodePathMod) {
+  const fsMod = basePath && rootPath ? await desktopHost.fs() : null;
+  if (basePath && rootPath && fsMod) {
     const files: string[] = [];
     const walk = async (dir: string) => {
-      let entries: any[];
+      let entries: DesktopDirectoryEntry[];
       try {
         entries = await fsMod.readdir(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const entry of entries) {
-        const full = nodePathMod.join(dir, entry.name);
+        const full = joinFilesystemPath(dir, entry.name);
         if (entry.isDirectory()) {
           await walk(full);
         } else if (entry.isFile()) {
-          const rel = nodePathMod.relative(basePath, full).split(nodePathMod.sep).join("/");
+          const rel = full
+            .slice(basePath.replace(/[\\/]+$/, "").length)
+            .replace(/^[\\/]+/, "")
+            .replace(/\\/g, "/");
           files.push(rel);
         }
       }
@@ -255,10 +243,10 @@ export async function listAdapterFiles(adapter: any, root: string): Promise<stri
   return files;
 }
 
-export async function listAdapterDirectory(adapter: any, dirPath: string): Promise<{ files: string[]; folders: string[] }> {
+export async function listAdapterDirectory(adapter: VaultDataAdapter, dirPath: string): Promise<{ files: string[]; folders: string[] }> {
   const basePath = resolveAdapterPath(adapter, "");
   const fullPath = resolveAdapterPath(adapter, dirPath);
-  const fsMod = basePath && fullPath ? nodeFs() : null;
+  const fsMod = basePath && fullPath ? await desktopHost.fs() : null;
   if (basePath && fullPath && fsMod) {
     const entries = await fsMod.readdir(fullPath, { withFileTypes: true });
     const normalizedDir = normalizeVaultPath(String(dirPath ?? ""));
@@ -290,10 +278,10 @@ export async function listAdapterDirectory(adapter: any, dirPath: string): Promi
  * Move a vault path on disk. Desktop uses the Node fast-path; adapter fallbacks
  * (no base path / no Node) rename through the adapter API (#142).
  */
-export async function renameAdapterPath(adapter: any, sourcePath: string, destPath: string): Promise<void> {
+export async function renameAdapterPath(adapter: VaultDataAdapter, sourcePath: string, destPath: string): Promise<void> {
   const sourceFull = resolveAdapterPath(adapter, sourcePath);
   const destFull = resolveAdapterPath(adapter, destPath);
-  const fsMod = sourceFull && destFull ? nodeFs() : null;
+  const fsMod = sourceFull && destFull ? await desktopHost.fs() : null;
   if (sourceFull && destFull && fsMod) {
     await fsMod.rename(sourceFull, destFull);
     return;
@@ -308,43 +296,6 @@ export async function renameAdapterPath(adapter: any, sourcePath: string, destPa
   throw new Error("Adapter base path unavailable");
 }
 
-/**
- * Permanently remove a vault path on disk (mirrors the desktop `fs.rm`).
- * Adapter fallbacks (no base path / no Node) remove files via `adapter.remove`
- * and folders via `adapter.rmdir(path, recursive)` (#142).
- */
-export async function removeAdapterPath(adapter: any, vaultPath: string): Promise<void> {
-  const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? nodeFs() : null;
-  if (fullPath && fsMod) {
-    await fsMod.rm(fullPath, { recursive: true, force: true });
-    return;
-  }
-  const normalized = normalizeVaultPath(String(vaultPath ?? ""));
-  if (!normalized) return;
-  let isFolder = false;
-  if (adapter && typeof adapter.stat === "function") {
-    try {
-      const stat = await adapter.stat(normalized);
-      isFolder = stat?.type === "folder";
-    } catch {
-      isFolder = false;
-    }
-  }
-  if (isFolder && adapter && typeof adapter.rmdir === "function") {
-    await adapter.rmdir(normalized, true);
-    return;
-  }
-  if (adapter && typeof adapter.remove === "function") {
-    await adapter.remove(normalized);
-    return;
-  }
-  if (adapter && typeof adapter.rmdir === "function") {
-    await adapter.rmdir(normalized, true);
-    return;
-  }
-  throw new Error("Adapter base path unavailable");
-}
 
 /**
  * Ensure a folder (and every missing ancestor) exists via the Vault API alone —
@@ -433,8 +384,6 @@ export function createSimpleDiff(originalContent: string, newContent: string, fi
 
   // Line-by-line comparison with character budget
   const maxLines = Math.max(originalLines.length, newLines.length);
-  let shownAdded = 0;
-  let shownRemoved = 0;
   let totalAdded = 0;
   let totalRemoved = 0;
 
@@ -466,8 +415,6 @@ export function createSimpleDiff(originalContent: string, newContent: string, fi
           if (!pushIfFits(`- ${oldLine}`)) {
             budgetExceeded = true;
             truncated = true;
-          } else {
-            shownRemoved++;
           }
         }
       }
@@ -477,8 +424,6 @@ export function createSimpleDiff(originalContent: string, newContent: string, fi
           if (!pushIfFits(`+ ${newLine}`)) {
             budgetExceeded = true;
             truncated = true;
-          } else {
-            shownAdded++;
           }
         }
       }
@@ -496,8 +441,8 @@ export async function runWithConcurrency<T>(
   items: string[], 
   worker: (item: string) => Promise<T>, 
   concurrency = 10
-): Promise<T[]> {
-  const ret: T[] = [];
+): Promise<Array<T | ConcurrencyFailure>> {
+  const ret: Array<T | ConcurrencyFailure> = [];
   let idx = 0;
 
   const runners = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
@@ -507,7 +452,7 @@ export async function runWithConcurrency<T>(
         ret.push(await worker(current));
       } catch (err) {
         // Propagate error as result shape for consistency
-        ret.push({ error: err, path: current } as any);
+        ret.push({ error: err, path: current });
       }
     }
   });
@@ -569,47 +514,11 @@ export function getFilesFromFolder(folder: TFolder): TFile[] {
 }
 
 /**
- * Evaluate metadata query
- */
-export function evaluateQuery(actualValue: any, operator: string, expectedValue: any): boolean {
-  // Attempt to parse dates for comparison
-  const dActual = new Date(actualValue);
-  const dExpected = new Date(expectedValue);
-
-  const isDateComparison = !isNaN(dActual.getTime()) && !isNaN(dExpected.getTime());
-
-  if (isDateComparison) {
-    actualValue = dActual;
-    expectedValue = dExpected;
-  }
-
-  switch (operator) {
-    case 'equals':
-      return actualValue == expectedValue;
-    case 'not_equals':
-      return actualValue != expectedValue;
-    case 'contains':
-      if (Array.isArray(actualValue)) return actualValue.includes(expectedValue);
-      if (typeof actualValue === 'string') return actualValue.includes(expectedValue);
-      return false;
-    case 'starts_with':
-      if (typeof actualValue === 'string') return actualValue.startsWith(expectedValue);
-      return false;
-    case 'greater_than':
-      return actualValue > expectedValue;
-    case 'less_than':
-      return actualValue < expectedValue;
-    default:
-      return false;
-  }
-}
-
-/**
  * Determine whether adding `addition` (after stringifying) would exceed the
  * supplied character limit. Useful for building responses that must stay
  * under our model-safe threshold.
  */
-export function wouldExceedCharLimit(currentSize: number, addition: any, limit: number): boolean {
+export function wouldExceedCharLimit(currentSize: number, addition: unknown, limit: number): boolean {
   try {
     const additionSize = typeof addition === 'string' ? addition.length : JSON.stringify(addition).length;
     return currentSize + additionSize > limit;

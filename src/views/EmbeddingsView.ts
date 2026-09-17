@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
-import SystemSculptPlugin from '../main';
+import type SystemSculptPlugin from '../main';
 import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
@@ -66,7 +66,7 @@ export class EmbeddingsView extends ItemView {
   }
 
   private getActiveChatView(): AgentChatView | null {
-    const activeLeaf = this.app.workspace.activeLeaf;
+    const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const activeView = activeLeaf?.view as AgentChatView | undefined;
     if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
       return null;
@@ -150,7 +150,6 @@ export class EmbeddingsView extends ItemView {
     
     // Also listen for direct file-open events which can fire without a leaf switch
     this.registerEvent(
-      // @ts-ignore - 'file-open' exists on workspace event bus
       this.app.workspace.on('file-open', (file) => {
         if (file instanceof TFile && file.path === this.deletedSourcePath) {
           this.deletedSourcePath = null;
@@ -205,7 +204,7 @@ export class EmbeddingsView extends ItemView {
     
     // Listen for chat updates
     this.registerEvent(
-      (this.app.workspace as any).on('systemsculpt:chat-loaded', (chatId: string) => {
+      this.app.workspace.on('systemsculpt:chat-loaded', (chatId: string) => {
         // When a chat is loaded or updated, refresh if it's the current chat
         if (this.currentChatView && this.currentChatView.chatId === chatId) {
           this.debouncedSearchCurrentChat();
@@ -215,7 +214,7 @@ export class EmbeddingsView extends ItemView {
     
     // Durable transcript changes are emitted only after the vault write commits.
     this.registerEvent(
-      (this.app.workspace as any).on(CHAT_TRANSCRIPT_COMMITTED_EVENT, (event: ChatTranscriptCommittedEvent) => {
+      this.app.workspace.on(CHAT_TRANSCRIPT_COMMITTED_EVENT, (event: ChatTranscriptCommittedEvent) => {
         if (this.currentChatView && this.currentChatView.chatId === event?.chatId) {
           this.debouncedSearchCurrentChat();
         }
@@ -225,7 +224,7 @@ export class EmbeddingsView extends ItemView {
     // File context is plugin state, not document state. The workspace event
     // bus keeps this synchronized even when either view lives in a popout.
     this.registerEvent(
-      (this.app.workspace as any).on(
+      this.app.workspace.on(
         FILE_CONTEXT_STATE_CHANGED_EVENT,
         (event: FileContextStateChangedEvent) => {
           if (
@@ -346,7 +345,7 @@ export class EmbeddingsView extends ItemView {
     // Consider the view visible if its leaf exists, is connected, not hidden,
     // and has non-zero dimensions. This catches cases where the tab exists but
     // is not the front tab in the ribbon.
-    const leafEl = this.containerEl?.closest?.('.workspace-leaf') as HTMLElement | null;
+    const leafEl = this.containerEl?.closest?.('.workspace-leaf');
     if (!leafEl) return false;
     const isHidden = leafEl.classList.contains('is-hidden');
     const isConnected = leafEl.isConnected;
@@ -378,7 +377,7 @@ export class EmbeddingsView extends ItemView {
 
     // If this Similar Notes view is the active leaf, keep the current context even when
     // Obsidian reports no active file/chat (prevents stale results on deletes/renames).
-    const activeLeaf = this.app.workspace.activeLeaf;
+    const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const isEmbeddingsViewActive = activeLeaf?.view?.getViewType?.() === EMBEDDINGS_VIEW_TYPE;
     if (isEmbeddingsViewActive) {
       if (!activeChatView && this.currentChatView) {
@@ -400,9 +399,6 @@ export class EmbeddingsView extends ItemView {
     if (hasNewFile) {
       if (!activeFile) return;
       // Switch to a different file
-      // Only log if it's actually a different file or first time
-      if (this.currentFile?.path !== activeFile.path) {
-      }
       this.currentFile = activeFile;
       this.currentChatView = null; // Clear chat since we're now on a file
       this.updateFileName(activeFile.basename);
@@ -412,9 +408,6 @@ export class EmbeddingsView extends ItemView {
       if (!activeChatView) return;
       // Switch to a different chat
       const chatTitle = activeChatView.getChatTitle();
-      // Only log if it's actually a different chat or first time
-      if (this.currentChatView?.chatId !== activeChatView.chatId) {
-      }
       this.currentChatView = activeChatView;
       this.currentFile = null; // Clear file since we're now on a chat
       this.updateFileName(chatTitle || 'Chat');

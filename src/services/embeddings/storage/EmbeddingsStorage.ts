@@ -19,6 +19,7 @@ import {
   serializeEmbeddingsIndex,
   type SerializedEmbeddingsIndex,
 } from './EmbeddingsIndexSerialization';
+import { toError } from "../../../utils/errors";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 const DB_VERSION = 11;
@@ -52,7 +53,7 @@ export class EmbeddingsStorage {
       const store = tx.objectStore(STORE_NAME);
       const req = store.count();
       req.onsuccess = () => resolve(typeof req.result === "number" ? req.result : 0);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
     });
   }
 
@@ -86,7 +87,7 @@ export class EmbeddingsStorage {
 
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open(this.dbName, DB_VERSION);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       request.onsuccess = () => {
         this.db = request.result;
         this.initialized = true;
@@ -152,7 +153,7 @@ export class EmbeddingsStorage {
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -167,7 +168,7 @@ export class EmbeddingsStorage {
       try {
         transaction = this.db!.transaction([STORE_NAME], 'readwrite');
       } catch (error) {
-        reject(error);
+        reject(toError(error, "IndexedDB initialization failed."));
         return;
       }
 
@@ -189,7 +190,7 @@ export class EmbeddingsStorage {
         }
         resolve();
       };
-      transaction.onerror = () => reject(transaction.error);
+      transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
       transaction.onabort = () =>
         reject(transaction.error || new Error('IndexedDB transaction aborted while storing vectors.'));
     });
@@ -237,7 +238,7 @@ export class EmbeddingsStorage {
         }
         for (const vector of vectors) store.put(vector);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (
@@ -251,7 +252,7 @@ export class EmbeddingsStorage {
         this.pathsSet.add(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path publication aborted."));
     });
   }
@@ -274,7 +275,7 @@ export class EmbeddingsStorage {
         for (const id of (request.result || []) as string[]) store.delete(id);
         for (const vector of vectors) store.put(vector);
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.path === path) this.cache.delete(id);
@@ -288,7 +289,7 @@ export class EmbeddingsStorage {
         else this.pathsSet.delete(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path replacement aborted."));
     });
   }
@@ -311,47 +312,10 @@ export class EmbeddingsStorage {
           }
           resolve(items);
         };
-        req.onerror = () => reject(req.error);
-      } catch (e) {
+        req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
+      } catch {
         resolve([]);
       }
-    });
-  }
-
-  /**
-   * Move a vector to a new id (e.g., when a chunk's index changes but content is identical).
-   * If a vector already exists at the destination id, it will be replaced.
-   */
-  async moveVectorId(oldId: string, newId: string, newChunkId?: number): Promise<void> {
-    if (!this.db) return;
-    if (oldId === newId) return;
-    await new Promise<void>((resolve, reject) => {
-      const tx = this.db!.transaction([STORE_NAME], 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      let updated: EmbeddingVector | null = null;
-      const getOld = store.get(oldId);
-      getOld.onsuccess = () => {
-        const existing = getOld.result as EmbeddingVector | undefined;
-        if (!existing) return;
-        updated = {
-          ...existing,
-          id: newId,
-          chunkId: typeof newChunkId === 'number' ? newChunkId : existing.chunkId,
-        };
-        store.put(updated);
-        store.delete(oldId);
-      };
-      getOld.onerror = () => reject(getOld.error);
-      tx.oncomplete = () => {
-        if (updated) {
-          this.cache.delete(oldId);
-          const chunkId = updated.chunkId ?? this.parseChunkIdFromId(updated.id);
-          if (chunkId === 0) this.cache.set(newId, updated);
-        }
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB vector move aborted."));
     });
   }
 
@@ -478,7 +442,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STORE_NAME], "readonly");
       const request = tx.objectStore(STORE_NAME).getAll();
       request.onsuccess = () => resolve((request.result || []) as EmbeddingVector[]);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -520,7 +484,7 @@ export class EmbeddingsStorage {
           const results = (req.result || []) as EmbeddingVector[];
           resolve(results);
         };
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       } catch {
         resolve([]);
       }
@@ -557,12 +521,12 @@ export class EmbeddingsStorage {
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         if (!stopped && batch.length > 0 && !options.signal?.aborted) onBatch(batch);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -583,7 +547,7 @@ export class EmbeddingsStorage {
         resolve();
       };
 
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -602,7 +566,7 @@ export class EmbeddingsStorage {
     return new Promise((resolve, reject) => {
       const deleteRequest = indexedDB.deleteDatabase(this.dbName);
       deleteRequest.onsuccess = () => resolve();
-      deleteRequest.onerror = () => reject(deleteRequest.error);
+      deleteRequest.onerror = () => reject(toError(deleteRequest.error, "IndexedDB reset failed."));
       deleteRequest.onblocked = () => reject(new Error("IndexedDB reset was blocked by another open connection."));
     });
   }
@@ -627,7 +591,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readonly");
       const request = tx.objectStore(STATE_STORE_NAME).get(key);
       request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
   }
 
@@ -637,7 +601,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readwrite");
       tx.objectStore(STATE_STORE_NAME).put(value, key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -647,7 +611,7 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STATE_STORE_NAME], "readwrite");
       tx.objectStore(STATE_STORE_NAME).delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
@@ -672,7 +636,7 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB vector removal aborted."));
     });
   }
@@ -689,7 +653,7 @@ export class EmbeddingsStorage {
       req.onsuccess = () => {
         for (const key of (req.result || []) as string[]) store.delete(key);
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) {
           if (vector.path === path) this.cache.delete(id);
@@ -697,69 +661,8 @@ export class EmbeddingsStorage {
         this.pathsSet.delete(path);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path deletion aborted."));
-    });
-  }
-
-  /**
-   * Remove all vectors for a path+namespace except those with ids in keepIds.
-   * This prevents duplicate chunks when indices shift while preserving other namespaces.
-   */
-  async removeByPathExceptIds(path: string, namespace: string, keepIds: Set<string>): Promise<void> {
-    if (!this.db) return;
-    await new Promise<void>((resolve, reject) => {
-      const tx = this.db!.transaction([STORE_NAME], 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const prefix = `${namespace}::${path}#`;
-      let deletedIds: string[] = [];
-      const request = store.index('by_path').getAllKeys(IDBKeyRange.only(path));
-      request.onsuccess = () => {
-        deletedIds = ((request.result || []) as string[])
-          .filter((id) => id.startsWith(prefix) && !keepIds.has(id));
-        for (const id of deletedIds) store.delete(id);
-      };
-      request.onerror = () => reject(request.error);
-      tx.oncomplete = () => {
-        for (const id of deletedIds) this.cache.delete(id);
-        this.refreshPathsCache();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB stale-chunk removal aborted."));
-    });
-  }
-
-  /** Atomically publish a complete root and remove stale chunks for one note generation. */
-  async finalizePath(
-    path: string,
-    namespace: string,
-    root: EmbeddingVector,
-    keepIds: Set<string>,
-  ): Promise<void> {
-    if (!this.db) return;
-    await new Promise<void>((resolve, reject) => {
-      const tx = this.db!.transaction([STORE_NAME], "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const prefix = `${namespace}::${path}#`;
-      const request = store.index("by_path").getAllKeys(IDBKeyRange.only(path));
-      request.onsuccess = () => {
-        for (const id of (request.result || []) as string[]) {
-          if (id.startsWith(prefix) && !keepIds.has(id)) store.delete(id);
-        }
-        store.put(root);
-      };
-      request.onerror = () => reject(request.error);
-      tx.oncomplete = () => {
-        for (const [id, vector] of this.cache) {
-          if (vector.path === path && id.startsWith(prefix) && !keepIds.has(id)) this.cache.delete(id);
-        }
-        this.cache.set(root.id, root);
-        this.pathsSet.add(path);
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB note finalization aborted."));
     });
   }
 
@@ -791,7 +694,7 @@ export class EmbeddingsStorage {
           store.put(updated);
         }
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) if (vector.path === oldPath) this.cache.delete(id);
         for (const vector of updates) {
@@ -801,7 +704,7 @@ export class EmbeddingsStorage {
         if (updates.length > 0) this.pathsSet.add(newPath);
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path rename aborted."));
     });
   }
@@ -829,11 +732,11 @@ export class EmbeddingsStorage {
         this.refreshPathsCache();
         resolve();
       };
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB directory rename aborted."));
 
       const cursorRequest = store.index("by_path").openCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
+      cursorRequest.onerror = () => reject(toError(cursorRequest.error, "IndexedDB cursor failed."));
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
         if (!cursor) return;
@@ -871,100 +774,54 @@ export class EmbeddingsStorage {
    * Streams keys via the path index to avoid full-store scans.
    */
   async removeByDirectory(dir: string): Promise<void> {
-    if (!this.db) return;
     const prefix = this.normalizeDirPrefix(dir);
-    if (!prefix) return;
-
-    await new Promise<void>((resolve, reject) => {
-      const tx = this.db!.transaction([STORE_NAME], "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
-      const deletedIds: string[] = [];
-
-      tx.oncomplete = () => {
-        for (const id of deletedIds) this.cache.delete(id);
-        this.refreshPathsCache();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB directory removal aborted."));
-
-      const cursorRequest = store.index("by_path").openKeyCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result;
-        if (!cursor) return;
-        deletedIds.push(String(cursor.primaryKey));
-        store.delete(cursor.primaryKey);
-        cursor.continue();
-      };
-    });
+    if (prefix) await this.removeIndexedPrefix("by_path", prefix);
   }
 
   /** Remove every vector in the current managed generation family. */
   async removeCurrentManagedGeneration(): Promise<void> {
-    if (!this.db) return;
-    await new Promise<void>((resolve, reject) => {
-      const tx = this.db!.transaction([STORE_NAME], "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const index = store.index("by_namespace");
-      const range = IDBKeyRange.bound(
-        MANAGED_EMBEDDING_FAMILY_PREFIX,
-        `${MANAGED_EMBEDDING_FAMILY_PREFIX}\uffff`,
-      );
-      const deletedIds: string[] = [];
-
-      tx.oncomplete = () => {
-        for (const id of deletedIds) this.cache.delete(id);
-        this.refreshPathsCache();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-
-      const cursorRequest = index.openKeyCursor(range);
-      cursorRequest.onerror = () => reject(cursorRequest.error);
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result;
-        if (!cursor) return;
-        deletedIds.push(String(cursor.primaryKey));
-        store.delete(cursor.primaryKey);
-        cursor.continue();
-      };
-    });
+    await this.removeIndexedPrefix("by_namespace", MANAGED_EMBEDDING_FAMILY_PREFIX);
   }
 
   async removeNamespacesExcept(prefix: string, keepNamespace: string): Promise<number> {
-    if (!this.db || !prefix || !keepNamespace) return 0;
-    let removed = 0;
-    await new Promise<void>((resolve, reject) => {
+    if (!prefix || !keepNamespace) return 0;
+    return this.removeIndexedPrefix("by_namespace", prefix, keepNamespace);
+  }
+
+  /** Stream indexed keys and publish root-cache removals only after commit. */
+  private async removeIndexedPrefix(
+    indexName: "by_path" | "by_namespace",
+    prefix: string,
+    keepKey?: string,
+  ): Promise<number> {
+    if (!this.db) return 0;
+    return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
-      const request = store.index("by_namespace").openCursor(range);
+      const deletedRootIds: string[] = [];
+      let removed = 0;
+      tx.oncomplete = () => {
+        for (const id of deletedRootIds) this.cache.delete(id);
+        this.refreshPathsCache();
+        resolve(removed);
+      };
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+      tx.onabort = () => reject(toError(tx.error, "IndexedDB transaction aborted."));
+      const request = store.index(indexName).openKeyCursor(range);
+      request.onerror = () => reject(toError(request.error, "IndexedDB cursor failed."));
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
-        const vector = cursor.value as EmbeddingVector;
-        if (vector.metadata.namespace !== keepNamespace) {
+        if (keepKey === undefined || cursor.key !== keepKey) {
+          const id = String(cursor.primaryKey);
+          if (this.cache.has(id)) deletedRootIds.push(id);
           store.delete(cursor.primaryKey);
           removed += 1;
         }
         cursor.continue();
       };
-      request.onerror = () => reject(request.error);
-      tx.oncomplete = () => {
-        for (const [id, vector] of this.cache) {
-          if (vector.metadata.namespace.startsWith(prefix) && vector.metadata.namespace !== keepNamespace) {
-            this.cache.delete(id);
-          }
-        }
-        this.refreshPathsCache();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
     });
-    return removed;
   }
 
   /**

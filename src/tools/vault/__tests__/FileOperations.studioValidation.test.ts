@@ -14,6 +14,7 @@ function studioProjectText(): string {
     maxRuns: 100,
     maxArtifactsMb: 1024,
   });
+  project.graph.layout = { mode: "manual" };
   project.graph.nodes.push({
     id: "overview",
     kind: "studio.text",
@@ -248,10 +249,10 @@ describe("FileOperations Studio agent edits", () => {
       {
         arrow: 42,
         error:
-          'canvas.arrows[0] must be the string "fromShape -> toShape" or an object { from, to, label }',
+          'canvas.arrows[0] must be the string "fromItem -> toItem" or an object { from, to, label }',
       },
-      { arrow: { from: "a", to: "a", label: "x" }, error: "must connect two different shapes" },
-      { arrow: { from: "a", to: "ghost" }, error: 'references missing shape "ghost"' },
+      { arrow: { from: "a", to: "a", label: "x" }, error: "must connect two different canvas items" },
+      { arrow: { from: "a", to: "ghost" }, error: 'references missing canvas item "ghost"' },
     ];
     for (const { arrow, error } of rejects) {
       const document = JSON.parse(JSON.stringify(base));

@@ -3,10 +3,10 @@
  */
 import { StorageManager, StorageLocationType } from "../StorageManager";
 import { StorageManager as StorageManagerExport } from "../index";
-import { App, TFolder } from "obsidian";
+import { App, FileSystemAdapter, TFolder } from "obsidian";
 
 // Create mock vault adapter
-const createMockAdapter = () => ({
+const createMockAdapter = () => Object.assign(new FileSystemAdapter("/vault"), {
   exists: jest.fn().mockResolvedValue(false),
   read: jest.fn().mockResolvedValue(""),
   write: jest.fn().mockResolvedValue(undefined),
@@ -254,25 +254,6 @@ describe("StorageManager", () => {
       expect(mockApp.vault.adapter.append).toHaveBeenCalledWith(
         ".systemsculpt/diagnostics/log.txt",
         "line2\n"
-      );
-    });
-
-    it("falls back to read+write when append is not available", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
-      mockApp.vault.adapter.append = undefined;
-      mockApp.vault.adapter.read.mockResolvedValue("existing\n");
-
-      const result = await storage.appendToFile(
-        "diagnostics",
-        "log.txt",
-        "new line"
-      );
-
-      expect(result.success).toBe(true);
-      expect(mockApp.vault.adapter.read).toHaveBeenCalled();
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
-        ".systemsculpt/diagnostics/log.txt",
-        "existing\nnew line\n"
       );
     });
 

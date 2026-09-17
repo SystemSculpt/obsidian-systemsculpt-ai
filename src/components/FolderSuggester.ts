@@ -36,7 +36,7 @@ class FolderSuggester extends AbstractInputSuggest<string> {
 function getFolderSuggestions(app: App): Set<string> {
   const folders = app.vault
     .getAllLoadedFiles()
-    .filter((file) => file instanceof TFolder) as TFolder[];
+    .filter((file) => file instanceof TFolder);
   return new Set(folders.map((folder) => folder.path));
 }
 

@@ -32,6 +32,14 @@ import {
 } from "../../../studio/StudioProjectAgentFileGuard";
 
 /**
+ * Raised when a file changed between the read that produced an edit and the
+ * write that would apply it. Losing the other writer's bytes is worse than
+ * asking the caller to re-read.
+ */
+const EDIT_CONFLICT_MESSAGE =
+  "File changed while this edit was being prepared; nothing was overwritten. Read the file again and retry.";
+
+/**
  * File operations for first-party vault tools (read, write, edit).
  */
 export class FileOperations {
@@ -50,10 +58,18 @@ export class FileOperations {
    * an agent edit is being prepared, so a plain `modify` here could otherwise
    * overwrite that newer canvas state after validation has already finished.
    */
-  private async writeStudioProjectIfUnchanged(
+  /**
+   * Write `nextContent` only if the file still holds `expectedContent`.
+   *
+   * Every edit path here reads a file, derives new content from it, then
+   * writes. `vault.process` runs the comparison inside Obsidian's own file
+   * lock, so a concurrent writer cannot land between the read and the write.
+   */
+  private async writeIfUnchanged(
     file: TFile,
     expectedContent: string,
-    nextContent: string
+    nextContent: string,
+    conflictMessage: string
   ): Promise<void> {
     let changedBeforeWrite = false;
     await this.app.vault.process(file, (currentContent) => {
@@ -64,30 +80,41 @@ export class FileOperations {
       return nextContent;
     });
     if (changedBeforeWrite) {
-      throw new Error(
-        "Studio project changed while this edit was being prepared; nothing was overwritten. Read the file again and retry."
-      );
+      throw new Error(conflictMessage);
     }
+  }
+
+  private async writeStudioProjectIfUnchanged(
+    file: TFile,
+    expectedContent: string,
+    nextContent: string
+  ): Promise<void> {
+    await this.writeIfUnchanged(
+      file,
+      expectedContent,
+      nextContent,
+      "Studio project changed while this edit was being prepared; nothing was overwritten. Read the file again and retry."
+    );
   }
 
   /**
    * Read multiple files with windowing support
    */
   async readFiles(params: ReadFilesParams): Promise<{ files: Array<{ path: string; content: string; metadata?: FileReadMetadata; error?: string }> }> {
-    const raw = (params as any)?.paths;
+    const raw = params.paths;
     if (!Array.isArray(raw) || raw.length === 0) {
       throw new Error("Missing required 'paths'. Provide one or more file paths, e.g. {\"paths\":[\"Notes/Example.md\"]}.");
     }
     const paths = raw
-      .map((v: any) => (typeof v === "string" ? v : String(v ?? "")))
+      .map((v: unknown) => (typeof v === "string" ? v : String(v ?? "")))
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
     if (paths.length === 0) {
       throw new Error("Missing required 'paths'. Provide one or more file paths, e.g. {\"paths\":[\"Notes/Example.md\"]}.");
     }
 
-    const offset = Number((params as any)?.offset ?? 0);
-    const lengthArg = (params as any)?.length;
+    const offset = Number(params.offset ?? 0);
+    const lengthArg = params.length;
     
     // Limit number of files to prevent resource exhaustion
     const maxReadFiles = FILESYSTEM_LIMITS.MAX_READ_FILES ?? 10;
@@ -164,12 +191,12 @@ export class FileOperations {
             metadata
           });
           remainingContentBudget = Math.max(0, remainingContentBudget - windowContent.length);
-        } catch (err) {
+        } catch {
           files.push({ path, content: "", error: "Failed to read file" });
         }
       } else if (this.shouldUseAdapter(normalizedPath || path)) {
         try {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           const fullContent = await readAdapterText(adapter, normalizedPath || path);
           const stat = await statAdapterPath(adapter, normalizedPath || path);
           const fileSize = stat?.size ?? fullContent.length;
@@ -230,9 +257,9 @@ export class FileOperations {
   async writeFile(params: WriteFileParams): Promise<{ path: string, success: boolean }> {
     const path = params.path;
     const content = params.content;
-    const createDirs = (params as any).createDirs ?? true;
-    const ifExists = (params as any).ifExists ?? "overwrite";
-    const appendNewline = (params as any).appendNewline ?? false;
+    const createDirs = params.createDirs ?? true;
+    const ifExists = params.ifExists ?? "overwrite";
+    const appendNewline = params.appendNewline ?? false;
     
     if (!validatePath(path, this.allowedPaths)) {
       throw new Error(`Access denied: ${path}`);
@@ -269,7 +296,7 @@ export class FileOperations {
         if (isStudioProjectDocumentPath(normalizedPath || path)) {
           await this.writeStudioProjectIfUnchanged(file, current, newContent);
         } else {
-          await this.app.vault.modify(file, newContent);
+          await this.writeIfUnchanged(file, current, newContent, EDIT_CONFLICT_MESSAGE);
         }
       } else {
         const previousContent = isStudioProjectDocumentPath(normalizedPath || path)
@@ -292,7 +319,7 @@ export class FileOperations {
         }
       }
     } else if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter: any = this.app.vault.adapter as any;
+      const adapter = this.app.vault.adapter;
       const exists = await adapterPathExists(adapter, normalizedPath);
       if (exists && ifExists === "skip") {
         return { path: normalizedPath || path, success: true };
@@ -367,7 +394,7 @@ export class FileOperations {
   async editFile(params: EditFileParams): Promise<EditFileResult> {
     const filePath = params.path;
     const edits = params.edits;
-    const strict = (params as any).strict ?? true;
+    const strict = params.strict ?? true;
 
     if (!validatePath(filePath, this.allowedPaths)) {
       throw new Error(`Access denied: ${filePath}`);
@@ -382,7 +409,7 @@ export class FileOperations {
       mode: "edit",
     });
     if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter: any = this.app.vault.adapter as any;
+      const adapter = this.app.vault.adapter;
       const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
 
       const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
@@ -439,7 +466,12 @@ export class FileOperations {
           modifiedContent
         );
       } else {
-        await this.app.vault.modify(abstractFile, modifiedContent);
+        await this.writeIfUnchanged(
+          abstractFile,
+          originalContent,
+          modifiedContent,
+          EDIT_CONFLICT_MESSAGE
+        );
       }
     }
 
@@ -508,7 +540,7 @@ export class FileOperations {
         let readCurrent: () => Promise<string>;
         let write: (content: string) => Promise<void>;
         if (this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           original = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
           readCurrent = async () => normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
           write = async (content) => writeAdapterText(adapter, normalizedPath, content);
@@ -521,7 +553,7 @@ export class FileOperations {
           readCurrent = async () => normalizeLineEndings(await this.app.vault.read(file));
           write = isStudioProjectDocumentPath(resolvedPath)
             ? async (content) => this.writeStudioProjectIfUnchanged(file, rawOriginal, content)
-            : async (content) => this.app.vault.modify(file, content);
+            : async (content) => this.writeIfUnchanged(file, rawOriginal, content, EDIT_CONFLICT_MESSAGE);
         }
 
         const strict = entry.strict ?? true;
