@@ -1,6 +1,6 @@
 import { repairStudioProjectForLoad } from "../StudioProjectRepairs";
 import { reconcileStudioProject } from "../StudioProjectReconciliation";
-import { detachOrphanedManagedMediaOutputs } from "../StudioManagedOutputNodes";
+import { cleanupOrphanedManagedMediaOutputs } from "../StudioManagedOutputNodes";
 import { assignNodesToGroup, createGroupFromSelection, sanitizeGraphGroups } from "../StudioGraphGroupModel";
 import { createEmptyStudioProject, parseStudioProject, serializeStudioProject } from "../schema";
 import { arrangeManagedOutputContainers, materializeImageOutputsAsMediaNodes, materializePendingImageOutputPlaceholders, removePendingManagedOutputNodes } from "../StudioManagedOutputNodes";
@@ -128,7 +128,7 @@ it.each(["deletion", "load", "reconciliation"])("preserves completed outputs as 
   project.graph.edges = project.graph.edges.filter(edge => edge.fromNodeId !== source.id && edge.toNodeId !== source.id);
   let result = project;
   if (mode === "deletion") {
-    expect(detachOrphanedManagedMediaOutputs(project)).toBe(true);
+    expect(cleanupOrphanedManagedMediaOutputs(project)).toBe(true);
   } else if (mode === "load") {
     expect(repairStudioProjectForLoad(project)).toBe(true);
   } else {
@@ -140,6 +140,24 @@ it.each(["deletion", "load", "reconciliation"])("preserves completed outputs as 
   for (const key of ["__studio_managed_by", "__studio_source_node_id", "__studio_source_output_index", "__studio_output_run_id"]) {
     expect(kept.config[key]).toBeUndefined();
   }
-  expect(detachOrphanedManagedMediaOutputs(result)).toBe(false);
+  expect(cleanupOrphanedManagedMediaOutputs(result)).toBe(false);
   expect(parseStudioProject(serializeStudioProject(result)).graph.nodes.find(node => node.id === kept.id)?.config).toEqual(kept.config);
+});
+
+it.each(["deletion", "load", "reconciliation"])("removes orphaned pending outputs during %s while preserving completed images", mode => {
+  const { project, source, options, outputs } = fixture();
+  source.config.count = 1;
+  materializeImageOutputsAsMediaNodes({ ...options, runId: "finished", outputs: outputs(["keep.png"]) });
+  const pending = materializePendingImageOutputPlaceholders({ ...options, runId: "pending" });
+  const base = JSON.parse(JSON.stringify(project));
+  project.graph.nodes = project.graph.nodes.filter(node => node.id !== source.id);
+  project.graph.edges = project.graph.edges.filter(edge => edge.fromNodeId !== source.id && edge.toNodeId !== source.id);
+  let result = project;
+  if (mode === "deletion") cleanupOrphanedManagedMediaOutputs(project);
+  else if (mode === "load") repairStudioProjectForLoad(project);
+  else result = reconcileStudioProject(base, base, project).project;
+  expect(result.graph.nodes.some(node => pending.createdNodeIds.includes(node.id))).toBe(false);
+  expect(result.graph.groups?.some(group => group.nodeIds.some(id => pending.createdNodeIds.includes(id)))).toBe(false);
+  expect(result.graph.nodes.find(node => node.config.sourcePath === "keep.png")).toBeDefined();
+  expect(cleanupOrphanedManagedMediaOutputs(result)).toBe(false);
 });

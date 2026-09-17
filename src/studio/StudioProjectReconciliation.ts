@@ -1,4 +1,4 @@
-import { detachOrphanedManagedMediaOutputs } from "./StudioManagedOutputNodes";
+import { cleanupOrphanedManagedMediaOutputs } from "./StudioManagedOutputNodes";
 import { parseStudioProject, serializeStudioProject } from "./schema";
 import type { StudioProjectV1 } from "./types";
 
@@ -87,7 +87,7 @@ export function reconcileStudioProject(
     });
   }
   const project = parseStudioProject(JSON.stringify(merged));
-  detachOrphanedManagedMediaOutputs(project);
+  cleanupOrphanedManagedMediaOutputs(project);
   // Deleting a node also removes its connections, even when another editor
   // concurrently added a connection to the deleted node.
   const nodeIds = new Set(project.graph.nodes.map(node => node.id));

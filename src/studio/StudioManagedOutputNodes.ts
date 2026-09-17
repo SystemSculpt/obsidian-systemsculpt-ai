@@ -118,17 +118,17 @@ function detachManagedMediaOutput(node: StudioNodeInstance): void {
   delete node.config[MANAGED_OUTPUT_RUN_ID_KEY];
 }
 
-/** Keep completed media after producer deletion, with no stale ownership. */
-export function detachOrphanedManagedMediaOutputs(project: StudioProjectV1): boolean {
+/** Producer deletion preserves completed media and removes unfinished placeholders. */
+export function cleanupOrphanedManagedMediaOutputs(project: StudioProjectV1): boolean {
   const nodeIds = new Set(project.graph.nodes.map(node => node.id));
   let changed = false;
+  const pending = new Set<string>();
   for (const node of project.graph.nodes) {
-    if (!isManagedMediaNode(node) || readManagedOutputPendingFlag(node)) continue;
-    if (nodeIds.has(readManagedMediaSourceNodeId(node))) continue;
-    detachManagedMediaOutput(node);
-    changed = true;
+    if (!isManagedMediaNode(node) || nodeIds.has(readManagedMediaSourceNodeId(node))) continue;
+    if (readManagedOutputPendingFlag(node)) pending.add(node.id);
+    else { detachManagedMediaOutput(node); changed = true; }
   }
-  return changed;
+  return removeOutputNodes(project, pending).changed || changed;
 }
 
 /** Copies belong to the copied producer, or become independent media cards. */
