@@ -72,6 +72,9 @@ export function reconcileStudioProject(
     if (record(merged.canvas.layout) && Array.isArray(merged.canvas.layout.pinnedNodeIds)) {
       merged.canvas.layout.pinnedNodeIds = [...new Set(merged.canvas.layout.pinnedNodeIds)].filter(id => ids.has(id));
     }
+    if (Array.isArray(merged.canvas.groups)) for (const group of merged.canvas.groups.filter(record)) {
+      if (typeof group.outputFor === "string" && !ids.has(group.outputFor)) { delete group.outputFor; delete group.outputOffset; }
+    }
     for (const node of merged.canvas.nodes.filter(record)) if (typeof node.parent === "string" && !ids.has(node.parent)) delete node.parent;
 
     const endpoints = new Map([...base.graph.edges, ...local.graph.edges, ...external.graph.edges].map(edge => [

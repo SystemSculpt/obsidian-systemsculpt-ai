@@ -91,18 +91,3 @@ export function computeStudioNewNodePosition(input: StudioNewNodePlacementInput)
     y: 120 + Math.floor(index / columns) * (size.height + 64),
   };
 }
-
-/**
- * User placement is authoritative. In managed layout an unpinned card is
- * reflowed to wherever the structural layout puts it, which read as "the new
- * node appeared far away"; pin it where it landed, exactly as a drag does.
- */
-export function pinStudioNodeForManagedLayout(project: StudioProjectV1, nodeId: string): boolean {
-  const layout = project.graph.layout;
-  if (layout?.mode !== "managed") return false;
-  const pinned = new Set(layout.pinnedNodeIds || []);
-  if (pinned.has(nodeId)) return false;
-  pinned.add(nodeId);
-  project.graph.layout = { ...layout, pinnedNodeIds: [...pinned] };
-  return true;
-}

@@ -1,3 +1,4 @@
+import type { StudioMovementSnap } from "../canvas/StudioGraphAlignmentGuides";
 import type { StudioProjectSessionMutationReason } from "../../../studio/StudioProjectSession";
 import type { StudioProjectV1, StudioShapeKind } from "../../../studio/types";
 import {
@@ -51,6 +52,7 @@ export type StudioShapeControllerHost = {
   clearNodeSelection: () => void;
   requestRender: () => void;
   /** Node side of a drag that started on a shape. */
+  createMovementSnap?: () => StudioMovementSnap;
   beginNodeTranslation: () => void;
   translateNodes: (project: StudioProjectV1, delta: { x: number; y: number }) => boolean;
   previewNodeTranslation: () => void;
@@ -64,6 +66,7 @@ export class StudioShapeController {
   private arrowIds = new Set<string>();
   private layerHandle: StudioShapeLayerHandle | null = null;
   private cancelDraw: (() => void) | null = null;
+  private snapMovement: StudioMovementSnap = delta => delta;
   private translationOrigins: ShapeOrigin[] = [];
   private marqueeBaseline: StudioShapeSelection = EMPTY_STUDIO_SHAPE_SELECTION;
 
@@ -93,6 +96,7 @@ export class StudioShapeController {
   setSelectedShapeIds(shapeIds: readonly string[]): void {
     this.shapeIds = new Set(shapeIds);
     this.arrowIds.clear();
+    this.refreshSelectionVisuals();
   }
 
   /**
@@ -347,16 +351,19 @@ export class StudioShapeController {
     if (phase.first) {
       this.beginTranslation();
       this.host.beginNodeTranslation();
+      this.snapMovement = this.host.createMovementSnap?.() || (delta => delta);
     }
     this.host.commitMutation(
       "diagram.shape.move",
       (project) => {
-        const shapesMoved = this.applyTranslation(project, delta);
-        const nodesMoved = this.host.translateNodes(project, delta);
+        const snapped = phase.cancelled ? { x: 0, y: 0 } : this.snapMovement(delta);
+        const shapesMoved = this.applyTranslation(project, snapped);
+        const nodesMoved = this.host.translateNodes(project, snapped);
         return shapesMoved || nodesMoved;
       },
       { captureHistory: phase.first, mode: "continuous" }
     );
+    this.previewTranslation();
     this.host.previewNodeTranslation();
     if (phase.final) {
       this.finishTranslation();

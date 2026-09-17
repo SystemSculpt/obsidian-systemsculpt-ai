@@ -21,7 +21,7 @@ const SHAPE_V2_FIELDS = new Set(["id", "shape", "x", "y", "width", "height", "la
 const SHAPE_V2_REQUIRED_FIELDS = ["id", "shape", "x", "y", "width", "height", "label"] as const;
 const ARROW_V2_FIELDS = new Set(["from", "to", "label"]);
 const ARROW_V2_REQUIRED_FIELDS = ["from", "to"] as const;
-const GROUP_V2_FIELDS = new Set(["id", "name", "color", "nodes", "shapes"]);
+const GROUP_V2_FIELDS = new Set(["id", "name", "color", "nodes", "shapes", "outputFor", "outputOffset"]);
 const ROOT_REQUIRED_FIELDS = [
   "schema",
   "projectId",
@@ -58,7 +58,7 @@ const NODE_REQUIRED_FIELDS = ["id", "kind", "version", "title", "position", "con
 const NODE_POSITION_FIELDS = new Set(["x", "y"]);
 const NODE_SIZE_FIELDS = new Set(["width", "height"]);
 const EDGE_FIELDS = new Set(["id", "fromNodeId", "fromPortId", "toNodeId", "toPortId"]);
-const GROUP_FIELDS = new Set(["id", "name", "color", "nodeIds", "shapeIds"]);
+const GROUP_FIELDS = new Set(["id", "name", "color", "nodeIds", "shapeIds", "outputForNodeId", "outputOffset"]);
 const DIAGRAM_FIELDS = new Set(["shapes", "arrows"]);
 const SHAPE_FIELDS = new Set(["id", "shape", "position", "size", "label", "style"]);
 const SHAPE_REQUIRED_FIELDS = ["id", "shape", "position", "size", "label"] as const;
@@ -413,6 +413,7 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
   const shapeIds = assertStrictDiagram(document, nodeIds);
 
   const groupIds = new Set<string>();
+  const outputOwners = new Set<string>();
   const groupByNodeId = new Map<string, string>();
   const groupByShapeId = new Map<string, string>();
   (graph.groups as unknown[]).forEach((rawGroup, index) => {
@@ -424,6 +425,19 @@ export function assertValidStudioProjectAgentDocumentStructure(document: unknown
     }
     groupIds.add(groupId);
     assertTrimmedStringField(group, "name", groupLabel);
+    if (hasOwn(group, "outputOffset")) {
+      if (!hasOwn(group, "outputForNodeId")) throw new Error(`${groupLabel}.outputOffset requires outputForNodeId.`);
+      const offset = assertClosedObject(group.outputOffset, new Set(["x", "y"]), ["x", "y"], `${groupLabel}.outputOffset`);
+      if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y)) throw new Error(`${groupLabel}.outputOffset must contain finite x/y coordinates.`);
+    }
+
+    if (hasOwn(group, "outputForNodeId")) {
+      const owner = assertTrimmedStringField(group, "outputForNodeId", groupLabel);
+      if (outputOwners.has(owner)) throw new Error(`${groupLabel} duplicates an output container for "${owner}".`);
+      outputOwners.add(owner);
+      if (!nodeIds.has(owner) || (Array.isArray(group.nodeIds) && group.nodeIds.includes(owner))) throw new Error(`${groupLabel}.outputForNodeId must reference its existing producer outside the group.`);
+    }
+
     if (hasOwn(group, "color")) {
       if (
         typeof group.color !== "string"
@@ -809,6 +823,7 @@ function assertStrictProjectV2(document: Record<string, unknown>): void {
   });
 
   const groupIds = new Set<string>();
+  const outputOwners = new Set<string>();
   const groupByNodeId = new Map<string, string>();
   const groupByShapeId = new Map<string, string>();
   list("groups").forEach((rawGroup, index) => {
@@ -820,6 +835,19 @@ function assertStrictProjectV2(document: Record<string, unknown>): void {
     }
     groupIds.add(groupId);
     assertTrimmedStringField(group, "name", groupLabel);
+    if (hasOwn(group, "outputOffset")) {
+      if (!hasOwn(group, "outputFor")) throw new Error(`${groupLabel}.outputOffset requires outputFor.`);
+      const offset = assertClosedObject(group.outputOffset, new Set(["x", "y"]), ["x", "y"], `${groupLabel}.outputOffset`);
+      if (!Number.isFinite(offset.x) || !Number.isFinite(offset.y)) throw new Error(`${groupLabel}.outputOffset must contain finite x/y coordinates.`);
+    }
+
+    if (hasOwn(group, "outputFor")) {
+      const owner = assertTrimmedStringField(group, "outputFor", groupLabel);
+      if (outputOwners.has(owner)) throw new Error(`${groupLabel} duplicates an output container for "${owner}".`);
+      outputOwners.add(owner);
+      if (!nodeIds.has(owner) || (Array.isArray(group.nodes) && group.nodes.includes(owner))) throw new Error(`${groupLabel}.outputFor must reference its existing producer outside the group.`);
+    }
+
     if (hasOwn(group, "color")) {
       if (
         typeof group.color !== "string"

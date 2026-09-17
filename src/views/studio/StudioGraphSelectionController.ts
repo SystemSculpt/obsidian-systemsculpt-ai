@@ -1,3 +1,4 @@
+import { createStudioMovementSnap, STUDIO_ALIGNMENT_SNAP_THRESHOLD_PX, type StudioMovementSnap } from "./canvas/StudioGraphAlignmentGuides";
 import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
@@ -22,13 +23,13 @@ import {
   resolveStudioGraphSafeZoom,
 } from "../../studio/StudioNodeGeometry";
 import {
-  resolveStudioGraphResizeSnap,
-  resolveStudioGraphSnap,
-  STUDIO_SNAP_THRESHOLD_PX,
-  type StudioSnapRect,
-  type StudioSnapResult,
-} from "./canvas/StudioGraphSnapGuides";
-import { renderStudioGraphSnapGuidesLayer } from "./canvas/StudioGraphSnapGuidesOverlay";
+  resolveStudioResizeGuides,
+  resolveStudioMovementGuides,
+  STUDIO_GUIDE_THRESHOLD_PX,
+  type StudioGuideRect,
+  type StudioAlignmentGuides,
+} from "./canvas/StudioGraphAlignmentGuides";
+import { renderStudioGraphAlignmentGuidesLayer } from "./canvas/StudioGraphAlignmentGuidesOverlay";
 import {
   isStudioGraphEditableFieldActive,
   shouldStudioGraphDeferWheelToNativeScroll,
@@ -76,6 +77,7 @@ type StudioGraphSelectionHost = {
    */
   beginDiagramMarquee?: () => void;
   selectDiagramInBounds?: (bounds: GraphBounds, additive: boolean) => void;
+  getSelectedShapeIds?: () => string[];
   beginDiagramTranslation?: () => void;
   translateDiagramSelection?: (project: StudioProjectV1, delta: GraphPoint) => boolean;
   previewDiagramTranslation?: () => void;
@@ -100,7 +102,7 @@ export class StudioGraphSelectionController {
   private graphViewportEl: HTMLElement | null = null;
   private graphSurfaceEl: HTMLElement | null = null;
   private graphMarqueeEl: HTMLElement | null = null;
-  private snapGuidesEl: HTMLElement | null = null;
+  private alignmentGuidesEl: HTMLElement | null = null;
   private graphZoomLabelEl: HTMLElement | null = null;
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
@@ -209,7 +211,7 @@ export class StudioGraphSelectionController {
     this.graphViewportEl = null;
     this.graphSurfaceEl = null;
     this.graphMarqueeEl = null;
-    this.snapGuidesEl = null;
+    this.alignmentGuidesEl = null;
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
     this.graphWorldEl = null;
@@ -253,8 +255,8 @@ export class StudioGraphSelectionController {
     this.graphMarqueeEl = marquee;
   }
 
-  registerSnapGuidesElement(layer: HTMLElement): void {
-    this.snapGuidesEl = layer;
+  registerAlignmentGuidesElement(layer: HTMLElement): void {
+    this.alignmentGuidesEl = layer;
   }
 
   registerZoomLabelElement(label: HTMLElement): void {
@@ -1076,46 +1078,7 @@ export class StudioGraphSelectionController {
     let captureHistoryOnNextMutation = false;
     let hoveredGroupId: string | null = null;
 
-    // Smart alignment guides: statics are frozen for the whole drag; the
-    // dragged selection snaps as one unit (union bounds). Holding Ctrl/Cmd
-    // bypasses snapping so placement can freeball.
-    const dragNodeIdSet = new Set(dragNodeIds);
-    const staticSnapRects: StudioSnapRect[] = [];
-    for (const node of project.graph.nodes) {
-      if (dragNodeIdSet.has(node.id)) {
-        continue;
-      }
-      const nodeX = Number(node.position?.x);
-      const nodeY = Number(node.position?.y);
-      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
-        continue;
-      }
-      const nodeEl = this.nodeElsById.get(node.id);
-      staticSnapRects.push({
-        left: nodeX,
-        top: nodeY,
-        right: nodeX + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node),
-        bottom: nodeY + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
-      });
-    }
-    let movingOriginBounds: StudioSnapRect | null = null;
-    for (const [dragNodeId, origin] of originByNodeId.entries()) {
-      const dragNode = dragNodes.get(dragNodeId);
-      const nodeEl = this.nodeElsById.get(dragNodeId);
-      const right = origin.x + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, dragNode);
-      const bottom = origin.y + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
-      if (!movingOriginBounds) {
-        movingOriginBounds = { left: origin.x, top: origin.y, right, bottom };
-        continue;
-      }
-      movingOriginBounds.left = Math.min(movingOriginBounds.left, origin.x);
-      movingOriginBounds.top = Math.min(movingOriginBounds.top, origin.y);
-      movingOriginBounds.right = Math.max(movingOriginBounds.right, right);
-      movingOriginBounds.bottom = Math.max(movingOriginBounds.bottom, bottom);
-    }
-    const snapThreshold = STUDIO_SNAP_THRESHOLD_PX / resolveStudioGraphSafeZoom(zoom);
-    let snapBypassed = Boolean(startEvent.ctrlKey || startEvent.metaKey);
-    let activeSnap: StudioSnapResult | null = null;
+    let snapMovement: StudioMovementSnap = delta => delta;
     const syncHoveredGroup = (): void => {
       const nextGroupId = this.host.resolveNodeDragHoverGroup?.(dragNodeIds) || null;
       if (nextGroupId === hoveredGroupId) {
@@ -1130,36 +1093,18 @@ export class StudioGraphSelectionController {
       forceChanged?: boolean;
     }): boolean => {
       // Shared screen→canvas math with the resize frame — one zoom division.
-      let { deltaX, deltaY } = resolveStudioCanvasDelta({
+      const { deltaX, deltaY } = resolveStudioCanvasDelta({
         startClientX: startX,
         startClientY: startY,
         clientX: pendingClientX,
         clientY: pendingClientY,
         zoom,
       });
-      activeSnap = null;
-      if (!snapBypassed && movingOriginBounds && staticSnapRects.length > 0) {
-        const snap = resolveStudioGraphSnap({
-          moving: {
-            left: movingOriginBounds.left + deltaX,
-            top: movingOriginBounds.top + deltaY,
-            right: movingOriginBounds.right + deltaX,
-            bottom: movingOriginBounds.bottom + deltaY,
-          },
-          others: staticSnapRects,
-          threshold: snapThreshold,
-        });
-        deltaX += snap.deltaX;
-        deltaY += snap.deltaY;
-        if (snap.guides.length > 0 || snap.gaps.length > 0) {
-          activeSnap = snap;
-        }
-      }
-      const delta = { x: deltaX, y: deltaY };
+      const delta = snapMovement({ x: deltaX, y: deltaY });
       return this.host.commitProjectMutation(
         "node.position",
         (currentProject) => {
-          // Selected shapes ride the same snapped delta, in the same mutation,
+          // Selected shapes ride the same pointer delta, in the same mutation,
           // so a mixed selection stays put relative to itself.
           let changed = this.host.translateDiagramSelection?.(currentProject, delta) === true;
           for (const dragNodeId of dragNodeIds) {
@@ -1168,8 +1113,8 @@ export class StudioGraphSelectionController {
             if (!dragNode || !origin) {
               continue;
             }
-            const nextX = Math.round(origin.x + deltaX);
-            const nextY = Math.round(origin.y + deltaY);
+            const nextX = Math.round(origin.x + delta.x);
+            const nextY = Math.round(origin.y + delta.y);
             if (dragNode.position.x !== nextX || dragNode.position.y !== nextY) {
               dragNode.position.x = nextX;
               dragNode.position.y = nextY;
@@ -1194,6 +1139,7 @@ export class StudioGraphSelectionController {
         // Shape origins are captured here, not on pointerdown: the press may
         // still have been about to clear the diagram selection.
         this.host.beginDiagramTranslation?.();
+        snapMovement = this.createMovementSnap(dragNodeIds, this.host.getSelectedShapeIds?.() || []);
         this.host.onNodeDragStateChange?.(true);
         syncHoveredGroup();
       }
@@ -1206,7 +1152,7 @@ export class StudioGraphSelectionController {
         mode: "continuous",
       });
       captureHistoryOnNextMutation = false;
-      this.renderSnapGuides(activeSnap);
+      this.showMovementGuides(dragNodeIds, this.host.getSelectedShapeIds?.() || []);
       if (!changed) {
         syncHoveredGroup();
         return;
@@ -1224,7 +1170,6 @@ export class StudioGraphSelectionController {
       const latestEvent = latestStudioPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
-      snapBypassed = Boolean(moveEvent.ctrlKey || moveEvent.metaKey);
       if (
         Math.hypot(pendingClientX - startX, pendingClientY - startY) > 3 &&
         typeof moveEvent.preventDefault === "function"
@@ -1233,18 +1178,9 @@ export class StudioGraphSelectionController {
       }
     };
 
-    // Pressing/releasing Ctrl or Cmd mid-drag toggles snapping immediately,
-    // even while the pointer is stationary.
-    const onModifierChange = (keyEvent: KeyboardEvent): boolean => {
-      const nextBypassed = Boolean(keyEvent.ctrlKey || keyEvent.metaKey);
-      if (nextBypassed === snapBypassed) return false;
-      snapBypassed = nextBypassed;
-      return dragged;
-    };
-
     const cleanupDrag = (): void => {
       this.cancelPointerGesture = null;
-      this.renderSnapGuides(null);
+      this.renderAlignmentGuides(null);
     };
 
     const finishDrag = (): void => {
@@ -1272,7 +1208,7 @@ export class StudioGraphSelectionController {
 
     this.cancelPointerGesture = startStudioPointerGesture({
       element: dragSurfaceEl, event: startEvent, onMove: onPointerMove,
-      onFrame: flushDragFrame, onFinish: finishDrag, onKeyChange: onModifierChange,
+      onFrame: flushDragFrame, onFinish: finishDrag,
       onCancel: () => {
         cleanupDrag();
         if (dragged) {
@@ -1284,24 +1220,18 @@ export class StudioGraphSelectionController {
     });
   }
 
-  /**
-   * Snap support for the per-node resize frame: snaps the dragged edge(s)
-   * of the candidate rect to the other nodes' alignment anchors and draws
-   * the same guide lines a move-drag would. Returns canvas-space
-   * adjustments to add to the raw drag deltas. Callers clear the guides
-   * with clearResizeSnapGuides() when the gesture ends.
-   */
-  resolveNodeResizeSnap(
+  /** Show nearby edge alignment while resizing; never adjust the dragged edge. */
+  showNodeResizeGuides(
     nodeId: string,
-    moving: StudioSnapRect,
+    moving: StudioGuideRect,
     edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 }
-  ): { deltaX: number; deltaY: number } {
+  ): void {
     const project = this.host.getCurrentProject();
     if (!project) {
-      this.renderSnapGuides(null);
-      return { deltaX: 0, deltaY: 0 };
+      this.renderAlignmentGuides(null);
+      return;
     }
-    const others: StudioSnapRect[] = [];
+    const others: StudioGuideRect[] = [];
     for (const node of project.graph.nodes) {
       if (node.id === nodeId) {
         continue;
@@ -1319,26 +1249,61 @@ export class StudioGraphSelectionController {
         bottom: nodeY + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
       });
     }
-    const snap = resolveStudioGraphResizeSnap({
+    const guides = resolveStudioResizeGuides({
       moving,
       others,
-      threshold: STUDIO_SNAP_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom),
+      threshold: STUDIO_GUIDE_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom),
       edges,
     });
-    this.renderSnapGuides(snap.guides.length > 0 ? snap : null);
-    return { deltaX: snap.deltaX, deltaY: snap.deltaY };
+    this.renderAlignmentGuides(guides.guides.length > 0 ? guides : null);
   }
 
-  clearResizeSnapGuides(): void {
-    this.renderSnapGuides(null);
+  clearAlignmentGuides(): void {
+    this.renderAlignmentGuides(null);
   }
 
-  private renderSnapGuides(result: StudioSnapResult | null): void {
-    if (!this.snapGuidesEl) {
+  private movementGeometry(nodeIds: readonly string[], shapeIds: readonly string[]): { moving: StudioGuideRect; others: StudioGuideRect[] } | null {
+    const project = this.host.getCurrentProject();
+    if (!project) return null;
+    const nodes = new Set(nodeIds), shapes = new Set(shapeIds);
+    const moving: StudioGuideRect[] = [], others: StudioGuideRect[] = [];
+    for (const node of project.graph.nodes) {
+      const element = this.nodeElsById.get(node.id);
+      (nodes.has(node.id) ? moving : others).push({
+        left: node.position.x, top: node.position.y,
+        right: node.position.x + resolveMeasuredStudioNodeWidth(element?.offsetWidth, node),
+        bottom: node.position.y + resolveMeasuredStudioNodeHeight(element?.offsetHeight),
+      });
+    }
+    for (const shape of project.diagram?.shapes || []) {
+      (shapes.has(shape.id) ? moving : others).push({ left: shape.position.x, top: shape.position.y,
+        right: shape.position.x + shape.size.width, bottom: shape.position.y + shape.size.height });
+    }
+    if (!moving.length) return null;
+    const bounds = moving.reduce((union, rect) => ({ left: Math.min(union.left, rect.left),
+      top: Math.min(union.top, rect.top), right: Math.max(union.right, rect.right), bottom: Math.max(union.bottom, rect.bottom) }));
+    return { moving: bounds, others };
+  }
+
+  createMovementSnap(nodeIds: readonly string[], shapeIds: readonly string[]): StudioMovementSnap {
+    const geometry = this.movementGeometry(nodeIds, shapeIds);
+    return geometry ? createStudioMovementSnap({ ...geometry,
+      threshold: STUDIO_ALIGNMENT_SNAP_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom) }) : delta => delta;
+  }
+
+  showMovementGuides(nodeIds: readonly string[], shapeIds: readonly string[]): void {
+    const geometry = this.movementGeometry(nodeIds, shapeIds);
+    if (!geometry) { this.renderAlignmentGuides(null); return; }
+    this.renderAlignmentGuides(resolveStudioMovementGuides({ ...geometry,
+      threshold: STUDIO_GUIDE_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom) }));
+  }
+
+  private renderAlignmentGuides(result: StudioAlignmentGuides | null): void {
+    if (!this.alignmentGuidesEl) {
       return;
     }
     try {
-      renderStudioGraphSnapGuidesLayer(this.snapGuidesEl, result, this.graphZoom, this.getWorldOrigin());
+      renderStudioGraphAlignmentGuidesLayer(this.alignmentGuidesEl, result, this.graphZoom, this.getWorldOrigin());
     } catch {
       // Guide rendering must never break an in-flight drag.
     }

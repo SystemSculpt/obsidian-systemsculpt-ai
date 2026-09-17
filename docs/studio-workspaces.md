@@ -20,9 +20,10 @@ retain their admitted revision. An invalid definition retains the last valid vie
 and blocks new runs until repaired. Keep the entry and directory together; connector
 workspaces currently require renaming through their configuration.
 
-The graph remains the single view. Managed layout derives node placement from
-connections, organizational parents, groups and measured card sizes. Agents should
-author relationships, objectives and data rather than coordinates. Collection
+The graph remains the single view. Canvas placement is manual: agents preserve
+existing coordinates and specify positions for new nodes. Connections, parents
+and ordinary groups never reposition cards. Generator-owned Outputs containers
+arrange only their generated media cards. Collection
 nodes provide Kanban grouping, filtering and bounded card rendering over a snapshot.
 Grouping changes presentation; source mutations use the owning adapter.
 

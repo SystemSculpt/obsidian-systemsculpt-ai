@@ -81,10 +81,6 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   onZoomOut: () => void;
   onZoomReset: () => void;
   onZoomOverview: () => void;
-  onArrangeGraph?: () => void;
-  automaticLayout?: boolean;
-  onToggleAutomaticLayout?: () => void;
-  onToggleLayoutPins?: () => void;
   onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateTextNodeAtPosition: (position: { x: number; y: number }) => void;
@@ -216,8 +212,8 @@ export function renderStudioGraphWorkspace(
   const marquee = viewport.createDiv({ cls: "ss-studio-marquee-select" });
   graphInteraction.registerMarqueeElement(marquee);
 
-  const snapGuides = viewport.createDiv({ cls: "ss-studio-snap-guides-layer" });
-  graphInteraction.registerSnapGuidesElement(snapGuides);
+  const alignmentGuides = viewport.createDiv({ cls: "ss-studio-alignment-guides-layer" });
+  graphInteraction.registerAlignmentGuidesElement(alignmentGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
   const graphRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-row" });
@@ -252,22 +248,6 @@ export function renderStudioGraphWorkspace(
       }
       onOpenAddNodeMenuAtViewportCenter();
     },
-  });
-
-  if (options.onArrangeGraph) createStudioWorkspaceControl(graphRow, {
-    label: "Arrange", testId: "studio.workspace.arrange", ariaLabel: "Arrange graph from connections and groups",
-    onSelect: options.onArrangeGraph,
-  });
-  if (options.onToggleAutomaticLayout) {
-    const auto = createStudioWorkspaceControl(graphRow, {
-      label: options.automaticLayout ? "Auto on" : "Auto off", testId: "studio.workspace.auto-layout",
-      ariaLabel: "Toggle automatic layout", onSelect: options.onToggleAutomaticLayout,
-    });
-    auto.setAttribute("aria-pressed", String(Boolean(options.automaticLayout)));
-  }
-  if (options.onToggleLayoutPins) createStudioWorkspaceControl(graphRow, {
-    label: "Pin", testId: "studio.workspace.pin-layout", ariaLabel: "Pin or unpin selected nodes and their groups",
-    title: "Pin or unpin selection. Dragging in automatic mode pins the moved group.", onSelect: options.onToggleLayoutPins,
   });
 
   const zoomRow = graphRow.createDiv({ cls: "ss-studio-graph-workspace-control-zoom-row" });

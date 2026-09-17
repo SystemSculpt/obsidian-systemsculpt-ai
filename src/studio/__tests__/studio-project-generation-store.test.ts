@@ -205,8 +205,9 @@ describe("StudioProjectGenerationStore", () => {
     const before = await adapter.read(locator.vaultRelativeProjectPath);
     const filesBefore = [...adapter.files.keys()];
     const project = parseStudioProject(before);
-    project.graph.layout = { mode: "managed", pinnedNodeIds: ["removed_placeholder"] };
-    const result = await store.commitWholeGeneration({ kind: "replace_project", projectId: project.projectId, reason: "discrete_save", projectDocument: new TextEncoder().encode(serializeStudioProject(project)) }, root.expectedGeneration);
+    const legacyDocument = JSON.parse(serializeStudioProject(project));
+    legacyDocument.canvas.layout = { mode: "managed", pinnedNodeIds: ["removed_placeholder"] };
+    const result = await store.commitWholeGeneration({ kind: "replace_project", projectId: project.projectId, reason: "discrete_save", projectDocument: new TextEncoder().encode(JSON.stringify(legacyDocument)) }, root.expectedGeneration);
     expect(result.status).toBe("invalid_candidate");
     expect(await adapter.read(locator.vaultRelativeProjectPath)).toBe(before);
     expect([...adapter.files.keys()]).toEqual(filesBefore);

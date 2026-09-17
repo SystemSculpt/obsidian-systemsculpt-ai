@@ -12,10 +12,9 @@ type KeydownContext = {
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   activeCanvasTool: StudioCanvasTool;
   selectCanvasTool: jest.Mock<void, [StudioCanvasTool]>;
-  arrangeGraphFromCommand: jest.Mock<unknown, []>;
   busy: boolean;
   currentProject: unknown;
-  shapeController: { hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
+  shapeController: { setSelectedShapeIds: jest.Mock<void, [string[]]>; hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
   graphInteraction: { getSelectedNodeIds: jest.Mock<string[], []> };
   removeNodes: jest.Mock<void, [string[]]>;
 };
@@ -31,11 +30,10 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     isEditableKeyboardTarget: jest.fn(isStudioGraphEditableTarget),
     activeCanvasTool: "diamond",
     selectCanvasTool: jest.fn(),
-    arrangeGraphFromCommand: jest.fn(() => ({})),
     busy: false,
-    currentProject: { graph: { nodes: [] } },
-    shapeController: { hasSelection: jest.fn(() => false), removeSelection: jest.fn() },
-    graphInteraction: { getSelectedNodeIds: jest.fn(() => []) },
+    currentProject: { graph: { nodes: [{ id: "card" }] }, diagram: { shapes: [{ id: "drawing" }] } },
+    shapeController: { setSelectedShapeIds: jest.fn(), hasSelection: jest.fn(() => false), removeSelection: jest.fn() },
+    graphInteraction: { setSelectedNodeIds: jest.fn(), getSelectedNodeIds: jest.fn(() => []) },
     removeNodes: jest.fn(),
     ...overrides,
   };
@@ -184,14 +182,15 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
-  it.each(["metaKey", "ctrlKey"])("arranges the graph with %s+A without changing tools", (modifier) => {
+  it.each(["metaKey", "ctrlKey"])("selects the canvas with %s+A without changing tools", (modifier) => {
     const context = createContext();
     const event = createKeydownEvent({ key: "a", code: "KeyA", [modifier]: true });
 
     handleWindowKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
-    expect(context.arrangeGraphFromCommand).toHaveBeenCalledTimes(1);
+    expect(context.graphInteraction.setSelectedNodeIds).toHaveBeenCalledWith(["card"]);
+    expect(context.shapeController.setSelectedShapeIds).toHaveBeenCalledWith(["drawing"]);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
     expect(event.stopPropagation).toHaveBeenCalledTimes(1);
   });

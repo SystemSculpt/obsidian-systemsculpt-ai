@@ -1,16 +1,10 @@
+import { ensureArray, isRecord } from "./utils";
 import type { StudioNodeInstance, StudioProjectV1 } from "./types";
 import { resolveStudioGraphNodeWidth, resolveStudioGraphNodeMinHeight } from "./StudioNodeGeometry";
 
-export type StudioLayoutSize = { width: number; height: number };
-export type StudioLayoutBounds = StudioLayoutSize & { id: string; x: number; y: number };
-export type StudioLayoutMeasurements = ReadonlyMap<string, StudioLayoutSize>;
-export type StudioLayoutReport = {
-  mode: "manual" | "managed";
-  nodes: StudioLayoutBounds[];
-  overlaps: { first: string; second: string }[];
-  truncated: boolean;
-  unmeasuredNodeIds: string[];
-};
+type StudioLayoutSize = { width: number; height: number };
+type StudioLayoutBounds = StudioLayoutSize & { id: string; x: number; y: number };
+type StudioLayoutMeasurements = ReadonlyMap<string, StudioLayoutSize>;
 type Link = { from: string; to: string };
 type Block = StudioLayoutBounds & { members: StudioLayoutBounds[]; fixed: boolean };
 const MAX_NODES = 2500;
@@ -19,19 +13,9 @@ const MARGIN = 48;
 const GROUP_PADDING = 32;
 const GROUP_FOOTER = 48;
 
-export function getStudioLayoutAnchoredNodeIds(project: StudioProjectV1): Set<string> {
-  const anchored = new Set(project.graph.layout?.pinnedNodeIds || []);
-  for (const group of project.graph.groups || []) {
-    if (group.shapeIds?.length || group.nodeIds.some((id) => anchored.has(id))) {
-      for (const id of group.nodeIds) anchored.add(id);
-    }
-  }
-  return anchored;
-}
-
 function checkBudget(project: StudioProjectV1): void {
   if (project.graph.nodes.length + (project.diagram?.shapes.length || 0) > MAX_NODES || project.graph.edges.length > MAX_LINKS) {
-    throw new Error(`Automatic layout supports at most ${MAX_NODES} canvas items and ${MAX_LINKS} connections.`);
+    throw new Error(`Legacy layout import supports at most ${MAX_NODES} canvas items and ${MAX_LINKS} connections.`);
   }
 }
 function dimension(value: number | undefined, fallback: number): number {
@@ -119,7 +103,7 @@ function outline(items: StudioLayoutBounds[], nodes: Map<string, StudioNodeInsta
 }
 
 /** Coordinates are derived from structure and measured geometry, never from previous free placement. */
-export function arrangeStudioGraph(project: StudioProjectV1, measurements: StudioLayoutMeasurements = new Map()): string[] {
+function arrangeStudioGraph(project: StudioProjectV1, measurements: StudioLayoutMeasurements = new Map()): string[] {
   checkBudget(project);
   const layout = project.graph.layout;
   const columnGap = dimension(layout?.columnGap, 96), rowGap = dimension(layout?.rowGap, 40);
@@ -192,17 +176,26 @@ export function arrangeStudioGraph(project: StudioProjectV1, measurements: Studi
   return moved;
 }
 
-/** Bounded diagnostics for agents and the view; missing measurements are explicit. */
-export function inspectStudioGraphLayout(project: StudioProjectV1, measurements: StudioLayoutMeasurements = new Map()): StudioLayoutReport {
-  checkBudget(project);
-  const nodes = project.graph.nodes.map((node) => boundsFor(node, measurements));
-  const all = [...nodes, ...(project.diagram?.shapes || []).map((shape) => ({ id: `shape:${shape.id}`, ...shape.position, ...shape.size }))].sort((a, b) => a.x - b.x);
-  const overlaps: StudioLayoutReport["overlaps"] = [];
-  let truncated = false, comparisons = 0;
-  outer: for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length && all[j].x < all[i].x + all[i].width; j++) {
-    if (++comparisons > 200000 || overlaps.length >= 200) { truncated = true; break outer; }
-    if (intersects(all[i], all[j])) overlaps.push({ first: all[i].id, second: all[j].id });
+/** Old managed documents omitted coordinates. Recover them once on import only. */
+export function restoreLegacyStudioPositions(project: StudioProjectV1, raw: Record<string, unknown>): StudioProjectV1 {
+  if (project.graph.layout?.mode !== "managed") return project;
+  const container = raw.canvas || raw.graph;
+  const canvas = isRecord(container) ? container : {};
+  const authored = new Set(ensureArray<unknown>(canvas.nodes).filter(isRecord).filter((node) => {
+    const position = isRecord(node.position) ? node.position : node;
+    return Number.isFinite(position.x) && Number.isFinite(position.y);
+  }).map((node) => String(node.id)));
+  if (project.graph.nodes.some((node) => !authored.has(node.id))) {
+    const recovered = JSON.parse(JSON.stringify(project)) as StudioProjectV1;
+    recovered.graph.layout = { ...recovered.graph.layout, mode: "managed", pinnedNodeIds: [...authored] };
+    // Mixed legacy groups must not anchor members whose coordinates were omitted.
+    recovered.graph.groups = (recovered.graph.groups || []).map((group) => ({
+      ...group, nodeIds: group.nodeIds.filter((id) => !authored.has(id)), shapeIds: [],
+    }));
+    arrangeStudioGraph(recovered);
+    const positions = new Map(recovered.graph.nodes.map((node) => [node.id, node.position]));
+    for (const node of project.graph.nodes) if (!authored.has(node.id)) node.position = positions.get(node.id)!;
   }
-  return { mode: project.graph.layout?.mode || "manual", nodes, overlaps, truncated,
-    unmeasuredNodeIds: nodes.filter((node) => !measurements.has(node.id)).map((node) => node.id) };
+  project.graph.layout = { mode: "manual" };
+  return project;
 }

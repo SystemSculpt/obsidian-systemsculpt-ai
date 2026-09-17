@@ -191,12 +191,12 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
   "name": "Interview pipeline",
   "docs": "${STUDIO_AGENT_DOCS_PATH}",
   "canvas": {
-    "layout": { "mode": "managed" },
+    "layout": { "mode": "manual" },
     "nodes": [
-      { "id": "recording", "kind": "media_ingest", "title": "Interview audio",
+      { "id": "recording", "kind": "media_ingest", "title": "Interview audio", "x": 80, "y": 80,
         "config": { "path": "Recordings/interview.m4a" } },
-      { "id": "transcript", "kind": "transcription", "title": "Transcribe" },
-      { "id": "summary", "kind": "text_generation", "title": "Summarize",
+      { "id": "transcript", "kind": "transcription", "title": "Transcribe", "x": 800, "y": 80 },
+      { "id": "summary", "kind": "text_generation", "title": "Summarize", "x": 1520, "y": 80,
         "config": { "systemPrompt": "Summarize the transcript." } }
     ],
     "edges": [
@@ -214,18 +214,17 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 
 - \`schema\`, \`id\`, and \`docs\` are Studio-owned: keep them exactly as they are. Everything under \`canvas\` plus \`name\` is yours to edit.
 - Every id must be non-empty and unique within its list. Keep existing ids stable; use short descriptive ids for additions.
-- A node is \`{id, kind, title?, parent?, x?, y?, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
+- A node is \`{id, kind, title?, parent?, x, y, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
 - \`config\` holds the node's authored content and settings; the node kind reference below lists allowed keys, defaults, and value constraints. Paths are vault-relative unless the field says otherwise.
 - An edge is the string \`"fromNode.outPort -> toNode.inPort"\`. Port types must match unless either side is \`any\`. When a node has exactly one output (or one input) port the port name may be omitted: \`"transcript -> summary.prompt"\`.
 - Edges connect executable data flow only. Visual-only kinds have no executable ports; do not invent port names.
-- A group is \`{id, name, color?, nodes, shapes?}\` framing existing node and shape ids. Membership defines its bounds; a member belongs to at most one group; a group needs at least one member; \`color\` is \`#rgb\` or \`#rrggbb\`.
+- A group is \`{id, name, color?, nodes, shapes?, outputFor?, outputOffset?}\` framing existing node and shape ids. Membership defines its bounds; a member belongs to at most one group; a group needs at least one member; \`color\` is \`#rgb\` or \`#rrggbb\`.
 - A shape is \`{id, shape, x, y, width, height, label, style?}\` on the same canvas. Shapes are drawings, not nodes: they never run and cannot connect to a node. \`shape\` is one of \`rectangle\` (step), \`ellipse\`, \`diamond\` (decision), \`pill\` (start or end), \`cylinder\` (store), \`note\` (aside), \`hexagon\` (preparation). Sides are whole pixels between 48 and 4000.
 - An arrow is the string \`"fromItem -> toItem"\` between two different existing nodes or shapes; each direction of a pair may appear once. Arrows are drawn border to border and carry no data.
 - To label an arrow, write it as the object \`{"from": "fromItem", "to": "toItem", "label": "text"}\` instead of the string. Shape and arrow labels are plain text; use \`\\n\` inside the JSON string for a line break.
-- New projects use \`canvas.layout: {"mode":"managed"}\`. Describe nodes, connections, groups and parents; omit node \`x\`/\`y\`. Studio measures actual cards and automatically places sections and flows, including after file edits and content growth. Coordinates are a derived view cache, not agent-authored content.
+- Use \`canvas.layout: {"mode":"manual"}\` and explicit node \`x\`/\`y\` coordinates. Preserve existing positions when editing content. Studio never rearranges ordinary cards on resize, file edits, or drop. Dragging cards, shapes, or groups shows visual edge/center alignment guides and pixel distances, with gentle snapping within 5 screen pixels of matching edges or centers. Older managed documents recover missing positions once on import and save as manual canvases.
+- Generated image/video cards belong to an Outputs container with \`outputFor\` pointing to their producer. Studio places a new container to its producer's right and arranges only its generated children in generation order, three columns with measured spacing. Preserve this marker and ownership metadata. Containers follow their producer; moving a container as a unit persists its producer-relative \`outputOffset: {x,y}\` (default x=96, y=0). Later runs append inside it. Ordinary groups and connected user-authored result cards remain manually placed.
 - Optional \`parent\` is an existing node id defining organizational hierarchy (for example an initiative and its tickets). Parent relationships must be acyclic and never create execution dependencies. Only \`edges\` carry data or cause execution.
-- Layout options are \`direction: "down" | "right"\` (default down), \`columnGap\`, \`rowGap\`, \`sectionGap\` (16–1000 pixels), and \`pinnedNodeIds\`. These are optional presentation preferences, not required authoring work. A pin anchors its entire group; drawings remain fixed obstacles. Keep coordinates for pinned groups and drawings.
-- \`canvas.layout.mode: "manual"\` opts into free placement; legacy files without layout retain their positions. Manual node coordinates are required. Dragging a node in automatic mode pins its group; Pin toggles selected pins. Auto resumes reflow and Arrange performs one cleanup. Agents can inspect actual mounted geometry with the Studio view's \`inspectGraphLayout()\` method (bounds, overlaps, unmeasured nodes, truncated flag) and request \`arrangeGraphFromCommand()\`; normal managed-file editing needs neither call.
 - Older projects may still be \`studio.project.v1\`; Studio upgrades them to v2 on save. Write v2 for new work.
 
 ## Running and observing a canvas

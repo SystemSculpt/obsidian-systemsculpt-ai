@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import {
   resolveStudioGraphNodeWidth,
+  resolveStudioGraphNodeMinHeight,
 } from "./StudioNodeGeometry";
 
 export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
@@ -15,6 +16,7 @@ export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
 export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
 export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
 export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
+const MANAGED_OUTPUT_RUN_ID_KEY = "__studio_output_run_id";
 const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
 export const MANAGED_OUTPUT_PENDING_MEDIA_KIND_KEY = "__studio_pending_media_kind";
 
@@ -32,9 +34,12 @@ const MEDIA_PROFILES: Readonly<Record<StudioManagedMediaKind, ManagedMediaProfil
 const GENERATED_MEDIA_EDGE_FROM_PORTS: readonly string[] = ["images", "videos"];
 const GENERATED_MEDIA_EDGE_TO_PORT = "media";
 const MANAGED_OUTPUT_NODE_HORIZONTAL_GAP = 96;
-const MEDIA_NODE_Y_GAP = 240;
+
+export type StudioOutputNodeMeasure = (node: StudioNodeInstance) => { width: number; height: number } | null;
 
 type MaterializeMediaOutputsOptions = {
+  runId?: string;
+  measure?: StudioOutputNodeMeasure;
   project: StudioProjectV1;
   sourceNode: StudioNodeInstance;
   outputs: StudioNodeOutputMap | null | undefined;
@@ -43,6 +48,7 @@ type MaterializeMediaOutputsOptions = {
 };
 
 type MaterializePendingMediaOutputPlaceholdersOptions = {
+  measure?: StudioOutputNodeMeasure;
   project: StudioProjectV1;
   sourceNode: StudioNodeInstance;
   runId: string;
@@ -105,6 +111,26 @@ function isManagedMediaNode(node: StudioNodeInstance): boolean {
   return String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() === MANAGED_MEDIA_OWNER;
 }
 
+/** Copies belong to the copied producer, or become independent media cards. */
+export function remapCopiedMediaOutputOwner(
+  node: StudioNodeInstance,
+  nodeIdMap: ReadonlyMap<string, string>
+): void {
+  if (!isManagedMediaNode(node)) return;
+  const sourceId = String(node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY] || "");
+  const copiedSourceId = nodeIdMap.get(sourceId);
+  if (copiedSourceId) {
+    node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY] = copiedSourceId;
+  } else {
+    delete node.config[MANAGED_MEDIA_OWNER_KEY];
+    delete node.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY];
+    delete node.config[MANAGED_MEDIA_SLOT_INDEX_KEY];
+  }
+  // A copied card never participates in an in-flight or completed original run.
+  node.config = stripManagedPendingFields(node.config);
+  delete node.config[MANAGED_OUTPUT_RUN_ID_KEY];
+}
+
 function isManagedTextNode(node: StudioNodeInstance): boolean {
   if (node.kind !== "studio.text_output") {
     return false;
@@ -120,7 +146,7 @@ function isManagedOutputNode(node: StudioNodeInstance): boolean {
   return isManagedMediaNode(node) || isManagedTextNode(node);
 }
 
-function readManagedOutputPendingFlag(node: StudioNodeInstance): boolean {
+export function readManagedOutputPendingFlag(node: StudioNodeInstance): boolean {
   if (!isManagedOutputNode(node)) {
     return false;
   }
@@ -246,8 +272,14 @@ function buildManagedMediaTitle(profile: ManagedMediaProfile, sourceNode: Studio
   return `${baseTitle} ${profile.titleNoun} ${slotIndex + 1}`;
 }
 
-function resolveManagedOutputTargetX(sourceNode: StudioNodeInstance): number {
-  return sourceNode.position.x + resolveStudioGraphNodeWidth(sourceNode) + MANAGED_OUTPUT_NODE_HORIZONTAL_GAP;
+function resolveManagedOutputTargetX(sourceNode: StudioNodeInstance, measure?: StudioOutputNodeMeasure): number {
+  return sourceNode.position.x + (measure?.(sourceNode)?.width || resolveStudioGraphNodeWidth(sourceNode)) + MANAGED_OUTPUT_NODE_HORIZONTAL_GAP;
+}
+
+function newOutputPosition(options: Pick<MaterializeMediaOutputsOptions, "project" | "sourceNode" | "measure">): { x: number; y: number } {
+  const group = options.project.graph.groups?.find(group => group.outputForNodeId === options.sourceNode.id);
+  return { x: resolveManagedOutputTargetX(options.sourceNode, options.measure) + (group?.outputOffset?.x ?? 96) - 96,
+    y: options.sourceNode.position.y + (group?.outputOffset?.y ?? 0) };
 }
 
 function createManagedMediaConfig(sourceNodeId: string, slotIndex: number, sourcePath: string): Record<string, StudioJsonValue> {
@@ -306,8 +338,6 @@ function mediaOutputLinks(
   const connected = new Set(project.graph.edges.filter(edge =>
     edge.fromNodeId === sourceNodeId && edge.fromPortId === profile.fromPort
     && edge.toPortId === GENERATED_MEDIA_EDGE_TO_PORT).map(edge => edge.toNodeId));
-  const groups = (project.graph.groups || []).filter(group => group.nodeIds.includes(sourceNodeId))
-    .map(group => ({ group, members: new Set(group.nodeIds) }));
   return nodeId => {
     let changed = false;
     if (!connected.has(nodeId)) {
@@ -318,15 +348,72 @@ function mediaOutputLinks(
       createdEdgeIds.push(id);
       changed = true;
     }
-    for (const { group, members } of groups) {
-      if (!members.has(nodeId)) {
-        group.nodeIds = [...group.nodeIds, nodeId];
-        members.add(nodeId);
-        changed = true;
-      }
-    }
+    changed = attachOutputToContainer(project, sourceNode, nodeId) || changed;
     return changed;
   };
+}
+
+/** A generated output belongs to one producer-owned container, never the workflow frame. */
+function attachOutputToContainer(project: StudioProjectV1, source: StudioNodeInstance, nodeId: string): boolean {
+  const groups = project.graph.groups ||= [];
+  let container = groups.find(group => group.outputForNodeId === source.id);
+  let changed = false;
+  if (!container) {
+    const base = `outputs_${source.id}`;
+    let id = base, suffix = 2;
+    while (groups.some(group => group.id === id)) id = `${base}_${suffix++}`;
+    container = { id, name: `${source.title || "Generation"} Outputs`, outputForNodeId: source.id, nodeIds: [] };
+    groups.push(container);
+    changed = true;
+  }
+  const ownedIds = project.graph.nodes.filter(node => readManagedMediaSourceNodeId(node) === source.id).map(node => node.id);
+  const owned = new Set([...ownedIds, nodeId]);
+  for (const group of groups) {
+    if (group === container) continue;
+    const remaining = group.nodeIds.filter(id => !owned.has(id));
+    if (remaining.length !== group.nodeIds.length) { group.nodeIds = remaining; changed = true; }
+  }
+  for (const id of owned) if (!container.nodeIds.includes(id)) { container.nodeIds.push(id); changed = true; }
+  project.graph.groups = groups.filter(group => group.nodeIds.length || group.shapeIds?.length);
+  return changed;
+}
+
+/** Three columns, stable generation order, measured rows. Ordinary groups and nodes never move. */
+export function arrangeManagedOutputContainers(project: StudioProjectV1, measure?: StudioOutputNodeMeasure): string[] {
+  const nodeById = new Map(project.graph.nodes.map(node => [node.id, node]));
+  const moved: string[] = [];
+  for (const group of project.graph.groups || []) {
+    if (!group.outputForNodeId || !nodeById.has(group.outputForNodeId)) continue;
+    const outputs = group.nodeIds.map(id => nodeById.get(id)).filter((node): node is StudioNodeInstance =>
+      Boolean(node && readManagedMediaSlot(node)?.sourceNodeId === group.outputForNodeId));
+    outputs.sort((a, b) => readManagedMediaSlot(a)!.slotIndex - readManagedMediaSlot(b)!.slotIndex);
+    if (!outputs.length) continue;
+    const source = nodeById.get(group.outputForNodeId)!;
+    const x = resolveManagedOutputTargetX(source, measure) + (group.outputOffset?.x ?? 96) - 96;
+    const y = source.position.y + (group.outputOffset?.y ?? 0);
+    const sizes = outputs.map(node => {
+      const measured = measure?.(node);
+      return { width: measured?.width || resolveStudioGraphNodeWidth(node),
+        height: measured?.height || node.size?.height || resolveStudioGraphNodeMinHeight(node) };
+    });
+    const columns = Math.min(3, outputs.length);
+    const widths = Array.from({ length: columns }, () => 0);
+    const heights = Array.from({ length: Math.ceil(outputs.length / columns) }, () => 0);
+    sizes.forEach((size, i) => { widths[i % columns] = Math.max(widths[i % columns], size.width); heights[Math.floor(i / columns)] = Math.max(heights[Math.floor(i / columns)], size.height); });
+    let top = y;
+    for (let row = 0; row < heights.length; row++) {
+      let left = x;
+      for (let column = 0; column < columns; column++) {
+        const node = outputs[row * columns + column];
+        if (node && (node.position.x !== Math.round(left) || node.position.y !== Math.round(top))) {
+          node.position = { x: Math.round(left), y: Math.round(top) }; moved.push(node.id);
+        }
+        left += widths[column] + 48;
+      }
+      top += heights[row] + 48;
+    }
+  }
+  return moved;
 }
 
 function nextManagedMediaSlotIndex(project: StudioProjectV1, sourceNodeId: string): number {
@@ -507,10 +594,7 @@ function materializePendingMediaOutputPlaceholders(
       kind: "studio.media_ingest",
       version: "1.0.0",
       title: buildManagedMediaTitle(profile, options.sourceNode, slotIndex, slotIndex + 1),
-      position: {
-        x: resolveManagedOutputTargetX(options.sourceNode),
-        y: options.sourceNode.position.y + slotIndex * MEDIA_NODE_Y_GAP,
-      },
+      position: newOutputPosition(options),
       config: createPendingManagedMediaConfig(profile.kind, sourceNodeId, slotIndex, runId, createdAt),
       continueOnError: false,
       disabled: true,
@@ -520,6 +604,8 @@ function materializePendingMediaOutputPlaceholders(
     changed = true;
     changed = linkOutput(nodeId) || changed;
   }
+
+  changed = arrangeManagedOutputContainers(options.project, options.measure).length > 0 || changed;
 
   return {
     changed,
@@ -564,7 +650,7 @@ function materializeMediaOutputsAsMediaNodes(
     }
     const config = asRecord(node.config) || {};
     const sourcePath = String(config.sourcePath || "").trim();
-    if (sourcePath && !managedNodesByPath.has(sourcePath)) {
+    if (sourcePath && (!options.runId || node.config[MANAGED_OUTPUT_RUN_ID_KEY] === options.runId) && !managedNodesByPath.has(sourcePath)) {
       managedNodesByPath.set(sourcePath, node);
     }
     const managed = readManagedMediaSlot(node);
@@ -580,7 +666,7 @@ function materializeMediaOutputsAsMediaNodes(
     if (edge.fromNodeId !== sourceNodeId || !GENERATED_MEDIA_EDGE_FROM_PORTS.includes(edge.fromPortId)
       || ![GENERATED_MEDIA_EDGE_TO_PORT, "path"].includes(edge.toPortId)) continue;
     const node = nodeById.get(edge.toNodeId);
-    if (!node || node.kind !== "studio.media_ingest" || usedNodeIds.has(node.id)) continue;
+    if (!node || node.kind !== "studio.media_ingest" || usedNodeIds.has(node.id) || readManagedMediaSlot(node)) continue;
     const path = String(node.config.sourcePath || "").trim();
     if (path && !managedNodesByPath.has(path)) managedNodesByPath.set(path, node);
   }
@@ -591,12 +677,18 @@ function materializeMediaOutputsAsMediaNodes(
   const linkOutput = mediaOutputLinks(options, profile, createdEdgeIds);
   let changed = false;
 
+  const pending = options.runId ? options.project.graph.nodes.filter(node =>
+    readManagedMediaSourceNodeId(node) === sourceNodeId && readManagedOutputPendingRunId(node) === options.runId)
+    .sort((a, b) => readManagedMediaSlot(a)!.slotIndex - readManagedMediaSlot(b)!.slotIndex) : [];
+
   for (const sourcePath of outputPaths) {
     if (!sourcePath) {
       continue;
     }
 
-    const existingNode = managedNodesByPath.get(sourcePath);
+    const existingNode = managedNodesByPath.get(sourcePath) || pending.shift();
+    // Explicit connected cards remain user-owned and keep their placement.
+    if (existingNode && !readManagedMediaSlot(existingNode)) continue;
     if (existingNode) {
       const existingConfig = asRecord(existingNode.config) || {};
       const existingManaged = readManagedMediaSlot(existingNode);
@@ -610,6 +702,7 @@ function materializeMediaOutputsAsMediaNodes(
         [MANAGED_MEDIA_OWNER_KEY]: MANAGED_MEDIA_OWNER,
         [MANAGED_MEDIA_SOURCE_NODE_ID_KEY]: sourceNodeId,
         [MANAGED_MEDIA_SLOT_INDEX_KEY]: slotIndex,
+        ...(options.runId ? { [MANAGED_OUTPUT_RUN_ID_KEY]: options.runId } : {}),
       };
       if (JSON.stringify(existingConfig) !== JSON.stringify(nextConfig)) {
         existingNode.config = nextConfig;
@@ -620,6 +713,7 @@ function materializeMediaOutputsAsMediaNodes(
         existingNode.disabled = false;
         changed = true;
       }
+      managedNodesByPath.set(sourcePath, existingNode);
       changed = linkOutput(existingNode.id) || changed;
       continue;
     }
@@ -631,11 +725,9 @@ function materializeMediaOutputsAsMediaNodes(
       kind: "studio.media_ingest",
       version: "1.0.0",
       title: buildManagedMediaTitle(profile, options.sourceNode, slotIndex, slotIndex + 1),
-      position: {
-        x: resolveManagedOutputTargetX(options.sourceNode),
-        y: options.sourceNode.position.y + slotIndex * MEDIA_NODE_Y_GAP,
-      },
-      config: createManagedMediaConfig(sourceNodeId, slotIndex, sourcePath),
+      position: newOutputPosition(options),
+      config: { ...createManagedMediaConfig(sourceNodeId, slotIndex, sourcePath),
+        ...(options.runId ? { [MANAGED_OUTPUT_RUN_ID_KEY]: options.runId } : {}) },
       continueOnError: false,
       disabled: false,
     };
@@ -647,6 +739,8 @@ function materializeMediaOutputsAsMediaNodes(
     changed = linkOutput(nodeId) || changed;
   }
 
+  const moved = arrangeManagedOutputContainers(options.project, options.measure);
+  changed = moved.length > 0 || changed;
   return {
     changed,
     createdNodeIds,

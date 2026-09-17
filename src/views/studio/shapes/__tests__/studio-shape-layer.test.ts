@@ -74,6 +74,16 @@ function shapeEl(canvas: HTMLElement, shapeId: string): HTMLElement {
 }
 
 describe("studio shape layer", () => {
+  it("marks cancelled movement as an exact origin restoration", () => {
+    const { canvas, onMoveSelection } = mount();
+    shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 120, 120));
+    window.dispatchEvent(pointerEvent("pointermove", 160, 140));
+    window.dispatchEvent(pointerEvent("pointercancel", 160, 140));
+    expect(onMoveSelection).toHaveBeenLastCalledWith({ x: 0, y: 0 },
+      { first: false, final: true, cancelled: true });
+    expect(shapeEl(canvas, "s1").style.left).toBe("100px");
+  });
+
   it("renders shapes at their stored geometry and an arrow between them", () => {
     const { canvas } = mount();
 

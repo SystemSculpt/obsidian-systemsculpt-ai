@@ -1,4 +1,4 @@
-import { computeStudioNewNodePosition, pinStudioNodeForManagedLayout, STUDIO_NEW_NODE_GAP } from "../StudioGraphNodePlacement";
+import { computeStudioNewNodePosition, STUDIO_NEW_NODE_GAP } from "../StudioGraphNodePlacement";
 import { resolveStudioGraphNodeWidth } from "../../../../studio/StudioNodeGeometry";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
 
@@ -46,18 +46,5 @@ describe("computeStudioNewNodePosition", () => {
 
   it("falls back to a deterministic grid from the origin without a bound viewport", () => {
     expect(computeStudioNewNodePosition({ project: project([]), definition, selectedNodeIds: [], viewportCenter: null })).toEqual({ x: 120, y: 120 });
-  });
-});
-
-describe("pinStudioNodeForManagedLayout", () => {
-  it("pins a placed node only under managed layout and never twice", () => {
-    const managed = { graph: { nodes: [], edges: [], entryNodeIds: [], layout: { mode: "managed", pinnedNodeIds: ["a"] } } } as unknown as StudioProjectV1;
-    expect(pinStudioNodeForManagedLayout(managed, "b")).toBe(true);
-    expect(managed.graph.layout).toEqual({ mode: "managed", pinnedNodeIds: ["a", "b"] });
-    expect(pinStudioNodeForManagedLayout(managed, "b")).toBe(false);
-    const manual = { graph: { nodes: [], edges: [], entryNodeIds: [], layout: { mode: "manual" } } } as unknown as StudioProjectV1;
-    expect(pinStudioNodeForManagedLayout(manual, "b")).toBe(false);
-    expect(manual.graph.layout).toEqual({ mode: "manual" });
-    expect(pinStudioNodeForManagedLayout(project([]), "b")).toBe(false);
   });
 });

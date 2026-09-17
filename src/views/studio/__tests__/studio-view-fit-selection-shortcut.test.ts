@@ -8,7 +8,6 @@ type KeydownContext = {
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   fitSelectedGraphNodesInViewport: jest.Mock<boolean, []>;
   fitGraphOverviewInViewport: jest.Mock<boolean, []>;
-  arrangeGraphFromCommand: jest.Mock<unknown, []>;
   clipboardAndDropController: {
     copySelectedGraphNodes: jest.Mock<boolean, []>;
     cutSelectedGraphNodes: jest.Mock<boolean, []>;
@@ -18,8 +17,9 @@ type KeydownContext = {
   busy: boolean;
   currentProject: unknown;
   graphInteraction: {
-    getSelectedNodeIds: jest.Mock<string[], []>;
+    getSelectedNodeIds: jest.Mock<string[], []>; setSelectedNodeIds: jest.Mock<void, [string[]]>;
   };
+  shapeController: { setSelectedShapeIds: jest.Mock<void, [string[]]> };
   removeNodes: jest.Mock<void, [string[]]>;
 };
 
@@ -47,7 +47,6 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     isEditableKeyboardTarget: jest.fn(() => false),
     fitSelectedGraphNodesInViewport: jest.fn(() => true),
     fitGraphOverviewInViewport: jest.fn(() => true),
-    arrangeGraphFromCommand: jest.fn(() => ({})),
     clipboardAndDropController: {
       copySelectedGraphNodes: jest.fn(() => false),
       cutSelectedGraphNodes: jest.fn(() => false),
@@ -57,8 +56,9 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     busy: false,
     currentProject: { graph: { nodes: [] } },
     graphInteraction: {
-      getSelectedNodeIds: jest.fn(() => []),
+      setSelectedNodeIds: jest.fn(), getSelectedNodeIds: jest.fn(() => []),
     },
+    shapeController: { setSelectedShapeIds: jest.fn() },
     removeNodes: jest.fn(),
     ...overrides,
   };
@@ -88,7 +88,8 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     const view = new SystemSculptStudioView({ app } as WorkspaceLeaf, {} as any);
     jest.spyOn(view as any, "isActiveStudioView").mockReturnValue(true);
     const fit = jest.spyOn(view as any, "fitSelectedGraphNodesInViewport").mockReturnValue(true);
-    const arrange = jest.spyOn(view, "arrangeGraphFromCommand").mockReturnValue({} as any);
+    const select = jest.spyOn((view as any).graphInteraction, "setSelectedNodeIds").mockImplementation(() => undefined);
+    jest.spyOn(view as any, "currentProject", "get").mockReturnValue({ graph: { nodes: [] } });
     const scope = view.scope as unknown as {
       parent: Scope;
       keys: { key: string; modifiers: string[]; func: (event: KeyboardEvent) => unknown }[];
@@ -100,13 +101,13 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     expect(binding.modifiers).toEqual(["Mod"]);
     expect(binding.func(event)).toBe(false);
     (view as any).handleWindowKeyDown(event);
-    expect(key === "f" ? fit : arrange).toHaveBeenCalledTimes(1);
+    expect(key === "f" ? fit : select).toHaveBeenCalledTimes(1);
 
     const fieldEvent = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
     Object.defineProperty(fieldEvent, "target", { value: document.createElement("textarea") });
     expect(binding.func(fieldEvent)).toBeUndefined();
     expect(fieldEvent.defaultPrevented).toBe(false);
-    expect(key === "f" ? fit : arrange).toHaveBeenCalledTimes(1);
+    expect(key === "f" ? fit : select).toHaveBeenCalledTimes(1);
   });
 
   it.each(["metaKey", "ctrlKey"])("fits selected nodes with %s+F", (modifier) => {
@@ -141,7 +142,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
 
     expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
     expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
-    expect(context.arrangeGraphFromCommand).not.toHaveBeenCalled();
+    expect(context.graphInteraction.setSelectedNodeIds).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
@@ -153,7 +154,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
 
     expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
     expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
-    expect(context.arrangeGraphFromCommand).not.toHaveBeenCalled();
+    expect(context.graphInteraction.setSelectedNodeIds).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 

@@ -29,8 +29,8 @@ function createGraphInteractionStub() {
     getGraphZoom: jest.fn(() => 1),
     toggleNodeSelection: jest.fn(),
     ensureSingleSelection: jest.fn(),
-    resolveNodeResizeSnap: jest.fn(() => null),
-    clearResizeSnapGuides: jest.fn(),
+    showNodeResizeGuides: jest.fn(() => null),
+    clearAlignmentGuides: jest.fn(),
   };
 }
 

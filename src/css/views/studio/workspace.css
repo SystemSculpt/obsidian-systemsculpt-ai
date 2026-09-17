@@ -104,8 +104,8 @@
   display: block;
 }
 
-/* Smart alignment guides (drag snapping) */
-.ss-studio-snap-guides-layer {
+/* Visual alignment guides and pixel dimensions */
+.ss-studio-alignment-guides-layer {
   position: absolute;
   left: 0;
   top: 0;
@@ -113,33 +113,72 @@
   pointer-events: none;
 }
 
-.ss-studio-snap-guide {
+.ss-studio-alignment-guide {
   position: absolute;
   background-color: var(--ss-accent);
 }
 
-.ss-studio-snap-guide.is-vertical {
+.ss-studio-alignment-guide.is-vertical {
   width: 1px;
 }
 
-.ss-studio-snap-guide.is-horizontal {
+.ss-studio-alignment-guide.is-horizontal {
   height: 1px;
 }
 
-.ss-studio-snap-gap-span {
+.ss-studio-alignment-guide.is-near.is-vertical {
+  background: repeating-linear-gradient(to bottom, var(--ss-accent) 0 4px, transparent 4px 8px);
+}
+
+.ss-studio-alignment-guide.is-near.is-horizontal {
+  background: repeating-linear-gradient(to right, var(--ss-accent) 0 4px, transparent 4px 8px);
+}
+
+.ss-studio-alignment-offset-badge {
+  margin-top: var(--ss-space-3);
+}
+
+.ss-studio-distance-span {
   position: absolute;
   background-color: color-mix(in srgb, var(--ss-accent) 55%, transparent);
 }
 
-.ss-studio-snap-gap-span.is-horizontal {
+.ss-studio-distance-span.is-horizontal {
   height: 1px;
 }
 
-.ss-studio-snap-gap-span.is-vertical {
+.ss-studio-distance-span.is-vertical {
   width: 1px;
 }
 
-.ss-studio-snap-gap-badge {
+.ss-studio-distance-span::before,
+.ss-studio-distance-span::after {
+  content: "";
+  position: absolute;
+  background-color: var(--ss-accent);
+}
+
+.ss-studio-distance-span.is-horizontal::before,
+.ss-studio-distance-span.is-horizontal::after {
+  width: 1px;
+  height: 7px;
+  top: -3px;
+}
+
+.ss-studio-distance-span.is-horizontal::before { left: 0; }
+.ss-studio-distance-span.is-horizontal::after { right: 0; }
+
+.ss-studio-distance-span.is-vertical::before,
+.ss-studio-distance-span.is-vertical::after {
+  width: 7px;
+  height: 1px;
+  left: -3px;
+}
+
+.ss-studio-distance-span.is-vertical::before { top: 0; }
+.ss-studio-distance-span.is-vertical::after { bottom: 0; }
+
+.ss-studio-distance-badge {
   position: absolute;
   transform: translate(-50%, -50%);
   padding: 1px var(--ss-space-1);
