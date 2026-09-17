@@ -57,9 +57,9 @@ describe("Studio schema", () => {
       name: "Agent-readable",
       docs: STUDIO_AGENT_DOCS_PATH,
       canvas: {
-        layout: { mode: "managed" },
+        layout: { mode: "manual" },
         nodes: [
-          { id: "prompt", kind: "text", title: "Prompt", width: 280, config: { value: "hello" } },
+          { id: "prompt", kind: "text", title: "Prompt", x: 20, y: 20, width: 280, config: { value: "hello" } },
         ],
         edges: [],
         groups: [],

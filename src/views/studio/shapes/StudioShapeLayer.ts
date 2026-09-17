@@ -34,7 +34,7 @@ export type StudioShapeTarget = { type: "shape" | "arrow"; id: string };
 export type StudioShapeRect = { x: number; y: number; width: number; height: number };
 
 /** One frame of a selection drag; `first` opens the history entry, `final` closes it. */
-export type StudioShapeDragPhase = { first: boolean; final: boolean };
+export type StudioShapeDragPhase = { first: boolean; final: boolean; cancelled?: boolean };
 
 export type StudioShapeLayerOptions = {
   canvasEl: HTMLElement;
@@ -261,7 +261,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       }
       if (!commit) {
         translateShapes(dragShapeIds, startPositions, { x: 0, y: 0 });
-        options.onMoveSelection({ x: 0, y: 0 }, { first: false, final: true });
+        options.onMoveSelection({ x: 0, y: 0 }, { first: false, final: true, cancelled: true });
         return;
       }
       options.onMoveSelection(lastDelta, { first: false, final: true });

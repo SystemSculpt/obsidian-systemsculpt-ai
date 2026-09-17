@@ -11,6 +11,7 @@ import {
   readDatasetOutputFields,
 } from "./nodes/datasetNode";
 import {
+  type StudioOutputNodeMeasure,
   materializeImageOutputsAsMediaNodes,
   materializePendingImageOutputPlaceholders,
   materializePendingVideoOutputPlaceholders,
@@ -95,6 +96,7 @@ export function syncDatasetOutputFieldsToProjectNodeConfig(options: {
 export function materializeManagedOutputPlaceholdersForStartedNode(options: {
   project: StudioProjectV1;
   event: NodeStartedEvent;
+  measure?: StudioOutputNodeMeasure;
   createNodeId: () => string;
   createEdgeId: () => string;
 }): boolean {
@@ -113,6 +115,7 @@ export function materializeManagedOutputPlaceholdersForStartedNode(options: {
     sourceNode,
     runId: options.event.runId,
     createdAt: options.event.at,
+    measure: options.measure,
     createNodeId: options.createNodeId,
     createEdgeId: options.createEdgeId,
   }).changed;
@@ -121,6 +124,7 @@ export function materializeManagedOutputPlaceholdersForStartedNode(options: {
 export function materializeManagedOutputNodesForNodeOutput(options: {
   project: StudioProjectV1;
   event: NodeOutputEvent;
+  measure?: StudioOutputNodeMeasure;
   createNodeId: () => string;
   createEdgeId: () => string;
 }): boolean {
@@ -136,6 +140,8 @@ export function materializeManagedOutputNodesForNodeOutput(options: {
       project: options.project,
       sourceNode,
       outputs: options.event.outputs || null,
+      runId: options.event.runId,
+      measure: options.measure,
       createNodeId: options.createNodeId,
       createEdgeId: options.createEdgeId,
     });
@@ -155,6 +161,7 @@ export function materializeManagedOutputNodesForNodeOutput(options: {
 export function materializeManagedOutputNodesFromCacheEntries(options: {
   project: StudioProjectV1;
   entries: Record<string, { outputs: StudioNodeOutputMap; updatedAt?: string }> | null;
+  measure?: StudioOutputNodeMeasure;
   createNodeId: () => string;
   createEdgeId: () => string;
 }): boolean {
@@ -179,6 +186,7 @@ export function materializeManagedOutputNodesFromCacheEntries(options: {
         project: options.project,
         sourceNode: node,
         outputs: cacheEntry.outputs,
+        measure: options.measure,
         createNodeId: options.createNodeId,
         createEdgeId: options.createEdgeId,
       });

@@ -1,3 +1,4 @@
+import { readManagedOutputPendingFlag } from "../../../studio/StudioManagedOutputNodes";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 import type {
   StudioEdge,
@@ -69,7 +70,7 @@ export function buildGraphClipboardPayload(options: {
   const { project, selectedNodeIds } = options;
   const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
   const normalizedSelection = normalizeNodeIdList(selectedNodeIds).filter((nodeId) =>
-    nodeById.has(nodeId)
+    nodeById.has(nodeId) && !readManagedOutputPendingFlag(nodeById.get(nodeId)!)
   );
 
   const selectedNodeIdSet = new Set(normalizedSelection);
@@ -118,8 +119,10 @@ export function buildGraphClipboardPayload(options: {
       const groupShapeIds = normalizeNodeIdList(group.shapeIds || []).filter((shapeId) =>
         selectedShapeIdSet.has(shapeId)
       );
-      // A group is worth copying only when at least two of its members came.
-      if (groupNodeIds.length + groupShapeIds.length < 2) {
+      const outputForNodeId = group.outputForNodeId && selectedNodeIdSet.has(group.outputForNodeId)
+        ? group.outputForNodeId : undefined;
+      // Owned containers also preserve a single output when its producer travels.
+      if (groupNodeIds.length + groupShapeIds.length < (outputForNodeId ? 1 : 2)) {
         return null;
       }
       const groupName = String(group.name || "").trim();
@@ -130,6 +133,7 @@ export function buildGraphClipboardPayload(options: {
       const groupColor = String(group.color || "").trim();
       return {
         id: groupId,
+        ...(outputForNodeId ? { outputForNodeId, ...(group.outputOffset ? { outputOffset: { ...group.outputOffset } } : {}) } : {}),
         name: groupName,
         ...(groupColor ? { color: groupColor } : {}),
         nodeIds: groupNodeIds,

@@ -1,4 +1,3 @@
-import { pinStudioNodeForManagedLayout } from "../canvas/StudioGraphNodePlacement";
 import { App, Notice, TFile, normalizePath } from "obsidian";
 import {
   STUDIO_DISPLAY_NAME,
@@ -264,7 +263,6 @@ export class StudioClipboardAndDropController {
       materialized;
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...newNodes);
-      for (const created of newNodes) pinStudioNodeForManagedLayout(project, created.id);
       project.graph.edges.push(...newEdges);
       if (newGroups.length > 0) {
         if (!Array.isArray(project.graph.groups)) project.graph.groups = [];
@@ -371,7 +369,6 @@ export class StudioClipboardAndDropController {
     });
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(node);
-      pinStudioNodeForManagedLayout(project, node.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;
@@ -407,7 +404,6 @@ export class StudioClipboardAndDropController {
     if (nodes.length === 0 || !this.isScopeCurrent(scope)) return false;
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...nodes);
-      for (const created of nodes) pinStudioNodeForManagedLayout(project, created.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;
@@ -530,7 +526,6 @@ export class StudioClipboardAndDropController {
 
     const changed = this.host.commitNodeCreation((project) => {
       project.graph.nodes.push(...newNodes);
-      for (const created of newNodes) pinStudioNodeForManagedLayout(project, created.id);
       return true;
     });
     if (!changed || !this.isScopeCurrent(scope)) return false;

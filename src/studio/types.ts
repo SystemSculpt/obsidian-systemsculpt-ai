@@ -216,6 +216,10 @@ export type StudioNodeGroup = {
   color?: string;
   nodeIds: string[];
   shapeIds?: string[];
+  /** Generated cards belonging to this producer; only this container arranges itself. */
+  outputForNodeId?: string;
+  /** Manual container displacement relative to the producer right edge. */
+  outputOffset?: { x: number; y: number };
 };
 
 export type StudioGraph = {

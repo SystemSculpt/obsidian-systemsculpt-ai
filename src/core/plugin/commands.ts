@@ -30,7 +30,6 @@ type StudioCommandViewLike = {
   getState(): unknown;
   fitSelectionInViewportFromCommand(): void;
   showGraphOverviewFromCommand(): void;
-  arrangeGraphFromCommand(): unknown;
 };
 
 type ChatCommandViewLike = {
@@ -584,17 +583,6 @@ export class CommandManager {
         if (!checking) {
           activeStudioView.fitSelectionInViewportFromCommand();
         }
-        return true;
-      },
-    });
-
-    this.plugin.addCommand({
-      id: "arrange-systemsculpt-studio-graph",
-      name: "Studio: arrange graph automatically",
-      checkCallback: (checking: boolean) => {
-        const view = this.getActiveStudioView();
-        if (!view) return false;
-        if (!checking) view.arrangeGraphFromCommand();
         return true;
       },
     });

@@ -270,7 +270,7 @@ describe("StudioManagedOutputNodes media outputs", () => {
     ).toEqual(["SystemSculpt/Assets/a.png", "SystemSculpt/Assets/b.png"]);
   });
 
-  it("adopts connected media nodes when metadata is missing", () => {
+  it("leaves explicitly connected media cards without managed metadata user-owned", () => {
     const sourceNode = createImageSourceNode();
     const connectedMediaNode: StudioNodeInstance = {
       id: "media_existing",
@@ -309,15 +309,15 @@ describe("StudioManagedOutputNodes media outputs", () => {
       createEdgeId: () => "edge_should_not_create",
     });
 
-    expect(result.changed).toBe(true);
+    expect(result.changed).toBe(false);
     expect(result.createdNodeIds).toEqual([]);
-    expect(result.updatedNodeIds).toEqual([connectedMediaNode.id]);
+    expect(result.updatedNodeIds).toEqual([]);
     expect(result.createdEdgeIds).toEqual([]);
     expect(project.graph.nodes).toHaveLength(2);
     expect(project.graph.edges).toHaveLength(1);
-    expect(connectedMediaNode.config[MANAGED_MEDIA_OWNER_KEY]).toBe(MANAGED_MEDIA_OWNER);
-    expect(connectedMediaNode.config[MANAGED_MEDIA_SOURCE_NODE_ID_KEY]).toBe(sourceNode.id);
-    expect(connectedMediaNode.config[MANAGED_MEDIA_SLOT_INDEX_KEY]).toBe(0);
+    expect(connectedMediaNode.config[MANAGED_MEDIA_OWNER_KEY]).toBeUndefined();
+    expect(connectedMediaNode.position).toEqual({ x: 460, y: 120 });
+    expect(project.graph.groups || []).toEqual([]);
   });
 
   it("ignores first_image-only outputs", () => {
@@ -364,7 +364,7 @@ describe("StudioManagedOutputNodes media outputs", () => {
     expect(project.graph.nodes).toHaveLength(1);
   });
 
-  it("adds managed media output nodes into the same group as the source node", () => {
+  it("puts generated outputs in their own group beside the source workflow", () => {
     const sourceNode = createImageSourceNode();
     const project = createProject(sourceNode, {
       groups: [
@@ -387,7 +387,8 @@ describe("StudioManagedOutputNodes media outputs", () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(project.graph.groups?.[0]?.nodeIds).toEqual([sourceNode.id, "node_media_0"]);
+    expect(project.graph.groups?.[0]?.nodeIds).toEqual([sourceNode.id]);
+    expect(project.graph.groups?.find(group => group.outputForNodeId === sourceNode.id)?.nodeIds).toEqual(["node_media_0"]);
   });
 });
 
@@ -589,7 +590,8 @@ describe("saved output reconciliation", () => {
     const repaired = materializePendingImageOutputPlaceholders(options);
     expect(repaired.createdNodeIds).toEqual([]);
     expect(repaired.createdEdgeIds).toHaveLength(2);
-    expect(project.graph.groups[0].nodeIds).toEqual([source.id, ...first.createdNodeIds]);
+    expect(project.graph.groups[0].nodeIds).toEqual([source.id]);
+    expect(project.graph.groups.find(group => group.outputForNodeId === source.id)?.nodeIds).toEqual(first.createdNodeIds);
     expect(materializePendingImageOutputPlaceholders(options).changed).toBe(false);
   });
 

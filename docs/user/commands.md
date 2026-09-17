@@ -59,7 +59,6 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 | Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
 | SystemSculpt Studio: Fit Selection in Viewport |  | `fit-systemsculpt-studio-selection-in-viewport` | Frames selected Studio nodes |
 | SystemSculpt Studio: Overview Graph in Viewport |  | `overview-systemsculpt-studio-graph-in-viewport` | Frames the full Studio graph |
-| Studio: Arrange Graph Automatically |  | `arrange-systemsculpt-studio-graph` | Arranges the graph from connections, parents, groups, and rendered card sizes |
 
 While the Studio canvas is active:
 
@@ -69,8 +68,8 @@ While the Studio canvas is active:
 - With the arrow tool, drag from a node or shape onto another node or shape.
   These arrows are visual annotations and do not pass data or affect execution.
 - `Mod+F` fits the selected nodes, or the whole graph when nothing is selected.
-- `Mod+A` runs automatic alignment, respecting pinned positions. New studios keep
-  layout automatic; use Auto to opt into manual placement.
+- `Mod+A` selects all cards and shapes. Placement is manual. While dragging,
+  alignment guides and pixel distances help you line things up. Dragging within 5 screen pixels of an edge or center gently snaps the selection into alignment.
 - `Shift+wheel` scrolls horizontally. An unmodified wheel scrolls vertically;
   trackpad horizontal scrolling and `Mod+wheel` zoom also remain available.
 
@@ -89,7 +88,7 @@ editing a field.
 
 Each card shows one thing. An image or video card is the media itself, with its actions beneath it. A text card is Markdown you edit in place. Script, JSON, value, process and command cards show their source: use **Edit source**, then **Apply** (Cmd/Ctrl+Enter) to save. Apply never runs a node. Image generation, video generation, text generation and Codex cards show their fields as controls with the result beneath. Collections, run boards, buttons, command centers and workflows show their panel, with a **Source** toggle in the title bar for the definition. Invalid edits stay in the editor; if an agent changes the same source, Studio retains your draft and asks you to reload.
 
-Adding a node with the **Add** button places it to the right of the selected node, or in the centre of the current view when nothing is selected, and never on top of an existing card. Right-click on the canvas still adds the node where you clicked. With automatic layout on, a card you add or drag stays pinned where you put it.
+Adding a node with the **Add** button places it to the right of the selected node, or in the centre of the current view when nothing is selected, and never on top of an existing card. Right-click on the canvas still adds the node where you clicked. Ordinary cards stay where you place them, including after content edits and resizing. Generated image/video cards collect in their producer’s **Outputs** container, initially to its right. Each run adds cards to a three-column grid; only the contents of that container arrange automatically. Move the container as a unit to keep later results in the same place.
 
 **Run** on a card runs only that card. Whatever is already connected to it is used as-is: a generated image feeding a video card is not regenerated, and a generation that has never run stops the run with a message naming the card to run first. Cards that only transform their inputs (text, values, media paths) refresh automatically when their inputs changed. The toolbar **Run** still runs the whole graph.
 

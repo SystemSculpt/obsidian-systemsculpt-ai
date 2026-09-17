@@ -1,3 +1,4 @@
+import { StudioOutputContainerController } from "./StudioOutputContainerController";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
 import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
@@ -54,7 +55,6 @@ import type {
   StudioProjectSessionAutosaveMode,
   StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
-import { StudioAutomaticLayoutController } from "./StudioAutomaticLayoutController";
 import { StudioMediaModelPickerController } from "./systemsculpt-studio-view/StudioMediaModelPickerController";
 import { renderStudioGraphWorkspace } from "./canvas/StudioGraphWorkspaceRenderer";
 import type { StudioNodeConfigPathBrowseOptions } from "./StudioPathFieldPicker";
@@ -99,7 +99,7 @@ import {
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
   STUDIO_TEXT_NODE_WIDTH_MODE_KEY,
 } from "../../studio/StudioNodeGeometry";
-import { computeStudioNewNodePosition, pinStudioNodeForManagedLayout } from "./canvas/StudioGraphNodePlacement";
+import { computeStudioNewNodePosition } from "./canvas/StudioGraphNodePlacement";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
@@ -118,7 +118,7 @@ import {
   definitionKey,
   prettifyNodeKind,
 } from "./StudioViewHelpers";
-import { removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
+import { cleanupOrphanedManagedMediaOutputs, removePendingManagedOutputNodes } from "../../studio/StudioManagedOutputNodes";
 import { isStudioGraphEditableTarget } from "./StudioGraphDomTargeting";
 import {
   getStudioOwnerDocument,
@@ -201,13 +201,12 @@ export class SystemSculptStudioView extends ItemView {
   private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
   private nodeDragInProgress = false;
   private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.render() });
-  private readonly automaticLayout = new StudioAutomaticLayoutController({
+  private readonly outputContainers = new StudioOutputContainerController({
     getProject: () => this.currentProject,
     getNodeElement: (id) => this.graphInteraction.getNodeElement(id),
     isDragging: () => this.nodeDragInProgress,
-    commit: (mutator) => this.commitCurrentProjectMutation("node.position", mutator),
+    commit: (mutate) => this.commitCurrentProjectMutation("runtime.projector", mutate, { captureHistory: false }),
     positionsChanged: () => this.graphInteraction.notifyNodePositionsChanged(),
-    reportError: (message) => this.setError(message),
   });
   private readonly textEdits = new StudioTextEditSessions();
   private nodeTeardowns = new Map<string, () => void>();
@@ -225,7 +224,7 @@ export class SystemSculptStudioView extends ItemView {
   private closePromise: Promise<void> | null = null;
   private closed = false;
   /** Diagram layer: shapes and arrows, with its own selection and edits. */
-  private readonly shapeController = new StudioShapeController({
+  private readonly shapeController: StudioShapeController = new StudioShapeController({
     isBusy: () => this.busy,
     getCanvasEl: () => this.graphCanvasEl,
     getGraphZoom: () => this.graphInteraction.getGraphZoom(),
@@ -234,11 +233,19 @@ export class SystemSculptStudioView extends ItemView {
     getCurrentProject: () => this.currentProject,
     clearNodeSelection: () => this.graphInteraction.setSelectedNodeIds([]),
     requestRender: () => this.render(),
+    createMovementSnap: () => this.graphInteraction.createMovementSnap(
+      this.graphInteraction.getSelectedNodeIds(), this.shapeController.getSelectedShapeIds()),
     beginNodeTranslation: () => this.graphInteraction.beginSelectionTranslation(),
     translateNodes: (project, delta) =>
       this.graphInteraction.applySelectionTranslation(project, delta),
-    previewNodeTranslation: () => this.graphInteraction.previewSelectionTranslation(),
-    finishNodeTranslation: () => this.graphInteraction.finishSelectionTranslation(),
+    previewNodeTranslation: () => {
+      this.graphInteraction.previewSelectionTranslation();
+      this.graphInteraction.showMovementGuides(this.graphInteraction.getSelectedNodeIds(), this.shapeController.getSelectedShapeIds());
+    },
+    finishNodeTranslation: () => {
+      this.graphInteraction.finishSelectionTranslation();
+      this.graphInteraction.clearMovementGuides();
+    },
   });
   private graphZoomMode: StudioGraphZoomMode = "interactive";
   private graphZoomGestureInFlight = false;
@@ -299,6 +306,7 @@ export class SystemSculptStudioView extends ItemView {
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
       describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
+      getSelectedShapeIds: () => this.shapeController.getSelectedShapeIds(),
       clearDiagramSelection: () => this.shapeController.clearSelectionInPlace(),
       beginDiagramMarquee: () => this.shapeController.beginMarquee(),
       selectDiagramInBounds: (bounds, additive) =>
@@ -427,6 +435,7 @@ export class SystemSculptStudioView extends ItemView {
   onClose(): Promise<void> { return this.closePromise ??= this.closeStudioView(); }
   captureReloadSnapshot(): StudioEditingSnapshot | null {
     this.disposeTextNodeEditors();
+    this.outputContainers.dispose();
     this.graphInteraction.clearRenderBindings();
     const editing = this.currentProjectSession?.getEditingSnapshot();
     return editing ? { ...editing, sourceEditors: captureStudioSourceReloadState(this.contentEl.ownerDocument, editing.project.projectId) } : null;
@@ -445,7 +454,6 @@ export class SystemSculptStudioView extends ItemView {
     this.assetPreviews.dispose();
     this.runObservation.dispose();
     this.activity.dispose();
-    this.automaticLayout.dispose();
     this.detachWindowMigration?.();
     this.detachWindowMigration = null;
     this.unbindOwnerWindowEvents();
@@ -460,6 +468,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay = null;
     this.graphViewportEl = null;
     this.graphCanvasEl = null;
+    this.outputContainers.dispose();
     this.graphInteraction.clearRenderBindings();
     this.contentEl.empty();
   }
@@ -718,7 +727,9 @@ export class SystemSculptStudioView extends ItemView {
         if (normalizedKey === "f" && !event.shiftKey) {
           handled = this.fitSelectedGraphNodesInViewport() || this.fitGraphOverviewInViewport();
         } else if (normalizedKey === "a" && !event.shiftKey) {
-          handled = Boolean(this.arrangeGraphFromCommand());
+          this.graphInteraction.setSelectedNodeIds(this.currentProject?.graph.nodes.map((node) => node.id) || []);
+          this.shapeController.setSelectedShapeIds(this.currentProject?.diagram?.shapes.map((shape) => shape.id) || []);
+          handled = Boolean(this.currentProject);
         } else if (normalizedKey === "c" && !event.shiftKey) {
           handled = this.clipboardAndDropController.copySelectedGraphNodes();
         } else if (normalizedKey === "x" && !event.shiftKey) {
@@ -1084,6 +1095,7 @@ export class SystemSculptStudioView extends ItemView {
         materializeManagedOutputPlaceholdersForStartedNode({
           project,
           event,
+          measure: this.outputContainers.measure,
           createNodeId: () => randomId("node"),
           createEdgeId: () => randomId("edge"),
         }),
@@ -1098,10 +1110,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    let changed = this.removePendingManagedOutputPlaceholders({
-      sourceNodeId: event.nodeId,
-      runId: event.runId,
-    });
+    let changed = false;
     changed =
       this.commitCurrentProjectMutation(
         "runtime.projector",
@@ -1109,11 +1118,14 @@ export class SystemSculptStudioView extends ItemView {
           materializeManagedOutputNodesForNodeOutput({
             project,
             event,
+            measure: this.outputContainers.measure,
             createNodeId: () => randomId("node"),
             createEdgeId: () => randomId("edge"),
           }),
         { captureHistory: false }
       ) || changed;
+
+    changed = this.removePendingManagedOutputPlaceholders({ sourceNodeId: event.nodeId, runId: event.runId }) || changed;
 
     if (!changed) {
       return;
@@ -1134,6 +1146,7 @@ export class SystemSculptStudioView extends ItemView {
         materializeManagedOutputNodesFromCacheEntries({
           project,
           entries,
+          measure: this.outputContainers.measure,
           createNodeId: () => randomId("node"),
           createEdgeId: () => randomId("edge"),
         }),
@@ -1344,21 +1357,6 @@ export class SystemSculptStudioView extends ItemView {
 
   fitSelectionInViewportFromCommand(): boolean {
     return this.fitSelectedGraphNodesInViewport();
-  }
-
-  arrangeGraphFromCommand() {
-    return this.automaticLayout.arrange();
-  }
-
-  inspectGraphLayout() {
-    return this.automaticLayout.inspect();
-  }
-
-  private toggleAutomaticLayout(): void {
-    this.automaticLayout.toggleMode();
-    const button = this.contentEl.querySelector('[data-testid="studio.workspace.auto-layout"]');
-    button?.setAttribute("aria-pressed", String(this.currentProject?.graph.layout?.mode === "managed"));
-    if (button) button.textContent = this.currentProject?.graph.layout?.mode === "managed" ? "Auto on" : "Auto off";
   }
 
   showGraphOverviewFromCommand(): boolean {
@@ -1873,7 +1871,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private handleNodeDragStateChange(isDragging: boolean): void {
     this.nodeDragInProgress = Boolean(isDragging);
-    this.automaticLayout.onDrag(this.nodeDragInProgress);
+    if (!this.nodeDragInProgress) this.outputContainers.schedule();
     this.syncGraphInteractionVisualState();
     if (this.nodeDragInProgress) {
       this.nodeContextMenuOverlay?.hide();
@@ -2411,7 +2409,6 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     const changed = this.commitCurrentProjectMutation("graph.node.create", (currentProject) => {
       currentProject.graph.nodes.push(node);
-      pinStudioNodeForManagedLayout(currentProject, node.id);
       return true;
     }, { historyGroup: node.kind === "studio.text" && options?.autoEditText === true ? `text:${node.id}` : undefined });
     if (!changed) {
@@ -2846,6 +2843,7 @@ export class SystemSculptStudioView extends ItemView {
         (edge) => !idsToRemove.has(edge.fromNodeId) && !idsToRemove.has(edge.toNodeId)
       );
       removeNodesFromGroups(project, Array.from(idsToRemove));
+      cleanupOrphanedManagedMediaOutputs(project);
       removeStudioArrowsForItems(project, idsToRemove);
       return true;
     }, options);
@@ -3053,10 +3051,6 @@ export class SystemSculptStudioView extends ItemView {
   }
   private renderGraphEditor(root: HTMLElement): void {
     const nodeDetailMode = this.readCurrentNodeDetailMode(); const result = renderStudioGraphWorkspace({
-      onArrangeGraph: () => this.arrangeGraphFromCommand(),
-      automaticLayout: this.currentProject?.graph.layout?.mode === "managed",
-      onToggleAutomaticLayout: () => this.toggleAutomaticLayout(),
-      onToggleLayoutPins: () => this.automaticLayout.togglePins(this.graphInteraction.getSelectedNodeIds()),
       root,
       busy: this.busy,
       currentProject: this.currentProject,
@@ -3154,7 +3148,6 @@ export class SystemSculptStudioView extends ItemView {
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
-        this.automaticLayout.schedule();
       },
       takeTextNodeEditorMountState: (nodeId) => this.textEdits.takeMountState(nodeId),
       onRequestTextNodeEdit: (nodeId, focusAt) =>
@@ -3182,7 +3175,7 @@ export class SystemSculptStudioView extends ItemView {
       this.nodeActionContextMenuOverlay?.hide();
       return;
     }
-    this.automaticLayout.mount(this.graphViewportEl);
+    this.outputContainers.mount(this.graphViewportEl);
     this.syncGraphInteractionVisualState();
 
     this.graphViewportEl.addEventListener("scroll", () => {
@@ -3246,11 +3239,11 @@ export class SystemSculptStudioView extends ItemView {
     if (this.closed) return;
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
-    this.automaticLayout.dispose();
     this.captureGraphViewportState();
     this.resetViewportScrollingState();
     // The render below replaces all card DOM; destroy live editors first.
     this.disposeTextNodeEditors();
+    this.outputContainers.dispose();
     this.graphInteraction.clearRenderBindings();
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();

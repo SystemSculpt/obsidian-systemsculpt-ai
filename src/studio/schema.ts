@@ -1,5 +1,5 @@
 import { normalizeGroupColor } from "./StudioGraphGroupModel";
-import { getStudioLayoutAnchoredNodeIds } from "./StudioGraphLayout";
+import { restoreLegacyStudioPositions } from "./StudioLegacyLayout";
 import { normalizePath } from "obsidian";
 import {
   STUDIO_POLICY_SCHEMA_V1,
@@ -181,6 +181,9 @@ function readGroup(raw: unknown): StudioNodeGroup {
     id,
     name,
     ...(color ? { color } : {}),
+    ...(asString(raw.outputForNodeId).trim() ? { outputForNodeId: asString(raw.outputForNodeId).trim() } : {}),
+    ...(asString(raw.outputForNodeId).trim() && isRecord(raw.outputOffset) && asNumber(raw.outputOffset.x) !== null && asNumber(raw.outputOffset.y) !== null
+      ? { outputOffset: { x: Number(raw.outputOffset.x), y: Number(raw.outputOffset.y) } } : {}),
     nodeIds,
     ...(shapeIds.length > 0 ? { shapeIds } : {}),
   };
@@ -199,6 +202,7 @@ function retainExistingGroupMembers(
       } else {
         delete next.shapeIds;
       }
+      if (next.outputForNodeId && !nodeIdSet.has(next.outputForNodeId)) { delete next.outputForNodeId; delete next.outputOffset; }
       return next;
     })
     .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
@@ -497,6 +501,8 @@ function readGroupV2(raw: unknown): StudioNodeGroup {
     color: raw.color,
     nodeIds: raw.nodes ?? raw.nodeIds,
     shapeIds: raw.shapes ?? raw.shapeIds,
+    outputForNodeId: raw.outputFor,
+    outputOffset: raw.outputOffset,
   });
 }
 
@@ -687,7 +693,7 @@ export function parseStudioProject(
 
   const schema = asString(parsed.schema).trim();
   if (schema === STUDIO_PROJECT_SCHEMA_V2) {
-    return readProjectV2(parsed, context);
+    return restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
   }
   if (schema !== STUDIO_PROJECT_SCHEMA_V1) {
     const migrated = migrateLegacyProject(parsed);
@@ -699,16 +705,16 @@ export function parseStudioProject(
     return migrated;
   }
 
-  return readProjectV1(parsed);
+  return restoreLegacyStudioPositions(readProjectV1(parsed), parsed);
 }
 
-function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number], includePosition = true): Record<string, unknown> {
+function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Record<string, unknown> {
   const hasConfig = Object.keys(node.config || {}).length > 0;
   return {
     id: node.id,
     kind: compactStudioNodeKind(node.kind),
     title: node.title,
-    ...(includePosition ? { x: node.position.x, y: node.position.y } : {}),
+    x: node.position.x, y: node.position.y,
     ...(node.parentId ? { parent: node.parentId } : {}),
     ...(node.size ? { width: node.size.width } : {}),
     ...(node.size && typeof node.size.height === "number" ? { height: node.size.height } : {}),
@@ -724,15 +730,14 @@ function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number], includ
  * Opening any older file and saving it upgrades it in place.
  */
 export function serializeStudioProject(project: StudioProjectV1): string {
-  const anchored = getStudioLayoutAnchoredNodeIds(project);
   const document = {
     schema: STUDIO_PROJECT_SCHEMA_V2,
     id: project.projectId,
     name: project.name,
     docs: STUDIO_AGENT_DOCS_PATH,
     canvas: {
-      ...(project.graph.layout ? { layout: project.graph.layout } : {}),
-      nodes: project.graph.nodes.map((node) => serializeNodeV2(node, project.graph.layout?.mode !== "managed" || anchored.has(node.id))),
+      layout: { mode: "manual" },
+      nodes: project.graph.nodes.map((node) => serializeNodeV2(node)),
       edges: project.graph.edges.map(
         (edge) => `${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}`
       ),
@@ -741,6 +746,8 @@ export function serializeStudioProject(project: StudioProjectV1): string {
         name: group.name,
         ...(group.color ? { color: group.color } : {}),
         nodes: group.nodeIds,
+        ...(group.outputForNodeId ? { outputFor: group.outputForNodeId } : {}),
+        ...(group.outputForNodeId && group.outputOffset ? { outputOffset: group.outputOffset } : {}),
         ...((group.shapeIds || []).length > 0 ? { shapes: group.shapeIds } : {}),
       })),
       shapes: (project.diagram?.shapes || []).map((shape) => ({
@@ -786,7 +793,7 @@ export function createEmptyStudioProject(options: {
       edges: [],
       entryNodeIds: [],
       groups: [],
-      layout: { mode: "managed" },
+      layout: { mode: "manual" },
     },
     diagram: createEmptyStudioDiagram(),
     permissionsRef: {

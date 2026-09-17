@@ -29,8 +29,8 @@ function createSizedNodeElement(width: number, height: number): HTMLElement {
 
 /**
  * Two 200x150 nodes. node_1 starts at (40, 50) and drags right by 100 with a
- * 3px vertical misalignment against node_2 at (600, 47): well inside the 8px
- * snap radius, so the drop should land dead on node_2's top edge.
+ * 3px vertical misalignment against node_2 at (600, 47): well inside the 5px
+ * snapping radius.
  */
 function createProject(): {
   graph: { nodes: Array<{ id: string; position: { x: number; y: number }; kind: string; config: Record<string, unknown> }> };
@@ -82,8 +82,8 @@ function dragNode(
   }
 }
 
-describe("StudioGraphSelectionController drag snapping", () => {
-  it("snaps a dragged node into edge alignment with a nearby static node", () => {
+describe("StudioGraphSelectionController alignment snapping", () => {
+  it("snaps pointer placement near a static alignment target", () => {
     const project = createProject();
     const controller = new StudioGraphSelectionController(createHost(project));
     const node1El = createSizedNodeElement(200, 150);
@@ -96,7 +96,7 @@ describe("StudioGraphSelectionController drag snapping", () => {
     expect(project.graph.nodes[0].position).toEqual({ x: 140, y: 47 });
   });
 
-  it("freeballs placement while Ctrl is held", () => {
+  it("snaps while Ctrl is held", () => {
     const project = createProject();
     const controller = new StudioGraphSelectionController(createHost(project));
     const node1El = createSizedNodeElement(200, 150);
@@ -105,10 +105,10 @@ describe("StudioGraphSelectionController drag snapping", () => {
 
     dragNode(controller, node1El, { clientX: 200, clientY: 120, ctrlKey: true });
 
-    expect(project.graph.nodes[0].position).toEqual({ x: 140, y: 50 });
+    expect(project.graph.nodes[0].position).toEqual({ x: 140, y: 47 });
   });
 
-  it("freeballs placement while Cmd is held", () => {
+  it("snaps while Cmd is held", () => {
     const project = createProject();
     const controller = new StudioGraphSelectionController(createHost(project));
     const node1El = createSizedNodeElement(200, 150);
@@ -117,7 +117,7 @@ describe("StudioGraphSelectionController drag snapping", () => {
 
     dragNode(controller, node1El, { clientX: 200, clientY: 120, metaKey: true });
 
-    expect(project.graph.nodes[0].position).toEqual({ x: 140, y: 50 });
+    expect(project.graph.nodes[0].position).toEqual({ x: 140, y: 47 });
   });
 
   it("does not snap when the misalignment is outside the snap radius", () => {

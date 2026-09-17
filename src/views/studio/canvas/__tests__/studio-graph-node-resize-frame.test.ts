@@ -709,41 +709,41 @@ describe("mountStudioGraphNodeResizeFrame", () => {
     });
   });
 
-  describe("smart-guide snapping", () => {
-    it("feeds the dragged-edge candidate rect to resolveResizeSnap and commits the adjusted size", () => {
+  describe("visual resize guides", () => {
+    it("feeds the dragged-edge candidate rect to showResizeGuides and preserves the pointer size", () => {
       const node = createNode();
-      const resolveResizeSnap = jest.fn(() => ({ deltaX: 5, deltaY: 0 }));
-      const onResizeSnapEnd = jest.fn();
+      const showResizeGuides = jest.fn();
+      const onResizeGuidesEnd = jest.fn();
       const { nodeEl, onNodeConfigMutated } = mountFrame(node, {
-        resolveResizeSnap,
-        onResizeSnapEnd,
+        showResizeGuides,
+        onResizeGuidesEnd,
       });
 
       dragZone(nodeEl, "e", { from: { x: 100, y: 100 }, to: { x: 140, y: 100 }, release: false });
 
       // node at (200,150), initial 300x200, raw east delta +40 → the candidate
       // rect moves ONLY the dragged (right) edge; the anchored edges stay put.
-      expect(resolveResizeSnap).toHaveBeenCalledWith(
+      expect(showResizeGuides).toHaveBeenCalledWith(
         { left: 200, right: 540, top: 150, bottom: 350 },
         { x: 1, y: 0 }
       );
-      // Snap adjustment (+5) lands on top of the raw delta: 300 + 40 + 5.
-      expect(node.size?.width).toBe(345);
+      // Guides do not change the pointer-derived width.
+      expect(node.size?.width).toBe(340);
 
       window.dispatchEvent(
         createPointerEvent("pointerup", { pointerId: 7, clientX: 140, clientY: 100 })
       );
-      expect(node.size?.width).toBe(345);
+      expect(node.size?.width).toBe(340);
       expect(onNodeConfigMutated).toHaveBeenCalledTimes(1);
       // Release always clears the host's guide lines.
-      expect(onResizeSnapEnd).toHaveBeenCalled();
+      expect(onResizeGuidesEnd).toHaveBeenCalled();
     });
 
-    it("bypasses snapping while Ctrl is held and clears live guides immediately", () => {
+    it("keeps guides while Ctrl is held and clears them on release", () => {
       const node = createNode();
-      const resolveResizeSnap = jest.fn(() => ({ deltaX: 5, deltaY: 0 }));
-      const onResizeSnapEnd = jest.fn();
-      const { nodeEl } = mountFrame(node, { resolveResizeSnap, onResizeSnapEnd });
+      const showResizeGuides = jest.fn();
+      const onResizeGuidesEnd = jest.fn();
+      const { nodeEl } = mountFrame(node, { showResizeGuides, onResizeGuidesEnd });
 
       queryZone(nodeEl, "e").dispatchEvent(
         createPointerEvent("pointerdown", { pointerId: 9, clientX: 100, clientY: 100 })
@@ -757,10 +757,8 @@ describe("mountStudioGraphNodeResizeFrame", () => {
         })
       );
 
-      expect(resolveResizeSnap).not.toHaveBeenCalled();
-      // Guides from any earlier snapped frame are cleared as soon as the
-      // bypass modifier goes down, not only on release.
-      expect(onResizeSnapEnd).toHaveBeenCalled();
+      expect(showResizeGuides).toHaveBeenCalled();
+      expect(onResizeGuidesEnd).not.toHaveBeenCalled();
       expect(node.size?.width).toBe(340);
 
       window.dispatchEvent(

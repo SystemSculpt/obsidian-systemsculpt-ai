@@ -27,6 +27,7 @@ type OnCloseContext = {
   nodeContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
   nodeActionContextMenuOverlay: { destroy: jest.Mock<void, []> } | null;
   graphViewportEl: HTMLElement | null;
+  outputContainers: { dispose: jest.Mock<void, []> };
   graphInteraction: {
     clearRenderBindings: jest.Mock<void, []>;
   };
@@ -81,6 +82,7 @@ describe("SystemSculptStudioView save persistence", () => {
       nodeContextMenuOverlay: { destroy: jest.fn() },
       nodeActionContextMenuOverlay: { destroy: jest.fn() },
       graphViewportEl: document.createElement("div"),
+      outputContainers: { dispose: jest.fn() },
       graphInteraction: {
         clearRenderBindings: jest.fn(),
       },

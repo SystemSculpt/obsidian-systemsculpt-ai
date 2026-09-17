@@ -34,12 +34,12 @@ describe("Studio workspace reconciliation", () => {
     expect(merged.project.graph.edges).toEqual([]);
   });
 
-  it("removes pins added concurrently to deleted nodes and leaves a valid public document", () => {
+  it("discards retired layout pins during reconciliation and leaves a valid manual document", () => {
     const base = fixture(), local = cloneStudioProjectSnapshot(base), external = cloneStudioProjectSnapshot(base);
     local.graph.nodes = local.graph.nodes.filter(node => node.id !== "b");
     external.graph.layout = { mode: "managed", pinnedNodeIds: ["a", "b"] };
     const merged = reconcileStudioProject(base, local, external);
-    expect(merged.project.graph.layout?.pinnedNodeIds).toEqual(["a"]);
+    expect(merged.project.graph.layout).toEqual({ mode: "manual" });
     expect(() => assertValidStudioProjectAgentDocumentStructure(JSON.parse(serializeStudioProject(merged.project)))).not.toThrow();
   });
 

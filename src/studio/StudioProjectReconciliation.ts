@@ -1,3 +1,4 @@
+import { cleanupOrphanedManagedMediaOutputs } from "./StudioManagedOutputNodes";
 import { parseStudioProject, serializeStudioProject } from "./schema";
 import type { StudioProjectV1 } from "./types";
 
@@ -72,6 +73,9 @@ export function reconcileStudioProject(
     if (record(merged.canvas.layout) && Array.isArray(merged.canvas.layout.pinnedNodeIds)) {
       merged.canvas.layout.pinnedNodeIds = [...new Set(merged.canvas.layout.pinnedNodeIds)].filter(id => ids.has(id));
     }
+    if (Array.isArray(merged.canvas.groups)) for (const group of merged.canvas.groups.filter(record)) {
+      if (typeof group.outputFor === "string" && !ids.has(group.outputFor)) { delete group.outputFor; delete group.outputOffset; }
+    }
     for (const node of merged.canvas.nodes.filter(record)) if (typeof node.parent === "string" && !ids.has(node.parent)) delete node.parent;
 
     const endpoints = new Map([...base.graph.edges, ...local.graph.edges, ...external.graph.edges].map(edge => [
@@ -83,6 +87,7 @@ export function reconcileStudioProject(
     });
   }
   const project = parseStudioProject(JSON.stringify(merged));
+  cleanupOrphanedManagedMediaOutputs(project);
   // Deleting a node also removes its connections, even when another editor
   // concurrently added a connection to the deleted node.
   const nodeIds = new Set(project.graph.nodes.map(node => node.id));

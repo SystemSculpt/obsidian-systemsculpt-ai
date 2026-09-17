@@ -41,6 +41,7 @@ export class StudioGraphInteractionEngine {
         this.host.onNodeDropToGroup?.(groupId, draggedNodeIds);
       },
       onGraphZoomChanged: (zoom, context) => this.host.onGraphZoomChanged?.(zoom, context),
+      getSelectedShapeIds: () => this.host.getSelectedShapeIds?.() || [],
       beginDiagramMarquee: () => this.host.beginDiagramMarquee?.(),
       selectDiagramInBounds: (bounds, additive) =>
         this.host.selectDiagramInBounds?.(bounds, additive),
@@ -62,6 +63,9 @@ export class StudioGraphInteractionEngine {
       requestRender: () => this.host.requestRender(),
       commitProjectMutation: (reason, mutator, options) =>
         this.host.commitProjectMutation(reason, mutator, options),
+      createMovementSnap: (nodes, shapes) => this.selectionController.createMovementSnap(nodes, shapes),
+      showMovementGuides: (nodes, shapes) => this.selectionController.showMovementGuides(nodes, shapes),
+      clearMovementGuides: () => this.selectionController.clearAlignmentGuides(),
       beginShapeTranslation: (shapeIds) => this.host.beginGroupShapeTranslation?.(shapeIds),
       translateShapes: (project, delta) =>
         this.host.translateDiagramSelection?.(project, delta) === true,
@@ -90,6 +94,18 @@ export class StudioGraphInteractionEngine {
       this.selectionResizeController.refreshSelectionFrame();
       this.externalSelectionChangeListener?.();
     });
+  }
+
+  createMovementSnap(nodeIds: readonly string[], shapeIds: readonly string[]) {
+    return this.selectionController.createMovementSnap(nodeIds, shapeIds);
+  }
+
+  showMovementGuides(nodeIds: readonly string[], shapeIds: readonly string[]): void {
+    this.selectionController.showMovementGuides(nodeIds, shapeIds);
+  }
+
+  clearMovementGuides(): void {
+    this.selectionController.clearAlignmentGuides();
   }
 
   getGraphZoom(): number {
@@ -179,8 +195,8 @@ export class StudioGraphInteractionEngine {
     this.selectionController.registerMarqueeElement(marquee);
   }
 
-  registerSnapGuidesElement(layer: HTMLElement): void {
-    this.selectionController.registerSnapGuidesElement(layer);
+  registerAlignmentGuidesElement(layer: HTMLElement): void {
+    this.selectionController.registerAlignmentGuidesElement(layer);
   }
 
   registerZoomLabelElement(label: HTMLElement): void {
@@ -246,16 +262,16 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getNodeElement(nodeId);
   }
 
-  resolveNodeResizeSnap(
+  showNodeResizeGuides(
     nodeId: string,
     moving: { left: number; top: number; right: number; bottom: number },
     edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 }
-  ): { deltaX: number; deltaY: number } {
-    return this.selectionController.resolveNodeResizeSnap(nodeId, moving, edges);
+  ): void {
+    return this.selectionController.showNodeResizeGuides(nodeId, moving, edges);
   }
 
-  clearResizeSnapGuides(): void {
-    this.selectionController.clearResizeSnapGuides();
+  clearAlignmentGuides(): void {
+    this.selectionController.clearAlignmentGuides();
   }
 
   registerPortElement(nodeId: string, direction: "in" | "out", portId: string, element: HTMLElement): void {

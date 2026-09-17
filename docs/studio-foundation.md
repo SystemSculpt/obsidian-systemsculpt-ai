@@ -214,39 +214,31 @@ See src/views/studio/DESIGN.md for presentation principles and the README files
 beside canvas, systemsculpt-studio-view, and activity for current module maps.
 
 
-## Automatic structural layout
+## Manual canvas placement
 
-New studios use `canvas.layout: {"mode":"managed"}`. Agents author node contents,
-data-flow edges, organizational `parent` links, and groups. Node coordinates are
-optional and the serializer omits computed positions. Existing coordinate-based
-files retain manual mode until Auto is enabled.
+Ordinary cards and drawings keep their authored positions. Editing content, resizing,
+changing focus, and opening a project never arrange or sort existing items.
+Dragging a card, shape, or group displays edge and center alignment guides and
+nearest-neighbor distances in canvas pixels. Movement gently snaps within 5 screen
+pixels of a matching edge or center, using the same radius at every zoom. Dragging
+beyond that radius releases the snap. Exact alignment uses a solid line; nearby targets use a dashed line
+and show the remaining pixel offset. Node resize guides likewise leave the
+dragged edge under your control.
 
-Studio measures the rendered cards with an owner-window ResizeObserver, arranges
-connected flows within their sections, and places complete sections with space
-between them. Parent-only collections use compact indented outlines. A group's
-first member is its section root; that root's external parent determines section
-placement, while other cross-group parent links remain organizational references.
-Parents never add runtime dependencies. Cyclic data flow produces feedback links
-for layout; the execution compiler continues to own run validity.
+Image and video generators are a scoped exception: each producer gets an
+Outputs container to its right. New runs append distinct cards in generation
+order, arranged in three columns with 48 px gaps and measured row heights.
+Pending cards become completed media in place. The container can be dragged as
+a unit, preserving its offset from the producer. It follows the producer when
+that node moves or changes width, and its contents reflow when media loads or
+changes size. Only generated
+members of an output container participate. The source and ordinary canvas
+items never move as part of output arrangement.
 
-Cards the user adds or drags are pinned at their placement, so reflow arranges
-the rest of the graph around them instead of moving them away.
-
-Resize and file-change reflow updates transforms in place. It waits while an editor
-has focus or a drag is active, then catches up, preserving editor state. Derived
-geometry creates neither autosaves nor undo entries. Manual Arrange is a single
-edit. Dragging in automatic mode pins the moved nodes and their groups. Drawings
-remain fixed; conflicting pinned items are reported rather than silently moved.
-
-The active view exposes `inspectGraphLayout()` and `arrangeGraphFromCommand()` for
-inspection and explicit repair. Reports include actual bounds, overlapping pairs,
-unmeasured node IDs and a truncation flag. Normal file authoring needs neither
-call. Layout is bounded to 2,500 canvas items and 20,000 execution connections;
-large work catalogs should expose summaries and focused subflows.
-
-Collapsed cards put configuration forms behind an accessible disclosure. Opening
-a form triggers the same measured reflow as an output growing or an external file
-edit. All content remains available in the same graph.
+Every saved node includes its coordinates, and undo snapshots preserve them.
+Older managed documents that omitted coordinates recover missing positions once
+on import. Explicit coordinates are preserved; the next save writes a manual
+canvas. Organizational parents and execution connections do not control placement.
 
 Text execution can instead use the installed Codex app-server on desktop. `services/codex/` contains the thin transport, native approval UI, local thread locator and ChatView presentation adapter. `studio.codex` runs explicit task prompts; the text-generation adapter honors the selected backend without creating managed operation receipts for local runs. Codex owns native sessions and all agent continuation.
 
