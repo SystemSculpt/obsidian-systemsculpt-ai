@@ -3,7 +3,7 @@ import { runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
-function host(options: { failLogin?: boolean; requestApproval?: boolean; wait?: boolean; malformed?: boolean; nativePolicy?: unknown; nativeReviewer?: string; nativeSandbox?: unknown; nativeProfile?: string; savedTurn?: unknown } = {}) {
+function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requestApproval?: boolean; wait?: boolean; malformed?: boolean; nativePolicy?: unknown; nativeReviewer?: string; nativeSandbox?: unknown; nativeProfile?: string; savedTurn?: unknown } = {}) {
   const child = Object.assign(new EventEmitter(), {
     stdout: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }), stderr: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }),
     stdin: Object.assign(new EventEmitter(), { write: jest.fn() }), kill: jest.fn(),
@@ -20,7 +20,7 @@ function host(options: { failLogin?: boolean; requestApproval?: boolean; wait?: 
     queueMicrotask(() => {
       if (options.malformed) { child.stdout.emit('data', 'invalid-json\n'); return; }
       if (msg.method === 'initialize') send({ id: msg.id, result: {} });
-      if (msg.method === 'account/read') send({ id: msg.id, result: { account: options.failLogin ? null : { type: 'chatgpt' } } });
+      if (msg.method === 'account/read') send({ id: msg.id, result: { account: options.failLogin ? null : { type: 'chatgpt' }, requiresOpenaiAuth: options.requiresOpenaiAuth ?? true } });
       if (msg.method === 'thread/start' || msg.method === 'thread/resume') send({ id: msg.id, result: { thread: { id: msg.params.ephemeral ? 'ephemeral-config' : 'native-thread' }, approvalPolicy: options.nativePolicy ?? 'never', approvalsReviewer: options.nativeReviewer ?? 'user', sandbox: options.nativeSandbox ?? { type: 'readOnly' }, ...(options.nativeProfile ? { activePermissionProfile: { id: options.nativeProfile } } : {}) } });
       if (msg.method === 'turn/interrupt') send({ id: msg.id, result: {} });
       if (msg.method === 'thread/read') send({ id: msg.id, result: { thread: { id: 'native-thread', turns: options.savedTurn ? [options.savedTurn] : [] } } });
@@ -34,7 +34,7 @@ function host(options: { failLogin?: boolean; requestApproval?: boolean; wait?: 
     return true;
   });
   (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn: jest.fn(() => child) });
-  (desktopHost.fs as jest.Mock).mockResolvedValue({ stat: jest.fn(async () => ({ isDirectory: () => true })) });
+  (desktopHost.fs as jest.Mock).mockResolvedValue({ stat: jest.fn(async () => ({ isDirectory: () => true })), readFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) });
   (desktopHost.path as jest.Mock).mockResolvedValue({ isAbsolute: (path: string) => path.startsWith('/'), delimiter: ':', join: (...parts: string[]) => parts.join('/') });
   (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test' });
@@ -150,4 +150,40 @@ it('resumes interrupted native history once and refuses to duplicate a still-act
   const active = host({ savedTurn: { id: 'saved-turn', status: 'inProgress' } });
   await expect(runLocalCodex({ ...input, threadId: 'native-thread', recoverCompletedTurn: true }, new AbortController().signal, callbacks())).rejects.toThrow('still active');
   expect(active.messages.some(message => message.method === 'turn/start')).toBe(false);
+});
+
+it('accepts a provider that does not require an OpenAI account', async () => {
+  host({ failLogin: true, requiresOpenaiAuth: false });
+  await expect(runLocalCodex(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
+});
+it('uses the normal Codex home instead of an inherited agent home', async () => {
+  host();
+  (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', CODEX_HOME: '/agent/shadow', HOME: '/home/test' });
+  await runLocalCodex(input, new AbortController().signal, callbacks());
+  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/.codex' }) }));
+});
+it('launches an explicitly configured wrapper and home without a shell', async () => {
+  host({ failLogin: true, requiresOpenaiAuth: false });
+  const fs = await desktopHost.fs();
+  (fs.readFile as jest.Mock).mockResolvedValue(JSON.stringify({ binary: '~/.local/bin/codex-via-lb', home: '~/.codex-t3/codex-lb' }));
+  await runLocalCodex(input, new AbortController().signal, callbacks());
+  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('/home/test/.local/bin/codex-via-lb', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/.codex-t3/codex-lb' }) }));
+});
+it('fails before starting Codex when launch preferences are malformed', async () => {
+  host();
+  ((await desktopHost.fs()).readFile as jest.Mock).mockResolvedValue('{bad');
+  await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('Cannot read Codex launch settings');
+  expect((await desktopHost.childProcess()).spawn).not.toHaveBeenCalled();
+});
+
+it.each([undefined, '/custom/codex-home'])('explains how to recover a missing Codex home (%s)', async homePath => {
+  host();
+  const fs = await desktopHost.fs();
+  if (homePath) (fs.readFile as jest.Mock).mockResolvedValue(JSON.stringify({ home: homePath }));
+  (fs.stat as jest.Mock).mockImplementation(async path => {
+    if (path !== input.workingDirectory) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    return { isDirectory: () => true };
+  });
+  await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('Run codex login');
+  expect((await desktopHost.childProcess()).spawn).not.toHaveBeenCalled();
 });

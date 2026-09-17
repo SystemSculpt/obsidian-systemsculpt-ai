@@ -321,3 +321,27 @@ Then install the exact production-built candidate in real Obsidian. Verify one s
 - CSS contract: src/css/README.md
 - Managed contracts: testing/fixtures/managed
 - Release artifacts: scripts/plugin-artifacts.mjs
+
+## Native Codex discovery
+
+On-machine Codex launches the installed `codex app-server` directly and uses
+`~/.codex` for its existing native login and configuration. This is independent
+of an agent-specific `CODEX_HOME` inherited when Obsidian was opened. The plugin
+adds common Homebrew and user CLI directories to the desktop application's PATH.
+Codex continues to own credentials, permissions, tools, and thread history.
+
+For a custom installation or provider wrapper, create the machine-local file
+`~/.config/systemsculpt/codex.json`, for example:
+
+```json
+{ "binary": "~/.local/bin/custom-codex", "home": "~/.codex-custom" }
+```
+
+Both fields are optional. `binary` is an executable name or path, not a shell
+command; use a wrapper for additional launch arguments. `home` must resolve to
+an absolute directory. These preferences stay outside the vault so another
+machine does not inherit its paths. No credentials belong in this file.
+Changes apply to new connections; use Reconnect Codex or reload the plugin to
+refresh the model picker. Existing threads remain owned by their original
+Codex home. Custom providers reporting `requiresOpenaiAuth: false` can connect
+without a ChatGPT account.
