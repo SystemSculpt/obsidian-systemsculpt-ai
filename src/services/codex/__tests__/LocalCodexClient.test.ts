@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { win32 } from 'node:path';
 import { runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
@@ -186,4 +187,23 @@ it.each([undefined, '/custom/codex-home'])('explains how to recover a missing Co
   });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('Run codex login');
   expect((await desktopHost.childProcess()).spawn).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('resolves native Windows homes and preserves PATH entries (custom: %s)', async custom => {
+  host();
+  const home = String.raw`C:\Users\tester`, nativePath = String.raw`C:\Windows\System32;C:\tools`;
+  (desktopHost.path as jest.Mock).mockResolvedValue(win32);
+  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => home });
+  (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: nativePath, CODEX_HOME: String.raw`C:\agent\shadow` });
+  const fs = await desktopHost.fs();
+  if (custom) (fs.readFile as jest.Mock).mockResolvedValue(JSON.stringify({ binary: '~/tools/codex.exe', home: '~/custom-codex' }));
+  await runLocalCodex({ ...input, workingDirectory: String.raw`C:\vault` }, new AbortController().signal, callbacks());
+  expect(fs.readFile).toHaveBeenCalledWith(win32.join(home, '.config', 'systemsculpt', 'codex.json'), 'utf8');
+  const spawn = (await desktopHost.childProcess()).spawn as jest.Mock;
+  expect(spawn).toHaveBeenCalledWith(custom ? win32.join(home, 'tools/codex.exe') : 'codex', ['app-server'], expect.objectContaining({
+    cwd: home, env: expect.objectContaining({ CODEX_HOME: win32.join(home, custom ? 'custom-codex' : '.codex') }),
+  }));
+  const entries = spawn.mock.calls[0][2].env.PATH.split(';');
+  expect(entries.slice(0, 2)).toEqual(nativePath.split(';'));
+  expect(entries).toContain(win32.join(home, '.local/bin'));
 });
