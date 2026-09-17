@@ -1,3 +1,4 @@
+import { MANAGED_IMAGE_INPUT_MAX_COUNT } from "../../services/managed/ManagedTypes";
 import type {
   StudioImageGenerationInput,
   StudioNodeDefinition,
@@ -12,7 +13,6 @@ import {
 } from "./shared";
 
 const IMAGE_PROMPT_MAX_CHARS = 8_000;
-const IMAGE_INPUT_MAX_COUNT = 4;
 const IMAGE_OUTPUT_MAX_COUNT = 4;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 function validateImagePromptLength(prompt: string): string {
@@ -70,8 +70,8 @@ async function resolveInputImages(
     const input = await resolveStudioImageInput(context, candidate,
       `Image generation node "${context.node.id}" received unsupported input image`);
     if (seen.has(input.asset.hash)) continue;
-    if (output.length >= IMAGE_INPUT_MAX_COUNT) {
-      throw new Error(`Image generation accepts at most ${IMAGE_INPUT_MAX_COUNT} distinct reference images. Remove extra references or split them into separate generation nodes.`);
+    if (output.length >= MANAGED_IMAGE_INPUT_MAX_COUNT) {
+      throw new Error(`Image generation accepts at most ${MANAGED_IMAGE_INPUT_MAX_COUNT} distinct reference images. Remove extra references or split them into separate generation nodes.`);
     }
     seen.add(input.asset.hash);
     output.push(input);

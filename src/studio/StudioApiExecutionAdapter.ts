@@ -1,4 +1,5 @@
 import { StudioCodexRuns, codexRunKey } from "../services/codex/StudioCodexRuns";
+import { studioImageReferenceLimit } from "./StudioMediaModelCapabilities";
 import { answerCodexRequest } from "../services/codex/CodexRequestModal";
 import { codexOptionsFromSettings, codexVaultDirectory, usesLocalCodex } from "../services/codex/CodexExecutionSettings";
 import type SystemSculptPlugin from "../main";
@@ -113,8 +114,9 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
         if (model && references.length > 0 && !model.supportsImageInput) {
           throw new Error(`${model.name} is text-only and does not accept reference images. Disconnect the images input or choose a model with image input.`);
         }
-        if (model && references.length > model.maxInputReferences) {
-          throw new Error(`${model.name} accepts at most ${model.maxInputReferences} reference image${model.maxInputReferences === 1 ? "" : "s"}; ${references.length} are connected.`);
+        const referenceLimit = studioImageReferenceLimit(model);
+        if (references.length > referenceLimit) {
+          throw new Error(`In this plugin, ${model?.name ?? "image generation"} accepts at most ${referenceLimit} reference image${referenceLimit === 1 ? "" : "s"}; ${references.length} are connected.`);
         }
         return {
           prompt: payload.prompt,

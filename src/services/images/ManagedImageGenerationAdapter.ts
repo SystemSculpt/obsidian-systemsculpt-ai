@@ -1,4 +1,5 @@
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
+import { MANAGED_IMAGE_INPUT_MAX_COUNT } from "../managed/ManagedTypes";
 import type {
   ManagedJobError,
   ManagedUploadedImageInput,
@@ -127,7 +128,7 @@ function normalizePayload(payload: ManagedImageGenerationPayload): {
   const prompt = String(payload.prompt || "").trim();
   if (!prompt || prompt.length > 8_000) throw new Error("Managed image generation requires a prompt of at most 8,000 characters.");
   const inputs = [...(payload.inputImages || [])];
-  if (inputs.length > 4) throw new Error("Managed image generation accepts at most four input images.");
+  if (inputs.length > MANAGED_IMAGE_INPUT_MAX_COUNT) throw new Error("Managed image generation accepts at most four input images.");
   for (const input of inputs) {
     if (
       !["image/png", "image/jpeg", "image/webp"].includes(input.mimeType)

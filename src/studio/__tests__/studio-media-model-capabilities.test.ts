@@ -19,6 +19,14 @@ const images = (models: Record<string, unknown>[]) => parseManagedImageModelCata
 const videos = (models: Record<string, unknown>[]) => parseManagedVideoModelCatalog({ contract: "systemsculpt-media-models-v1", models });
 
 describe("planStudioMediaNodeInputs", () => {
+  it.each([[16, 4], [3, 3], [1, 1]])("shows the effective reference limit for a model accepting %i images", (modelLimit, supportedLimit) => {
+    const snapshot = images([image({ input_schema: { inputs: [{ port: { id: "reference_images" }, route: "reference", maxItems: modelLimit }] } })]);
+    expect(snapshot.models[0].maxInputReferences).toBe(modelLimit);
+    const plan = planStudioMediaNodeInputs({ kind: "studio.image_generation", config: {} }, { images: snapshot, videos: null });
+    expect(plan?.inputPortNotes.images).toBe(`Up to ${supportedLimit} reference image${supportedLimit === 1 ? "" : "s"} for Image model.`);
+    expect(describeStudioMediaModelInputs(snapshot.models[0])[0]).toBe(`Image input · up to ${supportedLimit}`);
+  });
+
   it("keeps every input while the catalog is unknown", () => {
     const plan = planStudioMediaNodeInputs({ kind: "studio.video_generation", config: { model: "maker/video" } }, { images: null, videos: null });
     expect(plan).toMatchObject({ kind: "video", model: null, hiddenInputPortIds: [], hiddenFieldKeys: [] });

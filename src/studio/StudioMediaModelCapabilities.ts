@@ -1,4 +1,5 @@
 import type { ManagedImageModel, ManagedImageModelCatalogSnapshot } from "../services/images/ManagedImageModelCatalog";
+import { MANAGED_IMAGE_INPUT_MAX_COUNT } from "../services/managed/ManagedTypes";
 import type { ManagedVideoModel, ManagedVideoModelCatalogSnapshot } from "../services/videos/ManagedVideoModelCatalog";
 import type { StudioNodeInstance } from "./types";
 
@@ -7,7 +8,7 @@ export type StudioMediaModelKind = "image" | "video";
 /**
  * What the selected model can take, projected onto one node: ports it does
  * not accept are hidden, config fields it does not offer are hidden, and the
- * remaining ports carry the model's own limits as their help text.
+ * remaining ports carry the model's effective client-supported limits as help text.
  */
 export type StudioMediaNodeInputPlan = Readonly<{
   kind: StudioMediaModelKind;
@@ -36,13 +37,17 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+export function studioImageReferenceLimit(model: ManagedImageModel | null): number {
+  return Math.min(model?.maxInputReferences ?? MANAGED_IMAGE_INPUT_MAX_COUNT, MANAGED_IMAGE_INPUT_MAX_COUNT);
+}
+
 export function planStudioImageNodeInputs(model: ManagedImageModel | null, modelId = model?.id ?? ""): StudioMediaNodeInputPlan {
   if (!model) {
-    return { kind: "image", modelId, model: null, hiddenInputPortIds: [], inputPortNotes: { images: "Reference images; the chosen model sets the limit." }, hiddenFieldKeys: [], countMax: null };
+    return { kind: "image", modelId, model: null, hiddenInputPortIds: [], inputPortNotes: { images: `Up to ${MANAGED_IMAGE_INPUT_MAX_COUNT} reference images; the chosen model may allow fewer.` }, hiddenFieldKeys: [], countMax: null };
   }
   const hiddenInputPortIds = model.supportsImageInput ? [] : ["images"];
   const inputPortNotes = model.supportsImageInput
-    ? { images: `Up to ${plural(model.maxInputReferences, "reference image")} for ${model.name}.` }
+    ? { images: `Up to ${plural(studioImageReferenceLimit(model), "reference image")} for ${model.name}.` }
     : { images: `${model.name} is text-only and does not accept reference images.` };
   const hiddenFieldKeys = [
     ...(model.qualities.length === 0 ? ["quality"] : []),
@@ -96,7 +101,7 @@ export function planStudioMediaNodeInputs(
 export function describeStudioMediaModelInputs(model: ManagedImageModel | ManagedVideoModel): string[] {
   if ("supportsImageInput" in model) {
     return [
-      model.supportsImageInput ? `Image input · up to ${model.maxInputReferences}` : "Text only",
+      model.supportsImageInput ? `Image input · up to ${studioImageReferenceLimit(model)}` : "Text only",
       model.maxImages > 1 ? `Up to ${model.maxImages} per job` : "1 per job",
       ...(model.supportsSeed ? ["Seed"] : []),
     ];

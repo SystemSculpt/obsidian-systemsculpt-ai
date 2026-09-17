@@ -93,7 +93,7 @@ Adding a node with the **Add** button places it to the right of the selected nod
 
 **Run** on a card runs only that card. Whatever is already connected to it is used as-is: a generated image feeding a video card is not regenerated, and a generation that has never run stops the run with a message naming the card to run first. Cards that only transform their inputs (text, values, media paths) refresh automatically when their inputs changed. The toolbar **Run** still runs the whole graph.
 
-Image and video generation cards choose their model in a catalog window: click the model field to search every available model with its price, what it accepts as input, and a star to favorite it. Favorites stay at the top of that picker. The card then shows only the inputs and options that model supports, and a run stops early with the model's limit if it is given more reference images or a frame it cannot take.
+Image and video generation cards choose their model in a catalog window: click the model field to search every available model with its price, what it accepts as input, and a star to favorite it. Favorites stay at the top of that picker. The card then shows only the inputs and options that model supports. Reference images are limited to four per job, or fewer when the model requires it; the picker and card show this effective limit. A run stops early if it is given too many reference images or a frame it cannot take.
 
 A **Video generation** card needs a model and a prompt, and accepts optional first and last frame images when the model supports them. Duration, resolution, aspect ratio and audio follow the chosen model; a **Generating video…** card appears while the clip renders and becomes the video once it is saved.
 

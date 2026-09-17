@@ -268,10 +268,11 @@ removed (the reference `images` port for a text-only image model, a frame port
 the video model does not support), and fields with no choice for that model
 (sizes, quality, audio, single-value durations) are hidden. A port that is still
 wired when the model changes stays visible, dimmed, with the reason in its
-tooltip, so the edge is never silently orphaned. Runs validate the same limits
-before any credits are held: too many reference images, references for a
-text-only model, or a frame role the model rejects fail with the model's name
-and limit. Blank model means the service default, whose limits apply.
+tooltip, so the edge is never silently orphaned. Reference image limits reflect
+both the selected model and the plugin's maximum of four images per job. Runs
+validate these limits before any credits are held: too many reference images,
+references for a text-only model, or a frame role the model rejects stop the run
+with an explanation. Blank model means the service default, whose limits apply.
 
 The service supplies models, credit estimates, batch limits, sizes, ratios, and
 quality levels. Picking a different model resets output options to defaults.

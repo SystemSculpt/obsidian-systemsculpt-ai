@@ -1,4 +1,6 @@
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
+/** Maximum reference images supported by the current managed image client contract. */
+export const MANAGED_IMAGE_INPUT_MAX_COUNT = 4;
 export const MANAGED_IMAGE_OUTPUT_MAX_BYTES = 30 * 1024 * 1024;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
 

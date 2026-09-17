@@ -221,18 +221,18 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
 });
 
 describe("StudioApiExecutionAdapter per-model input limits", () => {
-  const catalog = () => ({
+  const catalog = (referenceLimit = 1) => ({
     contract: "systemsculpt-media-models-v1", default_model_id: "maker/plain",
     models: [
       { id: "maker/plain", name: "Plain", best_for: "Text only.", supports_image_input: false, max_images_per_job: 2, estimated_cost_per_image_credits: 5, allowed_aspect_ratios: ["1:1"], allowed_image_sizes: [], input_schema: { inputs: [] } },
-      { id: "maker/refs", name: "Refs", best_for: "Edits.", supports_image_input: true, max_images_per_job: 4, estimated_cost_per_image_credits: 5, allowed_aspect_ratios: ["1:1"], allowed_image_sizes: [], input_schema: { inputs: [{ port: { id: "reference_images" }, route: "reference", maxItems: 1 }] } },
+      { id: "maker/refs", name: "Refs", best_for: "Edits.", supports_image_input: true, max_images_per_job: 4, estimated_cost_per_image_credits: 5, allowed_aspect_ratios: ["1:1"], allowed_image_sizes: [], input_schema: { inputs: [{ port: { id: "reference_images" }, route: "reference", maxItems: referenceLimit }] } },
     ],
   });
-  function fixture() {
+  function fixture(referenceLimit = 1) {
     const { plugin } = createPlugin();
     (plugin as { getManagedCapabilityGraph: unknown }).getManagedCapabilityGraph = () => ({
       admission: {},
-      transport: { request: async ({ path }: { path: string }) => ({ response: new Response(JSON.stringify(path.includes("images/models") ? catalog() : { error: "no" }), { status: path.includes("images/models") ? 200 : 404 }) }) },
+      transport: { request: async ({ path }: { path: string }) => ({ response: new Response(JSON.stringify(path.includes("images/models") ? catalog(referenceLimit) : { error: "no" }), { status: path.includes("images/models") ? 200 : 404 }) }) },
     });
     const adapter = new StudioApiExecutionAdapter(plugin as never);
     const generate = jest.fn(async (operation: { buildPayload: () => Promise<Record<string, unknown>> }) => {
@@ -256,5 +256,11 @@ describe("StudioApiExecutionAdapter per-model input limits", () => {
     await expect(generate.mock.results.at(-1)!.value).resolves.toMatchObject({ payload: { count: 2 } });
     // Blank model means the service default, so its limits apply too.
     await expect(run({ prompt: "x", inputImages: [reference] })).rejects.toThrow("Plain is text-only");
+  });
+
+  it("keeps the client limit when a model supports sixteen reference images", async () => {
+    const { run, reference } = fixture(16);
+    await expect(run({ prompt: "x", model: "maker/refs", inputImages: Array(5).fill(reference) })).rejects.toThrow("at most 4 reference images;");
+    await expect(run({ prompt: "x", model: "maker/refs", inputImages: Array(4).fill(reference) })).resolves.toBeDefined();
   });
 });
