@@ -15,6 +15,7 @@ type Host = {
 export class StudioRunObservationController {
   private source: RunSource | null = null;
   private unsubscribe: (() => void) | null = null;
+  private presentationRevision = 0;
 
   constructor(private readonly host: Host) {}
 
@@ -27,9 +28,10 @@ export class StudioRunObservationController {
   async restore(projectPath: string, nodeIds: string[]): Promise<void> {
     const source = this.source;
     if (!source || projectPath !== this.host.getProjectPath()) return;
+    const revision = ++this.presentationRevision;
     let active = source.getActiveRun(projectPath);
     const savedEvents = active ? [] : await source.getLatestRunEvents(projectPath);
-    if (this.source !== source || projectPath !== this.host.getProjectPath()) return;
+    if (revision !== this.presentationRevision || this.source !== source || projectPath !== this.host.getProjectPath()) return;
     active = source.getActiveRun(projectPath);
     const allowed = new Set(nodeIds);
     const events = (active?.events || savedEvents).filter((event) => !("nodeId" in event) || allowed.has(event.nodeId));
@@ -43,6 +45,9 @@ export class StudioRunObservationController {
 
   private apply(update: StudioRunUpdate): void {
     if (update.projectPath !== this.host.getProjectPath()) return;
+    // A live event supersedes any history read already in flight, including
+    // a run which both starts and finishes before that read returns.
+    this.presentationRevision += 1;
     if (update.event.type === "run.started") {
       this.host.beginRun([...update.nodeIds], update.fromNodeId);
       this.host.setBusy(true);
@@ -53,6 +58,7 @@ export class StudioRunObservationController {
   }
 
   dispose(): void {
+    this.presentationRevision += 1;
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.source = null;

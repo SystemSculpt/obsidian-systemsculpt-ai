@@ -1,4 +1,4 @@
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { containsControlCharacters } from "../../utils/characterValidation";
 import type { AgentQueuedFollowUp } from "./AgentWorkspace";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
@@ -25,14 +25,14 @@ type QueueRecord = Readonly<{
   schemaVersion: typeof QUEUE_SCHEMA_VERSION;
   key: string;
   updatedAt: string;
-  items: readonly StoredQueueItem[];
+  items: readonly QueueItem<PersistedReadyAttachment>[];
 }>;
 
-type StoredQueueItem = Readonly<{
+type QueueItem<TAttachment> = Readonly<{
   id: string;
   text: string;
   includeContextFiles: boolean;
-  attachments?: readonly PersistedReadyAttachment[];
+  attachments?: readonly TAttachment[];
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,21 +53,10 @@ function isAttachment(value: unknown): value is ChatMessageAttachment {
   return true;
 }
 
-function isStoredQueueItem(value: unknown): value is StoredQueueItem {
-  if (!isRecord(value)) return false;
-  if (!Object.keys(value).every((key) => [
-    "id", "text", "includeContextFiles", "attachments",
-  ].includes(key))) return false;
-  if (typeof value.id !== "string" || !value.id.trim()) return false;
-  if (typeof value.text !== "string") return false;
-  if (typeof value.includeContextFiles !== "boolean") return false;
-  if (typeof value.attachments === "undefined") return value.text.trim().length > 0;
-  return Array.isArray(value.attachments)
-    && value.attachments.length > 0
-    && value.attachments.every(isPersistedReadyAttachment);
-}
-
-function isQueueItem(value: unknown): value is AgentQueuedFollowUp {
+function isQueueItem<TAttachment>(
+  value: unknown,
+  isAttachment: (value: unknown) => value is TAttachment,
+): value is QueueItem<TAttachment> {
   if (!isRecord(value)) return false;
   if (!Object.keys(value).every((key) => [
     "id", "text", "includeContextFiles", "attachments",
@@ -104,7 +93,7 @@ export class AgentQueueStateRepository {
       || parsed.key !== normalizedKey
       || typeof parsed.updatedAt !== "string"
       || !Array.isArray(parsed.items)
-      || !parsed.items.every(isStoredQueueItem)) {
+      || !parsed.items.every((item) => isQueueItem(item, isPersistedReadyAttachment))) {
       throw new Error("Saved queued follow-ups are invalid.");
     }
     return Object.freeze(parsed.items.map((item) => ({
@@ -120,7 +109,7 @@ export class AgentQueueStateRepository {
 
   public async save(key: string, items: readonly AgentQueuedFollowUp[]): Promise<void> {
     const normalizedKey = this.normalizeKey(key);
-    if (!items.every(isQueueItem)) {
+    if (!items.every((item) => isQueueItem(item, isAttachment))) {
       throw new Error("Only valid follow-ups can be queued for a chat.");
     }
     const path = this.path(normalizedKey);
@@ -174,7 +163,7 @@ export class AgentQueueStateRepository {
           || typeof parsed.updatedAt !== "string"
           || !Number.isFinite(Date.parse(parsed.updatedAt))
           || !Array.isArray(parsed.items)
-          || !parsed.items.every(isStoredQueueItem)) {
+          || !parsed.items.every((item) => isQueueItem(item, isPersistedReadyAttachment))) {
           return null;
         }
         let normalizedKey: string;

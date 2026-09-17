@@ -1,155 +1,97 @@
 import { normalizeStudioProjectPath } from "./paths";
 import { StudioProjectSession } from "./StudioProjectSession";
 
-export type StudioProjectSessionManagerEntry = {
-  path: string;
-  session: StudioProjectSession;
-  retainCount: number;
-};
+type SessionEntry = { session: StudioProjectSession; retainCount: number };
 
+/** Owns shared session lifetime, including asynchronous creation, reload and close. */
 export class StudioProjectSessionManager {
-  private readonly entriesByPath = new Map<string, StudioProjectSessionManagerEntry>();
+  private readonly entriesByPath = new Map<string, SessionEntry>();
+  private readonly operations = new Map<string, Promise<unknown>>();
+  private disposed = false;
 
   getSession(projectPath: string): StudioProjectSession | null {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      return null;
-    }
-    return this.entriesByPath.get(normalized)?.session || null;
-  }
-
-  getRetainCount(projectPath: string): number {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      return 0;
-    }
-    return this.entriesByPath.get(normalized)?.retainCount || 0;
-  }
-
-  listOpenSessions(): StudioProjectSessionManagerEntry[] {
-    return Array.from(this.entriesByPath.values()).map((entry) => ({
-      path: entry.path,
-      session: entry.session,
-      retainCount: entry.retainCount,
-    }));
+    const path = this.normalizeProjectPath(projectPath);
+    return this.entriesByPath.get(path)?.session || null;
   }
 
   async retainSession(
     projectPath: string,
-    createSession: (normalizedProjectPath: string) => Promise<StudioProjectSession>
+    createSession: (path: string) => Promise<StudioProjectSession>,
+    reloadSession?: (session: StudioProjectSession, path: string) => Promise<void>,
   ): Promise<StudioProjectSession> {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      throw new Error("A valid Studio project path is required.");
-    }
-
-    const existing = this.entriesByPath.get(normalized);
-    if (existing) {
-      existing.retainCount += 1;
-      return existing.session;
-    }
-
-    const session = await createSession(normalized);
-    this.entriesByPath.set(normalized, {
-      path: normalized,
-      session,
-      retainCount: 1,
+    if (this.disposed) throw new Error("Studio project sessions are disposed.");
+    const path = this.normalizeProjectPath(projectPath);
+    if (!path) throw new Error("A valid Studio project path is required.");
+    return this.serialize(path, async () => {
+      const existing = this.entriesByPath.get(path);
+      if (existing) {
+        // A rejected reload must neither replace the live session nor retain it.
+        await reloadSession?.(existing.session, path);
+        existing.retainCount += 1;
+        return existing.session;
+      }
+      const session = await createSession(path);
+      this.entriesByPath.set(path, { session, retainCount: 1 });
+      return session;
     });
-    return session;
-  }
-
-  async flushSession(projectPath: string, options?: { force?: boolean }): Promise<void> {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      return;
-    }
-    const session = this.entriesByPath.get(normalized)?.session;
-    if (!session) {
-      return;
-    }
-    await session.flushPendingSaveWork({ force: options?.force });
-  }
-
-  moveSession(oldProjectPath: string, newProjectPath: string): boolean {
-    const normalizedOldPath = this.normalizeProjectPath(oldProjectPath);
-    const normalizedNewPath = this.normalizeProjectPath(newProjectPath);
-    if (!normalizedOldPath || !normalizedNewPath) {
-      return false;
-    }
-    if (normalizedOldPath === normalizedNewPath) {
-      return this.entriesByPath.has(normalizedOldPath);
-    }
-
-    const existing = this.entriesByPath.get(normalizedOldPath);
-    if (!existing) {
-      return false;
-    }
-
-    this.entriesByPath.delete(normalizedOldPath);
-    this.entriesByPath.set(normalizedNewPath, {
-      path: normalizedNewPath,
-      session: existing.session,
-      retainCount: existing.retainCount,
-    });
-    return true;
   }
 
   async releaseSession(projectPath: string): Promise<void> {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      return;
-    }
-    const existing = this.entriesByPath.get(normalized);
-    if (!existing) {
-      return;
-    }
-
-    existing.retainCount = Math.max(0, existing.retainCount - 1);
-    if (existing.retainCount > 0) {
-      return;
-    }
-
-    await existing.session.close();
-    this.entriesByPath.delete(normalized);
+    const path = this.normalizeProjectPath(projectPath);
+    if (!path) return;
+    await this.serialize(path, async () => {
+      const entry = this.entriesByPath.get(path);
+      if (!entry) return;
+      entry.retainCount = Math.max(0, entry.retainCount - 1);
+      if (entry.retainCount === 0) await this.closeEntry(path, entry);
+    });
   }
 
-  async closeSession(projectPath: string): Promise<void> {
-    const normalized = this.normalizeProjectPath(projectPath);
-    if (!normalized) {
-      return;
-    }
-    const existing = this.entriesByPath.get(normalized);
-    if (!existing) {
-      return;
-    }
-    await existing.session.close();
-    this.entriesByPath.delete(normalized);
+  async moveSession(oldProjectPath: string, newProjectPath: string): Promise<boolean> {
+    if (this.disposed) throw new Error("Studio project sessions are disposed.");
+    const oldPath = this.normalizeProjectPath(oldProjectPath), newPath = this.normalizeProjectPath(newProjectPath);
+    if (!oldPath || !newPath) return false;
+    if (oldPath === newPath) return this.serialize(oldPath, async () => this.entriesByPath.has(oldPath));
+    // Stable lock order also protects a rename against pending destination loads.
+    const [first, second] = [oldPath, newPath].sort();
+    return this.serialize(first, () => this.serialize(second, async () => {
+      const entry = this.entriesByPath.get(oldPath);
+      if (!entry) return false;
+      if (this.entriesByPath.has(newPath)) throw new Error("Another Studio session already owns the renamed path.");
+      this.entriesByPath.delete(oldPath);
+      this.entriesByPath.set(newPath, entry);
+      return true;
+    }));
   }
 
   async closeAll(): Promise<void> {
-    const entries = Array.from(this.entriesByPath.values());
-    const errors: unknown[] = [];
-    for (const entry of entries) {
-      try {
-        await entry.session.close();
-        this.entriesByPath.delete(entry.path);
-      } catch (error) {
-        errors.push(error);
-      }
-    }
-    if (errors.length > 0) {
-      const detail = errors
-        .map((error) => error instanceof Error ? error.message : String(error))
-        .join("; ");
-      throw new Error(`Studio could not safely close ${errors.length} project session(s): ${detail}`);
-    }
+    this.disposed = true;
+    // Include pending creations: disposal cannot finish while a load can still
+    // publish a new session after the last visible entry has been closed.
+    await Promise.allSettled([...this.operations.values()]);
+    const paths = [...this.entriesByPath.keys()];
+    const results = await Promise.allSettled([...paths].map(path => this.serialize(path, async () => {
+      const entry = this.entriesByPath.get(path);
+      if (entry) await this.closeEntry(path, entry);
+    })));
+    const failures = results.filter((result): result is { status: "rejected"; reason: unknown } => result.status === "rejected");
+    if (failures.length) throw new Error(`Studio could not safely close ${failures.length} project session(s): ${failures.map(result => String(result.reason instanceof Error ? result.reason.message : result.reason)).join("; ")}`);
   }
 
-  private normalizeProjectPath(projectPath: string): string {
-    const normalized = String(projectPath || "").trim();
-    if (!normalized) {
-      return "";
-    }
-    return normalizeStudioProjectPath(normalized);
+  private async closeEntry(path: string, entry: SessionEntry): Promise<void> {
+    // Keep the only remaining copy owned when recovery persistence fails.
+    await entry.session.close();
+    this.entriesByPath.delete(path);
+  }
+
+  private async serialize<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const pending = (this.operations.get(path) || Promise.resolve()).catch(() => undefined).then(operation);
+    this.operations.set(path, pending);
+    try { return await pending; }
+    finally { if (this.operations.get(path) === pending) this.operations.delete(path); }
+  }
+
+  private normalizeProjectPath(path: string): string {
+    return path.trim() ? normalizeStudioProjectPath(path) : "";
   }
 }

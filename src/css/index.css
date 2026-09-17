@@ -62,9 +62,7 @@
 @import 'views/studio/shapes.css';
 @import 'views/studio/menus.css';
 /* Studio node editors: component bodies, overlays, responsive rules, details. */
-@import 'views/studio/editor-preview.css';
 @import 'views/studio/editor-text.css';
-@import 'views/studio/editor-json.css';
 @import 'views/studio/editor-notes.css';
 @import 'views/studio/editor-dropdowns.css';
 @import 'views/studio/editor-model-picker.css';

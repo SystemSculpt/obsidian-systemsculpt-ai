@@ -3,7 +3,7 @@ import { connectCodex, type CodexConnection, type CodexJson } from './CodexAppSe
 import { resolveCodexOptions, type CodexExecutionOptions } from './CodexExecutionSettings';
 import { codexActivity, type CodexActivity } from './CodexActivity';
 const activeThreads = new Set<string>();
-export type CodexRequest = CodexExecutionOptions & { prompt: string; workingDirectory: string; threadId?: string; images?: string[]; dynamicTools?: CodexJson[]; recoverCompletedTurn?: boolean };
+export type CodexRequest = CodexExecutionOptions & { prompt: string; workingDirectory: string; threadId?: string; images?: readonly string[]; dynamicTools?: readonly CodexJson[]; recoverCompletedTurn?: boolean };
 export type CodexResult = { threadId: string; turnId: string; text: string; status: string };
 export type CodexCallbacks = {
   log: (text: string) => void;
@@ -19,11 +19,17 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Codex prompt must contain 1–256,000 characters.');
   const options = resolveCodexOptions(input);
   const approvalItems = new Map<string, CodexJson>();
-  let connection: CodexConnection | undefined, threadId = '', turnId = '', text = '', streamingText = '', ownsThread = false;
+  let connection: CodexConnection | undefined, threadId = '', turnId = '', text = '', streamingText = '', lockedThreadId = '';
+  const claimThread = (id: string) => {
+    if (activeThreads.has(id)) throw new Error('This Codex thread is already running in another Studio or chat view.');
+    activeThreads.add(id); lockedThreadId = id;
+  };
   let complete!: (result: CodexResult) => void, fail!: (error: Error) => void;
   const completion = new Promise<CodexResult>((resolve, reject) => { complete = resolve; fail = reject; });
   void completion.catch(() => {});
   try {
+    // Reserve a known thread before resume can change its native configuration.
+    if (input.threadId) claimThread(input.threadId);
     connection = await connectCodex(input.workingDirectory, signal, {
       error: error => fail(error),
       abort: async () => { if (threadId && turnId) await connection?.request('turn/interrupt', { threadId, turnId }); },
@@ -83,8 +89,9 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
     });
     if (!isRecord(thread.thread) || typeof thread.thread.id !== 'string') throw new Error('Codex returned no thread identity.');
     threadId = thread.thread.id;
-    if (activeThreads.has(threadId)) throw new Error('This Codex thread is already running in another Studio or chat view.');
-    activeThreads.add(threadId); ownsThread = true; await callbacks.thread(threadId); callbacks.log(`Codex thread: ${threadId}`);
+    if (input.threadId && threadId !== input.threadId) throw new Error('Codex resumed a different thread than requested.');
+    if (!lockedThreadId) claimThread(threadId);
+    await callbacks.thread(threadId); callbacks.log(`Codex thread: ${threadId}`);
     const started = await connection.request('turn/start', { threadId, model: options.model, effort: options.effort, serviceTierForTurn: options.serviceTier,
       ...(native && typeof profile !== 'string' ? { sandboxPolicy: native.sandbox } : {}),
       input: [{ type: 'text', text: input.prompt, text_elements: [] }, ...(input.images || []).map(url => ({ type: 'image', url }))] });
@@ -94,5 +101,5 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
       await connection!.request('turn/steer', { threadId, expectedTurnId: turnId, input: [{ type: 'text', text: message, text_elements: [] }] });
     } });
     return await completion;
-  } finally { if (ownsThread) activeThreads.delete(threadId); connection?.close(); }
+  } finally { if (lockedThreadId) activeThreads.delete(lockedThreadId); connection?.close(); }
 }

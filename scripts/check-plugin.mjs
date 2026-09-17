@@ -34,6 +34,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/plugin-release-metadata.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",
+  "scripts/module-ownership.test.mjs",
   "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
   "scripts/check/testid-coverage-policy.test.mjs",
@@ -45,6 +46,7 @@ const FAST_SCRIPT_TESTS = [
 const NORMAL_SCRIPT_TESTS = [
   "scripts/mobile-compatibility.test.mjs",
   "scripts/dev-watcher-service.test.mjs",
+  "scripts/watcher-ownership.test.mjs",
   "scripts/build-provenance.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",

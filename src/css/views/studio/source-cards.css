@@ -23,7 +23,6 @@
 .ss-studio-source-editor .cm-content { color: var(--ss-ink); caret-color: var(--ss-accent); padding: 8px 0; }
 .ss-studio-source-editor .cm-activeLine, .ss-studio-source-editor .cm-activeLineGutter { background: var(--ss-accent-tint); }
 .ss-studio-source-editor .cm-selectionBackground { background: var(--ss-accent-tint); }
-.ss-studio-source-markdown { padding: 10px 14px; max-height: 400px; overflow: auto; }
 .ss-studio-surface-card .tok-keyword, .ss-studio-surface-card .tok-heading { color: var(--color-purple); }
 .ss-studio-surface-card .tok-string, .ss-studio-surface-card .tok-string2 { color: var(--color-green); }
 .ss-studio-surface-card .tok-number, .ss-studio-surface-card .tok-bool, .ss-studio-surface-card .tok-null { color: var(--color-orange); }

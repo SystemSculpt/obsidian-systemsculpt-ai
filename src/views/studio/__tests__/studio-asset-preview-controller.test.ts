@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
 import { StudioAssetPreviewController } from "../StudioAssetPreviewController";
-jest.mock("../graph-v3/StudioGraphMediaPreviewModal", () => ({ resolveStudioAssetPreviewSrc: (_app: unknown, path: string) => `app://vault/${path}` }));
+jest.mock("../canvas/StudioGraphMediaPreviewModal", () => ({ resolveStudioAssetPreviewSrc: (_app: unknown, path: string) => `app://vault/${path}` }));
 
 const settle = async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); };
 

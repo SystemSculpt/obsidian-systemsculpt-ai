@@ -629,7 +629,7 @@ describe("Studio built-in text/image node execution", () => {
     expect(result.artifacts).toEqual([captionedAsset]);
   });
 
-  it("media ingest composes crop, blur, and highlight overlays for image-editor edits", async () => {
+  it("media ingest rejects crop and blur output when raster rendering is unavailable", async () => {
     const definition = registry.get("studio.media_ingest", "1.0.0");
     expect(definition).toBeDefined();
     const previewAsset = {
@@ -638,16 +638,7 @@ describe("Studio built-in text/image node execution", () => {
       sizeBytes: captionBoardBaseSvgBytes().byteLength,
       path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.svg",
     };
-    const editedAsset = {
-      hash: "edited-hash",
-      mimeType: "image/svg+xml",
-      sizeBytes: 768,
-      path: "Studio/Test.systemsculpt-assets/assets/sha256/ef/edited.svg",
-    };
-    const storeAssetMock = jest
-      .fn()
-      .mockResolvedValueOnce(previewAsset)
-      .mockResolvedValueOnce(editedAsset);
+    const storeAssetMock = jest.fn().mockResolvedValueOnce(previewAsset);
     const context = createContext({
       nodeId: "media-node",
       kind: "studio.media_ingest",
@@ -698,21 +689,12 @@ describe("Studio built-in text/image node execution", () => {
       readAssetMock: jest.fn(async () => captionBoardBaseSvgBytes()),
     });
 
-    const result = await definition!.execute(context);
+    await expect(definition!.execute(context)).rejects.toThrow("raster rendering is unavailable");
 
     expect(context.services.readVaultBinary).toHaveBeenCalledWith("Assets/source.svg");
-    expect(storeAssetMock).toHaveBeenNthCalledWith(1, expect.any(ArrayBuffer), "image/svg+xml");
-    expect(storeAssetMock).toHaveBeenNthCalledWith(2, expect.any(ArrayBuffer), "image/svg+xml");
-    const svg = new TextDecoder().decode(storeAssetMock.mock.calls[1][0]);
-    expect(svg).toContain("feGaussianBlur");
-    expect(svg).toContain("<ellipse");
-    expect(svg).toContain('viewBox="120.00 80.00 720.00 400.00"');
-    expect(result.outputs.path).toBe(editedAsset.path);
-    expect(result.outputs.preview_path).toBe(editedAsset.path);
-    expect(result.outputs.source_preview_path).toBe(previewAsset.path);
-    expect(result.outputs.preview_asset).toEqual(editedAsset);
-    expect(result.outputs.source_preview_asset).toEqual(previewAsset);
-    expect(result.artifacts).toEqual([editedAsset]);
+    // The source may be staged, but no misleading edited artifact is published.
+    expect(storeAssetMock).toHaveBeenCalledTimes(1);
+    expect(storeAssetMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), "image/svg+xml");
   });
 
   it("media ingest stages preview assets for absolute local videos", async () => {

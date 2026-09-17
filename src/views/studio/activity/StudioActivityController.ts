@@ -69,15 +69,13 @@ export class StudioActivityController {
       this.snapshot = EMPTY_ACTIVITY_SNAPSHOT;
       return this.snapshot;
     }
+    const placeholders = new Set(project.graph.nodes.filter(isManagedOutputPlaceholderNode).map(node => node.id));
     this.snapshot = projectStudioActivity({
       graph: project.graph,
       runStatus: this.host.presentation.getProgress().status,
       getNodeRunState: (nodeId) => this.host.presentation.getNodeState(nodeId),
       agentRuns: this.runs?.list(project.projectId) ?? [],
-      isPlaceholder: (nodeId) => {
-        const node = project.graph.nodes.find((candidate) => candidate.id === nodeId);
-        return node ? isManagedOutputPlaceholderNode(node) : false;
-      },
+      isPlaceholder: (nodeId) => placeholders.has(nodeId),
     });
     return this.snapshot;
   }

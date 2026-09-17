@@ -20,7 +20,6 @@ function installStorage(plugin: SystemSculptPlugin, writeFile: jest.Mock = jest.
     writeFile,
     getPath: jest.fn(() => DIAGNOSTICS_PATH),
   } as any;
-  jest.spyOn(plugin as any, "rotateDiagnosticsFile").mockResolvedValue(undefined);
   return writeFile;
 }
 
@@ -32,7 +31,7 @@ async function prepareAndWaitForCleanup(plugin: SystemSculptPlugin): Promise<voi
     return cleanup;
   });
 
-  await (plugin as any).prepareDiagnosticsSession();
+  await (plugin as any).getDiagnosticsSessionLifecycle().start();
   expect(cleanup).toBeDefined();
   await cleanup;
   run.mockRestore();
@@ -88,7 +87,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     { isAndroidApp: false, isIosApp: true, operatingSystem: "iOS" },
   ])("writes the exact mobile metadata allowlist to both session files on $operatingSystem", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
     jest.useFakeTimers();
-    jest.setSystemTime(new Date("2026-08-13T16:00:00.000Z"));
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
     platform.isAndroidApp = isAndroidApp;
     platform.isDesktopApp = false;
     platform.isIosApp = isIosApp;
@@ -101,12 +100,11 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     expect((app.vault.adapter as any).getBasePath).toBeUndefined();
     const plugin = makePlugin(app);
     const writeFile = installStorage(plugin);
-    jest.spyOn(plugin as any, "formatDiagnosticsFileTimestamp").mockReturnValue("20260813-160000");
     jest.spyOn(DiagnosticsSessionLifecycle.prototype, "run").mockResolvedValue(undefined);
     const metadata = {
       schemaVersion: 2,
       sessionId: "20260813-160000",
-      startedAt: "2026-08-13T16:00:00.000Z",
+      startedAt: new Date(2026, 7, 13, 16, 0, 0).toISOString(),
       environment: {
         pluginVersion: "6.6.0",
         obsidianVersion: "1.5.0",
@@ -115,7 +113,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
       },
     };
 
-    await expect((plugin as any).prepareDiagnosticsSession()).resolves.toBeUndefined();
+    await expect((plugin as any).getDiagnosticsSessionLifecycle().start()).resolves.toBeUndefined();
 
     expect(writeFile.mock.calls).toEqual([
       ["diagnostics", "session-latest.json", metadata],
@@ -130,7 +128,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     installStorage(plugin);
     const cleanup = jest.spyOn(DiagnosticsSessionLifecycle.prototype, "run").mockReturnValue(new Promise<void>(() => undefined));
 
-    await expect((plugin as any).prepareDiagnosticsSession()).resolves.toBeUndefined();
+    await expect((plugin as any).getDiagnosticsSessionLifecycle().start()).resolves.toBeUndefined();
 
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect((plugin as any).diagnosticsSessionLifecycle).toBeInstanceOf(DiagnosticsSessionLifecycle);

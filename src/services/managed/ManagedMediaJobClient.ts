@@ -1,3 +1,4 @@
+import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
   MANAGED_CAPABILITY_CONTRACT,
@@ -406,15 +407,12 @@ export class ManagedMediaJobClient {
       ...(validRequestedAt ? [] : [MEDIA_DOWNLOAD_REQUESTED_AT_HEADER]),
     ];
     if (mismatched.length > 0) malformed(`Invalid managed media output headers: ${mismatched.join(", ")}.`);
-    const bytes = await this.readBounded(response, validated.size_bytes);
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (bytes.byteLength !== validated.size_bytes) malformed("Managed media output integrity mismatch.");
-    if (await this.sha256(bytes) !== validated.sha256) malformed("Managed media output integrity mismatch.");
+    const bytes = await readVerifiedManagedOutput(response, validated, signal, reason => malformed(`Managed media output ${reason}.`));
     const localRequestCompletedAtMs = this.elapsedNow();
     const localRequestElapsedMs = Math.max(0, localRequestCompletedAtMs - localRequestStartedAtMs);
     const downloadCompletedOffsetMs = Math.min(MEDIA_DELIVERY_MAX_OFFSET_MS, Math.max(0, Math.round(
       downloadRequestedAt === null
-        ? localRequestCompletedAtMs - downloadStartedAtMs
+        ? this.now() - downloadStartedAtMs
         : (downloadRequestedAtMs - downloadStartedAtMs) + localRequestElapsedMs,
     )));
     return {
@@ -492,36 +490,6 @@ export class ManagedMediaJobClient {
       ...timing,
       outputs: outputs.map(({ arrayIndex: _arrayIndex, ...output }) => output),
     };
-  }
-
-  // The transport already caps the response at the per-kind ceiling; this
-  // bounds the read at the job's own verified size so an overlong body is
-  // cancelled instead of buffered, and abort errors surface unwrapped.
-  private async readBounded(response: Response, expectedBytes: number): Promise<ArrayBuffer> {
-    const body = response.body;
-    if (!body) {
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength > expectedBytes) malformed("Managed media output exceeded expected size.");
-      return bytes;
-    }
-    const reader = body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      total += value.byteLength;
-      if (total > expectedBytes) {
-        await reader.cancel().catch(() => undefined);
-        malformed("Managed media output exceeded expected size.");
-      }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    return bytes.buffer;
   }
 
   private async prepareInputs(input_images: Array<{ mime_type: string; size_bytes: number; sha256: string }>, bytes: (index: number) => Promise<ArrayBuffer>, signal?: AbortSignal): Promise<{ uploadId: string; inputs: ManagedUploadedImageInput[] }> {
@@ -616,8 +584,4 @@ export class ManagedMediaJobClient {
     }
   }
 
-  private async sha256(bytes: ArrayBuffer): Promise<string> {
-    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  }
 }

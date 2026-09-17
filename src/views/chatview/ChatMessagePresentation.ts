@@ -1,5 +1,5 @@
 import type { ChatMessage, MultiPartContent } from "../../types";
-import { parseAttachedTextContent } from "./attachments/ChatAttachmentContent";
+import { parseAttachedTextContent } from "../../chat/ChatAttachmentContent";
 import { isChatAttachmentReferencePlaceholder } from "./attachments/ChatAttachmentVaultStore";
 
 export type PresentedMessageAttachment = Readonly<{

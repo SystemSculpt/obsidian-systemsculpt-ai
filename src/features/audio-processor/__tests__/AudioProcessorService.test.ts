@@ -7,7 +7,7 @@ import type {
   AudioProcessorSignedPart,
 } from "../AudioProcessorApiClient";
 import { AudioProcessorService } from "../AudioProcessorService";
-import { sha256HexFromBytesPortable } from "../../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import type {
   AudioProcessorAudioSource,
   AudioProcessorJob,

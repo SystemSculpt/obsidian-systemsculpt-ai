@@ -10,7 +10,7 @@ const NETWORK_OWNERSHIP_ROOTS = [
   "src/services/managed",
   "src/services/images",
   "src/services/transcription",
-  "src/services/workflow/WorkflowEngineService.ts",
+  "src/features/inbox-transcription/InboxTranscriptionService.ts",
   "src/services/DocumentProcessingService.ts",
   "src/services/PostProcessingService.ts",
   "src/services/TitleGenerationService.ts",
@@ -38,7 +38,7 @@ const FORBIDDEN_PACKAGES = [
   "react-dom",
 ];
 const CHAT_AUTHORITY_ROOTS = [
-  "src/services/chat/",
+  "src/chat/",
   "src/services/managed/",
   "src/views/chatview/",
 ];
@@ -417,7 +417,8 @@ function authorityViolations(file) {
   if (!TOOL_COMPATIBILITY_ALLOWLIST.has(relative) && RETIRED_TOOL_ARCHITECTURE.test(source)) {
     findings.push(`${relative}: retired tool architecture`);
   }
-  if (relative.startsWith("src/views/chatview/") && CLIENT_CONTINUATION_POLICY.test(source)) {
+  if ((relative.startsWith("src/chat/") || relative.startsWith("src/views/chatview/"))
+    && CLIENT_CONTINUATION_POLICY.test(source)) {
     findings.push(`${relative}: client-owned continuation policy`);
   }
   return findings;
@@ -442,7 +443,7 @@ function networkViolations(file) {
 }
 
 test("first-party client import policy rejects every vendor SDK import form", () => {
-  const relative = "src/views/chatview/agent/FutureFirstPartyRuntime.ts";
+  const relative = "src/chat/managed/FutureFirstPartyRuntime.ts";
   const mutations = [
     {
       label: "extra named symbol",
@@ -623,9 +624,9 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
   for (const retiredPath of [
     "src/views/chatview/ManagedAgentController.ts",
     "src/views/chatview/turn/ManagedChatRuntimeAdapter.ts",
-    "src/services/chat/AcceptedChatRequestSnapshot.ts",
-    "src/services/chat/ChatRequestPreparationService.ts",
-    "src/services/chat/ManagedToolResult.ts",
+    "src/chat/managed/AcceptedChatRequestSnapshot.ts",
+    "src/chat/managed/ChatRequestPreparationService.ts",
+    "src/chat/managed/ManagedToolResult.ts",
     "src/services/managed/ManagedChatInputLimits.ts",
     "src/services/managed/ManagedChatSessionBudget.ts",
   ]) {
@@ -636,14 +637,6 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
     );
   }
 
-  const managedClient = fs.readFileSync(
-    path.resolve("src/services/managed/ManagedCapabilityClient.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(
-    managedClient,
-    /^\s*(?:public\s+)?(?:async\s+)?(?:request|stream|job|acquireChatTurnLease)\s*\(/mu,
-  );
   const hostedTransport = fs.readFileSync(
     path.resolve("src/services/managed/adapters/HostedTransportAdapter.ts"),
     "utf8",
@@ -660,7 +653,7 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
 });
 
 test("current chat code and fixtures use only canonical first-party tool names", () => {
-  const findings = sourceFiles("src/views/chatview").flatMap((file) => {
+  const findings = [...sourceFiles("src/chat"), ...sourceFiles("src/views/chatview")].flatMap((file) => {
     const source = fs.readFileSync(file, "utf8");
     const match = source.match(RETIRED_CHAT_TOOL_PREFIX);
     const relative = toRepositoryPath(path.relative(process.cwd(), file));

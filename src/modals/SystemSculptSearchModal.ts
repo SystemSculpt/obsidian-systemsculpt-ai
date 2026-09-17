@@ -261,8 +261,8 @@ export class SystemSculptSearchModal extends StandardModal {
       this.scheduleRecentPreviewHydration(recents, serial);
     } catch {
       if (serial < this.querySerial) return;
-      this.setStatus("Recent notes unavailable");
-      this.renderError("Could not load recent notes", "Try loading them again.");
+      this.setStatus("Recent files unavailable");
+      this.renderError("Could not load recent files", "Try loading them again.");
     }
   }
 
@@ -289,7 +289,7 @@ export class SystemSculptSearchModal extends StandardModal {
     this.setStatus(options.label);
 
     if (orderedResults.length === 0) {
-      this.renderEmpty(options.context === "recent" ? "No recent notes yet." : "No matches yet. Try fewer words.");
+      this.renderEmpty(options.context === "recent" ? "No recent files yet." : "No matches yet. Try fewer words.");
       return;
     }
 

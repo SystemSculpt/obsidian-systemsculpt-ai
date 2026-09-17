@@ -1,3 +1,4 @@
+import { reconcileStudioProject } from "../StudioProjectReconciliation";
 import { StudioProjectSession } from "../StudioProjectSession";
 import type { StudioProjectV1 } from "../types";
 
@@ -44,6 +45,33 @@ describe("StudioProjectSession", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it("persists history as a local edit and notifies both views without resetting the accepted base", async () => {
+    let disk = projectFixture();
+    disk.name = "4";
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: disk,
+      saveProject: async (_path, desired, _before, base) => {
+        const result = reconcileStudioProject(base!, desired, disk);
+        disk = result.project;
+        return result;
+      },
+    });
+    const activeView = jest.fn(() => session.getProject().name);
+    const hiddenView = jest.fn(() => session.getProject().name);
+    session.subscribe(activeView);
+    session.subscribe(hiddenView);
+    const restored = session.getProjectSnapshot();
+    restored.name = "3";
+    expect(session.applyHistorySnapshot(restored)).toBe(true);
+    expect(activeView).toHaveLastReturnedWith("3");
+    expect(hiddenView).toHaveLastReturnedWith("3");
+    await session.flushPendingSaveWork();
+    expect(disk.name).toBe("3");
+    expect(session.getProject().name).toBe("3");
+    expect(session.getDebugState().hasPendingLocalSaveWork).toBe(false);
+    await session.close();
   });
 
   it("returns defensive project snapshots so callers cannot mutate session state accidentally", () => {
@@ -402,6 +430,68 @@ describe("StudioProjectSession", () => {
     expect(session.getProject().name).toBe("Typed while running");
     expect(session.getProject().graph.nodes[0].config.value).toBe("generated result");
     await session.close();
+  });
+
+  it("keeps edits made while an async producer preserves its conflicting draft", async () => {
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: projectFixture(),
+      saveProject: async () => undefined, saveBlockedProjectRecovery: () => recovery,
+    });
+    let finishProducer!: () => void;
+    const producer = new Promise<void>(resolve => { finishProducer = resolve; });
+    const pending = session.mutateAsync("runtime.projector", async draft => {
+      await producer;
+      draft.name = "Generated name";
+    });
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    finishProducer();
+    await Promise.resolve(); await Promise.resolve();
+    session.mutate("node.title", current => { current.name = "Latest user edit"; });
+    finishRecovery();
+    await pending;
+    expect(session.getProject().name).toBe("Latest user edit");
+    await session.close();
+  });
+
+  it("keeps edits made during external-conflict recovery before adopting the external document", async () => {
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: projectFixture(),
+      saveProject: async () => undefined, saveBlockedProjectRecovery: () => recovery,
+    });
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    const external = projectFixture(); external.name = "External name";
+    const pending = session.reconcileExternalProject(external, null);
+    session.mutate("node.title", current => { current.name = "Latest user edit"; });
+    finishRecovery();
+    await pending;
+    expect(session.getProject().name).toBe("Latest user edit");
+    await session.close();
+  });
+
+  it("preserves edits made while the final blocked-close recovery is being written", async () => {
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    const saveBlockedProjectRecovery = jest.fn<Promise<void>, [string, StudioProjectV1]>()
+      .mockImplementationOnce(() => recovery).mockResolvedValue(undefined);
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: projectFixture(),
+      saveProject: async () => undefined, saveBlockedProjectRecovery,
+    });
+    session.blockProjectFileWrites();
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    const closing = session.close();
+    await Promise.resolve();
+    session.mutate("node.title", current => { current.name = "Last user edit before close"; });
+    finishRecovery();
+    await closing;
+    expect(session.isDisposed()).toBe(true);
+    expect(saveBlockedProjectRecovery).toHaveBeenLastCalledWith(
+      "Studio/Test.systemsculpt", expect.objectContaining({ name: "Last user edit before close" }),
+    );
   });
 
 });

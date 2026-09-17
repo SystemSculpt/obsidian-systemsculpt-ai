@@ -1,3 +1,4 @@
+import { normalizeGroupColor } from "./StudioGraphGroupModel";
 import { getStudioLayoutAnchoredNodeIds } from "./StudioGraphLayout";
 import { normalizePath } from "obsidian";
 import {
@@ -49,7 +50,6 @@ export type StudioProjectParseContext = {
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
-const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 function isStudioJsonValue(value: unknown): value is StudioJsonValue {
   if (
@@ -70,24 +70,6 @@ function readStudioJsonRecord(value: unknown): Record<string, StudioJsonValue> {
     throw new Error("Invalid node config: expected JSON values.");
   }
   return value as Record<string, StudioJsonValue>;
-}
-
-function normalizeHexColor(value: string): string | null {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return null;
-  }
-  if (!HEX_COLOR_PATTERN.test(trimmed)) {
-    return null;
-  }
-  const lower = trimmed.toLowerCase();
-  if (lower.length === 4) {
-    const r = lower.charAt(1);
-    const g = lower.charAt(2);
-    const b = lower.charAt(3);
-    return `#${r}${r}${g}${g}${b}${b}`;
-  }
-  return lower;
 }
 
 function readNodeSize(raw: unknown): { width: number; height?: number } | null {
@@ -175,7 +157,7 @@ function readGroup(raw: unknown): StudioNodeGroup {
   const id = asString(raw.id).trim();
   const name = asString(raw.name).trim();
   const colorRaw = asString(raw.color).trim();
-  const color = normalizeHexColor(colorRaw);
+  const color = normalizeGroupColor(colorRaw);
   const nodeIds = ensureArray<unknown>(raw.nodeIds)
     .map((value) => asString(value).trim())
     .filter((value) => value.length > 0)
@@ -202,6 +184,24 @@ function readGroup(raw: unknown): StudioNodeGroup {
     nodeIds,
     ...(shapeIds.length > 0 ? { shapeIds } : {}),
   };
+}
+
+function retainExistingGroupMembers(
+  groups: StudioNodeGroup[], nodeIdSet: ReadonlySet<string>, diagram: StudioDiagram
+): StudioNodeGroup[] {
+  const diagramShapeIdSet = new Set(diagram.shapes.map(shape => shape.id));
+  return groups
+    .map((group) => {
+      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
+      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
+      if (shapeIds.length > 0) {
+        next.shapeIds = shapeIds;
+      } else {
+        delete next.shapeIds;
+      }
+      return next;
+    })
+    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
 }
 
 function mergeStudioDiagrams(
@@ -276,20 +276,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
 
   // A group frames nodes, shapes, or both, so it survives while either half
   // still resolves.
-  const diagramShapeIdSet = new Set(diagram.shapes.map((shape) => shape.id));
-  const groups = groupsRaw
-    .map(readGroup)
-    .map((group) => {
-      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
-      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
-      if (shapeIds.length > 0) {
-        next.shapeIds = shapeIds;
-      } else {
-        delete next.shapeIds;
-      }
-      return next;
-    })
-    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
+  const groups = retainExistingGroupMembers(groupsRaw.map(readGroup), nodeIdSet, diagram);
 
   const permissionsRefRaw = isRecord(raw.permissionsRef) ? raw.permissionsRef : {};
   const policyPath = normalizePath(asString(permissionsRefRaw.policyPath).trim());
@@ -553,21 +540,9 @@ function readProjectV2(
     arrows: ensureArray<unknown>(canvas.arrows).map(liftArrowV2).filter(Boolean),
   }, nodesById.keys());
 
-  const nodeIdSet = new Set(nodes.map((node) => node.id));
-  const diagramShapeIdSet = new Set(diagram.shapes.map((shape) => shape.id));
-  const groups = ensureArray<unknown>(canvas.groups)
-    .map(readGroupV2)
-    .map((group) => {
-      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
-      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
-      if (shapeIds.length > 0) {
-        next.shapeIds = shapeIds;
-      } else {
-        delete next.shapeIds;
-      }
-      return next;
-    })
-    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
+  const groups = retainExistingGroupMembers(
+    ensureArray<unknown>(canvas.groups).map(readGroupV2), new Set(nodesById.keys()), diagram
+  );
 
   const now = nowIso();
   return {

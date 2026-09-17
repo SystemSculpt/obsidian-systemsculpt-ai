@@ -60,10 +60,22 @@ export class EmbeddingsIndexFile {
     return (await this.readCandidate(this.filePath)) ?? this.readCandidate(this.previousPath);
   }
 
-  private async readCandidate(path: string): Promise<SerializedEmbeddingsIndex | null> {
+  private async readCandidate(
+    path: string,
+    options?: { failOnReadError: boolean },
+  ): Promise<SerializedEmbeddingsIndex | null> {
+    let text: string;
     try {
       if (!(await this.adapter.exists(path))) return null;
-      const parsed = JSON.parse(await this.adapter.read(path)) as unknown;
+      text = await this.adapter.read(path);
+    } catch (error) {
+      // Startup may fall back to a checkpoint on an unreadable file. A write
+      // must not mistake that uncertainty for corrupt bytes and delete it.
+      if (options?.failOnReadError) throw error;
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
       return parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? parsed as SerializedEmbeddingsIndex
         : null;
@@ -92,10 +104,16 @@ export class EmbeddingsIndexFile {
     } catch (replaceError) {
       let movedPrevious = false;
       try {
-        if (await this.adapter.exists(backupPath)) await this.adapter.remove(backupPath);
         if (await this.adapter.exists(this.filePath)) {
-          await this.adapter.rename(this.filePath, backupPath);
-          movedPrevious = true;
+          if (await this.readCandidate(backupPath, { failOnReadError: true })
+            && !(await this.readCandidate(this.filePath, { failOnReadError: true }))) {
+            // Never rotate corrupt primary bytes over the only readable snapshot.
+            await this.adapter.remove(this.filePath);
+          } else {
+            if (await this.adapter.exists(backupPath)) await this.adapter.remove(backupPath);
+            await this.adapter.rename(this.filePath, backupPath);
+            movedPrevious = true;
+          }
         }
         await this.adapter.rename(tempPath, this.filePath);
         if (movedPrevious && await this.adapter.exists(backupPath)) {
@@ -121,6 +139,9 @@ export class EmbeddingsIndexFile {
   }
 
   public async remove(): Promise<void> {
-    if (await this.adapter.exists(this.filePath)) await this.adapter.remove(this.filePath);
+    // Recovery candidates must not resurrect a deliberately removed snapshot.
+    for (const path of [this.previousPath, `${this.filePath}.next`, this.filePath]) {
+      if (await this.adapter.exists(path)) await this.adapter.remove(path);
+    }
   }
 }

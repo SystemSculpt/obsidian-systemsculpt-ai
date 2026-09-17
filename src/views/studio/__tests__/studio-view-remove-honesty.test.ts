@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 
+import { StudioTextEditSessions } from "../StudioTextEditSessions";
+
 import type { StudioProjectV1 } from "../../../studio/types";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
@@ -68,11 +70,7 @@ function createRemoveNodesContext(options: {
     clearTransientFieldErrorsForNode: jest.fn(),
     runPresentation: { removeNode: jest.fn() },
     graphInteraction: { onNodeRemoved: jest.fn() },
-    editingTextNodeIds: new Set<string>(),
-    dirtyTextNodeEditIds: new Set<string>(),
-    pendingTextNodeAutofocusNodeId: null,
-    pendingTextNodeFocusPointByNodeId: new Map<string, { x: number; y: number }>(),
-    textNodeEditorSnapshots: new Map<string, unknown>(),
+    textEdits: new StudioTextEditSessions(),
     nodeContextMenuOverlay: null,
     nodeActionContextMenuOverlay: null,
     recomputeEntryNodes: jest.fn(),

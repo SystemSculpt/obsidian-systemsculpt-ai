@@ -40,6 +40,99 @@ function createViewport(): HTMLElement {
   } as unknown as HTMLElement;
 }
 
+describe("StudioGraphSelectionController hidden viewport restoration", () => {
+  let resize: () => void;
+  let disconnect: jest.Mock;
+  const originalObserver = window.ResizeObserver;
+
+  beforeEach(() => {
+    disconnect = jest.fn();
+    window.ResizeObserver = class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => { window.ResizeObserver = originalObserver; });
+
+  function mount(controller: StudioGraphSelectionController, initiallyVisible: boolean) {
+    let visible = initiallyVisible;
+    let left = 0;
+    let top = 0;
+    // Hidden Chromium elements expose zero scroll offsets and ignore writes.
+    const viewport = document.createElement("div");
+    Object.defineProperties(viewport, {
+      clientWidth: { get: () => visible ? 1000 : 0 },
+      clientHeight: { get: () => visible ? 600 : 0 },
+      scrollLeft: { get: () => visible ? left : 0, set: (value: number) => { if (visible) left = value; } },
+      scrollTop: { get: () => visible ? top : 0, set: (value: number) => { if (visible) top = value; } },
+    });
+    controller.registerViewportElement(viewport);
+    controller.registerSurfaceElement(createElementStub());
+    controller.registerCanvasElement(createElementStub(), createElementStub());
+    return {
+      viewport,
+      setVisible(value: boolean) { visible = value; resize?.(); },
+    };
+  }
+
+  it.each([1, 0.74455, 0.0308])("preserves a hidden saved viewport through repeated remounts at zoom %s", (zoom) => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const saved = { x: -206.25, y: 4.125 };
+    let mounted: ReturnType<typeof mount>;
+    for (let reload = 0; reload < 4; reload++) {
+      mounted = mount(controller, false);
+      controller.setGraphZoom(zoom);
+      controller.setViewportWorldTopLeft(saved.x, saved.y);
+      expect(controller.getViewportWorldTopLeft()).toEqual(saved);
+      controller.ensureWorldCoverage();
+      expect(controller.getViewportWorldTopLeft()).toEqual(saved);
+      if (reload < 3) controller.clearRenderBindings();
+    }
+    mounted!.setVisible(true);
+    expect(controller.getGraphZoom()).toBe(zoom);
+    expect(controller.getViewportWorldTopLeft()!.x).toBeCloseTo(saved.x);
+    expect(controller.getViewportWorldTopLeft()!.y).toBeCloseTo(saved.y);
+    const position = [mounted!.viewport.scrollLeft, mounted!.viewport.scrollTop];
+    resize();
+    expect([mounted!.viewport.scrollLeft, mounted!.viewport.scrollTop]).toEqual(position);
+    controller.clearRenderBindings();
+    expect(disconnect).toHaveBeenCalledTimes(4);
+  });
+
+  it("retains the last visible pan while hidden and restores it when shown", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const mounted = mount(controller, true);
+    controller.setViewportWorldTopLeft(-320, 280);
+    mounted.viewport.scrollLeft += 125;
+    mounted.viewport.scrollTop += 75;
+    const position = controller.getViewportWorldTopLeft();
+    mounted.setVisible(false);
+    expect(controller.getViewportWorldTopLeft()).toEqual(position);
+    controller.ensureWorldCoverage();
+    mounted.setVisible(true);
+    expect(controller.getViewportWorldTopLeft()).toEqual(position);
+    controller.clearRenderBindings();
+  });
+
+  it("retains a wheel pan when hidden before the deferred scroll capture", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const mounted = mount(controller, true);
+    controller.setViewportWorldTopLeft(250, -75);
+    controller.handleGraphViewportWheel(new WheelEvent("wheel", {
+      deltaX: 32,
+      deltaY: 64,
+      cancelable: true,
+    }));
+    mounted.setVisible(false);
+    expect(controller.getViewportWorldTopLeft()).toEqual({ x: 282, y: -11 });
+    mounted.setVisible(true);
+    expect(controller.getViewportWorldTopLeft()).toEqual({ x: 282, y: -11 });
+    controller.clearRenderBindings();
+  });
+});
+
 describe("StudioGraphSelectionController wheel behavior", () => {
   it("filters unknown node IDs when setting explicit selection", () => {
     const host = createHost();
@@ -593,6 +686,48 @@ describe("StudioGraphSelectionController fit selection", () => {
 });
 
 describe("StudioGraphSelectionController drag behavior", () => {
+  it.each(["pan", "marquee", "node"] as const)("cancels %s listeners and queued movement when the canvas is replaced", (gesture) => {
+    const host = createHost();
+    const project = { graph: { nodes: [{ id: "node_1", position: { x: 40, y: 50 }, kind: "studio.input", config: {} }] } } as any;
+    host.getCurrentProject = () => project;
+    const commit = jest.fn((_reason, mutator) => mutator(project) !== false);
+    host.commitProjectMutation = commit;
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = createViewport();
+    const nodeEl = createElementStub();
+    controller.registerViewportElement(viewport);
+    controller.registerMarqueeElement(createElementStub());
+    controller.registerNodeElement("node_1", nodeEl);
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    const request = jest.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    const cancel = jest.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id); });
+    const harness = installWindowPointerListenerHarness();
+    const start = { button: 0, pointerId: 7, clientX: 100, clientY: 120, preventDefault: jest.fn() } as unknown as PointerEvent;
+    try {
+      if (gesture === "pan") controller.startCanvasPan(start);
+      else if (gesture === "marquee") controller.startMarqueeSelection(start);
+      else controller.startNodeDrag("node_1", start, nodeEl);
+      harness.emit("pointermove", { pointerId: 7, clientX: 300, clientY: 320, preventDefault: jest.fn() } as unknown as PointerEvent);
+      expect(frames.size).toBe(1);
+      controller.clearRenderBindings();
+      expect(frames.size).toBe(0);
+      expect(harness.has("pointermove")).toBe(false);
+      expect(harness.has("pointerup")).toBe(false);
+      expect(harness.has("pointercancel")).toBe(false);
+      expect(commit).not.toHaveBeenCalled();
+      expect(project.graph.nodes[0].position).toEqual({ x: 40, y: 50 });
+    } finally {
+      controller.clearRenderBindings();
+      harness.restore();
+      request.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   it("allows dragging regular nodes while busy so layout can be reorganized during runs", () => {
     const host = createHost();
     const renderEdgeLayer = jest.fn();

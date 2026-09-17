@@ -434,6 +434,39 @@ describe("resuming a managed video job after a restart", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("retries a dropped video transfer using the same completed output", async () => {
+    const { adapter, create, downloadOutput } = resumeHarness(record("processing", 4, JOB_ID));
+    downloadOutput.mockRejectedValueOnce(new TypeError("connection reset"));
+
+    await expect(adapter.resume("studio-video-run-node")).resolves.toMatchObject({ jobId: JOB_ID });
+
+    expect(downloadOutput).toHaveBeenCalledTimes(2);
+    expect(downloadOutput.mock.calls[0]).toEqual(downloadOutput.mock.calls[1]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("does not retry corrupt video bytes", async () => {
+    const { adapter, downloadOutput } = resumeHarness(record("processing", 4, JOB_ID));
+    downloadOutput.mockRejectedValueOnce(Object.assign(new Error("Integrity mismatch"), {
+      code: "malformed_response", retryable: false,
+    }));
+
+    await expect(adapter.resume("studio-video-run-node")).rejects.toMatchObject({ code: "malformed_response" });
+    expect(downloadOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrieval when cancellation arrives during a dropped video transfer", async () => {
+    const { adapter, downloadOutput } = resumeHarness(record("processing", 4, JOB_ID));
+    const controller = new AbortController();
+    downloadOutput.mockImplementationOnce(async () => {
+      controller.abort();
+      throw new TypeError("connection aborted");
+    });
+
+    await expect(adapter.resume("studio-video-run-node", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(downloadOutput).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["created", "result_ready", "local_commit_pending"] as const)(
     "rejoins a %s job whose outputs the vault closed before saving",
     async (phase) => {

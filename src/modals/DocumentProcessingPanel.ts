@@ -124,7 +124,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       steps: TIMELINE_ORDER.map((step) => ({ id: step, label: STEP_LABEL[step] })),
     });
 
-    this.setButtons([
+    this.panel.setActions([
       {
         label: "Hide",
         testId: "document.progress.hide",
@@ -184,7 +184,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     });
     this.panel.setTimelineState("ready", "complete");
 
-    this.setButtons([
+    this.panel.setActions([
       {
         label: "Open Markdown",
         testId: "document.progress.open-markdown",
@@ -225,7 +225,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     });
     this.panel.setTimelineState(failedStep, "error");
 
-    this.setButtons([
+    this.panel.setActions([
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
@@ -261,16 +261,6 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.panel.close();
   }
 
-  private setButtons(
-    descriptors: Array<{
-      label: string;
-      testId: string;
-      onClick: () => void;
-      variant?: "primary" | "default";
-    }>
-  ): void {
-    this.panel.setActions(descriptors);
-  }
 
 }
 

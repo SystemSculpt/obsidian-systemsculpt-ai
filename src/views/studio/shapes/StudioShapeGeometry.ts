@@ -1,5 +1,5 @@
 import type { StudioShapeInstance } from "../../../studio/types";
-import type { LinkPoint } from "../connections-v3/LinkGeometry";
+import type { LinkPoint } from "../connections/LinkGeometry";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
 
 /** Visual bounds only: a node card can anchor an arrow without becoming a shape. */

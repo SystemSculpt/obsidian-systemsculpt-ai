@@ -1,6 +1,7 @@
 import { StudioAgentRuns } from '../StudioAgentRuns';
 import { runLocalCodex } from '../LocalCodexClient';
 import { codexActivity } from '../CodexActivity';
+import { answerCodexRequest } from '../CodexRequestModal';
 jest.mock('../LocalCodexClient', () => ({ runLocalCodex: jest.fn() }));
 jest.mock('../CodexRequestModal', () => ({ answerCodexRequest: jest.fn(async () => ({ decision: 'decline' })) }));
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { os: async () => ({ hostname: () => 'test-machine' }) } }));
@@ -49,9 +50,11 @@ it('rejects cross-project handoffs and records rejected native delivery', async 
   expect(await runs.send(a.id, 'Owner message')).toMatchObject({ status: 'failed', error: 'Native turn ended' }); await runs.dispose();
 });
 it('resumes a finished native thread for one explicit message without scheduling another turn', async () => {
-  const { runs } = fixture(); const a = await runs.start(spec()); await tick(); sessions[0].resolve(); await tick();
+  const { runs, files } = fixture(); const a = await runs.start(spec()); await tick(); sessions[0].resolve(); await tick();
   expect(a.status).toBe('completed'); const message = await runs.send(a.id, 'Follow-up'); await tick();
   expect(turn.mock.calls[1][0].threadId).toBe('thread-0'); expect(message.status).toBe('delivered');
+  const saved = [...files.values()].map(content => JSON.parse(content)).find(record => record.id === a.id);
+  expect(saved.messages[0].status).toBe('delivered'); expect(saved.turnId).toBe(a.turnId);
   sessions[1].resolve(); await tick(); jest.advanceTimersByTime(10_000); await tick(); expect(sessions).toHaveLength(2); await runs.dispose();
 });
 it('caps concurrent native turns and delivers queued messages once the target is ready', async () => {
@@ -64,6 +67,38 @@ it('exposes native approval as a review action and keeps the request pending unt
   const approval = sessions[0].cb.request('item/commandExecution/requestApproval', { threadId: a.threadId }, new AbortController().signal);
   expect(a.status).toBe('waiting'); expect(runs.hasRequest(a.id)).toBe(true);
   await runs.review(a.id); expect(await approval).toEqual({ decision: 'decline' }); expect(a.status).toBe('running'); await runs.dispose();
+});
+it('reviews concurrent native requests in order without losing either decision', async () => {
+  const { runs } = fixture(); const a = await runs.start(spec()); await tick();
+  let firstResolved = false, secondResolved = false;
+  const first = sessions[0].cb.request('item/commandExecution/requestApproval', { threadId: a.threadId, itemId: 'first' }, new AbortController().signal).then(() => { firstResolved = true; });
+  const second = sessions[0].cb.request('item/tool/requestUserInput', { threadId: a.threadId, itemId: 'second' }, new AbortController().signal).then(() => { secondResolved = true; });
+  await runs.review(a.id);
+  expect(firstResolved).toBe(true); expect(secondResolved).toBe(false);
+  expect(a.status).toBe('waiting'); expect(a.currentActivity).toBe('Waiting for your answer'); expect(runs.hasRequest(a.id)).toBe(true);
+  await runs.review(a.id); await Promise.all([first, second]);
+  expect(a.status).toBe('running'); expect(runs.hasRequest(a.id)).toBe(false); await runs.dispose();
+});
+it('keeps a stopped run stopped when an open native review finishes late', async () => {
+  const { runs } = fixture(); const a = await runs.start(spec()); await tick();
+  let finishReview!: () => void;
+  jest.mocked(answerCodexRequest).mockImplementationOnce(() => new Promise(resolve => { finishReview = () => resolve({ decision: 'decline' }); }));
+  const approval = sessions[0].cb.request('item/commandExecution/requestApproval', { threadId: a.threadId }, new AbortController().signal);
+  void approval.catch(() => {});
+  const review = runs.review(a.id); runs.stop(a.id); await tick();
+  expect(a.status).toBe('stopped'); finishReview(); await review;
+  expect(a.status).toBe('stopped'); expect(runs.hasRequest(a.id)).toBe(false); await runs.dispose();
+});
+it('cancels one queued native request without discarding the next review', async () => {
+  const { runs } = fixture(); const a = await runs.start(spec()); await tick();
+  const canceled = new AbortController();
+  const first = sessions[0].cb.request('item/commandExecution/requestApproval', { threadId: a.threadId }, canceled.signal);
+  void first.catch(() => {});
+  const second = sessions[0].cb.request('item/fileChange/requestApproval', { threadId: a.threadId }, new AbortController().signal);
+  canceled.abort(); await expect(first).rejects.toThrow('Run stopped');
+  expect(runs.hasRequest(a.id)).toBe(true); expect(a.status).toBe('waiting');
+  await runs.review(a.id); await expect(second).resolves.toEqual({ decision: 'decline' });
+  expect(runs.hasRequest(a.id)).toBe(false); await runs.dispose();
 });
 it('does not admit a native turn when the initial run record cannot be saved', async () => {
   const { runs, adapter } = fixture(); adapter.write.mockRejectedValue(new Error('Disk full'));
@@ -120,6 +155,50 @@ it('recovers the same workflow and child thread after reload without a duplicate
   expect(sessions).toHaveLength(4); expect(sessions[2].threadId).toBe('thread-1'); expect(sessions[3].threadId).toBe('thread-0');
   expect((await call(3, 'studio_start_run', args)).contentItems).toEqual(original.contentItems);
   expect(reloaded.runs.list('project')).toHaveLength(2); expect(turn.mock.calls[2][0].recoverCompletedTurn).toBe(true);
+  await reloaded.runs.dispose();
+});
+it('pauses ambiguous delivery after a crash and resumes only the new owner follow-up', async () => {
+  const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
+  sessions[0].resolve(); await tick();
+  await runs.send(root.id, 'Perform the requested change'); await tick();
+  expect(sessions).toHaveLength(2);
+  // The native turn accepted the message, but the process crashed before its receipt was saved.
+  const crashFiles = new Map(files);
+  for (const [path, content] of crashFiles) {
+    const saved = JSON.parse(content); if (saved.id !== root.id) continue;
+    saved.status = 'running'; saved.workflow.status = 'active';
+    saved.messages[0].status = 'pending'; crashFiles.set(path, JSON.stringify(saved));
+  }
+  await runs.dispose(); const reloaded = workflowFixture(crashFiles);
+  await reloaded.runs.load('project.systemsculpt', 'project'); await tick();
+  const restored = reloaded.runs.get(root.id)!;
+  expect(sessions).toHaveLength(2);
+  expect(restored.workflow?.status).toBe('needs_input');
+  expect(restored.workflow?.outcome).toContain('could not be verified');
+  expect(restored.messages[0]).toMatchObject({ status: 'failed', text: 'Perform the requested change' });
+  expect(restored.messages[0].error).toContain('may already have accepted');
+  expect([...crashFiles.values()].map(content => JSON.parse(content)).find(record => record.id === root.id).workflow.status).toBe('needs_input');
+  await reloaded.runs.send(root.id, 'I checked native history. Verify the existing change; do not repeat it.'); await tick();
+  expect(sessions).toHaveLength(3); expect(sessions[2].threadId).toBe(root.threadId);
+  expect(turn.mock.calls[2][0].prompt).toContain('I checked native history');
+  expect(sessions[2].send).not.toHaveBeenCalled();
+  await reloaded.runs.dispose();
+});
+it('pauses the whole workflow when a child steering receipt is uncertain', async () => {
+  const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
+  await call(0, 'studio_workflow_plan', { boundaries: 'Read only', steps });
+  await call(0, 'studio_start_run', { nodeId: 'worker', objective: 'Read fixture', assignmentId: 'inspect' }); await tick();
+  const child = runs.list('project').find(run => run.parentRunId === root.id)!;
+  await runs.send(child.id, 'Check one more detail'); await tick();
+  const crashFiles = new Map(files);
+  for (const [path, content] of crashFiles) {
+    const saved = JSON.parse(content); if (saved.id !== child.id) continue;
+    saved.messages[0].status = 'pending'; crashFiles.set(path, JSON.stringify(saved));
+  }
+  await runs.dispose(); const reloaded = workflowFixture(crashFiles);
+  await reloaded.runs.load('project.systemsculpt', 'project'); await tick();
+  expect(sessions).toHaveLength(2); expect(reloaded.runs.get(root.id)?.workflow?.status).toBe('needs_input');
+  expect(reloaded.runs.get(child.id)?.messages[0].status).toBe('failed');
   await reloaded.runs.dispose();
 });
 it('delivers child completion to the same parent thread when its native turn ended while waiting', async () => {

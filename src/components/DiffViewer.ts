@@ -2,7 +2,6 @@
  * DiffViewer component - shows only changed sections with minimal context
  */
 
-import { Component } from 'obsidian';
 import { DiffResult, DiffLine } from '../utils/diffUtils';
 
 /**
@@ -22,7 +21,7 @@ export interface DiffViewerOptions {
   emptyDetail?: string; // Extra context for the empty state, e.g. unmatched edit count
 }
 
-export class DiffViewer extends Component {
+export class DiffViewer {
   private container: HTMLElement;
   private diffResult: DiffResult;
   private fileName: string;
@@ -32,7 +31,6 @@ export class DiffViewer extends Component {
   private emptyDetail: string | null;
 
   constructor(options: DiffViewerOptions) {
-    super();
     this.container = options.container;
     this.diffResult = options.diffResult;
     this.fileName = options.fileName;
@@ -291,16 +289,6 @@ export class DiffViewer extends Component {
     if (!line.content && line.content !== '') {
       content.textContent = '\u00a0';
     }
-  }
-
-  public updateDiff(diffResult: DiffResult): void {
-    this.diffResult = diffResult;
-    this.render();
-  }
-
-  public destroy(): void {
-    this.container.empty();
-    this.unload();
   }
 
   private computeHunkSummary(hunk: DiffLine[]): string | null {

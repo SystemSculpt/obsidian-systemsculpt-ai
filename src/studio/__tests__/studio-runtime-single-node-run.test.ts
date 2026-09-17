@@ -1,6 +1,7 @@
 import { Platform } from "obsidian";
 import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
+import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import { StudioRuntime } from "../StudioRuntime";
 import type { StudioNodeDefinition, StudioProjectV1, StudioRunEvent } from "../types";
 
@@ -39,7 +40,7 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
     },
   });
   registry.register(define("test.seed", "by_inputs", [], "text", (_inputs, config) => config.value));
-  registry.register(define("test.generate", "never", [{ id: "prompt", type: "any" }], "image", (inputs) => `image-for-${String(inputs.prompt)}`));
+  registry.register(define("test.generate", "never", [{ id: "prompt", type: "any", required: true }], "image", (inputs) => `image-for-${String(inputs.prompt)}`));
   registry.register(define("test.clip", "never", [{ id: "frame", type: "any" }], "video", (inputs) => `video-from-${String(inputs.frame)}`));
 
   const published: { cache?: Record<string, unknown> } = {};
@@ -60,7 +61,7 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
   };
   const events: StudioRunEvent[] = [];
   const run = (entryNodeIds?: string[]) => runtime.runProjectSnapshot("Studio/Single.systemsculpt", project(), { entryNodeIds, onEvent: async (event) => { events.push(event); } });
-  return { run, executed, events, published };
+  return { run, executed, events, published, runtime, registry };
 }
 
 const entry = (nodeId: string, kind: string, outputs: Record<string, unknown>) => ({
@@ -125,4 +126,64 @@ describe("running one node", () => {
     expect(summary.status).toBe("success");
     expect(executed).toEqual(["clip"]);
   });
+  it("aborts active commands, rejects queued runs and prevents new execution after disposal", async () => {
+    const { run, runtime, registry } = harness();
+    let started!: () => void;
+    const startedPromise = new Promise<void>(resolve => { started = resolve; });
+    let commandSignal: AbortSignal | undefined;
+    const command = jest.spyOn(StudioSandboxRunner.prototype, "runCli").mockImplementation(async request => {
+      commandSignal = request.signal;
+      started();
+      return await new Promise((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => reject(new Error("Command aborted")), { once: true });
+      });
+    });
+    registry.register({ ...registry.get("test.seed", "1.0.0")!, async execute(context) {
+      await context.services.runCli({ command: "test", cwd: "/test" });
+      return { outputs: { text: "finished" } };
+    } });
+    const active = run();
+    const activeResult = expect(active).rejects.toThrow("Command aborted");
+    await startedPromise;
+    const queued = run();
+    const queuedResult = expect(queued).rejects.toThrow("disposed");
+    runtime.dispose();
+    expect(commandSignal?.aborted).toBe(true);
+    await Promise.all([activeResult, queuedResult]);
+    await expect(run()).rejects.toThrow("disposed");
+    expect(command).toHaveBeenCalledTimes(1);
+    command.mockRestore();
+  });
+
+  it("prepares connected context from recorded never-cache outputs without executing producers or the target", async () => {
+    const { runtime, executed } = harness({ gen: entry("gen", "test.generate", { image: ["kept", "image"] }) });
+    const inputs = await runtime.prepareNodeInputs("Studio/Single.systemsculpt", project(), "clip");
+    expect(inputs).toEqual({ frame: ["kept", "image"] });
+    expect(executed).toEqual([]);
+  });
+
+  it("prepares every same-port input with the same array-preserving fan-in as an ordinary run", async () => {
+    const { runtime, executed } = harness();
+    const snapshot = project();
+    snapshot.graph.nodes.push({ ...snapshot.graph.nodes[0], id: "second", config: { value: ["two", "three"] } });
+    snapshot.graph.edges.push({ id: "e3", fromNodeId: "second", fromPortId: "text", toNodeId: "gen", toPortId: "prompt" });
+    const inputs = await runtime.prepareNodeInputs("Studio/Single.systemsculpt", snapshot, "gen");
+    expect(inputs).toEqual({ prompt: ["one", ["two", "three"]] });
+    expect(executed).toEqual(["seed", "second"]);
+  });
+
+  it("fails input preparation instead of rerunning a never-cache producer with no recorded output", async () => {
+    const { runtime, executed } = harness();
+    await expect(runtime.prepareNodeInputs("Studio/Single.systemsculpt", project(), "clip")).rejects.toThrow('Run "Image Generation" first');
+    expect(executed).toEqual([]);
+  });
+
+  it("admits an immutable snapshot when preparing native inputs", async () => {
+    const { runtime } = harness();
+    const snapshot = project();
+    const pending = runtime.prepareNodeInputs("Studio/Single.systemsculpt", snapshot, "gen");
+    snapshot.graph.nodes[0].config.value = "edited after admission";
+    expect(await pending).toEqual({ prompt: "one" });
+  });
+
 });

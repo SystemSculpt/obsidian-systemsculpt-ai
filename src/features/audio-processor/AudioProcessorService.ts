@@ -10,7 +10,6 @@ import { AudioProcessorDelivery } from "./AudioProcessorDelivery";
 import { AudioProcessorDeviceStaging } from "./AudioProcessorDeviceStaging";
 import { AudioProcessorUploadRecovery } from "./AudioProcessorUploadRecovery";
 import { createVaultAudioSource } from "./audioSource";
-import { sha256HexFromArrayBuffer } from "../../studio/hash";
 import {
   type AudioProcessorAudioSource,
   type AudioProcessorArtifactKind,
@@ -64,6 +63,7 @@ export class AudioProcessorService {
   private readonly pollIntervalMs: number;
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly uploadRecovery: AudioProcessorUploadRecovery;
+  private readonly delivery: AudioProcessorDelivery;
   private deviceStaging: AudioProcessorServiceOptions["deviceStaging"] | null;
 
   constructor(
@@ -77,6 +77,7 @@ export class AudioProcessorService {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.sleep = options.sleep ?? abortableSleep;
     this.uploadRecovery = new AudioProcessorUploadRecovery(plugin);
+    this.delivery = new AudioProcessorDelivery(plugin, (url, signal) => this.api.downloadNote(url, signal));
     this.deviceStaging = options.deviceStaging ?? null;
   }
 
@@ -665,41 +666,14 @@ export class AudioProcessorService {
     });
 
     const artifactJobId = job.result.artifactJobId;
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const plan = await delivery.resolvePlan(
+    const files = await this.delivery.deliverPair({
       artifactJobId,
-      job.result.filename,
-      persistence,
-    );
-    const [note, transcript] = await Promise.all([
-      plan.note.file
-        ? Promise.resolve(null)
-        : this.api.downloadNote(job.result.noteUrl, options.signal),
-      plan.transcript.file
-        ? Promise.resolve(null)
-        : this.api.downloadNote(job.result.transcriptUrl, options.signal),
-    ]);
-    if (note != null && job.result.artifactManifest) {
-      await verifyArtifactDigest(
-        note,
-        job.result.artifactManifest.note.sha256,
-        "audio note",
-      );
-    }
-    if (transcript != null && job.result.artifactManifest) {
-      await verifyArtifactDigest(
-        transcript,
-        job.result.artifactManifest.transcript.sha256,
-        "audio transcript",
-      );
-    }
-    const files = await delivery.persist(
-      plan,
-      artifactJobId,
-      { note, transcript },
-      options.signal,
-      { deliveryJobId: job.id },
-    );
+      deliveryJobId: job.id,
+      filename: job.result.filename,
+      ...persistence,
+      note: { url: job.result.noteUrl, sha256: job.result.artifactManifest?.note.sha256 },
+      transcript: { url: job.result.transcriptUrl, sha256: job.result.artifactManifest?.transcript.sha256 },
+    }, options.signal);
 
     // Delivery acknowledgement is intentionally after both Vault.create
     // promises resolve. A partial local write remains recoverable and keeps
@@ -759,27 +733,15 @@ export class AudioProcessorService {
       message: "Saving the recovered transcript…",
     });
 
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const plan = await delivery.resolvePlan(
-      artifact.artifactJobId,
-      stripTranscriptFilenameSuffix(artifact.filename),
-      persistence,
-      ["transcript"],
-    );
-    const markdown = plan.transcript.file
-      ? null
-      : await this.api.downloadNote(artifact.transcriptUrl, options.signal);
-    if (markdown != null) {
-      await verifyArtifactDigest(markdown, artifact.sha256, "audio transcript");
-    }
-    const transcript = plan.transcript.file ?? await delivery.persistOne(
-      plan,
-      artifact.artifactJobId,
-      "transcript",
-      markdown!,
-      options.signal,
-      { deliveryJobId: job.id, linkedArtifactAvailable: false },
-    );
+    const transcript = await this.delivery.deliverArtifact({
+      artifactJobId: artifact.artifactJobId,
+      deliveryJobId: job.id,
+      filename: stripTranscriptFilenameSuffix(artifact.filename),
+      ...persistence,
+      kind: "transcript",
+      source: { url: artifact.transcriptUrl, sha256: artifact.sha256 },
+      standalone: true,
+    }, options.signal);
 
     await this.acknowledgeAfterLocalCommit(job.id, operationId, options.signal);
     const open = async (): Promise<void> => await this.openNote(transcript);
@@ -843,30 +805,23 @@ export class AudioProcessorService {
         "artifact_unavailable",
       );
     }
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const existing = delivery.findArtifact(artifact.artifactJobId, "transcript");
+    const existing = this.delivery.findArtifact(artifact.artifactJobId, "transcript");
     if (existing) {
       return {
         notePath: existing.path,
         open: async (): Promise<void> => await this.openNote(existing),
       };
     }
-    const plan = await delivery.resolvePlan(
-      artifact.artifactJobId,
-      stripTranscriptFilenameSuffix(artifact.filename),
-      { recoverMovedFiles: true },
-      ["transcript"],
-    );
-    const markdown = await this.api.downloadNote(artifact.transcriptUrl, signal);
-    await verifyArtifactDigest(markdown, artifact.sha256, "audio transcript");
-    const transcript = await delivery.persistOne(
-      plan,
-      artifact.artifactJobId,
-      "transcript",
-      markdown,
-      signal,
-      { deliveryJobId: job.id, linkedArtifactAvailable: false },
-    );
+    const transcript = await this.delivery.deliverArtifact({
+      artifactJobId: artifact.artifactJobId,
+      deliveryJobId: job.id,
+      filename: stripTranscriptFilenameSuffix(artifact.filename),
+      recoverMovedFiles: true,
+      kind: "transcript",
+      source: { url: artifact.transcriptUrl, sha256: artifact.sha256 },
+      standalone: true,
+      refreshDeliveryAlias: true,
+    }, signal);
     return {
       notePath: transcript.path,
       open: async (): Promise<void> => await this.openNote(transcript),
@@ -880,8 +835,7 @@ export class AudioProcessorService {
     signal: AbortSignal,
   ): Promise<AudioProcessorSavedArtifact> {
     if (signal.aborted) throw abortError();
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const existing = delivery.findArtifact(artifactJobId, kind);
+    const existing = this.delivery.findArtifact(artifactJobId, kind);
     if (existing) {
       return {
         notePath: existing.path,
@@ -916,37 +870,14 @@ export class AudioProcessorService {
     } else {
       artifactUrl = refreshed.result.transcriptUrl;
     }
-    const plan = await delivery.resolvePlan(
+    const file = await this.delivery.deliverArtifact({
       artifactJobId,
-      refreshed.result.filename,
-      { recoverMovedFiles: true },
-      [kind],
-    );
-    const slot = kind === "summary" ? plan.summary : plan.transcript;
-    if (slot.file) {
-      return {
-        notePath: slot.file.path,
-        open: async (): Promise<void> => await this.openNote(slot.file!),
-      };
-    }
-    const markdown = await this.api.downloadNote(artifactUrl, signal);
-    const manifestArtifact = refreshed.result.artifactManifest?.[kind];
-    if (manifestArtifact) {
-      await verifyArtifactDigest(markdown, manifestArtifact.sha256, `audio ${kind}`);
-    }
-    const file = await delivery.persistOne(
-      plan,
-      artifactJobId,
+      deliveryJobId,
+      filename: refreshed.result.filename,
+      recoverMovedFiles: true,
       kind,
-      markdown,
-      signal,
-      {
-        deliveryJobId,
-        linkedArtifactAvailable: kind === "summary"
-          ? Boolean(plan.transcript.file)
-          : Boolean(plan.note.file),
-      },
-    );
+      source: { url: artifactUrl, sha256: refreshed.result.artifactManifest?.[kind]?.sha256 },
+    }, signal);
     return {
       notePath: file.path,
       open: async (): Promise<void> => await this.openNote(file),
@@ -997,22 +928,6 @@ export class AudioProcessorService {
 
 function stripTranscriptFilenameSuffix(filename: string): string {
   return filename.replace(/\s+—\s+Transcript\.md$/i, ".md");
-}
-
-async function verifyArtifactDigest(
-  markdown: string,
-  expectedSha256: string,
-  label: string,
-): Promise<void> {
-  const bytes = new TextEncoder().encode(markdown);
-  const actualSha256 = await sha256HexFromArrayBuffer(bytes.buffer);
-  if (actualSha256 !== expectedSha256.toLowerCase()) {
-    throw new AudioProcessorApiError(
-      `The downloaded ${label} failed its integrity check. Please retry the download.`,
-      0,
-      "artifact_integrity_failed",
-    );
-  }
 }
 
 function createOperationId(): string {

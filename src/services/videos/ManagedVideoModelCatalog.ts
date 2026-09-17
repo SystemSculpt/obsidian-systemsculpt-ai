@@ -1,3 +1,4 @@
+import { HostedCatalogCache, type HostedCatalogCacheOptions } from "../managed/HostedCatalogCache";
 import type { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 
 export type ManagedVideoModelEstimate = Readonly<{
@@ -34,7 +35,6 @@ export type ManagedVideoModel = Readonly<{
 export type ManagedVideoModelCatalogSnapshot = Readonly<{ models: readonly ManagedVideoModel[] }>;
 
 const MODEL_ID_PATTERN = /^(?!.*:\/\/)[A-Za-z0-9][A-Za-z0-9./_:-]{0,159}$/;
-const CATALOG_TTL_MS = 5 * 60_000;
 function releasedAt(value: unknown): string | undefined {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) && Number.isFinite(Date.parse(value)) ? value.slice(0, 10) : undefined;
 }
@@ -178,46 +178,10 @@ export function snapManagedVideoRequestToModel(model: ManagedVideoModel, options
   return snapped;
 }
 
-export type ManagedVideoModelCatalogOptions = Readonly<{
-  /** Cached snapshots belong to one license; a key change drops them. */
-  licenseKey?: () => string;
-  now?: () => number;
-}>;
+export type ManagedVideoModelCatalogOptions = HostedCatalogCacheOptions;
 
-export class ManagedVideoModelCatalog {
-  private pending: Promise<ManagedVideoModelCatalogSnapshot> | undefined;
-  private cached: { value: ManagedVideoModelCatalogSnapshot; expiresAt: number; license: string } | null = null;
-  constructor(private readonly transport: Pick<HostedTransportAdapter, "request">, private readonly options: ManagedVideoModelCatalogOptions = {}) {}
-
-  /** The last loaded snapshot while it is fresh, without a request; null before the first load. */
-  peek(): ManagedVideoModelCatalogSnapshot | null {
-    const cached = this.cached;
-    if (!cached || cached.expiresAt <= this.now() || cached.license !== this.license()) return null;
-    return cached.value;
-  }
-
-  async load(): Promise<ManagedVideoModelCatalogSnapshot> {
-    const fresh = this.peek();
-    if (fresh) return fresh;
-    // Deduplicate simultaneous pickers; a short cache keeps card rendering
-    // synchronous without holding another license's catalog or a stale price.
-    if (this.pending) return this.pending;
-    this.pending = this.read();
-    try {
-      const value = await this.pending;
-      this.cached = { value, expiresAt: this.now() + CATALOG_TTL_MS, license: this.license() };
-      return value;
-    } finally { this.pending = undefined; }
-  }
-
-  invalidate(): void { this.cached = null; }
-
-  private now(): number { return this.options.now?.() ?? Date.now(); }
-  private license(): string { return this.options.licenseKey?.() ?? ""; }
-
-  private async read(): Promise<ManagedVideoModelCatalogSnapshot> {
-    const result = await this.transport.request({ path: "/api/plugin/videos/models", method: "GET" });
-    if (!result.response.ok) throw new Error(`Video models are unavailable (${result.response.status}). Check your license and connection.`);
-    return parseManagedVideoModelCatalog(await result.response.json());
+export class ManagedVideoModelCatalog extends HostedCatalogCache<ManagedVideoModelCatalogSnapshot> {
+  constructor(transport: Pick<HostedTransportAdapter, "request">, options: ManagedVideoModelCatalogOptions = {}) {
+    super(transport, "Video", parseManagedVideoModelCatalog, options);
   }
 }

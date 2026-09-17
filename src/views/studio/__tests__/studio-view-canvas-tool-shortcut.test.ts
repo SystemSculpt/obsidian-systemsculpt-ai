@@ -85,6 +85,30 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
   });
 
+  it("switches from the circle tool to Select with Shift+C", () => {
+    const context = createContext({ activeCanvasTool: "ellipse" });
+    const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true });
+
+    handleWindowKeyDown.call(context, event);
+
+    expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["metaKey", "ctrlKey", "altKey", "isComposing"])(
+    "leaves Shift+C alone with %s so app shortcuts keep working",
+    (modifier) => {
+      const context = createContext();
+      const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, [modifier]: true });
+
+      handleWindowKeyDown.call(context, event);
+
+      expect(context.selectCanvasTool).not.toHaveBeenCalled();
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+  );
+
   it("disarms the arrow tool too", () => {
     const context = createContext({ activeCanvasTool: "arrow" });
 
@@ -121,6 +145,9 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
       handleWindowKeyDown.call(context, event);
       expect(event.preventDefault).not.toHaveBeenCalled();
     }
+    const selectEvent = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, target });
+    handleWindowKeyDown.call(context, selectEvent);
+    expect(selectEvent.preventDefault).not.toHaveBeenCalled();
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
   });
 

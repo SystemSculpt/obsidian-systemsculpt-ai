@@ -1,6 +1,6 @@
 # Plugin development
 
-Work from ~/gits/personal/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
+Work from ~/gits/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
 local and CI baseline; version managers can select it from .nvmrc.
 
 ## Setup
@@ -149,6 +149,11 @@ npm run dev:watch:install
 npm run dev:watch:status
 ~~~
 
+Watcher startup and installation reject linked Git worktrees. A direct restart
+hands over only from a recorded process whose start identity still matches.
+If an older PID-only lock names a live process, stop that watcher manually
+before retrying; startup will not guess whether the PID still belongs to it.
+
 The per-user launch agent starts at login, stays running, rebuilds after source
 changes, atomically replaces each local artifact, and reloads the plugin through
 the official Obsidian CLI. Re-running the install command deliberately moves
@@ -157,6 +162,10 @@ production-shaped artifacts without inline source maps, including for local
 and staging API targets, so the artifact safety gate and automatic sync use
 the same bytes. Use `npm run
 dev:watch:uninstall` to remove it.
+
+Production-shaped builds are minified and retain class/function names for
+diagnostics. `npm run dev` keeps readable output and inline source maps for
+source-level debugging.
 
 Successful development syncs copy main.js, manifest.json, and styles.css. The
 synced manifest retains the release version used by server wire contracts and
@@ -289,11 +298,12 @@ Use credentials limited to the dedicated `systemsculpt-plugin-releases` bucket.
 The workflow cannot create, edit, or delete GitHub releases and does not deploy
 the plugin or API worker.
 
-Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with a controlled QA vault:
+Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with an explicitly supplied smoke license and candidate version (it makes no inference requests):
 
 ~~~bash
-cd ../website
-SYSTEMSCULPT_E2E_VAULT=/absolute/path/to/qa-vault npm run test:plugin-agent:live
+cd ../systemsculpt-website
+SYSTEMSCULPT_E2E_PLUGIN_VERSION=6.8.0 npm run test:agent-control-plane:live
+# Supply SYSTEMSCULPT_E2E_LICENSE_KEY securely through the environment.
 ~~~
 
 Then install the exact production-built candidate in real Obsidian. Verify one server web-search turn, a follow-up over the settled transcript, reconnect, and any changed approval or vault-tool flow. Record the Obsidian version and SHA-256 values for `main.js`, `manifest.json`, and `styles.css`. The credentialed production check is manual and cannot replace the deterministic critical-risk, endurance, integration, and byte-pinned cross-repository fixture gates.

@@ -109,9 +109,7 @@ export class FileContextMenuService {
   private readonly pluginLogger: PluginLogger | null;
   private readonly launchProcessingPanel: DocumentProcessingPanelLauncher;
   private eventRefs: EventRef[] = [];
-  private started = false;
-  private awaitingLayoutReady = false;
-  private cleanupRegistered = false;
+  private state: "stopped" | "waiting" | "active" = "stopped";
   private activeDocumentConversion: AbortController | null = null;
 
   constructor(options: FileContextMenuServiceOptions) {
@@ -127,24 +125,17 @@ export class FileContextMenuService {
       this.plugin.getPluginLogger();
     this.launchProcessingPanel = options.launchProcessingPanel ?? launchDocumentProcessingPanel;
 
+    this.plugin.register(() => this.stop());
     this.start();
   }
 
   start(): void {
-    if (this.started) {
-      return;
-    }
-
-    if (!this.cleanupRegistered) {
-      this.plugin.register(() => this.stop());
-      this.cleanupRegistered = true;
-    }
+    if (this.state !== "stopped") return;
+    this.state = "waiting";
 
     const workspace = this.app.workspace;
     const bindHandlers = () => {
-      if (this.started) {
-        return;
-      }
+      if (this.state !== "waiting") return;
 
       const fileRef = this.app.workspace.on(
         "file-menu",
@@ -157,9 +148,7 @@ export class FileContextMenuService {
       );
 
       this.eventRefs = [fileRef, filesRef];
-      this.eventRefs.forEach((ref) => this.plugin.registerEvent(ref));
-      this.started = true;
-      this.awaitingLayoutReady = false;
+      this.state = "active";
 
       this.info("File context menu service started", {
         layoutReady: workspace.layoutReady,
@@ -172,16 +161,7 @@ export class FileContextMenuService {
     }
 
     if (typeof workspace.onLayoutReady === "function") {
-      if (this.awaitingLayoutReady) {
-        this.debug("Layout ready listener already registered");
-        return;
-      }
-
-      this.awaitingLayoutReady = true;
-      workspace.onLayoutReady(() => {
-        this.awaitingLayoutReady = false;
-        bindHandlers();
-      });
+      workspace.onLayoutReady(bindHandlers);
 
       this.info("File context menu service awaiting layout ready", {
         layoutReady: false,
@@ -198,17 +178,11 @@ export class FileContextMenuService {
   stop(): void {
     this.activeDocumentConversion?.abort();
     this.activeDocumentConversion = null;
-    if (!this.started) {
-      return;
-    }
-
     for (const ref of this.eventRefs) {
       this.app.workspace.offref(ref);
     }
     this.eventRefs = [];
-    this.started = false;
-    this.awaitingLayoutReady = false;
-    this.cleanupRegistered = false;
+    this.state = "stopped";
 
     this.info("File context menu service stopped");
   }

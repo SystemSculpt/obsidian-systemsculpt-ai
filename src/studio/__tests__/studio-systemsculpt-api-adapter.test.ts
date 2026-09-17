@@ -22,8 +22,7 @@ function createPlugin() {
         adapter: {},
       },
     },
-    getManagedCapabilityGraph: () => ({ admission: {}, transport: {} }),
-    getManagedCapabilityClient: () => ({ generateText }),
+    getManagedCapabilityGraph: () => ({ admission: {}, transport: {}, textGeneration: { generate: generateText } }),
   };
   Object.defineProperties(plugin, {
     aiService: { get: () => { throw new Error("legacy stream access"); } },

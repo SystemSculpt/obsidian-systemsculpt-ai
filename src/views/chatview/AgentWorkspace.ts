@@ -22,7 +22,7 @@ import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
+import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import {
   AgentConversationRenderer,

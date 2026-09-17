@@ -23,7 +23,7 @@
       "node_modules/@types"
     ],
     "paths": {
-      "@/*": ["Nexus/src/*"],
+      "@/*": ["src/*"],
       "obsidian": ["node_modules/obsidian"]
     },
     "jsx": "react-jsx",

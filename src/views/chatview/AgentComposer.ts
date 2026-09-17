@@ -10,6 +10,7 @@ import {
   ChatMessageAttachmentCollection,
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
+  type ChatAttachmentIngestionResult,
 } from "./attachments/ChatMessageAttachments";
 import { containsControlCharacters } from "../../utils/characterValidation";
 
@@ -481,36 +482,29 @@ export class AgentComposer extends Component {
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);
   }
 
-  private async ingestFiles(files: readonly File[]): Promise<void> {
-    if (files.length === 0 || this.attachmentBusy || this.readOnlyMessage) return;
-    const generation = this.attachmentGeneration;
-    const collection = this.messageAttachments;
-    this.attachmentBusy = true;
-    this.syncControls();
-    try {
-      this.hint.setText("Processing attachments…");
-      const result = await collection.addFiles(files, this.input.value);
-      if (!this.isCurrentAttachmentOperation(generation, collection)) return;
-      for (const problem of result.issues) new Notice(problem.message, 5000);
-      this.renderAttachments();
-    } finally {
-      if (this.isCurrentAttachmentOperation(generation, collection)) {
-        this.attachmentBusy = false;
-        this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
-        this.syncControls();
-      }
-    }
+  private ingestFiles(files: readonly File[]): Promise<void> {
+    if (files.length === 0) return Promise.resolve();
+    return this.runAttachmentOperation("Processing attachments…", collection =>
+      collection.addFiles(files, this.input.value));
   }
 
-  private async retryMessageAttachment(id: string): Promise<void> {
+  private retryMessageAttachment(id: string): Promise<void> {
+    return this.runAttachmentOperation("Retrying document…", collection =>
+      collection.retry(id, this.input.value));
+  }
+
+  private async runAttachmentOperation(
+    label: string,
+    run: (collection: ChatMessageAttachmentCollection) => Promise<ChatAttachmentIngestionResult>,
+  ): Promise<void> {
     if (this.attachmentBusy || this.readOnlyMessage) return;
     const generation = this.attachmentGeneration;
     const collection = this.messageAttachments;
     this.attachmentBusy = true;
-    this.hint.setText("Retrying document…");
+    this.hint.setText(label);
     this.syncControls();
     try {
-      const result = await collection.retry(id, this.input.value);
+      const result = await run(collection);
       if (!this.isCurrentAttachmentOperation(generation, collection)) return;
       for (const problem of result.issues) new Notice(problem.message, 5000);
       this.renderAttachments();

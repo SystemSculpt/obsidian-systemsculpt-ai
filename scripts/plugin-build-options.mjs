@@ -234,6 +234,12 @@ export function createPluginBuildOptions({
     // Internal provenance must not be replaceable by generic esbuild overrides.
     plugins: [artifactIdentityPlugin, ...plugins],
     // Keep release-sensitive options after generic esbuild overrides.
+    minifyWhitespace: production,
+    minifyIdentifiers: production,
+    // Preserve audited expressions, including legacy credential-key cleanup.
+    minifySyntax: false,
+    // Retain useful class/function names in error reports and host integration.
+    keepNames: production,
     sourcemap: production ? false : (safeOverrides.sourcemap ?? 'inline'),
     define: {
       ...(overrideDefines || {}),

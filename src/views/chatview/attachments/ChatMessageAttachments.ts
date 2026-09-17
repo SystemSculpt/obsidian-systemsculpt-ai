@@ -4,7 +4,7 @@ import type {
   ChatMessage,
   MultiPartContent,
 } from "../../../types";
-import { sha256HexFromBytesPortable } from "../../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import { replaceControlCharacters } from "../../../utils/characterValidation";
 import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
@@ -15,7 +15,7 @@ import {
   createTextAttachmentPart,
   parseAttachedTextContent,
   parseImageDataUrl,
-} from "./ChatAttachmentContent";
+} from "../../../chat/ChatAttachmentContent";
 
 const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, "image/png" | "image/jpeg" | "image/webp">> = Object.freeze({
   png: "image/png",

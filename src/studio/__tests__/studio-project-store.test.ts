@@ -129,6 +129,7 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
     dirs,
     files,
     store: new StudioProjectStore(app as any),
+    reopen: () => new StudioProjectStore(app as any),
   };
 }
 
@@ -204,7 +205,7 @@ describe("StudioProjectStore", () => {
   });
 
   it("force reload invalidates the selected generation and ingests a one-file external edit", async () => {
-    const { store, files } = createStore();
+    const { store, files, reopen } = createStore();
     const created = await store.createProject({ name: "Direct edit", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");
 
@@ -214,12 +215,8 @@ describe("StudioProjectStore", () => {
 
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");
     expect((await store.loadProject(created.path, { forceReload: true })).name).toBe("Edited outside Studio");
-    const recovered = await store.generations.recover(created.project.projectId);
-    expect(recovered.status).toBe("ready");
-    if (recovered.status === "ready") {
-      expect(recovered.expectedGeneration.revision).toBe(1);
-      expect(recovered.generation.metadata.commandKind).toBe("external_sync");
-    }
+    // A new consumer must see the accepted edit without the previous store's cache.
+    expect((await reopen().loadProject(created.path)).name).toBe("Edited outside Studio");
   });
 
   it("keeps persistence bookkeeping out of project-file errors", async () => {

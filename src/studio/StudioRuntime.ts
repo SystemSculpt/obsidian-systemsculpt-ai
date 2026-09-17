@@ -8,13 +8,12 @@ import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
 import { hasHostCapability } from "../platform/hostCapabilities";
 import { StudioAssetStore } from "./StudioAssetStore";
-import { StudioGraphCompiler, type StudioCompiledGraph } from "./StudioGraphCompiler";
+import { StudioGraphCompiler, type StudioCompiledRun } from "./StudioGraphCompiler";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { buildNodeInputFingerprint, StudioNodeResultCacheStore } from "./StudioNodeResultCacheStore";
 import { StudioPermissionManager } from "./StudioPermissionManager";
 import { StudioSandboxRunner } from "./StudioSandboxRunner";
 import { StudioProjectStore } from "./StudioProjectStore";
-import { planStudioRun } from "./StudioRunScope";
 import type {
   StudioApiAdapter,
   StudioNodeCacheSnapshotV1,
@@ -33,11 +32,10 @@ import { nowIso, randomId } from "./utils";
 import { StudioRunObserver } from "./StudioRunObserver";
 import { assertStudioNodeHostAvailable } from "./StudioHostCapabilities";
 
+type RunResult = { summary: StudioRunSummary; inputs?: StudioNodeInputMap };
 type PendingRun = {
-  runId: string;
-  startedAt: string;
-  execute: () => Promise<StudioRunSummary>;
-  resolve: (summary: StudioRunSummary) => void;
+  execute: () => Promise<RunResult>;
+  resolve: (result: RunResult) => void;
   reject: (error: unknown) => void;
 };
 
@@ -70,7 +68,18 @@ const PREVIEWABLE_MEDIA_EXTENSIONS = new Set([
 
 export class StudioRuntime {
   private readonly codexRuns = new StudioCodexRuns();
-  dispose(): void { this.codexRuns.dispose(); }
+  private disposed = false;
+  private readonly activeRunControllers = new Set<AbortController>();
+
+  dispose(): void {
+    this.disposed = true;
+    for (const controller of this.activeRunControllers) controller.abort();
+    for (const queue of this.projectQueues.values()) {
+      for (const pending of queue.splice(0)) pending.reject(new Error("Studio runtime is disposed."));
+    }
+    this.projectQueues.clear();
+    this.codexRuns.dispose();
+  }
   private readonly projectQueues = new Map<string, PendingRun[]>();
   private readonly activeProjects = new Set<string>();
   private readonly nodeResultCacheStore: StudioNodeResultCacheStore;
@@ -243,8 +252,9 @@ export class StudioRuntime {
   private async enqueueRun(
     projectPath: string,
     project: StudioProjectV1,
-    options?: StudioRunOptions
-  ): Promise<StudioRunSummary> {
+    options?: StudioRunOptions & { prepareInputsFor?: string }
+  ): Promise<RunResult> {
+    if (this.disposed) throw new Error("Studio runtime is disposed.");
     const normalizedPath = normalizePath(projectPath);
     const queuedProject = cloneStudioProjectSnapshot(project);
     const runId = randomId("run");
@@ -256,20 +266,22 @@ export class StudioRuntime {
       new Set((options?.forceNodeIds || []).map((nodeId) => String(nodeId || "").trim()).filter(Boolean))
     );
     const onEvent = typeof options?.onEvent === "function" ? options.onEvent : undefined;
+    const compiled = this.compiler.compileRun(queuedProject, this.registry, {
+      entryNodeIds: scopedEntryNodeIds, prepareInputsFor: options?.prepareInputsFor,
+    });
 
-    return await new Promise<StudioRunSummary>((resolve, reject) => {
+    return await new Promise<RunResult>((resolve, reject) => {
       const pending: PendingRun = {
-        runId,
-        startedAt,
         execute: async () => {
-          const plan = planStudioRun(queuedProject, scopedEntryNodeIds, (node) => this.registry.get(node.kind, node.version)?.cachePolicy);
           this.runs.begin({
             projectPath: normalizedPath, runId,
-            nodeIds: plan.executeNodeIds,
+            nodeIds: compiled.executeNodeIds,
             fromNodeId: scopedEntryNodeIds[0] || null,
           });
+          const controller = new AbortController();
+          this.activeRunControllers.add(controller);
           try {
-            return await this.executeRun(normalizedPath, queuedProject, runId, startedAt, {
+            return await this.executeRun(normalizedPath, compiled, runId, startedAt, controller, {
               entryNodeIds: scopedEntryNodeIds.length > 0 ? scopedEntryNodeIds : undefined,
               forceNodeIds: scopedForceNodeIds.length > 0 ? scopedForceNodeIds : undefined,
               onEvent,
@@ -279,6 +291,8 @@ export class StudioRuntime {
             this.runs.publish(normalizedPath, { type: "run.failed", runId, error: String(error instanceof Error ? error.message : error), at: nowIso() });
             this.runs.publish(normalizedPath, { type: "run.completed", runId, status: "failed", at: nowIso() });
             throw error;
+          } finally {
+            this.activeRunControllers.delete(controller);
           }
         },
         resolve,
@@ -299,7 +313,7 @@ export class StudioRuntime {
   async runProject(projectPath: string, options?: StudioRunOptions): Promise<StudioRunSummary> {
     const normalizedPath = normalizePath(projectPath);
     const project = await this.projectStore.loadProject(normalizedPath);
-    return await this.enqueueRun(normalizedPath, project, options);
+    return (await this.enqueueRun(normalizedPath, project, options)).summary;
   }
 
   async runProjectSnapshot(
@@ -307,11 +321,17 @@ export class StudioRuntime {
     project: StudioProjectV1,
     options?: StudioRunOptions
   ): Promise<StudioRunSummary> {
-    return await this.enqueueRun(projectPath, project, options);
+    return (await this.enqueueRun(projectPath, project, options)).summary;
+  }
+
+  async prepareNodeInputs(projectPath: string, project: StudioProjectV1, nodeId: string): Promise<StudioNodeInputMap> {
+    if (!nodeId.trim()) throw new Error("A node is required to prepare connected inputs.");
+    const result = await this.enqueueRun(projectPath, project, { prepareInputsFor: nodeId.trim() });
+    return result.inputs!;
   }
 
   private async drainQueue(projectPath: string): Promise<void> {
-    if (this.activeProjects.has(projectPath)) return;
+    if (this.disposed || this.activeProjects.has(projectPath)) return;
     const queue = this.projectQueues.get(projectPath);
     if (!queue || queue.length === 0) return;
 
@@ -329,31 +349,6 @@ export class StudioRuntime {
       }
       await this.drainQueue(projectPath);
     }
-  }
-
-  private mapNodeInputs(compiled: StudioCompiledGraph, nodeId: string, outputsByNode: Map<string, StudioNodeOutputMap>): StudioNodeInputMap {
-    const current = compiled.nodesById.get(nodeId);
-    if (!current) return {};
-    const inputs: StudioNodeInputMap = {};
-    for (const edge of current.inboundEdges) {
-      const fromOutputs = outputsByNode.get(edge.fromNodeId);
-      if (!fromOutputs) continue;
-      const value = fromOutputs[edge.fromPortId];
-      if (typeof value === "undefined") continue;
-
-      if (Object.prototype.hasOwnProperty.call(inputs, edge.toPortId)) {
-        const existing = inputs[edge.toPortId];
-        if (Array.isArray(existing)) {
-          (existing as unknown[]).push(value);
-          inputs[edge.toPortId] = existing;
-        } else {
-          inputs[edge.toPortId] = [existing, value];
-        }
-      } else {
-        inputs[edge.toPortId] = value;
-      }
-    }
-    return inputs;
   }
 
   private isAbsoluteFilesystemPath(path: string): boolean {
@@ -403,19 +398,18 @@ export class StudioRuntime {
 
   private async executeRun(
     projectPath: string,
-    fullProject: StudioProjectV1,
+    compiled: StudioCompiledRun,
     runId: string,
     startedAt: string,
+    abortController: AbortController,
     options?: StudioRunOptions
-  ): Promise<StudioRunSummary> {
+  ): Promise<RunResult> {
+    abortController.signal.throwIfAborted();
     await this.retryPublishedTranscriptionCleanup(projectPath);
-    const plan = planStudioRun(cloneStudioProjectSnapshot(fullProject), options?.entryNodeIds, (node) => this.registry.get(node.kind, node.version)?.cachePolicy);
-    const project = plan.project;
-    const providedNodeIds = new Set(plan.providedNodeIds);
+    const { project, providedNodeIds, inputNodeId } = compiled;
     const policy = await this.projectStore.loadPolicy(project.permissionsRef.policyPath);
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);
-    const compiled = this.compiler.compile(project, this.registry);
 
     const snapshot: StudioRunSnapshotV1 = {
       schema: "studio.run.v1",
@@ -471,7 +465,6 @@ export class StudioRuntime {
 
     const outputsByNode = new Map<string, StudioNodeOutputMap>();
     const dependencyCount = new Map<string, number>();
-    const dependents = new Map<string, string[]>();
     const state = new Map<string, "pending" | "running" | "done" | "failed" | "skipped">();
     const runningByClass = {
       api: 0,
@@ -479,7 +472,6 @@ export class StudioRuntime {
       local_cpu: 0,
     };
     const runningPromises = new Map<string, Promise<void>>();
-    const abortController = new AbortController();
     const desktop = hasHostCapability("local-filesystem")
       ? await (async () => {
           const [fs, path, os] = await Promise.all([
@@ -496,18 +488,13 @@ export class StudioRuntime {
 
     for (const [nodeId, node] of compiled.nodesById.entries()) {
       dependencyCount.set(nodeId, node.dependencyNodeIds.length);
-      state.set(nodeId, "pending");
-      for (const depId of node.dependencyNodeIds) {
-        const list = dependents.get(depId) || [];
-        list.push(nodeId);
-        dependents.set(depId, list);
-      }
+      state.set(nodeId, nodeId === inputNodeId ? "skipped" : "pending");
     }
 
     let fatalError: unknown = null;
 
     const markDependentsReady = (nodeId: string): void => {
-      const next = dependents.get(nodeId) || [];
+      const next = compiled.nodesById.get(nodeId)?.dependentNodeIds || [];
       for (const dependentNodeId of next) {
         const prev = dependencyCount.get(dependentNodeId) || 0;
         dependencyCount.set(dependentNodeId, Math.max(0, prev - 1));
@@ -571,12 +558,7 @@ export class StudioRuntime {
 
       const promise = (async () => {
         assertStudioNodeHostAvailable(compiledNode.definition);
-        for (const edge of compiledNode.inboundEdges) {
-          if (!providedNodeIds.has(edge.fromNodeId) || outputsByNode.has(edge.fromNodeId)) continue;
-          const upstream = compiled.nodesById.get(edge.fromNodeId)?.node;
-          throw new Error(`Run "${upstream?.title || edge.fromNodeId}" first. It has no output yet, and Studio does not rerun it on your behalf.`);
-        }
-        const inputs = this.mapNodeInputs(compiled, nodeId, outputsByNode);
+        const inputs = compiled.resolveInputs(nodeId, outputsByNode);
         const cachePolicy = compiledNode.definition.cachePolicy || "by_inputs";
         // Every node records its latest outputs; only by-inputs nodes reuse them.
         const inputFingerprint = await buildNodeInputFingerprint(compiledNode.node, inputs);
@@ -617,7 +599,9 @@ export class StudioRuntime {
           }
         }
 
+        abortController.signal.throwIfAborted();
         await emit({ type: "node.started", runId, nodeId, at: nowIso() });
+        abortController.signal.throwIfAborted();
         const result = await compiledNode.definition.execute({
           projectId: project.projectId,
           runId,
@@ -795,7 +779,7 @@ export class StudioRuntime {
                 // Best effort cleanup.
               }
             },
-            runCli: (request) => sandbox.runCli(request),
+            runCli: (request) => sandbox.runCli({ ...request, signal: request.signal || abortController.signal }),
             assertFilesystemPath: (path) => permissions.assertFilesystemPath(path),
           },
           reportProgress: (percent, message) => {
@@ -892,6 +876,7 @@ export class StudioRuntime {
 
     try {
       while (true) {
+        if (abortController.signal.aborted && fatalError === null) fatalError = new Error("Studio run cancelled.");
         if (fatalError) break;
 
         let startedAny = false;
@@ -947,6 +932,12 @@ export class StudioRuntime {
           + "The graph has a dependency the scheduler cannot satisfy.",
         );
       }
+    }
+
+    let preparedInputs: StudioNodeInputMap | undefined;
+    if (inputNodeId && fatalError === null) {
+      try { preparedInputs = compiled.resolveInputs(inputNodeId, outputsByNode); }
+      catch (error) { fatalError = error; }
     }
 
     let status: StudioRunSummary["status"] = "success";
@@ -1020,6 +1011,6 @@ export class StudioRuntime {
       throw new Error(errorMessage || "Studio run failed.");
     }
 
-    return summary;
+    return { summary, inputs: preparedInputs };
   }
 }

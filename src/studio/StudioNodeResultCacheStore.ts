@@ -1,4 +1,4 @@
-import { sha256HexFromArrayBuffer } from "./hash";
+import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import { deriveStudioNodeCachePath } from "./paths";
 import { StudioProjectStore } from "./StudioProjectStore";
 import type { StudioJsonValue, StudioNodeCacheEntry, StudioNodeCacheSnapshotV1, StudioNodeInputMap, StudioNodeInstance } from "./types";

@@ -7,7 +7,7 @@ import type {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
-import { sha256HexFromBytesPortable } from "../studio/hash";
+import { sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { ManagedJobClient } from "./managed/ManagedJobClient";

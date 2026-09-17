@@ -328,6 +328,7 @@ export class AgentTranscriptRepository {
   private messages: ChatMessage[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private generation = 0;
+  private loadGeneration = 0;
   private readonly commitListeners = new Set<(commit: AgentTranscriptCommit) => void>();
 
   constructor(
@@ -352,8 +353,12 @@ export class AgentTranscriptRepository {
 
   public load(chatId: string): Promise<AgentLoadedTranscript | null> {
     const generation = this.generation;
+    const loadGeneration = ++this.loadGeneration;
     return this.serializeForGeneration(generation, async () => {
       const loaded = await this.storage.loadChat(chatId);
+      if (loadGeneration !== this.loadGeneration) {
+        throw new AgentTranscriptConflictError("A newer saved chat was selected while loading the transcript.");
+      }
       if (!loaded) return null;
       this.assertGeneration(
         generation,

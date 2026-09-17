@@ -3,12 +3,7 @@ import {
   normalizeStudioMenuScale,
   resolveStudioAnchoredMenuPosition,
 } from "./StudioFloatingMenuUtils";
-import {
-  cancelStudioAnimationFrame,
-  getStudioOwnerDocument,
-  getStudioOwnerWindow,
-  requestStudioAnimationFrame,
-} from "./StudioDomContext";
+import { StudioMenuLifecycle } from "./StudioMenuLifecycle";
 
 const CONTEXT_MENU_DEFAULT_WIDTH = 220;
 
@@ -30,41 +25,8 @@ export class StudioSimpleContextMenuOverlay {
   private anchorX = 0;
   private anchorY = 0;
   private menuWidth = CONTEXT_MENU_DEFAULT_WIDTH;
-  private isVisible = false;
   private itemButtons: HTMLButtonElement[] = [];
-  private focusRafId: number | null = null;
-  private listenerWindow: Window | null = null;
-
-  private readonly onWindowPointerDown = (event: PointerEvent): void => {
-    if (!this.isVisible || !this.rootEl) {
-      return;
-    }
-    const target = event.target as Node | null;
-    if (target && this.rootEl.contains(target)) {
-      return;
-    }
-    this.hide();
-  };
-
-  private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
-    if (!this.isVisible || event.key !== "Escape") {
-      return;
-    }
-    event.preventDefault();
-    this.hide();
-  };
-
-  private readonly onWindowContextMenu = (event: MouseEvent): void => {
-    if (!this.isVisible || !this.rootEl) {
-      return;
-    }
-    const target = event.target as Node | null;
-    if (target && this.rootEl.contains(target)) {
-      event.preventDefault();
-      return;
-    }
-    this.hide();
-  };
+  private lifecycle: StudioMenuLifecycle | null = null;
 
   mount(viewportEl: HTMLElement): void {
     this.viewportEl = viewportEl;
@@ -82,6 +44,7 @@ export class StudioSimpleContextMenuOverlay {
     if (this.rootEl?.parentElement) {
       this.rootEl.parentElement.removeChild(this.rootEl);
     }
+    this.lifecycle = null;
     this.viewportEl = null;
     this.rootEl = null;
     this.headerEl = null;
@@ -128,37 +91,15 @@ export class StudioSimpleContextMenuOverlay {
 
     this.renderItems(Array.isArray(options.items) ? options.items : []);
 
-    this.cancelPendingFocus();
-    this.rootEl.setCssStyles({ display: "flex" });
-    this.rootEl.removeAttribute("inert");
-    this.rootEl.setAttribute("aria-hidden", "false");
-    this.isVisible = true;
-    this.bindGlobalListeners();
-    this.applyLayout();
-
-    this.focusRafId = requestStudioAnimationFrame(this.rootEl, () => {
-      this.focusRafId = null;
-      if (!this.isVisible) {
-        return;
-      }
+    this.lifecycle?.show(() => {
       this.focusMenuItem(0);
       this.applyLayout();
     });
+    this.applyLayout();
   }
 
   hide(): void {
-    this.cancelPendingFocus();
-    this.unbindGlobalListeners();
-    this.isVisible = false;
-    if (this.rootEl) {
-      const activeElement = getStudioOwnerDocument(this.rootEl).activeElement as HTMLElement | null;
-      if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
-        activeElement.blur();
-      }
-      this.rootEl.setCssStyles({ display: "none" });
-      this.rootEl.setAttribute("inert", "");
-      this.rootEl.setAttribute("aria-hidden", "true");
-    }
+    this.lifecycle?.hide();
     if (this.listEl) {
       this.listEl.empty();
     }
@@ -197,6 +138,7 @@ export class StudioSimpleContextMenuOverlay {
     list.setAttribute("role", "presentation");
 
     this.rootEl = root;
+    this.lifecycle = new StudioMenuLifecycle(root, () => this.hide());
     this.headerEl = header;
     this.titleEl = title;
     this.subtitleEl = subtitle;
@@ -285,16 +227,6 @@ export class StudioSimpleContextMenuOverlay {
     }
   }
 
-  private cancelPendingFocus(): void {
-    if (this.focusRafId === null) {
-      return;
-    }
-    if (this.rootEl) {
-      cancelStudioAnimationFrame(this.rootEl, this.focusRafId);
-    }
-    this.focusRafId = null;
-  }
-
   private applyLayout(): void {
     if (!this.rootEl || !this.viewportEl) {
       return;
@@ -318,22 +250,4 @@ export class StudioSimpleContextMenuOverlay {
     this.rootEl.style.top = `${position.y}px`;
   }
 
-  private bindGlobalListeners(): void {
-    if (!this.rootEl) {
-      return;
-    }
-    this.unbindGlobalListeners();
-    const ownerWindow = getStudioOwnerWindow(this.rootEl);
-    ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown, true);
-    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
-    ownerWindow.addEventListener("contextmenu", this.onWindowContextMenu, true);
-    this.listenerWindow = ownerWindow;
-  }
-
-  private unbindGlobalListeners(): void {
-    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown, true);
-    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
-    this.listenerWindow?.removeEventListener("contextmenu", this.onWindowContextMenu, true);
-    this.listenerWindow = null;
-  }
 }

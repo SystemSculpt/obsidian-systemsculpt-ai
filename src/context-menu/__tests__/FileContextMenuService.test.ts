@@ -15,6 +15,31 @@ jest.mock("../../utils/errorLogger", () => ({
 }));
 
 describe("FileContextMenuService", () => {
+  it("does not revive menu handlers when layout becomes ready after unload", () => {
+    const app = new App() as any;
+    app.workspace.layoutReady = false;
+    app.workspace.on = jest.fn(() => ({ id: "evt-ref" }));
+    app.workspace.offref = jest.fn();
+    let ready!: () => void;
+    app.workspace.onLayoutReady = jest.fn((callback) => { ready = callback; });
+    const plugin = { settings: {}, register: jest.fn(), registerEvent: jest.fn(), getPluginLogger: () => null } as any;
+    const service = new FileContextMenuService({
+      app, plugin, documentProcessor: { processDocument: jest.fn() }, chatLauncher: { open: jest.fn() },
+    });
+    service.start();
+    expect(app.workspace.onLayoutReady).toHaveBeenCalledTimes(1);
+    plugin.register.mock.calls[0][0]();
+    ready();
+    expect(app.workspace.on).not.toHaveBeenCalled();
+
+    app.workspace.layoutReady = true;
+    service.start();
+    expect(app.workspace.on).toHaveBeenCalledTimes(2);
+    service.stop();
+    expect(app.workspace.offref).toHaveBeenCalledTimes(2);
+    expect(plugin.register).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["png", true],
     ["webp", true],

@@ -83,7 +83,7 @@ function studioPersistenceError(
 }
 
 export class StudioProjectStore {
-  readonly generations: StudioProjectGenerationStore;
+  private readonly generations: StudioProjectGenerationStore;
   private readonly selectedByPath = new Map<string, { token: ExpectedGeneration; generation: SelectedGeneration }>();
   private readonly projectWriteTails = new Map<string, Promise<unknown>>();
 

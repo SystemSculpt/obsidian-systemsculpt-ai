@@ -1,3 +1,4 @@
+import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 import { retryAfterHeaderMs } from "./ManagedJobObservation";
@@ -140,58 +141,13 @@ export class ManagedJobClient {
     if (mismatchedHeaders.length > 0) malformed(`Invalid managed image output headers: ${mismatchedHeaders.join(", ")}.`);
     const extension = expected.mime_type === "image/png" ? "png" : expected.mime_type === "image/jpeg" ? "jpg" : "webp";
     if (response.headers.get("content-disposition") !== `attachment; filename="systemsculpt-image-${outputIndex}.${extension}"`) malformed("Invalid managed image output disposition.");
-    const bytes = await this.readImageOutputBytes(response, expected.size_bytes, signal);
-    if (await this.sha256(bytes) !== expected.sha256) malformed("Managed image output integrity mismatch.");
+    const bytes = await readVerifiedManagedOutput(response, expected, signal, reason => malformed(`Managed image output ${reason}.`));
     return { metadata: expected, bytes };
-  }
-
-  private async readImageOutputBytes(response: Response, expectedBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
-    const body = response.body;
-    if (!body) malformed("Managed image output integrity mismatch.");
-    const reader = body.getReader();
-    const bytes = new Uint8Array(expectedBytes);
-    let offset = 0;
-    let completed = false;
-    const abortError = () => new DOMException("Aborted", "AbortError");
-    const abortReader = () => { void reader.cancel(abortError()).catch(() => undefined); };
-    signal?.addEventListener("abort", abortReader, { once: true });
-    try {
-      while (true) {
-        if (signal?.aborted) throw abortError();
-        let chunk: ReadableStreamReadResult<Uint8Array>;
-        try {
-          chunk = await reader.read();
-        } catch (error) {
-          if (signal?.aborted) throw abortError();
-          throw error;
-        }
-        if (signal?.aborted) throw abortError();
-        if (chunk.done) {
-          completed = true;
-          break;
-        }
-        if (!(chunk.value instanceof Uint8Array)) malformed("Managed image output body was malformed.");
-        if (chunk.value.byteLength > expectedBytes - offset) malformed("Managed image output exceeded expected size.");
-        bytes.set(chunk.value, offset);
-        offset += chunk.value.byteLength;
-      }
-    } finally {
-      signal?.removeEventListener("abort", abortReader);
-      if (!completed) {
-        try { await reader.cancel(); } catch {
-          // The original transfer failure remains authoritative.
-        }
-      }
-      reader.releaseLock();
-    }
-    if (offset !== expectedBytes) malformed("Managed image output integrity mismatch.");
-    return bytes.buffer;
   }
 
   private validateImageOutputMetadata(value: ManagedImageOutputMetadata, response = false): void { if (!value || Object.keys(value).sort().join() !== "height,index,mime_type,sha256,size_bytes,width" || !Number.isInteger(value.index) || value.index < 0 || value.index > 3 || !["image/png", "image/jpeg", "image/webp"].includes(value.mime_type) || !Number.isInteger(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MANAGED_IMAGE_OUTPUT_MAX_BYTES || !/^[a-f0-9]{64}$/.test(value.sha256) || [value.width, value.height].some(v => v !== null && (!Number.isInteger(v) || v < 0))) { if (response) malformed("Malformed image output metadata."); this.invalid("Invalid expected image output metadata."); } }
   private imageOutputHeaders(requestId: string): Record<string, string> { return { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": requestId }; }
   private requestId(): string { const requestId = this.createRequestId(); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) throw new Error("Invalid generated request ID."); return requestId; }
-  private async sha256(bytes: ArrayBuffer): Promise<string> { const digest = await window.crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join(""); }
   private validateImageOutputResponseHeaders(response: Response, requestId: string): void { const expected = { "x-request-id": requestId, "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation" }; if (Object.entries(expected).some(([name, value]) => response.headers.get(name) !== value)) malformed("Invalid managed image output response headers."); }
   private async imageOutputError(result: ManagedTransportResult, requestId: string): Promise<never> { this.validateImageOutputResponseHeaders(result.response, requestId); let value: unknown; try { value = await result.response.json(); } catch { malformed("Malformed managed image output error response."); } const envelope = exact(value, ["contract_version", "code", "message", "request_id"]); if (envelope.contract_version !== MANAGED_IMAGE_OUTPUT_PROTOCOL || envelope.request_id !== requestId || typeof envelope.code !== "string" || typeof envelope.message !== "string") malformed("Malformed managed image output error response."); const descriptor = (MANAGED_IMAGE_OUTPUT_DESCRIPTOR.errors as Record<string, { status: number; message: string }>)[envelope.code]; if (!descriptor || descriptor.status !== result.response.status || descriptor.message !== envelope.message) malformed("Malformed managed image output error response."); const code = envelope.code as ErrorCode; throw new ManagedJobError(code, descriptor.message, descriptor.status, requestId, code === "rate_limited" || code === "temporarily_unavailable", null, retryAfterHeaderMs(result.response.headers.get("retry-after"))); }
 

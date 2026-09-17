@@ -516,14 +516,9 @@ export class SurfaceCombobox<T> {
     const count = this.visibleItems.length;
     if (count === 0) return;
 
-    let nextIndex: number;
-    if (this.currentActiveIndex < 0) {
-      nextIndex = delta > 0 ? 0 : count - 1;
-    } else if ((this.options.navigation ?? "clamp") === "wrap") {
-      nextIndex = (this.currentActiveIndex + delta + count) % count;
-    } else {
-      nextIndex = Math.max(0, Math.min(count - 1, this.currentActiveIndex + delta));
-    }
+    const nextIndex = this.currentActiveIndex < 0
+      ? delta > 0 ? 0 : count - 1
+      : this.resolveMovedIndex(this.currentActiveIndex, delta);
     this.setActiveIndex(nextIndex);
   }
 

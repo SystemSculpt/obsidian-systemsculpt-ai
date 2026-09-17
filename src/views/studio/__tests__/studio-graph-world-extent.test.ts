@@ -3,7 +3,7 @@ import {
   STUDIO_WORLD_EXTENT_MIN_CHUNK,
   worldExtentContains,
   type StudioWorldExtent,
-} from "../graph-v3/StudioGraphWorldExtent";
+} from "../canvas/StudioGraphWorldExtent";
 
 const view = { left: 0, top: 0, right: 1200, bottom: 800 };
 const margin = { x: 1200, y: 800 };
@@ -58,5 +58,16 @@ describe("computeStudioWorldExtent", () => {
     expect(next.width).toBe(10_000);
     expect(worldExtentContains(next, farView)).toBe(true);
     expect(next.left).toBeGreaterThan(current.left);
+  });
+
+  it("keeps the viewport reachable when distant content spans both sides of the cap", () => {
+    const next = computeStudioWorldExtent({
+      current: null,
+      content: { left: -100_000, top: -100_000, right: 100_000, bottom: 100_000 },
+      view, margin, slack, maxSize: 10_000,
+    });
+    expect(next.width).toBe(10_000);
+    expect(next.height).toBe(10_000);
+    expect(worldExtentContains(next, view)).toBe(true);
   });
 });

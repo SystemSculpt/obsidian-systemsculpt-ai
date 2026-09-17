@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { resolveStudioAssetPreviewSrc } from "./graph-v3/StudioGraphMediaPreviewModal";
+import { resolveStudioAssetPreviewSrc } from "./canvas/StudioGraphMediaPreviewModal";
 
 type Preview = { path: string; src: string | null };
 

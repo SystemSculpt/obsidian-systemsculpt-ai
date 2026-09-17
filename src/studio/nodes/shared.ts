@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeExecutionContext } from "../types";
+import type { StudioImageGenerationInput, StudioJsonValue, StudioNodeExecutionContext } from "../types";
 import { isRecord } from "../utils";
 
 export type StudioImageInputCandidate = {
@@ -256,4 +256,40 @@ export function parseStructuredPromptInput(value: StudioJsonValue | undefined): 
   }
 
   return { prompt: text, systemPrompt: "", inputImages: [] };
+}
+
+function normalizeImageInputMimeType(value: string): "image/png" | "image/jpeg" | "image/webp" | null {
+  const mimeType = value.trim().toLowerCase();
+  if (mimeType === "image/png" || mimeType === "image/webp") return mimeType;
+  return mimeType === "image/jpeg" || mimeType === "image/jpg" ? "image/jpeg" : null;
+}
+
+/** Shared admission of image references and video stills. Existing staged assets
+ * stay lazy; file paths cross their host permission gate once before staging. */
+export async function resolveStudioImageInput(
+  context: StudioNodeExecutionContext,
+  candidate: StudioImageInputCandidate,
+  inputLabel: string,
+): Promise<StudioImageGenerationInput> {
+  const path = String(candidate.path || "").trim();
+  const hash = String(candidate.hash || "").trim().toLowerCase();
+  const size = Number(candidate.sizeBytes);
+  const sizeBytes = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+  const mimeType = normalizeImageInputMimeType(String(candidate.mimeType || ""));
+  let asset;
+  if (hash && path && sizeBytes && mimeType) {
+    asset = { hash, path, sizeBytes, mimeType };
+  } else {
+    const inferredMimeType = mimeType || normalizeImageInputMimeType(inferMimeTypeFromPath(path));
+    if (!inferredMimeType) throw new Error(`${inputLabel} format "${path}". Use PNG, JPEG, or WEBP.`);
+    let bytes: ArrayBuffer;
+    if (isLikelyAbsolutePath(path)) {
+      context.services.assertFilesystemPath(path);
+      bytes = await context.services.readLocalFileBinary(path);
+    } else {
+      bytes = await context.services.readVaultBinary(path);
+    }
+    asset = await context.services.storeAsset(bytes, inferredMimeType);
+  }
+  return { asset, load: () => context.services.readAsset(asset) };
 }

@@ -1,14 +1,14 @@
 import type { ChatMessage } from "../../../types";
-import type { AgentConversationSnapshot } from "../AgentConversation";
+import type { AgentConversationSnapshot } from "../../../chat/ChatConversation";
 import { AgentChatView } from "../AgentChatView";
 import {
   AgentChatSession,
-} from "../agent/ChatSession";
+} from "../../../chat/managed/ChatSession";
 import {
   THIN_AGENT_COMMAND_TYPE,
   THIN_AGENT_EVENT_TYPE,
   type AgentSubmitCommand,
-} from "../agent/Protocol";
+} from "../../../chat/managed/Protocol";
 
 const SOURCE_CONVERSATION_ID = `conversation_${"1".repeat(32)}`;
 const CLIENT_ID = `client_${"2".repeat(32)}`;

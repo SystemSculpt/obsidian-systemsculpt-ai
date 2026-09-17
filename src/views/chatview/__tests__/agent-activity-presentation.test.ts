@@ -1,4 +1,4 @@
-import type { AgentPart } from "../AgentConversation";
+import type { AgentPart } from "../../../chat/ChatConversation";
 import {
   finalAgentAnswerPartIds,
   formatAgentActivityDuration,

@@ -15,7 +15,7 @@ export function studioNodeSourceConfig(node: StudioNodeInstance): Record<string,
 }
 export function readStudioNodeSource(node: StudioNodeInstance): StudioNodeSource {
   if (node.kind === 'studio.script') return { language: 'javascript', text: typeof node.config.source === 'string' ? node.config.source : STUDIO_SCRIPT_TEMPLATE, externalData: false };
-  if (node.kind === 'studio.json') return { language: 'json', text: JSON.stringify(node.config.value ?? {}, null, 2), externalData: false };
+  if (node.kind === 'studio.json') return { language: 'json', text: JSON.stringify(node.config.value === undefined ? {} : node.config.value, null, 2), externalData: false };
   if (node.kind === 'studio.text') return { language: 'markdown', text: String(node.config.value ?? ''), externalData: false };
   const externalData = node.kind === 'studio.collection' && readCollectionField(node.config.value, 'source.schema') === 'studio.source.v1';
   return { language: 'yaml', text: stringify(studioNodeSourceConfig(node), { lineWidth: 0, aliasDuplicateObjects: false }), externalData };

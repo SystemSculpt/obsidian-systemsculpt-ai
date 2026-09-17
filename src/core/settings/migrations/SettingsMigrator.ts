@@ -216,12 +216,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function pruneLegacyKeysV1(settings: Record<string, unknown>): Record<string, unknown> {
-  const next = { ...settings };
-  for (const key of LEGACY_KEYS_REMOVED_IN_V1) {
-    delete next[key];
-  }
-  return next;
+function removeKeys(keys: readonly string[]): SettingsMigrationStep["migrate"] {
+  return settings => {
+    const next = { ...settings };
+    for (const key of keys) delete next[key];
+    return next;
+  };
 }
 
 /**
@@ -233,102 +233,57 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
   {
     to: 1,
     describe: "Prune legacy keys removed before schema versioning was introduced",
-    migrate: pruneLegacyKeysV1,
+    migrate: removeKeys(LEGACY_KEYS_REMOVED_IN_V1),
   },
   {
     to: 2,
     describe: "Remove retired managed disclosure acceptance",
-    migrate: (settings) => {
-      const next = { ...settings };
-      delete next.managedDisclosureAcceptance;
-      return next;
-    },
+    migrate: removeKeys(["managedDisclosureAcceptance"]),
   },
   {
     to: 3,
     describe: "Remove legacy configurable embeddings provider and retry controls",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3) {
-        delete next[key];
-      }
-      return next;
-    },
+    migrate: removeKeys(LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3),
   },
   {
     to: 4,
     describe: "Remove retired client-side provider, model, Pi auth, and BYOK settings",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4) {
-        delete next[key];
-      }
-      return next;
-    },
+    migrate: removeKeys(LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4),
   },
   {
     to: 5,
     describe: "Remove retired client-owned chat prompt, mode, and directory settings",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_CHAT_KEYS_REMOVED_IN_V5) delete next[key];
-      for (const key of LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5) delete next[key];
-      return next;
-    },
+    migrate: removeKeys([...LEGACY_CHAT_KEYS_REMOVED_IN_V5, ...LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5]),
   },
   {
     to: 6,
     describe: "Remove orphaned feature, model-routing, and modal-state settings",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_FEATURE_KEYS_REMOVED_IN_V6) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_FEATURE_KEYS_REMOVED_IN_V6),
   },
   {
     to: 7,
     describe: "Remove the retired semantic-index auto-process switch",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7),
   },
   {
     to: 8,
     describe: "Remove duplicate plugin-update notification state",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_UPDATE_KEYS_REMOVED_IN_V8) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_UPDATE_KEYS_REMOVED_IN_V8),
   },
   {
     to: 9,
     describe: "Remove retired recorder and transcription settings",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_AUDIO_KEYS_REMOVED_IN_V9) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_AUDIO_KEYS_REMOVED_IN_V9),
   },
   {
     to: 10,
     describe: "Move microphone preference out of synced settings",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_RECORDER_KEYS_REMOVED_IN_V10) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_RECORDER_KEYS_REMOVED_IN_V10),
   },
   {
     to: 11,
     describe: "Remove obsolete top-level transcription language overrides",
-    migrate: (settings) => {
-      const next = { ...settings };
-      for (const key of LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11) delete next[key];
-      return next;
-    },
+    migrate: removeKeys(LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11),
   },
   {
     to: 12,

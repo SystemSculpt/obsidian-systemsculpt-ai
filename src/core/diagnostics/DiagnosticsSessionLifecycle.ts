@@ -50,6 +50,7 @@ export type DiagnosticsSessionMetadata = Readonly<{
 }>;
 
 export interface DiagnosticsSessionStorage {
+  initialize(): Promise<void>;
   getPath(type: "diagnostics"): string;
   writeFile(type: "diagnostics", fileName: string, data: string | object): Promise<unknown>;
 }
@@ -61,7 +62,7 @@ export type DiagnosticsSessionLifecycleOptions = Readonly<{
   getObsidianVersion: () => unknown;
 }>;
 
-export type DiagnosticsSessionSchedule = Readonly<{
+type DiagnosticsSessionSchedule = Readonly<{
   sessionId: string;
   startedAt: string;
 }>;
@@ -102,11 +103,67 @@ export function sanitizePublicDiagnosticsVersion(value: unknown): string {
 }
 
 export class DiagnosticsSessionLifecycle {
+  readonly logFileName = "systemsculpt-latest.log";
+  readonly metricsFileName = "resource-metrics-latest.ndjson";
+  private activeSessionId: string | null = null;
+  private startup: Promise<void> | null = null;
   private admissionOpen = true;
 
   constructor(private readonly options: DiagnosticsSessionLifecycleOptions) {}
 
-  async schedule(session: DiagnosticsSessionSchedule): Promise<void> {
+  get sessionId(): string | null {
+    return this.activeSessionId;
+  }
+
+  /** Prepares one session. Concurrent callers share rotation and metadata writes. */
+  start(): Promise<void> {
+    return this.startup ??= this.prepare();
+  }
+
+  private async prepare(): Promise<void> {
+    if (!this.admissionOpen) return;
+    try {
+      await this.options.storage.initialize();
+    } catch {
+      warnDiagnostics("Failed to initialize storage");
+    }
+    if (!this.admissionOpen) return;
+
+    const startedAt = new Date();
+    const pad = (value: number): string => value.toString().padStart(2, "0");
+    const sessionId = [
+      startedAt.getFullYear(), pad(startedAt.getMonth() + 1), pad(startedAt.getDate()),
+      "-", pad(startedAt.getHours()), pad(startedAt.getMinutes()), pad(startedAt.getSeconds()),
+    ].join("");
+    this.activeSessionId = sessionId;
+    const header = `SystemSculpt diagnostics session ${sessionId} (plugin v${sanitizePublicDiagnosticsVersion(this.options.pluginVersion)})\n`;
+    await this.rotate(this.logFileName, `systemsculpt-${sessionId}.log`, header);
+    await this.rotate(this.metricsFileName, `resource-metrics-${sessionId}.ndjson`);
+    await this.schedule({ sessionId, startedAt: startedAt.toISOString() });
+  }
+
+  private async rotate(latestName: string, archiveName: string, header = ""): Promise<void> {
+    if (!this.admissionOpen) return;
+    const { adapter, storage } = this.options;
+    const basePath = storage.getPath("diagnostics");
+    const latestPath = `${basePath}/${latestName}`;
+    try {
+      if (await adapter.exists(latestPath)) {
+        if (!this.admissionOpen) return;
+        await adapter.rename(latestPath, `${basePath}/${archiveName}`);
+      }
+    } catch {
+      warnDiagnostics("Failed to rotate file");
+    }
+    if (!this.admissionOpen) return;
+    try {
+      await adapter.write(latestPath, header);
+    } catch {
+      warnDiagnostics("Failed to reset file");
+    }
+  }
+
+  private async schedule(session: DiagnosticsSessionSchedule): Promise<void> {
     if (!this.admissionOpen) return;
     const metadata: DiagnosticsSessionMetadata = {
       schemaVersion: 2,

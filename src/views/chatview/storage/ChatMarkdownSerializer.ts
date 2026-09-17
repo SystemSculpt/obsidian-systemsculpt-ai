@@ -5,10 +5,9 @@ import {
   MultiPartContent,
   type ChatAttachmentMetadata,
 } from "../../../types";
-import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
+import { parseAttachedTextContent } from "../../../chat/ChatAttachmentContent";
 import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
-import { MessagePartList } from "../utils/MessagePartList";
 import {
   hasChatIdentityMetadata,
   parseChatFrontmatterYaml,
@@ -264,15 +263,14 @@ export class ChatMarkdownSerializer {
   }
 
   private static reconstructMessageFromParts(role: ChatRole, message_id: string, messageParts: MessagePart[]): ChatMessage {
-    const list = new MessagePartList(messageParts);
-    return {
-      role,
-      message_id,
-      content: list.contentMarkdown(""),
-      reasoning: list.reasoningMarkdown(),
-      tool_calls: list.toolCalls,
-      messageParts,
-    };
+    let content = "", reasoning = "";
+    const tool_calls: ToolCall[] = [];
+    for (const part of messageParts) {
+      if (part.type === "content") content += String(part.data ?? "");
+      else if (part.type === "reasoning") reasoning += String(part.data ?? "");
+      else if (part.type === "tool_call") tool_calls.push(part.data);
+    }
+    return { role, message_id, content, reasoning, tool_calls, messageParts };
   }
 
   private static parseFramedMessagePayload(

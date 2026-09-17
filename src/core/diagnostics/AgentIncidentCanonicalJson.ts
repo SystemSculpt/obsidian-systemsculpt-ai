@@ -5,7 +5,7 @@
  * incident report: the recorder sizes its reports with it and the store
  * persists exactly the bytes it returns, so the two cannot drift. It reads own
  * data properties through descriptors and never invokes getters, toJSON hooks
- * or Proxy traps. It rejects cycles, symbol keys, accessors, non-plain
+ * and fails closed when object inspection throws. It rejects cycles, symbol keys, accessors, non-plain
  * prototypes, reserved keys, sparse arrays, non-finite numbers and malformed
  * UTF-16, and emits RFC 8785 output (property names sorted by UTF-16 code
  * unit, arrays in order, shortest round-trip numbers).

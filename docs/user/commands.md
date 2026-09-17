@@ -17,7 +17,7 @@ Source of truth:
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
-| Copy Current File Path | `Mod+Shift+C` | `copy-current-file-path` | Copies the full filesystem path on desktop and the vault-relative path on mobile for the focused vault-backed tab |
+| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault, with a success notice; assign a shortcut in Obsidian Hotkeys |
 
 ## Chat and writing
 
@@ -32,7 +32,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Opens search modal |
+| Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
 | Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
@@ -63,7 +63,7 @@ Chat always runs through SystemSculpt. There are no separate chat-model commands
 
 While the Studio canvas is active:
 
-- `S` selects the pointer tool; `B` draws a box, `C` draws a circle, and `A`
+- `Shift+C` or `S` selects the pointer tool; `B` draws a box, `C` draws a circle, and `A`
   draws a visual arrow. `Escape` returns to the pointer. The same tools are
   available in the canvas toolbar.
 - With the arrow tool, drag from a node or shape onto another node or shape.
@@ -82,7 +82,7 @@ editing a field.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
-| Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Opens janitor modal |
+| Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Reviews cleanup candidates before moving them to Trash |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
 
 ### Studio cards
@@ -100,3 +100,5 @@ A **Video generation** card needs a model and a prompt, and accepts optional fir
 Add a **Script** node for JavaScript with typed connections. The starter module exports a function receiving `inputs` and `context`, and returns output values. The opening `studio` comment declares ports and runtime settings. Scripts run through an approved local Node executable on desktop. JSON and Markdown data have their own source editors; existing typed actions use YAML definitions. Live collection data continues updating in Result.
 
 Click an empty part of a group's colored background to select its frame, then press **Cmd/Ctrl+F** to fit the whole group and its label. The selected group has a solid outline. Dragging the background still moves the group; node controls and source editors remain independently interactive. Keyboard users can focus a group and press Enter or Space to select it.
+
+Janitor only applies the reviewed files. Files changed, moved, replaced, or added after review are preserved. Audio cleanup keeps transcripts, and notes containing frontmatter are not treated as empty.

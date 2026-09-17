@@ -4,7 +4,7 @@ import type {
   AgentPart,
   AgentRunStatus,
   AgentToolPart,
-} from "./AgentConversation";
+} from "../../chat/ChatConversation";
 
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;

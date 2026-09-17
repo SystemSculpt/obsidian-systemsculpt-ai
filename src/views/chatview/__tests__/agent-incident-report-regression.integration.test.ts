@@ -1,3 +1,4 @@
+import type { AgentChatTransportSegmentSummaryEvent, AgentRunFailureCaptureEvent } from "../../../core/diagnostics/AgentIncidentCapture";
 import { createHash } from "node:crypto";
 import * as Obsidian from "obsidian";
 import type { ListedFiles, Stat } from "obsidian";
@@ -22,13 +23,9 @@ import {
 } from "../../../utils/PluginLogger";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
-import type {
-  AgentChatTransportSegmentSummaryEvent,
-  AgentRunFailureCaptureEvent,
-} from "../agent/ChatSession";
-import { AgentChatSession } from "../agent/ChatSession";
-import { AgentMutationJournal } from "../agent/MutationJournal";
-import { THIN_AGENT_EVENT_TYPE } from "../agent/Protocol";
+import { AgentChatSession } from "../../../chat/managed/ChatSession";
+import { AgentMutationJournal } from "../../../chat/managed/MutationJournal";
+import { THIN_AGENT_EVENT_TYPE } from "../../../chat/managed/Protocol";
 import { AgentChatView } from "../AgentChatView";
 
 const CONVERSATION_ID = `conversation_${"1".repeat(32)}`;

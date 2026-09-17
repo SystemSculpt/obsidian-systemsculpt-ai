@@ -10,19 +10,19 @@ import type { ToolCall } from "../../types/toolCalls";
 import {
   isServerExecutedManagedToolCall,
   readManagedToolCallFunction,
-} from "../../services/chat/ManagedToolExecution";
+} from "../../chat/managed/ManagedToolExecution";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
 import {
   renderOperationsInlinePreview,
   renderWriteEditInlineDiff,
-} from "../../utils/toolCallPreview";
+} from "./ToolCallPreview";
 import type {
   AgentArtifact,
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
-} from "./AgentConversation";
+} from "../../chat/ChatConversation";
 import {
   formatAgentActivityDuration,
   formatAgentWorkingDuration,
@@ -51,6 +51,7 @@ import {
   type PresentedMessageAttachment,
   type PresentedMessageContent,
 } from "./ChatMessagePresentation";
+import { InlineMessageEditor, type AgentInlineMessageEdit } from "./InlineMessageEditor";
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
@@ -93,14 +94,7 @@ export type AgentConversationRendererIncidentSnapshot = Readonly<{
   renderingEnabled: boolean;
 }>;
 
-export type AgentInlineMessageEdit = Readonly<{
-  messageId: string;
-  text: string;
-  laterMessageCount: number;
-  hasAttachments: boolean;
-  unavailableAttachmentCount: number;
-  requiresReplayConfirmation: boolean;
-}>;
+export type { AgentInlineMessageEdit } from "./InlineMessageEditor";
 
 function button(parent: HTMLElement, testId: string, label: string, icon?: string): HTMLButtonElement {
   const element = createUiAction(parent, {
@@ -473,10 +467,7 @@ export class AgentConversationRenderer extends Component {
   private activeTurn: HTMLElement | null = null;
   private activeBody: HTMLElement | null = null;
   private activeTurnId: string | null = null;
-  private suppressedEditorKeyup: "Escape" | "Enter" | null = null;
-  private suppressedEditorKeyupAction: (() => void) | null = null;
-  private suppressedEditorKeyupTimer: number | null = null;
-  private inlineEditorShortcutCleanup: (() => void) | null = null;
+  private readonly inlineEditor: InlineMessageEditor;
   private readonly copyFeedbackTimers = new Map<HTMLButtonElement, number>();
   private readonly incidentDisclosureStates = new Map<HTMLElement, IncidentDisclosureState>();
   private readonly liveMarkdown: LiveMarkdownRenderer;
@@ -507,11 +498,10 @@ export class AgentConversationRenderer extends Component {
     });
     this.historyRoot = this.element.createDiv({ cls: "systemsculpt-agent-history" });
     this.activeRoot = this.element.createDiv({ cls: "systemsculpt-agent-active-run" });
-    const containEditorKeyup = (event: KeyboardEvent): void => {
-      this.containSuppressedEditorKeyup(event);
-    };
-    this.element.addEventListener("keyup", containEditorKeyup, true);
-    this.register(() => this.element.removeEventListener("keyup", containEditorKeyup, true));
+    this.inlineEditor = new InlineMessageEditor(this.element, {
+      onResubmitMessage: options.onResubmitMessage,
+      onCancelMessageEdit: options.onCancelMessageEdit,
+    });
     this.liveMarkdown = new LiveMarkdownRenderer({
       beginDomCommit: (target) => this.options.beginLayoutMutation?.(undefined, target),
       render: async (markdown, staging, component) => {
@@ -829,7 +819,7 @@ export class AgentConversationRenderer extends Component {
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
-          this.renderInlineMessageEditor(body, inlineEdit);
+          this.inlineEditor.render(body, inlineEdit);
         } else if (content.markdown.trim()) {
           try {
             await this.renderMarkdown(content.markdown, body);
@@ -913,7 +903,7 @@ export class AgentConversationRenderer extends Component {
     this.committedCancelledMessageIds = nextDurableCancelledMessageIds;
     this.committedFailedMessageIds = nextDurableFailedMessageIds;
     this.committedFailedTurnIds = nextDurableFailedTurnIds;
-    if (!hasInlineEdit) this.clearInlineEditorShortcutGuard();
+    if (!hasInlineEdit) this.inlineEditor.deactivate();
   }
 
   /**
@@ -2641,8 +2631,7 @@ export class AgentConversationRenderer extends Component {
     this.committedFailedTurnIds = new Set<string>();
     this.incidentDisclosureStates.clear();
     this.incidentPendingHydrationCount = 0;
-    this.clearInlineEditorShortcutGuard();
-    this.clearSuppressedEditorKeyup();
+    this.inlineEditor.dispose();
   }
 
   public override onload(): void {
@@ -3154,7 +3143,7 @@ export class AgentConversationRenderer extends Component {
     open.onclick = () => void this.options.onOpenArtifact(artifact);
     const copyPath = button(actions, "chat.tool.file.copy-path", "Copy path", "copy");
     copyPath.setAttrs({ "aria-label": "Copy path", "aria-live": "polite" });
-    copyPath.onclick = () => void this.copyArtifactPath(copyPath, artifact);
+    copyPath.onclick = () => void this.copyWithFeedback(copyPath, "path", () => this.options.onCopyArtifactPath(artifact));
   }
 
   private historicalToolPart(tool: ToolCall): AgentToolPart {
@@ -3227,7 +3216,7 @@ export class AgentConversationRenderer extends Component {
       });
       copy.addClass("systemsculpt-agent-message-copy");
       copy.setAttrs({ "aria-label": `Copy ${subject}`, "aria-live": "polite" });
-      copy.onclick = () => void this.copyMessage(copy, text, subject);
+      copy.onclick = () => void this.copyWithFeedback(copy, subject, () => this.options.onCopyText?.(text));
     }
     if (canRetry) {
       const retry = createUiAction(actions, {
@@ -3240,185 +3229,6 @@ export class AgentConversationRenderer extends Component {
       retry.setAttr("data-focus-key", "edit-message");
       retry.onclick = () => void this.options.onRetryMessage?.(message.message_id);
     }
-  }
-
-  private renderInlineMessageEditor(parent: HTMLElement, edit: AgentInlineMessageEdit): void {
-    const editor = parent.createDiv({
-      cls: "systemsculpt-agent-message-editor",
-      attr: {
-        role: "group",
-      },
-    });
-    const input = editor.createEl("textarea", {
-      cls: "systemsculpt-agent-message-editor-input",
-      attr: {
-        rows: "3",
-        "aria-label": "Edit message",
-      },
-    });
-    input.value = edit.text;
-
-    const consequenceParts: string[] = [];
-    if (edit.laterMessageCount > 0) {
-      consequenceParts.push(
-        `Saving will replace ${edit.laterMessageCount} later ${
-          edit.laterMessageCount === 1 ? "message" : "messages"
-        } in this chat.`,
-      );
-    } else {
-      consequenceParts.push("Saving will resubmit this message from here.");
-    }
-    if (edit.unavailableAttachmentCount > 0) {
-      consequenceParts.push(
-        `${edit.unavailableAttachmentCount} unavailable ${
-          edit.unavailableAttachmentCount === 1 ? "attachment" : "attachments"
-        } will be left out.`,
-      );
-    }
-    if (edit.requiresReplayConfirmation) {
-      consequenceParts.push("Existing vault changes will not be undone. You will confirm before resubmitting.");
-    }
-    consequenceParts.push("Ctrl or Command Enter to save. Escape to cancel.");
-    const hint = editor.createDiv({
-      cls: "systemsculpt-agent-message-editor-hint",
-      text: consequenceParts.join(" "),
-    });
-    const hintId = `systemsculpt-agent-message-editor-hint-${edit.messageId}`;
-    hint.id = hintId;
-    input.setAttribute("aria-describedby", hintId);
-
-    const actions = editor.createDiv({ cls: "systemsculpt-agent-message-editor-actions" });
-    const cancel = createUiAction(actions, {
-      label: "Cancel",
-      testId: "chat.editor.cancel",
-      size: "small",
-    });
-    const save = createUiAction(actions, {
-      label: "Save and resubmit",
-      testId: "chat.editor.save-resubmit",
-      tone: "primary",
-      size: "small",
-    });
-    let submitting = false;
-    const sync = (): void => {
-      const empty = input.value.trim().length === 0 && !edit.hasAttachments;
-      input.disabled = submitting;
-      cancel.disabled = submitting;
-      save.disabled = submitting || empty;
-      editor.setAttribute("aria-busy", String(submitting));
-    };
-    const cancelEdit = (): void => {
-      if (submitting) return;
-      void this.options.onCancelMessageEdit?.(edit.messageId);
-    };
-    const submitEdit = async (): Promise<void> => {
-      if (submitting || (input.value.trim().length === 0 && !edit.hasAttachments)) return;
-      submitting = true;
-      sync();
-      let accepted = false;
-      try {
-        accepted = await this.options.onResubmitMessage?.(edit.messageId, input.value.trim()) === true;
-      } finally {
-        if (!accepted && input.isConnected) {
-          submitting = false;
-          sync();
-          input.focus();
-        }
-      }
-    };
-    input.oninput = () => {
-      input.setCssStyles({ height: "auto" });
-      const next = Math.min(Math.max(input.scrollHeight, 96), 280);
-      input.setCssStyles({ height: `${next}px` });
-      sync();
-    };
-    const handleEditorKeydown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        this.suppressEditorKeyup("Escape", cancelEdit);
-        return;
-      }
-      if (
-        event.key === "Enter"
-        && (event.metaKey || event.ctrlKey)
-        && !event.shiftKey
-        && !event.isComposing
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        this.suppressEditorKeyup("Enter");
-        void submitEdit();
-      }
-    };
-    input.onkeydown = handleEditorKeydown;
-    cancel.onclick = cancelEdit;
-    save.onclick = () => void submitEdit();
-    this.installInlineEditorShortcutGuard(input, handleEditorKeydown);
-    sync();
-  }
-
-  private installInlineEditorShortcutGuard(
-    input: HTMLTextAreaElement,
-    handleKeydown: (event: KeyboardEvent) => void,
-  ): void {
-    this.clearInlineEditorShortcutGuard();
-    const ownerWindow = getSurfaceOwnerWindow(input);
-    const keydown = (event: KeyboardEvent): void => {
-      if (event.target === input) handleKeydown(event);
-    };
-    const keyup = (event: KeyboardEvent): void => {
-      this.containSuppressedEditorKeyup(event);
-    };
-    ownerWindow.addEventListener("keydown", keydown, true);
-    ownerWindow.addEventListener("keyup", keyup, true);
-    this.inlineEditorShortcutCleanup = () => {
-      ownerWindow.removeEventListener("keydown", keydown, true);
-      ownerWindow.removeEventListener("keyup", keyup, true);
-    };
-  }
-
-  private clearInlineEditorShortcutGuard(): void {
-    this.inlineEditorShortcutCleanup?.();
-    this.inlineEditorShortcutCleanup = null;
-  }
-
-  private containSuppressedEditorKeyup(event: KeyboardEvent): boolean {
-    if (event.key !== this.suppressedEditorKeyup) return false;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const action = this.suppressedEditorKeyupAction;
-    this.clearSuppressedEditorKeyup();
-    action?.();
-    return true;
-  }
-
-  private suppressEditorKeyup(
-    key: "Escape" | "Enter",
-    afterKeyup: (() => void) | null = null,
-  ): void {
-    const ownerWindow = getSurfaceOwnerWindow(this.element);
-    if (this.suppressedEditorKeyupTimer !== null) {
-      ownerWindow.clearTimeout(this.suppressedEditorKeyupTimer);
-    }
-    this.suppressedEditorKeyup = key;
-    this.suppressedEditorKeyupAction = afterKeyup;
-    this.suppressedEditorKeyupTimer = ownerWindow.setTimeout(() => {
-      const action = this.suppressedEditorKeyupAction;
-      this.suppressedEditorKeyup = null;
-      this.suppressedEditorKeyupAction = null;
-      this.suppressedEditorKeyupTimer = null;
-      action?.();
-    }, 500);
-  }
-
-  private clearSuppressedEditorKeyup(): void {
-    if (this.suppressedEditorKeyupTimer !== null) {
-      getSurfaceOwnerWindow(this.element).clearTimeout(this.suppressedEditorKeyupTimer);
-    }
-    this.suppressedEditorKeyup = null;
-    this.suppressedEditorKeyupAction = null;
-    this.suppressedEditorKeyupTimer = null;
   }
 
   private renderMessageAttachments(parent: HTMLElement, attachments: readonly PresentedMessageAttachment[]): void {
@@ -3624,16 +3434,16 @@ export class AgentConversationRenderer extends Component {
     }, 2_000));
   }
 
-  private async copyMessage(
+  private async copyWithFeedback(
     button: HTMLButtonElement,
-    text: string,
-    subject: "message" | "response",
+    subject: "message" | "response" | "path",
+    copy: () => boolean | Promise<boolean> | undefined,
   ): Promise<void> {
     const attempt = String(Number(button.dataset.copyAttempt ?? "0") + 1);
     button.dataset.copyAttempt = attempt;
     let copied = false;
     try {
-      copied = await this.options.onCopyText?.(text) === true;
+      copied = await copy() === true;
     } catch {
       copied = false;
     }
@@ -3645,61 +3455,22 @@ export class AgentConversationRenderer extends Component {
 
     button.classList.toggle("is-copied", copied);
     button.classList.toggle("is-copy-failed", !copied);
+    const subjectLabel = subject[0].toUpperCase() + subject.slice(1);
+    const label = copied ? `${subjectLabel} copied` : `Could not copy ${subject}. Try again`;
     updateUiAction(button, {
-      label: copied ? `${subject === "response" ? "Response" : "Message"} copied` : `Could not copy ${subject}. Try again`,
+      label,
       icon: copied ? "check" : "circle-alert",
     });
-    const subjectLabel = subject === "response" ? "Response" : "Message";
-    button.setAttribute(
-      "aria-label",
-      copied ? `${subjectLabel} copied` : `Could not copy ${subject}. Try again`,
-    );
+    button.setAttribute("aria-label", label);
 
     const timer = ownerWindow.setTimeout(() => {
       this.copyFeedbackTimers.delete(button);
       if (!button.isConnected) return;
       button.removeClass("is-copied", "is-copy-failed");
       updateUiAction(button, { label: `Copy ${subject}`, icon: "copy" });
+      button.setAttribute("aria-label", `Copy ${subject}`);
     }, copied ? 1_800 : 3_000);
     this.copyFeedbackTimers.set(button, timer);
   }
 
-  private async copyArtifactPath(
-    button: HTMLButtonElement,
-    artifact: AgentArtifact,
-  ): Promise<void> {
-    const attempt = String(Number(button.dataset.copyAttempt ?? "0") + 1);
-    button.dataset.copyAttempt = attempt;
-    let copied = false;
-    try {
-      copied = await this.options.onCopyArtifactPath(artifact) === true;
-    } catch {
-      copied = false;
-    }
-    if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
-
-    const ownerWindow = getSurfaceOwnerWindow(button);
-    const previousTimer = this.copyFeedbackTimers.get(button);
-    if (typeof previousTimer === "number") ownerWindow.clearTimeout(previousTimer);
-
-    button.classList.toggle("is-copied", copied);
-    button.classList.toggle("is-copy-failed", !copied);
-    updateUiAction(button, {
-      label: copied ? "Path copied" : "Could not copy path. Try again",
-      icon: copied ? "check" : "circle-alert",
-    });
-    button.setAttribute(
-      "aria-label",
-      copied ? "Path copied" : "Could not copy path. Try again",
-    );
-
-    const timer = ownerWindow.setTimeout(() => {
-      this.copyFeedbackTimers.delete(button);
-      if (!button.isConnected) return;
-      button.removeClass("is-copied", "is-copy-failed");
-      updateUiAction(button, { label: "Copy path", icon: "copy" });
-      button.setAttribute("aria-label", "Copy path");
-    }, copied ? 1_800 : 3_000);
-    this.copyFeedbackTimers.set(button, timer);
-  }
 }

@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../../types";
 import type { App } from 'obsidian';
-import { AgentChatSession, type AgentChatSessionOptions, type AgentRunInput, type AgentRunResult } from '../../views/chatview/agent/ChatSession';
-import type { AgentConversationSnapshot, AgentTextPart } from '../../views/chatview/AgentConversation';
+import type { ChatSession, AgentRunInput, AgentRunResult } from '../../chat/ChatSession';
+import type { AgentConversationSnapshot, AgentTextPart } from '../../chat/ChatConversation';
 import { THIN_AGENT_CONTRACT_VERSION, type ThinAgentContextSource, type ThinAgentContextResponse } from '../managed/ThinAgentV1Contract';
 import { runLocalCodex } from './LocalCodexClient';
 import { answerCodexRequest } from './CodexRequestModal';
@@ -9,26 +9,26 @@ import { CodexThreadLocator } from './CodexThreadLocator';
 import { codexVaultDirectory, type CodexExecutionOptions } from './CodexExecutionSettings';
 
 /** Chat presentation adapter. Codex owns every model step, tool and durable thread. */
-export class CodexChatSession extends AgentChatSession {
+export class CodexChatSession implements ChatSession {
   private localSnapshot: AgentConversationSnapshot = { runId: null, turnId: null, status: 'idle', messages: [], parts: [] };
   private readonly localListeners = new Set<(value: AgentConversationSnapshot) => void>();
   private readonly locator: CodexThreadLocator;
   private localController: AbortController | null = null;
   private localCompletion: Promise<AgentRunResult> | null = null;
   private sources: readonly ThinAgentContextSource[] = [];
-  constructor(private readonly app: App, private readonly localOptions: AgentChatSessionOptions, private readonly forkHistory: () => readonly ChatMessage[] = () => [], private readonly executionOptions: () => CodexExecutionOptions = () => ({})) { super(localOptions); this.locator = new CodexThreadLocator(app); }
-  override getSnapshot(): AgentConversationSnapshot { return this.localSnapshot; }
-  override subscribe(listener: (value: AgentConversationSnapshot) => void): () => void { this.localListeners.add(listener); return () => this.localListeners.delete(listener); }
+  constructor(private readonly app: App, private readonly localOptions: { persistAssistant: (message: ChatMessage) => Promise<void> }, private readonly forkHistory: () => readonly ChatMessage[] = () => [], private readonly executionOptions: () => CodexExecutionOptions = () => ({})) { this.locator = new CodexThreadLocator(app); }
+  getSnapshot(): AgentConversationSnapshot { return this.localSnapshot; }
+  subscribe(listener: (value: AgentConversationSnapshot) => void): () => void { this.localListeners.add(listener); return () => this.localListeners.delete(listener); }
   private publish(patch: Partial<AgentConversationSnapshot>) {
     this.localSnapshot = { ...this.localSnapshot, ...patch };
     for (const listener of this.localListeners) { try { listener(this.localSnapshot); } catch { /* Presentation must not interrupt Codex. */ } }
   }
-  override async hydrate(conversationId: string): Promise<void> { await this.locator.read(conversationId); }
-  override async stageContext(_id: string, sources: readonly ThinAgentContextSource[]): Promise<ThinAgentContextResponse> {
+  async hydrate(conversationId: string): Promise<void> { await this.locator.read(conversationId); }
+  async stageContext(_id: string, sources: readonly ThinAgentContextSource[]): Promise<ThinAgentContextResponse> {
     this.sources = sources;
     return { contract_version: THIN_AGENT_CONTRACT_VERSION, context_ref: 'local-codex-context', expires_at: new Date(Date.now() + 60_000).toISOString(), bytes: 0, sha256: '' };
   }
-  override start(input: AgentRunInput): Promise<AgentRunResult> {
+  start(input: AgentRunInput): Promise<AgentRunResult> {
     if (this.localController) return Promise.reject(new Error('Wait for the current Codex response to finish.'));
     const controller = new AbortController(); this.localController = controller;
     this.sources = [];
@@ -79,8 +79,8 @@ export class CodexChatSession extends AgentChatSession {
       return { kind: 'failed', snapshot: this.localSnapshot, error };
     } finally { this.sources = []; }
   }
-  override async cancel(): Promise<void> { this.localController?.abort(); await this.localCompletion; }
-  override async detach(): Promise<void> { await this.cancel(); this.localListeners.clear(); }
-  override disconnect(): void { this.localController?.abort(); }
-  override respondToApproval(): boolean { return false; }
+  async cancel(): Promise<void> { this.localController?.abort(); await this.localCompletion; }
+  async detach(): Promise<void> { await this.cancel(); this.localListeners.clear(); }
+  disconnect(): void { this.localController?.abort(); }
+  respondToApproval(): boolean { return false; }
 }

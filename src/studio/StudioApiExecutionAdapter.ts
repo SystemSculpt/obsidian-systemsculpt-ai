@@ -78,7 +78,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       return { text: result.text };
     }
     const id = operationId("text", request.runId, request.nodeId);
-    const result = await this.plugin.getManagedCapabilityClient().generateText({
+    const result = await this.plugin.getManagedCapabilityGraph().textGeneration.generate({
       operationId: id,
       purpose: "workflow_automation",
       signal: request.signal,

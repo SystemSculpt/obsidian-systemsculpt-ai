@@ -12,9 +12,6 @@ export type { ToolCall };
 export type {
   WorkflowEngineSettings,
   WorkflowSkipEntry,
-  WorkflowTrigger,
-  WorkflowCondition,
-  WorkflowStep,
 } from "./types/workflows";
 
 export { createDefaultWorkflowEngineSettings } from "./types/workflows";
@@ -438,51 +435,4 @@ export interface ChatMessage {
   terminalFailureCode?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
-}
-
-export interface SystemSculptResponse {
-  id: string;
-  choices: {
-    message: ChatMessage;
-  }[];
-}
-
-export interface SystemSculptStreamChunk {
-  id?: string;
-  choices?: Array<{
-    delta?: {
-      content?: string;
-      text?: string;
-      reasoning?: string;
-      reasoning_details?: unknown[];
-      tool_calls?: Array<{
-        id?: string;
-        type?: "function";
-        function?: {
-          name?: string;
-          arguments?: string;
-        };
-      }>;
-    };
-    finish_reason?: string;
-  }>;
-  completion?: string;
-  delta?: {
-    text?: string;
-    reasoning?: string;
-  };
-	  error?: {
-	    code: string;
-	    message: string;
-	    statusCode?: number;
-	    model?: string;
-	  };
-	}
-
-export interface TextModificationState {
-  originalText: string;
-  modifiedText: string;
-  isStreaming: boolean;
-  streamComplete: boolean;
-  error?: string;
 }

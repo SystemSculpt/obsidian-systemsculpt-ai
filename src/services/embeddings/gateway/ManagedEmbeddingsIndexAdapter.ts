@@ -1,4 +1,4 @@
-import { sha256HexFromArrayBuffer } from "../../../studio/hash";
+import { sha256HexFromArrayBuffer } from "../../../utils/sha256";
 import { containsControlCharacters } from "../../../utils/characterValidation";
 import { base64ToBytes, bytesToBase64 } from "../../../utils/base64";
 import type { ManagedTransportResult } from "../../managed/ManagedTypes";

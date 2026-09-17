@@ -112,39 +112,30 @@ export class AutomaticBackupService {
      * Save backup to multiple locations for redundancy
      */
     private async saveBackupToMultipleLocations(fileName: string, backupData: object): Promise<void> {
-        const backupJson = JSON.stringify(backupData, null, 2);
-        const errors: string[] = [];
-
-        // Location 1: Vault root .systemsculpt directory  
+        let saved = false;
         try {
             const backupDir = ".systemsculpt/settings-backups";
-            
-            // Ensure backup directory exists
             try {
                 await this.plugin.app.vault.createFolder(backupDir);
             } catch {
-                // Directory might already exist, which is fine
+                // The write below determines whether this location is usable.
             }
-            
-            const backupPath = `.systemsculpt/settings-backups/${fileName}`;
-            await this.plugin.app.vault.adapter.write(backupPath, backupJson);
-        } catch (error) {
-            errors.push(`Vault backup directory: ${error}`);
+            await this.plugin.app.vault.adapter.write(
+                `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
+            );
+            saved = true;
+        } catch {
+            // Still attempt the second independent backup location.
         }
-
-        // Location 2: Vault storage (if available)
-        try {
-            if (this.plugin.storage) {
-                await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
+        if (this.plugin.storage) {
+            try {
+                const result = await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
+                saved = result.success || saved;
+            } catch {
+                // A successful first copy remains a valid backup.
             }
-        } catch (error) {
-            errors.push(`Vault storage: ${error}`);
         }
-
-        // If all locations failed, throw error
-        if (errors.length === 2) {
-            throw new Error(`Failed to save backup to any location: ${errors.join(', ')}`);
-        }
+        if (!saved) throw new Error("Failed to save backup to any location.");
     }
 
     /**

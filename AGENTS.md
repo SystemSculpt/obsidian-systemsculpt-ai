@@ -79,6 +79,12 @@ protocol evolution.
 
 ## Architecture
 
+Read [CONTEXT.md](CONTEXT.md) for domain language and
+[docs/architecture.md](docs/architecture.md) for source ownership and entry points.
+Use [CONTRIBUTING.md](CONTRIBUTING.md) for change and review standards. Durable
+decisions live in [docs/adr](docs/adr); audit reports and temporary plans stay
+outside this repository.
+
 - Prefer one deep module with a narrow interface over adapters that simply
   rename or forward calls.
 - Keep ownership local to the capability. Views render and coordinate; domain

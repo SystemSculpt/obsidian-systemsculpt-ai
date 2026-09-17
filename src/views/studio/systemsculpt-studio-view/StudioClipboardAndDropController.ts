@@ -1,4 +1,4 @@
-import { pinStudioNodeForManagedLayout } from "../graph-v3/StudioGraphNodePlacement";
+import { pinStudioNodeForManagedLayout } from "../canvas/StudioGraphNodePlacement";
 import { App, Notice, TFile, normalizePath } from "obsidian";
 import {
   STUDIO_DISPLAY_NAME,

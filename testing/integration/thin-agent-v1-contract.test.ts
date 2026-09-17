@@ -71,9 +71,9 @@ describe("thin-agent-v1 application contract", () => {
     expect(fixture.capability_semantics).toMatchObject({
       client_authored_model_tool_schema: false,
       obsidian_vault_v1_maps_to_canonical_local_tool_count: 12,
-      server_tool_catalog_canonical_bytes: 13_760,
+      server_tool_catalog_canonical_bytes: 14_160,
       server_tool_catalog_sha256:
-        "4de25bca0d6f003517c198c52e32337877bbe5367114b142aa54cd666121db14",
+        "b01bbb1441cbbb265ffd06acc4a336b6cd80b3389d299264cef36cba26180501",
     });
   });
 

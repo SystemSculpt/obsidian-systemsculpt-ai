@@ -6,16 +6,17 @@ import { isRecord, randomId } from '../../studio/utils';
 import { codexWorkingDirectory } from './CodexExecutionSettings';
 import { runLocalCodex, type CodexRequest, type CodexResult } from './LocalCodexClient';
 import { answerCodexRequest } from './CodexRequestModal';
-import { StudioAgentRunStore, isActiveAgentRun, type StudioAgentRun, type AgentRunMessage } from './StudioAgentRunStore';
+import { StudioAgentRunStore, isActiveAgentRun, type StudioAgentRun, type AgentRunMessage, type StudioAgentRunView, type AgentRunMessageView } from './StudioAgentRunStore';
 import type { CodexJson } from './CodexAppServer';
 
 export type StudioAgentSpecification = { workflow?: StudioWorkflow; assignmentId?: string; projectId: string; projectPath: string; nodeId: string; title: string; request: CodexRequest; parentRunId?: string; prepare?: () => Promise<CodexRequest> };
-type Control = { holdsSlot?: boolean; controller: AbortController; send?: (text: string) => Promise<void>; review?: () => Promise<void>; completion: Promise<CodexResult>; resolve: (result: CodexResult) => void; reject: (error: Error) => void };
+type NativeReview = { label: string; open: () => Promise<void> };
+type Control = { holdsSlot?: boolean; controller: AbortController; send?: (text: string) => Promise<void>; reviews: NativeReview[]; completion: Promise<CodexResult>; resolve: (result: CodexResult) => void; reject: (error: Error) => void };
 type Callbacks = {
-  startPeer: (projectPath: string, nodeId: string, objective: string, parentRunId: string, assignmentId?: string) => Promise<StudioAgentRun>;
+  startPeer: (projectPath: string, nodeId: string, objective: string, parentRunId: string, assignmentId?: string) => Promise<StudioAgentRunView>;
   workflowSpecification?: (projectPath: string, centerId: string, objective: string) => Promise<StudioAgentSpecification>;
   context?: (projectPath: string, nodeId?: string) => Promise<unknown>;
-  prepare?: (record: StudioAgentRun) => Promise<CodexRequest>;
+  prepare?: (record: StudioAgentRunView) => Promise<CodexRequest>;
   templates: (projectPath: string) => Promise<{ id: string; title: string }[]>;
 };
 const MAX_ACTIVE = 8, MAX_PENDING = 100;
@@ -28,7 +29,7 @@ const tools: CodexJson[] = [
 
 /** Native turns plus owner-started workflow handoffs. Codex decides the plan and completion. */
 export class StudioAgentRuns {
-  private readonly dispatches = new Map<string, Promise<StudioAgentRun>>();
+  private readonly dispatches = new Map<string, Promise<StudioAgentRunView>>();
   private readonly workflowWaiters = new Map<string, () => void>();
   private readonly records = new Map<string, StudioAgentRun>();
   private readonly controls = new Map<string, Control>();
@@ -47,16 +48,16 @@ export class StudioAgentRuns {
   private disposed = false;
   private machine = '';
 
-  constructor(private readonly plugin: SystemSculptPlugin, private readonly callbacks: Callbacks) { this.store = new StudioAgentRunStore(plugin.app); }
+  constructor(private readonly plugin: Pick<SystemSculptPlugin, 'app' | 'getLogger'>, private readonly callbacks: Callbacks) { this.store = new StudioAgentRunStore(plugin.app); }
   get app() { return this.plugin.app; }
   subscribe(listener: (projectId: string) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
-  list(projectId: string, nodeIds?: readonly string[]): StudioAgentRun[] {
+  list(projectId: string, nodeIds?: readonly string[]): readonly StudioAgentRunView[] {
     const allowed = nodeIds?.length ? new Set(nodeIds) : null;
     return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200);
   }
-  get(id: string): StudioAgentRun | undefined { return this.records.get(id); }
+  get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
   canControl(id: string): boolean { const run = this.records.get(id); return !!run && hasHostCapability('local-cli') && run.machine === this.machine; }
-  hasRequest(id: string): boolean { return !!this.controls.get(id)?.review; }
+  hasRequest(id: string): boolean { return !!this.controls.get(id)?.reviews.length; }
   private async identifyMachine(): Promise<void> {
     if (!this.machine && hasHostCapability('local-cli')) this.machine = (await desktopHost.os()).hostname();
   }
@@ -87,16 +88,16 @@ export class StudioAgentRuns {
         this.records.set(run.id, run);
       }
       this.prune(); this.emit(projectId);
-      this.recoverWorkflows(projectId);
+      await this.recoverWorkflows(projectId);
     })().catch(error => { this.loaded.delete(projectPath); throw error; }));
     await this.loaded.get(projectPath);
   }
-  async startWorkflow(projectPath: string, centerId: string, objective: string): Promise<StudioAgentRun> {
+  async startWorkflow(projectPath: string, centerId: string, objective: string): Promise<StudioAgentRunView> {
     if (!objective.trim() || objective.length > 16000) throw new Error('Describe an objective of at most 16,000 characters.');
     if (!this.callbacks.workflowSpecification) throw new Error('Workflow launch is unavailable.');
     return this.start({ ...await this.callbacks.workflowSpecification(projectPath, centerId, objective.trim()), workflow: createStudioWorkflow(objective.trim()) });
   }
-  async start(specification: StudioAgentSpecification): Promise<StudioAgentRun> {
+  async start(specification: StudioAgentSpecification): Promise<StudioAgentRunView> {
     if (this.disposed || !hasHostCapability('local-cli')) throw new Error('Start this run in Obsidian Desktop on the execution machine.');
     if (this.controls.size + this.admissions >= MAX_PENDING) throw new Error('There are already 100 active or queued runs. Stop or finish a run first.');
     if (new TextEncoder().encode(JSON.stringify(specification.request)).byteLength > 64_000) throw new Error('This run input exceeds 64 KB. Link large context files instead.');
@@ -135,7 +136,7 @@ export class StudioAgentRuns {
   private admit(record: StudioAgentRun, message: string, prepare?: () => Promise<CodexRequest>, initialMessage?: AgentRunMessage, recover = false): void {
     let resolve!: Control['resolve'], reject!: Control['reject'];
     const completion = new Promise<CodexResult>((yes, no) => { resolve = yes; reject = no; }); void completion.catch(() => {});
-    const control: Control = { controller: new AbortController(), completion, resolve, reject };
+    const control: Control = { controller: new AbortController(), reviews: [], completion, resolve, reject };
     this.controls.set(record.id, control); record.owner = this.owner; record.status = 'queued'; record.error = ''; record.result = ''; record.currentActivity = 'Queued'; delete record.finishedAt;
     this.changed(record);
     const task = async () => {
@@ -152,6 +153,8 @@ export class StudioAgentRuns {
             record.turnId = native.turnId; control.send = native.send; record.currentActivity = 'Codex is working';
             if (initialMessage) { initialMessage.status = 'delivered'; this.messageChanged(initialMessage); }
             this.changed(record);
+            // Native acceptance is a delivery receipt, not ordinary debounced presentation.
+            void this.persist(record).catch(() => {});
             for (const pending of record.messages.filter(item => item.to === record.id && item.status === 'pending')) void this.deliver(record, pending).catch(() => {});
           },
           log: text => { if (text.startsWith('Connected to')) { record.currentActivity = 'Starting native turn'; this.changed(record); } },
@@ -211,24 +214,41 @@ export class StudioAgentRuns {
     control.controller.abort();
     if (record.status === 'queued') { record.status = 'stopped'; record.currentActivity = 'Stopped'; this.changed(record); }
   }
-  async review(id: string): Promise<void> { await this.controls.get(id)?.review?.(); }
+  async review(id: string): Promise<void> { await this.controls.get(id)?.reviews[0]?.open(); }
+  private presentReview(record: StudioAgentRun, control: Control): void {
+    if (control.controller.signal.aborted || this.controls.get(record.id) !== control) return;
+    record.status = control.reviews.length ? 'waiting' : 'running';
+    record.currentActivity = control.reviews[0]?.label || 'Codex is working';
+    this.changed(record);
+  }
   private waitForReview(record: StudioAgentRun, control: Control, method: string, params: CodexJson, signal: AbortSignal): Promise<unknown> {
     if (!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval','item/tool/requestUserInput'].includes(method)) return Promise.reject(new Error(`Unsupported native request: ${method}`));
-    record.status = 'waiting'; record.currentActivity = method === 'item/tool/requestUserInput' ? 'Waiting for your answer' : 'Waiting for native approval'; this.changed(record);
+    if (signal.aborted || control.controller.signal.aborted) return Promise.reject(new Error('Run stopped.'));
+    if (control.reviews.length >= 16) return Promise.reject(new Error('Too many native requests are awaiting review.'));
     return new Promise((resolve, reject) => {
-      let reviewing = false;
-      const abort = () => { control.review = undefined; reject(new Error('Run stopped.')); };
-      signal.addEventListener('abort', abort, { once: true });
-      control.review = async () => {
-        if (reviewing) return; reviewing = true;
-        try { resolve(await answerCodexRequest(this.plugin.app, method, params, signal)); }
-        catch (error) { reject(error instanceof Error ? error : new Error(String(error))); }
-        finally { signal.removeEventListener('abort', abort); control.review = undefined; record.status = 'running'; record.currentActivity = 'Codex is working'; this.changed(record); }
+      let reviewing = false, settled = false;
+      const cleanup = () => {
+        settled = true;
+        signal.removeEventListener('abort', abort); control.controller.signal.removeEventListener('abort', abort);
+        const index = control.reviews.indexOf(review); if (index >= 0) control.reviews.splice(index, 1);
+        this.presentReview(record, control);
       };
-      if (signal.aborted) abort();
+      const abort = () => { if (!settled) { cleanup(); reject(new Error('Run stopped.')); } };
+      const review: NativeReview = {
+        label: method === 'item/tool/requestUserInput' ? 'Waiting for your answer' : 'Waiting for native approval',
+        open: async () => {
+          if (reviewing || settled) return; reviewing = true;
+          try { const answer = await answerCodexRequest(this.plugin.app, method, params, signal); if (!settled) resolve(answer); }
+          catch (error) { if (!settled) reject(error instanceof Error ? error : new Error(String(error))); }
+          finally { if (!settled) cleanup(); }
+        },
+      };
+      control.reviews.push(review);
+      signal.addEventListener('abort', abort, { once: true }); control.controller.signal.addEventListener('abort', abort, { once: true });
+      this.presentReview(record, control);
     });
   }
-  async send(targetId: string, text: string, fromId = 'you', requestId = randomId('message')): Promise<AgentRunMessage> {
+  async send(targetId: string, text: string, fromId = 'you', requestId = randomId('message')): Promise<AgentRunMessageView> {
     if (this.disposed) throw new Error('Obsidian session ended.');
     if (!text.trim() || text.length > 16_000) throw new Error('A message must contain 1–16,000 characters.');
     const target = this.records.get(targetId), sender = fromId === 'you' ? null : this.records.get(fromId);
@@ -297,7 +317,7 @@ export class StudioAgentRuns {
   private children(root: StudioAgentRun): StudioAgentRun[] {
     return [...this.records.values()].filter(run => run.workflowId === root.id);
   }
-  private async dispatch(parent: StudioAgentRun, nodeId: string, objective: string, assignmentId: string): Promise<StudioAgentRun> {
+  private async dispatch(parent: StudioAgentRun, nodeId: string, objective: string, assignmentId: string): Promise<StudioAgentRunView> {
     if (parent.workflowId) throw new Error('Return this assignment to the orchestrator; only it dispatches workflow children.');
     if (!parent.workflow) return this.callbacks.startPeer(parent.projectPath, nodeId, objective, parent.id);
     if (!workflowOpen(parent.workflow)) throw new Error('This workflow is paused or finished.');
@@ -391,14 +411,36 @@ export class StudioAgentRuns {
       this.admit(root, 'Child results are ready. Call studio_workflow_wait to receive them, then continue the owner objective using the saved plan.');
     }
   }
-  private recoverWorkflows(projectId: string): void {
+  private async recoverWorkflows(projectId: string): Promise<void> {
     if (this.disposed) return;
-    for (const root of [...this.records.values()].filter(run => run.projectId === projectId && run.machine === this.machine && workflowOpen(run.workflow))) {
+    const uncertain = new Set<string>();
+    const changed = new Set<StudioAgentRun>();
+    const deliveryError = 'Message delivery could not be verified after Obsidian reloaded. Codex may already have accepted it. Review native thread history before sending a new follow-up; this message will not be replayed.';
+    for (const run of this.records.values()) {
+      if (run.projectId !== projectId || run.machine !== this.machine || !run.threadId || this.controls.has(run.id)) continue;
+      for (const message of run.messages.filter(message => message.to === run.id && message.status === 'pending')) {
+        // A pending local receipt cannot prove that native turn/start or turn/steer failed.
+        message.status = 'failed'; message.error = deliveryError; this.messageChanged(message);
+        uncertain.add(run.id); changed.add(run);
+        const sender = this.records.get(message.from); if (sender) changed.add(sender);
+      }
+      if (uncertain.has(run.id)) { run.currentActivity = deliveryError; this.changed(run); }
+    }
+    const roots = [...this.records.values()].filter(run => run.projectId === projectId && run.machine === this.machine && workflowOpen(run.workflow));
+    for (const root of roots) {
+      if (![root, ...this.children(root)].some(run => uncertain.has(run.id))) continue;
+      root.workflow!.status = 'needs_input'; root.workflow!.outcome = deliveryError;
+      root.currentActivity = deliveryError; this.changed(root); changed.add(root);
+    }
+    // Save the pause and uncertain receipts before admitting any recovery turn.
+    await Promise.all([...changed].map(record => this.persist(record)));
+    if (this.disposed) return;
+    for (const root of roots.filter(root => workflowOpen(root.workflow))) {
       for (const run of [...this.children(root), root]) {
         if (run.machine !== this.machine || this.controls.has(run.id) || run.status !== 'interrupted') continue;
         if (run.workflow) run.workflow.received = {}; // Replaying evidence is safe; assignment IDs prevent repeated dispatch.
         this.admit(run, run.threadId ? `Obsidian reloaded during this owner-authorized workflow. Resume the existing assignment from native thread history. Inspect existing work before taking further action; do not repeat completed operations or create duplicate assignments.\n${run.workflow ? 'Use studio_workflow_wait for outstanding child results.' : run.request.prompt}` : run.request.prompt,
-          run.preparationPending && this.callbacks.prepare ? () => this.callbacks.prepare!(run) : undefined, undefined, !!run.threadId && !run.messages.some(message => message.to === run.id && message.status === 'pending'));
+          run.preparationPending && this.callbacks.prepare ? () => this.callbacks.prepare!(run) : undefined, undefined, !!run.threadId);
       }
       this.wakeWorkflow(root);
     }

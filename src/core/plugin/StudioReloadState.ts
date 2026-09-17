@@ -1,7 +1,7 @@
 import type { App, ViewState, WorkspaceLeaf } from "obsidian";
 import type { StudioProjectV1 } from "../../studio/types";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
-import type { StudioSourceReloadState } from "../../views/studio/graph-v3/StudioNodeSourceBody";
+import type { StudioSourceReloadState } from "../../views/studio/canvas/StudioNodeSourceBody";
 
 export type StudioEditingSnapshot = { base: StudioProjectV1; project: StudioProjectV1; sourceEditors?: StudioSourceReloadState };
 type ReloadView = {

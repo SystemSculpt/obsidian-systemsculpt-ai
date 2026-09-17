@@ -3,7 +3,7 @@ import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import {
   OperationProgressPanel,
-  type OperationProgressState,
+  type OperationProgressButton,
 } from "../core/ui/progress/OperationProgressPanel";
 import { tryCopyToClipboard } from "../utils/clipboard";
 
@@ -96,14 +96,6 @@ export interface BulkTranscriptionProgressWidgetOptions {
   host?: HTMLElement;
 }
 
-type BulkProgressAction = {
-  label: string;
-  testId: string;
-  onClick: () => void;
-  variant?: "primary" | "danger" | "default";
-  disabled?: boolean;
-};
-
 /** Feature adapter over the one canonical long-running operation panel. */
 export class BulkTranscriptionProgressWidget {
   private readonly plugin: SystemSculptPlugin;
@@ -129,7 +121,7 @@ export class BulkTranscriptionProgressWidget {
       host: options.host,
     });
     this.syncStatus();
-    this.setActions(this.buildRunningActions());
+    this.panel.setActions(this.buildRunningActions());
     this.plugin.register(() => this.close());
   }
 
@@ -173,7 +165,7 @@ export class BulkTranscriptionProgressWidget {
     this.state = "complete";
     this.status = "All transcriptions complete";
     this.syncStatus();
-    this.setActions([{
+    this.panel.setActions([{
       label: "Close",
       testId: "bulk-transcribe.progress.close",
       variant: "primary",
@@ -210,7 +202,7 @@ export class BulkTranscriptionProgressWidget {
             : "loader",
       progress,
       details: [this.buildCountLabel(), ...extraDetails].filter(Boolean).join("\n"),
-      state: this.toPanelState(),
+      state: this.state === "stopped" ? "warning" : this.state,
     });
   }
 
@@ -227,11 +219,6 @@ export class BulkTranscriptionProgressWidget {
     return `${this.completedCount} / ${this.totalFiles} complete${suffix}`;
   }
 
-  private toPanelState(): OperationProgressState {
-    if (this.state === "stopped") return "warning";
-    return this.state;
-  }
-
   private setFinalState(
     state: "error" | "stopped",
     status: string,
@@ -242,7 +229,7 @@ export class BulkTranscriptionProgressWidget {
     this.state = state;
     this.status = status;
     this.syncStatus(detailLines);
-    this.setActions([
+    this.panel.setActions([
       ...(copyText ? [this.buildCopyAction(copyText)] : []),
       {
         label: "Close",
@@ -253,7 +240,7 @@ export class BulkTranscriptionProgressWidget {
     ]);
   }
 
-  private buildRunningActions(): BulkProgressAction[] {
+  private buildRunningActions(): OperationProgressButton[] {
     if (!this.onStop) return [];
     return [{
       label: "Stop",
@@ -267,7 +254,7 @@ export class BulkTranscriptionProgressWidget {
     if (!this.onStop || this.state !== "running") return;
     this.status = "Stopping…";
     this.syncStatus();
-    this.setActions([{
+    this.panel.setActions([{
       label: "Stopping…",
       testId: "bulk-transcribe.progress.stop",
       variant: "danger",
@@ -277,22 +264,12 @@ export class BulkTranscriptionProgressWidget {
     this.onStop();
   }
 
-  private setActions(actions: BulkProgressAction[]): void {
-    this.panel.setActions(actions.map((action) => ({
-      label: action.label,
-      testId: action.testId,
-      onClick: action.onClick,
-      variant: action.variant,
-      disabled: action.disabled,
-    })));
-  }
-
-  private buildCopyAction(copyText: string): BulkProgressAction {
+  private buildCopyAction(copyText: string): OperationProgressButton {
     return {
       label: "Copy error",
       testId: "bulk-transcribe.progress.copy-error",
       onClick: () => {
-        void tryCopyToClipboard(copyText).then((copied) => {
+        void tryCopyToClipboard(copyText, this.panel.element).then((copied) => {
           new Notice(copied ? "Error copied to clipboard" : "Unable to copy error", 2500);
         });
       },

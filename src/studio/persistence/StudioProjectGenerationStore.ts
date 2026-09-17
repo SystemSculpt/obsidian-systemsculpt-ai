@@ -6,7 +6,7 @@ import {
   serializeStudioPolicy,
   serializeStudioProject,
 } from "../schema";
-import { sha256HexFromArrayBuffer } from "../hash";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 import { containsControlCharacters } from "../../utils/characterValidation";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
 import { reconcileStudioSupportDocument } from "./StudioSupportReconciliation";
@@ -95,7 +95,6 @@ export type StudioProjectGenerationCommand =
       /** Exact bytes already moved to locator by an ordinary vault rename. */
       destinationProjectDocumentBeforeRename?: Uint8Array;
     };
-type InternalStudioProjectGenerationCommand = StudioProjectGenerationCommand | { kind: "external_sync"; projectId: string; projectDocument: Uint8Array; supportFiles: readonly { relativePath: string; bytes: Uint8Array }[] };
 
 type StudioGenerationCommandKind = "create" | "discrete_save" | "autosave" | "policy" | "manifest" | "asset" | "support" | "run" | "cache" | "migration" | "repair" | "external_sync" | "logical_rename";
 
@@ -455,13 +454,7 @@ export class StudioProjectGenerationStore {
     );
   }
 
-  async commit(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> { return this.commitWholeGeneration(command, expected); }
-
   async commitWholeGeneration(command: StudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
-    return this.commitInternal(command, expected);
-  }
-
-  private async commitInternal(command: InternalStudioProjectGenerationCommand, expected: ExpectedGeneration): Promise<CommitResult> {
     return this.exclusive(command.projectId, async () => {
       const recovered = await this.recover(command.projectId);
       if (recovered.status !== "ready") return recovered;
@@ -470,7 +463,7 @@ export class StudioProjectGenerationStore {
         const adoptsVisibleRename =
           command.kind === "logical_rename"
           && command.destinationProjectDocumentBeforeRename !== undefined;
-        if (command.kind !== "external_sync" && !adoptsVisibleRename) {
+        if (!adoptsVisibleRename) {
           const projection = await this.readProjectDocument({ vaultRelativeProjectPath: recovered.generation.metadata.projection.canonicalPath });
           if (!projection || !bytesEqual(recovered.generation.files.get("project.systemsculpt")!, projection)) {
             return { status: "read_only", message: "The project file changed before this Studio save could begin; the file was left untouched." };
@@ -499,7 +492,7 @@ export class StudioProjectGenerationStore {
     });
   }
 
-  private applyCommand(command: InternalStudioProjectGenerationCommand, current: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
+  private applyCommand(command: StudioProjectGenerationCommand, current: ReadonlyMap<string, Uint8Array>): Map<string, Uint8Array> {
     const files = new Map<string, Uint8Array>([...current].filter(([path]) => !isAgentRunFile(path)).map(([path, bytes]) => [path, bytes.slice()]));
     const putIndex = (path: string, bytes: Uint8Array): void => {
       const previous = files.get(path);
@@ -530,17 +523,13 @@ export class StudioProjectGenerationStore {
         break;
       }
       case "logical_rename": files.set("project.systemsculpt", command.projectDocument.slice()); files.set("support/project.manifest.json", command.projectManifest.slice()); break;
-      case "external_sync":
-        files.clear(); files.set("project.systemsculpt", command.projectDocument.slice());
-        for (const file of command.supportFiles) files.set(normalizeRelativePath(file.relativePath), file.bytes.slice());
-        break;
     }
     return files;
   }
 
-  private commandKind(command: InternalStudioProjectGenerationCommand): StudioGenerationCommandKind {
+  private commandKind(command: StudioProjectGenerationCommand): StudioGenerationCommandKind {
     if (command.kind === "replace_project") return command.reason;
-    return ({ replace_policy: "policy", put_asset: "asset", put_support_file: "support", replace_cache: "cache", replace_manifest: "manifest", publish_run: "run", logical_rename: "logical_rename", external_sync: "external_sync" } as const)[command.kind];
+    return ({ replace_policy: "policy", put_asset: "asset", put_support_file: "support", replace_cache: "cache", replace_manifest: "manifest", publish_run: "run", logical_rename: "logical_rename" } as const)[command.kind];
   }
 
   async open(projectId: string, locatorInput: ProjectionLocator): Promise<OpenResult> {
@@ -684,15 +673,6 @@ export class StudioProjectGenerationStore {
         };
       }
     }
-    if (recoveredDocument && bytesEqual(recoveredDocument, document)) {
-      try {
-        await this.writeProjection(recovered.generation);
-        return { status: "committed", expectedGeneration: recovered.expectedGeneration, generation: recovered.generation, logicallyCommitted: true };
-      } catch (error) {
-        return { status: "storage_unavailable", message: String(error) };
-      }
-    }
-
     // The project document is the user-editable source of truth. Support files
     // are private implementation data: recover them from the last valid
     // generation instead of requiring an agent to coordinate them.

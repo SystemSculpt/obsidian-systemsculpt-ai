@@ -108,19 +108,20 @@ export class FileContextManager {
     this.emitContextChanged();
   }
 
-  public async setPinnedFiles(files: string[]): Promise<void> {
+  public setPinnedFiles(files: string[]): Promise<void> {
     const validFiles = Array.isArray(files) ? files.filter((file) => !!file && typeof file === "string") : [];
     const normalizedFiles = validFiles.map((file) => this.normalizeWikiLink(file));
 
     const existingFiles: string[] = [];
     for (const file of normalizedFiles) {
-      if (await this.validateFileExists(file)) {
+      if (this.validateFileExists(file)) {
         existingFiles.push(file);
       }
     }
 
     this.pinnedFiles = new Set(existingFiles);
     this.emitContextChanged();
+    return Promise.resolve();
   }
 
   private normalizeWikiLink(fileOrWikilink: string): string {
@@ -131,7 +132,7 @@ export class FileContextManager {
     return `[[${fileOrWikilink}]]`;
   }
 
-  private async validateFileExists(filePath: string): Promise<boolean> {
+  private validateFileExists(filePath: string): boolean {
     const linkText = filePath.replace(/^\[\[(.*?)\]\]$/, "$1");
 
     let resolvedFile = this.app.metadataCache.getFirstLinkpathDest(linkText, "");

@@ -1,4 +1,5 @@
 import { isRecord } from '../../studio/utils';
+import type { DeepReadonly } from '../../studio/StudioProjectSnapshots';
 import type { CodexJson } from './CodexAppServer';
 
 export type StudioWorkflowStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'blocked' | 'skipped'; detail: string; dependsOn: string[] };
@@ -6,7 +7,7 @@ export type StudioWorkflow = {
   objective: string; status: 'active' | 'waiting' | 'needs_input' | 'completed' | 'stopped';
   boundaries: string; steps: StudioWorkflowStep[]; outcome: string; received: Record<string, string>;
 };
-export const workflowOpen = (workflow?: StudioWorkflow): boolean => !!workflow && ['active', 'waiting'].includes(workflow.status);
+export const workflowOpen = (workflow?: DeepReadonly<StudioWorkflow>): boolean => !!workflow && ['active', 'waiting'].includes(workflow.status);
 export function createStudioWorkflow(objective: string): StudioWorkflow {
   return { objective, status: 'active', boundaries: 'Follow the owner’s requested scope. Stop at a local branch unless publication is explicitly requested. Ask before sending external messages.', steps: [], outcome: '', received: {} };
 }

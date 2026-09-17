@@ -1,6 +1,8 @@
 import { TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { replaceControlCharacters } from "../../utils/characterValidation";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
+import { AudioProcessorApiError } from "./AudioProcessorApiClient";
 import { AUDIO_PROCESSOR_OUTPUT_DIRECTORY, type AudioProcessorArtifactKind } from "./types";
 
 type DeliveryArtifact = "full" | AudioProcessorArtifactKind;
@@ -10,15 +12,23 @@ type ArtifactSlot = Readonly<{
   file: TFile | null;
 }>;
 
-export type AudioProcessorDeliveryPlan = Readonly<{
+type AudioProcessorDeliveryPlan = Readonly<{
   note: ArtifactSlot;
   summary: ArtifactSlot;
   transcript: ArtifactSlot;
 }>;
 
-export type AudioProcessorDeliveryFiles = Readonly<{
+type AudioProcessorDeliveryFiles = Readonly<{
   note: TFile;
   transcript: TFile;
+}>;
+
+type ArtifactSource = Readonly<{ url: string; sha256?: string }>;
+type DeliveryIdentity = Readonly<{
+  artifactJobId: string;
+  deliveryJobId: string;
+  filename: string;
+  recoverMovedFiles: boolean;
 }>;
 
 /**
@@ -30,9 +40,75 @@ export type AudioProcessorDeliveryFiles = Readonly<{
  * resumes the same delivery instead of creating numbered duplicates.
  */
 export class AudioProcessorDelivery {
-  constructor(private readonly plugin: SystemSculptPlugin) {}
+  constructor(
+    private readonly plugin: SystemSculptPlugin,
+    private readonly download: (url: string, signal: AbortSignal) => Promise<string>,
+  ) {}
 
-  async resolvePlan(
+  async deliverPair(
+    input: DeliveryIdentity & Readonly<{ note: ArtifactSource; transcript: ArtifactSource }>,
+    signal: AbortSignal,
+  ): Promise<AudioProcessorDeliveryFiles> {
+    const plan = await this.resolvePlan(input.artifactJobId, input.filename, input);
+    const [note, transcript] = await Promise.all([
+      plan.note.file ? null : this.downloadVerified(input.note, "note", signal),
+      plan.transcript.file ? null : this.downloadVerified(input.transcript, "transcript", signal),
+    ]);
+    return this.persist(plan, input.artifactJobId, { note, transcript }, signal, input);
+  }
+
+  async deliverArtifact(
+    input: DeliveryIdentity & Readonly<{
+      kind: AudioProcessorArtifactKind;
+      source: ArtifactSource;
+      /** Recovered transcripts can be saved before a primary note exists. */
+      standalone?: boolean;
+      /** A progress-time save verifies content before refreshing a recovered delivery alias. */
+      refreshDeliveryAlias?: boolean;
+    }>,
+    signal: AbortSignal,
+  ): Promise<TFile> {
+    const plan = await this.resolvePlan(input.artifactJobId, input.filename, input, [input.kind]);
+    const slot = plan[input.kind];
+    if (slot.file && !input.refreshDeliveryAlias) return slot.file;
+    const markdown = await this.downloadVerified(input.source, input.kind, signal);
+    assertAudioArtifact(markdown, input.artifactJobId, input.kind);
+    const linked = input.kind === "summary" ? plan.transcript : plan.note;
+    if (slot.file) {
+      await this.syncDeliveryAlias(
+        slot.file, input.artifactJobId, input.kind, input.deliveryJobId,
+        !input.standalone && linked.file ? linked.path : undefined,
+      );
+      return slot.file;
+    }
+    return this.createArtifact(
+      slot.path,
+      addDeliveryJobMarker(
+        !input.standalone && linked.file ? addVaultNavigation(markdown, input.kind, linked.path) : markdown,
+        input.deliveryJobId,
+      ),
+      input.artifactJobId,
+      input.kind,
+      signal,
+    );
+  }
+
+  private async downloadVerified(source: ArtifactSource, label: string, signal: AbortSignal): Promise<string> {
+    const markdown = await this.download(source.url, signal);
+    if (source.sha256 !== undefined) {
+      const bytes = new TextEncoder().encode(markdown);
+      if (await sha256HexFromArrayBuffer(bytes.buffer) !== source.sha256.toLowerCase()) {
+        throw new AudioProcessorApiError(
+          `The downloaded audio ${label} failed its integrity check. Please retry the download.`,
+          0,
+          "artifact_integrity_failed",
+        );
+      }
+    }
+    return markdown;
+  }
+
+  private async resolvePlan(
     artifactJobId: string,
     filename: string,
     options: Readonly<{ recoverMovedFiles: boolean }>,
@@ -86,7 +162,7 @@ export class AudioProcessorDelivery {
     return artifacts[kind] ?? null;
   }
 
-  async persist(
+  private async persist(
     plan: AudioProcessorDeliveryPlan,
     artifactJobId: string,
     markdown: Readonly<{ note: string | null; transcript: string | null }>,
@@ -144,48 +220,6 @@ export class AudioProcessorDelivery {
       );
     }
     return { note, transcript };
-  }
-
-  async persistOne(
-    plan: AudioProcessorDeliveryPlan,
-    artifactJobId: string,
-    kind: DeliveryArtifact,
-    markdown: string,
-    signal: AbortSignal,
-    options: Readonly<{
-      deliveryJobId: string;
-      linkedArtifactAvailable?: boolean;
-    }>,
-  ): Promise<TFile> {
-    assertAudioArtifact(markdown, artifactJobId, kind);
-    const slot = kind === "full"
-      ? plan.note
-      : kind === "summary"
-        ? plan.summary
-        : plan.transcript;
-    const linkedPath = kind === "transcript" ? plan.note.path : plan.transcript.path;
-    if (slot.file) {
-      await this.syncDeliveryAlias(
-        slot.file,
-        artifactJobId,
-        kind,
-        options.deliveryJobId,
-        options.linkedArtifactAvailable === false ? undefined : linkedPath,
-      );
-      return slot.file;
-    }
-    return await this.createArtifact(
-      slot.path,
-      addDeliveryJobMarker(
-        options.linkedArtifactAvailable === false
-          ? markdown
-          : addVaultNavigation(markdown, kind, linkedPath),
-        options.deliveryJobId,
-      ),
-      artifactJobId,
-      kind,
-      signal,
-    );
   }
 
   private findIndexedArtifacts(artifactJobId: string): Partial<Record<DeliveryArtifact, TFile>> {

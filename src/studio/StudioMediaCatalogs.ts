@@ -7,8 +7,7 @@ export type StudioMediaCatalogs = Readonly<{
   videos: ManagedVideoModelCatalog;
 }>;
 
-type Entry = { licenseKey: string; catalogs: StudioMediaCatalogs };
-const entries = new WeakMap<SystemSculptPlugin, Entry>();
+const entries = new WeakMap<SystemSculptPlugin, StudioMediaCatalogs>();
 
 /**
  * One image and one video catalog per plugin, shared by the pickers, the
@@ -16,14 +15,14 @@ const entries = new WeakMap<SystemSculptPlugin, Entry>();
  * license discards the cache so another account's prices never show.
  */
 export function getStudioMediaCatalogs(plugin: SystemSculptPlugin): StudioMediaCatalogs {
-  const licenseKey = String(plugin.settings?.licenseKey ?? "");
   const existing = entries.get(plugin);
-  if (existing && existing.licenseKey === licenseKey) return existing.catalogs;
+  if (existing) return existing;
   const transport = plugin.getManagedCapabilityGraph().transport;
+  const options = { licenseKey: () => String(plugin.settings?.licenseKey ?? "") };
   const catalogs: StudioMediaCatalogs = Object.freeze({
-    images: new ManagedImageModelCatalog(transport),
-    videos: new ManagedVideoModelCatalog(transport),
+    images: new ManagedImageModelCatalog(transport, options),
+    videos: new ManagedVideoModelCatalog(transport, options),
   });
-  entries.set(plugin, { licenseKey, catalogs });
+  entries.set(plugin, catalogs);
   return catalogs;
 }

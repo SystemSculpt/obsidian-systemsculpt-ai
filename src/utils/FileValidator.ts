@@ -15,73 +15,41 @@ const DEFAULT_POPUP_TITLE = "File Size Limit Exceeded";
 const DEFAULT_POPUP_DESCRIPTION =
   "Please reduce the file size or choose a smaller file.";
 
-const resolveMaxLabel = (maxBytes: number, maxLabel?: string): string =>
-  maxLabel ?? formatFileSize(maxBytes);
-
-/**
- * Validates file size and shows appropriate error messages
- * @param file The file to validate
- * @param app The Obsidian app instance
- * @returns True if file is valid, false otherwise
- */
-export async function validateFileSize(
+export function validateFileSize(
   file: TFile,
   app: App,
-  options: FileSizeValidationOptions = {}
+  options: FileSizeValidationOptions = {},
 ): Promise<boolean> {
-  // Get file size
-  const fileSize = file.stat.size;
-  const maxBytes = options.maxBytes ?? MAX_FILE_SIZE;
-
-  // Check if file is too large
-  if (fileSize > maxBytes) {
-    const maxLabel = resolveMaxLabel(maxBytes, options.maxLabel);
-
-    // Show popup warning for non-audio files
-    await showPrompt(
-      app,
-      `The file "${file.name}" is too large (${formatFileSize(fileSize)}). The maximum allowed size is ${maxLabel}.`,
-      {
-        title: options.title ?? DEFAULT_POPUP_TITLE,
-        description: options.description ?? DEFAULT_POPUP_DESCRIPTION,
-        primaryButton: "OK",
-      }
-    );
-    return false;
-  }
-
-  return true;
+  return validateSize(file.name, file.stat.size, app, options);
 }
 
-/**
- * Validates file size for a browser File object
- * @param file The browser File object
- * @param app The Obsidian app instance
- * @returns True if file is valid, false otherwise
- */
-export async function validateBrowserFileSize(
+export function validateBrowserFileSize(
   file: File,
   app: App,
-  options: FileSizeValidationOptions = {}
+  options: FileSizeValidationOptions = {},
+): Promise<boolean> {
+  return validateSize(file.name, file.size, app, options);
+}
+
+async function validateSize(
+  name: string,
+  size: number,
+  app: App,
+  options: FileSizeValidationOptions,
 ): Promise<boolean> {
   const maxBytes = options.maxBytes ?? MAX_FILE_SIZE;
-  if (file.size > maxBytes) {
-    const maxLabel = resolveMaxLabel(maxBytes, options.maxLabel);
+  if (!(size > maxBytes)) return true;
 
-    // Show popup warning for non-audio files
-    await showPrompt(
-      app,
-      `The file "${file.name}" is too large (${formatFileSize(file.size)}). The maximum allowed size is ${maxLabel}.`,
-      {
-        title: options.title ?? DEFAULT_POPUP_TITLE,
-        description: options.description ?? DEFAULT_POPUP_DESCRIPTION,
-        primaryButton: "OK",
-      }
-    );
-    return false;
-  }
-
-  return true;
+  await showPrompt(
+    app,
+    `The file "${name}" is too large (${formatFileSize(size)}). The maximum allowed size is ${options.maxLabel ?? formatFileSize(maxBytes)}.`,
+    {
+      title: options.title ?? DEFAULT_POPUP_TITLE,
+      description: options.description ?? DEFAULT_POPUP_DESCRIPTION,
+      primaryButton: "OK",
+    },
+  );
+  return false;
 }
 
 /**

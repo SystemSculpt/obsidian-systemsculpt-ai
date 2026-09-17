@@ -3,7 +3,7 @@
  */
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
-import { THIN_AGENT_LIFECYCLE_CODES } from "../../views/chatview/agent/Lifecycle";
+import { THIN_AGENT_LIFECYCLE_CODES } from "../../chat/managed/Lifecycle";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -659,6 +659,46 @@ describe("PluginLogger", () => {
       expect(JSON.stringify(projected)).not.toContain("QA-CANARY-7421");
     });
 
+    it("contains hostile buffered metadata and copies safe scalars only once", () => {
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.lifecycle({ code: "phase_working", phase: "response" });
+      logger.lifecycle({ code: "run_finished_completed", phase: "response" });
+      const buffered = logger.getRecentEntries();
+      const revoked = Proxy.revocable({}, {});
+      revoked.revoke();
+      buffered[0].context!.metadata = revoked.proxy;
+      buffered[1].context!.metadata = {
+        code: "phase_working",
+        phase: "response",
+        get status(): number { throw new Error("hostile getter"); },
+      };
+      const reads = new Set<PropertyKey>();
+      buffered[2].context!.metadata = new Proxy({
+        code: "run_finished_completed",
+        phase: "response",
+        serverTimingAppMs: 42,
+        prompt: "private prompt",
+      }, {
+        ownKeys() { throw new Error("must not enumerate input"); },
+        get(target, key, receiver) {
+          if (reads.has(key)) throw new Error(`duplicate read: ${String(key)}`);
+          if (key === "prompt") throw new Error("private property read");
+          reads.add(key);
+          return Reflect.get(target, key, receiver);
+        },
+      });
+
+      expect(logger.getSupportDiagnostics()).toEqual([{
+        timestamp: expect.any(String),
+        severity: "info",
+        code: "run_finished_completed",
+        phase: "response",
+        server_timing_app_ms: 42,
+        server_timing_clock_domain: "server_response_headers_monotonic_duration",
+      }]);
+      expect(reads.has("prompt")).toBe(false);
+    });
+
     it("applies the support limit after excluding unrelated log entries", () => {
       logger.lifecycle({ code: "run_started", phase: "response" });
       mockPlugin.settings.debugMode = true;
@@ -866,6 +906,40 @@ describe("PluginLogger", () => {
       for (const canary of hostileCanaries) {
         expect(surfaces).not.toContain(canary);
       }
+    });
+
+    it("snapshots changing failure getters once before applying the privacy allowlist", async () => {
+      let reads = 0;
+      const error = {
+        get code() {
+          reads += 1;
+          return reads <= 2 ? "response_failed" : "private-error-canary";
+        },
+      };
+      logger.error("ChatView agent session failed", error, {
+        source: "AgentChatView", method: "agentSession",
+      });
+      await logger.flushNow();
+      expect(reads).toBe(1);
+      expect(logger.getRecentEntries()[0].context?.metadata?.code).toBe("response_failed");
+      expect(JSON.stringify(mockStorage.appendToFile.mock.calls)).not.toContain("private-error-canary");
+    });
+
+    it("keeps throwing and revoked failure objects content-free without blocking error handling", async () => {
+      const revoked = Proxy.revocable({}, {});
+      revoked.revoke();
+      for (const error of [revoked.proxy, { get code() { throw new Error("private-getter-canary"); } }]) {
+        expect(() => logger.error("ChatView agent session failed", error, {
+          source: "AgentChatView", method: "agentSession",
+        })).not.toThrow();
+      }
+      await logger.flushNow();
+      expect(logger.getRecentEntries()[0]).toMatchObject({
+        message: "thin-agent:failure",
+        context: { metadata: { code: "client_failure", cause: "object_error" } },
+      });
+      expect(JSON.stringify(mockStorage.appendToFile.mock.calls)).not.toContain("private-getter-canary");
+      expect(consoleSpy.error).not.toHaveBeenCalled();
     });
 
     it("bounds a hostile plain-object failure across every diagnostic surface", async () => {

@@ -1,6 +1,6 @@
 import { getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
 import type { StudioNodeDefinition } from "../types";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../hash";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
 import { getTranscriptionMaxFileSize } from "../../services/transcription/TranscriptionCoordinator";
 import { formatFileSize } from "../../utils/FileValidator";

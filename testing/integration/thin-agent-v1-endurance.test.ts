@@ -12,13 +12,13 @@ import {
   THIN_AGENT_EVENT_TYPE,
   type AgentJsonValue,
   type AgentUserMessage,
-} from "../../src/views/chatview/agent/Protocol";
+} from "../../src/chat/managed/Protocol";
 import {
   AgentChatSession,
   type AgentLifecycleRecord,
   type AgentRunResult,
-} from "../../src/views/chatview/agent/ChatSession";
-import { AgentMutationJournal } from "../../src/views/chatview/agent/MutationJournal";
+} from "../../src/chat/managed/ChatSession";
+import { AgentMutationJournal } from "../../src/chat/managed/MutationJournal";
 
 type ToolCall = Readonly<{
   id: string;

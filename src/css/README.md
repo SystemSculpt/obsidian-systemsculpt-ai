@@ -26,7 +26,7 @@ imports only, and their order is the Studio cascade contract:
 
 1. Canvas: `theme`, `workspace`, `connections`, `node-chrome`, `media-nodes`,
    `node-runtime`, `groups`, `text-nodes`, `inspector`, `menus`.
-2. Editors: `editor-preview`, `editor-text`, `editor-json`, `editor-notes`,
+2. Editors: `editor-preview`, `editor-text`, `editor-notes`,
    `editor-dropdowns`, `editor-media`, `caption-board`, `editor-responsive`,
    `inline-config`, `node-details`.
 

@@ -13,7 +13,7 @@ import {
   waitForManagedJob,
 } from "../managed/ManagedJobObservation";
 import type { ManagedMediaJobError, ManagedVideoFrameImage, ManagedVideoFrameRole } from "../managed/ManagedMediaJobClient";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 
 const CAPABILITY = "video_generation" as const;
 const RESOLUTION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/;
@@ -530,7 +530,18 @@ export class ManagedVideoGenerationAdapter {
         const outputs: ManagedDeliveredVideoOutputBytes[] = [];
         for (const metadata of status.outputs) {
           throwIfAborted(signal);
-          outputs.push(await this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal));
+          // A failed transfer only repeats retrieval of this verified output;
+          // the completed server job must never be commissioned again.
+          for await (const output of observeManagedJob<ManagedDeliveredVideoOutputBytes>({
+            read: () => this.dependencies.jobs.downloadOutput(jobId, metadata.index, metadata, signal),
+            signal,
+            isRetryableError: isRetryableManagedJobObservationError,
+            retryAfterMs: error => (error as Partial<ManagedMediaJobError> | null)?.retryAfterMs,
+            wait: this.wait,
+          })) {
+            outputs.push(output);
+            break;
+          }
         }
         const downloadStartedAt = outputs[0]?.delivery.download_started_at;
         if (!downloadStartedAt || outputs.some(output => output.delivery.download_started_at !== downloadStartedAt)) {

@@ -1,10 +1,11 @@
 # SystemSculpt AI for Obsidian
 
-SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. There are no provider keys, model catalogs, or local AI runtimes to configure.
+SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex.
 
 ## What it does
 
 - Chat with notes, documents, images, and built-in vault tools.
+- Use on-machine Codex for desktop chats and Studio tasks with its native permissions and history.
 - Stream reasoning, content, citations, tool activity, and approvals.
 - Attach or paste multiple mixed files into a conversation.
 - Find related notes with a portable semantic index.
@@ -31,13 +32,13 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 
 ## Privacy, network, and local access
 
-- The plugin connects only to the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin` for account and license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, and image work.
+- The plugin connects only to the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin` for account and license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, image, and video work.
 - Hosted requests send the prompts, selected notes, files, images, audio, YouTube URLs, conversation context, and local tool results needed for the feature the user invokes. SystemSculpt may process that data server-side through OpenRouter, AssemblyAI, Supadata, and Cloudflare R2 as described in the [privacy policy](https://systemsculpt.com/privacy); the plugin does not connect to those providers directly.
 - The plugin contains no client-side telemetry or third-party advertising. The SystemSculpt service records limited account, usage, billing, and diagnostic metadata for hosted requests as described in the privacy policy.
 - Obsidian stores the license key, settings, caches, and small device-local preferences locally. The plugin can create chats, recordings, attachments, embedding indexes, Studio projects and assets, diagnostics, and redacted settings backups inside the vault in configured directories.
 - Semantic search, file pickers, and vault tools enumerate or read vault files when needed. User-invoked copy, paste, and attachment features access the system clipboard.
 - On Obsidian Desktop, Studio's CLI, dataset-adapter, media-ingest, and FFmpeg nodes can read or write user-selected paths outside the vault and execute user-configured commands. These capabilities run only when the user configures and executes the relevant node and are unavailable on mobile.
-- Ask Approval pauses before agent-requested vault mutations. Full Access runs those mutations without pausing. License keys are removed from exported diagnostics and settings backups.
+- Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. License keys are removed from exported diagnostics and settings backups.
 
 ## Documentation
 
@@ -45,6 +46,7 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 - [Agent tools and approvals](docs/user/agent-mode.md)
 - [Settings](docs/user/settings.md)
 - [Commands](docs/user/commands.md)
+- [Studio workspaces and on-machine Codex](docs/studio-workspaces.md)
 - [Similar Notes](docs/user/similar-notes.md)
 - [Audio and transcription](docs/user/audio-transcription.md)
 - [Audio Processor](docs/user/audio-processor.md)
@@ -53,7 +55,7 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 ## Development
 
 ~~~bash
-cd ~/gits/personal/systemsculpt/plugin
+cd ~/gits/systemsculpt/plugin
 npm install
 npm run check
 ~~~
@@ -71,15 +73,15 @@ The local-agent route is fixed at `http://127.0.0.1:8787/api/plugin`. Production
 
 | Directory | Responsibility |
 | --- | --- |
-| `~/gits/personal/systemsculpt/plugin` | This Obsidian client |
-| `~/gits/systemsculpt/website` | Website and first-party plugin API |
+| `~/gits/systemsculpt/plugin` | This Obsidian client |
+| `~/gits/systemsculpt/systemsculpt-website` | Website and first-party plugin API |
 | `~/gits/systemsculpt/systemsculpt-os` | Growth and operator automation |
 
 See [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
 
 ## Release
 
-- Version: 6.7.2
+- Version: 6.8.0
 - Minimum Obsidian version: 1.7.2
 - Platforms: desktop and mobile
 - License: MIT

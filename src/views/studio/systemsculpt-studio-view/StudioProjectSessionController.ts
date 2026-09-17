@@ -2,12 +2,12 @@ import { resolveStudioEntry } from '../../../studio/StudioEntry';
 import {
   Notice,
   TAbstractFile,
+  TFolder,
   normalizePath,
 } from "obsidian";
 import type SystemSculptPlugin from "../../../main";
 import type {
   StudioNodeCacheSnapshotV1,
-  StudioNodeInstance,
   StudioProjectV1,
 } from "../../../studio/types";
 import {
@@ -30,11 +30,11 @@ import {
   type StudioGraphViewportState,
   type StudioNodeDetailModeByProject,
   upsertGraphViewStateForProject,
-} from "../graph-v3/StudioGraphViewStateStore";
+} from "../canvas/StudioGraphViewStateStore";
 import {
   STUDIO_NODE_DETAIL_DEFAULT_MODE,
   type StudioNodeDetailMode,
-} from "../graph-v3/StudioGraphNodeDetailMode";
+} from "../canvas/StudioGraphNodeDetailMode";
 import { requestStudioAnimationFrame } from "../StudioDomContext";
 import { STUDIO_GRAPH_DEFAULT_ZOOM, type StudioGraphZoomMode } from "../StudioGraphInteractionTypes";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
@@ -43,11 +43,8 @@ import {
   remapPathScopedRecord,
   resolveProjectPathAfterFolderRename,
 } from "./StudioProjectPathState";
-import {
-  deriveStudioNoteTitleFromPath,
-  parseStudioNoteItems,
-  serializeStudioNoteItems,
-} from "../../../studio/StudioNoteConfig";
+import type { StudioGraphHistory } from "../StudioGraphHistory";
+import type { StudioVaultNotes } from "../StudioVaultNotes";
 
 export type StudioProjectScopedViewState = {
   file?: unknown;
@@ -74,7 +71,7 @@ type StudioProjectSessionControllerHost = {
   scheduleLayoutSave: () => void;
   requestLayoutSave: () => void;
   getGraphViewportElement: () => HTMLElement | null;
-  captureProjectHistoryCheckpoint: () => void;
+  history: StudioGraphHistory;
   resetProjectHistory: (project: StudioProjectV1 | null) => void;
   preserveProjectAsUndo: (project: StudioProjectV1, selectedNodeIds: string[]) => void;
   setHistoryCurrentSnapshot: (project: StudioProjectV1, selectedNodeIds: string[]) => void;
@@ -89,21 +86,15 @@ type StudioProjectSessionControllerHost = {
   materializeManagedOutputNodesFromCache: (
     entries: StudioNodeCacheSnapshotV1["entries"]
   ) => void;
-  refreshNoteNodePreviewsFromVault: (
-    project: StudioProjectV1,
-    options?: { onlyNodeIds?: Set<string> }
-  ) => Promise<boolean>;
+  vaultNotes: Pick<StudioVaultNotes, "refresh" | "renameReferences" | "affectedNodeIds">;
   setError: (error: unknown) => void;
   setLastError: (message: string | null) => void;
   render: () => void;
   refreshLeafDisplay: () => void;
-  isMarkdownVaultFile: (file: TAbstractFile | null | undefined) => boolean;
-  isVaultFolder: (file: TAbstractFile | null | undefined) => boolean;
-  readAllNotePathsFromConfig: (node: StudioNodeInstance) => string[];
-  normalizeNoteNodeConfig: (node: StudioNodeInstance) => boolean;
 };
 
 export class StudioProjectSessionController {
+  private readonly mutationOrigin = Symbol("Studio view");
   private currentProject: StudioProjectV1 | null = null;
   private currentProjectPath: string | null = null;
   private currentProjectSession: StudioProjectSession | null = null;
@@ -266,6 +257,7 @@ export class StudioProjectSessionController {
     mutator: (project: StudioProjectV1) => boolean | void,
     options?: {
       captureHistory?: boolean;
+      historyGroup?: string;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): boolean {
@@ -273,12 +265,14 @@ export class StudioProjectSessionController {
     if (!session) {
       return false;
     }
-    if (options?.captureHistory !== false) {
-      this.host.captureProjectHistoryCheckpoint();
-    }
-    return session.mutate(reason, mutator, {
-      mode: options?.mode || "discrete",
-    });
+    const before = options?.captureHistory !== false ? session.getProjectSnapshot() : null;
+    const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
+    const changed = session.mutate(reason, mutator, { mode: options?.mode || "discrete", origin: this.mutationOrigin });
+    if (changed && before) this.host.history.recordEdit(
+      { project: before, selectedNodeIds },
+      { project: session.getProject(), selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
+    );
+    return changed;
   }
 
   async commitMutationAsync(
@@ -286,6 +280,7 @@ export class StudioProjectSessionController {
     mutator: (project: StudioProjectV1) => Promise<boolean | void>,
     options?: {
       captureHistory?: boolean;
+      historyGroup?: string;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): Promise<boolean> {
@@ -293,12 +288,14 @@ export class StudioProjectSessionController {
     if (!session) {
       return false;
     }
-    if (options?.captureHistory !== false) {
-      this.host.captureProjectHistoryCheckpoint();
-    }
-    return await session.mutateAsync(reason, mutator, {
-      mode: options?.mode || "discrete",
-    });
+    const before = options?.captureHistory !== false ? session.getProjectSnapshot() : null;
+    const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
+    const changed = await session.mutateAsync(reason, mutator, { mode: options?.mode || "discrete", origin: this.mutationOrigin });
+    if (changed && before && this.currentProjectSession === session) this.host.history.recordEdit(
+      { project: before, selectedNodeIds },
+      { project: session.getProject(), selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
+    );
+    return changed;
   }
 
   schedulePersistFromLegacyMutation(options?: {
@@ -306,7 +303,7 @@ export class StudioProjectSessionController {
     mode?: StudioProjectSessionAutosaveMode;
   }): void {
     if (options?.captureHistory !== false) {
-      this.host.captureProjectHistoryCheckpoint();
+      if (this.currentProject) this.host.history.checkpoint(this.currentProject, this.host.graphInteraction.getSelectedNodeIds());
     }
     this.currentProjectSession?.schedulePersist({ mode: options?.mode || "discrete" });
   }
@@ -450,7 +447,7 @@ export class StudioProjectSessionController {
       this.currentProject = project;
       this.unsubscribeProjectSession?.();
       let recoveryRevision = session.getConflictRecovery()?.revision || 0;
-      this.unsubscribeProjectSession = session.subscribe(() => {
+      this.unsubscribeProjectSession = session.subscribe(change => {
         if (this.currentProjectSession !== session) return;
         const recovery = session.getConflictRecovery();
         const hasNewConflict = recovery && recovery.revision !== recoveryRevision;
@@ -459,7 +456,11 @@ export class StudioProjectSessionController {
           this.host.preserveProjectAsUndo(recovery.project, this.host.graphInteraction.getSelectedNodeIds());
           this.projectFileWarning = "Another edit changed the same field. Independent changes were merged; your canvas version is available in Undo and saved recovery history.";
         }
-        if (!hasNewConflict && this.currentProject === session.getProject()) return;
+        // In-place local edits already update their own controls. Peers need a
+        // refresh even though they share this object. Async replacements still
+        // refresh the originating view, and never mask peer edits while awaiting.
+        if (!hasNewConflict && this.currentProject === session.getProject()
+          && (change.kind === "save" || change.origin === this.mutationOrigin)) return;
         this.currentProject = session.getProject();
         this.host.render();
       });
@@ -503,7 +504,7 @@ export class StudioProjectSessionController {
       try {
         await this.commitMutationAsync(
           "project.repair",
-          async (currentProject) => await this.host.refreshNoteNodePreviewsFromVault(currentProject),
+          async (currentProject) => await this.host.vaultNotes.refresh(currentProject),
           { captureHistory: false }
         );
       } catch (previewError) {
@@ -619,25 +620,13 @@ export class StudioProjectSessionController {
       await this.projectFileMutationTail;
       return;
     }
-    if (!this.host.isMarkdownVaultFile(file)) {
-      return;
-    }
-    const matchingNodeIds = this.currentProject.graph.nodes
-      .filter((node) => {
-        if (node.kind !== "studio.note") {
-          return false;
-        }
-        return this.host.readAllNotePathsFromConfig(node).includes(modifiedPath);
-      })
-      .map((node) => node.id);
-    if (matchingNodeIds.length === 0) {
-      return;
-    }
+    const matchingNodeIds = this.host.vaultNotes.affectedNodeIds(this.currentProject, file);
+    if (matchingNodeIds.size === 0) return;
 
     await this.commitMutationAsync(
       "vault.sync",
       async (project) =>
-        await this.host.refreshNoteNodePreviewsFromVault(project, {
+        await this.host.vaultNotes.refresh(project, {
           onlyNodeIds: new Set(matchingNodeIds),
         }),
       { captureHistory: false }
@@ -665,7 +654,7 @@ export class StudioProjectSessionController {
       return;
     }
 
-    const remappedProjectPath = this.host.isVaultFolder(file)
+    const remappedProjectPath = file instanceof TFolder
       ? resolveProjectPathAfterFolderRename({
           currentProjectPath: this.currentProjectPath,
           previousFolderPath: previousPath,
@@ -689,76 +678,7 @@ export class StudioProjectSessionController {
 
     const changed = await this.commitMutationAsync(
       "vault.sync",
-      async (project) => {
-        let nextChanged = false;
-        const changedNodeIds = new Set<string>();
-        if (this.host.isMarkdownVaultFile(file)) {
-          for (const node of project.graph.nodes) {
-            if (node.kind !== "studio.note") {
-              continue;
-            }
-            if (this.host.normalizeNoteNodeConfig(node)) {
-              nextChanged = true;
-            }
-            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-              path: item.path ? normalizePath(item.path) : "",
-              enabled: item.enabled !== false,
-            }));
-            const remappedItems = existingItems.map((item) => ({
-              path: item.path === previousPath ? normalizePath(file.path) : item.path,
-              enabled: item.enabled,
-            }));
-            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-              continue;
-            }
-            node.config.notes = serializeStudioNoteItems(remappedItems);
-            const previousTitle = deriveStudioNoteTitleFromPath(previousPath);
-            if (!node.title || node.title === "Note" || node.title === previousTitle) {
-              node.title = (file as { basename?: string }).basename || node.title;
-            }
-            nextChanged = true;
-            changedNodeIds.add(node.id);
-          }
-        } else if (this.host.isVaultFolder(file)) {
-          const prefix = `${previousPath}/`;
-          for (const node of project.graph.nodes) {
-            if (node.kind !== "studio.note") {
-              continue;
-            }
-            if (this.host.normalizeNoteNodeConfig(node)) {
-              nextChanged = true;
-            }
-            const existingItems = parseStudioNoteItems(node.config.notes).map((item) => ({
-              path: item.path ? normalizePath(item.path) : "",
-              enabled: item.enabled !== false,
-            }));
-            const remappedItems = existingItems.map((item) => {
-              if (!item.path.startsWith(prefix)) {
-                return item;
-              }
-              const suffix = item.path.slice(prefix.length);
-              return {
-                path: normalizePath(`${file.path}/${suffix}`),
-                enabled: item.enabled,
-              };
-            });
-            if (JSON.stringify(existingItems) === JSON.stringify(remappedItems)) {
-              continue;
-            }
-            node.config.notes = serializeStudioNoteItems(remappedItems);
-            nextChanged = true;
-            changedNodeIds.add(node.id);
-          }
-        }
-
-        if (changedNodeIds.size > 0) {
-          const hydrated = await this.host.refreshNoteNodePreviewsFromVault(project, {
-            onlyNodeIds: changedNodeIds,
-          });
-          nextChanged = nextChanged || hydrated;
-        }
-        return nextChanged;
-      },
+      async (project) => await this.host.vaultNotes.renameReferences(project, file, previousPath),
       { captureHistory: false }
     );
     if (changed) {
@@ -783,32 +703,7 @@ export class StudioProjectSessionController {
       return;
     }
 
-    const matchingNodeIds = new Set<string>();
-    if (this.host.isMarkdownVaultFile(file)) {
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        if (!this.host.readAllNotePathsFromConfig(node).includes(deletedPath)) {
-          continue;
-        }
-        matchingNodeIds.add(node.id);
-      }
-    } else if (this.host.isVaultFolder(file)) {
-      const prefix = `${deletedPath}/`;
-      for (const node of this.currentProject.graph.nodes) {
-        if (node.kind !== "studio.note") {
-          continue;
-        }
-        const hasMatch = this.host.readAllNotePathsFromConfig(node).some((path) =>
-          path.startsWith(prefix)
-        );
-        if (!hasMatch) {
-          continue;
-        }
-        matchingNodeIds.add(node.id);
-      }
-    }
+    const matchingNodeIds = this.host.vaultNotes.affectedNodeIds(this.currentProject, file);
 
     if (matchingNodeIds.size === 0) {
       return;
@@ -817,7 +712,7 @@ export class StudioProjectSessionController {
     const changed = await this.commitMutationAsync(
       "vault.sync",
       async (project) =>
-        await this.host.refreshNoteNodePreviewsFromVault(project, {
+        await this.host.vaultNotes.refresh(project, {
           onlyNodeIds: matchingNodeIds,
         }),
       { captureHistory: false }

@@ -15,7 +15,7 @@ import {
   observeManagedJob,
   waitForManagedJob,
 } from "../managed/ManagedJobObservation";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 
 const CAPABILITY = "image_generation" as const;
 

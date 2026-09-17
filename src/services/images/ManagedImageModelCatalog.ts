@@ -1,3 +1,4 @@
+import { HostedCatalogCache, type HostedCatalogCacheOptions } from "../managed/HostedCatalogCache";
 import type { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 
 export type ManagedImageSizeEstimate = Readonly<{ imageSize: string; estimatedCredits: number }>;
@@ -29,7 +30,6 @@ export type ManagedImageModel = Readonly<{
 
 export type ManagedImageModelCatalogSnapshot = Readonly<{ defaultModelId: string; models: readonly ManagedImageModel[] }>;
 
-const CACHE_TTL_MS = 5 * 60_000;
 const MODEL_ID_PATTERN = /^(?!.*:\/\/)[A-Za-z0-9][A-Za-z0-9./_:-]{0,159}$/;
 const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid image model catalog.");
@@ -137,38 +137,8 @@ export function parseManagedImageModelCatalog(value: unknown): ManagedImageModel
   return Object.freeze({ defaultModelId, models: Object.freeze(models) });
 }
 
-export class ManagedImageModelCatalog {
-  private pending: Promise<ManagedImageModelCatalogSnapshot> | undefined;
-  private cached: { value: ManagedImageModelCatalogSnapshot; expiresAt: number } | null = null;
-  constructor(private readonly transport: Pick<HostedTransportAdapter, "request">, private readonly now: () => number = () => Date.now()) {}
-
-  /** The last catalog loaded within the cache window, for synchronous card rendering. */
-  peek(): ManagedImageModelCatalogSnapshot | null {
-    return this.cached && this.cached.expiresAt > this.now() ? this.cached.value : null;
-  }
-
-  invalidate(): void {
-    this.cached = null;
-  }
-
-  async load(): Promise<ManagedImageModelCatalogSnapshot> {
-    const cached = this.peek();
-    if (cached) return cached;
-    // Deduplicate simultaneous pickers; prices stay fresh across the short window.
-    if (this.pending) return this.pending;
-    this.pending = this.read();
-    try {
-      const value = await this.pending;
-      this.cached = { value, expiresAt: this.now() + CACHE_TTL_MS };
-      return value;
-    } finally {
-      this.pending = undefined;
-    }
-  }
-
-  private async read(): Promise<ManagedImageModelCatalogSnapshot> {
-    const result = await this.transport.request({ path: "/api/plugin/images/models", method: "GET" });
-    if (!result.response.ok) throw new Error(`Image models are unavailable (${result.response.status}). Check your license and connection.`);
-    return parseManagedImageModelCatalog(await result.response.json());
+export class ManagedImageModelCatalog extends HostedCatalogCache<ManagedImageModelCatalogSnapshot> {
+  constructor(transport: Pick<HostedTransportAdapter, "request">, options: HostedCatalogCacheOptions | (() => number) = {}) {
+    super(transport, "Image", parseManagedImageModelCatalog, typeof options === "function" ? { now: options } : options);
   }
 }

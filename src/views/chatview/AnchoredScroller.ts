@@ -372,40 +372,12 @@ export class AnchoredScroller {
     };
   }
 
-  public jumpTo(
-    rowId: string,
-    options: Readonly<{
-      align?: "start" | "center" | "end";
-      followEnd?: boolean;
-    }> = {},
-  ): void {
-    this.assertLive();
-    const row = this.requireRow(rowId);
-    const rowTop = this.rowTop(row);
-    const rowHeight = this.rowHeight(row);
-    const viewportHeight = Math.max(0, finite(this.viewport.clientHeight));
-    let target = rowTop;
-    if (options.align === "center") target = rowTop - (viewportHeight - rowHeight) / 2;
-    if (options.align === "end") target = rowTop + rowHeight - viewportHeight;
-    this.mode = options.followEnd === true ? "end" : "manual";
-    if (this.mode === "end") this.lastKnownManualAnchor = null;
-    this.setScrollTop(target, "smooth");
-  }
-
   public scrollToEnd(options: { smooth?: boolean } = {}): void {
     this.assertLive();
     this.clearSubmittedPromptAnchor();
     this.mode = "end";
     this.lastKnownManualAnchor = null;
     this.setScrollTop(this.maximumScrollTop(), options.smooth === false ? "auto" : "smooth");
-  }
-
-  public getMode(): AnchoredScrollMode {
-    return this.mode;
-  }
-
-  public isFollowingEnd(): boolean {
-    return this.mode === "end";
   }
 
   /** Returns content-free state maintained by the scroller during normal work. */

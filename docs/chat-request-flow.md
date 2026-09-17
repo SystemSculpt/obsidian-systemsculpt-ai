@@ -1,19 +1,31 @@
-# ChatView thin-agent flow
+# Managed chat execution
 
 Architecture requirement adopted: **2026-07-29**.
 
-ChatView is a thin UI and Obsidian capability adapter. The server owns the agent, history, model execution, and continuation.
+This page describes the SystemSculpt API backend. The server owns its agent,
+history, model execution, and continuation; the plugin presents activity and
+performs approved Obsidian operations. On-machine Codex instead adapts its native
+thread through `src/services/codex/CodexChatSession.ts`. Both backends implement
+`src/chat/ChatSession.ts` for the same chat workspace.
 
 ## Client structure
 
 Each loaded conversation owns one `AgentChatSession` instance. A view replaces that local instance when it loads another conversation. It does not cancel server work during the replacement.
 
-The client uses:
+The managed client lives under `src/chat/managed/` and uses:
 
 - `StreamingTransport` for bootstrap, snapshot reads, and streaming HTTP commands;
 - `AuthoritativeSession` for ordered server state and idempotent command delivery;
-- `ChatSession` for Obsidian tools, approvals, rendering, and final persistence;
+- `ChatSession` for Obsidian tools, lifecycle coordination, and final persistence;
+- `VaultActionAuthorization` for immutable action identity and local approval decisions;
+- `ConversationProjection` for optimistic display, interrupted responses,
+  local-result overlays, and live/durable message conversion;
 - `MutationJournal` for crash-safe vault mutation receipts.
+
+`WireConversation` is shared implementation code for interpreting validated
+wire messages; execution and projection use the same identity rules. It is not
+a second execution or authorization owner. Projection outputs cannot grant
+permission to perform a vault action or become authoritative server history.
 
 The plugin does not run a model harness. It does not select a provider, build model context, compact history, or choose continuation limits.
 

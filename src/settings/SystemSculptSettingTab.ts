@@ -275,15 +275,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   display(): void {
-    this.invalidateRenderCleanups();
-    this.clearSettingsIndexRebuild();
-    this.removeAllListeners();
-    this.tabsHandle?.destroy();
-    this.tabsHandle = null;
-    this.searchCombobox?.destroy();
-    this.searchCombobox = null;
-    this.searchHandle?.destroy();
-    this.searchHandle = null;
+    this.disposeRender();
     const { containerEl } = this;
     containerEl.empty();
 
@@ -440,7 +432,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       if (this.contentMutationObserver) {
         this.contentMutationObserver.disconnect();
       }
-      this.contentMutationObserver = new MutationObserver(() => {
+      this.contentMutationObserver = new surfaceWindow.MutationObserver(() => {
         this.scheduleSettingsIndexRebuild(surfaceWindow, 150);
       });
       this.contentMutationObserver.observe(this.contentContainerEl, {
@@ -459,8 +451,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.initializeSearchCombobox();
     this.syncSearchChrome();
   }
-  // Override hide method to clean up event listeners
-  hide() {
+  hide(): void {
+    this.disposeRender();
+    super.hide();
+  }
+
+  private disposeRender(): void {
     this.invalidateRenderCleanups();
     this.clearSettingsIndexRebuild();
     this.removeAllListeners();
@@ -478,7 +474,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       this.app.workspace.offref(this.focusTabEventRef);
       this.focusTabEventRef = null;
     }
-    super.hide();
   }
 
   /**

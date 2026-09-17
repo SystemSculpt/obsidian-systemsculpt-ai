@@ -271,6 +271,24 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     expect(result.delivery.download_completed_offset_ms).toBe(5_250);
   });
 
+  it("uses wall time for legacy download responses without the request timestamp", async () => {
+    const elapsedTimes = [1_000, 1_250];
+    const legacyClient = new ManagedMediaJobClient(
+      transport,
+      () => Date.parse("2026-08-22T12:00:05.250Z"),
+      () => "req-1",
+      () => elapsedTimes.shift() as number,
+    );
+    const { "x-systemsculpt-download-requested-at": _omit, ...headers } = videoDownloadHeaders({
+      "x-systemsculpt-download-started-at": "2026-08-22T12:00:00.000Z",
+    });
+    request.mockResolvedValue(new Response(new Uint8Array([1, 2]), { status: 200, headers }));
+
+    const result = await legacyClient.videos.downloadOutput(JOB_ID, 0, videoOutput);
+
+    expect(result.delivery.download_completed_offset_ms).toBe(5_250);
+  });
+
   it.each([
     ["content type", videoDownloadHeaders({ "content-type": "video/webm" }), "content-type"],
     ["disposition", videoDownloadHeaders({ "content-disposition": "inline" }), "disposition"],

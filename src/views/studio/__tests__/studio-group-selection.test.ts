@@ -64,6 +64,30 @@ describe('group background selection and fit',()=>{
     h.engine.renderGroupLayer();h.select();expect(h.engine.fitSelectedNodesInViewport({paddingPx:40})).toBe(true);
     expect(h.engine.getGraphZoom()).toBeLessThan(0.8);expect(h.engine.getGraphZoom()).toBeGreaterThan(0.5);
   });
+  it.each([{ applied: false, reset: false }, { applied: true, reset: false }, { applied: false, reset: true }, { applied: true, reset: true }])('cancels group drag on teardown (frame applied: $applied, project reset: $reset)', ({ applied, reset }) => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    jest.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++id, callback); return id; });
+    jest.spyOn(window, 'cancelAnimationFrame').mockImplementation(handle => { frames.delete(handle); });
+    const h = harness();
+    cleanup = () => { h.engine.clearRenderBindings(); jest.restoreAllMocks(); };
+    h.frame().dispatchEvent(pointer('pointerdown'));
+    window.dispatchEvent(pointer('pointermove', 240, 250));
+    if (applied) {
+      for (const callback of [...frames.values()]) callback(0);
+      frames.clear();
+      expect(h.project.graph.nodes[0].position).toEqual({ x: 240, y: 250 });
+      window.dispatchEvent(pointer('pointermove', 280, 290));
+    }
+    const position = { ...h.project.graph.nodes[0].position };
+    if (reset) h.engine.clearProjectState(); else h.engine.clearRenderBindings();
+    const count = h.commit.mock.calls.length;
+    expect(frames.size).toBe(0);
+    window.dispatchEvent(pointer('pointermove', 300, 320));
+    window.dispatchEvent(pointer('pointerup', 300, 320));
+    expect(h.commit).toHaveBeenCalledTimes(count);
+    expect(h.project.graph.nodes[0].position).toEqual(position);
+  });
   it('does not retain a removed group as the fit target',()=>{
     const h=harness();cleanup=()=>h.engine.clearRenderBindings();h.select();h.project.graph.groups=[];h.engine.renderGroupLayer();
     expect(h.engine.fitSelectedNodesInViewport()).toBe(false);

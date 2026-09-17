@@ -255,7 +255,6 @@ export class SettingsManager {
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
 
-    migratedSettings.workflowEngine = normalizeWorkflowEngineSettings(migratedSettings.workflowEngine);
     
     if (typeof migratedSettings.debugMode !== "boolean") {
       migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
@@ -267,21 +266,6 @@ export class SettingsManager {
       migratedSettings.logLevel = LogLevel.WARNING;
     }
 
-    if (!Array.isArray(migratedSettings.favoriteChats)) {
-      migratedSettings.favoriteChats = DEFAULT_SETTINGS.favoriteChats;
-    }
-
-    if (!Array.isArray(migratedSettings.favoriteStudioSessions)) {
-      migratedSettings.favoriteStudioSessions = DEFAULT_SETTINGS.favoriteStudioSessions;
-    }
-
-    if (!Array.isArray(migratedSettings.favoriteImageModels)) {
-      migratedSettings.favoriteImageModels = DEFAULT_SETTINGS.favoriteImageModels;
-    }
-
-    if (!Array.isArray(migratedSettings.favoriteVideoModels)) {
-      migratedSettings.favoriteVideoModels = DEFAULT_SETTINGS.favoriteVideoModels;
-    }
     
     // Ensure automatic backup settings are properly initialized (migration for existing users)
     if (typeof migratedSettings.automaticBackupsEnabled !== 'boolean') {
@@ -302,10 +286,6 @@ export class SettingsManager {
       migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
     }
 
-    if (typeof migratedSettings.defaultChatTag !== "string") {
-      migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
-    }
-
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }
@@ -318,12 +298,6 @@ export class SettingsManager {
       migratedSettings.studioRunRetentionMaxArtifactsMb = DEFAULT_SETTINGS.studioRunRetentionMaxArtifactsMb;
     }
 
-    if (
-      migratedSettings.studioJsonEditorDefaultMode !== "composer" &&
-      migratedSettings.studioJsonEditorDefaultMode !== "raw"
-    ) {
-      migratedSettings.studioJsonEditorDefaultMode = DEFAULT_SETTINGS.studioJsonEditorDefaultMode;
-    }
     
     return migratedSettings;
   }
@@ -339,87 +313,55 @@ export class SettingsManager {
    * @returns The restored settings or null if restoration failed
    */
   private async restoreFromBackup(): Promise<Record<string, unknown> | null> {
-    try {
-      const hydrateBackup = (candidate: unknown): Record<string, unknown> | null => {
-        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-          return null;
-        }
+    const readBackup = async (read: () => Promise<unknown>): Promise<Record<string, unknown> | null> => {
+      try {
+        const candidate = await read();
+        if (!this.isNonEmptyRecord(candidate)) return null;
         return applyCurrentSecretsToBackup(
-          candidate as Record<string, unknown>,
+          candidate,
           this.settings as unknown as Record<string, unknown>,
         );
-      };
-
-      // First try to restore from the new vault-based location if storage manager is available
-      if (this.plugin.storage) {
-        try {
-          // Try to get the latest backup from the vault storage
-          const latestBackup = await this.plugin.storage.readFile('settings', 'backups/settings-backup-latest.json', true);
-          const hydratedLatestBackup = hydrateBackup(latestBackup);
-          if (hydratedLatestBackup) {
-            return hydratedLatestBackup;
-          }
-
-          // If no latest backup, try to find the most recent daily backup
-          const backupFiles = await this.plugin.storage.listFiles('settings', 'backups');
-          const dailyBackups = backupFiles
-            .filter(f => f.match(/settings-backup-\d{4}-\d{2}-\d{2}\.json$/))
-            .sort()
-            .reverse();
-
-          if (dailyBackups.length > 0) {
-            const newestBackup = await this.plugin.storage.readFile('settings', `backups/${dailyBackups[0]}`, true);
-            const hydratedNewestBackup = hydrateBackup(newestBackup);
-            if (hydratedNewestBackup) {
-              return hydratedNewestBackup;
-            }
-          }
-        } catch {
-          // Continue with vault-root backups.
-        }
+      } catch {
+        // One damaged backup must not hide older recoverable settings.
+        return null;
       }
+    };
+    const datedBackups = (paths: string[]) => paths
+      .filter(path => /settings-backup-\d{4}-\d{2}-\d{2}\.json$/.test(path))
+      .sort()
+      .reverse();
 
-      // If we get here, try the vault root location as fallback
-      const backupDir = ".systemsculpt/settings-backups";
-      const latestBackupPath = ".systemsculpt/settings-backups/settings-backup-latest.json";
-
-      // Check if the latest backup exists
-      const exists = await this.plugin.app.vault.adapter.exists(latestBackupPath);
-      if (exists) {
-        // Read the latest backup file
-        const backupData = await this.plugin.app.vault.adapter.read(latestBackupPath);
-        const backupSettings = JSON.parse(backupData);
-        const hydratedBackup = hydrateBackup(backupSettings);
-        if (hydratedBackup) {
-          return hydratedBackup;
-        }
-      }
-
-      // If no latest backup, try to find the most recent daily backup
+    const storage = this.plugin.storage;
+    if (storage) {
+      const latest = await readBackup(() => storage.readFile("settings", "backups/settings-backup-latest.json", true));
+      if (latest) return latest;
       try {
-        const files = await this.plugin.app.vault.adapter.list(backupDir);
-        const backupFiles = files.files
-          .filter(f => f.match(/settings-backup-\d{4}-\d{2}-\d{2}\.json$/))
-          .sort()
-          .reverse();
-
-        if (backupFiles.length > 0) {
-          const newestBackup = backupFiles[0];
-          const backupData = await this.plugin.app.vault.adapter.read(newestBackup);
-          const backupSettings = JSON.parse(backupData);
-          const hydratedBackup = hydrateBackup(backupSettings);
-          if (hydratedBackup) {
-            return hydratedBackup;
-          }
+        for (const name of datedBackups(await storage.listFiles("settings", "backups"))) {
+          const backup = await readBackup(() => storage.readFile("settings", `backups/${name}`, true));
+          if (backup) return backup;
         }
       } catch {
-        // No dated vault-root backup is available.
+        // Continue with the legacy vault-root backup directory.
       }
-
-      return null;
-    } catch {
-      return null;
     }
+
+    const adapter = this.plugin.app.vault.adapter;
+    const directory = ".systemsculpt/settings-backups";
+    const readVaultBackup = (path: string) => readBackup(async () => {
+      if (!(await adapter.exists(path))) return null;
+      return JSON.parse(await adapter.read(path)) as unknown;
+    });
+    const latest = await readVaultBackup(`${directory}/settings-backup-latest.json`);
+    if (latest) return latest;
+    try {
+      for (const path of datedBackups((await adapter.list(directory)).files)) {
+        const backup = await readVaultBackup(path);
+        if (backup) return backup;
+      }
+    } catch {
+      // No readable vault-root backup directory is available.
+    }
+    return null;
   }
 
   async loadSettings(): Promise<void> {
@@ -506,7 +448,7 @@ export class SettingsManager {
       if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
         await this.writePreMigrationBackup(raw, fromVersion);
       }
-      const migrated = await this.validateSettingsAsync(this.migrateSettings(result.settings));
+      const migrated = this.validateSettings(this.migrateSettings(result.settings));
       if (!result.future) {
         this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
       }
@@ -517,7 +459,7 @@ export class SettingsManager {
         // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
         // The user's original data is preserved both here (raw wins) and in the
         // pre-migration backup written above.
-        return await this.validateSettingsAsync(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
+        return this.validateSettings(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
       } catch {
         // Last resort: pure defaults. Data is safe in the pre-migration backup.
         return { ...DEFAULT_SETTINGS };
@@ -918,7 +860,7 @@ export class SettingsManager {
     try {
       const oldSettings = { ...(this.plugin._internal_settings_systemsculpt_plugin || DEFAULT_SETTINGS) }; 
       // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
-      const persistedSettings = await this.validateSettingsAsync({
+      const persistedSettings = this.validateSettings({
         ...this.plugin._internal_settings_systemsculpt_plugin,
       });
       this.settings = persistedSettings;
@@ -958,7 +900,7 @@ export class SettingsManager {
     const updatedSettings = { ...this.settings, ...newSettings };
     
     // Validate the merged settings before persistence.
-    this.settings = await this.validateSettingsAsync(updatedSettings);
+    this.settings = this.validateSettings(updatedSettings);
 
     // Synchronize the plugin's internal settings representation BEFORE persisting.
     // This ensures that saveSettings() – which relies on `_internal_settings_systemsculpt_plugin`
@@ -981,13 +923,6 @@ export class SettingsManager {
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
     const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
     await this.updateSettings(migrated);
-  }
-
-  /**
-   * Perform async validation.
-   */
-  private async validateSettingsAsync(settings: SystemSculptSettings): Promise<SystemSculptSettings> {
-    return this.validateSettings(settings);
   }
 
   /**

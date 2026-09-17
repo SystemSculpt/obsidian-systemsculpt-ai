@@ -89,8 +89,7 @@
 
 .ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card textarea,
 .ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card input,
-.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-text-rendered,
-.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-config-preview {
+.ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-text-rendered {
   display: none;
 }
 
@@ -101,10 +100,6 @@
   align-items: center;
   gap: var(--ss-space-1);
   padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-1);
-}
-
-.ss-studio-node-kind {
-  display: none;
 }
 
 .ss-studio-node-title-input {

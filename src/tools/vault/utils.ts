@@ -296,43 +296,6 @@ export async function renameAdapterPath(adapter: VaultDataAdapter, sourcePath: s
   throw new Error("Adapter base path unavailable");
 }
 
-/**
- * Permanently remove a vault path on disk (mirrors the desktop `fs.rm`).
- * Adapter fallbacks (no base path / no Node) remove files via `adapter.remove`
- * and folders via `adapter.rmdir(path, recursive)` (#142).
- */
-export async function removeAdapterPath(adapter: VaultDataAdapter, vaultPath: string): Promise<void> {
-  const fullPath = resolveAdapterPath(adapter, vaultPath);
-  const fsMod = fullPath ? await desktopHost.fs() : null;
-  if (fullPath && fsMod) {
-    await fsMod.rm(fullPath, { recursive: true, force: true });
-    return;
-  }
-  const normalized = normalizeVaultPath(String(vaultPath ?? ""));
-  if (!normalized) return;
-  let isFolder = false;
-  if (adapter && typeof adapter.stat === "function") {
-    try {
-      const stat = await adapter.stat(normalized);
-      isFolder = stat?.type === "folder";
-    } catch {
-      isFolder = false;
-    }
-  }
-  if (isFolder && adapter && typeof adapter.rmdir === "function") {
-    await adapter.rmdir(normalized, true);
-    return;
-  }
-  if (adapter && typeof adapter.remove === "function") {
-    await adapter.remove(normalized);
-    return;
-  }
-  if (adapter && typeof adapter.rmdir === "function") {
-    await adapter.rmdir(normalized, true);
-    return;
-  }
-  throw new Error("Adapter base path unavailable");
-}
 
 /**
  * Ensure a folder (and every missing ancestor) exists via the Vault API alone —
@@ -548,57 +511,6 @@ export function getFilesFromFolder(folder: TFolder): TFile[] {
   };
   processFolder(folder);
   return files;
-}
-
-/**
- * Evaluate metadata query
- */
-export function evaluateQuery(actualValue: unknown, operator: string, expectedValue: unknown): boolean {
-  // Attempt to parse dates for comparison
-  const comparableDateValue = (value: unknown): string | number | Date | null =>
-    typeof value === "string" || typeof value === "number" || value instanceof Date
-      ? value
-      : null;
-  const actualDateValue = comparableDateValue(actualValue);
-  const expectedDateValue = comparableDateValue(expectedValue);
-  const dActual = actualDateValue === null ? null : new Date(actualDateValue);
-  const dExpected = expectedDateValue === null ? null : new Date(expectedDateValue);
-
-  const isDateComparison = dActual !== null
-    && dExpected !== null
-    && !Number.isNaN(dActual.getTime())
-    && !Number.isNaN(dExpected.getTime());
-
-  if (isDateComparison) {
-    actualValue = dActual.getTime();
-    expectedValue = dExpected.getTime();
-  }
-
-  switch (operator) {
-    case 'equals':
-      return actualValue == expectedValue;
-    case 'not_equals':
-      return actualValue != expectedValue;
-    case 'contains':
-      if (Array.isArray(actualValue)) return actualValue.includes(expectedValue);
-      if (typeof actualValue === 'string' && typeof expectedValue === 'string') return actualValue.includes(expectedValue);
-      return false;
-    case 'starts_with':
-      if (typeof actualValue === 'string' && typeof expectedValue === 'string') return actualValue.startsWith(expectedValue);
-      return false;
-    case 'greater_than':
-      return (typeof actualValue === "number" && typeof expectedValue === "number")
-        || (typeof actualValue === "string" && typeof expectedValue === "string")
-        ? actualValue > expectedValue
-        : false;
-    case 'less_than':
-      return (typeof actualValue === "number" && typeof expectedValue === "number")
-        || (typeof actualValue === "string" && typeof expectedValue === "string")
-        ? actualValue < expectedValue
-        : false;
-    default:
-      return false;
-  }
 }
 
 /**

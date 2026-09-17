@@ -1,7 +1,7 @@
 import { studioAgentExecution, readStudioCommandExecution } from './StudioCommandExecution';
 import { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
 import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettings';
-import type { StudioAgentRun } from '../services/codex/StudioAgentRunStore';
+import type { StudioAgentRunView } from '../services/codex/StudioAgentRunStore';
 import { normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { replaceControlCharacters } from "../utils/characterValidation";
@@ -47,7 +47,7 @@ import {
 } from "./paths";
 import { parseStudioProject, type StudioProjectParseContext } from "./schema";
 import { STUDIO_PROJECT_SCHEMA_V2 } from "./types";
-import { sha256HexFromArrayBuffer } from "./hash";
+import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
   assertValidStudioProjectAgentDocumentStructure,
@@ -121,7 +121,6 @@ export class StudioService {
   private readonly projectSessionManager = new StudioProjectSessionManager();
   private readonly projectRecoveryStore: StudioProjectRecoveryStore;
   private readonly agentReferenceFile: StudioAgentReferenceFile;
-  private readonly projectSessionOperations = new Map<string, Promise<void>>();
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
@@ -273,58 +272,19 @@ export class StudioService {
     path: string,
     options?: { forceReload?: boolean }
   ): Promise<StudioProjectSession> {
-    const normalized = normalizeStudioProjectPath(path);
-    return await this.withProjectSessionOperation(normalized, async () => {
-      const existingSession = this.projectSessionManager.getSession(normalized);
-      if (existingSession && options?.forceReload === true) {
-        // Load and validate completely before replacing the shared in-memory
-        // snapshot. A failed file reload therefore leaves the current canvas
-        // and its editor state untouched.
-        const loaded = await this.loadProjectForSession(normalized, { forceReload: true });
-        await existingSession.reconcileExternalProject(loaded.project, loaded.rawText);
-      }
-
-      return await this.projectSessionManager.retainSession(normalized, async (sessionPath) => {
-        // With no retained session there is no Studio view watching file
-        // modifications. Reconcile the visible project file before creating a
-        // new session instead of reusing a selection cached by an earlier view.
-        const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
-        return await this.buildProjectSession(sessionPath, loaded.project, {
-          acceptedRawText: loaded.rawText,
-        });
-      });
-    });
+    return this.projectSessionManager.retainSession(path, async sessionPath => {
+      // New sessions always reconcile the visible file, including changes made
+      // while no view was watching the project.
+      const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
+      return this.buildProjectSession(sessionPath, loaded.project, { acceptedRawText: loaded.rawText });
+    }, options?.forceReload ? async (session, sessionPath) => {
+      const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
+      await session.reconcileExternalProject(loaded.project, loaded.rawText);
+    } : undefined);
   }
 
   async releaseProjectSession(path: string): Promise<void> {
-    const rawPath = String(path || "").trim();
-    if (!rawPath) {
-      return;
-    }
-    const normalized = normalizeStudioProjectPath(rawPath);
-    await this.withProjectSessionOperation(normalized, async () => {
-      await this.projectSessionManager.releaseSession(normalized);
-    });
-  }
-
-  private async withProjectSessionOperation<T>(
-    projectPath: string,
-    operation: () => Promise<T>
-  ): Promise<T> {
-    const prior = this.projectSessionOperations.get(projectPath) || Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = prior.catch(() => {}).then(() => gate);
-    this.projectSessionOperations.set(projectPath, queued);
-    await prior.catch(() => {});
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.projectSessionOperations.get(projectPath) === queued) {
-        this.projectSessionOperations.delete(projectPath);
-      }
-    }
+    await this.projectSessionManager.releaseSession(path);
   }
 
   private getProjectsFolder(): string {
@@ -459,7 +419,7 @@ export class StudioService {
         projectPath: renamed.newPath,
         acceptedRawText: nextRawText,
       });
-      this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
+      await this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
     }
 
     return renamed;
@@ -549,7 +509,7 @@ export class StudioService {
       projectPath: renamed.newPath,
       acceptedRawText: nextRawText,
     });
-    this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
+    await this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
     return { ...renamed, replacedCanvasProject };
   }
 
@@ -660,7 +620,7 @@ export class StudioService {
     return session?.getProjectSnapshot() || this.projectStore.loadProject(projectPath);
   }
 
-  async startAgentRun(projectPath: string, nodeId: string, options?: { objective?: string; parentRunId?: string; assignmentId?: string }): Promise<StudioAgentRun> {
+  async startAgentRun(projectPath: string, nodeId: string, options?: { objective?: string; parentRunId?: string; assignmentId?: string }): Promise<StudioAgentRunView> {
     const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
     const node = project.graph.nodes.find(node => node.id === nodeId && node.kind === 'studio.codex');
     if (!node) throw new Error('Choose a Codex role in this project.');
@@ -680,10 +640,7 @@ export class StudioService {
   private async prepareAgentInputs(path: string, nodeId: string, request: import('../services/codex/LocalCodexClient').CodexRequest): Promise<import('../services/codex/LocalCodexClient').CodexRequest> {
     const project = await this.agentProjectSnapshot(path), inbound = project.graph.edges.filter(edge => edge.toNodeId === nodeId);
     if (!inbound.length) return request;
-    const result = await this.runtime.runProjectSnapshot(path, project, { entryNodeIds: [...new Set(inbound.map(edge => edge.fromNodeId))] });
-    if (result.status !== 'success') throw new Error(result.error || 'Connected input preparation failed.');
-    const cache = await this.runtime.getNodeCacheSnapshot(path);
-    const inputs = Object.fromEntries(inbound.map(edge => [edge.toPortId, cache.entries[edge.fromNodeId]?.outputs[edge.fromPortId] ?? null]));
+    const inputs = await this.runtime.prepareNodeInputs(path, project, nodeId);
     return { ...request, prompt: `${request.prompt}\n\nConnected context:\n${JSON.stringify(inputs)}` };
   }
 

@@ -46,7 +46,7 @@ describe("Studio persistence architecture lint", () => {
     ]);
     const allowedNonProjectContexts = new Set([
       "src/core/diagnostics/DiagnosticsSessionLifecycle.ts#run",
-      "src/main.ts#rotateDiagnosticsFile",
+      "src/core/diagnostics/DiagnosticsSessionLifecycle.ts#rotate",
       // Vault-level generated agent documentation, not project-local state.
       "src/studio/StudioAgentReferenceFile.ts#ensureCurrent",
       "src/studio/StudioApiExecutionAdapter.ts#removeTempPath",

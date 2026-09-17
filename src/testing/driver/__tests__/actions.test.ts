@@ -6,7 +6,7 @@ import type { App } from "obsidian";
 
 import type { ChatMessage, MessagePart } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
-import { canonicalAgentToolInput } from "../../../views/chatview/agent/MutationJournal";
+import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
   DEVELOPMENT_TEST_ROOT,
   runDriverAction,

@@ -27,7 +27,7 @@ function plugin() {
       postProcessingEnabled: true,
       postProcessingPrompt: "Clean this transcript.",
     },
-    getManagedCapabilityClient: jest.fn(() => ({ generateText })),
+    getManagedCapabilityGraph: jest.fn(() => ({ textGeneration: { generate: generateText } })),
     generateText,
   } as any;
 }
@@ -47,7 +47,7 @@ describe("PostProcessingService", () => {
     mock.settings.postProcessingEnabled = false;
     const result = await PostProcessingService.getInstance(mock).processTranscription("raw");
     expect(result).toEqual({ text: "raw" });
-    expect(mock.getManagedCapabilityClient).not.toHaveBeenCalled();
+    expect(mock.getManagedCapabilityGraph).not.toHaveBeenCalled();
   });
 
   it("uses only the managed transcript purpose with a caller-owned durable operation ID", async () => {
@@ -152,7 +152,7 @@ describe("PostProcessingService", () => {
       enabled: false,
     })).resolves.toEqual({ text: "raw" });
 
-    expect(mock.getManagedCapabilityClient).not.toHaveBeenCalled();
+    expect(mock.getManagedCapabilityGraph).not.toHaveBeenCalled();
   });
 
   it("preserves the raw transcript on a definitive first-party failure without fallback", async () => {
@@ -228,8 +228,8 @@ describe("PostProcessingService", () => {
 
     expect(reloadedService).not.toBe(firstService);
     await expect(reloadedService.processTranscription("raw")).resolves.toEqual({ text: "raw cleaned" });
-    expect(firstPlugin.getManagedCapabilityClient).not.toHaveBeenCalled();
-    expect(reloadedPlugin.getManagedCapabilityClient).toHaveBeenCalledTimes(1);
+    expect(firstPlugin.getManagedCapabilityGraph).not.toHaveBeenCalled();
+    expect(reloadedPlugin.getManagedCapabilityGraph).toHaveBeenCalledTimes(1);
 
     const request = reloadedPlugin.generateText.mock.calls[0][0];
     const messages = await request.buildMessages();

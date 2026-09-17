@@ -153,19 +153,19 @@ function extractDiffSequence(
   
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      result.unshift({ type: 'unchanged', line: oldLines[i - 1] });
+      result.push({ type: 'unchanged', line: oldLines[i - 1] });
       i--;
       j--;
     } else if (j > 0 && (i === 0 || matrix[i][j - 1] >= matrix[i - 1][j])) {
-      result.unshift({ type: 'added', line: newLines[j - 1] });
+      result.push({ type: 'added', line: newLines[j - 1] });
       j--;
     } else if (i > 0) {
-      result.unshift({ type: 'removed', line: oldLines[i - 1] });
+      result.push({ type: 'removed', line: oldLines[i - 1] });
       i--;
     }
   }
   
-  return result;
+  return result.reverse();
 }
 
 /**

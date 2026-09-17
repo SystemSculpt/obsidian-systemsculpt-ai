@@ -144,7 +144,7 @@ describe("SystemSculptSearchModal", () => {
 
       const state = (modal as any).listEl?.querySelector(".ss-ui-state.is-error");
       expect(state?.getAttribute("role")).toBe("alert");
-      expect(state?.textContent).toContain("Could not load recent notes");
+      expect(state?.textContent).toContain("Could not load recent files");
       expect(state?.querySelector("button")?.textContent).toBe("Retry");
       expect((modal as any).listEl?.getAttribute("role")).toBeNull();
     });

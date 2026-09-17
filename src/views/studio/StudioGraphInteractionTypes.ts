@@ -3,7 +3,7 @@ import type {
   StudioProjectSessionAutosaveMode,
   StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
-import type { StudioGraphNodeResizePatch } from "./graph-v3/StudioGraphNodeCardTypes";
+import type { StudioGraphNodeResizePatch } from "./canvas/StudioGraphNodeCardTypes";
 
 export const STUDIO_GRAPH_MIN_ZOOM = 0.02;
 export const STUDIO_GRAPH_OVERVIEW_MIN_ZOOM = 0.005;

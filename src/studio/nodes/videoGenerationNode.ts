@@ -1,5 +1,4 @@
 import type {
-  StudioAssetRef,
   StudioNodeDefinition,
   StudioNodeExecutionContext,
   StudioVideoFrameInput,
@@ -7,33 +6,13 @@ import type {
 import {
   extractImageInputCandidates,
   getText,
-  inferMimeTypeFromPath,
-  isLikelyAbsolutePath,
+  resolveStudioImageInput,
   parseStructuredPromptInput,
-  type StudioImageInputCandidate,
 } from "./shared";
 
 const VIDEO_PROMPT_MAX_CHARS = 8_000;
 const VIDEO_DURATION_MAX_SECONDS = 60;
 const RESOLUTION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/;
-
-function normalizeFrameMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
-  const normalized = String(mimeType || "").trim().toLowerCase();
-  if (normalized === "image/png") return "image/png";
-  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
-  if (normalized === "image/webp") return "image/webp";
-  return null;
-}
-
-function asExistingAssetRef(candidate: StudioImageInputCandidate): StudioAssetRef | null {
-  const hash = String(candidate.hash || "").trim().toLowerCase();
-  const path = String(candidate.path || "").trim();
-  const sizeRaw = Number(candidate.sizeBytes);
-  const sizeBytes = Number.isFinite(sizeRaw) && sizeRaw > 0 ? Math.floor(sizeRaw) : 0;
-  const mimeType = normalizeFrameMimeType(String(candidate.mimeType || ""));
-  if (!hash || !path || !sizeBytes || !mimeType) return null;
-  return { hash, mimeType, sizeBytes, path };
-}
 
 function validateVideoPromptLength(prompt: string): string {
   const trimmed = String(prompt || "").trim();
@@ -69,30 +48,9 @@ async function resolveFrame(
     context.log(`[studio.video_generation] Port "${portId}" received ${candidates.length} images; using the first one.`);
   }
 
-  const existing = asExistingAssetRef(candidate);
-  if (existing) {
-    return { role: portId, asset: existing, load: () => context.services.readAsset(existing) };
-  }
-
-  const sourcePath = String(candidate.path || "").trim();
-  const mimeHint =
-    normalizeFrameMimeType(String(candidate.mimeType || "")) ||
-    normalizeFrameMimeType(inferMimeTypeFromPath(sourcePath));
-  if (!mimeHint) {
-    throw new Error(
-      `Video generation node "${context.node.id}" received unsupported ${portId.replace("_", " ")} format "${sourcePath}". Use PNG, JPEG, or WEBP.`
-    );
-  }
-
-  let bytes: ArrayBuffer;
-  if (isLikelyAbsolutePath(sourcePath)) {
-    context.services.assertFilesystemPath(sourcePath);
-    bytes = await context.services.readLocalFileBinary(sourcePath);
-  } else {
-    bytes = await context.services.readVaultBinary(sourcePath);
-  }
-  const stored = await context.services.storeAsset(bytes, mimeHint);
-  return { role: portId, asset: stored, load: () => context.services.readAsset(stored) };
+  const input = await resolveStudioImageInput(context, candidate,
+    `Video generation node "${context.node.id}" received unsupported ${portId.replace("_", " ")}`);
+  return { ...input, role: portId };
 }
 
 export const videoGenerationNode: StudioNodeDefinition = {

@@ -3,7 +3,7 @@
 import { imageGenerationNode } from "../../../studio/nodes/imageGenerationNode";
 import type { StudioNodeInstance } from "../../../studio/types";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
-import { renderStudioGraphNodeCard } from "../graph-v3/StudioGraphNodeCardRenderer";
+import { renderStudioGraphNodeCard } from "../canvas/StudioGraphNodeCardRenderer";
 
 it("opens the model catalog from the form card and refreshes dependent selections while keeping the prompt", async () => {
   const root = document.body.createDiv();

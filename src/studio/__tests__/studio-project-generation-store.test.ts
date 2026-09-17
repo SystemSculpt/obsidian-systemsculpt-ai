@@ -4,7 +4,7 @@ import {
   validateProjectionLocator,
   type StudioGenerationAdapter,
 } from "../persistence/StudioProjectGenerationStore";
-import { sha256HexFromBytesPortable } from "../hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { parseStudioProject, serializeStudioProject } from "../schema";
 import { FileOperations } from "../../tools/vault/tools/FileOperations";
 

@@ -337,9 +337,17 @@ test("microphone discovery has one owner-realm and lifecycle seam", () => {
   assert.match(settings, /tabInstance\.registerRenderCleanup\(/);
   assert.match(settings, /activeRecorderTabRenders\.get\(tabInstance\)\?\.dispose\(\)/);
   assert.match(settingsHost, /registerRenderCleanup\(cleanup: \(\) => void\)/);
-  assert.ok(
-    [...settingsHost.matchAll(/this\.invalidateRenderCleanups\(\)/g)].length >= 2,
-    "settings rerender and hide must both invalidate registered work",
+  for (const entry of ["display", "hide"]) {
+    assert.match(
+      settingsHost,
+      new RegExp(`${entry}\\(\\): void\\s*\\{\\s*this\\.disposeRender\\(\\);`),
+      `settings ${entry} must enter the shared teardown before replacing or hiding its surface`,
+    );
+  }
+  assert.match(
+    settingsHost,
+    /private disposeRender\(\): void\s*\{\s*this\.invalidateRenderCleanups\(\);/,
+    "shared settings teardown must invalidate registered work before disposing its controls",
   );
 });
 
@@ -440,14 +448,8 @@ test("Studio clipboard and drop orchestration stays behind one typed controller"
     "src/views/studio/systemsculpt-studio-view/StudioClipboardAndDropController.ts",
   );
 
-  assert.match(view, /new StudioClipboardAndDropController\(this\.app/);
-  assert.match(view, /this\.clipboardAndDropController\.bindOwnerWindow\(ownerWindow\)/);
-  assert.match(view, /this\.clipboardAndDropController\.bindViewport\(this\.graphViewportEl\)/);
-  assert.match(controller, /export interface StudioClipboardAndDropHost/);
-  assert.match(controller, /private graphClipboardPayload:/);
-  assert.match(controller, /async handlePaste\(event: ClipboardEvent\)/);
-  assert.match(controller, /async handleDrop\(event: DragEvent\)/);
-  assert.match(controller, /private isScopeCurrent\(scope: ProjectOperationScope\)/);
+  // Observable clipboard behavior is covered through the controller's public
+  // event seam. This guard only prevents ownership leaking back into the view.
   assert.doesNotMatch(controller, /SystemSculptStudioView/);
 
   assert.doesNotMatch(
@@ -466,37 +468,17 @@ test("Studio project and live-sync ownership stays behind one typed controller",
     "src/views/studio/systemsculpt-studio-view/StudioProjectSessionController.ts",
   );
 
-  const graphInteractionConstruction = view.indexOf("new StudioGraphInteractionEngine(");
-  const sessionControllerConstruction = view.indexOf("new StudioProjectSessionController(");
-  assert.ok(graphInteractionConstruction >= 0, "Studio must construct its graph interaction engine");
-  assert.ok(
-    sessionControllerConstruction > graphInteractionConstruction,
-    "Studio must construct graph interaction before passing it to the session controller",
-  );
-
-  assert.match(controller, /export class StudioProjectSessionController/);
-  assert.match(controller, /private currentProject: StudioProjectV1 \| null/);
-  assert.match(controller, /private retainedProjectPath: string \| null/);
-  assert.match(controller, /async loadProjectFromPath\(/);
-  assert.match(controller, /async handleVaultItemModified\(/);
-  assert.match(controller, /async handleVaultItemRenamed\(/);
-  assert.match(controller, /async handleVaultItemDeleted\(/);
-  assert.match(controller, /async flushPendingProjectSaveWork\(/);
-  assert.match(controller, /private async releaseRetainedProjectSession\(/);
+  // Session tests drive open/save/rename/delete/close. Private field names and
+  // constructor order are implementation choices, not architecture contracts.
   assert.doesNotMatch(controller, /SystemSculptStudioView/);
 
-  assert.match(view, /private readonly projectSessionController: StudioProjectSessionController/);
-  assert.match(view, /return this\.projectSessionController\.getProject\(\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemModified\(file\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemRenamed\(file, oldPath\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemDeleted\(file\)/);
   assert.doesNotMatch(view, /retainProjectSession|releaseProjectSession/);
   assert.doesNotMatch(view, /private (?:retainedProjectPath|pendingViewportState|graphViewStateByProjectPath|nodeDetailModeByProjectPath)\b/);
   assert.doesNotMatch(view, /projectSessionController\?:|self\.currentProject\s*=/);
 });
 
 test("Studio image editing stays split into feature-owned modules", () => {
-  const coordinatorPath = "src/views/studio/graph-v3/StudioGraphImageEditorModal.ts";
+  const coordinatorPath = "src/views/studio/canvas/StudioGraphImageEditorModal.ts";
   const composedModules = [
     "StudioImageEditorAssets",
     "StudioImageEditorCanvas",

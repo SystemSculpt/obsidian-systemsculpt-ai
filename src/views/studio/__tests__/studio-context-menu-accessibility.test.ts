@@ -34,6 +34,43 @@ describe("Studio context menu accessibility", () => {
     disposeMobileHostLayoutStates();
   });
 
+  it.each(["simple", "node"] as const)("releases pending focus and owner-window listeners on %s menu destruction", kind => {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const ownerDocument = frame.contentDocument!;
+    const ownerWindow = frame.contentWindow as Window & typeof globalThis;
+    // Obsidian patches every window's Element/HTMLElement prototypes; mirror the host mock in the pop-out.
+    for (const [source, target] of [[Element.prototype, ownerWindow.Element.prototype], [HTMLElement.prototype, ownerWindow.HTMLElement.prototype]]) {
+      for (const key of Object.getOwnPropertyNames(source)) {
+        if (!(key in target)) Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)!);
+      }
+    }
+    const viewport = document.createElement("div");
+    ownerDocument.body.appendChild(viewport);
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    const raf = jest.spyOn(ownerWindow, "requestAnimationFrame").mockImplementation(callback => { frames.set(++next, callback); return next; });
+    const caf = jest.spyOn(ownerWindow, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id); });
+    const add = jest.spyOn(ownerWindow, "addEventListener");
+    const remove = jest.spyOn(ownerWindow, "removeEventListener");
+    const overlay = kind === "simple" ? new StudioSimpleContextMenuOverlay() : new StudioNodeContextMenuOverlay();
+    overlay.mount(viewport);
+    const open = () => {
+      if (overlay instanceof StudioSimpleContextMenuOverlay) overlay.open({ anchorX: 0, anchorY: 0, items: [{ id: "run", title: "Run", onSelect: jest.fn() }] });
+      else overlay.open({ anchorX: 0, anchorY: 0, items: [], onSelectDefinition: jest.fn() });
+    };
+    open();
+    open();
+    expect(frames.size).toBe(1);
+    overlay.destroy();
+    expect(frames.size).toBe(0);
+    for (const [type, listener, capture] of add.mock.calls.filter(([type, , capture]) => capture === true && ["pointerdown", "keydown", "contextmenu"].includes(type))) {
+      expect(remove).toHaveBeenCalledWith(type, listener, capture);
+    }
+    expect(viewport.children.length).toBe(0);
+    raf.mockRestore(); caf.mockRestore(); add.mockRestore(); remove.mockRestore();
+  });
+
   it("exposes add-node search as a dialog with a combobox-owned listbox", () => {
     const viewport = document.body.createDiv();
     const overlay = new StudioNodeContextMenuOverlay();

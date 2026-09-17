@@ -68,14 +68,7 @@ export class VaultFileCache {
    * Get all markdown files (cached)
    */
   getMarkdownFiles(): TFile[] {
-    // Check if cache is valid
-    if (this.isCacheValid() && this.markdownFiles) {
-      return [...this.markdownFiles]; // Return copy to prevent mutation
-    }
-    
-    // Cache miss - refresh
-    this.refreshMarkdownCache();
-    return [...(this.markdownFiles || [])];
+    return [...this.getMarkdownFilesView()];
   }
 
   /**
@@ -97,12 +90,7 @@ export class VaultFileCache {
    * Get all files (cached)
    */
   getAllFiles(): TFile[] {
-    if (this.isCacheValid() && this.allFiles) {
-      return [...this.allFiles];
-    }
-    
-    this.refreshAllFilesCache();
-    return [...(this.allFiles || [])];
+    return [...this.getAllFilesView()];
   }
 
   /**
@@ -252,7 +240,7 @@ export class VaultFileCache {
         }
         
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange();
+          this.invalidateCache();
         }
       })
     );
@@ -271,7 +259,7 @@ export class VaultFileCache {
     this.eventRefs.push(
       this.vault.on('delete', (file) => {
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange();
+          this.invalidateCache();
         }
       })
     );
@@ -280,7 +268,7 @@ export class VaultFileCache {
     this.eventRefs.push(
       this.vault.on('rename', (file) => {
         if (file instanceof TFile && this.isUserContentFile(file)) {
-          this.handleFileChange();
+          this.invalidateCache();
         }
       })
     );
@@ -311,13 +299,4 @@ export class VaultFileCache {
     return true;
   }
   
-  private handleFileChange(): void {
-    // Invalidate caches that are affected by file structure changes
-    this.markdownFiles = null;
-    this.allFiles = null;
-    this.fileStats = null;
-    this.lastCacheUpdate = 0;
-    
-    // VaultFileCache cache invalidated due to file change silently
-  }
-} 
+}

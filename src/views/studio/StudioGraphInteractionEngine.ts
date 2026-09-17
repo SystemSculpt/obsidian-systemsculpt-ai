@@ -1,4 +1,4 @@
-import { StudioGraphConnectionEngineV3 } from "./connections-v3/StudioGraphConnectionEngineV3";
+import { StudioGraphConnectionEngine } from "./connections/StudioGraphConnectionEngine";
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
 import { StudioGraphSelectionResizeController } from "./StudioGraphSelectionResizeController";
@@ -12,7 +12,7 @@ export type { PendingConnection };
 
 export class StudioGraphInteractionEngine {
   private readonly selectionController: StudioGraphSelectionController;
-  private readonly connectionEngine: StudioGraphConnectionEngineV3;
+  private readonly connectionEngine: StudioGraphConnectionEngine;
   private readonly groupController: StudioGraphGroupController;
   private readonly selectionResizeController: StudioGraphSelectionResizeController;
   private externalSelectionChangeListener: (() => void) | null = null;
@@ -69,7 +69,7 @@ export class StudioGraphInteractionEngine {
       finishShapeTranslation: () => this.host.finishDiagramTranslation?.(),
     });
 
-    this.connectionEngine = new StudioGraphConnectionEngineV3({
+    this.connectionEngine = new StudioGraphConnectionEngine({
       ...this.host,
       getGraphZoom: () => this.selectionController.getGraphZoom(),
     });

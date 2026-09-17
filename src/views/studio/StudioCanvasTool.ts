@@ -8,7 +8,8 @@ import type { StudioShapeKind } from "../../studio/types";
  */
 export type StudioCanvasTool = "select" | StudioShapeKind | "arrow";
 
-export function resolveStudioCanvasToolShortcut(key: string): StudioCanvasTool | null {
+export function resolveStudioCanvasToolShortcut(key: string, shiftKey = false): StudioCanvasTool | null {
+  if (shiftKey) return key.toLowerCase() === "c" ? "select" : null;
   switch (key.toLowerCase()) {
     case "s":
     case "escape":

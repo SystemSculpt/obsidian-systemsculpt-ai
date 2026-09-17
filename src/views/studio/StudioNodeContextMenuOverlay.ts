@@ -5,12 +5,7 @@ import {
   normalizeStudioMenuScale,
   resolveStudioAnchoredMenuPosition,
 } from "./StudioFloatingMenuUtils";
-import {
-  cancelStudioAnimationFrame,
-  getStudioOwnerDocument,
-  getStudioOwnerWindow,
-  requestStudioAnimationFrame,
-} from "./StudioDomContext";
+import { StudioMenuLifecycle } from "./StudioMenuLifecycle";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { readMobileHostLayout } from "../../platform/mobileHostLayout";
 
@@ -48,44 +43,8 @@ export class StudioNodeContextMenuOverlay {
   private anchorX = 0;
   private anchorY = 0;
   private onSelectDefinition: ((definition: StudioNodeDefinition) => void) | null = null;
-  private isVisible = false;
   private actions: StudioNodeContextMenuAction[] = [];
-  private focusRafId: number | null = null;
-  private listenerWindow: Window | null = null;
-
-  private readonly onWindowPointerDown = (event: PointerEvent): void => {
-    if (!this.isVisible || !this.rootEl) {
-      return;
-    }
-    const target = event.target as Node | null;
-    if (target && this.rootEl.contains(target)) {
-      return;
-    }
-    this.hide();
-  };
-
-  private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
-    if (!this.isVisible) {
-      return;
-    }
-    if (event.key !== "Escape") {
-      return;
-    }
-    event.preventDefault();
-    this.hide();
-  };
-
-  private readonly onWindowContextMenu = (event: MouseEvent): void => {
-    if (!this.isVisible || !this.rootEl) {
-      return;
-    }
-    const target = event.target as Node | null;
-    if (target && this.rootEl.contains(target)) {
-      event.preventDefault();
-      return;
-    }
-    this.hide();
-  };
+  private lifecycle: StudioMenuLifecycle | null = null;
 
   mount(viewportEl: HTMLElement): void {
     this.viewportEl = viewportEl;
@@ -105,6 +64,7 @@ export class StudioNodeContextMenuOverlay {
     if (this.rootEl?.parentElement) {
       this.rootEl.parentElement.removeChild(this.rootEl);
     }
+    this.lifecycle = null;
     this.viewportEl = null;
     this.rootEl = null;
     this.searchInputEl = null;
@@ -142,53 +102,20 @@ export class StudioNodeContextMenuOverlay {
     this.combobox?.setOpen(true);
     this.combobox?.setItems(options.items);
 
-    this.cancelPendingFocus();
-    this.rootEl.setCssStyles({ display: "flex" });
-    this.rootEl.removeAttribute("inert");
-    this.rootEl.setAttribute("aria-hidden", "false");
-    this.isVisible = true;
-    this.bindGlobalListeners();
-    this.applyLayout();
-
-    // Height can change after DOM paints; clamp once more.
-    this.focusRafId = requestStudioAnimationFrame(this.rootEl, () => {
-      this.focusRafId = null;
-      if (!this.isVisible || !this.searchInputEl) {
-        return;
-      }
-      if (this.rootEl?.getAttribute("aria-hidden") === "true") {
-        return;
-      }
-      if (!isMobileLayout(this.rootEl)) {
-        try {
-          this.searchInputEl.focus({ preventScroll: true });
-        } catch {
-          try {
-            this.searchInputEl.focus();
-          } catch {
-            // Ignore focus failures.
-          }
-        }
+    this.lifecycle?.show(() => {
+      if (this.searchInputEl && !isMobileLayout(this.rootEl)) {
+        try { this.searchInputEl.focus({ preventScroll: true }); }
+        catch { try { this.searchInputEl.focus(); } catch { /* Host may reject focus. */ } }
       }
       this.applyLayout();
     });
+    this.applyLayout();
   }
 
   hide(): void {
-    this.cancelPendingFocus();
+    this.lifecycle?.hide();
     this.onSelectDefinition = null;
-    this.unbindGlobalListeners();
-    this.isVisible = false;
     this.actions = [];
-    if (this.rootEl) {
-      const activeElement = getStudioOwnerDocument(this.rootEl).activeElement as HTMLElement | null;
-      if (activeElement && this.rootEl.contains(activeElement) && typeof activeElement.blur === "function") {
-        activeElement.blur();
-      }
-      this.rootEl.setCssStyles({ display: "none" });
-      this.rootEl.setAttribute("inert", "");
-      this.rootEl.setAttribute("aria-hidden", "true");
-    }
     if (this.searchInputEl) {
       this.searchInputEl.value = "";
     }
@@ -254,6 +181,7 @@ export class StudioNodeContextMenuOverlay {
     });
 
     this.rootEl = root;
+    this.lifecycle = new StudioMenuLifecycle(root, () => this.hide());
     this.searchInputEl = searchInput;
     this.listEl = list;
     this.actionsEl = actions;
@@ -296,16 +224,6 @@ export class StudioNodeContextMenuOverlay {
       onEscape: () => this.hide(),
       onRender: () => this.applyLayout(),
     });
-  }
-
-  private cancelPendingFocus(): void {
-    if (this.focusRafId === null) {
-      return;
-    }
-    if (this.rootEl) {
-      cancelStudioAnimationFrame(this.rootEl, this.focusRafId);
-    }
-    this.focusRafId = null;
   }
 
   private renderActions(): void {
@@ -426,22 +344,4 @@ export class StudioNodeContextMenuOverlay {
     this.rootEl.style.top = `${resolvedY}px`;
   }
 
-  private bindGlobalListeners(): void {
-    if (!this.rootEl) {
-      return;
-    }
-    this.unbindGlobalListeners();
-    const ownerWindow = getStudioOwnerWindow(this.rootEl);
-    ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown, true);
-    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
-    ownerWindow.addEventListener("contextmenu", this.onWindowContextMenu, true);
-    this.listenerWindow = ownerWindow;
-  }
-
-  private unbindGlobalListeners(): void {
-    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown, true);
-    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
-    this.listenerWindow?.removeEventListener("contextmenu", this.onWindowContextMenu, true);
-    this.listenerWindow = null;
-  }
 }

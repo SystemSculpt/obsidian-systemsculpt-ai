@@ -75,6 +75,7 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /scripts\/plugin-release-metadata\.test\.mjs/);
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);
   assert.match(source, /scripts\/lint-css\.test\.mjs/);
+  assert.match(source, /scripts\/module-ownership\.test\.mjs/);
   assert.match(source, /npm run check:plugin:obsidian/);
   assert.match(source, /buildProductionPlugin/);
   assert.match(source, /if \(!fast\) \{/);
@@ -165,4 +166,42 @@ test("focused Jest gates point at test files that exist", () => {
       );
     }
   }
+});
+
+test("source CI partitions cover every suite without repeating embeddings", () => {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
+  const escapedRoot = normalizedRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const selected = (file) => {
+    const config = require(path.join(root, file));
+    const ignored = (config.testPathIgnorePatterns ?? []).map((pattern) =>
+      new RegExp(pattern.replace(/<rootDir>/g, escapedRoot)));
+    const paths = config.testMatch.flatMap((pattern) => [...fs.globSync(
+      pattern.startsWith("<rootDir>/") ? pattern.slice("<rootDir>/".length) : `src/${pattern}`,
+      { cwd: root },
+    )]);
+    return new Set(paths.map((filePath) => filePath.replace(/\\/g, "/"))
+      .filter((filePath) => !ignored.some((pattern) => pattern.test(`${normalizedRoot}/${filePath}`))));
+  };
+  const unit = selected("jest.unit-ci.config.cjs");
+  const embeddings = selected("jest.embeddings.config.cjs");
+  assert.ok(unit.size > 0 && embeddings.size > 0);
+  assert.deepEqual([...unit].filter((file) => embeddings.has(file)), []);
+  const covered = new Set([
+    ...unit, ...embeddings,
+    ...selected("jest.mobile-interactions.config.cjs"),
+    ...selected("jest.chatview-critical-risk.config.cjs"),
+  ]);
+  const expected = new Set([...fs.globSync("src/**/__tests__/**/*.test.ts", { cwd: root })]
+    .map((filePath) => filePath.replace(/\\/g, "/")));
+  assert.deepEqual([...covered].sort(), [...expected].sort());
+});
+
+test("TypeScript and Jest resolve the source alias to the same tree", () => {
+  const ts = require("typescript");
+  const config = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  const result = ts.resolveModuleName("@/constants/api", path.join(root, "src/main.ts"), parsed.options, ts.sys);
+  assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/constants/api.ts"));
+  assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^@/(.*)$"], "<rootDir>/src/$1");
 });

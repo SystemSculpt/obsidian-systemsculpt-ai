@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, TFile } from "obsidian";
 import { JanitorModal } from "../JanitorModal";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 function createHarness() {
   const app = new App();
@@ -20,7 +22,7 @@ function createHarness() {
 }
 
 describe("JanitorModal", () => {
-  afterEach(() => document.body.empty());
+  afterEach(() => { document.body.empty(); jest.restoreAllMocks(); });
 
   it("uses the modal surface and semantic loading state", () => {
     const modal = createHarness();
@@ -53,7 +55,7 @@ describe("JanitorModal", () => {
     (modal.app.vault.getFiles as jest.Mock).mockImplementation(() => {
       throw new Error("scan failed");
     });
-    (modal as any).refreshData();
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="janitor.refresh"]')!.click();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -73,36 +75,13 @@ describe("JanitorModal", () => {
       },
     };
     const modal = new JanitorModal(app, plugin as any);
-    let resolveFirstScan!: (value: unknown) => void;
-    const staleData = {
-      emptyFiles: [],
-      emptyFolders: [],
-      chatFiles: [{ path: "SystemSculpt/Chats/stale.md", stat: { size: 3 } }],
-      extractionFiles: [],
-      recordingFiles: [],
-      sizes: {
-        empty: "empty",
-        chat: "3 bytes",
-        extraction: "empty",
-        recording: "empty",
-      },
-      stats: {
-        emptyFileCount: 0,
-        emptyFolderCount: 0,
-        totalEmptyCount: 0,
-      },
-    };
-    const freshData = {
-      ...staleData,
-      chatFiles: [],
-      sizes: { ...staleData.sizes, chat: "empty" },
-    };
-    const scanVault = jest
-      .spyOn(modal as any, "scanVault")
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveFirstScan = resolve;
-      }))
-      .mockResolvedValueOnce(freshData);
+    let resolveFirstRead!: (value: string) => void;
+    const stale = new TFile({ path: "SystemSculpt/Chats/stale.md", extension: "md", stat: { size: 3 } });
+    (app.vault.getFiles as jest.Mock).mockReturnValueOnce([stale]).mockReturnValue([]);
+    (app.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
+    (app.vault.read as jest.Mock).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstRead = resolve;
+    }));
 
     modal.open();
     modal.close();
@@ -111,12 +90,38 @@ describe("JanitorModal", () => {
     await Promise.resolve();
 
     expect(modal.modalEl.textContent).toContain("No chat history");
-    resolveFirstScan(staleData);
+    resolveFirstRead("   ");
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(scanVault).toHaveBeenCalledTimes(2);
+    expect(app.vault.getFiles).toHaveBeenCalledTimes(2);
     expect(modal.modalEl.textContent).toContain("No chat history");
     expect(modal.modalEl.textContent).not.toContain("Move 1 chats to Trash");
+  });
+
+  it("applies the files actually reviewed, excluding arrivals while confirmation is open", async () => {
+    const modal = createHarness();
+    await Promise.resolve();
+    await Promise.resolve();
+    const reviewed = new TFile({ path: "SystemSculpt/Chats/reviewed.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const sibling = new TFile({ path: "SystemSculpt/Chats-old/keep.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const files = [reviewed, sibling];
+    (modal.app.vault.getFiles as jest.Mock).mockImplementation(() => files);
+    (modal.app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path) => files.find((file) => file.path === path) ?? null);
+    const trash = jest.fn(async () => undefined);
+    (modal.app.fileManager as any).trashFile = trash;
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="janitor.refresh"]')!.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const section = [...modal.modalEl.querySelectorAll<HTMLElement>(".ss-janitor-section")].find((element) => element.textContent?.includes("Chat history"))!;
+    section.querySelector<HTMLButtonElement>("button")!.click();
+    const confirmation = document.querySelector<HTMLElement>(".ss-janitor-confirmation-modal")!;
+    expect(confirmation.textContent).toContain(reviewed.path);
+    expect(confirmation.textContent).not.toContain(sibling.path);
+    files.push(new TFile({ path: "SystemSculpt/Chats/new.md", extension: "md", stat: { size: 2000, mtime: 1 } }));
+    confirmation.querySelector<HTMLButtonElement>('[data-testid="janitor.confirm.accept"]')!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(trash).toHaveBeenCalledTimes(1);
+    expect(trash).toHaveBeenCalledWith(reviewed);
+    modal.close();
   });
 });

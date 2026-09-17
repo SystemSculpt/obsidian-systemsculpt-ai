@@ -108,14 +108,7 @@ export class DocumentContextManager {
       outputPath: effect.outputPath,
       markdownSha256: effect.markdownSha256,
     };
-    if (persisted && (
-      persisted.operationId !== identity.operationId ||
-      persisted.outputIdentity !== identity.outputIdentity ||
-      persisted.outputPath !== identity.outputPath ||
-      persisted.markdownSha256 !== identity.markdownSha256
-    )) {
-      throw new Error("Document context effect identity conflict.");
-    }
+    assertContextEffectIdentity(persisted, identity);
 
     const wasPersisted = Boolean(persisted);
     const record: PersistedDocumentContextEffect = persisted ?? {
@@ -142,6 +135,9 @@ export class DocumentContextManager {
     }
     if (!record.projectionMutated || !linkPresent) {
       record.projectionMutated = true;
+      // Acknowledgement belongs to the context that held the earlier link.
+      // Persist the repaired projection as pending before notifying this one.
+      if (!linkPresent) record.notificationAcknowledged = false;
       await persist();
     }
 
@@ -184,13 +180,17 @@ export class DocumentContextManager {
   }
 
   private async readContextEffectLedgerFile(): Promise<Record<string, PersistedDocumentContextEffect> | null> {
-    const adapter = this.app.vault.adapter;
     for (const path of [DOCUMENT_CONTEXT_EFFECTS_PATH, `${DOCUMENT_CONTEXT_EFFECTS_PATH}.previous`]) {
-      if (!(await adapter.exists(path))) continue;
-      const parsed = parseContextEffectLedgerFile(await adapter.read(path));
+      const parsed = await this.readContextEffectLedgerCandidate(path);
       if (parsed) return parsed;
     }
     return null;
+  }
+
+  private async readContextEffectLedgerCandidate(path: string): Promise<Record<string, PersistedDocumentContextEffect> | null> {
+    const adapter = this.app.vault.adapter;
+    if (!(await adapter.exists(path))) return null;
+    return parseContextEffectLedgerFile(await adapter.read(path));
   }
 
   private async persistContextEffect(
@@ -199,6 +199,8 @@ export class DocumentContextManager {
   ): Promise<void> {
     await this.withLedgerWriteLock(async () => {
       const ledger = await this.loadContextEffectLedgerLocked();
+      // Another conversion can establish the identity after the initial read.
+      assertContextEffectIdentity(ledger[effectId], record);
       ledger[effectId] = record;
       await this.writeContextEffectLedger(ledger);
     });
@@ -236,9 +238,15 @@ export class DocumentContextManager {
       await adapter.rename(tempPath, DOCUMENT_CONTEXT_EFFECTS_PATH);
     } catch (replaceError) {
       try {
-        if (await adapter.exists(previousPath)) await adapter.remove(previousPath);
         if (await adapter.exists(DOCUMENT_CONTEXT_EFFECTS_PATH)) {
-          await adapter.rename(DOCUMENT_CONTEXT_EFFECTS_PATH, previousPath);
+          if (await this.readContextEffectLedgerCandidate(previousPath)
+            && !(await this.readContextEffectLedgerCandidate(DOCUMENT_CONTEXT_EFFECTS_PATH))) {
+            // Keep the readable recovery ledger when the primary is truncated.
+            await adapter.remove(DOCUMENT_CONTEXT_EFFECTS_PATH);
+          } else {
+            if (await adapter.exists(previousPath)) await adapter.remove(previousPath);
+            await adapter.rename(DOCUMENT_CONTEXT_EFFECTS_PATH, previousPath);
+          }
         }
         await adapter.rename(tempPath, DOCUMENT_CONTEXT_EFFECTS_PATH);
         if (await adapter.exists(previousPath)) await adapter.remove(previousPath);
@@ -533,6 +541,20 @@ function validateContextEffect(effect: DocumentConversionContextEffect): void {
     !/^[a-f0-9]{64}$/.test(effect.markdownSha256)
   ) {
     throw new Error("Invalid document context effect.");
+  }
+}
+
+function assertContextEffectIdentity(
+  persisted: PersistedDocumentContextEffect | undefined,
+  identity: Pick<PersistedDocumentContextEffect, "operationId" | "outputIdentity" | "outputPath" | "markdownSha256">,
+): void {
+  if (persisted && (
+    persisted.operationId !== identity.operationId ||
+    persisted.outputIdentity !== identity.outputIdentity ||
+    persisted.outputPath !== identity.outputPath ||
+    persisted.markdownSha256 !== identity.markdownSha256
+  )) {
+    throw new Error("Document context effect identity conflict.");
   }
 }
 

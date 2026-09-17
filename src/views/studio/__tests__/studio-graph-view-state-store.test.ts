@@ -6,7 +6,7 @@ import {
   serializeGraphViewStateByProject,
   serializeNodeDetailModeByProject,
   upsertGraphViewStateForProject,
-} from "../graph-v3/StudioGraphViewStateStore";
+} from "../canvas/StudioGraphViewStateStore";
 
 describe("StudioGraphViewStateStore node detail mode", () => {
   it("parses per-project node detail mode map and normalizes invalid entries", () => {

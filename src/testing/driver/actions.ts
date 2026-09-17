@@ -1,10 +1,10 @@
 import type { App } from "obsidian";
 
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ChatMessage } from "../../types";
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
-import { canonicalAgentToolInput } from "../../views/chatview/agent/MutationJournal";
+import { canonicalAgentToolInput } from "../../chat/managed/MutationJournal";
 import { FILESYSTEM_LIMITS } from "../../tools/vault/constants";
 import type { DriverDiagnostics } from "./diagnostics";
 import {

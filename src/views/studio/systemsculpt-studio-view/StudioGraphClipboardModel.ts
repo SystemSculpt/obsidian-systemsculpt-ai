@@ -1,4 +1,3 @@
-import { cloneStudioProjectSnapshot, serializeStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 import type {
   StudioEdge,
@@ -31,11 +30,6 @@ export type StudioGraphClipboardPayload = {
   };
 };
 
-export type StudioGraphHistorySnapshot = {
-  project: StudioProjectV1;
-  selectedNodeIds: string[];
-};
-
 export function normalizeNodeIdList(nodeIds: string[]): string[] {
   return Array.from(
     new Set(
@@ -44,25 +38,6 @@ export function normalizeNodeIdList(nodeIds: string[]): string[] {
         .filter((nodeId) => nodeId.length > 0)
     )
   );
-}
-
-export const cloneProjectSnapshot = cloneStudioProjectSnapshot;
-export const serializeProjectSnapshot = serializeStudioProjectSnapshot;
-
-export function cloneHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
-  return {
-    project: cloneProjectSnapshot(snapshot.project),
-    selectedNodeIds: [...snapshot.selectedNodeIds],
-  };
-}
-
-export function trimHistorySnapshots(
-  snapshots: StudioGraphHistorySnapshot[],
-  maxSnapshots: number
-): void {
-  while (snapshots.length > maxSnapshots) {
-    snapshots.shift();
-  }
 }
 
 function resolveClipboardAnchor(

@@ -30,10 +30,13 @@ Platform checks through node renderers or runtime implementations.
   migrations, generation history, and recovery.
 - StudioAssetStore.ts owns content-addressed project assets.
 - StudioPermissionManager.ts and StudioHostCapabilities.ts own execution gates.
-- StudioGraphCompiler.ts owns typed DAG validation.
+- StudioGraphCompiler.ts owns typed DAG validation, scoped run plans, and
+  connected input resolution.
 - StudioBuiltInNodes.ts and nodes/ own node definitions and implementations.
 - StudioRuntime.ts owns immutable run snapshots, queueing, events, cache, and
   retention.
+- StudioProjectSessionManager.ts owns shared session lifetime and serializes
+  creation, reload, release, rename, and disposal.
 - StudioService.ts is the plugin-facing orchestration interface.
 - SystemSculptStudioView.ts coordinates the Obsidian leaf and delegates graph,
   clipboard, session, and presentation ownership to focused modules.
@@ -132,6 +135,9 @@ window layout.
   nothing beyond it is touched. If that node has never produced an output
   the run stops with "Run <node> first". Running a video card therefore uses
   the image already on the canvas instead of regenerating it.
+- Native Codex run preparation uses that same queued run plan to resolve
+  connected context without executing the target card. Multiple connections
+  to one input preserve each producer's value, including array-valued outputs.
 - Disabling a node skips it, and the skip propagates: any node whose required
   input port loses every producer is skipped too, instead of running with that
   input missing. A node keeps running when only optional inputs are lost, or
@@ -205,7 +211,7 @@ execution disabled and a Desktop explanation; portable nodes still work.
   place; only outputs and placeholders rebuild it.
 
 See src/views/studio/DESIGN.md for presentation principles and the README files
-beside graph-v3, systemsculpt-studio-view, and activity for current module maps.
+beside canvas, systemsculpt-studio-view, and activity for current module maps.
 
 
 ## Automatic structural layout

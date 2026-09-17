@@ -147,12 +147,8 @@ describe("StudioRuntime session snapshot runs", () => {
         grants: [],
       })),
     } as any;
-    const compiler = {
-      compile: jest.fn(() => ({
-        executionOrder: [],
-        nodesById: new Map(),
-      })),
-    } as any;
+    const compiler = new StudioGraphCompiler();
+    jest.spyOn(compiler, "compileRun");
     const assetStore = {
       storeArrayBuffer: jest.fn(),
       readArrayBuffer: jest.fn(),
@@ -210,9 +206,10 @@ describe("StudioRuntime session snapshot runs", () => {
     const snapshotBytes = [...generationFiles].find(([path]) => path.endsWith("/snapshot.json"))?.[1];
     expect(snapshotBytes).toBeDefined();
     expect(new TextDecoder().decode(snapshotBytes)).toContain("Live Session Snapshot");
-    expect(compiler.compile).toHaveBeenCalledWith(
+    expect(compiler.compileRun).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Live Session Snapshot" }),
-      expect.anything()
+      expect.anything(),
+      { entryNodeIds: [], prepareInputsFor: undefined }
     );
 
     expect((await runtime.getLatestRunEvents("Studio/Test.systemsculpt")).map(event => event.type)).toEqual(["run.started", "run.completed"]);
@@ -261,8 +258,12 @@ describe("StudioRuntime session snapshot runs", () => {
       } },
       inboundEdges: [{ fromNodeId: "producer", fromPortId: "asset", toNodeId: "consumer", toPortId: "asset" }], dependencyNodeIds: ["producer"],
     };
-    const compiler = { compile: () => ({ executionOrder: ["producer", "consumer"], nodesById: new Map([["producer", producer], ["consumer", consumer]]) }) } as any;
-    const runtime = new StudioRuntime(app, plugin, projectStore, {} as any, compiler, assetStore, {
+    const registry = new StudioNodeRegistry();
+    for (const fixture of [producer, consumer]) registry.register({
+      ...fixture.definition, kind: fixture.node.kind, version: fixture.node.version,
+      cachePolicy: "never", configDefaults: {}, configSchema: { fields: [] },
+    } as any);
+    const runtime = new StudioRuntime(app, plugin, projectStore, registry, new StudioGraphCompiler(), assetStore, {
       beginLocalCommit: async () => undefined,
       completeLocalCommit: async () => undefined,
     } as any);

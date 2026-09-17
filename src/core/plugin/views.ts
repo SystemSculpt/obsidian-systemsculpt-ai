@@ -125,13 +125,14 @@ export class ViewManager {
       }
     })();
 
-    this.restorePromise = promise.finally(() => {
-      if (this.restorePromise === promise) {
+    const draining = promise.finally(() => {
+      if (this.restorePromise === draining) {
         this.restorePromise = null;
       }
     });
 
-    return this.restorePromise;
+    this.restorePromise = draining;
+    return draining;
   }
 
   private async initializeInBackground() {

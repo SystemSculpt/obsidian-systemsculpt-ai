@@ -3,8 +3,8 @@ import type SystemSculptPlugin from "../../../main";
 import { getStudioMediaCatalogs } from "../../../studio/StudioMediaCatalogs";
 import { planStudioMediaNodeInputs, resolveStudioMediaNodeKind, type StudioMediaModelKind, type StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
 import type { StudioNodeConfigDynamicOptionsSource, StudioNodeInstance } from "../../../studio/types";
-import { openStudioMediaModelPickerModal } from "../graph-v3/StudioMediaModelPickerModal";
-import { readMediaModelFavorites, toggleMediaModelFavorite } from "../graph-v3/studioMediaModelFavorites";
+import { openStudioMediaModelPickerModal } from "../canvas/StudioMediaModelPickerModal";
+import { readMediaModelFavorites, toggleMediaModelFavorite } from "../canvas/studioMediaModelFavorites";
 
 type Host = {
   /** Getter: the view constructs this controller as a class field, before parameter properties exist. */
@@ -21,6 +21,9 @@ type Host = {
  */
 export class StudioMediaModelPickerController {
   private readonly loading = new Set<StudioMediaModelKind>();
+  private disposed = false;
+  private openRevision = 0;
+  private modal: ReturnType<typeof openStudioMediaModelPickerModal> | null = null;
 
   constructor(private readonly host: Host) {}
 
@@ -30,30 +33,37 @@ export class StudioMediaModelPickerController {
     currentValue: string,
     onValueChange: (value: string, label?: string) => void,
   ): void => {
+    if (this.disposed) return;
+    const revision = ++this.openRevision;
     const kind: StudioMediaModelKind = source === "video_generation_models" ? "video" : "image";
     void (async () => {
       try {
         const catalogs = getStudioMediaCatalogs(this.host.plugin());
         const snapshot = kind === "image" ? await catalogs.images.load() : await catalogs.videos.load();
+        if (this.disposed || revision !== this.openRevision) return;
         if (snapshot.models.length === 0) {
           new Notice("No generation models are available right now.");
           return;
         }
-        openStudioMediaModelPickerModal(this.host.plugin().app, {
+        this.modal?.close();
+        this.modal = openStudioMediaModelPickerModal(this.host.plugin().app, {
           kind,
           models: snapshot.models,
           selectedId: currentValue || ("defaultModelId" in snapshot ? snapshot.defaultModelId : ""),
           favoriteIds: readMediaModelFavorites(this.host.plugin(), kind),
           onToggleFavorite: (modelId) => toggleMediaModelFavorite(this.host.plugin(), kind, modelId),
           onSelect: (model) => onValueChange(model.id, model.name),
+          onClose: () => { this.modal = null; },
         });
       } catch (error) {
+        if (this.disposed || revision !== this.openRevision) return;
         new Notice(`Unable to load generation models: ${error instanceof Error ? error.message : String(error)}`);
       }
     })();
   };
 
   planInputs(node: StudioNodeInstance): StudioMediaNodeInputPlan | null {
+    if (this.disposed) return null;
     const kind = resolveStudioMediaNodeKind(node.kind);
     if (!kind) return null;
     const catalogs = getStudioMediaCatalogs(this.host.plugin());
@@ -67,8 +77,15 @@ export class StudioMediaModelPickerController {
     this.loading.add(kind);
     const catalogs = getStudioMediaCatalogs(this.host.plugin());
     void (kind === "image" ? catalogs.images.load() : catalogs.videos.load())
-      .then(() => this.host.requestRender())
+      .then(() => { if (!this.disposed) this.host.requestRender(); })
       .catch(() => undefined)
       .finally(() => this.loading.delete(kind));
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.openRevision += 1;
+    this.modal?.close();
+    this.modal = null;
   }
 }

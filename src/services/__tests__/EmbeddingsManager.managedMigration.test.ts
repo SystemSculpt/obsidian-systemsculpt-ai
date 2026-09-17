@@ -148,8 +148,8 @@ function createHarness(vectorFormatVersion: number) {
       savedChatsDirectory: "Saved Chats",
     },
     emitter: { emit: jest.fn() },
-    getManagedCapabilityClient: jest.fn(() => ({
-      getEmbeddingsIndex: () => indexAdapter,
+    getManagedCapabilityGraph: jest.fn(() => ({
+      embeddingsIndex: indexAdapter,
     })),
     getSettingsManager: jest.fn(() => ({ updateSettings })),
   };

@@ -1,7 +1,7 @@
 const base = require("./jest.config.cjs");
 
 const mobileInteractionTests = [
-	"<rootDir>/src/views/studio/graph-v3/__tests__/studio-orchestrator-renderer.test.ts",
+	"<rootDir>/src/views/studio/canvas/__tests__/studio-orchestrator-renderer.test.ts",
 	"<rootDir>/src/services/codex/__tests__/CodexExecutionControls.test.ts",
 	"<rootDir>/src/platform/__tests__/hostCapabilities.test.ts",
 	"<rootDir>/src/platform/__tests__/mobileLayout.test.ts",
@@ -12,7 +12,7 @@ const mobileInteractionTests = [
 	"<rootDir>/src/views/studio/__tests__/studio-node-insert-menu.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-run-host-preflight.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-context-menu-accessibility.test.ts",
-	"<rootDir>/src/views/studio/graph-v3/__tests__/studio-graph-workspace-renderer-controls.test.ts",
+	"<rootDir>/src/views/studio/canvas/__tests__/studio-graph-workspace-renderer-controls.test.ts",
 	"<rootDir>/src/__tests__/main-diagnostics-session.test.ts",
 	"<rootDir>/src/__tests__/systemsculpt-settings-tab.test.ts",
 ];

@@ -1,9 +1,28 @@
 import { normalizePath, type App } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { VaultToolModule } from "./vault/VaultToolModule";
+import { FileOperations } from "./vault/tools/FileOperations";
+import { DirectoryOperations } from "./vault/tools/DirectoryOperations";
+import { SearchOperations } from "./vault/tools/SearchOperations";
+import { ManagementOperations } from "./vault/tools/ManagementOperations";
+import {
+  ReadFilesParams,
+  WriteFileParams,
+  EditFileParams,
+  MultiEditParams,
+  CreateDirectoriesParams,
+  ListDirectoriesParams,
+  MoveItemsParams,
+  TrashFilesParams,
+  FindFilesParams,
+  GrepVaultParams,
+  ManageWorkspaceParams,
+  ManageContextParams
+} from "./vault/types";
+
 import {
   FirstPartyToolExecutionError,
   type FirstPartyToolExecutionOptions,
+  type FirstPartyToolChatTarget,
 } from "./types";
 import {
   isFirstPartyToolName,
@@ -12,12 +31,16 @@ import {
 import { toError } from "../utils/errors";
 
 export class FirstPartyToolService {
-  private readonly vaultTools: VaultToolModule;
+  private fileOps!: FileOperations;
+  private directoryOps!: DirectoryOperations;
+  private searchOps!: SearchOperations;
+  private readonly managementOps: ManagementOperations;
   private vaultRoot: string | null = null;
   private vaultRootAliases: string[] = [];
 
-  constructor(plugin: SystemSculptPlugin, app: App) {
-    this.vaultTools = new VaultToolModule(plugin, app);
+  constructor(private readonly plugin: SystemSculptPlugin, private readonly app: App) {
+    this.managementOps = new ManagementOperations(app, plugin);
+    this.setVaultAllowedPaths(["/"]);
   }
 
   async executeTool(
@@ -35,17 +58,16 @@ export class FirstPartyToolService {
     if (!isFirstPartyToolName(requestedName)) {
       throw new Error(`Unknown first-party tool: ${requestedName}`);
     }
-    const normalizedName = requestedName;
-
-    const mappedArgs = this.mapVaultArgs(normalizedName, args);
-    const execution = options?.chatView
-      ? this.vaultTools.executeTool(normalizedName, mappedArgs, options.chatView)
-      : this.vaultTools.executeTool(normalizedName, mappedArgs);
+    const mappedArgs = this.mapVaultArgs(requestedName, args);
+    const execution = this.dispatch(requestedName, mappedArgs, options?.chatView);
     return await this.awaitStartedExecution(execution, options);
   }
 
   setVaultAllowedPaths(paths: string[]): void {
-    this.vaultTools.setAllowedPaths(paths);
+    const allowedPaths = [...paths];
+    this.fileOps = new FileOperations(this.app, allowedPaths);
+    this.directoryOps = new DirectoryOperations(this.app, allowedPaths, this.plugin);
+    this.searchOps = new SearchOperations(this.app, allowedPaths, this.plugin);
   }
 
   setVaultRoot(root: string | null, aliases: string[] = []): void {
@@ -53,6 +75,52 @@ export class FirstPartyToolService {
     this.vaultRootAliases = (Array.isArray(aliases) ? aliases : [])
       .map((alias) => normalizePath(String(alias ?? "")).replace(/^\/+/, ""))
       .filter((alias) => alias.length > 0);
+  }
+
+  private async dispatch(
+    toolName: FirstPartyToolName,
+    args: unknown,
+    chatView?: FirstPartyToolChatTarget,
+  ): Promise<unknown> {
+    switch (toolName) {
+      case "read":
+        return await this.fileOps.readFiles(args as ReadFilesParams);
+      case "write":
+        return await this.fileOps.writeFile(args as WriteFileParams);
+      case "edit": {
+        const { diff, appliedCount, requestedCount, skipped } =
+          await this.fileOps.editFile(args as EditFileParams);
+        // Honest reporting (BUG-02): success is false when nothing applied, so a
+        // mistyped find-string under strict:false can no longer masquerade as a
+        // successful edit. appliedCount/skipped let the caller retry the misses.
+        return {
+          path: (args as EditFileParams).path,
+          success: appliedCount > 0,
+          diff,
+          appliedCount,
+          requestedCount,
+          skipped,
+        };
+      }
+      case "multi_edit":
+        return await this.fileOps.multiEditFiles(args as MultiEditParams);
+      case "create_folders":
+        return await this.directoryOps.createDirectories(args as CreateDirectoriesParams);
+      case "list_items":
+        return await this.directoryOps.listDirectories(args as ListDirectoriesParams);
+      case "move":
+        return await this.directoryOps.moveItems(args as MoveItemsParams);
+      case "trash":
+        return await this.directoryOps.trashFiles(args as TrashFilesParams);
+      case "find":
+        return await this.searchOps.findFiles(args as FindFilesParams);
+      case "search":
+        return await this.searchOps.grepVault(args as GrepVaultParams);
+      case "open":
+        return await this.managementOps.manageWorkspace(args as ManageWorkspaceParams);
+      case "context":
+        return await this.managementOps.manageContext(args as ManageContextParams, chatView);
+    }
   }
 
   private async awaitStartedExecution<T>(

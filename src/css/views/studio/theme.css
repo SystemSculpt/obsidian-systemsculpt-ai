@@ -1,6 +1,6 @@
 /**
  * SystemSculpt Studio — node-graph canvas workspace.
- * TS: src/views/studio/** (graph-v3, connections-v3, overlays, menus).
+ * TS: src/views/studio/** (canvas, connections, overlays, menus).
  *
  * Runtime contracts (TS setProperty — do not rename):
  *   --ss-studio-group-accent, --ss-studio-chip-color, --ss-studio-swatch-color,

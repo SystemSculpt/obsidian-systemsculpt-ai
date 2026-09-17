@@ -653,7 +653,7 @@ function drawIrreversibleBlurAnnotation(
   const patchCanvas = createCanvas(width, height);
   const patchCtx = patchCanvas.getContext("2d");
   if (!patchCtx) {
-    return;
+    throw new Error("Canvas context is unavailable for raster blur rendering.");
   }
   patchCtx.clearRect(0, 0, width, height);
   patchCtx.drawImage(ctx.canvas, x, y, width, height, 0, 0, width, height);
@@ -664,7 +664,7 @@ function drawIrreversibleBlurAnnotation(
   const reducedCanvas = createCanvas(reducedWidth, reducedHeight);
   const reducedCtx = reducedCanvas.getContext("2d");
   if (!reducedCtx) {
-    return;
+    throw new Error("Canvas context is unavailable for raster blur rendering.");
   }
   reducedCtx.imageSmoothingEnabled = true;
   reducedCtx.drawImage(patchCanvas, 0, 0, reducedWidth, reducedHeight);
@@ -922,6 +922,12 @@ export async function renderStudioCaptionBoardImageFromBytes(options: {
     } catch {
       // Fall back to SVG composition below.
     }
+  }
+
+  // SVG composition embeds the complete original image. It is safe for an
+  // editor preview, but would expose pixels hidden by a final crop or blur.
+  if (mode === "final" && (boardState.crop || boardState.annotations.some(annotation => annotation.kind === "blur_rect"))) {
+    throw new Error("Cannot export cropped or blurred images because raster rendering is unavailable. Try again when image rendering is available.");
   }
 
   return buildFallbackSvgFromBaseBytes({

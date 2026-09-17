@@ -44,7 +44,6 @@ import {
 import {
   SemanticWorkQueue,
   type SemanticWorkItem,
-  type SemanticWorkStore,
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
 
@@ -140,7 +139,7 @@ function fatalManagedErrorMessage(code: ManagedEmbeddingsErrorCode): string {
  * Managed-only embeddings coordinator.
  *
  * Endpoint configuration, retries, cooldowns, and entitlement decisions do not
- * exist here. Admission and transport ownership live in ManagedCapabilityClient.
+ * exist here. The plugin composition owner provides the managed index gateway.
  */
 export class EmbeddingsManager {
   private readonly storage: EmbeddingsStorage;
@@ -149,9 +148,9 @@ export class EmbeddingsManager {
   private readonly search = new VectorSearch();
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
+  private readonly exclusionMatchers = new Map<string, RegExp>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
   private readonly lifecycle = new SemanticIndexLifecycle();
-  private readonly stateStore: SemanticWorkStore;
   private readonly workQueue: SemanticWorkQueue;
   private config: EmbeddingsManagerConfig;
   private initializationPromise: Promise<void> | null = null;
@@ -176,23 +175,8 @@ export class EmbeddingsManager {
     this.storage = new EmbeddingsStorage(
       EmbeddingsStorage.buildDbName(this.plugin.settings.vaultInstanceId || ""),
     );
-    this.gateway = this.plugin.getManagedCapabilityClient().getEmbeddingsIndex();
-    const stateStorage = this.storage as EmbeddingsStorage & Partial<Pick<
-      EmbeddingsStorage,
-      "readState" | "writeState" | "deleteState"
-    >>;
-    this.stateStore = {
-      readState: <T>(key: string) => typeof stateStorage.readState === "function"
-        ? stateStorage.readState<T>(key)
-        : Promise.resolve(null),
-      writeState: <T>(key: string, value: T) => typeof stateStorage.writeState === "function"
-        ? stateStorage.writeState(key, value)
-        : Promise.resolve(),
-      deleteState: (key: string) => typeof stateStorage.deleteState === "function"
-        ? stateStorage.deleteState(key)
-        : Promise.resolve(),
-    };
-    this.workQueue = new SemanticWorkQueue(this.stateStore);
+    this.gateway = this.plugin.getManagedCapabilityGraph().embeddingsIndex;
+    this.workQueue = new SemanticWorkQueue(this.storage);
     this.processor = new EmbeddingsProcessor(
       this.gateway,
       this.storage,
@@ -646,6 +630,7 @@ export class EmbeddingsManager {
   public syncFromSettings(): void {
     const previous = this.config;
     this.config = this.buildConfig();
+    this.exclusionMatchers.clear();
     if (JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions)) {
       void this.cleanupExcludedEmbeddings().catch(() => undefined);
     }
@@ -1188,11 +1173,7 @@ export class EmbeddingsManager {
   }
 
   private async readCommittedNamespace(): Promise<string | null> {
-    const storage = this.storage as EmbeddingsStorage & {
-      readState?: EmbeddingsStorage["readState"];
-    };
-    if (typeof storage.readState !== "function") return null;
-    const stored: unknown = await storage.readState(COMMITTED_NAMESPACE_STATE_KEY);
+    const stored: unknown = await this.storage.readState(COMMITTED_NAMESPACE_STATE_KEY);
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
     const candidate = stored as Record<string, unknown>;
     return candidate.version === 1
@@ -1203,25 +1184,16 @@ export class EmbeddingsManager {
   }
 
   private async writeCommittedNamespace(namespace: string): Promise<void> {
-    const storage = this.storage as EmbeddingsStorage & {
-      writeState?: EmbeddingsStorage["writeState"];
-    };
-    if (typeof storage.writeState !== "function") return;
     const state: CommittedNamespaceState = {
       version: 1,
       namespace,
       committedAt: Date.now(),
     };
-    await storage.writeState(COMMITTED_NAMESPACE_STATE_KEY, state);
+    await this.storage.writeState(COMMITTED_NAMESPACE_STATE_KEY, state);
   }
 
   private async deleteCommittedNamespace(): Promise<void> {
-    const storage = this.storage as EmbeddingsStorage & {
-      deleteState?: EmbeddingsStorage["deleteState"];
-    };
-    if (typeof storage.deleteState === "function") {
-      await storage.deleteState(COMMITTED_NAMESPACE_STATE_KEY);
-    }
+    await this.storage.deleteState(COMMITTED_NAMESPACE_STATE_KEY);
   }
 
   private shouldProcessFile(file: TFile): boolean {
@@ -1347,12 +1319,16 @@ export class EmbeddingsManager {
 
   private matchesGlob(target: string, pattern: string): boolean {
     if (!pattern) return false;
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    try {
-      return new RegExp(`^${escaped.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*").replace(/\?/g, ".")}$`, "i").test(target);
-    } catch {
-      return false;
+    let matcher = this.exclusionMatchers.get(pattern);
+    if (!matcher) {
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      const source = escaped.replace(/\*\*\/|\*\*|\*|\?/g, (token) => (
+        token === "**/" ? "(?:.*/)?" : token === "**" ? ".*" : token === "*" ? "[^/]*" : "[^/]"
+      ));
+      matcher = new RegExp(`^${source}$`, "i");
+      this.exclusionMatchers.set(pattern, matcher);
     }
+    return matcher.test(target);
   }
 
   private async cleanupExcludedEmbeddings(): Promise<void> {
@@ -1635,7 +1611,7 @@ export class EmbeddingsManager {
   }
 
   private async restoreFatalSuspension(): Promise<void> {
-    const stored = await this.stateStore.readState<unknown>(FATAL_SUSPENSION_STATE_KEY);
+    const stored = await this.storage.readState<unknown>(FATAL_SUSPENSION_STATE_KEY);
     if (stored === null) return;
     if (
       typeof stored === "object"
@@ -1694,7 +1670,7 @@ export class EmbeddingsManager {
         : {}),
       recordedAt: Date.now(),
     };
-    await this.stateStore.writeState(FATAL_SUSPENSION_STATE_KEY, state);
+    await this.storage.writeState(FATAL_SUSPENSION_STATE_KEY, state);
     this.refreshLifecycle({
       phase: "error",
       currentPath: null,
@@ -1703,7 +1679,7 @@ export class EmbeddingsManager {
   }
 
   private clearFatalSuspension(): Promise<void> {
-    return this.stateStore.deleteState(FATAL_SUSPENSION_STATE_KEY);
+    return this.storage.deleteState(FATAL_SUSPENSION_STATE_KEY);
   }
 
   private generationSnapshotForNamespace(namespace: string): SemanticIndexSnapshot["generation"] {

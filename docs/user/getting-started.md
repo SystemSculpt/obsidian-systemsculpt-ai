@@ -1,6 +1,6 @@
 # Getting started
 
-SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Chat works through your SystemSculpt account automatically, with nothing extra to pick inside the plugin.
+SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Hosted chat uses your SystemSculpt account. On desktop, you can instead select your installed, signed-in Codex for chat and Studio text generation.
 
 ## Install
 
@@ -32,6 +32,12 @@ npm run build
 - Command palette: `Open SystemSculpt Chat`
 - Ribbon icon: `Open SystemSculpt Chat`
 
+## On-machine Codex (desktop)
+
+Select **On-machine Codex** above the chat composer or in **Settings → SystemSculpt AI → Chat**. It requires an installed, signed-in Codex CLI and uses Codex’s own permissions and durable history. Model, reasoning, and speed controls apply to the next native turn. Switching execution backend opens a new chat and preserves the existing conversation and draft. Hosted media and Similar Notes still use SystemSculpt.
+
+See [Studio workspaces and native execution](../studio-workspaces.md) for setup and recovery behavior.
+
 ## Add context
 
 - Drag files into chat.
@@ -43,7 +49,7 @@ npm run build
 ## Tool use
 
 - SystemSculpt can use built-in tools automatically when the current flow needs them.
-- You only need to set up your SystemSculpt account in the plugin.
+- Hosted chat uses your SystemSculpt account. Native Codex chat uses your existing Codex login and native approval controls.
 
 ## Enable Similar Notes (optional)
 

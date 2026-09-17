@@ -128,15 +128,6 @@
 .ss-studio-collection-resources li { margin-block: 8px; overflow-wrap: anywhere; }
 .ss-studio-collection-resources small { display: block; color: var(--text-muted); }
 .ss-studio-workflow { padding: 12px; }
-.ss-studio-workflow-controls { display: flex; gap: 8px; flex-wrap: wrap; }
-.ss-studio-workflow-native { max-height: 420px; overflow: auto; overflow-wrap: anywhere; }
-.ss-studio-workflow-native textarea { width: 100%; min-height: 70px; }
-.ss-studio-workflow-native p { white-space: pre-wrap; }
-.ss-studio-role-instances { max-height: 250px; overflow: auto; overscroll-behavior: contain; }
-.ss-studio-role-instance { padding-block: 6px; border-bottom: 1px solid var(--background-modifier-border); }
-.ss-studio-role-instance button { white-space: normal; height: auto; text-align: start; }
-.ss-studio-role-instance button[aria-pressed="true"] { color: var(--interactive-accent); }
-.ss-studio-role-instance small { display: block; color: var(--text-muted); margin-block-start: 4px; }
 .ss-studio-collection-resources input, .ss-studio-collection-resources select { width: 100%; margin-block: 4px; }
 .ss-studio-collection-resources p { white-space: pre-wrap; }
 

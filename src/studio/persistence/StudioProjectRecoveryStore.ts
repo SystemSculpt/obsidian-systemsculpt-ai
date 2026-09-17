@@ -1,7 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import { parseStudioProject, serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
-import { sha256HexFromArrayBuffer } from "../hash";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 
 const STUDIO_RECOVERY_ROOT = ".systemsculpt/studio/recovery";
 

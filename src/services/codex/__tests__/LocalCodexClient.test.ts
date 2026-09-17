@@ -84,6 +84,26 @@ it('fails closed on malformed protocol input', async () => {
   host({ malformed: true });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('Invalid Codex protocol');
 });
+it('rejects a concurrent resume before changing the active native thread configuration', async () => {
+  const first = host({ wait: true }), controller = new AbortController();
+  const running = runLocalCodex({ ...input, threadId: 'native-thread' }, controller.signal, callbacks());
+  void running.catch(() => {});
+  for (let index = 0; index < 50 && !first.messages.some(message => message.method === 'turn/start'); index++) await Promise.resolve();
+  expect(first.messages.some(message => message.method === 'turn/start')).toBe(true);
+  try {
+    const second = host({ wait: true });
+    await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
+    expect(second.messages.some(message => ['thread/start', 'thread/resume'].includes(message.method))).toBe(false);
+  } finally { controller.abort(); await expect(running).rejects.toThrow('canceled'); }
+  host();
+  await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
+});
+it('releases a reserved thread when initialization fails before resume', async () => {
+  host({ failLogin: true });
+  await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('codex login');
+  host();
+  await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
+});
 
 it('forwards user-selected model, thinking and speed to the native thread and turn', async () => {
   const { messages } = host();

@@ -2,8 +2,6 @@ import { App, Notice, View, WorkspaceLeaf, TFile, normalizePath } from "obsidian
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
-import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
-import { hasHostCapability } from "../../platform/hostCapabilities";
 import { showConfirm } from "../ui/notifications";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
@@ -618,7 +616,7 @@ export class CommandManager {
 
     this.plugin.addCommand({
       id: "copy-current-file-path",
-      name: "Copy current file path",
+      name: "Copy vault-relative file path",
       checkCallback: (checking: boolean) => {
         const currentFilePath = this.getCurrentActiveFilePath();
         if (!currentFilePath) {
@@ -796,20 +794,13 @@ export class CommandManager {
   }
 
   private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {
-    const absolutePath = hasHostCapability("absolute-paths")
-      ? resolveAbsoluteVaultPath(this.app.vault.adapter, vaultFilePath)
-      : null;
-    const clipboardPath = absolutePath ?? vaultFilePath;
-
-    const copied = await tryCopyToClipboard(clipboardPath);
+    const copied = await tryCopyToClipboard(vaultFilePath);
     if (!copied) {
       new Notice("Unable to copy file path to clipboard.");
       return;
     }
 
-    new Notice(absolutePath
-      ? "Full file path copied to clipboard."
-      : "Vault-relative file path copied to clipboard.");
+    new Notice("Vault-relative file path copied to clipboard.");
   }
 
   private registerEmbeddingsDatabaseCommands() {

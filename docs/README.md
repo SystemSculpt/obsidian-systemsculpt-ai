@@ -16,6 +16,11 @@ Current user and engineering references for the Obsidian plugin.
 
 ## Engineering references
 
+- [Domain language](../CONTEXT.md)
+- [Source ownership and interfaces](architecture.md)
+- [Contribution and independent review standards](../CONTRIBUTING.md)
+- [Execution authority decision](adr/0001-execution-authority.md)
+- [Project publication decision](adr/0002-project-publication.md)
 - [Development, testing, and release](development.md)
 - [Obsidian community review](community-review.md)
 - [Managed chat request flow](chat-request-flow.md)

@@ -83,13 +83,15 @@ function createDesktopVaultAudioSource(
 ): AudioProcessorAudioSource {
   type DesktopFs = Awaited<ReturnType<typeof desktopHost.fs>>;
   type DesktopFileHandle = Awaited<ReturnType<DesktopFs["open"]>>;
-  const fsPromise = desktopHost.fs();
   let handlePromise: Promise<DesktopFileHandle> | null = null;
   let released = false;
   const loadHandle = async (): Promise<DesktopFileHandle> => {
     if (released) return Promise.reject(new Error("The selected vault audio was released."));
-    const fs = await fsPromise;
-    handlePromise ??= fs.open(absolutePath, "r");
+    handlePromise ??= (async () => {
+      const fs = await desktopHost.fs();
+      if (released) throw new Error("The selected vault audio was released.");
+      return fs.open(absolutePath, "r");
+    })();
     return handlePromise;
   };
 
@@ -104,6 +106,7 @@ function createDesktopVaultAudioSource(
     },
     readSlice: async (start, end) => {
       const handle = await loadHandle();
+      if (released) throw new Error("The selected vault audio was released.");
       const stat = await handle.stat();
       if (
         stat.size !== sizeBytes

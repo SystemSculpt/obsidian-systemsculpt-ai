@@ -1,5 +1,4 @@
 import type {
-  StudioAssetRef,
   StudioImageGenerationInput,
   StudioNodeDefinition,
   StudioNodeExecutionContext,
@@ -7,8 +6,7 @@ import type {
 import {
   extractImageInputCandidates,
   getText,
-  inferMimeTypeFromPath,
-  isLikelyAbsolutePath,
+  resolveStudioImageInput,
   parseStructuredPromptInput,
   type StudioImageInputCandidate,
 } from "./shared";
@@ -17,31 +15,6 @@ const IMAGE_PROMPT_MAX_CHARS = 8_000;
 const IMAGE_INPUT_MAX_COUNT = 4;
 const IMAGE_OUTPUT_MAX_COUNT = 4;
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
-function normalizeInputMimeType(mimeType: string): "image/png" | "image/jpeg" | "image/webp" | null {
-  const normalized = String(mimeType || "").trim().toLowerCase();
-  if (normalized === "image/png") return "image/png";
-  if (normalized === "image/jpeg" || normalized === "image/jpg") return "image/jpeg";
-  if (normalized === "image/webp") return "image/webp";
-  return null;
-}
-
-function asExistingAssetRef(candidate: StudioImageInputCandidate): StudioAssetRef | null {
-  const hash = String(candidate.hash || "").trim().toLowerCase();
-  const path = String(candidate.path || "").trim();
-  const sizeRaw = Number(candidate.sizeBytes);
-  const sizeBytes = Number.isFinite(sizeRaw) && sizeRaw > 0 ? Math.floor(sizeRaw) : 0;
-  const normalizedMime = normalizeInputMimeType(String(candidate.mimeType || ""));
-  if (!hash || !path || !sizeBytes || !normalizedMime) {
-    return null;
-  }
-  return {
-    hash,
-    mimeType: normalizedMime,
-    sizeBytes,
-    path,
-  };
-}
-
 function validateImagePromptLength(prompt: string): string {
   const trimmed = String(prompt || "").trim();
   if (trimmed.length > IMAGE_PROMPT_MAX_CHARS) {
@@ -92,44 +65,16 @@ async function resolveInputImages(
 
   const output: StudioImageGenerationInput[] = [];
   const seen = new Set<string>();
-  const addInput = (asset: StudioAssetRef) => {
-    if (seen.has(asset.hash)) return;
+  for (const candidate of merged) {
+    if (!String(candidate.path || "").trim()) continue;
+    const input = await resolveStudioImageInput(context, candidate,
+      `Image generation node "${context.node.id}" received unsupported input image`);
+    if (seen.has(input.asset.hash)) continue;
     if (output.length >= IMAGE_INPUT_MAX_COUNT) {
       throw new Error(`Image generation accepts at most ${IMAGE_INPUT_MAX_COUNT} distinct reference images. Remove extra references or split them into separate generation nodes.`);
     }
-    seen.add(asset.hash);
-    output.push({ asset, load: () => context.services.readAsset(asset) });
-  };
-  for (const candidate of merged) {
-    const sourcePath = String(candidate.path || "").trim();
-    if (!sourcePath) {
-      continue;
-    }
-
-    const existing = asExistingAssetRef(candidate);
-    if (existing) {
-      addInput(existing);
-      continue;
-    }
-
-    const mimeHint =
-      normalizeInputMimeType(String(candidate.mimeType || "")) ||
-      normalizeInputMimeType(inferMimeTypeFromPath(sourcePath));
-    if (!mimeHint) {
-      throw new Error(
-        `Image generation node "${context.node.id}" received unsupported input image format "${sourcePath}". Use PNG, JPEG, or WEBP.`
-      );
-    }
-
-    let bytes: ArrayBuffer;
-    if (isLikelyAbsolutePath(sourcePath)) {
-      context.services.assertFilesystemPath(sourcePath);
-      bytes = await context.services.readLocalFileBinary(sourcePath);
-    } else {
-      bytes = await context.services.readVaultBinary(sourcePath);
-    }
-    const stored = await context.services.storeAsset(bytes, mimeHint);
-    addInput(stored);
+    seen.add(input.asset.hash);
+    output.push(input);
   }
 
   return output;

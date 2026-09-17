@@ -115,6 +115,25 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect((plugin as any).recorderService).toBeNull();
   });
 
+  it("releases capture and remaining services when early update and diagnostics cleanup fail", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    plugin.recorderService = { unload: jest.fn(() => { order.push("recorder"); }) };
+    plugin.pluginUpdateService = { stop: jest.fn(() => {
+      order.push("updates");
+      throw new Error("update teardown failed");
+    }) };
+    plugin.diagnosticsSessionLifecycle = { close: jest.fn(() => {
+      order.push("diagnostics");
+      throw new Error("diagnostics teardown failed");
+    }) };
+    plugin.settingsManager = { destroy: jest.fn(() => { order.push("settings"); }) };
+
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
+
+    expect(order).toEqual(["recorder", "updates", "diagnostics", "settings"]);
+  });
+
   it("bounds incident persistence drain while its accepted write continues best-effort", async () => {
     jest.useFakeTimers();
     const plugin = makePlugin();

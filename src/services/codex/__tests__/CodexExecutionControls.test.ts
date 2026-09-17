@@ -61,6 +61,35 @@ it('shows portable API controls without starting Codex on a mobile host', async 
   expect(readCodexCatalog).not.toHaveBeenCalled(); expect(updateSettings).not.toHaveBeenCalled();
   expect(settings.textExecutionBackend).toBe('codex'); dispose(); hasHostCapability.mockReturnValue(true);
 });
+it('keeps a provider-switch failure visible while the current chat remains on the API', async () => {
+  const parent = document.createElement('div');
+  const settings = { textExecutionBackend: 'systemsculpt' };
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn(async patch => { Object.assign(settings, patch); }) }) };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt', onProviderChange: async () => { throw new Error('Could not open the new chat'); } });
+  const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
+  provider.value = 'codex'; provider.dispatchEvent(new Event('change')); await flush();
+  expect(parent.querySelector('.ss-codex-controls-status')?.textContent).toBe('Could not open the new chat');
+  expect((parent.querySelector('.ss-codex-controls-status') as HTMLElement).hidden).toBe(false); dispose();
+});
+it('preserves independent field edits while earlier settings saves are queued', async () => {
+  const parent = document.createElement('div');
+  const settings = { codexModel: 'gpt-6-astra', codexThinkingLevel: 'high', codexServiceTier: 'default' };
+  let finishFirst!: () => void;
+  let tail = new Promise<void>(resolve => { finishFirst = resolve; });
+  const updateSettings = jest.fn(patch => { tail = tail.then(() => { Object.assign(settings, patch); }); return tail; });
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
+  jest.mocked(readCodexCatalog).mockResolvedValue({ permissions: '', models: [{ model: 'gpt-6-astra', name: 'Astra', efforts: ['high', 'xhigh'], defaultEffort: 'high', fastTier: 'priority' }] });
+  const dispose = mountCodexExecutionControls(parent, plugin as never); await flush();
+  const effort = parent.querySelector('[data-testid="codex.execution.thinking"]') as HTMLSelectElement;
+  const speed = parent.querySelector('[data-testid="codex.execution.speed"]') as HTMLSelectElement;
+  effort.value = 'xhigh'; effort.dispatchEvent(new Event('change'));
+  speed.value = 'priority'; speed.dispatchEvent(new Event('change'));
+  expect(settings.codexThinkingLevel).toBe('high');
+  expect(updateSettings.mock.calls.map(([patch]) => patch)).toEqual([{ codexThinkingLevel: 'xhigh' }, { codexServiceTier: 'priority' }]);
+  finishFirst(); await tail; await flush();
+  expect(settings).toEqual({ codexModel: 'gpt-6-astra', codexThinkingLevel: 'xhigh', codexServiceTier: 'priority' });
+  expect(effort.value).toBe('xhigh'); expect(speed.value).toBe('priority'); dispose();
+});
 
 it('lets the user reconnect after a native catalog error and restores saved choices after remount', async () => {
   const parent = document.createElement('div');

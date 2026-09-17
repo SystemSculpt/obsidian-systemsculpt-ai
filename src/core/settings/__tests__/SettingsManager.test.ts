@@ -450,6 +450,27 @@ describe("SettingsManager managed settings contract", () => {
       expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
     });
 
+    it("skips corrupt or empty backups until it finds a valid dated backup", async () => {
+      const plugin = createPlugin(null);
+      const paths = [
+        LATEST_BACKUP,
+        ".systemsculpt/settings-backups/settings-backup-2026-09-16.json",
+        ".systemsculpt/settings-backups/settings-backup-2026-09-15.json",
+      ];
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => paths.includes(path));
+      plugin.app.vault.adapter.list.mockResolvedValue({ files: paths.slice(1), folders: [] });
+      plugin.app.vault.adapter.read.mockImplementation(async (path: string) => {
+        if (path === LATEST_BACKUP) return "{truncated";
+        if (path === paths[1]) return "{}";
+        return JSON.stringify(restoredBackup);
+      });
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+    });
+
     it("still ends up with defaults on a fresh install with no data and no backup", async () => {
       const plugin = createPlugin(null);
       plugin.app.vault.adapter.list.mockRejectedValue(new Error("ENOENT: .systemsculpt/settings-backups"));

@@ -4,6 +4,7 @@ import { deriveStudioAssetsDir } from '../../studio/paths';
 import { isRecord } from '../../studio/utils';
 import type { CodexActivity } from './CodexActivity';
 import type { CodexRequest } from './LocalCodexClient';
+import type { DeepReadonly } from '../../studio/StudioProjectSnapshots';
 
 export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'interrupted';
 export type AgentRunMessage = { id: string; from: string; to: string; text: string; at: string; status: 'pending' | 'delivered' | 'failed'; error?: string };
@@ -14,6 +15,10 @@ export type StudioAgentRun = {
   threadId: string; turnId: string; request: CodexRequest; result: string; error: string; currentActivity: string;
   activity: CodexActivity[]; messages: AgentRunMessage[]; persistenceError?: string;
 };
+/** Live observation views: only StudioAgentRuns may mutate the retained records. */
+export type StudioAgentRunView = DeepReadonly<StudioAgentRun>;
+export type AgentRunMessageView = DeepReadonly<AgentRunMessage>;
+
 export const isActiveAgentRun = (status: AgentRunStatus): boolean => ['queued', 'running', 'waiting'].includes(status);
 export const agentRunFolder = (projectPath: string): string => `${deriveStudioAssetsDir(projectPath)}/agent-runs`;
 

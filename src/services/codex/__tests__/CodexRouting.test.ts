@@ -7,7 +7,7 @@ jest.mock('../CodexExecutionSettings', () => ({ codexOptionsFromSettings: () => 
 it('routes selected Studio text generation to Codex with no managed request or managed operation receipt', async () => {
   const generateText = jest.fn(() => { throw new Error('Managed text must not run'); });
   const plugin = { app: { vault: { adapter: {}, getName: () => 'test' } }, settings: { textExecutionBackend: 'codex' },
-    getManagedCapabilityGraph: () => ({ admission: {}, transport: {} }), getManagedCapabilityClient: () => ({ generateText }) };
+    getManagedCapabilityGraph: () => ({ admission: {}, transport: {}, textGeneration: { generate: generateText } }) };
   (runLocalCodex as jest.Mock).mockResolvedValue({ text: 'native answer', threadId: 'native-thread', status: 'completed' });
   const result = await new StudioApiExecutionAdapter(plugin as never).generateText({ runId: 'r', nodeId: 'n', projectPath: 'test.systemsculpt', signal: new AbortController().signal, buildPayload: () => ({ prompt: 'Question', systemPrompt: 'Be concise' }) });
   expect(result).toEqual({ text: 'native answer' }); expect(generateText).not.toHaveBeenCalled();

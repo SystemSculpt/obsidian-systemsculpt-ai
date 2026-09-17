@@ -4,7 +4,7 @@
 
 import { App, MarkdownRenderer, setIcon, TFile } from "obsidian";
 import type { ChatMessage, MessagePart } from "../../../types";
-import type { AgentConversationSnapshot, AgentPart } from "../AgentConversation";
+import type { AgentConversationSnapshot, AgentPart } from "../../../chat/ChatConversation";
 import type { ToolCall } from "../../../types/toolCalls";
 import type {
   AgentConversationPresentation,
@@ -4672,42 +4672,31 @@ describe("AgentConversationRenderer tail status", () => {
     });
     renderer.load();
     const internals = renderer as unknown as {
-      copyMessage(
-        button: HTMLButtonElement,
-        text: string,
-        subject: "message" | "response",
-      ): Promise<void>;
-      copyArtifactPath(button: HTMLButtonElement, artifact: object): Promise<void>;
+      copyWithFeedback(button: HTMLButtonElement, subject: "message" | "response" | "path", copy: () => Promise<boolean>): Promise<void>;
     };
 
     const messageButton = parent.createEl("button");
-    await internals.copyMessage(messageButton, "Copy this", "message");
+    await internals.copyWithFeedback(messageButton, "message", onCopyText);
     expect(messageButton.classList).toContain("is-copied");
     jest.advanceTimersByTime(1_800);
     expect(messageButton.classList).not.toContain("is-copied");
-    await internals.copyMessage(messageButton, "Copy this again", "message");
+    await internals.copyWithFeedback(messageButton, "message", onCopyText);
     messageButton.remove();
     jest.advanceTimersByTime(1_800);
 
-    const artifact = {
-      id: "artifact-copy-feedback",
-      kind: "vault_file",
-      title: "Plan.md",
-      path: "Plan.md",
-    };
     const pathButton = parent.createEl("button");
-    await internals.copyArtifactPath(pathButton, artifact);
+    await internals.copyWithFeedback(pathButton, "path", onCopyArtifactPath);
     expect(pathButton.classList).toContain("is-copied");
     jest.advanceTimersByTime(1_800);
     expect(pathButton.classList).not.toContain("is-copied");
     expect(pathButton.getAttribute("aria-label")).toBe("Copy path");
-    await internals.copyArtifactPath(pathButton, artifact);
+    await internals.copyWithFeedback(pathButton, "path", onCopyArtifactPath);
     pathButton.remove();
     jest.advanceTimersByTime(1_800);
 
     onCopyArtifactPath.mockRejectedValueOnce(new Error("clipboard unavailable"));
     const failedPathButton = parent.createEl("button");
-    await internals.copyArtifactPath(failedPathButton, artifact);
+    await internals.copyWithFeedback(failedPathButton, "path", onCopyArtifactPath);
     expect(failedPathButton.classList).toContain("is-copy-failed");
     jest.advanceTimersByTime(3_000);
     expect(failedPathButton.classList).not.toContain("is-copy-failed");
@@ -4717,11 +4706,7 @@ describe("AgentConversationRenderer tail status", () => {
       releaseMessageCopy = resolve;
     }));
     const detachedMessageButton = parent.createEl("button");
-    const staleMessageCopy = internals.copyMessage(
-      detachedMessageButton,
-      "Detached copy",
-      "response",
-    );
+    const staleMessageCopy = internals.copyWithFeedback(detachedMessageButton, "response", onCopyText);
     detachedMessageButton.remove();
     releaseMessageCopy(true);
     await staleMessageCopy;
@@ -4732,7 +4717,7 @@ describe("AgentConversationRenderer tail status", () => {
       releasePathCopy = resolve;
     }));
     const supersededPathButton = parent.createEl("button");
-    const stalePathCopy = internals.copyArtifactPath(supersededPathButton, artifact);
+    const stalePathCopy = internals.copyWithFeedback(supersededPathButton, "path", onCopyArtifactPath);
     supersededPathButton.dataset.copyAttempt = "superseded";
     releasePathCopy(true);
     await stalePathCopy;

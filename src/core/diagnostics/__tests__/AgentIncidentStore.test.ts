@@ -1228,6 +1228,39 @@ describe("AgentIncidentStore", () => {
     }
   });
 
+  it("accepts truthful incomplete evidence but rejects omitted, invented, or reordered missing fields", async () => {
+    const absent = ["environment_loaded_bundle_sha256", "environment_plugin_version"];
+    const missingEvidence = (report: Record<string, unknown>) => {
+      const environment = report.environment as Record<string, unknown>;
+      delete environment.plugin_version;
+      delete environment.loaded_bundle_sha256;
+      const capture = report.capture_quality as Record<string, unknown>;
+      capture.complete = false;
+      capture.missing_fields = absent;
+    };
+    await expect(new AgentIncidentStore(new MemoryAdapter()).save(
+      incidentReport(280, undefined, missingEvidence),
+    )).resolves.toMatchObject({ created: true });
+
+    const claims = [
+      { complete: true, missing_fields: absent },
+      { complete: false, missing_fields: [] },
+      { complete: false, missing_fields: [absent[0]] },
+      { complete: false, missing_fields: [absent[0], "environment_obsidian_version", absent[1]] },
+      { complete: false, missing_fields: [...absent].reverse() },
+    ];
+    for (const [index, claim] of claims.entries()) {
+      const adapter = new MemoryAdapter();
+      const forged = incidentReport(281 + index, undefined, (report) => {
+        missingEvidence(report);
+        Object.assign(report.capture_quality as Record<string, unknown>, claim);
+      });
+      await expect(new AgentIncidentStore(adapter).save(forged))
+        .rejects.toMatchObject({ code: "invalid_report" });
+      expect(adapter.writeCalls).toBe(0);
+    }
+  });
+
   it("correlates terminal transport evidence by command kind, segment, and tool ordinal", async () => {
     const matching = incidentReport(256, undefined, (report) => {
       const terminal = (report.timeline as Array<Record<string, unknown>>)[1];

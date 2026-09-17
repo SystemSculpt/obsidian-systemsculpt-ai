@@ -1,4 +1,5 @@
-import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
+import { copyRenderingInput } from "./AgentIncidentRendering";
+import { snapshotSupportDiagnosticEvent, type SupportDiagnosticEvent } from "../../utils/SupportDiagnosticEvent";
 import {
   isThinAgentConversationId,
   isThinAgentRequestId,
@@ -6,7 +7,7 @@ import {
 import type {
   AgentChatTransportSegmentSummaryEvent,
   AgentRunFailureCaptureEvent,
-} from "../../views/chatview/agent/ChatSession";
+} from "./AgentIncidentCapture";
 import {
   AGENT_INCIDENT_MAX_RESOURCE_SAMPLES,
   AGENT_INCIDENT_MAX_TRANSPORT_SEGMENTS,
@@ -156,7 +157,6 @@ export class AgentIncidentCoordinator {
   private readonly settledCorrelations = new Map<string, true>();
   private readonly memoryByIncidentId = new Map<string, MemoryReport>();
   private readonly memoryByReportId = new Map<string, MemoryReport>();
-  private readonly memoryOrder: MemoryReport[] = [];
   private readonly lookupWaiters = new Map<string, Set<() => void>>();
   private readonly processingTasks = new Set<Promise<void>>();
   private readonly saveQueue: PendingSave[] = [];
@@ -221,7 +221,7 @@ export class AgentIncidentCoordinator {
   public recordLifecycle(event: SupportDiagnosticEvent): void {
     if (!this.admissionOpen) return;
     try {
-      const safeEvent = copyLifecycleEvent(event);
+      const safeEvent = snapshotSupportDiagnosticEvent(event);
       if (!safeEvent) return;
       const correlation = safeCorrelation(
         safeEvent.conversation_id,
@@ -409,7 +409,7 @@ export class AgentIncidentCoordinator {
         ? "not_started"
         : this.initializationSettled ? "settled" : "pending",
       pendingRunCount: this.pendingRuns.size,
-      memoryReportCount: this.memoryOrder.length,
+      memoryReportCount: this.memoryByReportId.size,
       pendingSaveCount: this.saveQueue.length + (this.activeSave ? 1 : 0),
       pendingRunEvictionCount: this.pendingRunEvictionCount,
       droppedSaveCount: this.droppedSaveCount,
@@ -711,9 +711,8 @@ export class AgentIncidentCoordinator {
       };
       this.memoryByReportId.set(reportId, memory);
       if (incidentId) this.memoryByIncidentId.set(incidentId, memory);
-      this.memoryOrder.push(memory);
-      while (this.memoryOrder.length > MAX_MEMORY_REPORTS) {
-        const oldest = this.memoryOrder.shift();
+      while (this.memoryByReportId.size > MAX_MEMORY_REPORTS) {
+        const oldest = this.memoryByReportId.values().next().value;
         if (!oldest) break;
         if (this.memoryByReportId.get(oldest.reportId) === oldest) {
           this.memoryByReportId.delete(oldest.reportId);
@@ -974,61 +973,6 @@ export class AgentIncidentCoordinator {
   }
 }
 
-function copyLifecycleEvent(event: SupportDiagnosticEvent): SupportDiagnosticEvent | null {
-  try {
-    if (!event) return null;
-    return Object.freeze({
-      timestamp: event.timestamp,
-      severity: event.severity,
-      code: event.code,
-      phase: event.phase,
-      origin: event.origin,
-      cause: event.cause,
-      sequence: event.sequence,
-      conversation_id: event.conversation_id,
-      request_id: event.request_id,
-      client_instance_id: event.client_instance_id,
-      plugin_build_id: event.plugin_build_id,
-      run_id: event.run_id,
-      server_run_id: event.server_run_id,
-      tool_name: event.tool_name,
-      status: event.status,
-      retryable: event.retryable,
-      incident_id: event.incident_id,
-      failure_code: event.failure_code,
-      latency_trace_id: event.latency_trace_id,
-      command_kind: event.command_kind,
-      command_segment_ordinal: event.command_segment_ordinal,
-      tool_execution_ordinal: event.tool_execution_ordinal,
-      tool_outcome: event.tool_outcome,
-      tool_failure_class: event.tool_failure_class,
-      tool_item_count: event.tool_item_count,
-      tool_completed_item_count: event.tool_completed_item_count,
-      tool_failed_item_count: event.tool_failed_item_count,
-      history_sync_kind: event.history_sync_kind,
-      history_sync_ordinal: event.history_sync_ordinal,
-      response_delivery_mode: event.response_delivery_mode,
-      client_monotonic_offset_ms: event.client_monotonic_offset_ms,
-      client_clock_domain: event.client_clock_domain,
-      server_timing_app_ms: event.server_timing_app_ms,
-      server_timing_auth_ms: event.server_timing_auth_ms,
-      server_timing_clock_domain: event.server_timing_clock_domain,
-      credits_refresh_reason: event.credits_refresh_reason,
-      credits_refresh_sequence: event.credits_refresh_sequence,
-      credits_refresh_transport: event.credits_refresh_transport,
-      credits_refresh_elapsed_ms: event.credits_refresh_elapsed_ms,
-      credits_refresh_clock_domain: event.credits_refresh_clock_domain,
-      credits_refresh_server_auth_ms: event.credits_refresh_server_auth_ms,
-      credits_refresh_server_rate_limit_ms: event.credits_refresh_server_rate_limit_ms,
-      credits_refresh_server_balance_store_ms: event.credits_refresh_server_balance_store_ms,
-      credits_refresh_server_total_ms: event.credits_refresh_server_total_ms,
-      credits_refresh_server_timing_clock_domain: event.credits_refresh_server_timing_clock_domain,
-    });
-  } catch {
-    return null;
-  }
-}
-
 function projectFailureCapture(event: AgentRunFailureCaptureEvent): ProjectedFailureCapture | null {
   try {
     if (!event) return null;
@@ -1094,11 +1038,12 @@ function projectTransport(event: AgentChatTransportSegmentSummaryEvent): Project
     const correlation = safeCorrelation(conversationId, requestId);
     if (!correlation) return null;
     const toolExecutionOrdinal = event.toolExecutionOrdinal;
+    const serverLatencyCorrelationId = event.serverLatencyCorrelationId;
     const segment: AgentIncidentTransportSegmentInput = Object.freeze({
       commandKind: event.commandKind,
       commandSegmentOrdinal: event.commandSegmentOrdinal,
-      ...(event.serverLatencyCorrelationId
-        ? { serverLatencyCorrelationId: event.serverLatencyCorrelationId }
+      ...(serverLatencyCorrelationId
+        ? { serverLatencyCorrelationId }
         : {}),
       ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
       closeReason: event.closeReason,
@@ -1273,55 +1218,6 @@ function copyResourceSamplesInput(
       }));
     }
     return Object.freeze(samples);
-  } catch {
-    return undefined;
-  }
-}
-
-function copyRenderingInput(
-  input: AgentIncidentRenderingInput,
-): AgentIncidentRenderingInput | undefined {
-  try {
-    const renderer = input.renderer;
-    const scroller = input.scroller;
-    return Object.freeze({
-      renderState: input.renderState,
-      renderPassCount: input.renderPassCount,
-      pendingRenderCount: input.pendingRenderCount,
-      lastRenderDurationMs: input.lastRenderDurationMs,
-      maxRenderDurationMs: input.maxRenderDurationMs,
-      firstDomCommitObserved: input.firstDomCommitObserved,
-      firstPaintOpportunityObserved: input.firstPaintOpportunityObserved,
-      registeredRowCount: input.registeredRowCount,
-      renderer: Object.freeze({
-        renderPassCount: renderer.renderPassCount,
-        pendingRenderPassCount: renderer.pendingRenderPassCount,
-        lastRenderDurationMs: renderer.lastRenderDurationMs,
-        maxRenderDurationMs: renderer.maxRenderDurationMs,
-        historicalRowCount: renderer.historicalRowCount,
-        historicalPartCount: renderer.historicalPartCount,
-        activePartCount: renderer.activePartCount,
-        disclosureCount: renderer.disclosureCount,
-        openDisclosureCount: renderer.openDisclosureCount,
-        activityDisclosureCount: renderer.activityDisclosureCount,
-        reasoningDisclosureCount: renderer.reasoningDisclosureCount,
-        toolDisclosureCount: renderer.toolDisclosureCount,
-        overflowDisclosureCount: renderer.overflowDisclosureCount,
-        pendingHydrationCount: renderer.pendingHydrationCount,
-        renderingEnabled: renderer.renderingEnabled,
-      }),
-      scroller: Object.freeze({
-        mode: scroller.mode,
-        distanceFromEndBucket: scroller.distanceFromEndBucket,
-        registeredRowCount: scroller.registeredRowCount,
-        pendingLayoutMutationCount: scroller.pendingLayoutMutationCount,
-        layoutMutationPending: scroller.layoutMutationPending,
-        geometryUpdatePending: scroller.geometryUpdatePending,
-        programmaticScrollPending: scroller.programmaticScrollPending,
-        submittedPromptAnchorActive: scroller.submittedPromptAnchorActive,
-        destroyed: scroller.destroyed,
-      }),
-    });
   } catch {
     return undefined;
   }

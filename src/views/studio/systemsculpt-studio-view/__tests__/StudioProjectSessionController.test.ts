@@ -1,5 +1,9 @@
 /** @jest-environment jsdom */
 
+import { StudioGraphHistory } from "../../StudioGraphHistory";
+import { StudioProjectSession } from "../../../../studio/StudioProjectSession";
+import { TFile } from "obsidian";
+import { StudioVaultNotes } from "../../StudioVaultNotes";
 import { readAllStudioNotePaths, serializeStudioNoteItems } from "../../../../studio/StudioNoteConfig";
 import type { StudioNodeCacheSnapshotV1, StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
 import { STUDIO_GRAPH_DEFAULT_ZOOM } from "../../StudioGraphInteractionTypes";
@@ -124,7 +128,7 @@ function createControllerHarness(project: StudioProjectV1) {
     scheduleLayoutSave: jest.fn(),
     requestLayoutSave: jest.fn(),
     getGraphViewportElement: jest.fn(() => null),
-    captureProjectHistoryCheckpoint: jest.fn(),
+    history: new StudioGraphHistory(),
     resetProjectHistory: jest.fn(),
     preserveProjectAsUndo: jest.fn(),
     setHistoryCurrentSnapshot: jest.fn(),
@@ -134,16 +138,13 @@ function createControllerHarness(project: StudioProjectV1) {
     scheduleProjectFileRetry: jest.fn(),
     hydrateProjectCache: jest.fn(async () => cacheSnapshot),
     materializeManagedOutputNodesFromCache: jest.fn(),
-    refreshNoteNodePreviewsFromVault: jest.fn(async () => true),
     setError: jest.fn(),
     setLastError: jest.fn(),
     render: jest.fn(),
     refreshLeafDisplay: jest.fn(),
-    isMarkdownVaultFile: jest.fn(() => true),
-    isVaultFolder: jest.fn(() => false),
-    readAllNotePathsFromConfig: (node: StudioNodeInstance) => readAllStudioNotePaths(node.config),
-    normalizeNoteNodeConfig: jest.fn(() => false),
   } as any;
+  host.vaultNotes = new StudioVaultNotes(host.app.vault, { primeNodeOutput: jest.fn() });
+  jest.spyOn(host.vaultNotes, "refresh").mockResolvedValue(true);
   const controller = new StudioProjectSessionController(host);
   Object.assign(controller as any, {
     currentProject: project,
@@ -154,18 +155,60 @@ function createControllerHarness(project: StudioProjectV1) {
 }
 
 describe("StudioProjectSessionController", () => {
+  it("renders peer mutations while an originating asynchronous edit awaits completion", async () => {
+    const project = projectFixture(noteNodeFixture("Notes/Shared.md"));
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => {} });
+    const first = createControllerHarness(project);
+    const second = createControllerHarness(project);
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    try {
+      for (const harness of [first, second]) {
+        await harness.controller.loadProjectFromPath(null);
+        harness.service.retainProjectSession.mockResolvedValue(session);
+        harness.host.vaultNotes.refresh.mockResolvedValue(false);
+        await harness.controller.loadProjectFromPath("Studio/Test.systemsculpt");
+        harness.host.render.mockClear();
+      }
+      const pending = first.controller.commitMutationAsync("node.config", async draft => {
+        await waiting;
+        draft.graph.nodes[0].config.preface = "Generated text";
+        return true;
+      }, { captureHistory: false });
+
+      second.controller.commitMutation("node.title", current => { current.graph.nodes[0].title = "Peer typing"; });
+      expect(first.host.render).toHaveBeenCalledTimes(1);
+      expect(second.host.render).not.toHaveBeenCalled();
+      expect(first.controller.getProject()?.graph.nodes[0].title).toBe("Peer typing");
+
+      release();
+      await pending;
+      expect(first.host.render).toHaveBeenCalledTimes(2);
+      expect(second.host.render).toHaveBeenCalledTimes(1);
+      for (const harness of [first, second]) {
+        expect(harness.controller.getProject()?.graph.nodes[0].title).toBe("Peer typing");
+        expect(harness.controller.getProject()?.graph.nodes[0].config.preface).toBe("Generated text");
+      }
+    } finally {
+      release();
+      await first.controller.close();
+      await second.controller.close();
+      await session.close();
+    }
+  });
+
   it("commits note path renames through the session mutation seam", async () => {
     const node = noteNodeFixture("Notes/Old.md");
     const { controller, host, project } = createControllerHarness(projectFixture(node));
 
     await controller.handleVaultItemRenamed(
-      { path: "Notes/Renamed.md", basename: "Renamed" } as any,
+      Object.assign(new TFile(), { path: "Notes/Renamed.md", basename: "Renamed", extension: "md" }),
       "Notes/Old.md"
     );
 
     expect(readAllStudioNotePaths(node.config)).toEqual(["Notes/Renamed.md"]);
     expect(node.title).toBe("Renamed");
-    expect(host.refreshNoteNodePreviewsFromVault).toHaveBeenCalledWith(project, {
+    expect(host.vaultNotes.refresh).toHaveBeenCalledWith(project, {
       onlyNodeIds: new Set([node.id]),
     });
     expect(host.render).toHaveBeenCalledTimes(1);
@@ -210,9 +253,9 @@ describe("StudioProjectSessionController", () => {
     const node = noteNodeFixture("Notes/Deleted.md");
     const { controller, host, project } = createControllerHarness(projectFixture(node));
 
-    await controller.handleVaultItemDeleted({ path: "Notes/Deleted.md" } as any);
+    await controller.handleVaultItemDeleted(Object.assign(new TFile(), { path: "Notes/Deleted.md", extension: "md" }));
 
-    expect(host.refreshNoteNodePreviewsFromVault).toHaveBeenCalledWith(project, {
+    expect(host.vaultNotes.refresh).toHaveBeenCalledWith(project, {
       onlyNodeIds: new Set([node.id]),
     });
     expect(host.render).toHaveBeenCalledTimes(1);
@@ -409,7 +452,7 @@ describe("StudioProjectSessionController", () => {
     Object.assign(controller as any, { retainedProjectPath: "Studio/Test.systemsculpt" });
     session.getProject.mockReturnValue(fileProject);
     service.retainProjectSession.mockResolvedValue(session);
-    host.refreshNoteNodePreviewsFromVault.mockRejectedValue(new Error("preview unavailable"));
+    host.vaultNotes.refresh.mockRejectedValue(new Error("preview unavailable"));
 
     const loaded = await controller.loadProjectFromPath("Studio/Test.systemsculpt", {
       notifyOnError: false,

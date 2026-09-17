@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { App, MarkdownView, Notice, TFile } from "obsidian";
-import { ManagedTranscriptionInterruptedError } from "../../services/transcription/ManagedTranscriptionAdapter";
+import { ManagedTranscriptionInterruptedError, ManagedTranscriptionRetryError } from "../../services/transcription/ManagedTranscriptionAdapter";
 import { AudioTranscriptionPanel } from "../AudioTranscriptionPanel";
 
 jest.mock("obsidian", () => {
@@ -242,6 +242,31 @@ describe("AudioTranscriptionPanel", () => {
     }));
     second.resolve(completedResult);
     await flushPromises();
+  });
+
+  it.each(["resume", "restart", "blocked"] as const)("preserves %s recovery policy for interrupted and failed tasks", async (disposition) => {
+    for (const interrupted of [false, true]) {
+      const running = deferred<typeof completedResult>();
+      mockStart.mockReturnValue({ promise: running.promise, cancel: jest.fn() });
+      const { panel, plugin } = createPanel();
+      panel.open();
+      running.reject(interrupted
+        ? new ManagedTranscriptionInterruptedError("same-operation", disposition === "resume", "processing", disposition)
+        : new ManagedTranscriptionRetryError("same-operation", disposition, "processing", new Error("connection lost")));
+      await flushPromises();
+      const retry = document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.retry"]');
+      if (disposition === "blocked") {
+        expect(retry).toBeNull();
+        expect(document.body.textContent).toContain("prevent duplicate work");
+      } else {
+        expect(retry?.textContent).toBe(disposition === "resume" ? "Resume" : "Retry");
+        retry!.click();
+        const request = mockStart.mock.calls.at(-1)![0];
+        expect(request.resumeOperationId).toBe(disposition === "resume" ? "same-operation" : undefined);
+      }
+      AudioTranscriptionPanel.disposeOwnedBy(plugin);
+      document.body.innerHTML = "";
+    }
   });
 
   it("opens the coordinator-owned output without creating a second transcript", async () => {
