@@ -8,7 +8,7 @@ export function materializeStudioProject(project: StudioProjectV1, restoreDelete
   const scope = new StudioCollaborationScope();
   try {
     const basis = scope.own(loadInitializedStudioCollaboration(project.document, project.projectId));
-    const state = scope.own(changeStudioCollaboration(basis, studioCollaborationEntities(basis), projectToEntities(project), {restoreDeletedEntities}));
+    const state = scope.own(changeStudioCollaboration(basis, studioCollaborationEntities(basis), projectToEntities(project), {restoreDeletedEntities, reconnectProjections: true}));
     return {...project, document: serializeStudioCollaboration(state)};
   } finally { scope.close(); }
 }

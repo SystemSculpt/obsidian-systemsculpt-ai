@@ -535,7 +535,9 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
         if (!activeGestureShapeIds.has(incoming.id)) {
           Object.assign(shape, incoming, { position: { ...incoming.position }, size: { ...incoming.size } });
           applyShapeGeometry(shape);
-          const label = shapeElements.get(shape.id)?.root.querySelector<HTMLElement>(".ss-studio-shape-label");
+          const root = shapeElements.get(shape.id)?.root;
+          if (root && root.dataset.shape !== shape.shape) root.dataset.shape = shape.shape;
+          const label = root?.querySelector<HTMLElement>(".ss-studio-shape-label");
           if (label && !label.classList.contains("is-editing")) label.setText(shape.label);
         }
       }

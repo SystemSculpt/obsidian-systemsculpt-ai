@@ -35,13 +35,20 @@ export class StudioProjectDocument {
   }
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     let paths = tails.get(this.adapter); if (!paths) {paths = new Map(); tails.set(this.adapter, paths);}
-    const task = (paths.get(this.path) || Promise.resolve()).catch(() => undefined).then(async () => {
-      for (let attempt = 0; ; attempt++) {
-        try { return await operation(); } catch (error) { if (!(error instanceof StudioWriteRace) || attempt >= 7) throw error; }
-      }
-    });
-    paths.set(this.path, task);
-    return task.finally(() => {if (paths.get(this.path) === task) paths.delete(this.path);});
+    const queues = paths;
+    // An entry file and its linked projection publish the same physical document: queue on that path.
+    const run = async (): Promise<T> => {
+      let key = this.path;
+      try { key = (await resolveStudioEntry(this.adapter, this.path)).path; } catch { /* Missing files queue on their own path. */ }
+      const task = (queues.get(key) || Promise.resolve()).catch(() => undefined).then(async () => {
+        for (let attempt = 0; ; attempt++) {
+          try { return await operation(); } catch (error) { if (!(error instanceof StudioWriteRace) || attempt >= 7) throw error; }
+        }
+      });
+      queues.set(key, task);
+      return task.finally(() => {if (queues.get(key) === task) queues.delete(key);});
+    };
+    return run();
   }
   private project(value: Accepted): StudioProjectV1 {
     return entitiesToProject(studioCollaborationEntities(value.state), value.template, serializeStudioCollaboration(value.state));
@@ -87,6 +94,7 @@ export class StudioProjectDocument {
     });
   }
   async save(project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1; restoreDeletedEntities?: boolean}): Promise<StudioProjectReconciliation> {
+    // A save carries canvas intent; reconnecting previously removed ports is allowed here, not on import.
     return this.exclusive(async () => {
       const entry = await resolveStudioEntry(this.adapter, this.path);
       const current = await this.import(entry.raw);
@@ -95,7 +103,7 @@ export class StudioProjectDocument {
       const base = options?.baseProject || project;
       const basis = project.document ? scope.own(await loadStudioCollaboration(project.document, project.projectId)) : current.state;
       const before = project.document ? studioCollaborationEntities(basis) : options?.baseProject ? projectToEntities(base) : studioCollaborationEntities(basis);
-      const changed = scope.own(changeStudioCollaboration(basis, before, projectToEntities(project), options));
+      const changed = scope.own(changeStudioCollaboration(basis, before, projectToEntities(project), {restoreDeletedEntities: options?.restoreDeletedEntities, reconnectProjections: true}));
       const next = {state: scope.own(mergeStudioCollaboration(current.state, changed)), template: current.template};
       const saved = this.project(next);
       validateStudioProjectForAgentEdit(saved);

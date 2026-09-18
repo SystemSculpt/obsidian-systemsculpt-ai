@@ -53,11 +53,11 @@ export function changeStudioCollaboration(
   state: StudioCollaborativeState,
   before: StudioProjectEntities,
   after: StudioProjectEntities,
-  options?: {restoreDeletedEntities?: boolean},
+  options?: {restoreDeletedEntities?: boolean; reconnectProjections?: boolean},
 ): StudioCollaborativeState {
   // A repeated file event or retry represents the same intent, not another
   // insertion. Stable actor and time make importing that intent idempotent.
-  const editActor = actor([Automerge.getHeads(state).sort(), before, after, !!options?.restoreDeletedEntities]);
+  const editActor = actor([Automerge.getHeads(state).sort(), before, after, !!options?.restoreDeletedEntities, !!options?.reconnectProjections]);
   const copy = Automerge.clone(state, {actor: editActor});
   try { return Automerge.change(copy, {time: 0}, draft => {
     const patch = (target: Record<string, Value>, previous: Record<string, Value>, next: Record<string, Value>, path: string[]): void => {
@@ -74,9 +74,11 @@ export function changeStudioCollaboration(
     for (const id of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
       if (!own(after, id)) { draft.deleted[id] = true; continue; }
       if (!own(before, id)) {
-        // Edges and arrows are keyed by their endpoints: reconnecting the same ports is a new authored
-        // connection, so only identity-bearing entities keep their deletion until an explicit restore.
-        if (draft.deleted[id] && !options?.restoreDeletedEntities && !/^(edge|arrow):/.test(id)) throw new Error("Deleted nodes require an explicit Undo or restore.");
+        // Edges and arrows are keyed by their endpoints: a canvas reconnecting the same ports is a new
+        // authored connection. Imported file bytes never carry that intent, so a stale event cannot
+        // restore a deleted connection; identity-bearing entities always need an explicit restore.
+        const reconnect = options?.reconnectProjections === true && /^(edge|arrow):/.test(id);
+        if (draft.deleted[id] && !options?.restoreDeletedEntities && !reconnect) throw new Error("Deleted nodes require an explicit Undo or restore.");
         draft.entities[id] = clone(after[id]);
         if (own(draft.deleted, id)) draft.deleted[id] = false;
       } else if (draft.entities[id]) patch(draft.entities[id], before[id], after[id], ["entities", id]);
