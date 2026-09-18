@@ -171,6 +171,30 @@ describe("studio shape layer", () => {
     );
   });
 
+  it("keeps the same shape element and active drag across document refreshes", () => {
+    const { canvas, handle, onMoveSelection } = mount();
+    const first = shapeEl(canvas, "s1");
+    first.dispatchEvent(pointerEvent("pointerdown", 150, 150));
+    window.dispatchEvent(pointerEvent("pointermove", 190, 170));
+
+    const refreshed = diagramFixture();
+    refreshed.shapes[1].label = "Peer edit";
+    handle.update({
+      diagram: refreshed,
+      busy: false,
+      activeCanvasTool: "select",
+      selection: EMPTY_STUDIO_SHAPE_SELECTION,
+    });
+    expect(shapeEl(canvas, "s1")).toBe(first);
+
+    window.dispatchEvent(pointerEvent("pointermove", 250, 200));
+    window.dispatchEvent(pointerEvent("pointerup", 250, 200));
+    expect(onMoveSelection).toHaveBeenLastCalledWith(
+      { x: 100, y: 50 },
+      { first: false, final: true }
+    );
+  });
+
   it("drags every selected shape, not just the one under the pointer", () => {
     const { canvas } = mount({ selection: { shapeIds: ["s1", "s2"], arrowIds: [] } });
 
@@ -224,6 +248,26 @@ describe("studio shape layer", () => {
 
     expect(onConnectShapes).toHaveBeenCalledWith("s1", "s2");
     expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).toBeNull();
+  });
+
+  it("keeps an arrow gesture alive across selection and document refreshes", () => {
+    const { canvas, handle, onConnectShapes } = mount({ activeCanvasTool: "arrow" });
+    const target = shapeEl(canvas, "s2");
+    document.elementFromPoint = () => target;
+    shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 150, 150));
+    window.dispatchEvent(pointerEvent("pointermove", 300, 150));
+    const preview = canvas.querySelector(".ss-studio-shape-arrow-preview");
+
+    handle.update({
+      diagram: diagramFixture(),
+      busy: false,
+      activeCanvasTool: "arrow",
+      selection: { shapeIds: [], arrowIds: ["a1"] },
+    });
+    expect(canvas.querySelector(".ss-studio-shape-arrow-preview")).toBe(preview);
+
+    window.dispatchEvent(pointerEvent("pointerup", 450, 150));
+    expect(onConnectShapes).toHaveBeenCalledWith("s1", "s2");
   });
 
   it("connects node cards visually and tracks their live bounds", () => {

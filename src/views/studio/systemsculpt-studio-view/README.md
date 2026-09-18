@@ -15,7 +15,7 @@ into focused submodules.
   - Text payload reference extraction helpers used by paste and drag-drop ingestion.
 
 - `../StudioGraphHistory.ts`
-  - Owns bounded undo/redo, recovery snapshots, and transient empty-node cancellation.
+  - Owns bounded undo/redo and transient empty-node cancellation.
   - Records each view's local edit transactions and rebases their undo/redo onto
     the current shared project; mutable stacks are private.
 

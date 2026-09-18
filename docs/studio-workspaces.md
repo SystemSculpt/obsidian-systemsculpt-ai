@@ -109,7 +109,7 @@ Command Center exposes Model and Reasoning selectors above its actions. The nati
 
 Run details open in a spacious, window-sized modal. Finished runs open on Response, showing the complete retained public response with rendered Markdown tables, links, lists and code blocks. Show source switches to the original text. Conversation and Messages also render Markdown; Activity renders public messages while preserving literal command output. The content scrolls independently above the message composer.
 
-Native agent run records are written independently from project generations. Project saves, external refreshes and reload reconciliation preserve the `agent-runs` directory, including newer records than an older project snapshot. Codex retains the authoritative thread separately.
+Native agent run records are written independently from the project document. Project saves, external refreshes and reload reconciliation preserve the `agent-runs` directory, including newer records than an older project revision. Codex retains the authoritative thread separately.
 
 ### Prompt-driven workflows
 

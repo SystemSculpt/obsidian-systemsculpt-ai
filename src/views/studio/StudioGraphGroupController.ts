@@ -756,7 +756,9 @@ export class StudioGraphGroupController {
       .map((nodeId) => nodeMap.get(nodeId))
       .filter((node): node is StudioProjectV1["graph"]["nodes"][number] => Boolean(node));
     const dragShapeIds = group.shapeIds || [];
-    const outputOffsetOrigin = group.outputOffset || { x: 96, y: 0 };
+    // Session reconciliation patches nested objects in place. A gesture origin
+    // must be a value snapshot, never a reference to the live offset.
+    const outputOffsetOrigin = { ...(group.outputOffset || { x: 96, y: 0 }) };
     if (dragNodes.length === 0 && dragShapeIds.length === 0) {
       return;
     }

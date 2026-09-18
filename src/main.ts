@@ -18,8 +18,6 @@ ErrorCollectorService.initializeEarlyLogsCapture();
  * SystemSculpt AI Plugin for Obsidian
  */
 import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
-export { StudioProjectGenerationStore } from "./studio/persistence/StudioProjectGenerationStore";
-export { ObsidianStudioGenerationAdapter } from "./studio/persistence/ObsidianStudioGenerationAdapter";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";

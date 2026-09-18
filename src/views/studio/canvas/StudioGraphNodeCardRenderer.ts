@@ -28,7 +28,13 @@ import { applyStudioNodeActivity } from '../activity/StudioActivityDomApplier';
  * media is the card, text is chromeless, code shows its source, forms show
  * their fields with the result beneath, panels own their body. No tabs.
  */
-export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): void {
+export type StudioGraphNodeCardHandle = {
+  element: HTMLElement;
+  updateGeometry: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
+  dispose: () => void;
+};
+
+export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOptions): StudioGraphNodeCardHandle {
   const { node, graphInteraction, nodeRunState } = options;
   const definition = options.findNodeDefinition(node);
   const placeholder = isManagedOutputPlaceholderNode(node);
@@ -56,7 +62,29 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   const mediaPlan = options.resolveMediaNodeInputPlan?.(node) ?? null;
   const portGating = { hiddenInputPortIds: new Set(mediaPlan?.hiddenInputPortIds ?? []), inputPortNotes: mediaPlan?.inputPortNotes ?? {},
     connectedInputPortIds: new Set((options.inboundEdges ?? []).map(edge => edge.toPortId)) };
-  const finish = (): void => { applyStudioNodeActivity(nodeEl, activity); options.registerNodeTeardown?.(node.id, () => teardowns.forEach(teardown => teardown())); };
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    for (const teardown of teardowns) {
+      try { teardown(); } catch { /* One detached surface must not block the remaining card cleanup. */ }
+    }
+  };
+  const handle: StudioGraphNodeCardHandle = {
+    element: nodeEl,
+    updateGeometry: (nextNode) => {
+      nodeEl.style.transform = `translate(${nextNode.position.x}px, ${nextNode.position.y}px)`;
+      nodeEl.style.width = `${resolveStudioGraphNodeWidth(nextNode)}px`;
+      const nextMinimum = resolveStudioGraphNodeMinHeight(nextNode);
+      nodeEl.style.minHeight = nextMinimum > 0 ? `${nextMinimum}px` : "";
+    },
+    dispose,
+  };
+  const finish = (): StudioGraphNodeCardHandle => {
+    applyStudioNodeActivity(nodeEl, activity);
+    options.registerNodeTeardown?.(node.id, dispose);
+    return handle;
+  };
   const mountResizeFrame = (aspectContentEl?: HTMLElement | null): void => { mountStudioGraphNodeResizeFrame({ node, nodeEl,
     title: node.kind === 'studio.terminal' ? 'Resize terminal node' : 'Resize node', ariaLabel: node.kind === 'studio.terminal' ? 'Resize terminal node' : 'Resize node',
     interactionLocked: locked, getGraphZoom: () => graphInteraction.getGraphZoom(),
@@ -70,15 +98,30 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
 
   // ── Text: chromeless Markdown that edits in place ──
   if (surface.kind === 'text') {
+    const registerEditorTeardown = options.registerTextNodeEditorTeardown
+      ? (nodeId: string, teardown: Parameters<NonNullable<typeof options.registerTextNodeEditorTeardown>>[1]): void => {
+          let snapshot: ReturnType<typeof teardown> | undefined;
+          let tornDown = false;
+          const guarded = (): ReturnType<typeof teardown> => {
+            if (!tornDown) {
+              snapshot = teardown();
+              tornDown = true;
+            }
+            return snapshot!;
+          };
+          teardowns.push(() => { guarded(); });
+          options.registerTextNodeEditorTeardown?.(nodeId, guarded);
+        }
+      : undefined;
     renderTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
       onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
       onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
       ...options.takeTextNodeEditorMountState(node.id),
       onRequestTextNodeEdit: options.onRequestTextNodeEdit, onStopTextNodeEdit: options.onStopTextNodeEdit,
       renderMarkdownPreview: options.renderMarkdownPreview, createMarkdownEditor: options.createTextNodeMarkdownEditor,
-      registerEditorTeardown: options.registerTextNodeEditorTeardown });
+      registerEditorTeardown });
     renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
-    finish(); return;
+    return finish();
   }
 
   // ── Media: the image or video is the card; actions ride below it ──
@@ -101,7 +144,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     // The activity chip lives inside the media content for this layout.
     const chip = content.querySelector<HTMLElement>(':scope > .ss-studio-node-activity');
     if (chip) nodeEl.appendChild(chip);
-    finish(); return;
+    return finish();
   }
 
   // ── Code, form, and panel cards share the compact header chrome ──
@@ -125,11 +168,11 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     pending.createDiv({ cls: 'ss-studio-node-pending-title', text: node.kind === 'studio.media_ingest' ? (readManagedPendingMediaKind(node) === 'video' ? 'Generating video…' : 'Generating image…') : 'Generating text…' });
     if (node.kind === 'studio.media_ingest') pending.createDiv({ cls: 'ss-studio-node-pending-frame' });
     else { pending.createDiv({ cls: 'ss-studio-node-pending-line' }); pending.createDiv({ cls: 'ss-studio-node-pending-line' }); pending.createDiv({ cls: 'ss-studio-node-pending-line is-short' }); }
-    mountResizeFrame(); finish(); return;
+    mountResizeFrame(); return finish();
   }
   if (!definition) {
     nodeEl.createEl('p', { cls: 'ss-studio-inline-error', text: `Missing definition for ${node.kind}@${node.version}.` });
-    mountResizeFrame(); finish(); return;
+    mountResizeFrame(); return finish();
   }
 
   const change = (key: string, value: Parameters<typeof commitInlineConfigValueChange>[0]['value']) => commitInlineConfigValueChange({ node, key, value, onNodeConfigValueChange: options.onNodeConfigValueChange, onNodeConfigMutated: options.onNodeConfigMutated });
@@ -166,5 +209,5 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     }
   }
   mountResizeFrame();
-  finish();
+  return finish();
 }

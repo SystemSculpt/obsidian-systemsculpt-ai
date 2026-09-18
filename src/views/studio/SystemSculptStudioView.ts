@@ -56,7 +56,11 @@ import type {
   StudioProjectSessionMutationReason,
 } from "../../studio/StudioProjectSession";
 import { StudioMediaModelPickerController } from "./systemsculpt-studio-view/StudioMediaModelPickerController";
-import { renderStudioGraphWorkspace } from "./canvas/StudioGraphWorkspaceRenderer";
+import {
+  renderStudioGraphWorkspace,
+  type StudioGraphWorkspaceRendererOptions,
+  type StudioGraphWorkspaceRenderResult,
+} from "./canvas/StudioGraphWorkspaceRenderer";
 import type { StudioNodeConfigPathBrowseOptions } from "./StudioPathFieldPicker";
 import { createEmbeddableMarkdownEditor } from "../../editor/embeddable-markdown-editor";
 import type {
@@ -169,6 +173,21 @@ import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { applyPluginSurface } from "../../core/ui/surface";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
+function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null): void {
+  const update = (className: string, text: string | null): void => {
+    const existing = root.querySelector<HTMLElement>(`:scope > .${className}`);
+    if (!text) {
+      existing?.remove();
+      return;
+    }
+    const element = existing ?? root.createDiv({ cls: className });
+    element.setText(text);
+    if (!existing) root.prepend(element);
+  };
+  update("ss-studio-warning", warning);
+  update("ss-studio-error", error);
+}
+
 type SystemSculptStudioViewState = StudioProjectScopedViewState;
 
 type StudioRunGraphOptions = {
@@ -209,7 +228,7 @@ export class SystemSculptStudioView extends ItemView {
     positionsChanged: () => this.graphInteraction.notifyNodePositionsChanged(),
   });
   private readonly textEdits = new StudioTextEditSessions();
-  private nodeTeardowns = new Map<string, () => void>();
+  private graphWorkspace: StudioGraphWorkspaceRenderResult | null = null;
   /** Armed diagram tool from the tools row; "select" is the normal pointer. */
   private activeCanvasTool: StudioCanvasTool = "select";
   private graphCanvasEl: HTMLElement | null = null;
@@ -2540,10 +2559,8 @@ export class SystemSculptStudioView extends ItemView {
 
   /** Dispose mounted surfaces before graph DOM replacement; active edits retain native focus/selection. */
   private disposeTextNodeEditors(): void {
-    for (const teardown of this.nodeTeardowns.values()) {
-      try { teardown(); } catch { /* A detached card must not prevent other mounted surfaces from closing. */ }
-    }
-    this.nodeTeardowns.clear();
+    this.graphWorkspace?.dispose();
+    this.graphWorkspace = null;
     this.textEdits.disposeMountedEditors();
   }
 
@@ -3049,8 +3066,8 @@ export class SystemSculptStudioView extends ItemView {
 
     new Notice(`Unable to open in the system file manager: ${rawPath}`);
   }
-  private renderGraphEditor(root: HTMLElement): void {
-    const nodeDetailMode = this.readCurrentNodeDetailMode(); const result = renderStudioGraphWorkspace({
+  private createGraphWorkspaceOptions(root: HTMLElement): StudioGraphWorkspaceRendererOptions {
+    const nodeDetailMode = this.readCurrentNodeDetailMode(); return {
       root,
       busy: this.busy,
       currentProject: this.currentProject,
@@ -3156,16 +3173,19 @@ export class SystemSculptStudioView extends ItemView {
       createTextNodeMarkdownEditor: this.createTextNodeMarkdownEditor,
       registerTextNodeEditorTeardown: (nodeId, teardown) =>
         this.textEdits.registerEditor(nodeId, teardown),
-      registerNodeTeardown: (nodeId, teardown) => {
-        this.nodeTeardowns.get(nodeId)?.();
-        this.nodeTeardowns.set(nodeId, teardown);
-      },
       onRevealPathInFinder: (path) => {
         void this.revealPathInFinder(path);
       },
       pathBrowseOptions: this.pathBrowseOptions(),
       resolveNodeBadge: (node) => this.resolveNodeCardBadge(node),
-    });
+      shouldPreserveNodeElement: (nodeId) =>
+        this.nodeDragInProgress && this.graphInteraction.isNodeSelected(nodeId),
+    };
+  }
+
+  private renderGraphEditor(root: HTMLElement): void {
+    const result = renderStudioGraphWorkspace(this.createGraphWorkspaceOptions(root));
+    this.graphWorkspace = result;
 
     this.graphViewportEl = result.viewportEl;
     this.graphCanvasEl = result.canvasEl;
@@ -3237,6 +3257,13 @@ export class SystemSculptStudioView extends ItemView {
 
   private render(): void {
     if (this.closed) return;
+    const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
+    if (mountedRoot && this.graphWorkspace?.refresh(this.createGraphWorkspaceOptions(mountedRoot))) {
+      refreshStudioMessages(mountedRoot, this.lastError, this.projectFileWarning);
+      this.activity.project();
+      this.activity.apply();
+      return;
+    }
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
     this.captureGraphViewportState();
@@ -3255,22 +3282,11 @@ export class SystemSculptStudioView extends ItemView {
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });
     applyPluginSurface(root, "view");
-
-    if (this.lastError) {
-      root.createDiv({
-        text: this.lastError,
-        cls: "ss-studio-error",
-      });
-    }
-    if (this.projectFileWarning) {
-      root.createDiv({
-        text: this.projectFileWarning,
-        cls: "ss-studio-warning",
-      });
-    }
+    refreshStudioMessages(root, this.lastError, this.projectFileWarning);
 
     this.activity.project();
     this.renderGraphEditor(root);
     this.activity.apply();
   }
+
 }

@@ -1,6 +1,7 @@
 {
   "author": "SystemSculpt",
   "dependencies": {
+    "@automerge/automerge": "^3.4.1",
     "@codemirror/commands": "6.11.0",
     "@codemirror/lang-javascript": "6.2.5",
     "@codemirror/lang-json": "6.0.2",
@@ -114,5 +115,5 @@
     "release:plugin": "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag"
   },
   "type": "module",
-  "version": "6.9.0"
+  "version": "6.10.0"
 }

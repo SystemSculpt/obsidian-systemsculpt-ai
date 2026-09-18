@@ -26,8 +26,9 @@ Platform checks through node renderers or runtime implementations.
 ## Deep modules
 
 - types.ts and schema.ts own project contracts and strict parsing.
-- paths.ts, StudioProjectStore.ts, and persistence/ own file-native storage,
-  migrations, generation history, and recovery.
+- paths.ts, StudioProjectStore.ts, and document/ own the single collaborative
+  project file, migrations, scoped edits, and atomic publication; persistence/
+  reconciles independent support files.
 - StudioAssetStore.ts owns content-addressed project assets.
 - StudioPermissionManager.ts and StudioHostCapabilities.ts own execution gates.
 - StudioGraphCompiler.ts owns typed DAG validation, scoped run plans, and
@@ -99,12 +100,11 @@ Names remain human-readable and collisions receive numeric suffixes.
 The canvas is a living document. Each session keeps the last accepted document
 and rebases its edits onto the current file before saving. Independent node and
 field edits merge, including changes arriving while a save or asynchronous
-producer is running. If two writers change the same field, the external value
-remains visible and the local version is preserved in Undo and an immutable
-recovery snapshot. Removing generated outputs also removes their pins and parent
+producer is running. Concurrent text edits merge within the same value, and
+deleted cards stay deleted until an explicit Undo or restore. Removing generated outputs also removes their pins and parent
 references; concurrent deletion removes references added by another writer.
-Every internal publication validates the project before writing its visible file
-or commit marker. Invalid documents still remain untouched until corrected.
+Every publication validates the project before atomically replacing its single
+visible file. Invalid documents remain untouched until corrected.
 
 Assets and run files arrive independently of the canvas. A canvas save never
 requires the support tree to match an older snapshot and never prunes files

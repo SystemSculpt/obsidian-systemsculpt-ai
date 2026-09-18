@@ -1,3 +1,4 @@
+import type { StudioDocumentEdit } from "../../studio/document/StudioProjectDocument";
 import { createStudioWorkflow, workflowOpen, readWorkflowSteps, studioWorkflowInstructions, studioWorkflowTools, type StudioWorkflow } from './StudioWorkflow';
 import type SystemSculptPlugin from '../../main';
 import { desktopHost } from '../../platform/desktopOnly';
@@ -13,6 +14,8 @@ export type StudioAgentSpecification = { workflow?: StudioWorkflow; assignmentId
 type NativeReview = { label: string; open: () => Promise<void> };
 type Control = { holdsSlot?: boolean; controller: AbortController; send?: (text: string) => Promise<void>; reviews: NativeReview[]; completion: Promise<CodexResult>; resolve: (result: CodexResult) => void; reject: (error: Error) => void };
 type Callbacks = {
+  readDocument?: (path: string) => Promise<unknown>;
+  editDocument?: (path: string, heads: string[], edits: StudioDocumentEdit[]) => Promise<unknown>;
   startPeer: (projectPath: string, nodeId: string, objective: string, parentRunId: string, assignmentId?: string) => Promise<StudioAgentRunView>;
   workflowSpecification?: (projectPath: string, centerId: string, objective: string) => Promise<StudioAgentSpecification>;
   context?: (projectPath: string, nodeId?: string) => Promise<unknown>;
@@ -21,6 +24,8 @@ type Callbacks = {
 };
 const MAX_ACTIVE = 8, MAX_PENDING = 100;
 const tools: CodexJson[] = [
+  {type: 'function', name: 'studio_read_document', description: 'Read this canvas and its revision for scoped concurrent edits. Use this and studio_edit_document instead of replacing the file.', inputSchema: {type: 'object', properties: {}, additionalProperties: false}},
+  {type: 'function', name: 'studio_edit_document', description: 'Apply a batch to this canvas using heads from studio_read_document. Edits use kind set/create/delete/restore, entityId, optional path string array, value, remove. Text merges collaboratively; deletion prevents stale resurrection.', inputSchema: {type: 'object', properties: {heads: {type: 'array', items: {type: 'string'}}, edits: {type: 'array', items: {type: 'object', properties: {kind: {type: 'string', enum: ['set','create','delete','restore']}, entityId: {type: 'string'}, path: {type: 'array', items: {type: 'string'}}, value: {}, remove: {type: 'boolean'}}, required: ['kind','entityId'], additionalProperties: false}}}, required: ['heads','edits'], additionalProperties: false}},
   { type: 'function', name: 'studio_stop_run', description: 'Stop one of your own child assignments when it is no longer needed. This preserves its history.', inputSchema: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'], additionalProperties: false } },
   { type: 'function', name: 'studio_runs', description: 'List the available role definitions and recent run instances in this Studio project, including IDs, status and latest public activity. Use before choosing a peer.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { type: 'function', name: 'studio_send_message', description: 'Send a concrete handoff or finding to a run in this Studio project. An active run receives it through native turn steering; an idle run resumes its native thread. A delivery receipt means accepted by Codex, not completed work.', inputSchema: { type: 'object', properties: { runId: { type: 'string' }, message: { type: 'string' } }, required: ['runId','message'], additionalProperties: false } },
@@ -302,7 +307,9 @@ export class StudioAgentRuns {
       if (params.threadId !== record.threadId || !isRecord(params.arguments)) throw new Error('Invalid run tool request.');
       const args = params.arguments;
       let result: unknown;
-      if (String(params.tool).startsWith('studio_workflow_') || params.tool === 'studio_context') result = await this.workflowTool(record, String(params.tool), args, signal);
+      if (params.tool === 'studio_read_document' && this.callbacks.readDocument) result = await this.callbacks.readDocument(record.projectPath);
+      else if (params.tool === 'studio_edit_document' && this.callbacks.editDocument) result = await this.callbacks.editDocument(record.projectPath, args.heads as string[], args.edits as StudioDocumentEdit[]);
+      else if (String(params.tool).startsWith('studio_workflow_') || params.tool === 'studio_context') result = await this.workflowTool(record, String(params.tool), args, signal);
       else if (params.tool === 'studio_runs') result = { self: record.id, roles: await this.callbacks.templates(record.projectPath), runs: this.list(record.projectId).slice(0, 50).map(run => ({ id: run.id, role: run.title, nodeId: run.nodeId, status: run.status, activity: run.currentActivity, parentRunId: run.parentRunId, controllable: this.canControl(run.id) })) };
       else if (params.tool === 'studio_send_message') result = await this.send(String(args.runId || ''), String(args.message || ''), record.id, String(params.callId || randomId('call')));
       else if (params.tool === 'studio_stop_run') { const child = this.get(String(args.runId || '')); if (!child || child.parentRunId !== record.id) throw new Error('Only your own child can be stopped.'); this.stop(child.id); result = { id: child.id, status: 'stop requested' }; }

@@ -68,6 +68,7 @@ export type StudioShapeLayerHandle = {
   applyShapePositions: (
     positions: ReadonlyArray<{ shapeId: string; position: { x: number; y: number } }>
   ) => void;
+  update: (options: Pick<StudioShapeLayerOptions, "diagram" | "busy" | "activeCanvasTool" | "selection">) => void;
 };
 
 type ArrowElements = {
@@ -96,10 +97,13 @@ function isAdditive(event: PointerEvent): boolean {
 }
 
 export function renderStudioShapeLayer(options: StudioShapeLayerOptions): StudioShapeLayerHandle {
-  const { canvasEl, diagram, busy, activeCanvasTool, selection, getGraphZoom } = options;
+  const { canvasEl, getGraphZoom } = options;
   const ownerWindow = getStudioOwnerWindow(canvasEl);
-  const selectedShapeIds = new Set(selection.shapeIds);
-  const selectedArrowIds = new Set(selection.arrowIds);
+  let currentDiagram = options.diagram;
+  let currentBusy = options.busy;
+  let currentActiveCanvasTool = options.activeCanvasTool;
+  let selectedShapeIds = new Set(options.selection.shapeIds);
+  let selectedArrowIds = new Set(options.selection.arrowIds);
 
   const layerEl = canvasEl.createDiv({ cls: "ss-studio-shapes-layer" });
   const arrowsLayer = createStudioSvgElement(layerEl, "svg");
@@ -108,14 +112,15 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
 
   // Working copy: gestures mutate this, never the project, until they commit.
   const shapesById = new Map<string, StudioShapeInstance>(
-    diagram.shapes.map((shape) => [
+    currentDiagram.shapes.map((shape) => [
       shape.id,
       { ...shape, position: { ...shape.position }, size: { ...shape.size } },
     ])
   );
   const shapeElements = new Map<string, ShapeElements>();
   const arrowElements = new Map<string, ArrowElements>();
-  const arrowFans = resolveArrowFans(diagram);
+  let arrowFans = resolveArrowFans(currentDiagram);
+  const activeGestureShapeIds = new Set<string>();
   let previewPath: SVGPathElement | null = null;
   let cancelArrowGesture = (): void => {};
 
@@ -153,7 +158,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!anchors.has(id)) anchors.set(id, resolveAnchor(id));
       return anchors.get(id) ?? null;
     };
-    for (const arrow of diagram.arrows) {
+    for (const arrow of currentDiagram.arrows) {
       const from = anchor(arrow.fromShapeId);
       const to = anchor(arrow.toShapeId);
       if (!from || !to) {
@@ -167,28 +172,28 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
         arrowElements.set(arrow.id, created);
         arrowsLayer.appendChild(created.group);
         created.hit.addEventListener("pointerdown", (event) => {
-          if (busy) {
+          if (currentBusy) {
             return;
           }
           event.stopPropagation();
           options.onSelect({ type: "arrow", id: arrow.id }, { additive: isAdditive(event) });
         });
         created.label.addEventListener("pointerdown", (event) => {
-          if (busy) {
+          if (currentBusy) {
             return;
           }
           event.stopPropagation();
           options.onSelect({ type: "arrow", id: arrow.id }, { additive: isAdditive(event) });
         });
         const editLabel = (event: Event): void => {
-          if (busy) {
+          if (currentBusy) {
             return;
           }
           event.stopPropagation();
           event.preventDefault();
           editStudioDiagramLabel({
             labelEl: created.label,
-            initial: arrow.label || "",
+            initial: currentDiagram.arrows.find(candidate => candidate.id === arrow.id)?.label || "",
             testid: "studio.arrow.label-editor",
             commit: (label) => options.onArrowLabelChange(arrow.id, label),
           });
@@ -242,6 +247,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     // Dragging a member of the selection drags the whole selection; dragging
     // anything else is that shape alone.
     const dragShapeIds = selectedShapeIds.has(shape.id) ? [...selectedShapeIds] : [shape.id];
+    dragShapeIds.forEach(shapeId => activeGestureShapeIds.add(shapeId));
     const startPositions = new Map<string, { x: number; y: number }>();
     for (const shapeId of dragShapeIds) {
       const dragged = shapesById.get(shapeId);
@@ -256,6 +262,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       ownerWindow.removeEventListener("pointermove", onMove);
       ownerWindow.removeEventListener("pointerup", onUp);
       ownerWindow.removeEventListener("pointercancel", onCancel);
+      dragShapeIds.forEach(shapeId => activeGestureShapeIds.delete(shapeId));
       if (!activated) {
         return;
       }
@@ -307,6 +314,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     corner: ResizeCorner,
     startEvent: PointerEvent
   ): void => {
+    activeGestureShapeIds.add(shape.id);
     const origin = graphPointFromClient(startEvent.clientX, startEvent.clientY);
     const startRect: StudioShapeRect = {
       x: shape.position.x,
@@ -318,6 +326,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     const finish = (): void => {
       ownerWindow.removeEventListener("pointermove", onMove);
       ownerWindow.removeEventListener("pointerup", onUp);
+      activeGestureShapeIds.delete(shape.id);
       options.onResizeShape(shape.id, {
         x: shape.position.x,
         y: shape.position.y,
@@ -362,7 +371,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   const startArrowGesture = (itemId: string, startEvent: PointerEvent): void => {
     cancelArrowGesture();
     const initialSource = resolveAnchor(itemId);
-    if (busy || !initialSource) return;
+    if (currentBusy || !initialSource) return;
     const source: StudioArrowAnchor = initialSource;
     previewPath = createStudioSvgElement(arrowsLayer, "path");
     previewPath.setAttribute("class", "ss-studio-shape-arrow-preview");
@@ -420,7 +429,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     onMove(startEvent);
   };
 
-  for (const shape of shapesById.values()) {
+  const mountShape = (shape: StudioShapeInstance): void => {
     const shapeEl = layerEl.createDiv({ cls: "ss-studio-shape" });
     shapeEl.dataset.shapeId = shape.id;
     shapeEl.dataset.shape = shape.shape;
@@ -431,16 +440,16 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     const labelEl = shapeEl.createDiv({ cls: "ss-studio-shape-label", text: shape.label });
 
     shapeEl.addEventListener("pointerdown", (event) => {
-      if (busy || event.button !== 0) {
+      if (currentBusy || event.button !== 0) {
         return;
       }
       event.stopPropagation();
-      if (activeCanvasTool === "arrow") {
+      if (currentActiveCanvasTool === "arrow") {
         event.preventDefault();
         startArrowGesture(shape.id, event);
         return;
       }
-      if (activeCanvasTool !== "select") {
+      if (currentActiveCanvasTool !== "select") {
         return;
       }
       options.onSelect({ type: "shape", id: shape.id }, { additive: isAdditive(event) });
@@ -448,7 +457,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     });
 
     shapeEl.addEventListener("dblclick", (event) => {
-      if (busy) {
+      if (currentBusy) {
         return;
       }
       event.stopPropagation();
@@ -465,7 +474,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     // does not stretch.
     const singleSelected =
       selectedShapeIds.size === 1 && selectedArrowIds.size === 0 && selectedShapeIds.has(shape.id);
-    if (singleSelected && !busy && activeCanvasTool === "select") {
+    if (singleSelected && !currentBusy && currentActiveCanvasTool === "select") {
       for (const corner of RESIZE_CORNERS) {
         const handle = shapeEl.createDiv({ cls: "ss-studio-shape-handle" });
         handle.dataset.corner = corner;
@@ -479,7 +488,9 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
         });
       }
     }
-  }
+  };
+
+  for (const shape of shapesById.values()) mountShape(shape);
 
   renderArrows();
   return {
@@ -495,6 +506,61 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
         }
         shape.position = { x: Math.round(position.x), y: Math.round(position.y) };
         applyShapeGeometry(shape);
+      }
+      renderArrows();
+    },
+    update: (next) => {
+      currentDiagram = next.diagram;
+      currentBusy = next.busy;
+      currentActiveCanvasTool = next.activeCanvasTool;
+      selectedShapeIds = new Set(next.selection.shapeIds);
+      selectedArrowIds = new Set(next.selection.arrowIds);
+      arrowFans = resolveArrowFans(currentDiagram);
+
+      const incomingIds = new Set(currentDiagram.shapes.map(shape => shape.id));
+      for (const [shapeId, elements] of shapeElements) {
+        if (incomingIds.has(shapeId) || activeGestureShapeIds.has(shapeId)) continue;
+        elements.root.remove();
+        shapeElements.delete(shapeId);
+        shapesById.delete(shapeId);
+      }
+      for (const incoming of currentDiagram.shapes) {
+        const shape = shapesById.get(incoming.id);
+        if (!shape) {
+          const created = { ...incoming, position: { ...incoming.position }, size: { ...incoming.size } };
+          shapesById.set(created.id, created);
+          mountShape(created);
+          continue;
+        }
+        if (!activeGestureShapeIds.has(incoming.id)) {
+          Object.assign(shape, incoming, { position: { ...incoming.position }, size: { ...incoming.size } });
+          applyShapeGeometry(shape);
+          const label = shapeElements.get(shape.id)?.root.querySelector<HTMLElement>(".ss-studio-shape-label");
+          if (label && !label.classList.contains("is-editing")) label.setText(shape.label);
+        }
+      }
+      for (const [shapeId, elements] of shapeElements) {
+        elements.root.classList.toggle("is-selected", selectedShapeIds.has(shapeId));
+        elements.root.querySelectorAll(".ss-studio-shape-handle").forEach(handle => handle.remove());
+      }
+      // Selection handles are presentation only. Reusing the existing shape
+      // elements keeps pointer listeners and active gestures intact.
+      if (!currentBusy && currentActiveCanvasTool === "select" && selectedShapeIds.size === 1 && selectedArrowIds.size === 0) {
+        const shapeId = [...selectedShapeIds][0];
+        const shape = shapesById.get(shapeId);
+        const root = shapeElements.get(shapeId)?.root;
+        if (shape && root && !activeGestureShapeIds.has(shapeId)) {
+          for (const corner of RESIZE_CORNERS) {
+            const resize = root.createDiv({ cls: "ss-studio-shape-handle" });
+            resize.dataset.corner = corner;
+            resize.addEventListener("pointerdown", event => {
+              if (event.button !== 0) return;
+              event.stopPropagation();
+              event.preventDefault();
+              startResizeGesture(shape, corner, event);
+            });
+          }
+        }
       }
       renderArrows();
     },

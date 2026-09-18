@@ -120,6 +120,10 @@ _Avoid_: Ordinary native run, automatic continuation
 A generated Studio result placed on the canvas with its producing node and run identity.
 _Avoid_: Source node, input attachment
 
-**Recovery snapshot**:
-A preserved project version that keeps otherwise conflicting or interrupted edits recoverable.
-_Avoid_: Latest project, execution authority
+**Collaborative document**:
+One authored Studio file containing readable canvas JSON and embedded merge state. Stable entity IDs and causal revisions let the shared edit service merge independent changes.
+_Avoid_: Sidecar transaction folder, conflict copy
+
+**Document revision**:
+The set of accepted change heads used as the basis for a scoped edit. Text edits merge within one value; deletion requires explicit restoration.
+_Avoid_: File modification time

@@ -1,3 +1,5 @@
+import { StudioEditorRevision } from "../document/StudioEditorRevision";
+import { StudioProjectSession } from "../StudioProjectSession";
 import { serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
@@ -126,6 +128,7 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
   };
 
   return {
+    adapter,
     dirs,
     files,
     store: new StudioProjectStore(app as any),
@@ -158,7 +161,7 @@ describe("StudioProjectStore", () => {
     expect(files.has("SystemSculpt/Studio/New Studio Project (3).systemsculpt")).toBe(true);
     expect(
       files.has("SystemSculpt/Studio/New Studio Project (3).systemsculpt-assets/project.manifest.json")
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("normalizes manual project paths and applies collision suffixes", async () => {
@@ -191,7 +194,7 @@ describe("StudioProjectStore", () => {
     expect(created.path).toBe("Custom/Flow (2).systemsculpt");
   });
 
-  it("serializes concurrent support publications by reloading ExpectedGeneration", async () => {
+  it("serializes concurrent support publications for one project", async () => {
     const { store } = createStore();
     const created = await store.createProject({ name: "Concurrent", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
     await Promise.all([0, 1, 2].map((index) => store.putAsset(created.path, created.project.projectId, {
@@ -204,7 +207,7 @@ describe("StudioProjectStore", () => {
     }
   });
 
-  it("force reload invalidates the selected generation and ingests a one-file external edit", async () => {
+  it("refreshes document authority on every load and ingests a causal file edit", async () => {
     const { store, files, reopen } = createStore();
     const created = await store.createProject({ name: "Direct edit", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
     expect((await store.loadProject(created.path)).name).toBe("Direct edit");
@@ -213,7 +216,7 @@ describe("StudioProjectStore", () => {
     externallyEdited.name = "Edited outside Studio";
     files.set(created.path, `${JSON.stringify(externallyEdited, null, 2)}\n`);
 
-    expect((await store.loadProject(created.path)).name).toBe("Direct edit");
+    expect((await store.loadProject(created.path)).name).toBe("Edited outside Studio");
     expect((await store.loadProject(created.path, { forceReload: true })).name).toBe("Edited outside Studio");
     // A new consumer must see the accepted edit without the previous store's cache.
     expect((await reopen().loadProject(created.path)).name).toBe("Edited outside Studio");
@@ -230,26 +233,17 @@ describe("StudioProjectStore", () => {
     });
     files.set(created.path, "{");
 
-    let message = "";
-    try {
-      await store.loadProject(created.path, { forceReload: true });
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
+    const result = await store.importProjectText(created.path, "{");
+    const message = result.conflicts.join("\n");
 
-    expect(message).toContain("Studio couldn't read this project file");
+    expect(message).toMatch(/waiting for a complete valid file edit/i);
     expect(message).not.toMatch(
       /external|sync|projection|authority|generation|candidate|marker|revision|hash/i
     );
     expect(files.get(created.path)).toBe("{");
-    expect(warn).toHaveBeenCalledWith(
-      "[SystemSculpt Studio] Project persistence operation failed",
-      {
-        action: "open",
-        status: "invalid_candidate",
-        detail: expect.stringMatching(/^SyntaxError:/),
-      },
-    );
+    expect(result.project.name).toBe("Invalid file");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("publishes a renamed projection and retires the old visible paths safely", async () => {
@@ -278,10 +272,10 @@ describe("StudioProjectStore", () => {
     expect(files.has("SystemSculpt/Studio/Original.systemsculpt")).toBe(false);
     expect(files.has("SystemSculpt/Studio/Renamed.systemsculpt")).toBe(true);
     expect(files.has(`${oldAssetsDir}/project.manifest.json`)).toBe(false);
-    expect(files.has(`${newAssetsDir}/project.manifest.json`)).toBe(true);
+    expect(files.has(`${newAssetsDir}/project.manifest.json`)).toBe(false);
     expect(files.has(`${oldAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(false);
     expect(files.has(`${newAssetsDir}/assets/sha256/aa/${"a".repeat(64)}.txt`)).toBe(true);
-    expect([...files.keys()].some((path) => path.includes("/retired/"))).toBe(true);
+    expect([...files.keys()].some((path) => path.includes("/retired/"))).toBe(false);
     expect(renamedProject.name).toBe("Renamed");
     expect(renamedProject.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(renamed.newPath));
   });
@@ -294,6 +288,31 @@ describe("Studio concurrent workspace writers", () => {
     const created = await state.store.createProject({ name: "Workspace", minPluginVersion: "6.7.2", maxRuns: 100, maxArtifactsMb: 1024 });
     return { ...state, ...created };
   }
+
+  it("opens a released-format file without merge state and embeds it into the same file", async () => {
+    const { store, files, path } = await workspace();
+    const legacy = JSON.parse(files.get(path)!) as Record<string, unknown>;
+    delete legacy.document;
+    legacy.canvas = { ...(legacy.canvas as object), nodes: [{ id: "note", kind: "studio.text", x: 10, y: 20, config: { value: "Released before merge state" } }] };
+    files.set(path, `${JSON.stringify(legacy, null, 2)}\n`);
+
+    const opened = await store.loadProject(path, { forceReload: true });
+    expect(opened.graph.nodes.map(node => node.id)).toEqual(["note"]);
+    expect(opened.document?.engine).toBe("automerge");
+    // Import publishes the readable canvas and its merge state together; no sidecar appears.
+    expect(JSON.parse(files.get(path)!).document?.engine).toBe("automerge");
+    expect([...files.keys()].filter(file => file.endsWith(".systemsculpt"))).toEqual([path]);
+
+    opened.name = "Adopted";
+    const saved = await store.saveProject(path, opened);
+    expect(saved.conflicts).toEqual([]);
+    const written = JSON.parse(files.get(path)!) as { name: string; document?: { engine: string; heads: string[] }; canvas: { nodes: Array<{ id: string; config: { value: string } }> } };
+    expect(written.name).toBe("Adopted");
+    expect(written.document?.engine).toBe("automerge");
+    expect(written.document?.heads).toHaveLength(1);
+    expect(written.canvas.nodes[0].config.value).toBe("Released before merge state");
+    expect(Object.keys(files.get(path) ? JSON.parse(files.get(path)!) : {})).toEqual(["schema", "id", "name", "docs", "canvas", "document"]);
+  });
 
   it("saves a canvas edit while an asset arrives without deleting or rewriting the asset", async () => {
     const { store, files, path, project } = await workspace();
@@ -319,7 +338,7 @@ describe("Studio concurrent workspace writers", () => {
     expect((await store.loadProject(path, { forceReload: true })).graph.nodes[0].id).toBe("remote");
   });
 
-  it("archives the conflicting local value and saves independent local changes", async () => {
+  it("converges to one value and saves independent local changes without copies", async () => {
     const { store, files, path, project } = await workspace();
     const base = cloneStudioProjectSnapshot(project), external = cloneStudioProjectSnapshot(project);
     external.name = "External title";
@@ -327,12 +346,11 @@ describe("Studio concurrent workspace writers", () => {
     project.name = "Local title";
     project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
     const saved = await store.saveProject(path, project, { baseProject: base });
-    expect(saved.conflicts).toEqual(["name"]);
-    expect(saved.project.name).toBe("External title");
+    expect(saved.conflicts).toEqual([]);
+    expect(typeof saved.project.name).toBe("string");
     expect(saved.project.graph.nodes[0].id).toBe("local");
-    const recoveries = [...files].filter(([file]) => file.startsWith(".systemsculpt/studio/recovery/"));
-    expect(recoveries.length).toBe(2);
-    expect(recoveries.every(([, raw]) => JSON.parse(raw).name === "Local title")).toBe(true);
+    expect([...files.keys()]).toEqual([path]);
+    expect([...files.keys()].some(file => file.startsWith(".systemsculpt/studio/recovery/"))).toBe(false);
   });
 
   it("keeps both node results when parallel runs publish caches from the same starting snapshot", async () => {
@@ -342,4 +360,128 @@ describe("Studio concurrent workspace writers", () => {
     const bytes = await store.readSupportFile(path, `${deriveStudioAssetsDir(path)}/cache/node-results.json`);
     expect(Object.keys(JSON.parse(new TextDecoder().decode(bytes!)).entries).sort()).toEqual(["a", "b"]);
   });
+});
+
+
+describe("single authored file", () => {
+  const options = {name: "Concurrent", minPluginVersion: "6.9.0", maxRuns: 100, maxArtifactsMb: 512};
+  it("creates exactly one file and serializes twenty clients from one revision", async () => {
+    const {store, files, reopen} = createStore();
+    const {path, project} = await store.createProject(options);
+    expect([...files.keys()]).toEqual([path]);
+    await Promise.all(Array.from({length: 20}, (_, index) => reopen().editDocument(path, project.document!.heads, [{kind: "create", entityId: `node:n${index}`, value: {id: `n${index}`, kind: "studio.text", x: index, y: 0, config: {value: `agent ${index}`}}}])));
+    expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(20);
+    expect([...files.keys()]).toEqual([path]);
+  });
+  it("keeps concurrent text in one node and never resurrects a stale deletion", async () => {
+    const {store, files, reopen} = createStore();
+    const {path, project} = await store.createProject(options);
+    const created = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello world"}}}]);
+    const heads = created.project.document!.heads;
+    await Promise.all([
+      store.editDocument(path, heads, [{entityId: "node:a", path: ["config", "value"], value: "hello wonderful world"}]),
+      reopen().editDocument(path, heads, [{entityId: "node:a", path: ["config", "value"], value: "hello world!"}]),
+    ]);
+    expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello wonderful world!");
+    await store.editDocument(path, heads, [{kind: "delete", entityId: "node:a"}]);
+    await store.editDocument(path, heads, [{entityId: "node:a", path: ["x"], value: 900}]);
+    expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(0);
+    expect([...files.keys()]).toEqual([path]);
+  });
+  it("can reuse a renamed path for a new identity", async () => {
+    const {store} = createStore();
+    const {path} = await store.createProject(options);
+    await store.renameProject(path, "Moved");
+    const next = await store.createProject(options);
+    expect(next.path).toBe(path);
+    expect((await store.loadProject(path)).projectId).toBe(next.project.projectId);
+  });
+  it("retries a failed publication against the latest file instead of reporting success", async () => {
+    const {store, files, adapter} = createStore();
+    const {path, project} = await store.createProject(options);
+    const original = adapter.process.getMockImplementation()!;
+    adapter.process.mockImplementationOnce(async (file, update) => {
+      const external = cloneStudioProjectSnapshot(project); external.name = "External";
+      files.set(file, serializeStudioProject(external));
+      return update(files.get(file)!);
+    });
+    const draft = cloneStudioProjectSnapshot(project);
+    draft.graph.nodes.push({id: "n", kind: "studio.text", version: "1.0.0", position: {x: 0, y: 0}, config: {value: "persist"}});
+    await store.saveProject(path, draft, {baseProject: project});
+    adapter.process.mockImplementation(original);
+    const saved = await store.loadProject(path);
+    expect(saved.name).toBe("External");
+    expect(saved.graph.nodes[0].config.value).toBe("persist");
+  });
+  it("retains typing made during a save without duplicating already committed text", async () => {
+    const {store, files} = createStore();
+    const created = await store.createProject(options);
+    const {project} = await store.editDocument(created.path, created.project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
+    let saving!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => {saving = resolve;});
+    const hold = new Promise<void>(resolve => {release = resolve;});
+    let calls = 0;
+    const session = new StudioProjectSession({projectPath: created.path, project, discreteDelayMs: 60000,
+      saveProject: async (path, value, onBeforeProjectWrite, baseProject, intent) => {
+        if (++calls === 1) {saving(); await hold;}
+        return store.saveProject(path, value, {baseProject, onBeforeProjectWrite, ...intent});
+      },
+    });
+    session.mutate("node.config", p => {p.graph.nodes[0].config.value = "hello world";});
+    const flush = session.flushPendingSaveWork({force: true});
+    await started;
+    session.mutate("node.config", p => {p.graph.nodes[0].config.value = "hello world!";});
+    release(); await flush;
+    expect(session.getProject().graph.nodes[0].config.value).toBe("hello world!");
+    expect((await store.loadProject(created.path)).graph.nodes[0].config.value).toBe("hello world!");
+    expect([...files.keys()]).toEqual([created.path]);
+    await session.close();
+  });
+
+  it("imports duplicate and delayed watcher events exactly once", async () => {
+    const {store, files} = createStore();
+    const {path, project} = await store.createProject(options);
+    const {project: base} = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
+    const draft = cloneStudioProjectSnapshot(base); draft.graph.nodes[0].config.value = "hello world";
+    const raw = serializeStudioProject(draft); files.set(path, raw);
+    await store.importProjectText(path, raw);
+    await store.importProjectText(path, raw);
+    await store.importProjectText(path, raw);
+    expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello world");
+  });
+
+  it("preserves agent text while a mounted editor continues from its displayed revision", async () => {
+    const {store} = createStore();
+    const {path, project} = await store.createProject(options);
+    const {project: base} = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
+    const editor = new StudioEditorRevision(cloneStudioProjectSnapshot(base));
+    const remote = await store.editDocument(path, base.document!.heads, [{entityId: "node:a", path: ["config", "value"], value: "hello remote"}]);
+    let merged = editor.edit("a", {config: "value"}, "hello!", remote.project);
+    merged = (await store.saveProject(path, merged)).project;
+    merged = editor.edit("a", {config: "value"}, "hello!!", merged);
+    const result = (await store.saveProject(path, merged)).project.graph.nodes[0].config.value as string;
+    expect(result).toContain("remote");
+    expect(result.match(/hello/g)).toHaveLength(1);
+    expect(result.match(/!/g)).toHaveLength(2);
+    expect(result.match(/remote/g)).toHaveLength(1);
+  });
+
+  it("round-trips labeled and unlabeled arrows and shape group membership", async () => {
+    const {store} = createStore();
+    const {path, project} = await store.createProject(options);
+    project.diagram = {shapes: [
+      {id: "a", shape: "rectangle", position: {x: 0, y: 0}, size: {width: 100, height: 80}, label: "A"},
+      {id: "b", shape: "rectangle", position: {x: 300, y: 0}, size: {width: 100, height: 80}, label: "B"},
+    ], arrows: [
+      {id: "a->b", fromShapeId: "a", toShapeId: "b"},
+      {id: "b->a", fromShapeId: "b", toShapeId: "a", label: "return"},
+    ]};
+    project.graph.groups = [{id: "g", name: "Shapes", nodeIds: [], shapeIds: ["a", "b"]}];
+    await store.saveProject(path, project);
+    await store.dispose();
+    const reopened = await store.loadProject(path);
+    expect(reopened.diagram).toEqual(project.diagram);
+    expect(reopened.graph.groups?.[0].shapeIds).toEqual(["a", "b"]);
+  });
+
 });
