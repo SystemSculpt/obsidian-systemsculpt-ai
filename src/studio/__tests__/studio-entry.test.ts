@@ -1,5 +1,7 @@
 import { resolveStudioEntry } from '../StudioEntry';
-import { ObsidianStudioGenerationAdapter } from '../persistence/ObsidianStudioGenerationAdapter';
+import { writeStudioDocumentAtomically } from '../document/StudioDocumentAtomicWrite';
+
+jest.mock('../../platform/hostCapabilities', () => ({ hasHostCapability: () => false }));
 
 function fixture() {
   const graph = JSON.stringify({ schema: 'studio.project.v2', id: 'same-project', canvas: { nodes: [] } });
@@ -14,12 +16,13 @@ describe('directory Studio entries', () => {
   it('opens the same project and atomically saves its linked canvas while keeping the small entry', async () => {
     const f = fixture();
     expect(await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt')).toEqual({ path: 'Benchmarks.studio/views/graph.systemsculpt', raw: f.graph, entryRaw: f.entry });
-    const bridge = new ObsidianStudioGenerationAdapter(f.adapter as any);
+    const entry = await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt');
     const changed = f.graph.replace('"nodes":[]', '"nodes":[{"id":"new"}]');
-    expect(await bridge.compareAndSwapText('Benchmarks.systemsculpt', f.graph, changed)).toBe(true);
+    expect(await writeStudioDocumentAtomically(f.adapter as any, entry.path, entry.raw, changed)).toBe(true);
     expect(f.files.get('Benchmarks.systemsculpt')).toBe(f.entry);
-    expect(await bridge.read('Benchmarks.systemsculpt')).toBe(changed);
-    expect(await bridge.compareAndSwapText('Benchmarks.systemsculpt', f.graph, '{}')).toBe(false);
+    expect((await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt')).raw).toBe(changed);
+    expect(await writeStudioDocumentAtomically(f.adapter as any, entry.path, f.graph, '{}')).toBe(false);
+    expect(f.files.get('Benchmarks.studio/views/graph.systemsculpt')).toBe(changed);
   });
   it('rejects traversal and mismatched identities without replacing either file', async () => {
     const f = fixture();

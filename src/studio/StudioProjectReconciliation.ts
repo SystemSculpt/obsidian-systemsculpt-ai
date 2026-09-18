@@ -1,3 +1,4 @@
+import { mergeStudioProjects } from "./document/StudioProjectCollaboration";
 import { cleanupOrphanedManagedMediaOutputs } from "./StudioManagedOutputNodes";
 import { parseStudioProject, serializeStudioProject } from "./schema";
 import type { StudioProjectV1 } from "./types";
@@ -28,6 +29,7 @@ export function reconcileStudioProject(
   options?: { preferLocalConflicts?: boolean }
 ): StudioProjectReconciliation {
   if (base.projectId !== local.projectId || base.projectId !== external.projectId) throw new Error("Cannot reconcile different Studio projects.");
+  if (local.document && external.document) return {project: mergeStudioProjects(local, external), conflicts: []};
   const conflicts: string[] = [];
   const merge = (before: Value, ours: Value, theirs: Value, path: string): Value => {
     if (equal(ours, before)) return theirs;
@@ -64,7 +66,7 @@ export function reconcileStudioProject(
   };
   // The public dialect omits generated timestamps, migrations and runtime
   // metadata, which must never turn an unrelated edit into a user conflict.
-  const document = (project: StudioProjectV1) => JSON.parse(serializeStudioProject(project)) as Json;
+  const document = (project: StudioProjectV1) => JSON.parse(serializeStudioProject({ ...project, document: undefined })) as Json;
   const merged = merge(document(base), document(local), document(external), "");
   if (record(merged) && record(merged.canvas) && Array.isArray(merged.canvas.nodes) && Array.isArray(merged.canvas.edges)) {
     const ids = new Set(merged.canvas.nodes.filter(record).map(node => node.id));

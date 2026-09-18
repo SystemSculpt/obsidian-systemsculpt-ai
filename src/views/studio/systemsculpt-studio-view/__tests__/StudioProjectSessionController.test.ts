@@ -96,11 +96,11 @@ function createControllerHarness(project: StudioProjectV1) {
     preserveProjectRecovery: jest.fn(async () => {}),
     consumeBlockedProjectRecovery: jest.fn(async () => null),
     lintProjectText: jest.fn(() => ({ ok: true })),
+    reconcileProjectFile: jest.fn(async () => ({ conflicts: [] })),
     adoptVisibleProjectRename: jest.fn(async (oldPath: string, newPath: string) => ({
       oldPath,
       newPath,
       project: { ...project, name: "Renamed" },
-      replacedCanvasProject: null,
     })),
   };
   const host = {
@@ -281,81 +281,58 @@ describe("StudioProjectSessionController", () => {
     expect(controller.getProjectPath()).toBeNull();
   });
 
-  it("finishes an observed file edit before close flushes and releases the project", async () => {
+  it("finishes central file reconciliation before close releases the project", async () => {
     const originalProject = projectFixture(noteNodeFixture("Notes/Before close.md"));
-    const fileProject = projectFixture(noteNodeFixture("Notes/Agent edit.md"));
-    fileProject.name = "Agent edit loaded before close";
     const { controller, host, service, session } = createControllerHarness(originalProject);
     Object.assign(controller as any, { retainedProjectPath: "Studio/Test.systemsculpt" });
     const rawText = '{"schema":"studio.project.v1","name":"Agent edit loaded before close"}';
     host.app.vault.adapter.read = jest.fn(async () => rawText);
-    session.hasPendingLocalSaveWork.mockReturnValue(true);
-    session.waitForInFlightSave.mockRejectedValue(new Error("project file changed"));
-    const reload = jest.spyOn(controller, "loadProjectFromPath").mockImplementation(async () => {
-      Object.assign(controller as any, { currentProject: fileProject });
-      return true;
+    let finishReconciliation!: () => void;
+    service.reconcileProjectFile.mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => { finishReconciliation = resolve; });
+      return { conflicts: [] };
     });
 
     const modified = controller.handleVaultItemModified({ path: "Studio/Test.systemsculpt" } as any);
+    while (service.reconcileProjectFile.mock.calls.length === 0) await Promise.resolve();
     const closed = controller.close();
+    finishReconciliation();
     await Promise.all([modified, closed]);
 
-    expect(session.waitForInFlightSave).toHaveBeenCalledTimes(1);
-    expect(reload).toHaveBeenCalledWith("Studio/Test.systemsculpt", {
-      notifyOnError: false,
-      forceReload: true,
-      consumeBlockedRecovery: false,
-    });
-    expect(host.preserveProjectAsUndo).toHaveBeenCalledWith(originalProject, []);
-    expect(service.preserveProjectRecovery).toHaveBeenCalledWith(originalProject);
-    expect(reload.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(service.reconcileProjectFile.mock.invocationCallOrder[0]).toBeLessThan(
       service.releaseProjectSession.mock.invocationCallOrder[0]
     );
+    expect(host.disposeTextNodeEditors).toHaveBeenCalledTimes(1); // close only
   });
 
-  it("loads a valid project-file edit and keeps pending canvas work available through Undo", async () => {
+  it("reconciles a valid project-file edit without disposing editors or reloading the view", async () => {
     const node = noteNodeFixture("Notes/Before.md");
     const originalProject = projectFixture(node);
     const addedNode = { ...noteNodeFixture("Notes/Added.md"), id: "note_added" };
     const fileProject = projectFixture(addedNode);
     fileProject.graph.nodes.unshift(node);
     const { controller, host, service, session } = createControllerHarness(originalProject);
-    const viewport = document.createElement("div");
-    host.getGraphViewportElement.mockReturnValue(viewport);
-    const animationFrame = jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      callback(0);
-      return 1;
-    });
-    session.hasPendingLocalSaveWork.mockReturnValue(true);
-    const load = jest.spyOn(controller, "loadProjectFromPath").mockImplementation(async () => {
-      Object.assign(controller as any, { currentProject: fileProject });
-      return true;
-    });
+    session.getProject.mockReturnValue(fileProject);
+    const load = jest.spyOn(controller, "loadProjectFromPath");
 
     await (controller as any).processCurrentProjectFileMutation('{"schema":"studio.project.v1"}');
 
-    expect(session.blockProjectFileWrites).toHaveBeenCalledTimes(1);
-    expect(session.waitForInFlightSave).toHaveBeenCalledTimes(1);
-    expect(host.disposeTextNodeEditors).toHaveBeenCalled();
-    expect(load).toHaveBeenCalledWith("Studio/Test.systemsculpt", {
-      notifyOnError: false,
-      forceReload: true,
-      consumeBlockedRecovery: false,
-    });
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", '{"schema":"studio.project.v1"}');
+    expect(load).not.toHaveBeenCalled();
+    expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
     expect(controller.getProject()).toBe(fileProject);
     expect(controller.getProjectFileWarning()).toBeNull();
-    expect(service.preserveProjectRecovery).toHaveBeenCalledWith(originalProject);
-    expect(host.preserveProjectAsUndo).toHaveBeenCalledWith(originalProject, []);
-    expect(host.graphInteraction.setSelectedNodeIds).toHaveBeenCalledWith(["note_added"]);
-    expect(host.graphInteraction.fitSelectedNodesInViewport).toHaveBeenCalledTimes(1);
-    animationFrame.mockRestore();
+    expect(service.preserveProjectRecovery).not.toHaveBeenCalled();
+    expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
+    expect(host.render).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes a delayed view when another view already accepted the same file edit", async () => {
+  it("ignores a duplicate file event already accepted by the shared session", async () => {
     const originalProject = projectFixture(noteNodeFixture("Notes/Before.md"));
     const sharedSessionProject = projectFixture(noteNodeFixture("Notes/From file.md"));
     sharedSessionProject.name = "Accepted by another Studio view";
-    const { controller, host, session } = createControllerHarness(originalProject);
+    const { controller, host, service, session } = createControllerHarness(originalProject);
     session.getProject.mockReturnValue(sharedSessionProject);
     session.resolveProjectFileTextUpdate.mockReturnValue({
       signature: "accepted-by-other-view",
@@ -366,65 +343,48 @@ describe("StudioProjectSessionController", () => {
       '{"schema":"studio.project.v1","name":"Accepted by another Studio view"}'
     );
 
-    expect(controller.getProject()).toBe(sharedSessionProject);
-    expect(controller.getProject()?.name).toBe("Accepted by another Studio view");
-    expect(host.render).toHaveBeenCalledTimes(1);
+    expect(controller.getProject()).toBe(originalProject);
+    expect(service.reconcileProjectFile).not.toHaveBeenCalled();
+    expect(host.render).not.toHaveBeenCalled();
   });
 
-  it("continues loading the file when a competing in-flight canvas save rejects", async () => {
+  it("accepts the service's reconciled shared session state without view teardown", async () => {
     const node = noteNodeFixture("Notes/Before.md");
     const originalProject = projectFixture(node);
     const fileProject = projectFixture({ ...node, title: "File wins" });
     const { controller, host, service, session } = createControllerHarness(originalProject);
-    let hasPendingWork = false;
-    session.hasPendingLocalSaveWork.mockImplementation(() => hasPendingWork);
-    session.waitForInFlightSave.mockRejectedValue(new Error("project file changed"));
-    host.disposeTextNodeEditors.mockImplementation(() => {
-      originalProject.name = "Final editor text preserved";
-      hasPendingWork = true;
-    });
+    session.getProject.mockReturnValue(fileProject);
     const rawText = '{"schema":"studio.project.v1","name":"File wins"}';
     host.app.vault.adapter.read = jest.fn(async () => rawText);
-    jest.spyOn(controller, "loadProjectFromPath").mockImplementation(async () => {
-      Object.assign(controller as any, { currentProject: fileProject });
-      return true;
-    });
 
     await (controller as any).processCurrentProjectFileMutation(rawText);
 
     expect(controller.getProject()).toBe(fileProject);
     expect(controller.getProjectFileWarning()).toBeNull();
-    expect(host.preserveProjectAsUndo).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Final editor text preserved" }),
-      []
-    );
-    expect(service.preserveProjectRecovery).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Final editor text preserved" })
-    );
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
+    expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
+    expect(service.preserveProjectRecovery).not.toHaveBeenCalled();
     expect(host.setError).not.toHaveBeenCalled();
   });
 
-  it("keeps the canvas bound and does not load the file until durable recovery succeeds", async () => {
+  it("keeps the canvas and interactions bound when invalid bytes cannot be imported", async () => {
     const originalProject = projectFixture(noteNodeFixture("Notes/Before recovery failure.md"));
-    const fileProject = projectFixture(noteNodeFixture("Notes/File still wins.md"));
     const { controller, host, service, session } = createControllerHarness(originalProject);
-    session.hasPendingLocalSaveWork.mockReturnValue(true);
-    service.preserveProjectRecovery.mockRejectedValue(new Error("recovery storage unavailable"));
+    service.reconcileProjectFile.mockRejectedValueOnce(new Error("Studio couldn't read this project file: Unexpected token"));
     const rawText = '{"schema":"studio.project.v1","name":"File still wins"}';
     host.app.vault.adapter.read = jest.fn(async () => rawText);
-    const load = jest.spyOn(controller, "loadProjectFromPath").mockImplementation(async () => {
-      Object.assign(controller as any, { currentProject: fileProject });
-      return true;
-    });
+    const load = jest.spyOn(controller, "loadProjectFromPath");
 
     await (controller as any).processCurrentProjectFileMutation(rawText);
 
     expect(controller.getProject()).toBe(originalProject);
-    expect(controller.getProjectFileWarning()).toContain("couldn't preserve the current canvas");
-    expect(service.preserveProjectRecovery).toHaveBeenCalledWith(originalProject);
+    expect(controller.getProjectFileWarning()).toContain("couldn't read this project file");
     expect(load).not.toHaveBeenCalled();
+    expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
+    expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
     expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
-    expect(host.scheduleProjectFileRetry).toHaveBeenCalledTimes(1);
+    expect(host.render).toHaveBeenCalledTimes(1);
   });
 
   it("restores the retained session binding and rejects close when recovery cannot be stored", async () => {
@@ -531,24 +491,25 @@ describe("StudioProjectSessionController", () => {
     );
   });
 
-  it("keeps a duplicate rejected file blocked and repeats its validation warning", async () => {
+  it("routes a duplicate rejected file through the service and repeats its warning", async () => {
     const project = projectFixture(noteNodeFixture("Notes/Still invalid.md"));
     const { controller, host, service, session } = createControllerHarness(project);
     session.resolveProjectFileTextUpdate.mockReturnValue({
       signature: "same-invalid-file",
       decision: { kind: "ignore", reason: "duplicate_rejected" },
     });
-    service.lintProjectText.mockReturnValue({ ok: false, error: "Unexpected token" });
+    service.reconcileProjectFile.mockRejectedValueOnce(new Error("Studio couldn't read this project file: Unexpected token"));
 
     await (controller as any).processCurrentProjectFileMutation("{");
 
-    expect(session.blockProjectFileWrites).toHaveBeenCalledTimes(1);
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", "{");
+    expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
     expect(controller.getProjectFileWarning()).toContain("Unexpected token");
-    expect(controller.getProjectFileWarning()).toContain("Fix the file");
+    expect(controller.getProjectFileWarning()).toContain("Studio couldn't read this project file");
     expect(host.render).toHaveBeenCalledTimes(1);
   });
 
-  it("retries a transient null read without allowing a canvas overwrite", async () => {
+  it("retries a transient null read while leaving durable transaction writes enabled", async () => {
     const project = projectFixture(noteNodeFixture("Notes/Retry.md"));
     const { controller, host, session } = createControllerHarness(project);
     const retryCallbacks: Array<() => void> = [];
@@ -565,7 +526,8 @@ describe("StudioProjectSessionController", () => {
 
     await controller.handleVaultItemModified({ path: "Studio/Test.systemsculpt" } as any);
 
-    expect(session.blockProjectFileWrites).toHaveBeenCalledTimes(1);
+    expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
+    expect(session.resumeProjectFileWrites).toHaveBeenCalledTimes(1);
     expect(controller.getProjectFileWarning()).toContain("retry automatically");
     expect(retryCallbacks).toHaveLength(1);
 
@@ -575,17 +537,17 @@ describe("StudioProjectSessionController", () => {
     expect(processFileEdit).toHaveBeenCalledWith("recovered file bytes");
   });
 
-  it("explains an invalid project file without sync bookkeeping language", async () => {
+  it("explains an invalid project file without blocking the shared session", async () => {
     const node = noteNodeFixture("Notes/Invalid.md");
     const { controller, host, project, service, session } = createControllerHarness(projectFixture(node));
-    service.lintProjectText.mockReturnValue({ ok: false, error: "Unexpected token" });
+    service.reconcileProjectFile.mockRejectedValueOnce(new Error("Studio couldn't read this project file: Unexpected token"));
 
     await (controller as any).processCurrentProjectFileMutation("{");
 
     expect(controller.getProject()).toBe(project);
-    expect(session.markRejectedProjectSignature).toHaveBeenCalledWith("external-signature");
-    expect(session.blockProjectFileWrites).toHaveBeenCalledTimes(1);
-    expect(controller.getProjectFileWarning()).toContain("Fix the file");
+    expect(session.markRejectedProjectSignature).not.toHaveBeenCalled();
+    expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
+    expect(controller.getProjectFileWarning()).toContain("Studio couldn't read this project file");
     expect(controller.getProjectFileWarning()).not.toMatch(
       /external|sync|projection|authority|generation|candidate|marker|revision|hash/i
     );

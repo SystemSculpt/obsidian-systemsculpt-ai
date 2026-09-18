@@ -693,7 +693,12 @@ export function parseStudioProject(
 
   const schema = asString(parsed.schema).trim();
   if (schema === STUDIO_PROJECT_SCHEMA_V2) {
-    return restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
+    const project = restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
+    if (isRecord(parsed.document)) {
+      if (parsed.document.engine !== "automerge" || typeof parsed.document.state !== "string" || !Array.isArray(parsed.document.heads) || !parsed.document.heads.every((head: unknown) => typeof head === "string")) throw new Error("Invalid Studio merge state.");
+      project.document = {engine: "automerge", state: parsed.document.state, heads: [...parsed.document.heads] as string[]};
+    }
+    return project;
   }
   if (schema !== STUDIO_PROJECT_SCHEMA_V1) {
     const migrated = migrateLegacyProject(parsed);
@@ -766,6 +771,7 @@ export function serializeStudioProject(project: StudioProjectV1): string {
           : `${arrow.fromShapeId} -> ${arrow.toShapeId}`
       ),
     },
+    ...(project.document ? { document: { engine: project.document.engine, state: project.document.state, heads: [...project.document.heads].sort() } } : {}),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }

@@ -1,7 +1,10 @@
+import { StudioEditorRevision } from "../../../studio/document/StudioEditorRevision";
+import { materializeStudioProject } from "../../../studio/document/StudioProjectCollaboration";
+import { cloneStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 import type { RenderStudioGraphNodeCardOptions } from "./StudioGraphNodeCardTypes";
 import type { StudioProjectV1 } from "../../../studio/types";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
-import { renderStudioGraphNodeCard } from "./StudioGraphNodeCardRenderer";
+import { renderStudioGraphNodeCard, type StudioGraphNodeCardHandle } from "./StudioGraphNodeCardRenderer";
 import {
   resolveStudioCanvasToolShape,
   type StudioCanvasTool,
@@ -84,13 +87,47 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   onToggleNodeDetailMode: () => void;
   onOpenNodeContextMenu: (event: MouseEvent) => void;
   onCreateTextNodeAtPosition: (position: { x: number; y: number }) => void;
+  /** Active gestures and native editors keep ownership of their mounted card. */
+  shouldPreserveNodeElement?: (nodeId: string) => boolean;
+  /** Text cards mount their editor; entering or leaving edit mode is a card transition. */
+  isTextNodeEditing?: (nodeId: string) => boolean;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
   viewportEl: HTMLElement | null;
   /** Zoomed graph-coordinate layer; canvas gestures measure against it. */
   canvasEl: HTMLElement | null;
+  /** Applies a new snapshot without replacing the workspace or unaffected cards. */
+  refresh: (options: StudioGraphWorkspaceRendererOptions) => boolean;
+  dispose: () => void;
 };
+
+function studioNodeContentSignature(
+  node: StudioProjectV1["graph"]["nodes"][number],
+  options: StudioGraphWorkspaceRendererOptions,
+): string {
+  const { position: _position, size: _size, ...content } = node;
+  const inboundEdges = options.currentProject?.graph.edges.filter(edge => edge.toNodeId === node.id) ?? [];
+  return JSON.stringify({
+    content,
+    inboundEdges,
+    outputs: options.getNodeRunState(node.id).outputs,
+    busy: options.busy,
+    nodeDetailMode: options.nodeDetailMode,
+    editing: options.isTextNodeEditing?.(node.id) === true,
+  });
+}
+
+function studioNodeStructureSignature(
+  node: StudioProjectV1["graph"]["nodes"][number],
+  options: StudioGraphWorkspaceRendererOptions,
+): string {
+  return studioNodeContentSignature({ ...node, title: "" }, options);
+}
+
+function studioCollectionSignature(value: unknown): string {
+  return JSON.stringify(value);
+}
 
 export function renderStudioGraphWorkspace(
   options: StudioGraphWorkspaceRendererOptions
@@ -102,8 +139,6 @@ export function renderStudioGraphWorkspace(
     currentProjectPath,
     nodeDetailMode,
     graphInteraction,
-    getNodeRunState,
-    getNodeActivity,
     onRunGraph,
     onOpenAddNodeMenuAtViewportCenter,
     activeCanvasTool,
@@ -125,7 +160,7 @@ export function renderStudioGraphWorkspace(
       text: "Open a .systemsculpt file from the left file explorer to edit this graph.",
       cls: "ss-studio-muted",
     });
-    return { viewportEl: null, canvasEl: null };
+    return { viewportEl: null, canvasEl: null, refresh: () => false, dispose: () => undefined };
   }
 
   const viewport = editor.createDiv({ cls: "ss-studio-graph-viewport" });
@@ -216,6 +251,8 @@ export function renderStudioGraphWorkspace(
   graphInteraction.registerAlignmentGuidesElement(alignmentGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
+  let currentBusy = busy;
+  let currentActiveCanvasTool = activeCanvasTool;
   const graphRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-row" });
   const commandCenter = currentProject.graph.nodes.find(node => node.kind === 'studio.command_center');
   if (commandCenter) createStudioWorkspaceControl(graphRow, {
@@ -230,7 +267,7 @@ export function renderStudioGraphWorkspace(
     className: "is-run",
     disabled: busy,
     onSelect: () => {
-      if (busy) {
+      if (currentBusy) {
         return;
       }
       onRunGraph();
@@ -243,7 +280,7 @@ export function renderStudioGraphWorkspace(
     ariaLabel: "Add node",
     disabled: busy,
     onSelect: () => {
-      if (busy) {
+      if (currentBusy) {
         return;
       }
       onOpenAddNodeMenuAtViewportCenter();
@@ -384,11 +421,11 @@ export function renderStudioGraphWorkspace(
       selected: activeCanvasTool === control.tool,
       disabled: busy,
       onSelect: () => {
-        if (busy) {
+        if (currentBusy) {
           return;
         }
         // Selecting the armed tool disarms it, back to the pointer.
-        onSelectCanvasTool(activeCanvasTool === control.tool ? "select" : control.tool);
+        onSelectCanvasTool(currentActiveCanvasTool === control.tool ? "select" : control.tool);
       },
     });
   }
@@ -450,19 +487,65 @@ export function renderStudioGraphWorkspace(
     });
     inboundEdgesByNode.set(edge.toNodeId, bucket);
   }
-  for (const node of currentProject.graph.nodes) {
-    renderStudioGraphNodeCard( {
-      ...options,
-      projectId: currentProject.projectId,
-      projectPath: currentProjectPath,
-      projectNodes: currentProject.graph.nodes,
-      getRelatedNodeRunState: getNodeRunState,
+  const cardHandles = new Map<string, StudioGraphNodeCardHandle>();
+  const nodeSignatures = new Map<string, string>();
+  const nodeStructureSignatures = new Map<string, string>();
+  const nodeEditing = new Map<string, boolean>();
+  const editorBases = new WeakMap<object, StudioProjectV1>();
+  const mountCard = (node: StudioProjectV1["graph"]["nodes"][number], renderOptions: StudioGraphWorkspaceRendererOptions): StudioGraphNodeCardHandle => {
+    const inboundEdges = renderOptions.currentProject!.graph.edges
+      .filter(edge => edge.toNodeId === node.id)
+      .map(edge => ({ fromNodeId: edge.fromNodeId, fromPortId: edge.fromPortId, toPortId: edge.toPortId }));
+    let editor: StudioEditorRevision | undefined;
+    if (renderOptions.currentProject?.document) {
+      let basis = editorBases.get(renderOptions);
+      if (!basis) {
+        basis = cloneStudioProjectSnapshot(materializeStudioProject(renderOptions.currentProject));
+        renderOptions.currentProject.document = basis.document ? {...basis.document, heads: [...basis.document.heads]} : undefined;
+        editorBases.set(renderOptions, basis);
+      }
+      editor = new StudioEditorRevision(basis);
+    }
+    const handle = renderStudioGraphNodeCard( {
+      ...renderOptions,
+      onNodeConfigValueChange: (nodeId, key, value, changeOptions) => {
+        const project = renderOptions.currentProject!;
+        if (!editor || typeof value !== "string" || !renderOptions.onNodeConfigValueChange) {
+          renderOptions.onNodeConfigValueChange?.(nodeId, key, value, changeOptions); return;
+        }
+        const merged = editor.edit(nodeId, {config: key}, value, project);
+        const next = merged.graph.nodes.find(node => node.id === nodeId);
+        if (!next) return;
+        renderOptions.onNodeConfigValueChange(nodeId, key, next.config[key], changeOptions);
+        project.document = merged.document;
+      },
+      onNodeTitleInput: (node, value) => {
+        const project = renderOptions.currentProject!;
+        if (!editor) { renderOptions.onNodeTitleInput(node, value); return; }
+        const merged = editor.edit(node.id, {title: true}, value, project);
+        const next = merged.graph.nodes.find(item => item.id === node.id);
+        if (!next) return;
+        renderOptions.onNodeTitleInput(node, next.title);
+        project.document = merged.document;
+      },
+      projectId: renderOptions.currentProject!.projectId,
+      projectPath: renderOptions.currentProjectPath!,
+      projectNodes: renderOptions.currentProject!.graph.nodes,
+      getRelatedNodeRunState: renderOptions.getNodeRunState,
       layer: nodeLayer,
       node,
-      inboundEdges: inboundEdgesByNode.get(node.id) || [],
-      nodeRunState: getNodeRunState(node.id),
-      nodeActivity: getNodeActivity?.(node.id),
+      inboundEdges,
+      nodeRunState: renderOptions.getNodeRunState(node.id),
+      nodeActivity: renderOptions.getNodeActivity?.(node.id),
     });
+    cardHandles.set(node.id, handle);
+    nodeEditing.set(node.id, renderOptions.isTextNodeEditing?.(node.id) === true);
+    nodeSignatures.set(node.id, studioNodeContentSignature(node, renderOptions));
+    nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, renderOptions));
+    return handle;
+  };
+  for (const node of currentProject.graph.nodes) {
+    mountCard(node, options);
   }
 
   graphInteraction.renderGroupLayer();
@@ -470,5 +553,130 @@ export function renderStudioGraphWorkspace(
   graphInteraction.applyGraphZoom();
   graphInteraction.refreshSelectionResizeFrame();
   shapeHandle.refreshArrows();
-  return { viewportEl: viewport, canvasEl: world };
+  let edgesSignature = studioCollectionSignature(currentProject.graph.edges);
+  let groupsSignature = studioCollectionSignature(currentProject.graph.groups);
+  let disposed = false;
+  let latestOptions = options;
+
+  const rebuildElementRegistrations = (): void => {
+    graphInteraction.clearGraphElementMaps();
+    for (const [nodeId, handle] of cardHandles) graphInteraction.registerNodeElement(nodeId, handle.element);
+    nodeLayer.querySelectorAll<HTMLElement>(".ss-studio-port-pin[data-node-id][data-port-id][data-port-direction]").forEach(pin => {
+      const direction = pin.dataset.portDirection;
+      if (direction !== "in" && direction !== "out") return;
+      graphInteraction.registerPortElement(pin.dataset.nodeId || "", direction, pin.dataset.portId || "", pin);
+    });
+  };
+
+  nodeLayer.addEventListener("focusout", () => {
+    void Promise.resolve().then(() => { if (!disposed) refresh(latestOptions); });
+  });
+
+  const refresh = (next: StudioGraphWorkspaceRendererOptions): boolean => {
+    const project = next.currentProject;
+    if (disposed || !project || next.currentProjectPath !== currentProjectPath || project.projectId !== currentProject.projectId) return false;
+    latestOptions = next;
+    const nextIds = new Set(project.graph.nodes.map(node => node.id));
+    let registrationsChanged = false;
+    let geometryChanged = false;
+    for (const [nodeId, handle] of cardHandles) {
+      if (nextIds.has(nodeId)) continue;
+      handle.dispose();
+      handle.element.remove();
+      cardHandles.delete(nodeId);
+      nodeSignatures.delete(nodeId);
+      nodeStructureSignatures.delete(nodeId);
+      nodeEditing.delete(nodeId);
+      graphInteraction.onNodeRemoved(nodeId);
+      registrationsChanged = true;
+    }
+    for (const node of project.graph.nodes) {
+      const existing = cardHandles.get(node.id);
+      if (!existing) {
+        mountCard(node, next);
+        registrationsChanged = true;
+        continue;
+      }
+      const preserveForGesture = next.shouldPreserveNodeElement?.(node.id) === true;
+      const nextTransform = `translate(${node.position.x}px, ${node.position.y}px)`;
+      const nextWidth = `${resolveStudioGraphNodeWidth(node)}px`;
+      if (!preserveForGesture) {
+        geometryChanged = geometryChanged || existing.element.style.transform !== nextTransform || existing.element.style.width !== nextWidth;
+        existing.updateGeometry(node);
+      }
+      const signature = studioNodeContentSignature(node, next);
+      if (nodeSignatures.get(node.id) === signature) continue;
+      // Entering or leaving text editing swaps preview for editor: remount even while focused or dragging.
+      const editing = next.isTextNodeEditing?.(node.id) === true;
+      const editingChanged = nodeEditing.get(node.id) !== editing;
+      const active = existing.element.ownerDocument.activeElement;
+      const titleInput = existing.element.querySelector<HTMLInputElement>(".ss-studio-node-title-input");
+      if (titleInput && active !== titleInput) titleInput.value = node.title;
+      const structureSignature = studioNodeStructureSignature(node, next);
+      if (!editingChanged && nodeStructureSignatures.get(node.id) === structureSignature) {
+        nodeSignatures.set(node.id, signature);
+        continue;
+      }
+      if (!editingChanged && ((active && existing.element.contains(active)) || preserveForGesture)) continue;
+      const replacement = mountCard(node, next);
+      existing.element.replaceWith(replacement.element);
+      existing.dispose();
+      registrationsChanged = true;
+    }
+    if (registrationsChanged) rebuildElementRegistrations();
+
+    const nextEdgesSignature = studioCollectionSignature(project.graph.edges);
+    if (registrationsChanged || geometryChanged || nextEdgesSignature !== edgesSignature) {
+      edgesSignature = nextEdgesSignature;
+      graphInteraction.notifyNodePositionsChanged();
+    }
+    const nextGroupsSignature = studioCollectionSignature(project.graph.groups);
+    if (registrationsChanged || nextGroupsSignature !== groupsSignature) {
+      groupsSignature = nextGroupsSignature;
+      graphInteraction.renderGroupLayer();
+    }
+    shapeHandle.update({
+      diagram: readStudioDiagramFromProject(project),
+      busy: next.busy,
+      activeCanvasTool: next.activeCanvasTool,
+      selection: next.shapeLayer.selection,
+    });
+    graphInteraction.refreshNodeSelectionClasses();
+    graphInteraction.refreshSelectionResizeFrame();
+    currentBusy = next.busy;
+    currentActiveCanvasTool = next.activeCanvasTool;
+    viewport.classList.toggle("is-arrow-tool", next.activeCanvasTool === "arrow");
+    viewport.classList.toggle("is-shape-tool", resolveStudioCanvasToolShape(next.activeCanvasTool) !== null);
+    const runButton = editor.querySelector<HTMLButtonElement>('[aria-label="Run Studio graph"]');
+    const addButton = editor.querySelector<HTMLButtonElement>('[aria-label="Add node"]');
+    if (runButton) runButton.disabled = next.busy;
+    if (addButton) addButton.disabled = next.busy;
+    const detailButton = editor.querySelector<HTMLButtonElement>('[aria-label="Toggle node detail mode"]');
+    if (detailButton) {
+      detailButton.setText(next.nodeDetailMode === "collapsed" ? "Expand" : "Collapse");
+      detailButton.setAttribute("aria-pressed", String(next.nodeDetailMode === "collapsed"));
+    }
+    for (const button of editor.querySelectorAll<HTMLButtonElement>(".ss-studio-graph-workspace-control-row.is-tools button")) {
+      button.disabled = next.busy;
+      const selected = button.dataset.testid === `studio.workspace.tool.${next.activeCanvasTool === "rectangle" ? "square" : next.activeCanvasTool}`;
+      button.setAttribute("aria-pressed", String(selected));
+    }
+    return true;
+  };
+
+  return {
+    viewportEl: viewport,
+    canvasEl: world,
+    refresh,
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      shapeHandle.cancelArrowGesture();
+      for (const handle of cardHandles.values()) handle.dispose();
+      cardHandles.clear();
+      nodeSignatures.clear();
+      nodeStructureSignatures.clear();
+      nodeEditing.clear();
+    },
+  };
 }

@@ -37,12 +37,12 @@ function listSourceFiles(): string[] {
 }
 
 describe("Studio persistence architecture lint", () => {
-  it("keeps Studio project-local mutations behind the generation store using AST call and import analysis", () => {
-    const mutationMethods = new Set(["write", "writeBinary", "append", "remove", "rename", "mkdir", "rmdir", "create", "createBinary", "modify", "modifyBinary", "delete", "renameFile"]);
+  it("keeps Studio project-local mutations behind the document and support stores using AST call and import analysis", () => {
+    const mutationMethods = new Set(["process", "write", "writeBinary", "append", "remove", "rename", "mkdir", "rmdir", "create", "createBinary", "modify", "modifyBinary", "delete", "renameFile"]);
     const persistenceFiles = new Set([
-      "src/studio/persistence/ObsidianStudioGenerationAdapter.ts",
-      "src/studio/persistence/StudioProjectGenerationStore.ts",
-      "src/studio/persistence/StudioProjectRecoveryStore.ts",
+      "src/studio/StudioProjectStore.ts",
+      "src/studio/document/StudioProjectDocument.ts",
+      "src/studio/document/StudioDocumentAtomicWrite.ts",
     ]);
     const allowedNonProjectContexts = new Set([
       "src/core/diagnostics/DiagnosticsSessionLifecycle.ts#run",

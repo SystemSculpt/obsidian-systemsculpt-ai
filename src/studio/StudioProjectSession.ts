@@ -1,3 +1,5 @@
+import { materializeStudioProject } from "./document/StudioProjectCollaboration";
+import { updateStudioProjectIdentity } from "./document/StudioProjectIdentity";
 import {
   cloneStudioProjectSnapshot,
   readonlyStudioProjectSnapshot,
@@ -39,6 +41,7 @@ export type StudioProjectSessionMutationReason =
   | "history.apply"
   | "project.load"
   | "project.reload"
+  | "project.rename"
   | "project.repair"
   | "unknown";
 
@@ -77,7 +80,8 @@ type StudioProjectSessionOptions = {
     projectPath: string,
     project: StudioProjectV1,
     onBeforeProjectWrite?: (rawText: string) => void,
-    baseProject?: StudioProjectV1
+    baseProject?: StudioProjectV1,
+    intent?: {restoreDeletedEntities?: boolean}
   ) => Promise<void | StudioProjectReconciliation>;
   readProjectRawText?: (projectPath: string) => Promise<string | null>;
   saveBlockedProjectRecovery?: (
@@ -106,6 +110,7 @@ export class StudioProjectSession {
   private saveQueued = false;
   private saveQueuedMode: StudioProjectSessionAutosaveMode | null = null;
   private saveFailurePaused = false;
+  private restoreDeletedEntities = false;
   private dirtyRevision = 0;
   private persistedRevision = 0;
   private projectFileWriteBlocked = false;
@@ -169,7 +174,7 @@ export class StudioProjectSession {
       reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     }
     if (serializeStudioProject(reconciled.project) === serializeStudioProject(this.project)) return;
-    this.project = reconciled.project;
+    updateStudioProjectIdentity(this.project, reconciled.project);
     this.schedulePersist({ reason: "project.reload" });
     this.notifyListeners();
     await this.flushPendingSaveWork();
@@ -207,10 +212,12 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutate:${reason}`);
       return false;
     }
-    const changed = mutator(this.project) !== false;
+    const draft = this.getProjectSnapshot();
+    const changed = mutator(draft) !== false;
     if (!changed) {
       return false;
     }
+    updateStudioProjectIdentity(this.project, draft);
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {
       this.notifyListeners({ kind: "project", origin: options?.origin });
@@ -227,6 +234,7 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutateAsync:${reason}`);
       return false;
     }
+    this.project.document = materializeStudioProject(this.project).document;
     const before = this.getProjectSnapshot();
     const draft = cloneStudioProjectSnapshot(before);
     const changed = (await mutator(draft)) !== false;
@@ -242,10 +250,10 @@ export class StudioProjectSession {
       // Recovery is asynchronous too: rebase against edits made during its I/O.
       reconciled = reconcileStudioProject(before, draft, this.project);
     }
-    this.project = reconciled.project;
+    updateStudioProjectIdentity(this.project, reconciled.project);
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {
-      this.notifyListeners({ kind: "project", origin: options?.origin });
+      this.notifyListeners({ kind: "project" });
     }
     return true;
   }
@@ -263,12 +271,15 @@ export class StudioProjectSession {
     return true;
   }
 
+  moveProjectPath(path: string): void { this.projectPath = path; }
+
   replaceProject(project: StudioProjectV1, options?: StudioProjectSessionReplaceProjectOptions): void {
     if (this.disposed) {
       this.warnDisposedWrite("replaceProject");
       return;
     }
-    this.project = cloneStudioProjectSnapshot(project);
+    if (this.project.projectId === project.projectId) updateStudioProjectIdentity(this.project, project);
+    else this.project = cloneStudioProjectSnapshot(project);
     this.baseProject = cloneStudioProjectSnapshot(project);
     this.projectPath = String(options?.projectPath || this.projectPath || "").trim();
     this.clearSaveTimer();
@@ -292,7 +303,8 @@ export class StudioProjectSession {
   /** History is a new local edit against the accepted disk version, not a reload. */
   applyHistorySnapshot(project: StudioProjectV1): boolean {
     if (this.disposed) return false;
-    this.project = cloneStudioProjectSnapshot(project);
+    this.restoreDeletedEntities = true;
+    updateStudioProjectIdentity(this.project, materializeStudioProject({...project, document: this.project.document}, true));
     this.schedulePersist({ mode: "discrete", reason: "history.apply" });
     this.notifyListeners();
     return true;
@@ -314,11 +326,14 @@ export class StudioProjectSession {
       // the already-conflicting edit remains preserved in the recovery file.
       reconciled = reconcileStudioProject(beforeRecovery, this.project, reconciled.project, { preferLocalConflicts: true });
     }
-    this.replaceProject(project, { acceptedRawText: rawText, notifyListeners: false });
-    this.project = reconciled.project;
+    this.baseProject = cloneStudioProjectSnapshot(project);
+    updateStudioProjectIdentity(this.project, reconciled.project);
     this.projectFileWriteBlocked = false;
+    if (rawText !== null) this.markAcceptedProjectText(rawText);
     if (serializeStudioProject(this.project) !== serializeStudioProject(project)) {
       this.schedulePersist({ reason: "vault.sync" });
+    } else {
+      this.persistedRevision = this.dirtyRevision;
     }
     this.notifyListeners();
   }
@@ -452,9 +467,11 @@ export class StudioProjectSession {
     }
 
     if (this.saveTimer !== null) {
-      if (this.saveTimerMode === "continuous" && mode === "discrete") {
+      if (this.saveTimerMode === "continuous") {
+        // Coalesce an uninterrupted gesture into one authored transaction.
+        // Pointer-up supplies a discrete edit; typing settles after its pause.
         this.clearSaveTimer();
-        this.startSaveTimer("discrete");
+        this.startSaveTimer(mode);
       }
       return;
     }
@@ -496,37 +513,10 @@ export class StudioProjectSession {
     if (this.disposed) {
       return;
     }
-    let flushError: unknown = null;
-    try {
-      await this.flushPendingSaveWork({ force: true });
-    } catch (error) {
-      // A competing file edit can make the final canvas CAS fail. Stop further
-      // writes and preserve that canvas snapshot as Undo instead of dropping it
-      // during teardown.
-      flushError = error;
-      this.blockProjectFileWrites();
-    }
-    const needsRecovery = this.projectFileWriteBlocked && this.hasPendingLocalSaveWork();
-    if (needsRecovery) {
-      if (!this.options.saveBlockedProjectRecovery) {
-        throw flushError instanceof Error
-          ? flushError
-          : new Error("Studio could not preserve unsaved canvas work.");
-      }
-      // Recovery persistence is a close gate. If it fails, this session stays
-      // alive so the only remaining copy of the canvas is never discarded.
-      while (true) {
-        const recoveryRevision = this.dirtyRevision;
-        await this.options.saveBlockedProjectRecovery(this.projectPath, this.getProjectSnapshot());
-        if (this.dirtyRevision === recoveryRevision) break;
-      }
-    }
-    if (flushError) {
-      console.warn("[SystemSculpt Studio] Preserved a canvas version that lost a file-edit race", {
-        projectPath: this.projectPath,
-        error: flushError instanceof Error ? flushError.message : String(flushError),
-      });
-    }
+    // A failed close retains the session and its pending edits. There is no
+    // alternate authored document to fall back to.
+    await this.flushPendingSaveWork({ force: true });
+    if (this.hasPendingLocalSaveWork()) throw new Error("Studio still has unsaved edits. Retry saving before closing.");
     this.disposed = true;
     this.clearSaveTimer();
     this.listeners.clear();
@@ -591,10 +581,13 @@ export class StudioProjectSession {
       return;
     }
 
+    this.project.document = materializeStudioProject(this.project, this.restoreDeletedEntities).document;
     this.saveInFlight = true;
     const revisionToPersist = this.dirtyRevision;
     const snapshotToPersist = this.getProjectSnapshot();
     const baseToPersist = cloneStudioProjectSnapshot(this.baseProject);
+    const restoreDeletedEntities = this.restoreDeletedEntities;
+    this.restoreDeletedEntities = false;
     let expectedWriteSignature: string | null = null;
     const savePromise = (async () => {
       try {
@@ -604,14 +597,17 @@ export class StudioProjectSession {
             this.expectedProjectWriteSignatures,
             expectedWriteSignature
           );
-        }, baseToPersist);
+        }, baseToPersist, {restoreDeletedEntities});
         const persistedProject = result?.project || snapshotToPersist;
         if (result?.conflicts.length) this.conflictRecovery = { revision: (this.conflictRecovery?.revision || 0) + 1, project: snapshotToPersist, fields: result.conflicts };
         // An edit made while I/O was pending belongs to the next save. Rebase
         // only that new intent onto the committed result; never replace it with
         // the earlier snapshot or replay already accepted edits.
         const rebased = reconcileStudioProject(snapshotToPersist, this.project, persistedProject, { preferLocalConflicts: true }).project;
-        if (serializeStudioProject(rebased) !== serializeStudioProject(this.project)) this.project = rebased;
+        if (serializeStudioProject(rebased) !== serializeStudioProject(this.project)) {
+          updateStudioProjectIdentity(this.project, rebased);
+          this.notifyListeners({ kind: "project" });
+        }
         this.baseProject = cloneStudioProjectSnapshot(persistedProject);
         this.saveFailurePaused = false;
         if (expectedWriteSignature) {
@@ -626,6 +622,7 @@ export class StudioProjectSession {
         }
         this.persistedRevision = Math.max(this.persistedRevision, revisionToPersist);
       } catch (error) {
+        this.restoreDeletedEntities ||= restoreDeletedEntities;
         if (expectedWriteSignature) {
           this.expectedProjectWriteSignatures.delete(expectedWriteSignature);
         }

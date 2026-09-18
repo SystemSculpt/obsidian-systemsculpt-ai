@@ -17,7 +17,6 @@ import {
   captureStartupIdentity,
   expectProductionStartupIdentity,
 } from "./startup-identity-assertions";
-import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -106,12 +105,6 @@ describe("built bundle (main.js)", () => {
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     expect(() => require(BUNDLE_PATH)).not.toThrow();
-  });
-
-  it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const bundleModule = require(BUNDLE_PATH);
-    await exerciseBuiltStudioGenerations(bundleModule);
   });
 
   it("ships the executable minimal text-node output contract", async () => {

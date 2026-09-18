@@ -1,3 +1,6 @@
+import { reconcileStudioProject } from "./StudioProjectReconciliation";
+import { projectToEntities } from "./document/StudioProjectEntities";
+import type { StudioDocumentEdit } from "./document/StudioProjectDocument";
 import { studioAgentExecution, readStudioCommandExecution } from './StudioCommandExecution';
 import { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
 import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettings';
@@ -24,7 +27,6 @@ import {
   type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
-import { StudioProjectRecoveryStore } from "./persistence/StudioProjectRecoveryStore";
 import { StudioAgentReferenceFile } from "./StudioAgentReferenceFile";
 import { isBlanketCliCommandPattern, randomId } from "./utils";
 import type {
@@ -45,7 +47,7 @@ import {
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
-import { parseStudioProject, type StudioProjectParseContext } from "./schema";
+import { parseStudioProject, serializeStudioProject, type StudioProjectParseContext } from "./schema";
 import { STUDIO_PROJECT_SCHEMA_V2 } from "./types";
 import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import {
@@ -119,16 +121,16 @@ export class StudioService {
   private readonly runtime: StudioRuntime;
   readonly agentRuns: StudioAgentRuns;
   private readonly projectSessionManager = new StudioProjectSessionManager();
-  private readonly projectRecoveryStore: StudioProjectRecoveryStore;
   private readonly agentReferenceFile: StudioAgentReferenceFile;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
     this.projectStore = new StudioProjectStore(plugin.app);
-    this.projectRecoveryStore = new StudioProjectRecoveryStore(plugin.app.vault.adapter);
     this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin);
     this.agentRuns = new StudioAgentRuns(plugin, {
+      readDocument: path => this.readAgentDocument(path),
+      editDocument: (path, heads, edits) => this.editAgentDocument(path, heads, edits),
       startPeer: (path, nodeId, objective, parentRunId, assignmentId) => this.startAgentRun(path, nodeId, { objective, parentRunId, assignmentId }),
       workflowSpecification: async (projectPath, centerId, objective) => {
         const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
@@ -209,17 +211,15 @@ export class StudioService {
     const session = new StudioProjectSession({
       projectPath,
       project,
-      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject) => {
+      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject, intent) => {
         return this.projectStore.saveProject(nextProjectPath, nextProject, {
-          onBeforeProjectWrite, baseProject,
+          onBeforeProjectWrite, baseProject, restoreDeletedEntities: intent?.restoreDeletedEntities,
         });
       },
       readProjectRawText: async (nextProjectPath) => {
         return this.projectStore.readProjectRawText(nextProjectPath);
       },
-      saveBlockedProjectRecovery: async (_nextProjectPath, recoveryProject) => {
-        await this.preserveProjectRecovery(recoveryProject);
-      },
+
     });
     const rawText =
       typeof options?.acceptedRawText === "string"
@@ -252,17 +252,6 @@ export class StudioService {
     };
   }
 
-  async preserveProjectRecovery(project: StudioProjectV1): Promise<void> {
-    await this.projectRecoveryStore.save(project);
-  }
-
-  async consumeBlockedProjectRecovery(
-    projectId: string,
-    currentProject?: StudioProjectV1
-  ): Promise<StudioProjectV1 | null> {
-    return await this.projectRecoveryStore.consume(projectId, currentProject);
-  }
-
   /**
    * Retain a project session for a specific owner (usually a Studio view).
    * Every retain must be paired with exactly one releaseProjectSession call;
@@ -281,6 +270,38 @@ export class StudioService {
       const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
       await session.reconcileExternalProject(loaded.project, loaded.rawText);
     } : undefined);
+  }
+
+  /** Files are imported into document authority; views and editor lifetimes stay intact. */
+  async reconcileProjectFile(path: string, rawText?: string): Promise<{conflicts: string[]}> {
+    const session = this.getProjectSession(path);
+    await session?.waitForInFlightSave();
+    const result = rawText === undefined
+      ? await this.projectStore.refreshDocument(path)
+      : await this.projectStore.importProjectText(path, rawText);
+    if (session && !session.isDisposed()) {
+      await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+    }
+    return {conflicts: result.conflicts};
+  }
+
+  async readAgentDocument(path: string): Promise<unknown> {
+    path = this.requireProjectPath(path);
+    await this.getProjectSession(path)?.flushPendingSaveWork({force: true});
+    const project = await this.projectStore.loadProject(path);
+    const readable = JSON.parse(serializeStudioProject(project));
+    delete readable.document;
+    return {heads: project.document?.heads, canvas: readable, entities: projectToEntities(project)};
+  }
+
+  async editAgentDocument(path: string, heads: string[], edits: StudioDocumentEdit[]): Promise<unknown> {
+    path = this.requireProjectPath(path);
+    if (!Array.isArray(heads) || !heads.length || !heads.every(head => typeof head === "string" && /^[0-9a-f]{64}$/.test(head))) throw new Error("Read the Studio revision before editing.");
+    const session = this.getProjectSession(path);
+    await session?.flushPendingSaveWork({force: true});
+    const result = await this.projectStore.editDocument(path, heads, edits);
+    await session?.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+    return {heads: result.project.document?.heads, entities: projectToEntities(result.project)};
   }
 
   async releaseProjectSession(path: string): Promise<void> {
@@ -403,23 +424,19 @@ export class StudioService {
     }
 
     const session = this.projectSessionManager.getSession(normalizedProjectPath);
-    const projectSnapshot = session?.getProjectSnapshot() || undefined;
-
     if (session) {
       await session.flushPendingSaveWork({ force: true });
     }
 
     const renamed = await this.projectStore.renameProject(normalizedProjectPath, safeName, {
-      project: projectSnapshot,
+      project: session?.getProjectSnapshot(),
     });
 
     const nextRawText = await this.projectStore.readProjectRawText(renamed.newPath);
     if (session) {
-      session.replaceProjectSnapshot(renamed.project, {
-        projectPath: renamed.newPath,
-        acceptedRawText: nextRawText,
-      });
+      session.moveProjectPath(renamed.newPath);
       await this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
+      await session.reconcileExternalProject(renamed.project, nextRawText);
     }
 
     return renamed;
@@ -429,7 +446,6 @@ export class StudioService {
     oldPath: string;
     newPath: string;
     project: StudioProjectV1;
-    replacedCanvasProject: StudioProjectV1 | null;
   }> {
     const oldPath = normalizeStudioProjectPath(oldProjectPath);
     const newPath = normalizeStudioProjectPath(newProjectPath);
@@ -479,18 +495,14 @@ export class StudioService {
         );
       }
     }
-    const replacedCanvasProject =
-      !fileContainsLastSavedCanvas && session.hasPendingLocalSaveWork()
-        ? currentCanvas
-        : null;
-    if (replacedCanvasProject) {
-      // Content changed as well as the path. Preserve the canvas before the
-      // file wins so a failed recovery write blocks the transition.
-      await this.preserveProjectRecovery(replacedCanvasProject);
-    }
+    await session.waitForInFlightSave();
+    const editing = session.getEditingSnapshot();
+    const merged = reconcileStudioProject(editing.base, editing.project, lintResult.project, {preferLocalConflicts: true}).project;
+    session.moveProjectPath(newPath);
+    await this.projectSessionManager.moveSession(oldPath, newPath);
     const fileName = newPath.slice(newPath.lastIndexOf("/") + 1);
     const projectName = fileName.slice(0, -".systemsculpt".length) || lintResult.project.name;
-    const sourceProject = fileContainsLastSavedCanvas ? currentCanvas : lintResult.project;
+    const sourceProject = merged;
     const renamed = await this.projectStore.adoptVisibleProjectRename({
       oldPath,
       newPath,
@@ -505,12 +517,10 @@ export class StudioService {
       },
     });
     const nextRawText = await this.projectStore.readProjectRawText(renamed.newPath);
-    session.replaceProjectSnapshot(renamed.project, {
-      projectPath: renamed.newPath,
-      acceptedRawText: nextRawText,
-    });
-    await this.projectSessionManager.moveSession(renamed.oldPath, renamed.newPath);
-    return { ...renamed, replacedCanvasProject };
+    // Preserve edits that arrived while the filesystem rename was adopted.
+    session.mutate("project.rename", current => { current.name = projectName; });
+    await session.reconcileExternalProject(renamed.project, nextRawText);
+    return { ...renamed, project: session.getProjectSnapshot() };
   }
 
   async saveProject(projectPath: string, project: StudioProjectV1): Promise<void> {
@@ -521,10 +531,7 @@ export class StudioService {
       return;
     }
     const rawText = await this.projectStore.readProjectRawText(normalizedProjectPath);
-    session.replaceProjectSnapshot(saved.project, {
-      projectPath: normalizedProjectPath,
-      acceptedRawText: rawText,
-    });
+    await session.reconcileExternalProject(saved.project, rawText);
   }
 
   lintProjectText(rawText: string, context?: StudioProjectParseContext): StudioProjectLintResult {
@@ -747,6 +754,7 @@ export class StudioService {
     this.runtime.dispose();
     this.apiAdapter.dispose();
     await this.projectSessionManager.closeAll();
+    await this.projectStore.dispose();
   }
 
   listNodeDefinitions() {

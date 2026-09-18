@@ -121,8 +121,12 @@ export class StudioGraphHistory {
     const from = direction === "undo" ? this.undoEdits : this.redoEdits;
     const to = direction === "undo" ? this.redoEdits : this.undoEdits;
     const edit = from[from.length - 1];
-    const current = canvas ?? this.current;
-    if (!edit || !current) return null;
+    const liveCurrent = canvas ?? this.current;
+    if (!edit || !liveCurrent) return null;
+    // Restoring now patches the shared project identity in place so mounted
+    // cards keep stable entity handles. Freeze the inverse before restore;
+    // otherwise that in-place patch also mutates the redo snapshot.
+    const current = snapshot(liveCurrent.project, liveCurrent.selectedNodeIds);
     const target = direction === "undo" ? edit.before : edit.after;
     const base = direction === "undo" ? edit.after : edit.before;
     const candidate = rebase(base, target, current);
