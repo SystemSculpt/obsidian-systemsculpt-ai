@@ -89,6 +89,8 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   onCreateTextNodeAtPosition: (position: { x: number; y: number }) => void;
   /** Active gestures and native editors keep ownership of their mounted card. */
   shouldPreserveNodeElement?: (nodeId: string) => boolean;
+  /** Text cards mount their editor; entering or leaving edit mode is a card transition. */
+  isTextNodeEditing?: (nodeId: string) => boolean;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
@@ -112,6 +114,7 @@ function studioNodeContentSignature(
     outputs: options.getNodeRunState(node.id).outputs,
     busy: options.busy,
     nodeDetailMode: options.nodeDetailMode,
+    editing: options.isTextNodeEditing?.(node.id) === true,
   });
 }
 
@@ -487,6 +490,7 @@ export function renderStudioGraphWorkspace(
   const cardHandles = new Map<string, StudioGraphNodeCardHandle>();
   const nodeSignatures = new Map<string, string>();
   const nodeStructureSignatures = new Map<string, string>();
+  const nodeEditing = new Map<string, boolean>();
   const editorBases = new WeakMap<object, StudioProjectV1>();
   const mountCard = (node: StudioProjectV1["graph"]["nodes"][number], renderOptions: StudioGraphWorkspaceRendererOptions): StudioGraphNodeCardHandle => {
     const inboundEdges = renderOptions.currentProject!.graph.edges
@@ -535,6 +539,7 @@ export function renderStudioGraphWorkspace(
       nodeActivity: renderOptions.getNodeActivity?.(node.id),
     });
     cardHandles.set(node.id, handle);
+    nodeEditing.set(node.id, renderOptions.isTextNodeEditing?.(node.id) === true);
     nodeSignatures.set(node.id, studioNodeContentSignature(node, renderOptions));
     nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, renderOptions));
     return handle;
@@ -581,6 +586,7 @@ export function renderStudioGraphWorkspace(
       cardHandles.delete(nodeId);
       nodeSignatures.delete(nodeId);
       nodeStructureSignatures.delete(nodeId);
+      nodeEditing.delete(nodeId);
       graphInteraction.onNodeRemoved(nodeId);
       registrationsChanged = true;
     }
@@ -600,15 +606,18 @@ export function renderStudioGraphWorkspace(
       }
       const signature = studioNodeContentSignature(node, next);
       if (nodeSignatures.get(node.id) === signature) continue;
+      // Entering or leaving text editing swaps preview for editor: remount even while focused or dragging.
+      const editing = next.isTextNodeEditing?.(node.id) === true;
+      const editingChanged = nodeEditing.get(node.id) !== editing;
       const active = existing.element.ownerDocument.activeElement;
       const titleInput = existing.element.querySelector<HTMLInputElement>(".ss-studio-node-title-input");
       if (titleInput && active !== titleInput) titleInput.value = node.title;
       const structureSignature = studioNodeStructureSignature(node, next);
-      if (nodeStructureSignatures.get(node.id) === structureSignature) {
+      if (!editingChanged && nodeStructureSignatures.get(node.id) === structureSignature) {
         nodeSignatures.set(node.id, signature);
         continue;
       }
-      if ((active && existing.element.contains(active)) || preserveForGesture) continue;
+      if (!editingChanged && ((active && existing.element.contains(active)) || preserveForGesture)) continue;
       const replacement = mountCard(node, next);
       existing.element.replaceWith(replacement.element);
       existing.dispose();
@@ -667,6 +676,7 @@ export function renderStudioGraphWorkspace(
       cardHandles.clear();
       nodeSignatures.clear();
       nodeStructureSignatures.clear();
+      nodeEditing.clear();
     },
   };
 }

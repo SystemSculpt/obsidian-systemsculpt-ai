@@ -5,6 +5,7 @@ import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract
 import type { StudioProjectV1 } from "../types";
 import type { StudioProjectReconciliation } from "../StudioProjectReconciliation";
 import { resolveStudioEntry } from "../StudioEntry";
+import { deriveStudioPolicyPath } from "../paths";
 import { entitiesToProject, projectToEntities } from "./StudioProjectEntities";
 import { StudioCollaborationScope, releaseStudioCollaboration, createStudioCollaboration, loadStudioCollaboration, serializeStudioCollaboration, studioCollaborationEntities, mergeStudioCollaboration, changeStudioCollaboration, studioCollaborationAt, type StudioCollaborativeState } from "./StudioCollaborativeDocument";
 import { writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
@@ -48,6 +49,8 @@ export class StudioProjectDocument {
   private async import(raw: string): Promise<Accepted> {
     assertValidStudioProjectAgentDocumentStructure(JSON.parse(raw));
     const candidate = parseStudioProject(raw, {projectPath: this.path});
+    // Grants belong to the file's own location; an authored reference cannot select another project's policy.
+    candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
     validateStudioProjectForAgentEdit(candidate);
     const previous = this.cache.get(this.path);
     if (previous && previous.template.projectId !== candidate.projectId) throw new Error("The edited file belongs to another Studio project.");

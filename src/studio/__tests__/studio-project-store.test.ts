@@ -353,6 +353,32 @@ describe("Studio concurrent workspace writers", () => {
     expect([...files.keys()].some(file => file.startsWith(".systemsculpt/studio/recovery/"))).toBe(false);
   });
 
+  it("lets a user reconnect the same ports after a saved disconnection", async () => {
+    const { store, path, project } = await workspace();
+    const text = (id: string) => ({ id, kind: "studio.text", version: "1.0.0", title: id, position: { x: 0, y: 0 }, config: { value: id } });
+    project.graph.nodes.push(text("a"), { ...text("b"), kind: "studio.text_output", config: {} });
+    const connect = () => ({ id: `edge_${Math.random().toString(16).slice(2)}`, fromNodeId: "a", fromPortId: "text", toNodeId: "b", toPortId: "text" });
+    project.graph.edges = [connect()];
+    let saved = (await store.saveProject(path, project)).project;
+    expect(saved.graph.edges).toHaveLength(1);
+    saved = cloneStudioProjectSnapshot(saved); saved.graph.edges = [];
+    saved = (await store.saveProject(path, saved)).project;
+    expect(saved.graph.edges).toHaveLength(0);
+    saved = cloneStudioProjectSnapshot(saved); saved.graph.edges = [connect()];
+    saved = (await store.saveProject(path, saved)).project;
+    expect(saved.graph.edges.map(edge => `${edge.fromNodeId}->${edge.toNodeId}`)).toEqual(["a->b"]);
+    expect((await store.loadProject(path, { forceReload: true })).graph.edges).toHaveLength(1);
+  });
+
+  it("binds grants to the file's own location instead of an authored policy reference", async () => {
+    const { store, files, path } = await workspace();
+    const foreign = JSON.parse(files.get(path)!) as Record<string, unknown>;
+    delete foreign.document;
+    files.set(path, `${JSON.stringify({ ...foreign, schema: "studio.project.v1", projectId: foreign.id, name: foreign.name, createdAt: "2026-09-17T00:00:00.000Z", updatedAt: "2026-09-17T00:00:00.000Z", engine: { apiMode: "systemsculpt_only", minPluginVersion: "0.0.0" }, graph: { nodes: [], edges: [], entryNodeIds: [], groups: [] }, permissionsRef: { policyVersion: 1, policyPath: "Studio/Other.systemsculpt-assets/policy/grants.json" }, settings: { runConcurrency: "adaptive", defaultFsScope: "vault", retention: { maxRuns: 10, maxArtifactsMb: 10 } }, migrations: { projectSchemaVersion: "1.0.0", applied: [] } }, null, 2)}\n`);
+    const opened = await store.loadProject(path, { forceReload: true });
+    expect(opened.permissionsRef.policyPath).toBe(deriveStudioPolicyPath(path));
+  });
+
   it("keeps both node results when parallel runs publish caches from the same starting snapshot", async () => {
     const { store, path, project } = await workspace();
     const cache = (id: string) => new TextEncoder().encode(JSON.stringify({ schema: "studio.node-cache.v1", projectId: project.projectId, updatedAt: "2026-09-09T00:00:00.000Z", entries: { [id]: { nodeId: id, runId: `run_${id}`, updatedAt: "2026-09-09T00:00:00.000Z", outputs: { text: id } } } }));

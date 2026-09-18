@@ -74,7 +74,9 @@ export function changeStudioCollaboration(
     for (const id of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
       if (!own(after, id)) { draft.deleted[id] = true; continue; }
       if (!own(before, id)) {
-        if (draft.deleted[id] && !options?.restoreDeletedEntities) throw new Error("Deleted nodes require an explicit Undo or restore.");
+        // Edges and arrows are keyed by their endpoints: reconnecting the same ports is a new authored
+        // connection, so only identity-bearing entities keep their deletion until an explicit restore.
+        if (draft.deleted[id] && !options?.restoreDeletedEntities && !/^(edge|arrow):/.test(id)) throw new Error("Deleted nodes require an explicit Undo or restore.");
         draft.entities[id] = clone(after[id]);
         if (own(draft.deleted, id)) draft.deleted[id] = false;
       } else if (draft.entities[id]) patch(draft.entities[id], before[id], after[id], ["entities", id]);

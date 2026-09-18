@@ -3178,6 +3178,7 @@ export class SystemSculptStudioView extends ItemView {
       },
       pathBrowseOptions: this.pathBrowseOptions(),
       resolveNodeBadge: (node) => this.resolveNodeCardBadge(node),
+      isTextNodeEditing: (nodeId) => this.textEdits.isEditing(nodeId),
       shouldPreserveNodeElement: (nodeId) =>
         this.nodeDragInProgress && this.graphInteraction.isNodeSelected(nodeId),
     };

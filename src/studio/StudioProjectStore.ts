@@ -60,10 +60,10 @@ export class StudioProjectStore {
     return this.exclusive("create-project", async () => {
     const desired = normalizeStudioProjectPath(options.projectPath?.trim() || `${DEFAULT_STUDIO_PROJECTS_DIR}/${options.name.trim() || "Untitled"}.systemsculpt`);
     let path = desired;
-    for (let suffix = 2; await this.app.vault.adapter.exists(path) || await this.app.vault.adapter.exists(deriveStudioAssetsDir(path)); suffix++) path = desired.replace(/\.systemsculpt$/, ` (${suffix}).systemsculpt`);
+    for (let suffix = 2; await this.app.vault.adapter.exists(path) || await this.app.vault.adapter.exists(deriveStudioAssetsDir(path)); suffix++) path = desired.replace(/\.systemsculpt$/i, ` (${suffix}).systemsculpt`);
     const project = createEmptyStudioProject({...options, policyPath: deriveStudioPolicyPath(path)});
     await this.document(path).forget();
-    await this.write(path, encoder.encode(serializeStudioProject(project)));
+    await this.write(path, encoder.encode(serializeStudioProject(project)), {exclusive: true});
     return {path, project: await this.loadProject(path)};
     });
   }
@@ -125,9 +125,11 @@ export class StudioProjectStore {
     if (await this.app.vault.adapter.exists(path)) return true;
     return false;
   }
-  private async write(path: string, bytes: Uint8Array): Promise<void> {
+  private async write(path: string, bytes: Uint8Array, options?: {exclusive?: boolean}): Promise<void> {
     const parts = path.split("/"); parts.pop(); let current = "";
     for (const part of parts) { current = current ? `${current}/${part}` : part; if (!await this.app.vault.adapter.exists(current)) { try { await this.app.vault.adapter.mkdir(current); } catch (error) { if (!await this.app.vault.adapter.exists(current)) throw error; } } }
+    // Re-check immediately before publishing: a sync client may have created the destination meanwhile.
+    if (options?.exclusive && await this.app.vault.adapter.exists(path)) throw new Error("A file appeared at the new Studio project path. Choose another name.");
     await this.app.vault.adapter.writeBinary(path, bytes.slice().buffer);
   }
   private supportPath(projectPath: string, relative: string): string {

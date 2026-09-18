@@ -76,6 +76,33 @@ describe("persistent Studio graph workspace", () => {
     expect(document.activeElement).toBe(input);
   });
 
+  it("remounts a mounted text card when it enters and leaves edit mode", () => {
+    const text: StudioNodeInstance = { ...node("note"), kind: "studio.text", config: { value: "Hello" } };
+    let editing = false;
+    const initial = options(project([text]));
+    initial.isTextNodeEditing = () => editing;
+    initial.takeTextNodeEditorMountState = () => ({ isEditing: editing, shouldAutoFocus: false });
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const preview = initial.root.querySelector<HTMLElement>('[data-node-id="note"]')!;
+    expect(preview.querySelector(".ss-studio-text-node-editor")).toBeNull();
+    preview.tabIndex = 0;
+    preview.focus();
+
+    editing = true;
+    expect(handle.refresh(initial)).toBe(true);
+    const editingCard = initial.root.querySelector<HTMLElement>('[data-node-id="note"]')!;
+    expect(editingCard).not.toBe(preview);
+    expect(editingCard.querySelector(".ss-studio-text-node-editor")).not.toBeNull();
+
+    editing = false;
+    expect(handle.refresh(initial)).toBe(true);
+    const restored = initial.root.querySelector<HTMLElement>('[data-node-id="note"]')!;
+    expect(restored).not.toBe(editingCard);
+    expect(restored.querySelector(".ss-studio-text-node-editor")).toBeNull();
+    expect(initial.root.querySelectorAll('[data-node-id="note"]')).toHaveLength(1);
+  });
+
   it("does not overwrite gesture-owned geometry during an incoming refresh", () => {
     const initial = options(project([node("dragging", 10)]));
     document.body.appendChild(initial.root);
