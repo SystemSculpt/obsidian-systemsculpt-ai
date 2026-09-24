@@ -232,12 +232,11 @@ export class PluginLogger {
     if (thinAgentFailure || entry.context?.source === "AgentLifecycle") {
       // Thin-agent diagnostics are already durably persisted here and, when
       // connected, emitted through the strict client-diagnostic contract.
-      // Sending them through patched console and ErrorCollector would create
-      // duplicate entries and reintroduce arbitrary Error messages/stacks.
+      // Echoing them to the console would reintroduce arbitrary Error
+      // messages and stacks.
       return entry;
     }
     this.emitToConsole(entry, error);
-    this.forwardToCollector(entry, error);
     return entry;
   }
 
@@ -441,19 +440,6 @@ export class PluginLogger {
     }
     const method = resolveConsoleMethod(entry.level);
     method(...parts);
-  }
-
-  private forwardToCollector(entry: PluginLogEntry, error?: unknown) {
-    const collector = this.plugin.getErrorCollector();
-    if (!collector) {
-      return;
-    }
-    collector.captureLog(
-      entry.level === "debug" ? "debug" : entry.level,
-      entry.context?.source || "SystemSculpt",
-      entry.message,
-      error && error instanceof Error ? error.stack : undefined
-    );
   }
 }
 

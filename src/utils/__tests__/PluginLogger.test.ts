@@ -38,7 +38,6 @@ describe("PluginLogger", () => {
           },
         },
       },
-      getErrorCollector: jest.fn(() => null),
     };
 
     consoleSpy = {
@@ -816,9 +815,7 @@ describe("PluginLogger", () => {
       expect(entries[0].error).toEqual({ message: "String error" });
     });
 
-    it("persists one bounded thin-agent failure without raw error or collector fanout", async () => {
-      const mockCollector = { captureLog: jest.fn() };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
+    it("persists one bounded thin-agent failure without raw error or console fanout", async () => {
       const hostileCanaries = [
         "PROMPT_CANARY_01",
         "CONTENT_CANARY_02",
@@ -876,7 +873,6 @@ describe("PluginLogger", () => {
         error: undefined,
       }]);
       expect(consoleSpy.error).not.toHaveBeenCalled();
-      expect(mockCollector.captureLog).not.toHaveBeenCalled();
 
       await logger.flushNow();
       const persisted = mockStorage.appendToFile.mock.calls[0][2];
@@ -900,7 +896,6 @@ describe("PluginLogger", () => {
       const surfaces = [
         persisted,
         JSON.stringify(logger.getRecentEntries()),
-        JSON.stringify(mockCollector.captureLog.mock.calls),
         JSON.stringify(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)),
       ].join("\n");
       for (const canary of hostileCanaries) {
@@ -943,8 +938,6 @@ describe("PluginLogger", () => {
     });
 
     it("bounds a hostile plain-object failure across every diagnostic surface", async () => {
-      const mockCollector = { captureLog: jest.fn() };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
       const hostileCanaries = [
         "PLAIN_PROMPT_CANARY_11",
         "PLAIN_CONTENT_CANARY_12",
@@ -996,7 +989,6 @@ describe("PluginLogger", () => {
         },
         error: undefined,
       })]);
-      expect(mockCollector.captureLog).not.toHaveBeenCalled();
       expect(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)).toEqual([]);
 
       await logger.flushNow();
@@ -1019,7 +1011,6 @@ describe("PluginLogger", () => {
       const surfaces = [
         persisted,
         JSON.stringify(logger.getRecentEntries()),
-        JSON.stringify(mockCollector.captureLog.mock.calls),
         JSON.stringify(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)),
       ].join("\n");
       for (const canary of hostileCanaries) {
@@ -1223,30 +1214,6 @@ describe("PluginLogger", () => {
 
       const entries = logger.getRecentEntries();
       expect(entries[0].context?.metadata).toEqual({ note: "metadata_unserializable" });
-    });
-  });
-
-  describe("error collector forwarding", () => {
-    it("forwards logs to error collector when available", () => {
-      const mockCollector = {
-        captureLog: jest.fn(),
-      };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
-
-      logger.error("Test error", new Error("Test"));
-
-      expect(mockCollector.captureLog).toHaveBeenCalledWith(
-        "error",
-        expect.any(String),
-        "Test error",
-        expect.any(String)
-      );
-    });
-
-    it("handles missing error collector", () => {
-      mockPlugin.getErrorCollector = jest.fn(() => null);
-
-      expect(() => logger.error("Test")).not.toThrow();
     });
   });
 

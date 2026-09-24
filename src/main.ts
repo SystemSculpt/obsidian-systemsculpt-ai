@@ -4,17 +4,6 @@
  */
 
 /**
- * Initialize error capture at the very beginning, before anything else loads
- */
-// Initialize plugin
-
-// @ts-ignore - Import ErrorCollectorService first, out of order
-import { ErrorCollectorService } from "./services/ErrorCollectorService";
-
-// Logging disabled – retain call for backwards compatibility only
-ErrorCollectorService.initializeEarlyLogsCapture();
-
-/**
  * SystemSculpt AI Plugin for Obsidian
  */
 import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
@@ -167,7 +156,6 @@ export default class SystemSculptPlugin extends Plugin {
   private safeMode = false;
   emitter: EventEmitter;
   directoryManager: DirectoryManager;
-  private errorCollectorService: ErrorCollectorService;
   public resumeChatService: ResumeChatService;
   public storage: StorageManager;
   private pluginLogger: PluginLogger | null = null;
@@ -373,13 +361,9 @@ export default class SystemSculptPlugin extends Plugin {
       });
       tracer.flushOpenPhases("plugin.onload-error");
 
-      if (this.errorCollectorService) {
-        this.errorCollectorService.captureError("Plugin load", error);
-      } else {
-        logger.error("Plugin load failed before error collector ready", error, {
-          source: "SystemSculptPlugin",
-        });
-      }
+      logger.error("Plugin load failed", error, {
+        source: "SystemSculptPlugin",
+      });
 
       this.enterSafeMode("core initialization failed");
     }
@@ -592,15 +576,6 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
-      id: "services.errorCollector",
-      label: "error collector",
-      run: () => {
-        this.errorCollectorService = new ErrorCollectorService(500);
-        this.errorCollectorService.enableCaptureAllLogs();
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
       id: "services.pluginUpdates",
       label: "plugin updates",
       optional: true,
@@ -728,12 +703,8 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private handleLifecycleFailure(event: LifecycleFailureEvent): void {
-    const label = event.label ?? event.taskId;
-    this.failures.push(label);
-    if (!event.optional && this.errorCollectorService) {
-      const error = event.error instanceof Error ? event.error : new Error(String(event.error ?? "Unknown error"));
-      this.errorCollectorService.captureError(`Lifecycle task failed: ${label}`, error);
-    }
+    // LifecycleCoordinator has already logged the failure.
+    this.failures.push(event.label ?? event.taskId);
   }
 
   private startCriticalAndDeferredPhases(tracer: InitializationTracer, logger: PluginLogger): void {
@@ -1701,7 +1672,6 @@ export default class SystemSculptPlugin extends Plugin {
       }
     };
 
-    await safely("error collector", () => this.errorCollectorService?.unload());
     await safely("resource monitor", () => {
       this.resourceMonitor?.stop();
       this.resourceMonitor = null;
@@ -1785,10 +1755,6 @@ export default class SystemSculptPlugin extends Plugin {
       });
     }
     return this.pluginLogger;
-  }
-
-  public getErrorCollector(): ErrorCollectorService | null {
-    return this.errorCollectorService ?? null;
   }
 
   public getResourceMonitor(): ResourceMonitorService | null {

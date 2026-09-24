@@ -332,7 +332,6 @@ function createPluginLogger(): Readonly<{
       getPath: (directory: string, file: string) => `${directory}/${file}`,
     },
     app: { vault: { adapter: { stat: async () => null } } },
-    getErrorCollector: () => null,
   };
   return {
     logger: new PluginLogger(plugin as never),
