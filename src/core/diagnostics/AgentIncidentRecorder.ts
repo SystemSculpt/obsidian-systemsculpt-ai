@@ -805,7 +805,7 @@ export class AgentIncidentRecorder {
 
   private createActive(correlation: SafeCorrelation): ActiveIncident {
     while (this.active.size >= AGENT_INCIDENT_MAX_ACTIVE_RUNS) {
-      const oldestKey = this.active.keys().next().value as string | undefined;
+      const oldestKey = this.active.keys().next().value;
       if (!oldestKey) break;
       this.active.delete(oldestKey);
     }

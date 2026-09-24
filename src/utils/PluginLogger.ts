@@ -254,7 +254,7 @@ export class PluginLogger {
     }
     this.recentThinAgentFailures.set(key, now);
     if (this.recentThinAgentFailures.size > MAX_RECENT_THIN_AGENT_FAILURES) {
-      const oldest = this.recentThinAgentFailures.keys().next().value as string | undefined;
+      const oldest = this.recentThinAgentFailures.keys().next().value;
       if (oldest) this.recentThinAgentFailures.delete(oldest);
     }
     return false;
