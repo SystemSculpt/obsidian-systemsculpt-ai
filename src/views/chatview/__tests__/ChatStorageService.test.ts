@@ -2,7 +2,12 @@
  * @jest-environment jsdom
  */
 import { App, Platform, TFile } from "obsidian";
-import { ChatStorageService, SavedChatCorruptedError } from "../ChatStorageService";
+import {
+  ChatStorageService,
+  isPathInDirectory,
+  resolveChatsDirectory,
+  SavedChatCorruptedError,
+} from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
 // Mock parseYaml and stringifyYaml
@@ -94,6 +99,41 @@ describe("ChatStorageService", () => {
       expect((service as any).chatDirectory).toBe("SystemSculpt/Chats");
     });
 
+    it("resolves a live directory for every operation", async () => {
+      let directory = "SystemSculpt/Chats";
+      const live = new ChatStorageService(mockApp, () => directory);
+
+      await live.saveChat("chat-live", []);
+      directory = "Archive/Chats";
+      await live.saveChat("chat-live", []);
+      await live.createChatExclusive("chat-new", []);
+      await live.loadChat("chat-live");
+
+      expect(mockVault.create.mock.calls.map(([path]: [string]) => path)).toEqual([
+        "SystemSculpt/Chats/chat-live.md",
+        "Archive/Chats/chat-live.md",
+        "Archive/Chats/chat-new.md",
+      ]);
+      expect(mockVault.getAbstractFileByPath).toHaveBeenLastCalledWith("Archive/Chats/chat-live.md");
+    });
+  });
+
+  describe("chats directory helpers", () => {
+    it("normalizes the configured folder and falls back to the default", () => {
+      expect(resolveChatsDirectory({ chatsDirectory: "Archive/Chats" })).toBe("Archive/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "Archive/Chats//" })).toBe("Archive/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "" })).toBe("SystemSculpt/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "/" })).toBe("SystemSculpt/Chats");
+      expect(resolveChatsDirectory({})).toBe("SystemSculpt/Chats");
+    });
+
+    it("checks containment on a path boundary", () => {
+      expect(isPathInDirectory("Chats/a.md", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats/Nested/a.md", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats-old/a.md", "Chats")).toBe(false);
+      expect(isPathInDirectory("Chatsa.md", "Chats")).toBe(false);
+    });
   });
 
   describe("saveChat", () => {

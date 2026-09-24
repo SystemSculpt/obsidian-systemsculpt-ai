@@ -1,15 +1,17 @@
 import { App, MarkdownView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
-import { SystemSculptSettings } from "../../types";
-import { ChatStorageService } from "./ChatStorageService";
+import {
+  ChatStorageService,
+  isPathInDirectory,
+  resolveChatsDirectory,
+} from "./ChatStorageService";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
 import { hasChatIdentityMetadata } from "./storage/ChatFrontmatterIdentity";
 
 export class ResumeChatService {
   private app: App;
   private plugin: SystemSculptPlugin;
-  private settings: SystemSculptSettings;
-  private chatStorage: ChatStorageService;
+  private readonly chatStorage: ChatStorageService;
   private readonly resumeActionByView = new Map<MarkdownView, {
     element: HTMLElement;
     filePath: string;
@@ -25,8 +27,13 @@ export class ResumeChatService {
     this.plugin = plugin;
     this.app = plugin.app;
     this.schedulerWindow = window;
-    this.settings = plugin.settings;
-    this.chatStorage = new ChatStorageService(this.app, this.settings.chatsDirectory || "SystemSculpt/Chats", plugin);
+    // SettingsManager replaces plugin.settings on every save, so the chats
+    // folder is resolved on each use instead of captured here.
+    this.chatStorage = new ChatStorageService(
+      this.app,
+      () => resolveChatsDirectory(this.plugin.settings),
+      plugin,
+    );
 
     // ResumeChatService initialized - silent success
 
@@ -155,8 +162,7 @@ export class ResumeChatService {
 
   public isChatHistoryFile(file: TFile): boolean {
     // Check if file is in the chats directory
-    const chatsDirectory = this.settings.chatsDirectory || "SystemSculpt/Chats";
-    if (!file.path.startsWith(chatsDirectory)) return false;
+    if (!isPathInDirectory(file.path, resolveChatsDirectory(this.plugin.settings))) return false;
 
     // Check if it's a markdown file
     if (!file.path.endsWith('.md')) return false;

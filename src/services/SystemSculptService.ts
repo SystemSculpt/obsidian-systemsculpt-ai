@@ -1,4 +1,3 @@
-import { SystemSculptSettings } from "../types";
 import {
   SystemSculptError,
   ERROR_CODES,
@@ -304,12 +303,14 @@ export type CreditsUsageHistoryPage = {
 };
 
 /**
- * Main service facade that delegates to specialized services
+ * Main service facade that delegates to specialized services.
+ *
+ * Settings are read from `plugin.settings` where they are used: the
+ * SettingsManager installs a new settings object on every save.
  */
 export class SystemSculptService {
-  private settings: SystemSculptSettings;
   private static instance: SystemSculptService | null = null;
-  public baseUrl: string;
+  public readonly baseUrl: string;
   private plugin: SystemSculptPlugin;
   private licenseService: LicenseService;
   private toolService: FirstPartyToolService;
@@ -317,10 +318,9 @@ export class SystemSculptService {
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
-    this.settings = plugin.settings;
-    
+
     // The endpoint is injected at build time; settings never own network routing.
-    this.baseUrl = this.getValidServerUrl();
+    this.baseUrl = SystemSculptEnvironment.resolveBaseUrl();
 
     this.licenseService = new LicenseService(plugin);
     this.toolService = new FirstPartyToolService(plugin, plugin.app);
@@ -330,12 +330,7 @@ export class SystemSculptService {
    * Get the singleton instance - use this instead of creating new instances
    */
   public static getInstance(plugin: SystemSculptPlugin): SystemSculptService {
-    if (!SystemSculptService.instance) {
-      SystemSculptService.instance = new SystemSculptService(plugin);
-    } else {
-      // Update settings if instance exists
-      SystemSculptService.instance.updateSettings(plugin.settings);
-    }
+    SystemSculptService.instance ??= new SystemSculptService(plugin);
     return SystemSculptService.instance;
   }
 
@@ -346,26 +341,8 @@ export class SystemSculptService {
     SystemSculptService.instance = null;
   }
 
-  /**
-   * Update settings on existing instance
-   */
-  public updateSettings(settings: SystemSculptSettings): void {
-    this.settings = settings;
-    this.refreshSettings();
-  }
-
-  private getValidServerUrl(): string {
-    return SystemSculptEnvironment.resolveBaseUrl();
-  }
-
-  private refreshSettings(): void {
-    this.settings = this.plugin.settings;
-    this.baseUrl = this.getValidServerUrl();
-  }
-
   // DELEGATE TO LICENSE SERVICE
   async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
-    this.refreshSettings(); // Ensure settings are current before validation
     return this.licenseService.validateLicenseDetailed(signal);
   }
 
@@ -373,9 +350,7 @@ export class SystemSculptService {
     onObservation?: (observation: CreditsBalanceObservation) => void;
     signal?: AbortSignal;
   }> = {}): Promise<CreditsBalanceSnapshot> {
-    this.refreshSettings();
-
-    const licenseKey = (this.settings.licenseKey || "").trim();
+    const licenseKey = (this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
       throw new SystemSculptError(
         "License key required to fetch credits balance.",
@@ -445,9 +420,7 @@ export class SystemSculptService {
     endpoints?: string[];
     signal?: AbortSignal;
   }): Promise<CreditsUsageHistoryPage> {
-    this.refreshSettings();
-
-    const licenseKey = (this.settings.licenseKey || "").trim();
+    const licenseKey = (this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
       throw new SystemSculptError(
         "License key required to fetch credits usage.",

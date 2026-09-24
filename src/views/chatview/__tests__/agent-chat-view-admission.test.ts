@@ -1786,6 +1786,21 @@ describe("AgentChatView composer admission", () => {
     });
   });
 
+  it("names the chat history file in the live chats folder", () => {
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      chatId: "2026-09-24 10-00-00",
+      plugin: { settings: { chatsDirectory: "SystemSculpt/Chats" } },
+    });
+    expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
+
+    view.plugin = { settings: { chatsDirectory: "Archive/Chats/" } };
+    expect(view.getExpectedChatHistoryFilePath()).toBe("Archive/Chats/2026-09-24 10-00-00.md");
+
+    view.plugin = { settings: { chatsDirectory: "" } };
+    expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
+  });
+
   it("does not pin a file merely because the agent read it", async () => {
     const pinnedFiles = new Set(["[[Projects/Plan.md]]"]);
     const contextManager = {

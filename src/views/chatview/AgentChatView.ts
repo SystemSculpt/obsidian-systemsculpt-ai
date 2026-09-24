@@ -24,7 +24,11 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
-import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
+import {
+  ChatStorageService,
+  resolveChatsDirectory,
+  SavedChatCorruptedError,
+} from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -505,7 +509,13 @@ export class AgentChatView extends ItemView {
       ? plugin.settings.thinAgentClientId!
       : protocolId("client");
     this.aiService = SystemSculptService.getInstance(plugin);
-    this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory, plugin);
+    // Resolved on each use: SettingsManager replaces plugin.settings on every
+    // save, and the chats folder may change while this view stays open.
+    this.chatStorage = new ChatStorageService(
+      plugin.app,
+      () => resolveChatsDirectory(this.plugin.settings),
+      plugin,
+    );
     this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter);
     this.queueRepository = new AgentQueueStateRepository(plugin.app.vault.adapter, this.attachmentStore);
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
@@ -1082,7 +1092,9 @@ export class AgentChatView extends ItemView {
   }
 
   public getExpectedChatHistoryFilePath(): string | null {
-    return this.chatId ? `${this.plugin.settings.chatsDirectory}/${this.chatId}.md` : null;
+    return this.chatId
+      ? `${resolveChatsDirectory(this.plugin.settings)}/${this.chatId}.md`
+      : null;
   }
 
   public getChatHistoryFilePath(): string | null {

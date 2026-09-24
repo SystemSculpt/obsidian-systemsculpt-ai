@@ -49,6 +49,26 @@ export class SavedChatCorruptedError extends Error {
   }
 }
 
+const DEFAULT_CHATS_DIRECTORY = "SystemSculpt/Chats";
+
+/**
+ * The configured chats folder without trailing slashes. An empty setting
+ * means the default folder, as the settings field promises.
+ */
+export function resolveChatsDirectory(
+  settings: Readonly<{ chatsDirectory?: unknown }>,
+): string {
+  const configured = typeof settings.chatsDirectory === "string"
+    ? settings.chatsDirectory.replace(/\/+$/u, "")
+    : "";
+  return configured || DEFAULT_CHATS_DIRECTORY;
+}
+
+/** Folder containment on a path boundary: `Chats-old/x.md` is not in `Chats`. */
+export function isPathInDirectory(path: string, directory: string): boolean {
+  return path === directory || path.startsWith(`${directory}/`);
+}
+
 const DESKTOP_CHAT_HISTORY_READ_CONCURRENCY = 8;
 const PORTABLE_CHAT_HISTORY_READ_CONCURRENCY = 1;
 const CHAT_HISTORY_READ_TIMEOUT_MS = 5_000;
@@ -156,7 +176,7 @@ function collectRawAttachmentRefKeys(content: string): ReadonlySet<string> | nul
 
 export class ChatStorageService {
   private app: App;
-  private chatDirectory: string;
+  private readonly resolveChatDirectory: () => string;
   private readonly attachmentStore: ChatAttachmentVaultStore | null;
   private readonly plugin: SystemSculptPlugin | null;
 
@@ -166,12 +186,25 @@ export class ChatStorageService {
    * through `app.plugins.plugins["systemsculpt-ai"]` to find our own instance
    * is a self-lookup through a private API, and it silently returns undefined
    * whenever the id or load order changes.
+   *
+   * Long-lived owners pass a resolver so the chats folder setting applies as
+   * soon as it changes; a string pins one folder.
    */
-  constructor(app: App, chatDirectory: string, plugin?: SystemSculptPlugin) {
+  constructor(
+    app: App,
+    chatDirectory: string | (() => string),
+    plugin?: SystemSculptPlugin,
+  ) {
     this.app = app;
-    this.chatDirectory = chatDirectory;
+    this.resolveChatDirectory = typeof chatDirectory === "function"
+      ? chatDirectory
+      : () => chatDirectory;
     this.attachmentStore = new ChatAttachmentVaultStore(app.vault.adapter);
     this.plugin = plugin ?? null;
+  }
+
+  private get chatDirectory(): string {
+    return this.resolveChatDirectory();
   }
 
   private normalizeTag(tag: string): string {
@@ -218,9 +251,10 @@ export class ChatStorageService {
     messages: ChatMessage[],
     options: SaveChatOptions = {},
   ): Promise<{ version: number } | null> {
-    const filePath = `${this.chatDirectory}/${chatId}.md`;
+    const chatDirectory = this.chatDirectory;
+    const filePath = `${chatDirectory}/${chatId}.md`;
     try {
-      const result = await this.saveChatSimple(chatId, messages, options, true);
+      const result = await this.saveChatSimple(chatId, messages, options, true, chatDirectory);
       return { version: result.version };
     } catch (error) {
       // Obsidian's vault.create is exclusive. A path that exists after the
@@ -238,9 +272,9 @@ export class ChatStorageService {
     messages: ChatMessage[],
     options: SaveChatOptions = {},
     exclusiveCreate: boolean = false,
+    chatDirectory: string = this.chatDirectory,
   ): Promise<{ filePath: string; version: number }> {
-    let filePath = `[unknown-path]/${chatId}.md`;
-    filePath = `${this.chatDirectory}/${chatId}.md`;
+    const filePath = `${chatDirectory}/${chatId}.md`;
       const now = new Date().toISOString();
       const vault = this.app.vault;
       let fileExists = false;
@@ -317,11 +351,11 @@ export class ChatStorageService {
 
       const directoryManager = this.plugin?.directoryManager;
       if (directoryManager) {
-        await directoryManager.ensureDirectoryByPath(this.chatDirectory);
+        await directoryManager.ensureDirectoryByPath(chatDirectory);
       } else {
-        const exists = await this.app.vault.adapter.exists(this.chatDirectory);
+        const exists = await this.app.vault.adapter.exists(chatDirectory);
         if (!exists) {
-          await this.app.vault.createFolder(this.chatDirectory);
+          await this.app.vault.createFolder(chatDirectory);
         }
       }
 
@@ -401,8 +435,9 @@ export class ChatStorageService {
   public async collectAttachmentRefKeys(): Promise<ReadonlySet<string> | null> {
     const adapter = this.app.vault.adapter;
     try {
-      if (!await adapter.exists(this.chatDirectory)) return new Set();
-      const directories = [this.chatDirectory];
+      const chatDirectory = this.chatDirectory;
+      if (!await adapter.exists(chatDirectory)) return new Set();
+      const directories = [chatDirectory];
       const chatFiles: string[] = [];
       while (directories.length > 0) {
         const directory = directories.pop()!;
