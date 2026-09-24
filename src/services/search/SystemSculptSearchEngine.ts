@@ -1,12 +1,13 @@
 import { App, EventRef, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../tools/vault/searchUtils";
+import { fuzzyMatchScore } from "../../tools/vault/searchUtils";
 import { containsNonAscii } from "../../utils/characterValidation";
 import { toError } from "../../utils/errors";
 import { extractCanvasText } from "./canvasTextExtractor";
 import { extractStudioText } from "./studioTextExtractor";
 import { resolveStudioEntry } from "../../studio/StudioEntry";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
+import { searchVaultExclusions, type VaultExclusions } from "./VaultExclusions";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
 export type SortMode = "relevance" | "recency";
@@ -641,7 +642,7 @@ export class SystemSculptSearchEngine {
       try {
         const resolved = await resolveStudioEntry({ read: async (path) => {
           const target = this.app.vault.getAbstractFileByPath(path);
-          if (!(target instanceof TFile) || shouldExcludeFromSearch(target, this.plugin)) {
+          if (!(target instanceof TFile) || searchVaultExclusions(this.plugin).isExcluded(target.path)) {
             throw new Error("Studio search source unavailable");
           }
           return this.app.vault.cachedRead(target);
@@ -677,51 +678,34 @@ export class SystemSculptSearchEngine {
   }
 
   private getEligibleFiles(): TFile[] {
-    const signature = this.computeEligibilitySignature();
-    if (this.eligibleFilesCache && this.eligibleFilesCacheSignature === signature) {
+    const exclusions = searchVaultExclusions(this.plugin);
+    if (this.eligibleFilesCache && this.eligibleFilesCacheSignature === exclusions.signature) {
       return this.eligibleFilesCache;
     }
 
     const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
     const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
-    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f));
-    this.eligibleFilesCacheSignature = signature;
+    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f, exclusions));
+    this.eligibleFilesCacheSignature = exclusions.signature;
     return this.eligibleFilesCache;
   }
 
   /**
-   * If the user's "Excluded files" filters changed since the last search,
-   * blow away the content/token indexes so the next search sees newly-included
-   * files and forgets newly-excluded ones. Track the new signature so
-   * subsequent changes are still detected — nulling it here previously let the
-   * guard short-circuit later edits until an unrelated event repopulated it.
+   * If the exclusion rules changed since the last search, blow away the
+   * content/token indexes so the next search sees newly-included files and
+   * forgets newly-excluded ones. The shared exclusion signature covers
+   * Obsidian's "Excluded files", which change without a plugin settings event.
+   * Track the new signature so subsequent changes are still detected — nulling
+   * it here previously let the guard short-circuit later edits until an
+   * unrelated event repopulated it.
    */
   private refreshEligibilityIfChanged(): void {
-    const signature = this.computeEligibilitySignature();
+    const signature = searchVaultExclusions(this.plugin).signature;
     if (this.eligibleFilesCacheSignature === null || this.eligibleFilesCacheSignature === signature) {
       return;
     }
     this.clearIndexes();
     this.eligibleFilesCacheSignature = signature;
-  }
-
-  /**
-   * Produce a cheap signature of the inputs that `isEligible` reads from outside
-   * our own settings. We snapshot Obsidian's `userIgnoreFilters` so the cached
-   * eligible-files list refreshes when the user edits core "Excluded files"
-   * without needing a plugin settings event.
-   */
-  private computeEligibilitySignature(): string {
-    try {
-      const vault = this.app.vault as unknown as { getConfig?: (key: string) => unknown };
-      const filters = typeof vault.getConfig === "function" ? vault.getConfig("userIgnoreFilters") : null;
-      if (Array.isArray(filters) && filters.length > 0) {
-        return filters.map((value) => String(value)).join("\u0000");
-      }
-    } catch {
-      // Vault config lookup may throw on some platforms; treat as "no filters".
-    }
-    return "";
   }
 
   private getMetadataTokenSnapshot(file: TFile): MetadataTokenSnapshot {
@@ -765,14 +749,14 @@ export class SystemSculptSearchEngine {
     return `${file.path}:${this.modifiedTime(file)}:${this.fileSize(file)}`;
   }
 
-  private isEligible(file: TFile): boolean {
+  private isEligible(file: TFile, exclusions: VaultExclusions = searchVaultExclusions(this.plugin)): boolean {
     if (!this.INDEXABLE_EXTENSIONS.has((file.extension ?? "").toLowerCase())) return false;
     if (this.isStudioFile(file) && (
       file.path.startsWith(".systemsculpt/studio/projects/") ||
       /\.studio\/views\//u.test(file.path) ||
       /\.systemsculpt-assets\//u.test(file.path)
     )) return false;
-    return !shouldExcludeFromSearch(file, this.plugin);
+    return !exclusions.isExcluded(file.path);
   }
 
   private stripFrontmatter(content: string): string {

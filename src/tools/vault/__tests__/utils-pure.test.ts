@@ -544,6 +544,10 @@ describe("shouldExcludeFromSearch", () => {
   const createMockPlugin = (overrides: any = {}) => ({
     settings: {
       chatsDirectory: "SystemSculpt/Chats",
+      savedChatsDirectory: "SystemSculpt/Saved Chats",
+      recordingsDirectory: "SystemSculpt/Recordings",
+      attachmentsDirectory: "SystemSculpt/Attachments",
+      extractionsDirectory: "SystemSculpt/Extractions",
       embeddingsExclusions: {
         ignoreChatHistory: true,
         respectObsidianExclusions: false,
@@ -582,14 +586,27 @@ describe("shouldExcludeFromSearch", () => {
     expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
   });
 
-  it("excludes SystemSculpt internal directories", () => {
+  it("excludes the configured recordings directory", () => {
     const plugin = createMockPlugin();
 
     const recordingsFile = new TFile({ path: "SystemSculpt/Recordings/audio.md" });
     expect(shouldExcludeFromSearch(recordingsFile, plugin)).toBe(true);
 
+    const moved = createMockPlugin({ settings: { recordingsDirectory: "Audio" } });
+    expect(shouldExcludeFromSearch(new TFile({ path: "Audio/memo.md" }), moved)).toBe(true);
+    expect(shouldExcludeFromSearch(recordingsFile, moved)).toBe(false);
+  });
+
+  it("treats the legacy system prompts folder as ordinary vault content", () => {
+    const plugin = createMockPlugin();
     const promptsFile = new TFile({ path: "SystemSculpt/System Prompts/prompt.md" });
-    expect(shouldExcludeFromSearch(promptsFile, plugin)).toBe(true);
+    expect(shouldExcludeFromSearch(promptsFile, plugin)).toBe(false);
+  });
+
+  it("excludes saved chats with chat history", () => {
+    const plugin = createMockPlugin();
+    const savedChat = new TFile({ path: "SystemSculpt/Saved Chats/export.md" });
+    expect(shouldExcludeFromSearch(savedChat, plugin)).toBe(true);
   });
 
   it("excludes files in configured exclusion folders", () => {
@@ -604,17 +621,19 @@ describe("shouldExcludeFromSearch", () => {
     expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
   });
 
-  it("excludes files matching configured patterns", () => {
+  it("excludes files matching configured glob patterns", () => {
     const plugin = createMockPlugin({
       settings: {
         embeddingsExclusions: {
-          patterns: ["\\.test\\."],
+          patterns: ["*.test.*", "Daily/**", "**/Archive/*", "*.PNG"],
         },
       },
     });
-    const file = new TFile({ path: "src/utils.test.ts" });
-    file.extension = "ts";
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
+    for (const path of ["src/utils.test.ts", "Daily/2026-09-24.md", "Projects/Archive/old.md", "Images/photo.png"]) {
+      expect(shouldExcludeFromSearch(new TFile({ path }), plugin)).toBe(true);
+    }
+    expect(shouldExcludeFromSearch(new TFile({ path: "Journal/Daily/entry.md" }), plugin)).toBe(false);
+    expect(shouldExcludeFromSearch(new TFile({ path: "Projects/Archive/Nested/old.md" }), plugin)).toBe(false);
   });
 
   it("does not exclude regular files", () => {
@@ -623,7 +642,7 @@ describe("shouldExcludeFromSearch", () => {
     expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
   });
 
-  it("handles invalid regex patterns gracefully", () => {
+  it("keeps regex syntax in glob patterns literal", () => {
     const plugin = createMockPlugin({
       settings: {
         embeddingsExclusions: {
@@ -632,15 +651,16 @@ describe("shouldExcludeFromSearch", () => {
       },
     });
     const file = new TFile({ path: "notes/file.md" });
-    // Should not throw, just skip invalid pattern
+    // An unbalanced bracket is a literal file name, never a broken regex.
     expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
+    expect(shouldExcludeFromSearch(new TFile({ path: "notes/[invalid" }), plugin)).toBe(true);
   });
 
-  it("skips likely unsafe regex patterns", () => {
+  it("does not evaluate regex-looking patterns as regexes", () => {
     const plugin = createMockPlugin({
       settings: {
         embeddingsExclusions: {
-          patterns: ["(a+)+b", "\\.tmp$"],
+          patterns: ["(a+)+b", "*.tmp"],
         },
       },
     });
@@ -664,18 +684,20 @@ describe("shouldExcludeFromSearch", () => {
     expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
   });
 
-  it("respects Obsidian native exclusions", () => {
+  it("respects Obsidian native exclusions with Obsidian's matching rules", () => {
     const plugin = createMockPlugin({
       app: {
         vault: {
-          getConfig: jest.fn().mockReturnValue(["^templates/"]),
+          getConfig: jest.fn().mockReturnValue(["Templates/", "/\\.excalidraw\\.md$/"]),
         },
       },
     });
     plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
 
-    const file = new TFile({ path: "templates/template.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
+    expect(shouldExcludeFromSearch(new TFile({ path: "templates/template.md" }), plugin)).toBe(true);
+    expect(shouldExcludeFromSearch(new TFile({ path: "Drawings/plan.excalidraw.md" }), plugin)).toBe(true);
+    // Plain entries are path prefixes, not substrings.
+    expect(shouldExcludeFromSearch(new TFile({ path: "Projects/Templates/x.md" }), plugin)).toBe(false);
   });
 
   it("handles getConfig throwing", () => {
@@ -699,7 +721,7 @@ describe("shouldExcludeFromSearch", () => {
     const plugin = createMockPlugin({
       app: {
         vault: {
-          getConfig: jest.fn().mockReturnValue(["[invalid"]),
+          getConfig: jest.fn().mockReturnValue(["/[invalid/"]),
         },
       },
     });

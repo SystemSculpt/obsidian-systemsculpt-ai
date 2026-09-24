@@ -32,4 +32,9 @@ Core controls:
 
 - Processing is background/on-demand, not a single one-shot job.
 - Exclusions can dramatically reduce indexed content.
+- The same exclusions hide notes from vault search and from the agent's
+  `list_items`, `find`, and `search` tools.
+- Excluded patterns are globs, such as `*.png`, `Daily/**`, or `**/Archive/*`.
+  A pattern without `/` matches file names. Obsidian exclusions follow
+  Obsidian's own rules.
 - If SystemSculpt updates the embeddings setup, a rebuild may be required.
