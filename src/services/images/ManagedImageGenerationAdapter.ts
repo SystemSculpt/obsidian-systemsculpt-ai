@@ -194,7 +194,11 @@ export class ManagedImageGenerationAdapter {
     }
     throwIfAborted(signal);
 
-    const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/images" });
+    const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/images" }, signal)
+      .catch((error: unknown) => {
+        throwIfAborted(signal);
+        throw error;
+      });
     throwIfAborted(signal);
     if (lease.outcome !== "allowed") throw new Error(`Managed image generation is unavailable (${lease.outcome}).`);
 

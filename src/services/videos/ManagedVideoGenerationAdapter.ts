@@ -133,7 +133,7 @@ export type ManagedVideoGenerationDependencies = Readonly<{
   /** hosted_videos discovery probe (fail-open tri-state). */
   availability: (signal?: AbortSignal) => Promise<{ canOpen: boolean; authoritative: boolean }>;
   /** admission-v1 license validation; video generation has no frozen-catalog lease. */
-  admission: () => Promise<{ outcome: string }>;
+  admission: (signal?: AbortSignal) => Promise<{ outcome: string }>;
   jobs: VideoJobs;
   /** Frame stills upload through the managed image input prepare endpoint. */
   prepareFrames: FramePrepare;
@@ -336,7 +336,10 @@ export class ManagedVideoGenerationAdapter {
     const availability = await this.dependencies.availability(signal);
     throwIfAborted(signal);
     if (!availability.canOpen) throw new Error("Managed video generation is not available on this server.");
-    const admission = await this.dependencies.admission();
+    const admission = await this.dependencies.admission(signal).catch((error: unknown) => {
+      throwIfAborted(signal);
+      throw error;
+    });
     throwIfAborted(signal);
     if (admission.outcome !== "allowed") throw new Error(`Managed video generation is unavailable (${admission.outcome}).`);
 

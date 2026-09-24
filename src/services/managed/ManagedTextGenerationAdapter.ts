@@ -384,6 +384,9 @@ export class ManagedTextGenerationAdapter {
     const lease = await this.dependencies.admission.acquireLease({
       alias: "systemsculpt/chat",
       requestContract: "text_generation",
+    }, operation.signal).catch((error: unknown) => {
+      throwIfAborted(operation.signal, operation.operationId, false);
+      throw error;
     });
     throwIfAborted(operation.signal, operation.operationId, false);
     if (lease.outcome !== "allowed") {

@@ -3,6 +3,10 @@ import type { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 export type HostedCatalogCacheOptions = Readonly<{ licenseKey?: () => string; now?: () => number }>;
 const CACHE_TTL_MS = 5 * 60_000;
 
+function cancelledLoad(): DOMException {
+  return new DOMException("The model catalog request was cancelled.", "AbortError");
+}
+
 /** One owner for server catalog requests, account changes, and invalidation. */
 export class HostedCatalogCache<T> {
   private license = "";
@@ -28,7 +32,23 @@ export class HostedCatalogCache<T> {
     this.pending = undefined;
   }
 
-  load(): Promise<T> {
+  /**
+   * Resolves the shared catalog read. A caller's signal only ends that
+   * caller's wait: the one in-flight read still serves every other caller and
+   * fills the cache, bounded by the request client's deadline.
+   */
+  load(signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) return Promise.reject(cancelledLoad());
+    const shared = this.shared();
+    if (!signal) return shared;
+    return new Promise<T>((resolve, reject) => {
+      const aborted = (): void => reject(cancelledLoad());
+      signal.addEventListener("abort", aborted, { once: true });
+      void shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+    });
+  }
+
+  private shared(): Promise<T> {
     const cached = this.peek();
     if (cached !== null) return Promise.resolve(cached);
     if (this.pending) return this.pending;

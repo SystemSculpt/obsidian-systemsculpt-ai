@@ -86,6 +86,22 @@ describe("HostedTransportAdapter", () => {
     expect((await adapter.getAdmission()).outcome).toBe("temporarily_unavailable");
   });
 
+  it("forwards the caller's signal to discovery and an explicit deadline to operations", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const controller = new AbortController();
+    request.mockResolvedValueOnce(response(200, fixture)).mockResolvedValueOnce(response(200, admission("allowed")));
+    await adapter.getCatalog(controller.signal);
+    await adapter.getAdmission(controller.signal);
+    await adapter.request({ path: "/op", method: "POST", body: {}, timeoutMs: 600_000 });
+    await adapter.request({ path: "/op", method: "GET" });
+
+    expect(request.mock.calls[0][0].signal).toBe(controller.signal);
+    expect(request.mock.calls[1][0].signal).toBe(controller.signal);
+    expect(request.mock.calls[2][0].timeoutMs).toBe(600_000);
+    // Without an override the request client applies its own default.
+    expect(request.mock.calls[3][0]).not.toHaveProperty("timeoutMs");
+  });
+
   it("adds operation contract headers and only explicit idempotency keys", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => " key " });
     await adapter.request({ path: "/op", method: "POST", body: { a: 1 }, capability: "embeddings", idempotencyKey: "idem" });

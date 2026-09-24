@@ -154,6 +154,25 @@ describe("managed document processing adapter contract", () => {
     expect(storage.files.size).toBe(0);
   });
 
+  it("stops waiting on admission when cancelled and reports its own cancellation", async () => {
+    const { adapter, admission, events, storage } = managedHarness();
+    const controller = new AbortController();
+    admission.acquireLease.mockImplementationOnce(((_operation: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as never);
+
+    const running = adapter.process(
+      { identity: "vault:documents/report.pdf", fingerprint: jest.fn(), load: jest.fn() },
+      { signal: controller.signal },
+    );
+    expect(admission.acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/documents" }, controller.signal);
+    controller.abort();
+
+    await expect(running).rejects.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+    expect(events).toEqual([]);
+    expect(storage.files.size).toBe(0);
+  });
+
   it("resumes only an acknowledged processing job with status then download and no dispatch", async () => {
     const { adapter, jobs, recovery } = managedHarness();
     let record = await recovery.createAdmitted({

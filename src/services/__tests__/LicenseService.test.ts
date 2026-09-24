@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "../../constants/api";
 import { LicenseService } from "../LicenseService";
+import { PlatformRequestTimeoutError } from "../PlatformRequestClient";
 
 const request = jest.fn();
 const requestClient = { request } as any;
@@ -173,6 +174,19 @@ describe("LicenseService website-owned validation", () => {
       outcome: "unavailable",
       isValid: false,
     });
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("forwards the caller's signal and keeps cached validity when the check times out", async () => {
+    const plugin = createPlugin({ licenseValid: true });
+    const controller = new AbortController();
+    request.mockRejectedValue(new PlatformRequestTimeoutError(30_000));
+
+    await expect(new LicenseService(plugin, requestClient).validateLicenseDetailed(controller.signal)).resolves.toEqual({
+      outcome: "unavailable",
+      isValid: true,
+    });
+    expect(request.mock.calls[0][0].signal).toBe(controller.signal);
     expect(plugin.updateSettings).not.toHaveBeenCalled();
   });
 

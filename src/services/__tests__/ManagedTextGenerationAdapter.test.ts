@@ -95,7 +95,7 @@ describe("ManagedTextGenerationAdapter", () => {
       text: "Generated text",
       finishReason: "stop",
     }));
-    expect(acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/chat", requestContract: "text_generation" });
+    expect(acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/chat", requestContract: "text_generation" }, undefined);
     expect(buildMessages).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith({
       path: "/api/plugin/chat/completions",
@@ -233,6 +233,24 @@ describe("ManagedTextGenerationAdapter", () => {
       retryable: false,
     });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting on admission when cancelled and reports a pre-dispatch local abort", async () => {
+    const { adapter, acquireLease, request } = harness();
+    const controller = new AbortController();
+    acquireLease.mockImplementationOnce((_operation: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }));
+    const running = adapter.generate({ ...operation(), signal: controller.signal });
+    await Promise.resolve();
+    expect(acquireLease).toHaveBeenCalledWith(expect.anything(), controller.signal);
+    controller.abort();
+    await expect(running).rejects.toMatchObject({
+      name: "AbortError",
+      code: "local_aborted",
+      ambiguous: false,
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("distinguishes a pre-dispatch local abort from server cancellation", async () => {

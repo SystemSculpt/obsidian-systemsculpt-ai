@@ -1,6 +1,7 @@
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import { ManagedAdmission } from "../ManagedAdmission";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
+import { PlatformRequestTimeoutError } from "../../PlatformRequestClient";
 
 const catalog = ManagedCapabilityCatalog.parse(fixture);
 
@@ -126,5 +127,54 @@ describe("ManagedAdmission", () => {
     now += 300_000;
     getCatalog.mockRejectedValue(new Error("offline"));
     expect((await admission.acquireLease({ alias: "systemsculpt/chat" })).outcome).toBe("temporarily_unavailable");
+  });
+
+  it("forwards the caller's signal to the catalog and license requests", async () => {
+    const controller = new AbortController();
+    await create().acquireLease({ alias: "systemsculpt/chat" }, controller.signal);
+    expect(getCatalog).toHaveBeenCalledWith(controller.signal);
+    expect(getAdmission).toHaveBeenCalledWith(controller.signal);
+  });
+
+  it("rejects with the caller's abort instead of a lease when cancelled mid-request", async () => {
+    // Like the platform request client: never settles until its signal aborts.
+    const abortable = (signal?: AbortSignal) => new Promise<never>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    });
+    const until = async (mock: jest.Mock) => {
+      for (let turn = 0; turn < 50 && mock.mock.calls.length === 0; turn += 1) await Promise.resolve();
+      expect(mock).toHaveBeenCalled();
+    };
+    getAdmission.mockImplementation(abortable);
+    const controller = new AbortController();
+    const admission = create();
+
+    const lease = admission.acquireLease({ alias: "systemsculpt/chat" }, controller.signal);
+    await until(getAdmission);
+    controller.abort();
+    await expect(lease).rejects.toMatchObject({ name: "AbortError" });
+
+    getCatalog.mockClear();
+    getCatalog.mockImplementation(abortable);
+    now += 300_000;
+    const second = new AbortController();
+    const refetch = admission.acquireLease({ alias: "systemsculpt/chat" }, second.signal);
+    await until(getCatalog);
+    second.abort();
+    await expect(refetch).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not contact the server for an already cancelled caller", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(create().acquireLease({ alias: "systemsculpt/chat" }, controller.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(getCatalog).not.toHaveBeenCalled();
+    expect(getAdmission).not.toHaveBeenCalled();
+  });
+
+  it("maps a request deadline to a retryable temporarily_unavailable lease", async () => {
+    getAdmission.mockRejectedValue(new PlatformRequestTimeoutError(30_000));
+    expect((await create().acquireLease({ alias: "systemsculpt/chat" })).outcome).toBe("temporarily_unavailable");
   });
 });

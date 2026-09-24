@@ -35,9 +35,10 @@ export class LicenseService {
   }
 
   /**
-   * Validate the current license key
+   * Validate the current license key. An aborted or timed-out check is
+   * "unavailable": it never downgrades the cached validity.
    */
-  public async validateLicenseDetailed(): Promise<LicenseValidationResult> {
+  public async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
     if (!this.licenseKey?.trim()) {
       if (this.plugin.settings.licenseValid) {
         await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
@@ -61,6 +62,7 @@ export class LicenseService {
         method: "GET",
         headers: headersToSend,
         cache: "no-store",
+        signal,
       });
       const payload = await this.readJson(response);
 
