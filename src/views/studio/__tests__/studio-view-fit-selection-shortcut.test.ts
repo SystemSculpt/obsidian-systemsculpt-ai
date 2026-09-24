@@ -4,7 +4,7 @@ import { App, Scope, type WorkspaceLeaf } from "obsidian";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
 type KeydownContext = {
-  isActiveStudioView: jest.Mock<boolean, []>;
+  ownsKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   fitSelectedGraphNodesInViewport: jest.Mock<boolean, []>;
   fitGraphOverviewInViewport: jest.Mock<boolean, []>;
@@ -36,14 +36,14 @@ type KeydownEventLike = {
   stopPropagation: jest.Mock<void, []>;
 };
 
-const handleWindowKeyDown = (SystemSculptStudioView as any).prototype.handleWindowKeyDown as (
+const handleCanvasKeyDown = (SystemSculptStudioView as any).prototype.handleCanvasKeyDown as (
   this: KeydownContext,
   event: KeyboardEvent
-) => void;
+) => boolean;
 
 function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
   return {
-    isActiveStudioView: jest.fn(() => true),
+    ownsKeyboardTarget: jest.fn(() => true),
     isEditableKeyboardTarget: jest.fn(() => false),
     fitSelectedGraphNodesInViewport: jest.fn(() => true),
     fitGraphOverviewInViewport: jest.fn(() => true),
@@ -86,28 +86,33 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     const app = new App();
     app.scope = new Scope();
     const view = new SystemSculptStudioView({ app } as WorkspaceLeaf, {} as any);
-    jest.spyOn(view as any, "isActiveStudioView").mockReturnValue(true);
+    document.body.appendChild(view.containerEl);
     const fit = jest.spyOn(view as any, "fitSelectedGraphNodesInViewport").mockReturnValue(true);
     const select = jest.spyOn((view as any).graphInteraction, "setSelectedNodeIds").mockImplementation(() => undefined);
     jest.spyOn(view as any, "currentProject", "get").mockReturnValue({ graph: { nodes: [] } });
     const scope = view.scope as unknown as {
       parent: Scope;
-      keys: { key: string; modifiers: string[]; func: (event: KeyboardEvent) => unknown }[];
+      keys: { key: string | null; modifiers: string[] | null; func: (event: KeyboardEvent) => unknown }[];
     };
-    const binding = scope.keys.find((entry) => entry.key === key)!;
-    const event = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
-
+    // One catch-all binding: canvas shortcuts win, anything unhandled falls through to app.scope.
     expect(scope.parent).toBe(app.scope);
-    expect(binding.modifiers).toEqual(["Mod"]);
+    expect(scope.keys).toHaveLength(1);
+    const binding = scope.keys[0];
+    expect(binding.modifiers).toBeNull();
+    expect(binding.key).toBeNull();
+
+    const event = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
+    document.body.dispatchEvent(event);
     expect(binding.func(event)).toBe(false);
-    (view as any).handleWindowKeyDown(event);
     expect(key === "f" ? fit : select).toHaveBeenCalledTimes(1);
 
+    const field = view.contentEl.createEl("textarea");
     const fieldEvent = new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
-    Object.defineProperty(fieldEvent, "target", { value: document.createElement("textarea") });
+    field.dispatchEvent(fieldEvent);
     expect(binding.func(fieldEvent)).toBeUndefined();
     expect(fieldEvent.defaultPrevented).toBe(false);
     expect(key === "f" ? fit : select).toHaveBeenCalledTimes(1);
+    view.containerEl.remove();
   });
 
   it.each(["metaKey", "ctrlKey"])("fits selected nodes with %s+F", (modifier) => {
@@ -116,7 +121,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
       key: "f", code: "KeyF", metaKey: false, shiftKey: false, [modifier]: true,
     });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).toHaveBeenCalledTimes(1);
     expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
@@ -128,7 +133,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     const context = createContext({ fitSelectedGraphNodesInViewport: jest.fn(() => false) });
     const event = createKeydownEvent({ key: "f", code: "KeyF", shiftKey: false });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitGraphOverviewInViewport).toHaveBeenCalledTimes(1);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -138,7 +143,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
     const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
     expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
@@ -146,11 +151,11 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
-  it.each(["a", "f"])("ignores Mod+%s outside the active Studio view", (key) => {
-    const context = createContext({ isActiveStudioView: jest.fn(() => false) });
+  it.each(["a", "f"])("ignores Mod+%s aimed outside the Studio view", (key) => {
+    const context = createContext({ ownsKeyboardTarget: jest.fn(() => false) });
     const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
     expect(context.fitGraphOverviewInViewport).not.toHaveBeenCalled();
@@ -164,7 +169,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
     });
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).toHaveBeenCalledTimes(1);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -178,7 +183,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
       code: "Numpad1",
     });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).toHaveBeenCalledTimes(1);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -199,7 +204,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
       shiftKey: false,
     });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.clipboardAndDropController.copySelectedGraphNodes).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
@@ -212,7 +217,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
       shiftKey: false,
     });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.fitSelectedGraphNodesInViewport).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();

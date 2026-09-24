@@ -75,7 +75,9 @@ While the Studio canvas is active:
 
 Text fields and embedded editors keep their normal Find and Select All shortcuts
 and native scrolling. `Mod+Shift+1` also fits selected nodes, including while
-editing a field.
+editing a field. Dialogs, menus, and other panels opened over the canvas keep
+their own keys and pastes: `Delete`, `Backspace`, and the tool keys pressed
+there never change the canvas.
 
 ## Diagnostics
 

@@ -5,6 +5,7 @@ import { inputNode } from "../../../studio/nodes/inputNode";
 import { StudioProjectSession } from "../../../studio/StudioProjectSession";
 import { reconcileStudioProject } from "../../../studio/StudioProjectReconciliation";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
+import { installObsidianKeymap } from "./studio-obsidian-keymap-test-helpers";
 
 it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %s across two views and persisted undo/redo", async mode => {
   const app = new App();
@@ -35,6 +36,8 @@ it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %
   const views = [new SystemSculptStudioView(new WorkspaceLeaf(app), plugin as any), new SystemSculptStudioView(new WorkspaceLeaf(app), plugin as any)];
   let active = views[0];
   jest.spyOn(app.workspace, "getActiveViewOfType").mockImplementation(() => active as any);
+  // Keys reach only the active view, through Obsidian's keymap and its view scope.
+  const keymap = installObsidianKeymap(app, () => active);
   try {
     for (const view of views) {
       Object.assign(view.contentEl, { onWindowMigrated: () => () => {} });
@@ -59,7 +62,7 @@ it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %
     if (mode === "untouched peer") {
       active = views[1];
       const event = new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true });
-      window.dispatchEvent(event);
+      document.body.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(false);
       await session.flushPendingSaveWork();
       expect(disk.graph.nodes[0].title).toBe("4");
@@ -75,21 +78,22 @@ it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %
       active = views[0];
     }
     const undo = new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true });
-    window.dispatchEvent(undo);
+    document.body.dispatchEvent(undo);
     expect(undo.defaultPrevented).toBe(true);
     expect(title(views[0]).value).toBe("3");
     expect(title(views[1]).value).toBe("3");
     await session.flushPendingSaveWork();
     expect(disk.graph.nodes[0].title).toBe("3");
     expect(title(views[0]).value).toBe("3");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true }));
     expect(title(views[0]).value).toBe("2");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     expect(title(views[0]).value).toBe("3");
     await session.flushPendingSaveWork();
     expect(disk.graph.nodes[0].title).toBe("3");
     expect(disk.graph.nodes[1].title).toBe(mode === "independent peer edit" ? "Peer edit" : "Before peer");
   } finally {
+    keymap.dispose();
     for (const view of views) { await view.onClose(); view.containerEl.remove(); }
     await session.close();
     hostPrototype.setState = originalSetState;

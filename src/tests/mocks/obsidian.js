@@ -783,6 +783,35 @@ class Scope {
   unregister(handler) {
     this.keys = this.keys.filter((entry) => entry !== handler);
   }
+
+  /**
+   * Mirrors Obsidian's dispatch: the first matching handler decides, `false`
+   * asks the keymap to prevent the event, and only an unhandled catch-all
+   * (null modifiers and key) falls through to the parent scope.
+   */
+  handleKey(event, info) {
+    for (const entry of this.keys) {
+      if (!scopeEntryMatches(entry, info)) continue;
+      const result = entry.func(event, info);
+      if (result !== undefined) return result;
+      if (entry.key !== null || entry.modifiers !== null) return result;
+    }
+    return this.parent ? this.parent.handleKey(event, info) : undefined;
+  }
+}
+
+function compileScopeModifiers(modifiers) {
+  const isMac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || "");
+  return modifiers
+    .map((modifier) => (modifier === "Mod" ? (isMac ? "Meta" : "Ctrl") : modifier))
+    .sort()
+    .join(",");
+}
+
+function scopeEntryMatches(entry, info) {
+  if (entry.modifiers !== null && compileScopeModifiers(entry.modifiers) !== info.modifiers) return false;
+  if (!entry.key) return true;
+  return entry.key === info.vkey || (Boolean(info.key) && entry.key.toLowerCase() === info.key.toLowerCase());
 }
 
 function arrayBufferToBase64(buffer) {

@@ -270,9 +270,6 @@ export class SystemSculptStudioView extends ItemView {
   private graphZoomGestureInFlight = false;
   private disposeVaultEvents: (() => void) | null = null;
   private readonly historyState = new StudioGraphHistory();
-  private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
-    this.handleWindowKeyDown(event);
-  };
 
   private get currentProject(): StudioProjectV1 | null {
     return this.projectSessionController.getProject();
@@ -300,15 +297,11 @@ export class SystemSculptStudioView extends ItemView {
       const projectPath = this.currentProjectPath;
       return projectPath ? this.plugin.getStudioService().restoreAssetFile(projectPath, path) : false;
     });
-    // View scopes run before Obsidian's global Find/Select All bindings.
-    // The window listener remains the fallback for the other canvas shortcuts.
+    // Obsidian routes keys to the active leaf's view scope before the global
+    // hotkeys in app.scope. Modals, menus and suggesters push their own scopes,
+    // so keys pressed there never reach the canvas. Unhandled keys fall through.
     this.scope = new Scope(this.app.scope);
-    for (const key of ["f", "a"]) {
-      this.scope.register(["Mod"], key, (event) => {
-        this.handleWindowKeyDown(event);
-        if (event.defaultPrevented) return false;
-      });
-    }
+    this.scope.register(null, null, (event) => (this.handleCanvasKeyDown(event) ? false : undefined));
     this.graphInteraction = new StudioGraphInteractionEngine({
       isBusy: () => this.busy,
       getCurrentProject: () => this.currentProject,
@@ -382,7 +375,7 @@ export class SystemSculptStudioView extends ItemView {
       refreshLeafDisplay: () => this.refreshLeafDisplay(),
     });
     this.clipboardAndDropController = new StudioClipboardAndDropController(this.app, {
-      isActive: () => this.isActiveStudioView(),
+      ownsEventTarget: (target) => this.isActiveStudioView() && this.ownsKeyboardTarget(target),
       isBusy: () => this.busy,
       isEditableTarget: (target) => this.isEditableKeyboardTarget(target),
       getCurrentProject: () => this.currentProject,
@@ -493,7 +486,6 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private unbindOwnerWindowEvents(): void {
-    this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown, true);
     this.clipboardAndDropController.unbindOwnerWindow();
     this.listenerWindow = null;
   }
@@ -503,7 +495,6 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     this.unbindOwnerWindowEvents();
-    ownerWindow.addEventListener("keydown", this.onWindowKeyDown, true);
     this.clipboardAndDropController.bindOwnerWindow(ownerWindow);
     this.listenerWindow = ownerWindow;
   }
@@ -526,6 +517,21 @@ export class SystemSculptStudioView extends ItemView {
 
   private isActiveStudioView(): boolean {
     return this.app.workspace.getActiveViewOfType(SystemSculptStudioView) === this;
+  }
+
+  /**
+   * Canvas keys and pastes belong to this view only when they target it. The
+   * canvas itself is not focusable, so a key pressed after clicking it
+   * targets the document body; anything focused elsewhere belongs to that
+   * surface.
+   */
+  private ownsKeyboardTarget(target: EventTarget | null): boolean {
+    const ownerDocument = this.containerEl.ownerDocument;
+    if (target === ownerDocument.body || target === ownerDocument.documentElement) {
+      return true;
+    }
+    // Duck-typed: nodes in a pop-out window fail a main-window instanceof check.
+    return Boolean(target && "nodeType" in target && this.containerEl.contains(target as Node));
   }
 
   private setHistoryCurrentSnapshot(project: StudioProjectV1, selectedNodeIds: string[]): void {
@@ -724,12 +730,13 @@ export class SystemSculptStudioView extends ItemView {
     );
   }
 
-  private handleWindowKeyDown(event: KeyboardEvent): void {
+  /** Returns true when the key was consumed as a canvas shortcut. */
+  private handleCanvasKeyDown(event: KeyboardEvent): boolean {
     if (event.defaultPrevented) {
-      return;
+      return false;
     }
-    if (!this.isActiveStudioView()) {
-      return;
+    if (!this.ownsKeyboardTarget(event.target)) {
+      return false;
     }
     const normalizedKey = String(event.key || "").toLowerCase();
     const normalizedCode = String(event.code || "").toLowerCase();
@@ -764,17 +771,17 @@ export class SystemSculptStudioView extends ItemView {
         event.preventDefault();
         event.stopPropagation();
       }
-      return;
+      return handled;
     }
 
     if (event.metaKey || event.ctrlKey || event.altKey) {
-      return;
+      return false;
     }
     if (this.busy || !this.currentProject) {
-      return;
+      return false;
     }
     if (editableTarget) {
-      return;
+      return false;
     }
 
     const canvasTool = event.isComposing
@@ -782,23 +789,23 @@ export class SystemSculptStudioView extends ItemView {
       : resolveStudioCanvasToolShortcut(normalizedKey, event.shiftKey);
     if (canvasTool) {
       if (this.activeCanvasTool === canvasTool) {
-        return;
+        return false;
       }
       event.preventDefault();
       event.stopPropagation();
       this.selectCanvasTool(canvasTool);
-      return;
+      return true;
     }
 
     if (normalizedKey !== "delete" && normalizedKey !== "backspace") {
-      return;
+      return false;
     }
 
     // One selection, one delete: a marquee that caught both layers removes both.
     const hasShapeSelection = this.shapeController.hasSelection();
     const selectedNodeIds = this.graphInteraction.getSelectedNodeIds();
     if (!hasShapeSelection && selectedNodeIds.length === 0) {
-      return;
+      return false;
     }
 
     event.preventDefault();
@@ -809,6 +816,7 @@ export class SystemSculptStudioView extends ItemView {
     if (selectedNodeIds.length > 0) {
       this.removeNodes(selectedNodeIds);
     }
+    return true;
   }
 
   private async insertVaultNoteNodes(
