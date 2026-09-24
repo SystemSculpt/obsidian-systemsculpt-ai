@@ -112,6 +112,9 @@ describe("ManagedJobClient exact wire contract", () => {
     const part = await client.documents.uploadPart("doc-1", 1, new Uint8Array(10).buffer); expect(part).toEqual({ partNumber: 1, etag: `"${"a".repeat(32)}"` }); expect(JSON.stringify(part)).not.toContain("signed");
     request.mockResolvedValueOnce(json({ result: { content: [], text: "x", markdown: "x", images: [], metadata: {} } }));
     expect((await client.documents.download("doc-1")).result.text).toBe("x");
+    // The inline result can be large, so its download outlasts the JSON default.
+    expect(request.mock.calls.at(-1)?.[0].timeoutMs).toBeGreaterThan(10 * 60_000);
+    expect(request.mock.calls.slice(0, -1).every(([input]) => input.timeoutMs === undefined)).toBe(true);
     request.mockResolvedValueOnce(json({ items: [{ job: imageJob(), outputs: [], usage: { raw_usd: 0.1, cost_source: "provider", estimated: false } }], next_before: null }));
     expect((await client.images.list()).items).toHaveLength(1);
   });

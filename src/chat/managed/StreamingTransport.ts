@@ -1,5 +1,6 @@
 import {
   getPlatformResponseDeliveryMode,
+  platformTransferTimeoutMs,
   type PlatformRequestClient,
   type PlatformResponseDeliveryMode,
 } from "../../services/PlatformRequestClient";
@@ -126,6 +127,9 @@ const ACCESS_REFRESH_MARGIN_MS = 5_000;
 const ACCESS_BACKGROUND_REFRESH_WINDOW_MS = 20_000;
 const MAX_BOOTSTRAP_RESPONSE_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+// A long history can approach the snapshot cap; its deadline admits that on a
+// slow link instead of the ordinary JSON exchange allowance.
+const SNAPSHOT_TIMEOUT_MS = platformTransferTimeoutMs(MAX_SNAPSHOT_BYTES);
 const MAX_EVENT_BYTES = 64 * 1024 * 1024;
 const MAX_SEGMENT_RECEIVED_BYTES = MAX_EVENT_BYTES;
 const MAX_SEGMENT_OBSERVATION_COUNT = 10_000;
@@ -446,6 +450,7 @@ implements AgentConnectionPort {
       url: `${this.options.baseUrl}${THIN_AGENT_MESSAGES_PATH}`,
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: SNAPSHOT_TIMEOUT_MS,
     });
     if (this.disposed || generation !== this.connectGeneration) return;
     if (!response.ok) {

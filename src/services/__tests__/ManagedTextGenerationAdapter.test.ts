@@ -1,6 +1,7 @@
 import capabilityFixture from "../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import routeFixture from "../../../testing/fixtures/managed/managed-text-generation-route-v1.json";
 import { ManagedCapabilityCatalog } from "../managed/ManagedCapabilityCatalog";
+import { PlatformRequestTimeoutError } from "../PlatformRequestClient";
 import {
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER,
@@ -111,6 +112,8 @@ describe("ManagedTextGenerationAdapter", () => {
         ],
       },
       signal: undefined,
+      // Generation runs inside this request; the JSON default would cut it off.
+      timeoutMs: 10 * 60_000,
     });
   });
 
@@ -215,6 +218,17 @@ describe("ManagedTextGenerationAdapter", () => {
     await expect(adapter.generate(operation())).rejects.toMatchObject({
       code: "ambiguous_outcome",
       operationId: "workflow:operation_1",
+      ambiguous: true,
+      retryable: false,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a request deadline after dispatch a durable ambiguous outcome", async () => {
+    const { adapter, request } = harness();
+    request.mockRejectedValueOnce(new PlatformRequestTimeoutError(10 * 60_000));
+    await expect(adapter.generate(operation())).rejects.toMatchObject({
+      code: "ambiguous_outcome",
       ambiguous: true,
       retryable: false,
     });

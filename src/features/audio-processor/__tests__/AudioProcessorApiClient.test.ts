@@ -1,5 +1,6 @@
 import {
   PlatformRequestClient,
+  platformTransferTimeoutMs,
   type PlatformRequestInput,
 } from "../../../services/PlatformRequestClient";
 import {
@@ -236,7 +237,10 @@ describe("AudioProcessorApiClient", () => {
       method: "GET",
       bodyEncoding: "raw",
       transport: "requestUrl",
+      // A note may approach its 32 MiB cap; the JSON default would cut it off.
+      timeoutMs: platformTransferTimeoutMs(32 * 1024 * 1024),
     }));
+    expect(requestClient.inputs[0]).not.toHaveProperty("timeoutMs");
   });
 
   it("rejects malformed plans and private signed URLs before upload", async () => {

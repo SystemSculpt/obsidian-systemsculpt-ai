@@ -6,6 +6,7 @@ import {
 } from "../StreamingTransport";
 import {
   PlatformRequestClient,
+  platformTransferTimeoutMs,
   type PlatformResponseDeliveryMode,
 } from "../../../services/PlatformRequestClient";
 
@@ -220,6 +221,21 @@ describe("AgentStreamingTransport", () => {
       streamingProbeUrl: "https://systemsculpt.test/api/plugin/connectivity",
       allowTransportFallback: false,
     });
+  });
+
+  it("sizes the snapshot deadline by its byte cap and never puts one on a turn stream", async () => {
+    const { transport, calls } = harness([
+      { type: "systemsculpt.agent.event.v1", version: 1, kind: "terminal" },
+    ]);
+
+    await transport.connect();
+    await transport.sendSubmit(submit("user_deadlines"));
+
+    const snapshotCall = calls.find((call) => String(call.url).includes("/get-messages"));
+    const turnCall = calls.find((call) => String(call.url).includes("/agent/turn"));
+    expect(snapshotCall?.timeoutMs).toBe(platformTransferTimeoutMs(64 * 1024 * 1024));
+    expect(turnCall).toMatchObject({ stream: true });
+    expect(turnCall).not.toHaveProperty("timeoutMs");
   });
 
   it("selects requestUrl once before a supported-host turn when the CORS probe fails", async () => {

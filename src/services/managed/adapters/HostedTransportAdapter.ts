@@ -212,6 +212,7 @@ export class HostedTransportAdapter {
       body: operation.body, stream: false, preserveResponseHeaders: true,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
+      ...(operation.timeoutMs !== undefined ? { timeoutMs: operation.timeoutMs } : {}),
       ...requestOverrides,
     });
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);
