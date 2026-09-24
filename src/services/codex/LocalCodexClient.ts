@@ -40,7 +40,7 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
         const activity = codexActivity(method, params); if (activity) callbacks.activity?.(activity);
         if (method === 'item/started' && isRecord(params.item) && params.item.type === 'fileChange') {
           approvalItems.set(String(params.item.id), params.item);
-          if (approvalItems.size > 16) approvalItems.delete(approvalItems.keys().next().value);
+          if (approvalItems.size > 16) approvalItems.delete(approvalItems.keys().next().value!);
         }
         if (method === 'turn/started' && isRecord(params.turn)) turnId = String(params.turn.id || '');
         if (method === 'item/agentMessage/delta' && typeof params.delta === 'string') { streamingText = (streamingText + params.delta).slice(-256_000); callbacks.text?.(streamingText); }

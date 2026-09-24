@@ -17,7 +17,7 @@ export function renderStudioCollection(root: HTMLElement, { node, outputs, scope
   const stateKey = `${scope}:${node.id}`;
   const state: ViewState = documentStates.get(stateKey) || { query: '', expanded: new Set(), pages: new Map(), scrollLeft: 0, columnScroll: new Map() };
   documentStates.delete(stateKey); documentStates.set(stateKey, state);
-  while (documentStates.size > 100) documentStates.delete(documentStates.keys().next().value);
+  while (documentStates.size > 100) documentStates.delete(documentStates.keys().next().value!);
   const controls = board.createDiv({ cls: 'ss-studio-collection-controls' });
   const group = controls.createEl('select', { attr: { 'aria-label': 'Group collection by', "data-testid": `studio.collection.group.${node.id}` } });
   const fields = isRecord(config.groupFields) ? config.groupFields : { Status: 'status' };
@@ -43,7 +43,7 @@ export function renderStudioCollection(root: HTMLElement, { node, outputs, scope
     details.open = state.expanded.has(key);
     details.addEventListener('toggle', () => {
       if (details.open) state.expanded.add(key); else state.expanded.delete(key);
-      while (state.expanded.size > 100) state.expanded.delete(state.expanded.values().next().value);
+      while (state.expanded.size > 100) state.expanded.delete(state.expanded.values().next().value!);
     });
   };
   function updateSourceStatus(): void {

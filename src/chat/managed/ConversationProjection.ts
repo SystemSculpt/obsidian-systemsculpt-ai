@@ -1252,7 +1252,7 @@ export class ConversationProjection {
       hasAssistant: sequence.some((message) => message.role === "assistant"),
     });
     state.analyses.set(messages, analysis);
-    if (state.analyses.size > 2) state.analyses.delete(state.analyses.keys().next().value);
+    if (state.analyses.size > 2) state.analyses.delete(state.analyses.keys().next().value!);
     return analysis;
   }
 
