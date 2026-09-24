@@ -40,10 +40,11 @@ async function harness(fileCount: number) {
   }));
   const roots = new Map<string, EmbeddingVector>();
   const state = new Map<string, unknown>();
+  const queueWrites = { count: 0 };
   const queue = new SemanticWorkQueue({
     readState: async <T>(key: string) => (state.get(key) as T | undefined) ?? null,
-    writeState: async <T>(key: string, value: T) => { state.set(key, value); },
-    deleteState: async (key: string) => { state.delete(key); },
+    writeState: async <T>(key: string, value: T) => { queueWrites.count += 1; state.set(key, value); },
+    deleteState: async (key: string) => { queueWrites.count += 1; state.delete(key); },
   }, 0);
   const settings = {
     embeddingsEnabled: true,
@@ -103,7 +104,7 @@ async function harness(fileCount: number) {
   manager.markPortableIndexChanged = jest.fn();
   manager.flushPortableIndex = jest.fn(async () => undefined);
   manager.commitPortableDestructiveMutation = jest.fn(async () => undefined);
-  return { files, roots, queue, manager, settings };
+  return { files, roots, queue, queueWrites, manager, settings, state };
 }
 
 describe("EmbeddingsManager run bookkeeping", () => {
@@ -224,5 +225,48 @@ describe("EmbeddingsManager run bookkeeping", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("persists a full reindex's claims and failures in O(1) queue writes", async () => {
+    const fileCount = 300;
+    const { files, roots, queue, queueWrites, manager, state } = await harness(fileCount);
+    const completed = files.slice(0, fileCount / 2);
+    const failed = files.slice(fileCount / 2);
+    let writesBeforeNetwork = -1;
+    let durableBeforeNetwork = 0;
+    manager.processor = {
+      processFiles: jest.fn(async (): Promise<ProcessingResult> => {
+        writesBeforeNetwork = queueWrites.count;
+        durableBeforeNetwork = (state.get("semantic-work-v1") as { items: unknown[] } | undefined)?.items.length ?? 0;
+        for (const file of completed) roots.set(root(file).id, root(file));
+        return {
+          completed: completed.length,
+          completedPaths: completed.map((file) => file.path),
+          failed: failed.length,
+          failedPaths: failed.map((file) => file.path),
+          failedDetails: Object.fromEntries(failed.map((file) => [file.path, {
+            code: "temporarily_unavailable",
+            message: "Try again later.",
+            status: 503,
+          }])),
+          cancelled: false,
+          fatalError: null,
+        };
+      }),
+    };
+
+    await manager.processVault();
+
+    // Every claim is durable before the first network request, in one write.
+    expect(writesBeforeNetwork).toBe(1);
+    expect(durableBeforeNetwork).toBe(fileCount);
+    // One write for failures, one for completions: never one per file.
+    expect(queueWrites.count).toBeLessThanOrEqual(3);
+    expect(queue.failureCount).toBe(failed.length);
+    expect(queue.size).toBe(failed.length);
+    expect(manager.failedFiles.size).toBe(failed.length);
+    expect(manager.failedFiles.get(failed[0].path)).toEqual(expect.objectContaining({
+      error: { code: "temporarily_unavailable", message: "Try again later." },
+    }));
   });
 });

@@ -204,19 +204,18 @@ export class EmbeddingsManager {
     await this.migrateToManagedNamespaceContract();
     const repair = await this.storage.purgeCorruptedVectors();
     await this.hydrateManagedIdentityFromStorage();
-    for (const path of repair.removedPaths) {
+    if (repair.removedPaths.length > 0) {
       const failedAt = Date.now();
       const error = { code: "invalid_response", message: "Stored vector was invalid." };
-      const abstract = this.app.vault.getAbstractFileByPath(path);
-      const claim = await this.workQueue.enqueueImmediate(
-        path,
-        "reconcile",
-        abstract instanceof TFile ? this.sourceMtime(abstract) : null,
+      const claims = await this.workQueue.enqueueManyImmediate(repair.removedPaths.map((path) => {
+        const abstract = this.app.vault.getAbstractFileByPath(path);
+        return { path, sourceMtime: abstract instanceof TFile ? this.sourceMtime(abstract) : null };
+      }), "reconcile", failedAt);
+      const recorded = await this.workQueue.failMany(
+        [...claims.values()].map((claim) => ({ claim, failure: error })),
         failedAt,
       );
-      if (claim && await this.workQueue.fail(claim, error, failedAt)) {
-        this.failedFiles.set(path, { path, error, failedAt });
-      }
+      for (const path of recorded) this.failedFiles.set(path, { path, error, failedAt });
     }
     this.setupFileWatchers();
     this.initialized = true;
@@ -994,6 +993,11 @@ export class EmbeddingsManager {
     fatalError: ManagedEmbeddingsError | null,
   ): Promise<void> {
     const failedAt = Date.now();
+    const failures: Array<{
+      claim: SemanticWorkItem;
+      error: FailedEmbeddingFile["error"];
+      failure: FailedProcessingDetail;
+    }> = [];
     for (const path of paths) {
       const detail = details?.[path];
       const error = {
@@ -1002,14 +1006,21 @@ export class EmbeddingsManager {
       };
       const claim = workClaims.get(path);
       if (!claim) continue;
-      const recorded = await this.workQueue.fail(claim, {
-        ...error,
-        ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
-        ...(detail?.requestId ? { requestId: detail.requestId } : {}),
-      }, failedAt);
-      if (!recorded) continue;
-      this.failedFiles.set(path, {
-        path,
+      failures.push({
+        claim,
+        error,
+        failure: {
+          ...error,
+          ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
+          ...(detail?.requestId ? { requestId: detail.requestId } : {}),
+        },
+      });
+    }
+    const recorded = await this.workQueue.failMany(failures, failedAt);
+    for (const { claim, error } of failures) {
+      if (!recorded.has(claim.path)) continue;
+      this.failedFiles.set(claim.path, {
+        path: claim.path,
         error,
         failedAt,
       });
@@ -1021,6 +1032,7 @@ export class EmbeddingsManager {
     reason: SemanticWorkReason,
   ): Promise<Map<string, SemanticWorkItem>> {
     const claims = new Map<string, SemanticWorkItem>();
+    const unclaimed: Array<{ path: string; sourceMtime: number | null }> = [];
     for (const file of files) {
       const sourceMtime = this.sourceMtime(file);
       const existing = this.workQueue.get(file.path);
@@ -1028,9 +1040,12 @@ export class EmbeddingsManager {
         claims.set(file.path, existing);
         continue;
       }
-      const claim = await this.workQueue.enqueueImmediate(file.path, reason, sourceMtime);
-      if (claim) claims.set(file.path, claim);
+      unclaimed.push({ path: file.path, sourceMtime });
     }
+    // One durable write for the whole batch: a full reindex used to rewrite
+    // the entire queue once per file.
+    const enqueued = await this.workQueue.enqueueManyImmediate(unclaimed, reason);
+    for (const [path, claim] of enqueued) claims.set(path, claim);
     return claims;
   }
 
