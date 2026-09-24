@@ -22,7 +22,7 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
     region.createEl('h3', { text: 'What do you want to accomplish?' });
     const prompt = region.createEl('textarea', { cls: 'ss-studio-workflow-prompt', attr: { 'data-testid': 'studio.workflow.prompt', 'aria-label': 'Workflow objective', placeholder: 'Find and test a new benchmark. Prepare a local branch for my review…', rows: '3', maxlength: '16000' } });
     prompt.value = drafts.get(key) || '';
-    prompt.addEventListener('input', () => { drafts.set(key, prompt.value); while (drafts.size > 50) drafts.delete(drafts.keys().next().value); });
+    prompt.addEventListener('input', () => { drafts.set(key, prompt.value); while (drafts.size > 50) drafts.delete(drafts.keys().next().value!); });
     disposeExecution = options.execution(region);
     let starting = false;
     const start = createStudioAction(region, { label: 'Start workflow', icon: 'play', testId: 'studio.workflow.start', className: 'ss-studio-workflow-start', onSelect: () => {

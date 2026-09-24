@@ -91,7 +91,7 @@ The public [6.7.2 scorecard](https://community.obsidian.md/plugins/systemsculpt-
 
 ## Local checker
 
-`eslint-plugin-obsidianmd` is pinned as a development dependency. `eslint.community.config.mjs` mirrors the directory's documented source scope and scanner exclusions, and the canonical `npm run check` gate includes it.
+`eslint-plugin-obsidianmd` is pinned as a development dependency. `eslint.community.config.mjs` mirrors the directory's documented source scope and scanner exclusions, and the canonical `npm run check` gate includes it. `tsconfig.json` enables `strictBuiltinIteratorReturn` so the type-aware rules see the same iterator types as the scanner; without it, unnecessary-assertion findings on `next().value` casts appear only on the scorecard.
 
 ~~~bash
 npm run lint:community

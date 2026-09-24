@@ -55,6 +55,26 @@ describe("SystemSculptPlugin.initializeBasicUI", () => {
     plugin.embeddingsStatusBar = null;
   });
 
+  it("mounts primary UI without retrying a failed directory initialization (#326)", async () => {
+    const app = new App();
+    const plugin = pluginReadyForBasicUi(app);
+    const initialize = jest.fn().mockRejectedValue(new Error("Folder already exists."));
+    (plugin as any).directoryManager = { isInitialized: () => false, initialize };
+    const addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
+    (Platform as any).isDesktop = true;
+    (Platform as any).isDesktopApp = true;
+    (Platform as any).isMobile = false;
+    (Platform as any).isMobileApp = false;
+
+    await (plugin as any).initializeBasicUI();
+
+    expect(initialize).not.toHaveBeenCalled();
+    expect((plugin as any).failures).not.toContain("UI components");
+    expect(addStatusBarItemSpy).toHaveBeenCalledTimes(1);
+    plugin.removeChild(plugin.embeddingsStatusBar!);
+    plugin.embeddingsStatusBar = null;
+  });
+
   it("does not invoke the desktop-only status bar API in Obsidian mobile", async () => {
     const app = new App();
     const plugin = pluginReadyForBasicUi(app);

@@ -1255,15 +1255,11 @@ export default class SystemSculptPlugin extends Plugin {
     try {
       this.ensureSettingsTab();
 
+      // initializeDirectories owns startup directory creation and reports its
+      // own failure. Primary UI never retries or awaits it: every writer
+      // ensures its directory before use, so a directory problem stays scoped.
       if (!this.directoryManager) {
         this.directoryManager = new DirectoryManager(this.app, this);
-      } else if (!this.directoryManager.isInitialized()) {
-        await this.directoryManager.initialize();
-      }
-
-      if (this.isUnloading) {
-        phase.complete({ skipped: true, stage: "post-directory-init" });
-        return;
       }
 
       if (hasHostCapability("status-bar") && !this.embeddingsStatusBar) {

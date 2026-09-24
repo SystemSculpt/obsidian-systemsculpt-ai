@@ -281,7 +281,7 @@ export class StudioAgentRuns {
       return message;
     })();
     this.receipts.set(key, operation);
-    while (this.receipts.size > 1000) this.receipts.delete(this.receipts.keys().next().value);
+    while (this.receipts.size > 1000) this.receipts.delete(this.receipts.keys().next().value!);
     return operation;
   }
   private async deliver(target: StudioAgentRun, message: AgentRunMessage): Promise<void> {

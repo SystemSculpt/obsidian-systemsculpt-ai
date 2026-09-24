@@ -7,6 +7,7 @@ import {
 } from "../types/documentProcessing";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { isCreditsRequiredError } from "../utils/errors";
 
 type TimelineStep = "queued" | "uploading" | "processing" | "contextualizing" | "ready";
 
@@ -68,6 +69,7 @@ export function describeDocumentProcessingFailure(error: unknown): string {
   const messages: Record<string, string> = {
     license_required: "An active SystemSculpt Pro license is required.",
     license_rejected: "Your SystemSculpt license could not be verified.",
+    payment_required: "Not enough credits are available. Add credits to convert documents.",
     capability_unavailable: "Document conversion is temporarily unavailable.",
     temporarily_unavailable: "Document conversion is temporarily unavailable. Try again shortly.",
     rate_limited: "Too many document conversions. Try again shortly.",
@@ -81,6 +83,7 @@ export function describeDocumentProcessingFailure(error: unknown): string {
     local_abort: "Conversion cancelled.",
   };
   if (messages[code]) return messages[code];
+  if (isCreditsRequiredError(error)) return messages.payment_required;
   if (error instanceof DOMException && error.name === "AbortError") return messages.local_abort;
   return error instanceof Error ? error.message : String(error ?? "Unknown error");
 }
@@ -103,11 +106,13 @@ export type DocumentProcessingPanelLauncher = (
 ) => DocumentProcessingPanelHandle;
 
 class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
+  private readonly plugin: SystemSculptPlugin;
   private readonly onCancel?: () => void;
   private readonly panel: OperationProgressPanel;
   private destroyed = false;
 
   constructor(options: DocumentProcessingPanelOptions) {
+    this.plugin = options.plugin;
     this.onCancel = options.onCancel;
 
     const metaParts: string[] = [options.file.name];
@@ -225,7 +230,19 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     });
     this.panel.setTimelineState(failedStep, "error");
 
+    const creditsRequired = isCreditsRequiredError(payload.error);
     this.panel.setActions([
+      ...(creditsRequired
+        ? [{
+            label: "Add credits",
+            testId: "document.progress.add-credits",
+            variant: "primary" as const,
+            onClick: () => {
+              this.close();
+              void this.plugin.openCreditsBalanceModal();
+            },
+          }]
+        : []),
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
@@ -246,7 +263,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       {
         label: "Close",
         testId: "document.progress.close",
-        variant: "primary",
+        variant: creditsRequired ? "default" : "primary",
         onClick: () => this.close(),
       },
     ]);

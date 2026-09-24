@@ -99,6 +99,29 @@ describe("DirectoryManager", () => {
     await expect(manager.ensureDirectoryByPath("Projects/Alpha")).resolves.toBeUndefined();
   });
 
+  it("initializes when folders exist on disk before the vault tree resolves them (#326)", async () => {
+    // Obsidian rejects createFolder for any path already on disk, even while
+    // getAbstractFileByPath still returns null during onload.
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(new Error("Folder already exists."));
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
+    (app.vault.adapter.stat as jest.Mock).mockResolvedValue({ type: "folder", ctime: 0, mtime: 0, size: 0 });
+
+    await expect(manager.initialize()).resolves.toBeUndefined();
+
+    expect(manager.isInitialized()).toBe(true);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect(app.vault.adapter.stat).toHaveBeenCalledWith("SystemSculpt/Chats");
+  });
+
+  it("still rejects an already-exists error when the disk entry is a file", async () => {
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(new Error("Folder already exists."));
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
+    (app.vault.adapter.stat as jest.Mock).mockResolvedValue({ type: "file", ctime: 0, mtime: 0, size: 3 });
+
+    await expect(manager.initialize()).rejects.toThrow("Folder already exists.");
+    expect(manager.isInitialized()).toBe(false);
+  });
+
   it("propagates real create failures and file collisions", async () => {
     (app.vault.createFolder as jest.Mock).mockRejectedValueOnce(new Error("permission denied"));
     await expect(manager.ensureDirectoryByPath("Projects/Alpha")).rejects.toThrow("permission denied");

@@ -495,7 +495,7 @@ export class AgentIncidentCoordinator {
     const existing = this.pendingRuns.get(key);
     if (existing) return existing;
     while (this.pendingRuns.size >= MAX_PENDING_RUNS) {
-      const oldestKey = this.pendingRuns.keys().next().value as string | undefined;
+      const oldestKey = this.pendingRuns.keys().next().value;
       if (!oldestKey) break;
       const oldest = this.pendingRuns.get(oldestKey);
       this.pendingRuns.delete(oldestKey);
@@ -895,7 +895,7 @@ export class AgentIncidentCoordinator {
     this.settledCorrelations.delete(key);
     this.settledCorrelations.set(key, true);
     while (this.settledCorrelations.size > MAX_SETTLED_CORRELATIONS) {
-      const oldest = this.settledCorrelations.keys().next().value as string | undefined;
+      const oldest = this.settledCorrelations.keys().next().value;
       if (!oldest) break;
       this.settledCorrelations.delete(oldest);
     }

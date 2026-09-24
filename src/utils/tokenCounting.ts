@@ -17,7 +17,7 @@ class LruCache<K, V> {
     this.map.set(key, value);
     if (this.map.size <= this.maxEntries) return;
 
-    const oldest = this.map.keys().next().value as K | undefined;
+    const oldest = this.map.keys().next().value;
     if (oldest !== undefined) this.map.delete(oldest);
   }
 }

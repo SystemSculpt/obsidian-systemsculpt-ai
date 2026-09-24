@@ -1,6 +1,7 @@
 import { App, normalizePath, TFolder } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
+import { createVaultFolder } from "../utils/vaultFolders";
 
 const DIRECTORY_SETTING_KEYS = [
   "chatsDirectory",
@@ -100,14 +101,10 @@ export class DirectoryManager {
     if (existing instanceof TFolder) return;
     if (existing) throw new Error(`Cannot create directory "${path}": a file already exists at that path.`);
 
-    try {
-      await this.app.vault.createFolder(path);
-    } catch (error) {
-      // A concurrent caller may have won the create race. Only accept the
-      // rejection when Obsidian now resolves the requested path as a folder.
-      if (this.app.vault.getAbstractFileByPath(path) instanceof TFolder) return;
-      throw error;
-    }
+    // The vault tree can miss a folder that exists on disk (onload before
+    // indexing settles, a concurrent create). Obsidian then rejects with
+    // "Folder already exists."; the helper accepts only a real folder.
+    await createVaultFolder(this.app, path);
   }
 
   private normalizedDirectory(value: string): string {

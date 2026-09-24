@@ -9,6 +9,7 @@ jest.mock("obsidian", () => ({
     isMobileApp: false,
   },
   normalizePath: (value: string) => String(value || "").replace(/\\/g, "/"),
+  TFolder: class TFolder {},
 }));
 
 const backupStart = jest.fn();
@@ -402,6 +403,34 @@ describe("SettingsManager managed settings contract", () => {
       "Failed to write SystemSculpt settings backup",
       expect.any(Error),
       expect.objectContaining({ source: "SettingsManager" }),
+    );
+  });
+
+  it("writes the settings backup when a concurrent save already created its folder", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    plugin.app.vault.adapter.write.mockClear();
+
+    const backupDir = ".systemsculpt/settings-backups";
+    plugin.app.vault.adapter.exists.mockImplementation(async () => false);
+    plugin.app.vault.createFolder.mockImplementationOnce(async () => {
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path === backupDir);
+      throw new Error("Folder already exists.");
+    });
+    plugin.app.vault.getAbstractFileByPath = jest.fn(() => null);
+    plugin.app.vault.adapter.stat = jest.fn().mockResolvedValue({ type: "folder" });
+
+    await manager.updateSettings({ chatFontSize: "large" });
+
+    expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
+      `${backupDir}/settings-backup-latest.json`,
+      expect.any(String),
+    );
+    expect(plugin.logger.error).not.toHaveBeenCalledWith(
+      "Failed to write SystemSculpt settings backup",
+      expect.anything(),
+      expect.anything(),
     );
   });
 

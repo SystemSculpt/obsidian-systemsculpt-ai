@@ -2,6 +2,7 @@ import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 import { retryAfterHeaderMs } from "./ManagedJobObservation";
+import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
 const MANAGED_IMAGE_OUTPUT_PROTOCOL = "managed-image-output-v1" as const;
@@ -19,6 +20,7 @@ export const MANAGED_IMAGE_OUTPUT_DESCRIPTOR = Object.freeze({
 type Operation = "create" | "part_url" | "upload_complete" | "upload_abort" | "start" | "status" | "download" | "input_prepare" | "generation_create" | "generation_list" | "generation_status";
 type ErrorCode = "invalid_request" | "unsupported_image_output_contract" | "license_required" | "payment_required" | "license_rejected" | "not_found" | "output_not_ready" | "operation_conflict" | "upgrade_required" | "rate_limited" | "internal_error" | "temporarily_unavailable" | "managed_job_error" | "malformed_response" | "unsupported_operation" | "transcription_failed" | "document_processing_failed" | "image_generation_failed" | "job_expired";
 const MANAGED_JOB_HTTP_ERROR_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
+  402: CREDITS_REQUIRED_MESSAGE,
   429: "SystemSculpt is receiving too many processing requests right now.",
   502: "SystemSculpt processing is temporarily unavailable.",
   503: "SystemSculpt processing is temporarily unavailable.",
