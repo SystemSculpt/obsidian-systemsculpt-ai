@@ -272,6 +272,24 @@ describe("mountStudioGraphNodeResizeFrame", () => {
         );
       });
     }
+
+    it("writes negative positions on an unbounded canvas instead of flooring them", () => {
+      const node = createNode("studio.terminal", { position: { x: -300, y: 10 } });
+      const onNodeResize = jest.fn();
+      const { nodeEl } = mountFrame(node, {
+        onNodeResize,
+        readInitialSize: () => ({ width: 640, height: 420 }),
+      });
+
+      dragZone(nodeEl, "nw", { to: { x: -40, y: -30 } });
+
+      expect(onNodeResize).toHaveBeenNthCalledWith(
+        1,
+        node.id,
+        { size: { width: 680, height: 450 }, position: { x: -340, y: -20 } },
+        expect.objectContaining({ mode: "continuous", captureHistory: true })
+      );
+    });
   });
 
   describe("shared #284 hardening", () => {

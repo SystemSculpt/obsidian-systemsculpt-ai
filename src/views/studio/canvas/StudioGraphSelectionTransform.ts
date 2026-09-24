@@ -81,13 +81,6 @@ export type StudioSelectionResizeResult = StudioSelectionGroupResizeResult & {
  */
 export const STUDIO_SELECTION_MIN_GROUP_SCALE = 0.05;
 
-/** Mirror of the canvas position floor shared by every node-move path. */
-const STUDIO_SELECTION_MIN_CANVAS_POSITION = 24;
-
-function floorCanvasPosition(value: number): number {
-  return Math.max(STUDIO_SELECTION_MIN_CANVAS_POSITION, Math.round(value));
-}
-
 function isFiniteRect(rect: StudioSelectionRect): boolean {
   return (
     Number.isFinite(rect.left) &&
@@ -243,12 +236,8 @@ export function resolveStudioSelectionResizePatches(params: {
     // Positions interpolate from the RAW group transform (normalized start
     // offset × new group size), never from clamped node sizes.
     patch.position = {
-      x: floorCanvasPosition(
-        group.bounds.left + (node.rect.left - startBounds.left) * group.scaleX
-      ),
-      y: floorCanvasPosition(
-        group.bounds.top + (node.rect.top - startBounds.top) * group.scaleY
-      ),
+      x: Math.round(group.bounds.left + (node.rect.left - startBounds.left) * group.scaleX),
+      y: Math.round(group.bounds.top + (node.rect.top - startBounds.top) * group.scaleY),
     };
 
     patches.push({ nodeId: node.nodeId, patch });
