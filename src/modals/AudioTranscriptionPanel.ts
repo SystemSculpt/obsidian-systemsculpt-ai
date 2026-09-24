@@ -18,6 +18,7 @@ import {
 } from "../services/transcription/NoteInsertionTarget";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { isCreditsRequiredError } from "../utils/errors";
 
 export interface AudioTranscriptionPanelOptions {
   file: TFile;
@@ -211,6 +212,9 @@ export class AudioTranscriptionPanel {
       if (this.disposed || this.task !== task) return;
       this.task = null;
       const interrupted = error instanceof Error && error.name === "AbortError";
+      const creditsActions = !interrupted && isCreditsRequiredError(error)
+        ? [this.addCreditsButton()]
+        : [];
       if (interrupted || error instanceof ManagedTranscriptionRetryError) {
         const recovery = error instanceof ManagedTranscriptionInterruptedError
           || error instanceof ManagedTranscriptionRetryError ? error : null;
@@ -250,6 +254,7 @@ export class AudioTranscriptionPanel {
         }
         this.updateStatus({ label, icon: "alert-triangle", progress: 100, details });
         this.setButtons([
+          ...creditsActions,
           ...(!blocked ? [{
             label: this.resumeOperationId ? "Resume" : "Retry",
             testId: "transcription.progress.retry",
@@ -283,6 +288,7 @@ export class AudioTranscriptionPanel {
         details: message,
       });
       this.setButtons([
+        ...creditsActions,
         ...(this.resumeOperationId ? [{
           label: "Retry save",
           testId: "transcription.progress.retry",
@@ -302,6 +308,16 @@ export class AudioTranscriptionPanel {
         },
       ]);
     }
+  }
+
+  /** Credits failures add the purchase route beside their existing retry path. */
+  private addCreditsButton(): { label: string; testId: string; onClick: () => void; variant: "default" } {
+    return {
+      label: "Add credits",
+      testId: "transcription.progress.add-credits",
+      variant: "default",
+      onClick: () => void this.options.plugin.openCreditsBalanceModal(),
+    };
   }
 
   private setButtons(

@@ -21,6 +21,7 @@ import {
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
 import { retryAfterHeaderMs } from "../../services/managed/ManagedJobObservation";
+import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -378,12 +379,17 @@ export class AudioProcessorApiClient {
     if (!response.ok) {
       const root = isRecord(payload) ? payload : {};
       const error = isRecord(root.error) ? root.error : root;
-      const code = typeof error.code === "string" ? error.code : "request_failed";
+      const paymentRequired = response.status === 402;
+      const code = typeof error.code === "string"
+        ? error.code
+        : paymentRequired ? "payment_required" : "request_failed";
       const message = typeof error.message === "string"
         ? error.message
         : typeof root.error === "string"
           ? root.error
-        : `Audio service request failed (${response.status}).`;
+        : paymentRequired
+          ? CREDITS_REQUIRED_MESSAGE
+          : `Audio service request failed (${response.status}).`;
       throw new AudioProcessorApiError(
         message,
         response.status,

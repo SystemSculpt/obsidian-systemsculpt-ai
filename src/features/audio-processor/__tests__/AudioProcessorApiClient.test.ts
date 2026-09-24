@@ -275,6 +275,23 @@ describe("AudioProcessorApiClient", () => {
     }));
   });
 
+  it("maps a bare 402 to the credits code and wording (#300)", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({}, 402));
+
+    await expect(client.createYouTubeJob(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      {
+        operationId: "audio-op:create",
+        outputPreset: "detailed",
+      },
+    )).rejects.toEqual(expect.objectContaining({
+      status: 402,
+      code: "payment_required",
+      message: "Not enough credits are available. Add credits to continue.",
+    }));
+  });
+
   it("surfaces the website's flat error-string response shape", async () => {
     const { client, requestClient } = setup();
     requestClient.responses.push(json({

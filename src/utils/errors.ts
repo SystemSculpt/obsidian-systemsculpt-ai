@@ -153,6 +153,33 @@ export function isPlanAccessError(error: unknown): boolean {
   return typeof code === "string" && PLAN_ACCESS_CODES.has(code);
 }
 
+/** Shared wording for a managed request the account cannot currently fund. */
+export const CREDITS_REQUIRED_MESSAGE = "Not enough credits are available. Add credits to continue.";
+
+const CREDITS_REQUIRED_CODES = new Set<string>([
+  ERROR_CODES.INSUFFICIENT_CREDITS,
+  "insufficient_credits",
+  "out_of_credits",
+  "payment_required",
+]);
+
+/**
+ * True when an error means the account lacks credits: a structured credits
+ * code or an HTTP 402. Follows the originalError/cause chain because managed
+ * transcription wraps its transport failure in a recovery error.
+ */
+export function isCreditsRequiredError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    const { code, status } = current as { code?: unknown; status?: unknown };
+    if (typeof code === "string" && CREDITS_REQUIRED_CODES.has(code)) return true;
+    if (status === 402) return true;
+    const wrapper = current as { originalError?: unknown; cause?: unknown };
+    current = wrapper.originalError ?? wrapper.cause;
+  }
+  return false;
+}
+
 /**
  * Get a user-friendly error message for the given error code
  */

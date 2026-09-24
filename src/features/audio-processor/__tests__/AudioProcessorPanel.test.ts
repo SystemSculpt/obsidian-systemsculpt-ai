@@ -112,6 +112,27 @@ describe("AudioProcessorPanel", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("routes a rejected 402 to Add credits instead of a raw failure (#300)", () => {
+    const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
+    const plugin = {
+      register: jest.fn(),
+      openCreditsBalanceModal,
+    } as unknown as SystemSculptPlugin;
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+    const error = Object.assign(new Error("Insufficient available credits to run this request."), {
+      status: 402,
+      code: "insufficient_credits",
+    });
+
+    panel.fail(error);
+
+    expect(document.body.textContent).toContain("Not enough credits");
+    expect(document.body.textContent).toContain("Add credits to process audio.");
+    expect(document.body.textContent).not.toContain("Audio processing failed");
+    actionButton("Add credits").click();
+    expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
+  });
+
   it("opens an independently paid transcript without stopping active processing", async () => {
     const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
     const onCancel = jest.fn();

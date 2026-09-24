@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { isCreditsRequiredError, isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { OperationProgressPanel } from "../../core/ui/progress/OperationProgressPanel";
 import type {
@@ -188,6 +188,10 @@ export class AudioProcessorPanel {
       this.renderPlanRequired();
       return;
     }
+    if (!cancelled && isCreditsRequiredError(error)) {
+      this.renderCreditsRequired();
+      return;
+    }
     if (!this.panel || this.hidden) {
       if (cancelled) return;
       new Notice(`Audio processing failed: ${message}`, 7000);
@@ -233,6 +237,35 @@ export class AudioProcessorPanel {
         onClick: () => {
           this.close();
           UpgradePlanModal.openOnce(this.plugin, { feature: "Audio processing" });
+        },
+      },
+      { label: "Close", testId: "audio.progress.close", onClick: () => this.close() },
+    ]);
+  }
+
+  /** Credit failures route to Credits & usage instead of a raw status. */
+  private renderCreditsRequired(): void {
+    const details = "Not enough credits are available. Add credits to process audio.";
+    if (!this.panel || this.hidden) {
+      new Notice(details, 7000);
+      return;
+    }
+    this.panel.setStatus({
+      label: "Not enough credits",
+      icon: "circle-alert",
+      progress: 100,
+      details,
+      state: "error",
+    });
+    this.panel.setTimelineState(this.currentStep, "error");
+    this.panel.setActions([
+      {
+        label: "Add credits",
+        testId: "audio.progress.add-credits",
+        variant: "primary",
+        onClick: () => {
+          this.close();
+          void this.plugin.openCreditsBalanceModal();
         },
       },
       { label: "Close", testId: "audio.progress.close", onClick: () => this.close() },

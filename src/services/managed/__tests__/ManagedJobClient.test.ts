@@ -229,6 +229,17 @@ describe("ManagedJobClient exact wire contract", () => {
     });
   });
 
+  it("turns a 402 into the credits message instead of a raw status (#300)", async () => {
+    request.mockResolvedValue(json({ error: { code: "insufficient_credits" } }, 402));
+
+    await expect(client.documents.start("doc-1", "op")).rejects.toMatchObject({
+      code: "payment_required",
+      status: 402,
+      message: "Not enough credits are available. Add credits to continue.",
+      retryable: false,
+    });
+  });
+
   it("turns a retryable 503 into a customer-facing availability message", async () => {
     request.mockResolvedValue(json({ code: "temporarily_unavailable" }, 503));
 
