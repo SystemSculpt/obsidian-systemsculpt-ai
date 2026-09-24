@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
+import { requestUrl } from "obsidian";
 import { API_BASE_URL } from "../../constants/api";
 import { AccountConnectService, type ConnectOutcome } from "../AccountConnectService";
+import { PlatformRequestClient } from "../PlatformRequestClient";
 
 const BASE64_URL_32_BYTES = /^[A-Za-z0-9_-]{43}$/;
 
@@ -50,13 +52,13 @@ afterEach(() => {
   createdServices.splice(0).forEach((service) => service.cancelPending());
 });
 
-function createService(plugin = createPlugin()) {
+function createService(plugin = createPlugin(), client = requestClient) {
   const openedUrls: string[] = [];
   const opener = jest.fn(async (url: string) => {
     openedUrls.push(url);
     return true;
   });
-  const service = new AccountConnectService(plugin, requestClient, opener);
+  const service = new AccountConnectService(plugin, client, opener);
   createdServices.push(service);
   return { service, plugin, opener, openedUrls };
 }
@@ -383,5 +385,110 @@ describe("AccountConnectService background polling", () => {
     await jest.advanceTimersByTimeAsync(3_500);
     expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
     expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("gives each poll its own deadline and aborts the in-flight poll on cancel", async () => {
+    const { service } = createPollingService();
+    request.mockImplementation(() => new Promise<Response>(() => undefined));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    const pollInput = request.mock.calls[0][0];
+    expect(pollInput.timeoutMs).toBe(15_000);
+    expect(pollInput.signal.aborted).toBe(false);
+    service.cancelPending();
+    expect(pollInput.signal.aborted).toBe(true);
+  });
+});
+
+describe("AccountConnectService hung sign-in polls", () => {
+  // Drives the production request client so the poll deadline is the one the
+  // plugin actually enforces, over a native request that never answers.
+  const nativeRequest = requestUrl as jest.Mock;
+  const native = (status: number, payload: unknown) => ({
+    status,
+    text: JSON.stringify(payload),
+    json: payload,
+    headers: { "content-type": "application/json" },
+  });
+  const hang = () => new Promise<never>(() => undefined);
+  const nativeCalls = (path: string) =>
+    nativeRequest.mock.calls.filter(([input]) => input.url === `${API_BASE_URL}${path}`);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    nativeRequest.mockReset();
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    nativeRequest.mockReset();
+  });
+
+  function createNativeService() {
+    const created = createService(createPlugin(), new PlatformRequestClient());
+    const outcomes: ConnectOutcome[] = [];
+    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    return { ...created, outcomes };
+  }
+
+  it("resumes polling after a poll hangs past its deadline and completes the sign-in", async () => {
+    const { service, outcomes } = createNativeService();
+    nativeRequest
+      .mockImplementationOnce(hang)
+      .mockResolvedValueOnce(native(200, successPayload));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(nativeCalls("/auth/poll")).toHaveLength(1);
+
+    // The hung poll holds the slot: later ticks do not stack requests on it.
+    await jest.advanceTimersByTimeAsync(14_999);
+    expect(nativeCalls("/auth/poll")).toHaveLength(1);
+    expect(outcomes).toHaveLength(0);
+
+    // Its deadline releases the slot, and the next tick completes sign-in.
+    await jest.advanceTimersByTimeAsync(1 + 3_500);
+    expect(nativeCalls("/auth/poll")).toHaveLength(2);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("lets a manual code exchange proceed once the hung poll it waits on times out", async () => {
+    const { service } = createNativeService();
+    nativeRequest
+      .mockImplementationOnce(hang)
+      .mockResolvedValueOnce(native(200, successPayload));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    let settled = false;
+    const manual = service.submitManualCode("manual-code").finally(() => { settled = true; });
+
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(settled).toBe(false);
+    expect(nativeCalls("/auth/exchange")).toHaveLength(0);
+
+    await jest.advanceTimersByTimeAsync(5_000);
+    await expect(manual).resolves.toMatchObject({ kind: "signed-in" });
+    expect(nativeCalls("/auth/exchange")).toHaveLength(1);
+  });
+
+  it("does not let a hung poll for a cancelled sign-in block a new one", async () => {
+    const { service, outcomes } = createNativeService();
+    nativeRequest
+      .mockImplementationOnce(hang)
+      .mockResolvedValueOnce(native(200, successPayload));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    service.cancelPending();
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(nativeCalls("/auth/poll")).toHaveLength(2);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
   });
 });

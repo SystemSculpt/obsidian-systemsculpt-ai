@@ -47,6 +47,15 @@ const PENDING_CONNECT_TTL_MS = 10 * 60_000;
  */
 const CONNECT_POLL_INTERVAL_MS = 3_500;
 
+/**
+ * Each poll owns the in-flight slot until it settles, and a manual code
+ * exchange waits on it. A poll the network never answers must give that slot
+ * back within a few intervals so later polls and the exchange can proceed.
+ */
+const CONNECT_POLL_TIMEOUT_MS = 15_000;
+
+type PollAttempt = Readonly<{ controller: AbortController; settled: Promise<void> }>;
+
 function base64UrlEncode(bytes: Uint8Array): string {
   return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
@@ -65,8 +74,7 @@ export class AccountConnectService {
   private readonly openUrl: (url: string, ownerWindow?: Window) => Promise<boolean>;
   private pending: PendingConnectRequest | null = null;
   private pollTimer: number | null = null;
-  private pollInFlight = false;
-  private pollSettled: Promise<void> | null = null;
+  private pollAttempt: PollAttempt | null = null;
   private lastOutcome: ConnectOutcome | null = null;
   private exchangeInProgress = false;
   private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
@@ -88,6 +96,7 @@ export class AccountConnectService {
     this.pending = null;
     this.lastOutcome = null;
     this.stopPolling();
+    this.abortPoll();
   }
 
   /**
@@ -108,6 +117,8 @@ export class AccountConnectService {
     const verifier = base64UrlEncode(this.randomBytes());
     this.pending = { state, verifier, mode, createdAt: Date.now() };
     this.lastOutcome = null;
+    // A poll for a superseded request must not hold the slot for this one.
+    this.abortPoll();
     this.startPolling();
 
     const opened = await this.openUrl(await this.connectUrl(this.pending), ownerWindow);
@@ -152,16 +163,26 @@ export class AccountConnectService {
     }
   }
 
+  /** Releases the in-flight slot now; the aborted poll settles on its own. */
+  private abortPoll(): void {
+    const attempt = this.pollAttempt;
+    this.pollAttempt = null;
+    attempt?.controller.abort();
+  }
+
   private async pollOnce(): Promise<void> {
     const pending = this.activePending();
     if (!pending) {
       this.stopPolling();
       return;
     }
-    if (this.pollInFlight) return;
-    this.pollInFlight = true;
+    if (this.pollAttempt) return;
     let settle!: () => void;
-    this.pollSettled = new Promise((resolve) => { settle = resolve; });
+    const attempt: PollAttempt = {
+      controller: new AbortController(),
+      settled: new Promise((resolve) => { settle = resolve; }),
+    };
+    this.pollAttempt = attempt;
     try {
       let response: Response;
       try {
@@ -170,9 +191,13 @@ export class AccountConnectService {
           method: "POST",
           headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
           body: { verifier: pending.verifier },
+          signal: attempt.controller.signal,
+          timeoutMs: CONNECT_POLL_TIMEOUT_MS,
         });
       } catch {
-        return; // Transient network failure — keep polling until the TTL.
+        // Transient network failure, attempt deadline, or cancellation —
+        // keep polling until the TTL.
+        return;
       }
       if (response.status !== 200) return;
       const payload = await this.readJson(response);
@@ -194,8 +219,7 @@ export class AccountConnectService {
       // its own modal — announcing here too would stack a second one.
       if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
     } finally {
-      this.pollInFlight = false;
-      this.pollSettled = null;
+      if (this.pollAttempt === attempt) this.pollAttempt = null;
       settle();
     }
   }
@@ -237,7 +261,7 @@ export class AccountConnectService {
       // single-use code would 401 here while the poll succeeds, so wait for
       // it and adopt its outcome instead.
       this.stopPolling();
-      if (this.pollSettled) await this.pollSettled;
+      if (this.pollAttempt) await this.pollAttempt.settled;
       if (this.pending !== pending) {
         return this.lastOutcome ?? { kind: "error", reason: "expired" };
       }
