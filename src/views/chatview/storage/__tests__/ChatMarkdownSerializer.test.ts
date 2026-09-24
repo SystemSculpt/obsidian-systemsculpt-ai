@@ -1076,7 +1076,7 @@ Valid message
 
   describe("round-trip serialization", () => {
     it.each(["-->", "--!>"])(
-      "round-trips reserved %s framing in user, assistant, reasoning, and nested tool output",
+      "round-trips %s in user, assistant, reasoning, and nested tool output without framing",
       (sentinel) => {
         const messages: ChatMessage[] = [
           { role: "user", content: `User quoted ${sentinel}`, message_id: "user-sentinel" },
@@ -1086,7 +1086,7 @@ Valid message
             content: "",
             message_id: "reasoning-sentinel",
             messageParts: [
-              { id: "reasoning", type: "reasoning", data: `Reasoning quoted ${sentinel}`, timestamp: 1 },
+              { id: "reasoning", type: "reasoning", data: `Reasoning quoted ${sentinel}\n${sentinel} at a line start`, timestamp: 1 },
               { id: "content", type: "content", data: "Done", timestamp: 2 },
             ],
           },
@@ -1114,20 +1114,274 @@ Valid message
         const markdown = `---\nid: sentinel-chat\n---\n\n${serialized}`;
         const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
 
-        expect(serialized.match(/payload-format="base64-json-v1"/g)).toHaveLength(4);
+        expect(serialized).not.toContain("payload-format=");
         expect(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-END -->/g)).toHaveLength(4);
+        // Plain answers stay readable and searchable in the note.
+        expect(serialized).toContain(`\nUser quoted ${sentinel}\n`);
+        expect(serialized).toContain(`\nAssistant quoted ${sentinel}\n`);
+        // Neither hidden comment can be closed early by the quoted text.
+        for (const block of serialized.match(/<!-- (?:REASONING|TOOL-CALLS)\n[\s\S]*?\n-->/g) ?? []) {
+          expect(block.slice(4, -3)).not.toMatch(/--!?>/u);
+        }
+        expect(serialized).toContain('reasoning-escape="v1"');
+        expect(serialized).toContain(`Tool quoted ${sentinel.replace(">", "\\u003e")}`);
+
         expect(parsed?.messages).toHaveLength(4);
         expect(parsed?.messages[0].content).toBe(`User quoted ${sentinel}`);
         expect(parsed?.messages[1].content).toBe(`Assistant quoted ${sentinel}`);
-        expect(parsed?.messages[2].reasoning).toContain(`Reasoning quoted ${sentinel}`);
+        expect(parsed?.messages[2].reasoning)
+          .toBe(`Reasoning quoted ${sentinel}\n${sentinel} at a line start`);
         const restoredTool = parsed?.messages[3].messageParts?.find((part) => part.type === "tool_call");
         expect((restoredTool?.data as any)?.result?.data?.nested?.[0]?.summary)
           .toBe(`Tool quoted ${sentinel}`);
       },
     );
 
+    it("keeps a mermaid answer and HTML-comment tool output readable instead of framing them", () => {
+      const mermaid = "```mermaid\ngraph TD\n  A-->B\n  B --> C\n```";
+      const noteWithComment = "# Note\n<!-- hidden: keep -->\nBody > quote";
+      const messages: ChatMessage[] = [{
+        role: "assistant",
+        content: "",
+        message_id: "assistant-mermaid",
+        messageParts: [
+          {
+            id: "tool",
+            type: "tool_call",
+            timestamp: 1,
+            data: {
+              id: "call-read",
+              state: "completed",
+              result: { success: true, data: { content: noteWithComment } },
+            } as any,
+          },
+          { id: "content", type: "content", data: mermaid, timestamp: 2 },
+        ],
+      }];
+
+      const serialized = ChatMarkdownSerializer.serializeMessages(messages);
+      const parsed = ChatMarkdownSerializer.parseMarkdown(`---\nid: mermaid\n---\n\n${serialized}`);
+
+      expect(serialized).not.toContain("payload-format=");
+      expect(serialized).not.toContain("reasoning-escape=");
+      expect(serialized).toContain(mermaid);
+      expect(parsed?.messages[0].content).toBe(mermaid);
+      const tool = parsed?.messages[0].messageParts?.find((part) => part.type === "tool_call");
+      expect((tool?.data as any)?.result?.data?.content).toBe(noteWithComment);
+    });
+
+    it("round-trips generated histories exactly and frames only messages that contain a marker", () => {
+      // Deterministic xorshift so a failure reproduces from this seed.
+      let seed = 0x363;
+      const random = () => {
+        seed ^= seed << 13;
+        seed ^= seed >>> 17;
+        seed ^= seed << 5;
+        return (seed >>> 0) / 0x1_0000_0000;
+      };
+      const atoms = [
+        "-", "--", "-->", "--!>", ">", "!", "\\", "\\>", "--\\>", "--\\\\!>", "<!--", " ", "\n",
+        "\r\n", "a", "é", "🗿", "\"", "`", "A-->B", "\n-->", "\n--\\>",
+      ];
+      const markerAtoms = [
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        "<!-- REASONING\n",
+        "<!-- TOOL-CALLS",
+        "\n<!-- SYSTEMSCULPT-CONTENT-PARTS base64\nAAAA\n-->",
+      ];
+      const pick = (values: readonly string[]) => values[Math.floor(random() * values.length)];
+      const text = () => {
+        let value = "x";
+        const length = 1 + Math.floor(random() * 12);
+        for (let index = 0; index < length; index += 1) {
+          value += random() < 0.04 ? pick(markerAtoms) : pick(atoms);
+        }
+        // Stored content chunks are trimmed at their boundaries, so keep a
+        // non-whitespace sentinel on both ends of every generated value.
+        return `${value}y`;
+      };
+      const markers = ["<!-- SYSTEMSCULPT-", "<!-- REASONING", "<!-- TOOL-CALLS"];
+      let framedMessages = 0;
+      let readableMessages = 0;
+      const hasMarker = (...values: string[]) =>
+        values.some((value) => markers.some((marker) => value.includes(marker)));
+
+      for (let iteration = 0; iteration < 300; iteration += 1) {
+        const reasoning = text();
+        const content = text();
+        const toolOutput = text();
+        const userText = text();
+        const messages: ChatMessage[] = [
+          { role: "user", content: userText, message_id: `user-${iteration}` },
+          {
+            role: "assistant",
+            content: "",
+            message_id: `assistant-${iteration}`,
+            messageParts: [
+              { id: "reasoning", type: "reasoning", data: reasoning, timestamp: 1 },
+              {
+                id: "tool",
+                type: "tool_call",
+                timestamp: 2,
+                data: { id: `call-${iteration}`, state: "completed", result: { success: true, data: toolOutput } } as any,
+              },
+              { id: "content", type: "content", data: content, timestamp: 3 },
+            ],
+          },
+        ];
+
+        const serialized = ChatMarkdownSerializer.serializeMessages(messages);
+        const parsed = ChatMarkdownSerializer.parseMarkdown(`---\nid: generated-${iteration}\n---\n\n${serialized}`);
+        const [userStart, assistantStart] = serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-START [^\n]*-->/g) ?? [];
+
+        for (const start of [userStart, assistantStart]) {
+          if (start.includes("payload-format=")) framedMessages += 1;
+          else readableMessages += 1;
+        }
+        expect(userStart.includes("payload-format=")).toBe(hasMarker(userText));
+        expect(assistantStart.includes("payload-format="))
+          .toBe(hasMarker(reasoning, content, toolOutput));
+        expect(parsed?.messages[0].content).toBe(userText);
+        expect(parsed?.messages[1].reasoning).toBe(reasoning);
+        expect(parsed?.messages[1].content).toBe(content);
+        const tool = parsed?.messages[1].messageParts?.find((part) => part.type === "tool_call");
+        expect((tool?.data as any)?.result?.data).toBe(toolOutput);
+        // Saving what was loaded writes the identical note. A framed user
+        // message is re-framed as ordered parts, so compare the next save.
+        const resaved = ChatMarkdownSerializer.serializeMessages(parsed?.messages ?? []);
+        if (!serialized.includes("payload-format=")) expect(resaved).toBe(serialized);
+        const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: resaved-${iteration}\n---\n\n${resaved}`);
+        expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(resaved);
+      }
+      expect(framedMessages).toBeGreaterThan(50);
+      expect(readableMessages).toBeGreaterThan(300);
+    });
+
+    it("escapes reasoning reversibly for every short run of comment-closer characters", () => {
+      const alphabet = ["-", "\\", "!", ">", "a"];
+      let candidates = [""];
+      const failures: string[] = [];
+      for (let length = 1; length <= 5; length += 1) {
+        candidates = candidates.flatMap((prefix) => alphabet.map((character) => prefix + character));
+        for (const candidate of candidates) {
+          const reasoning = `x${candidate}y`;
+          const serialized = ChatMarkdownSerializer.serializeMessages([{
+            role: "assistant",
+            content: "",
+            message_id: "assistant-escape",
+            messageParts: [
+              { id: "reasoning", type: "reasoning", data: reasoning, timestamp: 1 },
+              { id: "content", type: "content", data: "Answer", timestamp: 2 },
+            ],
+          }]);
+          const stored = serialized.match(/<!-- REASONING\n([\s\S]*?)\n-->/)?.[1] ?? "";
+          const parsed = ChatMarkdownSerializer.parseMarkdown(`---\nid: escape\n---\n\n${serialized}`);
+          if (
+            /--!?>/u.test(stored)
+            || serialized.includes("payload-format=")
+            || parsed?.messages[0].reasoning !== reasoning
+          ) failures.push(reasoning);
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+
+    it("still reads messages the previous writer framed because of --> alone", () => {
+      const frame = (payload: unknown) => btoa(String.fromCharCode(
+        ...new TextEncoder().encode(JSON.stringify(payload)),
+      ));
+      const legacyToolCall = {
+        id: "call-legacy",
+        state: "completed",
+        result: { success: true, data: "graph A-->B" },
+      };
+      const markdown = [
+        "---",
+        "id: legacy-framed",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-legacy" payload-format="base64-json-v1" -->',
+        frame({ version: 1, kind: "content", content: "Draw A-->B" }),
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-legacy" has-tool-calls="true" has-reasoning="true" payload-format="base64-json-v1" -->',
+        frame({
+          version: 1,
+          kind: "parts",
+          parts: [
+            { type: "reasoning", data: "Think --!> then -->" },
+            { type: "tool_call", data: legacyToolCall },
+            { type: "content", data: "```mermaid\nA-->B\n```" },
+          ],
+        }),
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(parsed?.messages[0].content).toBe("Draw A-->B");
+      expect(parsed?.messages[1].reasoning).toBe("Think --!> then -->");
+      expect(parsed?.messages[1].content).toBe("```mermaid\nA-->B\n```");
+      expect(parsed?.messages[1].tool_calls).toEqual([legacyToolCall]);
+
+      // Saving it again drops the framing: the note becomes readable.
+      const rewritten = ChatMarkdownSerializer.serializeMessages(parsed?.messages ?? []);
+      expect(rewritten).not.toContain("payload-format=");
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: legacy-framed\n---\n\n${rewritten}`);
+      expect(reloaded?.messages[0].content).toBe("Draw A-->B");
+      expect(reloaded?.messages[1].reasoning).toBe("Think --!> then -->");
+      expect(reloaded?.messages[1].content).toBe("```mermaid\nA-->B\n```");
+      expect(reloaded?.messages[1].tool_calls).toEqual([legacyToolCall]);
+    });
+
+    it("reads unescaped reasoning and raw > in older notes verbatim", () => {
+      const markdown = [
+        "---",
+        "id: legacy-verbatim",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-verbatim" has-reasoning="true" has-tool-calls="true" -->',
+        "<!-- REASONING",
+        "Keep --\\> and a > b exactly",
+        "-->",
+        "<!-- TOOL-CALLS",
+        '[{"id":"call-gt","name":"read","arguments":{"query":"a > b"}}]',
+        "-->",
+        "Answer",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      const parsed = ChatMarkdownSerializer.parseMarkdown(markdown);
+
+      expect(parsed?.messages[0].reasoning).toBe("Keep --\\> and a > b exactly");
+      expect(parsed?.messages[0].tool_calls?.[0]).toMatchObject({
+        id: "call-gt",
+        arguments: { query: "a > b" },
+      });
+    });
+
+    it.each([
+      ["an unknown version", 'reasoning-escape="v2"'],
+      ["a repeated declaration", 'reasoning-escape="v1" reasoning-escape="v1"'],
+    ])("fails closed on %s of the reasoning escape", (_label, attribute) => {
+      const markdown = [
+        "---",
+        "id: bad-escape",
+        "---",
+        "",
+        `<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-escape" has-reasoning="true" ${attribute} -->`,
+        "<!-- REASONING",
+        "Arrow --\\>",
+        "-->",
+        "Answer",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      expect(ChatMarkdownSerializer.parseMarkdown(markdown)).toBeNull();
+    });
+
     it("stores and restores the exact framed JSON payload through base64", () => {
-      const exactContent = "Unicode 🗿 café\nNUL:\u0000\nReserved: --!>\nTrailing spaces:  ";
+      const exactContent = "Unicode 🗿 café\nNUL:\u0000\nReserved: <!-- SYSTEMSCULPT-MESSAGE-END -->\nTrailing spaces:  ";
       const serialized = ChatMarkdownSerializer.serializeMessages([{
         role: "user",
         content: exactContent,
