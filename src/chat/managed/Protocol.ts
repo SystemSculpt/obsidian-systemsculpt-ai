@@ -3,6 +3,7 @@ import type {
   ThinAgentRunTerminalData,
 } from "../../services/managed/ThinAgentV1Contract";
 import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../services/managed/ThinAgentInputLimits";
+import { isBase64 } from "../../utils/base64";
 
 export const THIN_AGENT_COMMAND_TYPE =
   "systemsculpt.agent.command.v1" as const;
@@ -290,22 +291,7 @@ function utf8Bytes(value: string): number {
 }
 
 function decodedBase64Bytes(value: string): Uint8Array | null {
-  if (value.length === 0 || value.length % 4 !== 0) return null;
-  let padding = 0;
-  if (value.charCodeAt(value.length - 1) === 0x3d) {
-    padding = value.charCodeAt(value.length - 2) === 0x3d ? 2 : 1;
-  }
-  const contentLength = value.length - padding;
-  for (let index = 0; index < contentLength; index += 1) {
-    const code = value.charCodeAt(index);
-    if (!(
-      (code >= 0x41 && code <= 0x5a)
-      || (code >= 0x61 && code <= 0x7a)
-      || (code >= 0x30 && code <= 0x39)
-      || code === 0x2b
-      || code === 0x2f
-    )) return null;
-  }
+  if (!isBase64(value)) return null;
   try {
     const decoded = window.atob(value);
     return Uint8Array.from(decoded, (character) => character.charCodeAt(0));

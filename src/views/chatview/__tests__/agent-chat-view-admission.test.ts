@@ -19,6 +19,11 @@ import type {
 } from "../../../chat/managed/ChatSession";
 import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
+import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
+import {
+  parseThinAgentContextRequest,
+  type ThinAgentContextSource,
+} from "../../../services/managed/ThinAgentV1Contract";
 
 jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 
@@ -1692,6 +1697,93 @@ describe("AgentChatView composer admission", () => {
     ]);
     expect(getPinnedFiles).toHaveBeenCalledTimes(2);
     harness.composer.unload();
+  });
+
+  describe("pinned image context", () => {
+    function contextView(
+      images: Record<string, { bytes: number; statSize?: number }>,
+      limits = DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    ) {
+      const files = new Map(Object.entries(images).map(([path, image]) => [
+        path,
+        {
+          file: new TFile({ path, stat: { size: image.statSize ?? image.bytes } }),
+          bytes: image.bytes,
+        },
+      ]));
+      const readBinary = jest.fn(async (file: TFile) =>
+        new Uint8Array(files.get(file.path)?.bytes ?? 0).fill(0x41).buffer);
+      const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+      Object.assign(view, {
+        chatInputLimits: limits,
+        app: {
+          metadataCache: {
+            getFirstLinkpathDest: jest.fn((path: string) => files.get(path)?.file ?? null),
+          },
+          vault: {
+            getAbstractFileByPath: jest.fn((path: string) => files.get(path)?.file ?? null),
+            readBinary,
+            read: jest.fn(async () => ""),
+          },
+        },
+      });
+      const read = (...entries: string[]) =>
+        (view as any).readThinAgentContextSources(new Set(entries)) as Promise<ThinAgentContextSource[]>;
+      return { read, readBinary };
+    }
+
+    it("reads pinned images above 4 MiB and at the 6 MiB limit into sources the contract accepts", async () => {
+      const { read, readBinary } = contextView({
+        "Photos/large.jpg": { bytes: 4 * 1024 * 1024 + 4_321 },
+        "Photos/limit.png": { bytes: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes },
+      });
+
+      const sources = await read("[[Photos/large.jpg]]", "[[Photos/limit.png]]");
+
+      expect(readBinary).toHaveBeenCalledTimes(2);
+      expect(sources.map((source) => [source.kind, source.path])).toEqual([
+        ["image", "Photos/large.jpg"],
+        ["image", "Photos/limit.png"],
+      ]);
+      const [large, limit] = sources as Array<Extract<ThinAgentContextSource, { kind: "image" }>>;
+      expect(large.data_url.startsWith("data:image/jpeg;base64,")).toBe(true);
+      expect(limit.data_url.startsWith("data:image/png;base64,")).toBe(true);
+      expect(Buffer.from(limit.data_url.split(",")[1], "base64").byteLength)
+        .toBe(DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes);
+      // Server-parity check: the untrusted-input parser accepts exactly what
+      // the view built, so skipping the client-side re-parse loses nothing.
+      expect(parseThinAgentContextRequest({
+        contract_version: "thin-agent-v1",
+        root_message_id: "user-large-images",
+        context_sources: sources,
+      }, DEFAULT_THIN_AGENT_INPUT_LIMITS).context_sources).toEqual(sources);
+    });
+
+    it("measures the bytes actually read rather than trusting a stale stat", async () => {
+      const { read } = contextView({
+        "Photos/grew.png": {
+          statSize: 1_024,
+          bytes: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes + 1,
+        },
+        "Photos/empty.png": { bytes: 0 },
+      });
+
+      await expect(read("[[Photos/grew.png]]"))
+        .rejects.toThrow("grew.png exceeds the pinned image limit.");
+      await expect(read("[[Photos/empty.png]]"))
+        .rejects.toThrow("empty.png is an empty image.");
+    });
+
+    it("rejects an image type the negotiated limits do not accept before reading it", async () => {
+      const { read, readBinary } = contextView(
+        { "Photos/photo.webp": { bytes: 16 } },
+        { ...DEFAULT_THIN_AGENT_INPUT_LIMITS, imageMimeTypes: ["image/png", "image/jpeg"] },
+      );
+
+      await expect(read("[[Photos/photo.webp]]"))
+        .rejects.toThrow("photo.webp is not a supported pinned image type.");
+      expect(readBinary).not.toHaveBeenCalled();
+    });
   });
 
   it("does not pin a file merely because the agent read it", async () => {

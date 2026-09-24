@@ -841,6 +841,34 @@ describe("AgentChatSession", () => {
     }));
   });
 
+  it("stages view-measured pinned images above 4 MiB and at the 6 MiB limit without re-parsing them", async () => {
+    const harness = createHarness();
+    const rootMessageId = "user_context_large_images";
+    const image = (byteLength: number) => ({
+      kind: "image" as const,
+      path: `Photos/${byteLength}.jpg`,
+      data_url: `data:image/jpeg;base64,${Buffer.alloc(byteLength, 0x33).toString("base64")}`,
+    });
+    const contextSources = [
+      image(4 * 1024 * 1024 + 99_999),
+      image(6 * 1024 * 1024),
+    ];
+
+    await expect(harness.agent.stageContext(rootMessageId, contextSources))
+      .resolves.toMatchObject({ context_ref: expect.stringMatching(/^ctx1_/u) });
+
+    const contextRequest = harness.request.mock.calls[1]?.[0] as PlatformRequestInput;
+    expect(contextRequest.url).toBe("https://systemsculpt.test/api/plugin/agent/context");
+    expect(contextRequest.body).toEqual({
+      contract_version: "thin-agent-v1",
+      root_message_id: rootMessageId,
+      context_sources: contextSources,
+    });
+    // The sources travel as built; nothing re-encodes or copies the payload.
+    expect((contextRequest.body as { context_sources: unknown }).context_sources)
+      .toBe(contextSources);
+  });
+
   it.each([
     {
       label: "an oversized body",

@@ -28,7 +28,6 @@ import {
   THIN_AGENT_CONTRACT_VERSION,
   parseThinAgentBootstrapRequest,
   parseThinAgentBootstrapResponse,
-  parseThinAgentContextRequest,
   parseThinAgentContextResponse,
   type ThinAgentBootstrapRequest,
   type ThinAgentBootstrapResponse,
@@ -36,10 +35,7 @@ import {
   type ThinAgentContextSource,
   type ThinAgentRunTerminalData,
 } from "../../services/managed/ThinAgentV1Contract";
-import {
-  DEFAULT_THIN_AGENT_INPUT_LIMITS,
-  type ThinAgentInputLimits,
-} from "../../services/managed/ThinAgentInputLimits";
+import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import type { ChatMessage } from "../../types";
 import type { ToolCallResult } from "../../types/toolCalls";
 import {
@@ -594,7 +590,6 @@ export class AgentChatSession implements ChatSession {
   private pendingCancelInFlight = false;
   private readonly pendingDeliveries = new Map<string, PendingToolDelivery>();
   private readonly pendingApprovalDeliveries = new Map<string, PendingApprovalDelivery>();
-  private inputLimits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS;
   private readonly lifecycle: AgentLifecycle;
   private renderTimer: number | null = null;
   private pendingSnapshot: AgentConversationSnapshot | null = null;
@@ -1054,11 +1049,16 @@ export class AgentChatSession implements ChatSession {
     try {
       const bootstrap = await this.issueBootstrap();
       const url = new URL(THIN_AGENT_CONTEXT_PATH, this.options.baseUrl);
-      const request = parseThinAgentContextRequest({
+      // The view assembled these sources and measured every byte against the
+      // negotiated limits while reading them. Re-running the untrusted
+      // contract parser here would re-encode every text block and rescan
+      // every image; the server validates the staged request and answers an
+      // oversized one with 413.
+      const request = {
         contract_version: THIN_AGENT_CONTRACT_VERSION,
         root_message_id: rootMessageId,
         context_sources: contextSources,
-      }, this.inputLimits);
+      };
       const response = await this.requestClient.request({
         url: url.toString(),
         method: "POST",
@@ -3751,8 +3751,7 @@ export class AgentChatSession implements ChatSession {
   private async issueBootstrap(): Promise<ThinAgentBootstrapResponse> {
     if (this.transport) {
       const bootstrap = await this.transport.bootstrap();
-      this.inputLimits = bootstrap.client_input_limits;
-      this.options.updateInputLimits?.(this.inputLimits);
+      this.options.updateInputLimits?.(bootstrap.client_input_limits);
       return bootstrap;
     }
 
@@ -3785,8 +3784,7 @@ export class AgentChatSession implements ChatSession {
     const bootstrap = parseThinAgentBootstrapResponse(value, {
       conversation_id: request.conversation_id,
     });
-    this.inputLimits = bootstrap.client_input_limits;
-    this.options.updateInputLimits?.(this.inputLimits);
+    this.options.updateInputLimits?.(bootstrap.client_input_limits);
     return bootstrap;
   }
 

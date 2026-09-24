@@ -1865,10 +1865,23 @@ export class AgentChatView extends ItemView {
         if (imageCount > this.chatInputLimits.maxImagesPerTurn) {
           throw new Error("Pinned files exceed the per-message image count limit.");
         }
+        const mimeType = imageMimeType(resolved.extension);
+        if (!this.chatInputLimits.imageMimeTypes.includes(mimeType)) {
+          throw new Error(`${resolved.name} is not a supported pinned image type.`);
+        }
         if (resolved.stat.size > this.chatInputLimits.maxImageBytes) {
           throw new Error(`${resolved.name} exceeds the pinned image limit.`);
         }
         const bytes = new Uint8Array(await this.app.vault.readBinary(resolved));
+        // These sources are sent without being parsed again, so this is the
+        // one place their sizes are measured. Check the bytes actually read,
+        // not only the possibly stale stat.
+        if (bytes.byteLength === 0) {
+          throw new Error(`${resolved.name} is an empty image.`);
+        }
+        if (bytes.byteLength > this.chatInputLimits.maxImageBytes) {
+          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
+        }
         imageBytes += bytes.byteLength;
         if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
           throw new Error("Pinned images exceed the total per-message image limit.");
@@ -1876,7 +1889,7 @@ export class AgentChatView extends ItemView {
         sources.push({
           kind: "image",
           path: resolved.path,
-          data_url: thinAgentDataUrl(imageMimeType(resolved.extension), bytes),
+          data_url: thinAgentDataUrl(mimeType, bytes),
         });
       } else {
         const content = await this.app.vault.read(resolved);

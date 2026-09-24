@@ -1,3 +1,5 @@
+import { isBase64 } from "../../utils/base64";
+
 export const THIN_AGENT_CONTRACT_VERSION = "thin-agent-v1" as const;
 export const THIN_AGENT_CAPABILITY_CONTRACT_VERSION =
   "thin-agent-capabilities-v1" as const;
@@ -198,8 +200,6 @@ const ACCESS_TOKEN = /^[A-Za-z0-9._~-]{16,4096}$/;
 const CONTEXT_REF = /^ctx1_[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/;
 const DOCUMENT_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const BASE64 =
-  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MAX_PATH_CHARS = 1_024;
 const MAX_CONTEXT_ARTIFACT_BYTES = 24 * 1024 * 1024;
 const MAX_CLIENT_TOOL_INPUT_DEPTH = 64;
@@ -356,18 +356,23 @@ function imageDataUrlBytes(
   const mimeType = metadata.slice("data:".length, -";base64".length);
   if (!limits.imageMimeTypes.includes(mimeType)) return null;
   const base64 = value.slice(comma + 1);
-  if (base64.length === 0 || base64.length % 4 !== 0 || !BASE64.test(base64)) {
-    return null;
-  }
+  if (!isBase64(base64)) return null;
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   const bytes = (base64.length / 4) * 3 - padding;
   return bytes > 0 && bytes <= limits.maxImageBytes ? bytes : null;
 }
 
+type MeasuredContextSource = Readonly<{
+  source: ThinAgentContextSource;
+  textBytes: number;
+  imageBytes: number;
+}>;
+
+/** Validates one source and measures it in the same pass. */
 function parseContextSource(
   value: unknown,
   limits: ThinAgentInputLimits,
-): ThinAgentContextSource | null {
+): MeasuredContextSource | null {
   if (!isRecord(value)
     || typeof value.kind !== "string"
     || typeof value.path !== "string"
@@ -378,21 +383,31 @@ function parseContextSource(
   }
   if (value.kind === "text"
     && hasExactKeys(value, ["kind", "path", "content"])
-    && typeof value.content === "string"
-    && utf8Bytes(value.content) <= limits.maxTextBytesPerBlock) {
+    && typeof value.content === "string") {
+    const contentBytes = utf8Bytes(value.content);
+    if (contentBytes > limits.maxTextBytesPerBlock) return null;
     return Object.freeze({
-      kind: "text",
-      path: value.path,
-      content: value.content,
+      source: Object.freeze({
+        kind: "text",
+        path: value.path,
+        content: value.content,
+      }),
+      textBytes: utf8Bytes(value.path) + contentBytes,
+      imageBytes: 0,
     });
   }
   if (value.kind === "image"
-    && hasExactKeys(value, ["kind", "path", "data_url"])
-    && imageDataUrlBytes(value.data_url, limits) !== null) {
+    && hasExactKeys(value, ["kind", "path", "data_url"])) {
+    const imageBytes = imageDataUrlBytes(value.data_url, limits);
+    if (imageBytes === null) return null;
     return Object.freeze({
-      kind: "image",
-      path: value.path,
-      data_url: value.data_url as string,
+      source: Object.freeze({
+        kind: "image",
+        path: value.path,
+        data_url: value.data_url as string,
+      }),
+      textBytes: 0,
+      imageBytes,
     });
   }
   if (value.kind === "document_ref"
@@ -400,9 +415,13 @@ function parseContextSource(
     && typeof value.document_id === "string"
     && DOCUMENT_ID.test(value.document_id)) {
     return Object.freeze({
-      kind: "document_ref",
-      path: value.path,
-      document_id: value.document_id,
+      source: Object.freeze({
+        kind: "document_ref",
+        path: value.path,
+        document_id: value.document_id,
+      }),
+      textBytes: 0,
+      imageBytes: 0,
     });
   }
   return null;
@@ -427,25 +446,22 @@ export function parseThinAgentContextRequest(
       "The selected vault context request is invalid.",
     );
   }
-  const contextSources = value.context_sources.map((source) =>
-    parseContextSource(source, limits));
-  if (contextSources.some((source) => source === null)) {
-    throw new ThinAgentContractError(
-      "invalid_context",
-      "A selected context source is malformed.",
-    );
-  }
-  const sources = contextSources as ThinAgentContextSource[];
+  const sources: ThinAgentContextSource[] = [];
   let textBytes = 0;
   let imageBytes = 0;
   let imageCount = 0;
-  for (const source of sources) {
-    if (source.kind === "text") {
-      textBytes += utf8Bytes(source.path) + utf8Bytes(source.content);
-    } else if (source.kind === "image") {
-      imageCount += 1;
-      imageBytes += imageDataUrlBytes(source.data_url, limits) ?? 0;
+  for (const candidate of value.context_sources) {
+    const measured = parseContextSource(candidate, limits);
+    if (!measured) {
+      throw new ThinAgentContractError(
+        "invalid_context",
+        "A selected context source is malformed.",
+      );
     }
+    sources.push(measured.source);
+    textBytes += measured.textBytes;
+    imageBytes += measured.imageBytes;
+    if (measured.source.kind === "image") imageCount += 1;
   }
   if (textBytes > limits.maxTotalTextBytes
     || imageCount > limits.maxImagesPerTurn
