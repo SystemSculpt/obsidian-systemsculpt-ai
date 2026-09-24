@@ -38,7 +38,13 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 - Obsidian stores the license key, settings, caches, and small device-local preferences locally. The plugin can create chats, recordings, attachments, embedding indexes, Studio projects and assets, diagnostics, and redacted settings backups inside the vault in configured directories.
 - Semantic search, file pickers, and vault tools enumerate or read vault files when needed. User-invoked copy, paste, and attachment features access the system clipboard.
 - On Obsidian Desktop, Studio's CLI, dataset-adapter, media-ingest, and FFmpeg nodes can read or write user-selected paths outside the vault and execute user-configured commands. These capabilities run only when the user configures and executes the relevant node and are unavailable on mobile.
+- On Obsidian Desktop, on-machine Codex runs only after you select it for chat or Studio text generation, or use a Studio Codex task card, run board, or command center. The plugin then launches your installed `codex app-server` command as a local child process and exchanges messages with it over standard input and output to list models and run turns. Codex keeps its own login, configuration, and thread history. On-machine Codex is unavailable on mobile.
+- To start Codex, the plugin reads the optional launch settings file `~/.config/systemsculpt/codex.json`, which can set the `binary` to run and the Codex `home` directory. It checks that the Codex home (`~/.codex` by default) exists and passes it to Codex as `CODEX_HOME`. The plugin does not read, copy, or upload files inside the Codex home, including Codex credentials.
 - Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. License keys are removed from exported diagnostics and settings backups.
+
+## Bundled components
+
+- [Automerge](https://github.com/automerge/automerge) (`@automerge/automerge` 3.4.1, MIT license, copyright Ink & Switch LLC) merges concurrent edits to a Studio project document, for example edits from two synced devices, without discarding either side. Its WebAssembly core ships inside `main.js` as base64 and is compiled on the device the first time a Studio project document loads. It runs locally, makes no network requests, and is never downloaded at runtime.
 
 ## Documentation
 
@@ -81,7 +87,7 @@ See [development.md](docs/development.md), [community-review.md](docs/community-
 
 ## Release
 
-- Version: 6.8.0
+- Version: see the [latest release](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/releases/latest); `manifest.json` is authoritative
 - Minimum Obsidian version: 1.7.2
 - Platforms: desktop and mobile
 - License: MIT
