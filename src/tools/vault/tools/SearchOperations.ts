@@ -18,6 +18,13 @@ import { extractSearchTerms, calculateScore, sortByScore, formatScoredResults, S
 import SystemSculptPlugin from "../../../main";
 
 type CompiledSearchPattern = Readonly<{ raw: string; source: string }>;
+type FindMatch = { path: string; score: number; mtime: number | null };
+type FindFilesResponse = {
+  results: Array<{ path: string; score: number; modified?: string }>;
+  totalFound: number;
+  truncated?: boolean;
+  notice?: string;
+};
 type GrepContext = {
   lines: number[];
   matchCount: number;
@@ -180,7 +187,7 @@ export class SearchOperations {
   }
 
   /**
-   * Search for files and directories by name patterns - with intelligent scoring
+   * Find files and folders whose names match at least one search term.
    */
   async findFiles(params: FindFilesParams): Promise<unknown> {
     const patterns = this.normalizeStringArray(params.patterns);
@@ -205,8 +212,21 @@ export class SearchOperations {
     const originalQuery = patterns.join(' ');
     const searchTerms = extractSearchTerms(originalQuery);
     
-    const scoredResults: ScoredResult[] = [];
+    const matches: FindMatch[] = [];
     const seenPaths = new Set<string>();
+    const consider = (path: string, mtime: number | null | undefined) => {
+      const scored = calculateScore(path, '', {
+        searchTerms,
+        originalQuery
+      });
+      // A name that contains no search term is not a result, however it scores.
+      if (scored.matchDetails.keywordsFound.length === 0) return;
+      matches.push({
+        path: scored.path,
+        score: scored.score,
+        mtime: typeof mtime === "number" && Number.isFinite(mtime) && mtime > 0 ? mtime : null,
+      });
+    };
 
     const adapterFiles = await this.listHiddenFiles();
     
@@ -224,19 +244,7 @@ export class SearchOperations {
         continue;
       }
       seenPaths.add(file.path);
-      
-      // Calculate intelligent score
-      const scoreResult = calculateScore(file.path, '', {
-        searchTerms,
-        originalQuery
-      });
-      
-      // Add metadata
-      scoreResult.created = new Date(file.stat.ctime).toISOString();
-      scoreResult.modified = new Date(file.stat.mtime).toISOString();
-      scoreResult.fileSize = file.stat.size;
-      
-      scoredResults.push(scoreResult);
+      consider(file.path, file.stat?.mtime);
     }
 
     for (const file of adapterFiles) {
@@ -244,19 +252,7 @@ export class SearchOperations {
         continue;
       }
       seenPaths.add(file.path);
-
-      const scoreResult = calculateScore(file.path, '', {
-        searchTerms,
-        originalQuery
-      });
-
-      const created = file.stat?.ctime ? new Date(file.stat.ctime).toISOString() : undefined;
-      const modified = file.stat?.mtime ? new Date(file.stat.mtime).toISOString() : undefined;
-      if (created) scoreResult.created = created;
-      if (modified) scoreResult.modified = modified;
-      scoreResult.fileSize = file.stat?.size ?? 0;
-
-      scoredResults.push(scoreResult);
+      consider(file.path, file.stat?.mtime);
     }
     
     // Search folders
@@ -267,13 +263,7 @@ export class SearchOperations {
       for (const child of folder.children) {
         if (child instanceof TFolder) {
           if (this.isAllowedPath(child.path)) {
-            // Calculate intelligent score for folder
-            const scoreResult = calculateScore(child.path, '', {
-              searchTerms,
-              originalQuery
-            });
-            
-            scoredResults.push(scoreResult);
+            consider(child.path, null);
           }
           // Recursively search subfolders
           searchFolder(child);
@@ -299,19 +289,25 @@ export class SearchOperations {
         continue;
       }
       seenPaths.add(folderPath);
-      const scoreResult = calculateScore(folderPath, '', {
-        searchTerms,
-        originalQuery
-      });
-      scoredResults.push(scoreResult);
+      consider(folderPath, null);
     }
     
-    // Sort by score and format results
-    const sortedResults = sortByScore(scoredResults);
-    const response = formatScoredResults(sortedResults, resultLimit);
+    // Rank, then return only what the caller needs to open or list a match.
+    matches.sort((left, right) => right.score - left.score);
+    const response: FindFilesResponse = {
+      results: matches.slice(0, resultLimit).map(({ path, score, mtime }) => ({
+        path,
+        score,
+        ...(mtime === null ? {} : { modified: new Date(mtime).toISOString() }),
+      })),
+      totalFound: matches.length,
+    };
+    if (matches.length === 0) {
+      response.notice = `No file or folder names contain ${patterns.map((pattern) => `"${pattern}"`).join(", ")}. `
+        + "Patterns are plain name fragments, not globs or regexes. Try a shorter fragment, or use search to look inside note contents.";
+    }
     while (
-      Array.isArray(response.results)
-      && response.results.length > 0
+      response.results.length > 0
       && JSON.stringify(response).length > FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS
     ) {
       response.results.pop();
