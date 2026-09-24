@@ -98,15 +98,24 @@ export class StorageManager {
     // Ensure base hidden directory exists
     await this.ensureDirectory(this.hiddenBasePath);
 
-    // Create core subdirectories
+    // Create core subdirectories. Diagnostics is created by its first write
+    // (ensureLocation) so a session that records nothing leaves no trace (#337).
     await Promise.all([
       this.ensureDirectory(this.getPath('settings')),
       this.ensureDirectory(this.getPath('settings', 'backups')),
       this.ensureDirectory(this.getPath('settings', 'emergency')),
       this.ensureDirectory(this.getPath('cache')),
       this.ensureDirectory(this.getPath('temp')),
-      this.ensureDirectory(this.getPath('diagnostics'), true)
     ]);
+  }
+
+  /**
+   * Initialize storage and ensure one location's directory exists.
+   * Created directories are cached, so repeated writes cost nothing extra.
+   */
+  async ensureLocation(type: StorageLocationType): Promise<void> {
+    await this.initialize();
+    await this.ensureDirectory(this.getPath(type), type === 'diagnostics');
   }
 
   private getAdapterBasePath(): string | null {
@@ -248,8 +257,8 @@ export class StorageManager {
     }
 
     try {
-      // Ensure storage is initialized
-      await this.initialize();
+      // Ensure storage and the target location are initialized
+      await this.ensureLocation(type);
       
       // Get full path
       const path = this.getPath(type, fileName);
@@ -286,7 +295,7 @@ export class StorageManager {
     }
 
     try {
-      await this.initialize();
+      await this.ensureLocation(type);
 
       const path = this.getPath(type, fileName);
       const payload = data.endsWith('\n') ? data : `${data}\n`;

@@ -85,6 +85,19 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     containerEl.createEl("h3", { text: "Diagnostics" });
 
     new Setting(containerEl)
+        .setName("Record diagnostics")
+        .setDesc("Save resource samples, long-frame reports, and chat lifecycle logs in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Failed chat runs still save incident reports.")
+        .addToggle((toggle) => {
+            toggle
+                .setValue(plugin.settings.showDiagnostics === true)
+                .onChange(async (value) => {
+                    await plugin.getSettingsManager().updateSettings({
+                        showDiagnostics: value,
+                    });
+                });
+        });
+
+    new Setting(containerEl)
         .setName("Copy diagnostics snapshot")
         .setDesc("Copies a content-free runtime and resource summary for support.")
         .addButton((button) => {

@@ -7,31 +7,47 @@ import {
   ResourceSample,
 } from "../ResourceMonitorService";
 
-// Mock the main plugin
-jest.mock("../../main", () => {
-  return class MockPlugin {
-    getLogger() {
-      return {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-      };
+const MINUTE_MS = 60_000;
+
+function createFakeObserver(supportedEntryTypes: readonly string[] = ["long-animation-frame"]) {
+  const instances: FakeObserver[] = [];
+  class FakeObserver {
+    static supportedEntryTypes = supportedEntryTypes;
+    readonly observe = jest.fn();
+    readonly disconnect = jest.fn();
+    constructor(private readonly callback: PerformanceObserverCallback) {
+      instances.push(this);
     }
-    storage = {
-      appendToFile: jest.fn().mockResolvedValue(undefined),
-    };
-  };
-});
+    emit(durations: number[]): void {
+      this.callback(
+        { getEntries: () => durations.map((duration) => ({ duration })) } as unknown as PerformanceObserverEntryList,
+        this as unknown as PerformanceObserver,
+      );
+    }
+  }
+  return { FakeObserver, instances };
+}
+
+function setDocumentHidden(hidden: boolean): void {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+function writtenLines(appendToFile: jest.Mock): Record<string, unknown>[] {
+  return appendToFile.mock.calls.flatMap(([, , payload]: [string, string, string]) =>
+    payload.trim().split("\n").map((line) => JSON.parse(line)));
+}
 
 describe("ResourceMonitorService", () => {
   let service: ResourceMonitorService;
   let mockPlugin: any;
   let mockLogger: any;
+  let observer: ReturnType<typeof createFakeObserver>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    setDocumentHidden(false);
 
     mockLogger = {
       debug: jest.fn(),
@@ -42,105 +58,332 @@ describe("ResourceMonitorService", () => {
 
     mockPlugin = {
       getLogger: jest.fn().mockReturnValue(mockLogger),
-      registerInterval: jest.fn((id: number) => id),
+      register: jest.fn(),
       storage: {
-        appendToFile: jest.fn().mockResolvedValue(undefined),
+        appendToFile: jest.fn().mockResolvedValue({ success: true }),
+        writeFile: jest.fn().mockResolvedValue({ success: true }),
+        getPath: jest.fn((type: string, fileName: string) => `.systemsculpt/${type}/${fileName}`),
+      },
+      app: {
+        vault: {
+          adapter: {
+            stat: jest.fn().mockResolvedValue(null),
+          },
+        },
       },
     };
 
-    service = new ResourceMonitorService(mockPlugin);
+    observer = createFakeObserver();
+    service = new ResourceMonitorService(mockPlugin, {
+      metricsFileName: "resource-metrics-latest.ndjson",
+      sessionId: "20260924-120000",
+      freezeObserverConstructor: observer.FakeObserver as never,
+    });
   });
 
   afterEach(() => {
     service.stop();
     jest.useRealTimers();
+    delete (document as any).hidden;
   });
 
   describe("constructor", () => {
-    it("creates service instance", () => {
-      expect(service).toBeInstanceOf(ResourceMonitorService);
-    });
-
-    it("accepts custom options", () => {
-      const customService = new ResourceMonitorService(mockPlugin, {
-        intervalMs: 30000,
-        metricsFileName: "custom-metrics.ndjson",
-        sessionId: "test-session",
-      });
-
-      expect(customService).toBeInstanceOf(ResourceMonitorService);
-      expect((customService as any).samplingIntervalMs).toBe(30000);
-      expect((customService as any).metricsFileName).toBe("custom-metrics.ndjson");
-      expect((customService as any).sessionId).toBe("test-session");
-    });
-
-    it("uses default interval when not specified", () => {
-      expect((service as any).samplingIntervalMs).toBe(15000);
+    it("samples at most once a minute", () => {
+      expect((service as any).samplingIntervalMs).toBe(MINUTE_MS);
+      expect((new ResourceMonitorService(mockPlugin, { intervalMs: 15_000 }) as any).samplingIntervalMs).toBe(MINUTE_MS);
+      expect((new ResourceMonitorService(mockPlugin, { intervalMs: Number.NaN }) as any).samplingIntervalMs).toBe(MINUTE_MS);
+      expect((new ResourceMonitorService(mockPlugin, { intervalMs: 5 * MINUTE_MS }) as any).samplingIntervalMs).toBe(5 * MINUTE_MS);
     });
   });
 
-  describe("start", () => {
-    it("starts resource monitoring", () => {
+  describe("while diagnostics recording is off", () => {
+    it("runs no timer, observes nothing, and writes nothing", async () => {
+      expect(jest.getTimerCount()).toBe(0);
+      expect(observer.instances).toHaveLength(0);
+
+      await service.captureManualSample("support");
+      const terminal = service.captureIncidentTerminalSample();
+      await jest.advanceTimersByTimeAsync(60 * MINUTE_MS);
+      await service.flushPending();
+
+      expect(service.isRecording()).toBe(false);
+      expect(terminal.captured_at).toEqual(expect.any(String));
+      expect(service.getRecentSamples().map((sample) => sample.note)).toEqual(["support", "incident-terminal"]);
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+      expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.stat).not.toHaveBeenCalled();
+      expect(mockPlugin.register).not.toHaveBeenCalled();
+    });
+
+    it("stops every timer, observer, and queued write when recording is turned off", async () => {
+      service.start();
+      service.stop();
+      await service.flushPending();
+      mockPlugin.storage.appendToFile.mockClear();
+
+      await jest.advanceTimersByTimeAsync(10 * MINUTE_MS);
+      await service.captureManualSample("after-stop");
+      setDocumentHidden(false);
+      await service.flushPending();
+
+      expect(jest.getTimerCount()).toBe(0);
+      expect(observer.instances[0].disconnect).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("while diagnostics recording is on", () => {
+    it("records one sample a minute on a single timer", async () => {
+      service.start();
       service.start();
 
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        "Resource monitor starting",
-        expect.objectContaining({
-          source: "ResourceMonitor",
-        })
+      expect(service.isRecording()).toBe(true);
+      expect(jest.getTimerCount()).toBe(1);
+      expect(observer.instances).toHaveLength(1);
+      expect(service.getRecentSamples().map((sample) => sample.note)).toEqual(["recording-started"]);
+
+      await jest.advanceTimersByTimeAsync(MINUTE_MS - 1);
+      expect(service.getRecentSamples()).toHaveLength(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(service.getRecentSamples()).toHaveLength(2);
+      expect(service.getRecentSamples()[1].note).toBeUndefined();
+      expect(service.getRecentSamples()[1]).not.toHaveProperty("eventLoopLagMs", expect.any(Number));
+    });
+
+    it("appends samples in batches instead of once per sample", async () => {
+      service.start();
+      await jest.advanceTimersByTimeAsync(3 * MINUTE_MS);
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(MINUTE_MS);
+
+      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.storage.appendToFile.mock.calls[0][0]).toBe("diagnostics");
+      expect(mockPlugin.storage.appendToFile.mock.calls[0][1]).toBe("resource-metrics-latest.ndjson");
+      const lines = writtenLines(mockPlugin.storage.appendToFile);
+      expect(lines).toHaveLength(5);
+      expect(lines.every((line) => line.sessionId === "20260924-120000")).toBe(true);
+    });
+
+    it("pauses sampling while the window is hidden and flushes what it has", async () => {
+      service.start();
+      await jest.advanceTimersByTimeAsync(MINUTE_MS);
+
+      setDocumentHidden(true);
+      await Promise.resolve();
+
+      expect(jest.getTimerCount()).toBe(0);
+      expect(writtenLines(mockPlugin.storage.appendToFile)).toHaveLength(2);
+      await jest.advanceTimersByTimeAsync(30 * MINUTE_MS);
+      expect(service.getRecentSamples()).toHaveLength(2);
+
+      setDocumentHidden(false);
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(MINUTE_MS);
+      expect(service.getRecentSamples()).toHaveLength(3);
+    });
+
+    it("does not start the timer when recording begins in a hidden window", () => {
+      setDocumentHidden(true);
+
+      service.start();
+
+      expect(jest.getTimerCount()).toBe(0);
+      setDocumentHidden(false);
+      expect(jest.getTimerCount()).toBe(1);
+    });
+
+    it("keeps samples queued after stop until they are flushed", async () => {
+      service.start();
+      await jest.advanceTimersByTimeAsync(MINUTE_MS);
+      service.stop();
+
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+      await service.flushPending();
+
+      expect(writtenLines(mockPlugin.storage.appendToFile).map((line) => line.note)).toEqual(["recording-started", undefined]);
+    });
+
+    it("drains samples queued behind an active flush", async () => {
+      let releaseFirst!: () => void;
+      mockPlugin.storage.appendToFile.mockImplementationOnce(() => new Promise((resolve) => {
+        releaseFirst = () => resolve({ success: true });
+      }));
+      service.start();
+      const first = service.flushPending();
+      await service.captureManualSample("queued");
+      const drained = service.flushPending();
+
+      releaseFirst();
+      await first;
+      await drained;
+
+      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(2);
+      expect(writtenLines(mockPlugin.storage.appendToFile).map((line) => line.note)).toEqual(["recording-started", "queued"]);
+    });
+
+    it("queues incident samples with the next batch instead of writing each one", () => {
+      service.start();
+
+      const sample = (service.captureIncidentTerminalSample as any)("private-caller-note");
+
+      expect(sample.captured_at).toEqual(expect.any(String));
+      expect(sample).not.toHaveProperty("note");
+      expect(JSON.stringify(sample)).not.toContain("private-caller-note");
+      expect(service.getRecentSamples(1)[0].note).toBe("incident-terminal");
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it("ties its timer and observer to plugin unload once", () => {
+      service.start();
+      service.stop();
+      service.start();
+
+      expect(mockPlugin.register).toHaveBeenCalledTimes(1);
+      mockPlugin.register.mock.calls[0][0]();
+      expect(service.isRecording()).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe("long-frame reports", () => {
+    it("records a freeze sample from the observer without writing immediately", () => {
+      service.start();
+
+      observer.instances[0].emit([80, 512.34]);
+
+      const freezeSample = service.getRecentSamples(1)[0];
+      expect(freezeSample).toMatchObject({
+        note: "freeze",
+        freezeDeltaMs: 512.3,
+        eventLoopLagMs: 512.3,
+      });
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it("ignores frames below the freeze threshold", () => {
+      service.start();
+
+      observer.instances[0].emit([60, 199]);
+
+      expect(service.getRecentSamples().map((sample) => sample.note)).toEqual(["recording-started"]);
+    });
+
+    it("keeps partial freeze evidence when memory and CPU reads fail", () => {
+      service.start();
+      jest.spyOn(service as any, "readMemoryUsage").mockImplementation(() => {
+        throw new Error("private-memory-failure");
+      });
+      jest.spyOn(service as any, "captureCpuPercent").mockImplementation(() => {
+        throw new Error("private-cpu-failure");
+      });
+
+      expect(() => observer.instances[0].emit([500])).not.toThrow();
+
+      const freezeSample = service.getRecentSamples(1)[0];
+      expect(freezeSample).toMatchObject({ freezeDeltaMs: 500, note: "freeze" });
+      expect(freezeSample).not.toHaveProperty("cpuPercent", expect.any(Number));
+      expect((service as any).pendingWrites).toContain(freezeSample);
+    });
+
+    it("queues the sample after a buffer or threshold logger failure", () => {
+      service.start();
+      const bufferAndCheckSample = jest.spyOn(service as any, "bufferAndCheckSample");
+      bufferAndCheckSample.mockImplementationOnce(() => {
+        throw new Error("private-buffer-failure");
+      });
+
+      expect(() => observer.instances[0].emit([1_000])).not.toThrow();
+
+      expect((service as any).pendingWrites.at(-1)).toMatchObject({ freezeDeltaMs: 1_000, note: "freeze" });
+    });
+  });
+
+  describe("metrics file", () => {
+    it("reports failed and rejected batch writes without throwing", async () => {
+      service.start();
+      mockPlugin.storage.appendToFile.mockResolvedValueOnce({ success: false, error: "private-storage-failure" });
+      await service.flushPending();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "Failed to write resource metrics",
+        undefined,
+        expect.objectContaining({ source: "ResourceMonitor" }),
+      );
+      expect(JSON.stringify(mockLogger.error.mock.calls)).not.toContain("private-storage-failure");
+
+      await service.captureManualSample("second");
+      mockPlugin.storage.appendToFile.mockRejectedValueOnce(new Error("private-storage-failure"));
+      await service.flushPending();
+
+      expect(mockLogger.error).toHaveBeenLastCalledWith(
+        "Failed to write resource metrics",
+        expect.any(Error),
+        expect.objectContaining({ source: "ResourceMonitor" }),
       );
     });
 
-    it("collects initial sample on startup", () => {
-      service.start();
+    it("does not emit an unhandled rejection when storage and diagnostics logging fail", async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      mockPlugin.storage.appendToFile.mockRejectedValue(new Error("private-storage-failure"));
+      mockLogger.error.mockImplementation(() => {
+        throw new Error("private-logger-failure");
+      });
 
-      const samples = service.getRecentSamples();
-      expect(samples.length).toBeGreaterThan(0);
-      expect(samples[0].note).toBe("startup");
+      try {
+        service.start();
+        for (let index = 0; index < 5; index += 1) service.captureIncidentTerminalSample();
+        await service.flushPending();
+        await Promise.resolve();
+
+        expect(service.getRecentSamples()).toHaveLength(6);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+      }
     });
 
-    it("does not restart if already running", () => {
+    it("keeps pending samples when storage is not ready", async () => {
+      mockPlugin.storage = null;
       service.start();
-      const firstIntervalId = (service as any).intervalId;
 
-      service.start();
-      const secondIntervalId = (service as any).intervalId;
+      await expect(service.flushPending()).resolves.toBeUndefined();
 
-      expect(firstIntervalId).toBe(secondIntervalId);
+      expect((service as any).pendingWrites).toHaveLength(1);
     });
 
-    it("sets up interval for periodic sampling", () => {
+    it("stats the file once per session, then counts appended bytes", async () => {
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 1_000 });
       service.start();
+      await service.flushPending();
+      await service.captureManualSample("next");
+      await service.flushPending();
 
-      expect((service as any).intervalId).not.toBeNull();
-    });
-  });
-
-  describe("stop", () => {
-    it("stops resource monitoring", () => {
-      service.start();
-      service.stop();
-
-      expect((service as any).intervalId).toBeNull();
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(".systemsculpt/diagnostics/resource-metrics-latest.ndjson");
+      expect((service as any).metricsFileBytes).toBeGreaterThan(1_000);
+      expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
     });
 
-    it("clears lag interval", () => {
+    it("caps the file at 1 MB by rewriting it with the newest samples", async () => {
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 999_990 });
       service.start();
-      service.stop();
+      await service.flushPending();
+      expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
+      await service.captureManualSample("over-cap");
 
-      expect((service as any).lagIntervalId).toBeNull();
-    });
+      await service.flushPending();
 
-    it("clears startup burst interval", () => {
-      service.start();
-      service.stop();
-
-      expect((service as any).startupBurstIntervalId).toBeNull();
-    });
-
-    it("handles stop when not started", () => {
-      // Should not throw
-      expect(() => service.stop()).not.toThrow();
+      expect(mockPlugin.storage.writeFile).toHaveBeenCalledTimes(1);
+      const [type, fileName, retained] = mockPlugin.storage.writeFile.mock.calls[0];
+      expect(type).toBe("diagnostics");
+      expect(fileName).toBe("resource-metrics-latest.ndjson");
+      expect(retained.trim().split("\n").map((line: string) => JSON.parse(line).note)).toEqual(["recording-started", "over-cap"]);
+      expect((service as any).metricsFileBytes).toBe(retained.length);
     });
   });
 
@@ -163,122 +406,6 @@ describe("ResourceMonitorService", () => {
 
       expect(sample.timestamp).toBeDefined();
       expect(sample.iso).toBeDefined();
-    });
-  });
-
-  describe("captureIncidentTerminalSample", () => {
-    it("returns an allowlisted sample synchronously and uses the fixed terminal note", () => {
-      const pendingWrite = new Promise(() => undefined);
-      mockPlugin.storage.appendToFile.mockReturnValue(pendingWrite);
-
-      const sample = (service.captureIncidentTerminalSample as any)("private-caller-note");
-
-      expect(sample.captured_at).toEqual(expect.any(String));
-      expect(sample).not.toHaveProperty("note");
-      expect(JSON.stringify(sample)).not.toContain("private-caller-note");
-      expect(service.getRecentSamples(1)[0].note).toBe("incident-terminal");
-      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(1);
-    });
-
-    it("keeps a rejected diagnostics write observational", async () => {
-      mockPlugin.storage.appendToFile.mockRejectedValue(new Error("private-storage-failure"));
-
-      expect(() => service.captureIncidentTerminalSample()).not.toThrow();
-      expect(service.getRecentSamples(1)).toHaveLength(1);
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        "Failed to write resource metrics",
-        expect.any(Error),
-        expect.objectContaining({ source: "ResourceMonitor" }),
-      );
-    });
-
-    it("keeps a rejected storage result observational", async () => {
-      mockPlugin.storage.appendToFile.mockResolvedValue({
-        success: false,
-        error: "private-storage-failure",
-      });
-
-      const sample = service.captureIncidentTerminalSample();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(sample.captured_at).toEqual(expect.any(String));
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        "Failed to write resource metrics",
-        undefined,
-        expect.objectContaining({ source: "ResourceMonitor" }),
-      );
-      expect(JSON.stringify(mockLogger.error.mock.calls)).not.toContain("private-storage-failure");
-    });
-
-    it("does not emit an unhandled rejection when storage and diagnostics logging fail", async () => {
-      const unhandled: unknown[] = [];
-      const onUnhandled = (reason: unknown): void => {
-        unhandled.push(reason);
-      };
-      process.on("unhandledRejection", onUnhandled);
-      mockPlugin.storage.appendToFile.mockRejectedValue(
-        new Error("private-storage-failure"),
-      );
-      mockLogger.error.mockImplementation(() => {
-        throw new Error("private-logger-failure");
-      });
-
-      try {
-        const sample = service.captureIncidentTerminalSample();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(sample.captured_at).toEqual(expect.any(String));
-        expect(service.getRecentSamples(1)).toHaveLength(1);
-        expect(unhandled).toEqual([]);
-      } finally {
-        process.removeListener("unhandledRejection", onUnhandled);
-      }
-    });
-
-    it("attaches rejection containment to terminal and freeze sample writes", () => {
-      const detachedWrite = {
-        catch: jest.fn().mockReturnValue(Promise.resolve()),
-      };
-      jest.spyOn(service as any, "writeSample").mockReturnValue(detachedWrite);
-
-      service.captureIncidentTerminalSample();
-      (service as any).subscribeToFreezeEvents();
-      window.dispatchEvent(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }));
-
-      expect(detachedWrite.catch).toHaveBeenCalledTimes(2);
-      for (const [handler] of detachedWrite.catch.mock.calls) {
-        expect(handler).toEqual(expect.any(Function));
-      }
-    });
-  });
-
-  describe("detached periodic sampling", () => {
-    it("attaches rejection containment to startup, interval, and burst samples", () => {
-      const detachedSamples: Array<{ catch: jest.Mock }> = [];
-      jest.spyOn(service as any, "collectAndPersistSample").mockImplementation(() => {
-        const detached = {
-          catch: jest.fn().mockReturnValue(Promise.resolve()),
-        };
-        detachedSamples.push(detached);
-        return detached;
-      });
-
-      service.start();
-      jest.advanceTimersByTime(15_000);
-
-      expect(detachedSamples.length).toBeGreaterThanOrEqual(3);
-      for (const detached of detachedSamples) {
-        expect(detached.catch).toHaveBeenCalledTimes(1);
-        expect(detached.catch).toHaveBeenCalledWith(expect.any(Function));
-      }
     });
   });
 
@@ -617,24 +744,6 @@ describe("ResourceMonitorService", () => {
       );
     });
 
-    it("logs warning when event loop lag exceeds threshold", async () => {
-      const sample: ResourceSample = {
-        timestamp: Date.now(),
-        iso: new Date().toISOString(),
-        eventLoopLagMs: 300,
-        note: "test",
-      };
-
-      (service as any).checkThresholds(sample);
-
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        "Event loop lag detected",
-        expect.objectContaining({
-          source: "ResourceMonitor",
-        })
-      );
-    });
-
     it("logs warning when freeze spike exceeds threshold", async () => {
       const sample: ResourceSample = {
         timestamp: Date.now(),
@@ -675,33 +784,6 @@ describe("ResourceMonitorService", () => {
       // Memory cooldown is 60_000
       const result = (service as any).shouldAlert("memory", now + 60_001);
       expect(result).toBe(true);
-    });
-  });
-
-  describe("writeSample (private)", () => {
-    it("does nothing when storage is not available", async () => {
-      mockPlugin.storage = null;
-      const localService = new ResourceMonitorService(mockPlugin);
-      const sample: ResourceSample = {
-        timestamp: Date.now(),
-        iso: new Date().toISOString(),
-      };
-
-      await expect((localService as any).writeSample(sample)).resolves.not.toThrow();
-    });
-
-    it("handles write errors gracefully", async () => {
-      mockPlugin.storage = {
-        appendToFile: jest.fn().mockRejectedValue(new Error("Write failed")),
-      };
-      const localService = new ResourceMonitorService(mockPlugin);
-      const sample: ResourceSample = {
-        timestamp: Date.now(),
-        iso: new Date().toISOString(),
-      };
-
-      await expect((localService as any).writeSample(sample)).resolves.not.toThrow();
-      expect(mockLogger.error).toHaveBeenCalled();
     });
   });
 
@@ -804,148 +886,6 @@ describe("ResourceMonitorService", () => {
 
       global.process = originalProcess;
       expect(result).toBeUndefined();
-    });
-  });
-
-  describe("subscribeToFreezeEvents (private)", () => {
-    const subscribeAndGetHandler = (): ((event: Event) => void) => {
-      (service as any).subscribeToFreezeEvents();
-      return (service as any).freezeEventHandler;
-    };
-
-    it("handles freeze events", () => {
-      service.start();
-
-      const event = new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      });
-      window.dispatchEvent(event);
-
-      const samples = service.getRecentSamples();
-      const freezeSample = samples.find(s => s.note === "freeze");
-      expect(freezeSample).toBeDefined();
-      expect(freezeSample?.freezeDeltaMs).toBe(500);
-    });
-
-    it("keeps partial freeze evidence when memory and CPU reads fail", () => {
-      jest.spyOn(service as any, "readMemoryUsage").mockImplementation(() => {
-        throw new Error("private-memory-failure");
-      });
-      jest.spyOn(service as any, "captureCpuPercent").mockImplementation(() => {
-        throw new Error("private-cpu-failure");
-      });
-      const writeSample = jest.spyOn(service as any, "writeSample").mockResolvedValue(undefined);
-      const handler = subscribeAndGetHandler();
-
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }))).not.toThrow();
-
-      const freezeSample = service.getRecentSamples(1)[0];
-      expect(freezeSample).toMatchObject({
-        freezeDeltaMs: 500,
-        note: "freeze",
-      });
-      expect(freezeSample).not.toHaveProperty("cpuPercent", expect.any(Number));
-      expect(writeSample).toHaveBeenCalledWith(freezeSample);
-    });
-
-    it("persists after a buffer or threshold logger failure", () => {
-      const writeSample = jest.spyOn(service as any, "writeSample").mockResolvedValue(undefined);
-      const bufferAndCheckSample = jest.spyOn(service as any, "bufferAndCheckSample");
-      const handler = subscribeAndGetHandler();
-
-      bufferAndCheckSample.mockImplementationOnce(() => {
-        throw new Error("private-buffer-failure");
-      });
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }))).not.toThrow();
-      expect(writeSample).toHaveBeenCalledTimes(1);
-
-      mockLogger.debug.mockImplementationOnce(() => {
-        throw new Error("private-logger-failure");
-      });
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 1_000 },
-      }))).not.toThrow();
-      expect(writeSample).toHaveBeenCalledTimes(2);
-      expect(service.getRecentSamples(1)[0]).toMatchObject({
-        freezeDeltaMs: 1_000,
-        note: "freeze",
-      });
-    });
-
-    it("contains synchronous and detached persistence failures", () => {
-      const handler = subscribeAndGetHandler();
-      const writeSample = jest.spyOn(service as any, "writeSample");
-
-      writeSample.mockImplementationOnce(() => {
-        throw new Error("private-sync-persistence-failure");
-      });
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }))).not.toThrow();
-
-      const detachedWrite = {
-        catch: jest.fn().mockReturnValue(Promise.resolve()),
-      };
-      writeSample.mockReturnValueOnce(detachedWrite as any);
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }))).not.toThrow();
-      expect(detachedWrite.catch).toHaveBeenCalledWith(expect.any(Function));
-    });
-
-    it("contains rejected storage and persistence logger failures", async () => {
-      mockPlugin.storage.appendToFile.mockRejectedValue(new Error("private-storage-failure"));
-      mockLogger.error.mockImplementation(() => {
-        throw new Error("private-persistence-logger-failure");
-      });
-      const handler = subscribeAndGetHandler();
-
-      expect(() => handler(new CustomEvent("systemsculpt:freeze-detected", {
-        detail: { deltaMs: 500 },
-      }))).not.toThrow();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(service.getRecentSamples(1)[0]).toMatchObject({
-        freezeDeltaMs: 500,
-        note: "freeze",
-      });
-      expect(mockLogger.error).toHaveBeenCalledTimes(1);
-    });
-
-    it("contains hostile freeze event detail access", () => {
-      const handler = subscribeAndGetHandler();
-      const event = new Event("systemsculpt:freeze-detected");
-      Object.defineProperty(event, "detail", {
-        get() {
-          throw new Error("private-detail-failure");
-        },
-      });
-
-      expect(() => handler(event)).not.toThrow();
-      expect(service.getRecentSamples()).toEqual([]);
-    });
-  });
-
-  describe("startStartupBurstSampling (private)", () => {
-    it("starts burst sampling interval", () => {
-      service.start();
-      expect((service as any).startupBurstIntervalId).not.toBeNull();
-    });
-
-    it("collects burst samples during startup", () => {
-      service.start();
-      const initialSampleCount = (service as any).samples.length;
-
-      // Advance by burst interval
-      jest.advanceTimersByTime(3000);
-
-      expect((service as any).samples.length).toBeGreaterThan(initialSampleCount);
     });
   });
 });

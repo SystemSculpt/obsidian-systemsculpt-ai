@@ -1,102 +1,115 @@
 /**
- * FreezeMonitor - lightweight main-thread lag detector with breadcrumbs.
+ * FreezeMonitor - reports long main-thread stalls without polling.
  *
- * - Measures event-loop lag using setInterval
- * - Records recent breadcrumb marks (event starts/ends)
- * - Emits a compact console report when a lag spike is detected
- *
- * Usage:
- *   FreezeMonitor.start();
- *   FreezeMonitor.mark('workspace:active-leaf-change:start', { path });
+ * Observes `long-animation-frame` entries, or `longtask` on hosts without
+ * them, through a PerformanceObserver. Unlike a polling timer it costs nothing
+ * while the app is idle, and Chromium's timer throttling in hidden or occluded
+ * windows cannot masquerade as a freeze (#325, #337).
  */
-export type Breadcrumb = {
-  t: number;          // performance.now timestamp
-  label: string;      // event label
-  data?: Record<string, unknown>; // optional metadata
+export type FreezeEntryType = "long-animation-frame" | "longtask";
+
+export type FreezeReport = Readonly<{
+  durationMs: number;
+  entryType: FreezeEntryType;
+}>;
+
+type PerformanceObserverConstructor = {
+  new (callback: PerformanceObserverCallback): PerformanceObserver;
+  readonly supportedEntryTypes?: readonly string[];
 };
 
+export type FreezeMonitorOptions = Readonly<{
+  onFreeze: (report: FreezeReport) => void;
+  thresholdMs?: number;
+  minReportIntervalMs?: number;
+  /** Defaults to the host PerformanceObserver. */
+  observerConstructor?: PerformanceObserverConstructor;
+  now?: () => number;
+}>;
+
+const PREFERRED_ENTRY_TYPES: readonly FreezeEntryType[] = ["long-animation-frame", "longtask"];
+const DEFAULT_THRESHOLD_MS = 200;
+const DEFAULT_MIN_REPORT_INTERVAL_MS = 2_000;
+
+/** Picks the richest long-frame entry type the host can observe, if any. */
+export function resolveFreezeEntryType(
+  observerConstructor: PerformanceObserverConstructor | undefined,
+): FreezeEntryType | null {
+  try {
+    const supported = observerConstructor?.supportedEntryTypes;
+    if (!supported || typeof supported.includes !== "function") return null;
+    return PREFERRED_ENTRY_TYPES.find((type) => supported.includes(type)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class FreezeMonitor {
-  private static breadcrumbs: Breadcrumb[] = [];
-  private static maxBreadcrumbs = 100; // keep last 100 marks
-  private static intervalId: number | null = null;
-  private static lastTick = performance.now();
-  private static thresholdMs = 200; // lag threshold in ms
-  private static enabled = true;
-  private static lastReportTime = 0;
-  private static minReportIntervalMs = 3000; // avoid flooding
+  private readonly onFreeze: FreezeMonitorOptions["onFreeze"];
+  private readonly thresholdMs: number;
+  private readonly minReportIntervalMs: number;
+  private readonly observerConstructor?: PerformanceObserverConstructor;
+  private readonly now: () => number;
+  private observer: PerformanceObserver | null = null;
+  private entryType: FreezeEntryType | null = null;
+  private lastReportAt = Number.NEGATIVE_INFINITY;
 
-  public static start(options?: { thresholdMs?: number; maxBreadcrumbs?: number; minReportIntervalMs?: number; enabled?: boolean }) {
-    if (typeof window === 'undefined') return; // SSR/Node safety
-    if (this.intervalId) return;
-    if (options?.thresholdMs) this.thresholdMs = options.thresholdMs;
-    if (options?.maxBreadcrumbs) this.maxBreadcrumbs = options.maxBreadcrumbs;
-    if (options?.minReportIntervalMs) this.minReportIntervalMs = options.minReportIntervalMs;
-    if (options?.enabled === false) this.enabled = false;
-
-    this.lastTick = performance.now();
-    this.intervalId = window.setInterval(() => {
-      if (!this.enabled) return;
-      const now = performance.now();
-      const delta = now - this.lastTick;
-      this.lastTick = now;
-      // Allow some jitter; flag only larger spikes
-      if (delta > (50 + this.thresholdMs)) {
-        this.reportLag(delta);
-      }
-    }, 50);
+  constructor(options: FreezeMonitorOptions) {
+    this.onFreeze = options.onFreeze;
+    this.thresholdMs = options.thresholdMs ?? DEFAULT_THRESHOLD_MS;
+    this.minReportIntervalMs = options.minReportIntervalMs ?? DEFAULT_MIN_REPORT_INTERVAL_MS;
+    this.observerConstructor = options.observerConstructor
+      ?? (typeof PerformanceObserver === "function" ? PerformanceObserver : undefined);
+    this.now = options.now ?? (() => performance.now());
   }
 
-  public static stop() {
-    if (this.intervalId) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-  }
-
-  public static mark(label: string, data?: Record<string, unknown>) {
-    if (!this.enabled) return;
-    const entry: Breadcrumb = { t: performance.now(), label, data };
-    this.breadcrumbs.push(entry);
-    if (this.breadcrumbs.length > this.maxBreadcrumbs) {
-      this.breadcrumbs.shift();
-    }
-  }
-
-  private static reportLag(deltaMs: number) {
-    const now = performance.now();
-    if (now - this.lastReportTime < this.minReportIntervalMs) return;
-    this.lastReportTime = now;
-
-    // Prepare a compact snapshot of the last N breadcrumbs
-    const tail = this.breadcrumbs.slice(-15);
-    const snapshot = tail.map((b, i) => {
-      const prev = i > 0 ? tail[i - 1].t : (tail[0]?.t ?? b.t);
-      const dt = Math.max(0, b.t - prev).toFixed(1);
-      const json = b.data ? ` ${safeJson(b.data)}` : '';
-      return `${dt}ms ${b.label}${json}`;
-    });
-
-    // Optionally emit a custom event instead of direct console logging
+  /** Starts observing and returns the entry type, or null when the host cannot report long frames. */
+  start(): FreezeEntryType | null {
+    if (this.observer) return this.entryType;
+    const Observer = this.observerConstructor;
+    const entryType = resolveFreezeEntryType(Observer);
+    if (!Observer || !entryType) return null;
     try {
-      const event = new CustomEvent('systemsculpt:freeze-detected', {
-        detail: {
-          deltaMs: Number(deltaMs.toFixed(1)),
-          events: snapshot
-        }
-      });
-      window.dispatchEvent(event);
+      const observer = new Observer((list) => this.handleEntries(list));
+      observer.observe({ type: entryType });
+      this.observer = observer;
+      this.entryType = entryType;
+      return entryType;
+    } catch {
+      return null;
+    }
+  }
+
+  stop(): void {
+    const observer = this.observer;
+    this.observer = null;
+    this.entryType = null;
+    try {
+      observer?.disconnect();
+    } catch {
+      // A stale observer must not block diagnostics teardown.
+    }
+  }
+
+  isObserving(): boolean {
+    return this.observer !== null;
+  }
+
+  private handleEntries(list: PerformanceObserverEntryList): void {
+    try {
+      const entryType = this.entryType;
+      if (!entryType) return;
+      let longestMs = 0;
+      for (const entry of list.getEntries()) {
+        if (entry.duration > longestMs) longestMs = entry.duration;
+      }
+      if (!(longestMs >= this.thresholdMs)) return;
+      const now = this.now();
+      if (now - this.lastReportAt < this.minReportIntervalMs) return;
+      this.lastReportAt = now;
+      this.onFreeze({ durationMs: Number(longestMs.toFixed(1)), entryType });
     } catch {
       // Freeze reporting must never affect the monitored UI thread.
     }
   }
 }
-
-function safeJson(obj: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(obj);
-  } catch {
-    return '[unserializable]';
-  }
-}
-
-

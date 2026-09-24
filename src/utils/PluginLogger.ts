@@ -227,13 +227,14 @@ export class PluginLogger {
       this.buffer.shift();
     }
 
-    this.pendingFlush.push(entry);
-    this.ensureFlushScheduled();
+    if (this.shouldPersist(level, context)) {
+      this.pendingFlush.push(entry);
+      this.ensureFlushScheduled();
+    }
     if (thinAgentFailure || entry.context?.source === "AgentLifecycle") {
-      // Thin-agent diagnostics are already durably persisted here and, when
-      // connected, emitted through the strict client-diagnostic contract.
-      // Echoing them to the console would reintroduce arbitrary Error
-      // messages and stacks.
+      // Thin-agent diagnostics stay in the bounded buffer and, when connected,
+      // are emitted through the strict client-diagnostic contract. Echoing them
+      // to the console would reintroduce arbitrary Error messages and stacks.
       return entry;
     }
     this.emitToConsole(entry, error);
@@ -276,6 +277,22 @@ export class PluginLogger {
 
     const settingsLevel = this.plugin.settings?.logLevel ?? LogLevel.WARNING;
     return settingsLevel >= LEVEL_TO_THRESHOLD[level];
+  }
+
+  /**
+   * Lifecycle info bypasses the log level so support snapshots and incident
+   * correlation always see it in the in-memory ring. Writing it to disk on
+   * every run is diagnostics recording, so it follows that toggle (#337).
+   */
+  private shouldPersist(level: PluginLogLevel, context?: PluginLogContext): boolean {
+    const settings = this.plugin.settings;
+    if (settings?.debugMode || settings?.showDiagnostics === true) {
+      return true;
+    }
+    if (context?.source === "AgentLifecycle" && level === "info") {
+      return (settings?.logLevel ?? LogLevel.WARNING) >= LEVEL_TO_THRESHOLD.info;
+    }
+    return true;
   }
 
   private ensureFlushScheduled() {
@@ -419,7 +436,11 @@ export class PluginLogger {
         return;
       }
       // Trim file to the last portion of buffered entries to keep context
-      const recent = this.buffer.slice(-200).map((entry) => JSON.stringify(entry)).join("\n");
+      const recent = this.buffer
+        .filter((entry) => this.shouldPersist(entry.level, entry.context))
+        .slice(-200)
+        .map((entry) => JSON.stringify(entry))
+        .join("\n");
       await adapter.write(path, `${recent}\n`);
     } catch {
       // Ignore trimming failures silently

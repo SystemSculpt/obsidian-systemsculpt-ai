@@ -156,7 +156,8 @@ describe("PluginLogger", () => {
       expect(consoleSpy.warn).toHaveBeenCalled();
     });
 
-    it("persists sanitized lifecycle info while ordinary info remains filtered", async () => {
+    it("persists sanitized lifecycle info while diagnostics recording is on and ordinary info remains filtered", async () => {
+      mockPlugin.settings.showDiagnostics = true;
       logger.info("ordinary info");
       const lifecycle = logger.lifecycle({
         sequence: 7,
@@ -264,6 +265,55 @@ describe("PluginLogger", () => {
       expect(persistedText).toContain("incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(persistedText).toContain("c".repeat(32));
       expect(consoleSpy.debug).not.toHaveBeenCalled();
+    });
+
+    it("keeps lifecycle info in the in-memory ring without a flush timer while diagnostics recording is off", async () => {
+      const event = logger.lifecycle({ code: "run_started", phase: "response", runId: "run-local-safe" });
+
+      expect(event).toEqual(expect.objectContaining({ code: "run_started", run_id: "run-local-safe" }));
+      expect(logger.getRecentEntries()).toHaveLength(1);
+      expect(logger.getSupportDiagnostics()).toEqual([
+        expect.objectContaining({ code: "run_started", phase: "response" }),
+      ]);
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(60_000);
+      await logger.flushNow();
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["debug mode", { debugMode: true }],
+      ["an info log level", { logLevel: LogLevel.INFO }],
+    ])("persists lifecycle info when %s asks for it", async (_label, settings) => {
+      Object.assign(mockPlugin.settings, settings);
+
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("thin-agent:lifecycle");
+    });
+
+    it("still persists warnings while diagnostics recording is off", async () => {
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.warn("Visible warning");
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("Visible warning");
+      expect(mockStorage.appendToFile.mock.calls[0][2]).not.toContain("thin-agent:lifecycle");
+    });
+
+    it("leaves unpersisted lifecycle entries out of the size-cap rewrite", async () => {
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.warn("Retained warning");
+
+      await logger.flushNow();
+
+      const rewritten = mockPlugin.app.vault.adapter.write.mock.calls[0][1];
+      expect(rewritten).toContain("Retained warning");
+      expect(rewritten).not.toContain("thin-agent:lifecycle");
     });
 
     it.each([

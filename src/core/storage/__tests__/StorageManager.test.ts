@@ -87,6 +87,34 @@ describe("StorageManager", () => {
       expect(storage.isInitialized()).toBe(true);
     });
 
+    it("does not create the diagnostics directory until something is written there", async () => {
+      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt");
+      await storage.initialize();
+
+      const createdFolders = mockApp.vault.createFolder.mock.calls.map(([path]) => path);
+      expect(createdFolders).toContain(".systemsculpt/settings");
+      expect(createdFolders).not.toContain(".systemsculpt/diagnostics");
+      expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+
+      await storage.appendToFile("diagnostics", "log.txt", "line");
+      await storage.writeFile("diagnostics", "report.json", { ok: true });
+
+      expect(mockApp.vault.createFolder.mock.calls.filter(([path]) => path === ".systemsculpt/diagnostics")).toHaveLength(1);
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
+        ".systemsculpt/diagnostics/.folder",
+        "This file helps Obsidian recognize the directory.",
+      );
+    });
+
+    it("ensures one location on demand", async () => {
+      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt");
+      await storage.ensureLocation("diagnostics");
+      await storage.ensureLocation("diagnostics");
+
+      expect(storage.isInitialized()).toBe(true);
+      expect(mockApp.vault.createFolder.mock.calls.filter(([path]) => path === ".systemsculpt/diagnostics")).toHaveLength(1);
+    });
+
     it("reinitializes when the vault base path changes", async () => {
       const adapter = mockApp.vault.adapter;
       adapter.exists.mockResolvedValue(true);

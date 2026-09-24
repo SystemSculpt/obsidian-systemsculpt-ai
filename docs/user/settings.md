@@ -14,7 +14,7 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | `Knowledge` | Embeddings, Similar Notes, exclusions, and processing status |
 | `Workspace` | Directory paths, workspace diagnostics, automatic backups, and restore workflow |
 | `Studio` | Studio project storage, run retention, and generated-artifact retention |
-| `Advanced` | Quick actions, reset defaults, and diagnostics tools |
+| `Advanced` | Quick actions, reset defaults, diagnostics recording (off by default), and diagnostics tools |
 
 ## Notes
 

@@ -27,7 +27,6 @@ import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
-import { FreezeMonitor } from "./services/FreezeMonitor";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
 import { InitializationTracer } from "./core/diagnostics/InitializationTracer";
@@ -531,25 +530,10 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
-      id: "monitor.freeze",
-      label: "freeze monitor",
-      optional: true,
-      run: () => {
-        FreezeMonitor.start({ thresholdMs: 150, minReportIntervalMs: 2000 });
-      },
-    });
-
-    coordinator.registerTask("bootstrap", {
       id: "workspace.events",
       label: "workspace events",
       optional: true,
       run: () => {
-        this.registerEvent(
-          this.app.workspace.on("active-leaf-change", (leaf) => {
-            FreezeMonitor.mark("workspace:active-leaf-change:start", { hasLeaf: !!leaf });
-          })
-        );
-
         this.registerEvent(
           this.app.workspace.on("systemsculpt:settings-updated", () => {
             try {
@@ -566,6 +550,15 @@ export default class SystemSculptPlugin extends Plugin {
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Relative line numbers settings sync failed", error, {
+                source: "SystemSculptPlugin",
+              });
+            }
+
+            try {
+              this.syncDiagnosticsRecording();
+            } catch (error) {
+              const logger = this.getLogger();
+              logger.error("Diagnostics recording settings sync failed", error, {
                 source: "SystemSculptPlugin",
               });
             }
@@ -603,11 +596,12 @@ export default class SystemSculptPlugin extends Plugin {
       label: "resource monitor",
       optional: true,
       run: () => {
+        // Always available for on-demand incident and support samples.
+        // Periodic recording starts only with diagnostics on (#337).
         this.resourceMonitor = new ResourceMonitorService(this, {
           metricsFileName: this.getDiagnosticsSessionLifecycle().metricsFileName,
           sessionId: this.getDiagnosticsSessionLifecycle().sessionId ?? undefined,
         });
-        this.resourceMonitor.start();
       },
     });
 
@@ -705,6 +699,25 @@ export default class SystemSculptPlugin extends Plugin {
   private handleLifecycleFailure(event: LifecycleFailureEvent): void {
     // LifecycleCoordinator has already logged the failure.
     this.failures.push(event.label ?? event.taskId);
+  }
+
+  /**
+   * Applies the diagnostics toggle (#337). When on, record session metadata and
+   * sample resources periodically. When off, nothing runs on a timer and
+   * nothing is written; samples are taken on demand for incidents only.
+   */
+  private syncDiagnosticsRecording(): void {
+    if (this.isUnloading) return;
+    const monitor = this.resourceMonitor;
+    if (this.settings?.showDiagnostics === true) {
+      void this.getDiagnosticsSessionLifecycle().recordSession().catch(() => undefined);
+      monitor?.start();
+      return;
+    }
+    if (monitor?.isRecording()) {
+      monitor.stop();
+      void monitor.flushPending();
+    }
   }
 
   private startCriticalAndDeferredPhases(tracer: InitializationTracer, logger: PluginLogger): void {
@@ -886,7 +899,7 @@ export default class SystemSculptPlugin extends Plugin {
         initialization_issue_count: Math.min(9_999, this.failures.length),
         settings_loaded: Boolean(this._internal_settings_systemsculpt_plugin),
         directories_ready: directoriesReady,
-        resource_monitor_running: monitor !== null,
+        resource_monitor_running: monitor?.isRecording() === true,
       },
       event_count: events.length,
       events,
@@ -1136,6 +1149,7 @@ export default class SystemSculptPlugin extends Plugin {
       const logLevel = debugMode ? LogLevel.DEBUG : this.settings.logLevel ?? LogLevel.WARNING;
       setLogLevel(logLevel);
       errorLogger.setDebugMode(debugMode);
+      this.syncDiagnosticsRecording();
 
       logger.info("Settings initialized", {
         source: "SystemSculptPlugin",
@@ -1160,6 +1174,7 @@ export default class SystemSculptPlugin extends Plugin {
       const logLevel = debugMode ? LogLevel.DEBUG : fallbackSettings?.logLevel ?? LogLevel.WARNING;
       setLogLevel(logLevel);
       errorLogger.setDebugMode(debugMode);
+      this.syncDiagnosticsRecording();
 
       this.failures.push("settings");
       phase.fail(error, {
@@ -1585,7 +1600,7 @@ export default class SystemSculptPlugin extends Plugin {
     // Stop non-view producers first. ChatView teardown must run while incident
     // admission remains open so its final accepted failure evidence is kept.
     try {
-      FreezeMonitor.stop();
+      this.resourceMonitor?.stop();
     } catch {
       // A failed producer stop must not skip the pending diagnostics drain.
     }
@@ -1615,6 +1630,11 @@ export default class SystemSculptPlugin extends Plugin {
     }
     try {
       await this.pluginLogger?.flushBeforeUnload();
+    } catch {
+      // Diagnostics are best-effort and must never block plugin teardown.
+    }
+    try {
+      await this.resourceMonitor?.flushPending();
     } catch {
       // Diagnostics are best-effort and must never block plugin teardown.
     }
@@ -1672,10 +1692,8 @@ export default class SystemSculptPlugin extends Plugin {
       }
     };
 
-    await safely("resource monitor", () => {
-      this.resourceMonitor?.stop();
-      this.resourceMonitor = null;
-    });
+    // The resource monitor was stopped and flushed with the other producers.
+    this.resourceMonitor = null;
     // Stops automatic settings backups.
     await safely("settings manager", () => this.settingsManager?.destroy());
     await safely("embeddings status bar", () => {
@@ -1820,7 +1838,9 @@ export default class SystemSculptPlugin extends Plugin {
             : [...window.slice(-11), terminal];
         },
       });
-      void this.agentIncidentCoordinator.initialize();
+      // The store is not initialized here: it creates its directory and
+      // enforces retention on the first failed run that needs a report, so a
+      // healthy launch neither creates directories nor scans reports (#337).
       void this.getLoadedPluginBuildId().then(
         (buildId) => {
           this.agentIncidentLoadedBundleId = buildId;
@@ -1840,7 +1860,7 @@ export default class SystemSculptPlugin extends Plugin {
       return false;
     }
     try {
-      await this.storage.initialize();
+      await this.storage.ensureLocation("diagnostics");
     } catch {
       // Best effort; continue without blocking
     }
