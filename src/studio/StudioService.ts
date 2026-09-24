@@ -47,7 +47,7 @@ import {
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
-import { parseStudioProject, serializeStudioProject, type StudioProjectParseContext } from "./schema";
+import { parseAndMigrateStudioProject, serializeStudioProject, type StudioProjectParseContext } from "./schema";
 import { STUDIO_PROJECT_SCHEMA_V2 } from "./types";
 import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import {
@@ -538,7 +538,7 @@ export class StudioService {
     try {
       const projectText = String(rawText || "");
       assertValidStudioProjectAgentDocumentStructure(JSON.parse(projectText));
-      const project = parseStudioProject(projectText, context);
+      const project = parseAndMigrateStudioProject(projectText, context);
       // Lint gates whether Studio adopts an edited document, so it compiles
       // in document mode like the persistence gate. Run readiness (required
       // configs and inputs) is enforced by the runtime when a run starts.

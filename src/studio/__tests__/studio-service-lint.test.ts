@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { StudioService } from "../StudioService";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
@@ -99,6 +101,25 @@ describe("StudioService lintProjectText", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain("missing node definition");
+    }
+  });
+
+  it("migrates retired v1 node kinds before compiling, as Studio does on import", () => {
+    const service = new StudioService(createPluginStub());
+    const v1Text = readFileSync(join(__dirname, "fixtures/v1-retired-node-kinds.systemsculpt"), "utf8");
+
+    const result = service.lintProjectText(v1Text, {
+      projectPath: "SystemSculpt/Studio/Legacy API digest.systemsculpt",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) {
+      expect(result.project.graph.nodes.map((node) => `${node.id}:${node.kind}`)).toEqual([
+        "caption:studio.text",
+        "endpoint:studio.input",
+        "fetch:studio.retired_http_request",
+        "response:studio.text_output",
+      ]);
     }
   });
 

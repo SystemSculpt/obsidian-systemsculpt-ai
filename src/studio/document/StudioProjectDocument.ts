@@ -1,5 +1,5 @@
 import type { DataAdapter } from "obsidian";
-import { parseStudioProject, serializeStudioProject } from "../schema";
+import { parseAndMigrateStudioProject, serializeStudioProject } from "../schema";
 import { assertValidStudioProjectAgentDocumentStructure } from "../StudioProjectAgentDocumentValidation";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
 import type { StudioProjectV1 } from "../types";
@@ -55,7 +55,8 @@ export class StudioProjectDocument {
   }
   private async import(raw: string): Promise<Accepted> {
     assertValidStudioProjectAgentDocumentStructure(JSON.parse(raw));
-    const candidate = parseStudioProject(raw, {projectPath: this.path});
+    // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
+    const candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
     // Grants belong to the file's own location; an authored reference cannot select another project's policy.
     candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
     validateStudioProjectForAgentEdit(candidate);

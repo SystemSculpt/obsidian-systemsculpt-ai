@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
 import { StudioProjectSession } from "../StudioProjectSession";
 import { serializeStudioProject } from "../schema";
@@ -510,4 +512,51 @@ describe("single authored file", () => {
     expect(reopened.graph.groups?.[0].shapeIds).toEqual(["a", "b"]);
   });
 
+});
+
+describe("v1 projects with retired node kinds", () => {
+  const v1Text = readFileSync(join(__dirname, "fixtures/v1-retired-node-kinds.systemsculpt"), "utf8");
+  const path = "SystemSculpt/Studio/Legacy API digest.systemsculpt";
+
+  it("migrates studio.label and studio.http_request before validating the file", async () => {
+    const { store, files, reopen } = createStore();
+    files.set(path, v1Text);
+
+    const opened = await store.loadProject(path);
+
+    const kinds = Object.fromEntries(opened.graph.nodes.map((node) => [node.id, node.kind]));
+    expect(kinds).toEqual({
+      caption: "studio.text",
+      endpoint: "studio.input",
+      fetch: "studio.retired_http_request",
+      response: "studio.text_output",
+    });
+    const caption = opened.graph.nodes.find((node) => node.id === "caption");
+    expect(caption?.config).toEqual({ value: "Fetches the item list and shows the response body.", fontSize: 18 });
+    expect(caption?.size).toEqual({ width: 300, height: 120 });
+    expect(opened.graph.nodes.find((node) => node.id === "fetch")?.size).toEqual({ width: 410, height: 320 });
+    expect(opened.graph.edges.map((edge) => `${edge.fromNodeId}.${edge.fromPortId}->${edge.toNodeId}.${edge.toPortId}`).sort())
+      .toEqual(["endpoint.text->fetch.url", "fetch.body->response.text"]);
+    expect(opened.migrations.applied.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      "studio.text-node-kinds.v1",
+      "studio.retire-http-request.v1",
+    ]));
+
+    // The first import publishes the migrated canvas in the current dialect without the retired node's secrets.
+    const written = files.get(path)!;
+    expect(JSON.parse(written).schema).toBe("studio.project.v2");
+    expect(written).not.toMatch(/sentinel-header|sentinel-token|"label"|"http_request"/);
+    const reopened = await reopen().loadProject(path);
+    expect(reopened.graph.nodes.map((node) => node.kind)).toEqual(opened.graph.nodes.map((node) => node.kind));
+  });
+
+  it("keeps rejecting v1 node kinds that no migration knows", async () => {
+    const { store, files } = createStore();
+    files.set(path, v1Text.replace('"studio.label"', '"studio.unknown_kind"'));
+
+    await expect(store.loadProject(path)).rejects.toThrow(
+      'Studio couldn\'t read this project file: Graph compile failed: missing node definition for "studio.unknown_kind@1.0.0".'
+    );
+    expect(files.get(path)).toBe(v1Text.replace('"studio.label"', '"studio.unknown_kind"'));
+  });
 });
