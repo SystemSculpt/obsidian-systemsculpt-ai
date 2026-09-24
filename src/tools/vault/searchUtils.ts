@@ -1,15 +1,3 @@
-import type { TFile } from "obsidian";
-import type SystemSculptPlugin from "../../main";
-import { searchVaultExclusions } from "../../services/search/VaultExclusions";
-
-/**
- * Check if a file should be excluded from search results and vault tools.
- * This lives in a vault-only module so search surfaces do not pull Node helpers.
- */
-export function shouldExcludeFromSearch(file: TFile, plugin: SystemSculptPlugin): boolean {
-  return searchVaultExclusions(plugin).isExcluded(file.path);
-}
-
 /**
  * Simple fuzzy match scoring function (lower score = better match).
  * Returns `null` if `needle` cannot be found in order inside `haystack`.

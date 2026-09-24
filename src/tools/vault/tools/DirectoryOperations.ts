@@ -13,7 +13,6 @@ import {
   validatePath,
   formatBytes,
   runWithConcurrency,
-  shouldExcludeFromSearch,
   normalizeVaultPath,
   isHiddenSystemPath,
   ensureAdapterFolder,
@@ -23,6 +22,7 @@ import {
   statAdapterPath,
 } from "../utils";
 import SystemSculptPlugin from "../../../main";
+import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
 import { resolveFolderNotePath } from "../folderNotes";
 
 /**
@@ -257,12 +257,13 @@ export class DirectoryOperations {
 
         // Collect all items (with recursion if needed)
         let allItems: (TFile | TFolder)[] = [];
+        const exclusions = searchVaultExclusions(this.plugin);
         
         const collectItems = (folder: TFolder) => {
           for (const child of folder.children) {
             if (child instanceof TFile || child instanceof TFolder) {
               // Skip chat history and system files for files
-              if (child instanceof TFile && shouldExcludeFromSearch(child, this.plugin)) {
+              if (child instanceof TFile && exclusions.isExcluded(child.path)) {
                 continue;
               }
               allItems.push(child);

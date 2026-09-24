@@ -39,7 +39,7 @@ jest.mock("../embeddings/processing/EmbeddingsProcessor", () => {
 
 import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
 import { SystemSculptSearchEngine } from "../search/SystemSculptSearchEngine";
-import { shouldExcludeFromSearch } from "../../tools/vault/searchUtils";
+import { SearchOperations } from "../../tools/vault/tools/SearchOperations";
 import { App, TFile } from "obsidian";
 
 function createPluginStub(overrides?: Partial<any>) {
@@ -339,14 +339,28 @@ describe("EmbeddingsManager exclusions", () => {
 
       const app = new App();
       const toolPlugin = { app, settings } as any;
-      expect(shouldExcludeFromSearch(new TFile({ path: excludedPath }), toolPlugin)).toBe(true);
-      expect(shouldExcludeFromSearch(new TFile({ path: includedPath }), toolPlugin)).toBe(false);
-
-      const files = [excludedPath, includedPath].map((path) => new TFile({ path, stat: { mtime: Date.now() } }));
+      const files = [excludedPath, includedPath].map((path) => new TFile({
+        path,
+        stat: { ctime: Date.now(), mtime: Date.now(), size: 14 },
+      }));
       app.vault.getFiles.mockReturnValue(files);
       app.vault.cachedRead.mockResolvedValue("shared keyword");
       app.vault.getAbstractFileByPath.mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
       (app.workspace as any).offref = jest.fn();
+
+      // Agent vault tools: find by name and search by content.
+      const tools = new SearchOperations(app as any, ["/"], toolPlugin);
+      const name = includedPath.split("/").pop()!.replace(/\.[^.]+$/, "");
+      const found = (await tools.findFiles({ patterns: [name] }) as { results: Array<{ path: string }> })
+        .results.map((result) => result.path);
+      expect(found).toContain(includedPath);
+      expect(found).not.toContain(excludedPath);
+      const searched = (await tools.grepVault({ patterns: ["shared keyword"] }) as { results: Array<{ path: string }> })
+        .results.map((result) => result.path);
+      expect(searched).toContain(includedPath);
+      expect(searched).not.toContain(excludedPath);
+
+      // Search modal engine.
       const engine = new SystemSculptSearchEngine(app as any, toolPlugin);
       try {
         const hits = (await engine.search("shared keyword", { mode: "lexical", limit: 10 })).results.map((hit) => hit.path);

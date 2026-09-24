@@ -6,7 +6,6 @@ import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import {
   createLineCalculator,
   wouldExceedCharLimit,
-  shouldExcludeFromSearch,
   validatePath,
   normalizeVaultPath,
   isHiddenSystemPath,
@@ -16,6 +15,7 @@ import {
 } from "../utils";
 import { extractSearchTerms, calculateScore, sortByScore, formatScoredResults, ScoredResult } from "../searchScoring";
 import SystemSculptPlugin from "../../../main";
+import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
 
 type CompiledSearchPattern = Readonly<{ raw: string; source: string }>;
 type FindMatch = { path: string; score: number; mtime: number | null };
@@ -232,9 +232,10 @@ export class SearchOperations {
     
     // Search files
     const files = this.app.vault.getFiles();
+    const exclusions = searchVaultExclusions(this.plugin);
     for (const file of files) {
       // Exclude chat history and system files
-      if (shouldExcludeFromSearch(file, this.plugin)) {
+      if (exclusions.isExcluded(file.path)) {
         continue;
       }
       if (!this.isAllowedPath(file.path)) {
@@ -395,11 +396,12 @@ export class SearchOperations {
     }
 
     // Exclude chat history and system files
+    const exclusions = searchVaultExclusions(this.plugin);
     filesToSearch = filesToSearch.filter((file) => {
       if (!this.isAllowedPath(file.path)) return false;
       if (!this.isWithinSearchPaths(file.path, searchPaths)) return false;
       if (isAdapterFile(file)) return true;
-      return !shouldExcludeFromSearch(file, this.plugin);
+      return !exclusions.isExcluded(file.path);
     });
 
     // Sort files by size (smallest first) so we surface results quickly from
