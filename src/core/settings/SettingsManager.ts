@@ -22,6 +22,7 @@ import {
   normalizePreferredMicrophoneId,
   seedCurrentHostPreferredMicrophoneId,
 } from "../../services/recorder/RecorderPreferenceStore";
+import { createVaultFolder } from "../../utils/vaultFolders";
 
 const DEVICE_LOCAL_RECORDER_PREFERENCE_SCHEMA_VERSION = 10;
 const AUDIO_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
@@ -786,10 +787,11 @@ export class SettingsManager {
       const backupDir = ".systemsculpt/settings-backups";
       const backupPath = ".systemsculpt/settings-backups/settings-backup-latest.json";
       
-      // Ensure the backup directory exists before writing
+      // Ensure the backup directory exists before writing. Concurrent saves
+      // can race this create, so an existing folder counts as success.
       const dirExists = await this.plugin.app.vault.adapter.exists(backupDir);
       if (!dirExists) {
-        await this.plugin.app.vault.createFolder(backupDir);
+        await createVaultFolder(this.plugin.app, backupDir);
       }
       
       await this.plugin.app.vault.adapter.write(backupPath, backupData);
