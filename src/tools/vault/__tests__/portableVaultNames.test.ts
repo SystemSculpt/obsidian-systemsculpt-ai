@@ -81,11 +81,19 @@ describe("agent file tools create names that work on every device", () => {
     expect(app.vault.create).toHaveBeenCalledWith("Old: Folder/New note.md", "new");
   });
 
-  it("honors ifExists against the portable path a previous write created", async () => {
-    const app = vaultWith({ files: ["a b.md"] });
-    await expect(new FileOperations(app, ["/"]).writeFile({ path: "a:b.md", content: "x", ifExists: "error" }))
-      .rejects.toThrow("File already exists: a b.md");
-    expect(app.vault.create).not.toHaveBeenCalled();
+  it("never writes into an existing note that a portable name happens to match", async () => {
+    const app = vaultWith({ files: ["a b.md", "a b 1.md"], folders: ["Plans Q1"] });
+    const ops = new FileOperations(app, ["/"]);
+
+    const written = await ops.writeFile({ path: "a:b.md", content: "new" });
+    expect(written).toMatchObject({ path: "a b 2.md", requestedPath: "a:b.md" });
+    expect(app.vault.create).toHaveBeenCalledWith("a b 2.md", "new");
+    expect(app.vault.modify).not.toHaveBeenCalled();
+    expect(app.vault.process).not.toHaveBeenCalled();
+
+    // An unrelated folder with the portable name is not merged into either.
+    const nested = await ops.writeFile({ path: "Plans: Q1/draft.md", content: "x" });
+    expect(nested.path).toBe("Plans Q1 1/draft.md");
   });
 
   it("does not rename a hidden SystemSculpt path", async () => {
@@ -114,6 +122,15 @@ describe("agent file tools create names that work on every device", () => {
     expect(results[0]).toMatchObject({ path: "Archive/2026 Q3", requestedPath: "Archive/2026: Q3", success: true });
     expect(results[0].notice).toContain("Archive/2026 Q3");
     expect(results[1]).toEqual({ path: "Archive/Clean", success: true });
+  });
+
+  it("moves beside, not onto, an existing item with the portable name", async () => {
+    const app = vaultWith({ files: ["Inbox/x.md", "Done/a b.md"], folders: ["Done"] });
+    const { results } = await new DirectoryOperations(app, ["/"], { settings: {} } as any).moveItems({
+      items: [{ source: "Inbox/x.md", destination: "Done/a:b.md" }],
+    });
+    expect(results[0]).toMatchObject({ destination: "Done/a b 1.md", success: true });
+    expect(app.fileManager.renameFile).toHaveBeenCalledWith(expect.objectContaining({ path: "Inbox/x.md" }), "Done/a b 1.md");
   });
 
   it("moves to a portable destination, allows an unsafe source, and reports the destination it used", async () => {

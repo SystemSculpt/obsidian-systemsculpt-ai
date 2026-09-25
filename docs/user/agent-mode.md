@@ -61,8 +61,10 @@ approval mode.
   Sync. When a requested name contains characters such as `:` `?` `*` `#` `[`
   `]` `|`, starts or ends with a dot or space, or is a reserved Windows name
   such as `CON`, the write, folder creation, or move uses a portable name
-  instead and tells the model the path it used. Existing files keep their exact
-  names, so the agent can still edit or rename them.
+  instead and tells the model the path it used. If that portable name is
+  already taken, a number is added, so an existing note is never replaced.
+  Existing files keep their exact names, so the agent can still edit or rename
+  them.
 
 ## Practical safety tips
 

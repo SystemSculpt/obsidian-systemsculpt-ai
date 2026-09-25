@@ -333,7 +333,9 @@ export async function ensureVaultFolder(app: App, folderPath: string): Promise<v
  * The path a create or move will actually produce. Segments that already
  * exist are kept exactly, so an agent can still address, overwrite or rename
  * a file whose name cannot sync. Every segment the call would create goes
- * through the shared vault file-name sanitizer.
+ * through the shared vault file-name sanitizer. A sanitized name never lands
+ * on an existing item the agent did not name: "a:b.md" beside an unrelated
+ * "a b.md" becomes "a b 1.md".
  */
 export function resolvePortableVaultPath(app: App, path: string): string {
   const resolved: string[] = [];
@@ -347,10 +349,26 @@ export function resolvePortableVaultPath(app: App, path: string): string {
       resolved.push(segment);
       continue;
     }
+    const safe = toSafeVaultFileName(segment);
+    // Only the first created segment can collide: everything after it lives
+    // under a folder that did not exist.
+    resolved.push(!creating && safe !== segment ? unusedSiblingName(app, resolved, safe) : safe);
     creating = true;
-    resolved.push(toSafeVaultFileName(segment));
   }
   return resolved.join("/");
+}
+
+function unusedSiblingName(app: App, parent: readonly string[], name: string): string {
+  const taken = (candidate: string) => app.vault.getAbstractFileByPath([...parent, candidate].join("/")) !== null;
+  if (!taken(name)) return name;
+  const match = /^(.+?)(\.[A-Za-z0-9]{1,16})?$/.exec(name);
+  const stem = match?.[1] ?? name;
+  const extension = match?.[2] ?? "";
+  for (let suffix = 1; suffix <= 1_000; suffix += 1) {
+    const candidate = `${stem} ${suffix}${extension}`;
+    if (!taken(candidate)) return candidate;
+  }
+  throw new Error(`Could not find an unused name for "${name}".`);
 }
 
 /**
