@@ -48,6 +48,21 @@ type SaveChatOptions = {
   authoritativeServerHistoryReconciliation?: boolean;
 };
 
+/** The frontmatter a save must carry forward from the file it replaces. */
+type ExistingChatMetadata = Readonly<{
+  created?: string;
+  tags: readonly string[];
+  version: number;
+  title?: string;
+}>;
+
+function frontmatterTimestamp(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return value instanceof Date && Number.isFinite(value.getTime())
+    ? value.toISOString()
+    : undefined;
+}
+
 export class SavedChatCorruptedError extends Error {
   constructor(public readonly filePath: string) {
     super(`Saved chat history is corrupted: ${filePath}`);
@@ -213,6 +228,12 @@ export class ChatStorageService {
   private readonly resolveChatDirectory: () => string;
   private readonly attachmentStore: ChatAttachmentVaultStore | null;
   private readonly plugin: SystemSculptPlugin | null;
+  /**
+   * What this service last wrote per file. Saves read the carried-forward
+   * frontmatter from here and from Obsidian's metadata cache, which may not
+   * have indexed the previous write yet, instead of rereading the file.
+   */
+  private readonly writtenMetadata = new Map<string, ExistingChatMetadata>();
 
   /**
    * `plugin` is optional only because tests construct this service against a
@@ -336,22 +357,21 @@ export class ChatStorageService {
       const now = new Date().toISOString();
       const vault = this.app.vault;
       let fileExists = false;
-      let existingMetadata: ChatMetadata | null = null;
+      let existingMetadata: ExistingChatMetadata | null = null;
 
       const file = exclusiveCreate ? null : vault.getAbstractFileByPath(filePath);
       if (file instanceof TFile) {
         fileExists = true;
-        const content = await vault.read(file);
-        existingMetadata = ChatMarkdownSerializer.parseMetadata(content);
+        existingMetadata = await this.existingChatMetadata(file, filePath);
       }
 
       const creationDate = existingMetadata?.created || now;
       const existingTags = existingMetadata?.tags ?? [];
       const defaultChatTag = this.resolveDefaultChatTag();
-      const mergedTags = this.mergeTags(existingTags, defaultChatTag);
+      const mergedTags = this.mergeTags([...existingTags], defaultChatTag);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
-      const currentVersion = Number(existingMetadata?.version) || 0;
+      const currentVersion = existingMetadata?.version ?? 0;
       let newVersion = currentVersion + 1;
       const agentConversationId = parseAgentConversationId(options.agentConversationId);
       
@@ -422,8 +442,48 @@ export class ChatStorageService {
       } else {
         await vault.create(filePath, fullContent);
       }
+      this.writtenMetadata.set(filePath, {
+        created: creationDate,
+        tags: mergedTags,
+        version: newVersion,
+        title: metadata.title,
+      });
       
       return { filePath, version: newVersion };
+  }
+
+  /**
+   * The existing file's created date, tags, version and title without
+   * reading its transcript. Obsidian's metadata cache reflects the user's own
+   * frontmatter edits; this service's last write covers the window before the
+   * cache indexes it. Only a file neither source knows yet is read.
+   */
+  private async existingChatMetadata(
+    file: TFile,
+    filePath: string,
+  ): Promise<ExistingChatMetadata | null> {
+    const cache = this.app.metadataCache?.getFileCache(file);
+    const written = this.writtenMetadata.get(filePath);
+    if (!cache && !written) {
+      const parsed = ChatMarkdownSerializer.parseMetadata(await this.app.vault.read(file));
+      return parsed
+        ? {
+            created: parsed.created,
+            tags: parsed.tags ?? [],
+            version: Number(parsed.version) || 0,
+            title: parsed.title,
+          }
+        : null;
+    }
+    const frontmatter: Readonly<Record<string, unknown>> | undefined = cache?.frontmatter;
+    const cached = typeof frontmatter?.id === "string" ? frontmatter : null;
+    if (!cached && !written) return null;
+    return {
+      created: frontmatterTimestamp(cached?.created) ?? written?.created,
+      tags: cached ? ChatMarkdownSerializer.normalizeTags(cached.tags) : written?.tags ?? [],
+      version: Math.max(Number(cached?.version) || 0, written?.version ?? 0),
+      title: typeof cached?.title === "string" ? cached.title : written?.title,
+    };
   }
 
   async loadChats(): Promise<LoadedChatRecord[]> {
