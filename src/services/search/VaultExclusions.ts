@@ -15,10 +15,12 @@
  * - Search surfaces also hide the configured plugin working folders
  *   (recordings, attachments, extractions), the Obsidian config folder, and
  *   node_modules. Embeddings only index notes the user can exclude directly.
- * - A folder is excluded when its own path matches, or when a rule covers
- *   everything under it: `Daily/**`, Obsidian's `Archive/` entries, and the
- *   SystemSculpt chat-folder rule describe a folder's contents, not the
- *   folder path itself.
+ * - A folder is excluded only when a rule is guaranteed to exclude every
+ *   path beneath it: an excluded or working folder, the chat-folder rule, an
+ *   Obsidian prefix entry such as `Archive/`, or a glob ending in `/**` such as
+ *   `Daily/**` and the node_modules rule. Rules that can leave a descendant
+ *   eligible (`Daily/*`, a name glob such as `*`, an Obsidian `/regex/`) never
+ *   hide a folder, so listings and find still reach the notes they allow.
  *
  * Rules compile once per distinct settings revision. Every input that changes
  * matching is part of the signature, including Obsidian's filters, which
@@ -68,6 +70,7 @@ export interface VaultExclusions {
 }
 
 type CompiledGlob = Readonly<{ regex: RegExp; matchesPath: boolean }>;
+type CompiledIgnoreFilter = Readonly<{ regex: RegExp; isPrefix: boolean }>;
 
 const NODE_MODULES_PATTERN = "**/node_modules/**";
 const COMPILED_CACHE_LIMIT = 8;
@@ -128,36 +131,45 @@ function compileVaultExclusions(
 ): VaultExclusions {
   const prefixes = [...new Set(directories.map((directory) => directory.toLowerCase()))];
   const globs = patterns.map(compileGlob);
+  // `X/**` excludes every path under any folder that X matches.
+  const subtreeGlobs = patterns
+    .filter((pattern) => pattern.endsWith("/**") && pattern.length > 3)
+    .map((pattern) => compileGlob(pattern.slice(0, -3)).regex);
   const filters = ignoreFilters.flatMap(compileUserIgnoreFilter);
-  const matches = (normalized: string): boolean => {
-    const lower = normalized.toLowerCase();
-    for (const prefix of prefixes) {
-      if (lower === prefix || lower.startsWith(`${prefix}/`)) return true;
-    }
-    if (
-      excludeChatHistory
-      && lower.includes("systemsculpt")
-      && (lower.includes("/chats/") || lower.includes("/saved chats/"))
-    ) return true;
-    const name = normalized.slice(normalized.lastIndexOf("/") + 1);
-    for (const glob of globs) {
-      if (glob.regex.test(glob.matchesPath ? normalized : name)) return true;
-    }
-    for (const filter of filters) {
-      if (filter.test(normalized)) return true;
-    }
-    return false;
-  };
+  const inPrefixDirectory = (lower: string): boolean =>
+    prefixes.some((prefix) => lower === prefix || lower.startsWith(`${prefix}/`));
+  const inChatFolder = (lower: string): boolean =>
+    excludeChatHistory
+    && lower.includes("systemsculpt")
+    && (lower.includes("/chats/") || lower.includes("/saved chats/"));
   return Object.freeze({
     signature,
     isExcluded(path: string): boolean {
       const normalized = normalizePath(path);
-      return normalized.length > 0 && matches(normalized);
+      if (!normalized) return false;
+      const lower = normalized.toLowerCase();
+      if (inPrefixDirectory(lower) || inChatFolder(lower)) return true;
+      const name = normalized.slice(normalized.lastIndexOf("/") + 1);
+      for (const glob of globs) {
+        if (glob.regex.test(glob.matchesPath ? normalized : name)) return true;
+      }
+      return filters.some((filter) => filter.regex.test(normalized));
     },
     isFolderExcluded(path: string): boolean {
       const normalized = normalizePath(path);
-      // The trailing slash asks whether a rule covers the folder's contents.
-      return normalized.length > 0 && (matches(normalized) || matches(`${normalized}/`));
+      if (!normalized) return false;
+      if (inPrefixDirectory(normalized.toLowerCase())) return true;
+      // Every descendant path starts with `folder/`. The chat-folder substrings
+      // and Obsidian's prefix entries that match it match every descendant.
+      const contents = `${normalized}/`;
+      if (inChatFolder(contents.toLowerCase())) return true;
+      if (filters.some((filter) => filter.isPrefix && filter.regex.test(contents))) return true;
+      const segments = normalized.split("/");
+      for (let depth = 1; depth <= segments.length; depth += 1) {
+        const ancestor = segments.slice(0, depth).join("/");
+        if (subtreeGlobs.some((glob) => glob.test(ancestor))) return true;
+      }
+      return false;
     },
   });
 }
@@ -171,11 +183,11 @@ function compileGlob(pattern: string): CompiledGlob {
 }
 
 /** Mirrors Obsidian's MetadataCache.updateUserIgnoreFilters (1.13). */
-function compileUserIgnoreFilter(filter: string): RegExp[] {
+function compileUserIgnoreFilter(filter: string): CompiledIgnoreFilter[] {
   try {
     return [filter.length > 2 && filter.startsWith("/") && filter.endsWith("/")
-      ? new RegExp(filter.slice(1, -1), "i")
-      : new RegExp(`^${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")];
+      ? { regex: new RegExp(filter.slice(1, -1), "i"), isPrefix: false }
+      : { regex: new RegExp(`^${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"), isPrefix: true }];
   } catch {
     // Obsidian skips filters that are not valid regexes too.
     return [];

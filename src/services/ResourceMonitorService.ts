@@ -577,8 +577,12 @@ export class ResourceMonitorService {
     if (this.metricsFileBytes <= MAX_METRICS_FILE_BYTES) {
       return;
     }
+    // Samples still queued (captured during this append, or kept after a
+    // failed one) reach the file with a later append; writing them here too
+    // would record them twice.
+    const queued = new Set(this.pendingWrites);
     const retained = this.samples
-      .filter((sample) => this.persistableSamples.has(sample))
+      .filter((sample) => this.persistableSamples.has(sample) && !queued.has(sample))
       .map((sample) => this.serializeSample(sample))
       .join("");
     const result = await storage.writeFile("diagnostics", this.metricsFileName, retained);

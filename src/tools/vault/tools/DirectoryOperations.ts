@@ -255,10 +255,17 @@ export class DirectoryOperations {
             pathResult.directories = [];
         }
 
+        // Naming an excluded folder directly must not bypass the exclusion
+        // that hides it from its parent's listing.
+        const exclusions = searchVaultExclusions(this.plugin);
+        if (exclusions.isFolderExcluded(folder.path)) {
+          pathResult.notice = `${path} is excluded from vault search and listings by the exclusion settings, so its contents are not listed.`;
+          return pathResult;
+        }
+
         // Collect all items (with recursion if needed)
         let allItems: (TFile | TFolder)[] = [];
-        const exclusions = searchVaultExclusions(this.plugin);
-        
+
         const isVisible = (child: TFile | TFolder) => child instanceof TFile
           ? !exclusions.isExcluded(child.path)
           : !exclusions.isFolderExcluded(child.path);

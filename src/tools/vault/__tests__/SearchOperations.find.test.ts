@@ -153,6 +153,30 @@ describe("find", () => {
     ]);
   });
 
+  it("keeps walking a folder whose rule leaves deeper notes eligible (Daily/*)", async () => {
+    const ops = vault([...paths, "Daily/today.md", "Daily/sub/deep.md"], { patterns: ["Daily/*"] });
+
+    const response = await find(ops, ["deep"]);
+
+    expect(response.results.map((result) => result.path)).toEqual(["Daily/sub/deep.md"]);
+    expect((await find(ops, ["sub"])).results.map((result) => result.path).sort()).toEqual(["Daily/sub", "Daily/sub/deep.md"]);
+    expect((await find(ops, ["today"])).results).toEqual([]);
+  });
+
+  it("does not hide folders for a name-only * pattern", async () => {
+    const response = await find(vault(paths, { patterns: ["*"] }), ["launch"]);
+
+    expect(response.results).toEqual([expect.objectContaining({ path: "Projects/Launch" })]);
+  });
+
+  it("skips a folder whose whole subtree is excluded (Daily/**)", async () => {
+    const ops = vault([...paths, "Daily/Launch Notes/deep.md"], { patterns: ["Daily/**"] });
+
+    const response = await find(ops, ["launch"]);
+
+    expect(response.results.map((result) => result.path)).toEqual(["Projects/Launch", "Projects/Launch/plan.md"]);
+  });
+
   it("keeps the no-match notice intact through managed tool-result delivery", async () => {
     const response = await find(vault(paths), ["zzqxv"]);
 

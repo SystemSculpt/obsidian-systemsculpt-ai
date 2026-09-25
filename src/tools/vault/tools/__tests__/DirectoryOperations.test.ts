@@ -298,6 +298,60 @@ describe("DirectoryOperations", () => {
       expect(result.results[0].totalItems).toBe(4);
     });
 
+    it("lists nothing inside a requested folder that is itself excluded", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: ["Private"],
+        patterns: [],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const folder = new TFolder({
+        path: "Private",
+        children: [
+          new TFile({ path: "Private/secret.md", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFolder({ path: "Private/Sub", children: [] }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["Private"], recursive: true });
+
+      expect(result.results[0]).toEqual({
+        path: "Private",
+        offset: 0,
+        totalItems: 0,
+        nextOffset: null,
+        files: [],
+        directories: [],
+        notice: expect.stringContaining("Private is excluded"),
+      });
+      expect(app.vault.cachedRead).not.toHaveBeenCalled();
+    });
+
+    it("still lists a requested folder whose rule leaves deeper notes eligible", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: [],
+        patterns: ["Daily/*"],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const stat = { ctime: 1000, mtime: 2000, size: 100 };
+      const folder = new TFolder({
+        path: "Daily",
+        children: [
+          new TFile({ path: "Daily/today.md", stat }),
+          new TFolder({ path: "Daily/sub", children: [new TFile({ path: "Daily/sub/deep.md", stat })] }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["Daily"], recursive: true, sort: "name" });
+
+      expect(result.results[0].notice).toBeUndefined();
+      expect(result.results[0].files?.map((file: any) => file.path)).toEqual(["Daily/sub/deep.md"]);
+      expect(result.results[0].directories?.map((entry: any) => entry.path)).toEqual(["Daily/sub"]);
+    });
+
     it("filters to only files when filter is files", async () => {
       const folder = new TFolder({
         path: "test",

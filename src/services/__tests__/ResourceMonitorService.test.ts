@@ -455,6 +455,32 @@ describe("ResourceMonitorService", () => {
     expect(retained.trim().split("\n").map((line: string) => JSON.parse(line).note)).toEqual(["recording-started", "over-cap"]);
   });
 
+  it("writes a sample captured during a cap-crossing append exactly once", async () => {
+    mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 999_990 });
+    service.start();
+    await service.flushPending();
+    await service.captureManualSample("over-cap");
+    let finishAppend!: () => void;
+    mockPlugin.storage.appendToFile.mockImplementationOnce(() => new Promise((resolve) => {
+      finishAppend = () => resolve({ success: true });
+    }));
+    const crossing = service.flushPending();
+    await service.captureManualSample("during-append");
+
+    finishAppend();
+    await crossing;
+    expect(mockPlugin.storage.writeFile).toHaveBeenCalledTimes(1);
+    const rewritten = mockPlugin.storage.writeFile.mock.calls[0][2].trim().split("\n")
+      .map((line: string) => JSON.parse(line).note);
+    mockPlugin.storage.appendToFile.mockClear();
+    await service.flushPending();
+
+    // The file is the rewrite followed by later appends: each sample once.
+    const fileAfterRewrite = [...rewritten, ...writtenLines(mockPlugin.storage.appendToFile).map((line) => line.note)];
+    expect(fileAfterRewrite).toEqual(["recording-started", "over-cap", "during-append"]);
+    expect((service as any).pendingWrites).toEqual([]);
+  });
+
   describe("captureManualSample", () => {
     it("captures sample with custom note", async () => {
       const sample = await service.captureManualSample("test-note");

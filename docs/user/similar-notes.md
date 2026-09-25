@@ -34,7 +34,8 @@ Core controls:
 - Exclusions can dramatically reduce indexed content.
 - The same exclusions hide notes from vault search and from the agent's
   `list_items`, `find`, and `search` tools. Those tools also hide an excluded
-  folder, or a folder whose contents a rule such as `Daily/**` excludes.
+  folder, or a folder when a rule such as `Daily/**` excludes everything
+  inside it. A rule such as `Daily/*` hides only the notes it matches.
 - Excluded patterns are globs, such as `*.png`, `Daily/**`, or `**/Archive/*`.
   A pattern without `/` matches file names. Obsidian exclusions follow
   Obsidian's own rules.
