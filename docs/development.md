@@ -163,6 +163,12 @@ and staging API targets, so the artifact safety gate and automatic sync use
 the same bytes. Use `npm run
 dev:watch:uninstall` to remove it.
 
+The default production watcher usually targets the everyday vault, so it
+omits the E2E test driver. Install `npm run dev:watch:install:e2e` (the
+production-watch-e2e route) before live CLI QA, and reinstall the default
+watcher afterwards. Staging and local-agent watchers always include the
+driver.
+
 Production-shaped builds are minified and retain class/function names for
 diagnostics. `npm run dev` keeps readable output and inline source maps for
 source-level debugging.
@@ -201,9 +207,10 @@ this repository.
 
 ## CLI E2E driving
 
-Development, staging, and local-agent builds embed SystemSculptTestDriver/v1
-(src/testing/driver). Release builds exclude it via the __SS_TEST_DRIVER__
-define, and artifact inspection enforces both directions. The driver dials out
+Development, staging, local-agent, and production-watch-e2e builds embed
+SystemSculptTestDriver/v1 (src/testing/driver). Release builds and the default
+production-watch watcher exclude it via the __SS_TEST_DRIVER__ define, and
+artifact inspection enforces both directions for release artifacts. The driver dials out
 to a CLI-hosted localhost WebSocket server; the plugin never listens.
 
 With Obsidian running a development build, drive the real GUI from the

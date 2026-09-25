@@ -10,7 +10,7 @@ import {
   countConfiguredTargets,
   resolveSyncConfigPath,
 } from "./plugin-sync.mjs";
-import { resolvePluginBuildTarget } from "./plugin-build-options.mjs";
+import { resolveWatcherBuildTargetName } from "./plugin-build-options.mjs";
 import { assertCanonicalWatcherCheckout } from "./watcher-ownership.mjs";
 
 export const DEV_WATCHER_SERVICE_LABEL = "com.systemsculpt.obsidian-plugin-dev";
@@ -51,8 +51,10 @@ export function createDevWatcherLaunchAgentPlist(options) {
     "/usr/sbin",
     "/sbin",
   ].filter((value, index, values) => values.indexOf(value) === index).join(":");
-  const watcherTarget = `${String(options.target || "production")}-watch`;
-  resolvePluginBuildTarget(watcherTarget);
+  const watcherTarget = resolveWatcherBuildTargetName({
+    target: options.target || "production",
+    e2eDriver: options.e2eDriver === true,
+  });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -171,6 +173,7 @@ export function installDevWatcherService(options = {}) {
     configPath,
     home,
     target: options.target,
+    e2eDriver: options.e2eDriver === true,
   }));
 
   const domain = `gui/${uid}`;
@@ -194,6 +197,7 @@ export function installDevWatcherService(options = {}) {
     configPath,
     domain,
     target: options.target || "production",
+    e2eDriver: options.e2eDriver === true,
   };
 }
 
@@ -234,7 +238,12 @@ function parseArgs(argv) {
   const command = argv[0];
   let configPath;
   let target = "production";
+  let e2eDriver = false;
   for (let index = 1; index < argv.length; index += 1) {
+    if (argv[index] === "--e2e") {
+      e2eDriver = true;
+      continue;
+    }
     if (argv[index] === "--config" && argv[index + 1]) {
       configPath = argv[index + 1];
       index += 1;
@@ -251,20 +260,29 @@ function parseArgs(argv) {
     throw new Error(`Unknown plugin watcher target: ${target}`);
   }
   if (!["install", "uninstall", "status"].includes(command)) {
-    throw new Error("Usage: node scripts/dev-watcher-service.mjs <install|uninstall|status> [--config <path>] [--target production|staging|local-agent]");
+    throw new Error("Usage: node scripts/dev-watcher-service.mjs <install|uninstall|status> [--config <path>] [--target production|staging|local-agent] [--e2e]");
   }
-  return { command, configPath, target };
+  if (e2eDriver && target !== "production") {
+    throw new Error(`The ${target} watcher already includes the E2E test driver.`);
+  }
+  return { command, configPath, target, e2eDriver };
 }
 
 async function main() {
-  const { command, configPath, target } = parseArgs(process.argv.slice(2));
+  const { command, configPath, target, e2eDriver } = parseArgs(process.argv.slice(2));
   if (command === "install") {
     const result = installDevWatcherService({
       configPath,
       target,
+      e2eDriver,
     });
     console.log(`[dev] Persistent watcher installed from ${result.root}.`);
     console.log(`[dev] API target: ${target}.`);
+    if (target === "production") {
+      console.log(e2eDriver
+        ? "[dev] E2E test driver: included (reinstall without --e2e to remove it)."
+        : "[dev] E2E test driver: excluded (use npm run dev:watch:install:e2e for live QA).");
+    }
     console.log(`[dev] Sync config: ${result.configPath}`);
     console.log(`[dev] Log: ${result.stdoutPath}`);
     return;

@@ -147,14 +147,17 @@ Run the deterministic ChatView gate before live checks:
 npm run qa:chatview:deterministic
 ~~~
 
-Confirm that the watcher uses the canonical checkout. Restart it when the QA
-vault reports another revision:
+Confirm that the watcher uses the canonical checkout. The default watcher
+omits the E2E driver, so install the QA watcher, which includes it. Restart it
+when the QA vault reports another revision:
 
 ~~~bash
 npm run dev:watch:status
-npm run dev:watch:install
+npm run dev:watch:install:e2e
 npm run e2e -- status --json
 ~~~
+
+Reinstall the default watcher with `npm run dev:watch:install` after QA.
 
 The status result must name the current development build ID. Do not accept a
 version-only match.

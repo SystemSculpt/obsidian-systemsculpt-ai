@@ -64,6 +64,7 @@
     "check:compat": "npm run check:plugin:fast && npm run test:chatview:compat && npm run test:integration:ci",
     "dev": "node esbuild.config.mjs development",
     "dev:watch:install": "node scripts/dev-watcher-service.mjs install",
+    "dev:watch:install:e2e": "node scripts/dev-watcher-service.mjs install --e2e",
     "dev:watch:install:local-agent": "node scripts/dev-watcher-service.mjs install --target local-agent",
     "dev:watch:install:staging": "node scripts/dev-watcher-service.mjs install --target staging",
     "dev:watch:status": "node scripts/dev-watcher-service.mjs status",

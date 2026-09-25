@@ -210,3 +210,24 @@ test("status and uninstall use the same launchd label", (t) => {
   assert.match(calls[0][1][1], new RegExp(DEV_WATCHER_SERVICE_LABEL));
   assert.match(calls[1][1][1], new RegExp(DEV_WATCHER_SERVICE_LABEL));
 });
+
+test("launch agent installs the E2E driver watcher only on explicit opt-in", (t) => {
+  const root = tempRoot(t);
+  const options = {
+    root: path.join(root, "plugin"),
+    configPath: path.join(root, "sync.json"),
+    home: path.join(root, "home"),
+  };
+
+  const everyday = createDevWatcherLaunchAgentPlist(options);
+  const qa = createDevWatcherLaunchAgentPlist({ ...options, e2eDriver: true });
+
+  assert.match(everyday, /<string>--<\/string>\s*<string>production-watch<\/string>/);
+  assert.doesNotMatch(everyday, /production-watch-e2e/);
+  assert.match(qa, /<string>--<\/string>\s*<string>production-watch-e2e<\/string>/);
+  assert.doesNotMatch(qa, /SYSTEMSCULPT_TEST_DRIVER/);
+  assert.throws(
+    () => createDevWatcherLaunchAgentPlist({ ...options, target: "staging", e2eDriver: true }),
+    /already includes the E2E test driver/,
+  );
+});

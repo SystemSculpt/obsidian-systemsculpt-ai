@@ -12,6 +12,7 @@ import {
   resolvePluginBuildArguments,
   resolvePluginBuildStamp,
   resolvePluginBuildTarget,
+  resolveWatcherBuildTargetName,
 } from "./plugin-build-options.mjs";
 import {
   PLUGIN_ARTIFACT_ID_PLUGIN_NAME,
@@ -331,5 +332,52 @@ test("the E2E test driver define follows non-release production-shaped builds", 
       testDriver: true,
     }).define.__SS_TEST_DRIVER__,
     "true",
+  );
+});
+
+test("the everyday production watcher excludes the E2E driver unless QA opts in", () => {
+  const everyday = resolvePluginBuildTarget("production-watch");
+  const qa = resolvePluginBuildTarget("production-watch-e2e");
+  assert.equal(everyday.testDriver, false);
+  assert.equal(everyday.watch, true);
+  assert.equal(everyday.releaseBuild, false);
+  assert.equal(qa.testDriver, true);
+  assert.equal(qa.watch, true);
+  assert.equal(qa.apiBaseUrl, everyday.apiBaseUrl);
+  assert.equal(qa.buildStamp, everyday.buildStamp);
+  assert.equal(
+    createPluginBuildOptions({
+      production: everyday.production,
+      releaseBuild: everyday.releaseBuild,
+      testDriver: everyday.testDriver,
+    }).define.__SS_TEST_DRIVER__,
+    "false",
+  );
+  assert.equal(
+    createPluginBuildOptions({
+      production: qa.production,
+      releaseBuild: qa.releaseBuild,
+      testDriver: qa.testDriver,
+    }).define.__SS_TEST_DRIVER__,
+    "true",
+  );
+  // QA routes keep the driver: they never target the everyday vault by default.
+  for (const name of ["development", "staging", "staging-watch", "local-agent", "local-agent-watch"]) {
+    assert.equal(resolvePluginBuildTarget(name).testDriver, true, name);
+  }
+});
+
+test("watcher routes resolve the driver opt-in only for the production target", () => {
+  assert.equal(resolveWatcherBuildTargetName(), "production-watch");
+  assert.equal(resolveWatcherBuildTargetName({ e2eDriver: true }), "production-watch-e2e");
+  assert.equal(resolveWatcherBuildTargetName({ target: "staging" }), "staging-watch");
+  assert.equal(resolveWatcherBuildTargetName({ target: "local-agent" }), "local-agent-watch");
+  assert.throws(
+    () => resolveWatcherBuildTargetName({ target: "staging", e2eDriver: true }),
+    /already includes the E2E test driver/,
+  );
+  assert.throws(
+    () => resolveWatcherBuildTargetName({ target: "prodution" }),
+    /Unknown plugin build target/,
   );
 });
