@@ -148,7 +148,7 @@ describe("EmbeddingsManager superseded generation pruning (#324)", () => {
       },
       markPortableIndexChanged: jest.fn(),
       flushPortableIndex: jest.fn(async () => undefined),
-      commitPortableDestructiveMutation: jest.fn(async () => undefined),
+      markPortableIndexDestructive: jest.fn(async () => undefined),
       processor: {
         processFiles: jest.fn(async (): Promise<ProcessingResult> => {
           roots.set(buildVectorId(IN_PROGRESS, "A.md", 0), record(IN_PROGRESS, "A.md", 4));
@@ -168,7 +168,7 @@ describe("EmbeddingsManager superseded generation pruning (#324)", () => {
     await manager.processVault();
 
     expect(manager.storage.retainNamespaces).toHaveBeenCalledWith(new Set([COMMITTED, IN_PROGRESS]));
-    expect(manager.commitPortableDestructiveMutation).toHaveBeenCalled();
+    expect(manager.markPortableIndexDestructive).toHaveBeenCalled();
     expect(manager.getSearchNamespace()).toBe(COMMITTED);
   });
 

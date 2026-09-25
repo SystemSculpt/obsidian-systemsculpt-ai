@@ -709,16 +709,21 @@ export class EmbeddingsStorage {
   }
 
   /**
-   * Remove all vectors associated with a given file path
+   * Remove all vectors associated with a given file path. Resolves the number
+   * of records removed, so callers can tell a real change from a no-op.
    */
-  async removeByPath(path: string): Promise<void> {
-    if (!this.db) return;
-    await new Promise<void>((resolve, reject) => {
+  async removeByPath(path: string): Promise<number> {
+    if (!this.db) return 0;
+    return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], 'readwrite');
       const store = tx.objectStore(STORE_NAME);
+      let removed = 0;
       const req = store.index('by_path').getAllKeys(IDBKeyRange.only(path));
       req.onsuccess = () => {
-        for (const key of (req.result || []) as string[]) store.delete(key);
+        for (const key of (req.result || []) as string[]) {
+          store.delete(key);
+          removed += 1;
+        }
       };
       req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
@@ -726,17 +731,18 @@ export class EmbeddingsStorage {
           if (vector.path === path) this.cache.delete(id);
         }
         this.pathsSet.delete(path);
-        resolve();
+        resolve(removed);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path deletion aborted."));
     });
   }
 
-  async renameByPath(oldPath: string, newPath: string, newTitle?: string): Promise<void> {
-    if (!this.db) return;
-    if (!oldPath || !newPath || oldPath === newPath) return;
-    await new Promise<void>((resolve, reject) => {
+  /** Move a note's records to its new path. Resolves the number of records moved. */
+  async renameByPath(oldPath: string, newPath: string, newTitle?: string): Promise<number> {
+    if (!this.db) return 0;
+    if (!oldPath || !newPath || oldPath === newPath) return 0;
+    return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const updates: EmbeddingVector[] = [];
@@ -769,7 +775,7 @@ export class EmbeddingsStorage {
         }
         this.pathsSet.delete(oldPath);
         if (updates.length > 0) this.pathsSet.add(newPath);
-        resolve();
+        resolve(updates.length);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB path rename aborted."));
@@ -779,25 +785,27 @@ export class EmbeddingsStorage {
   /**
    * Rename all vectors under a directory prefix without re-embedding.
    * Uses an indexed cursor to avoid loading the entire store into memory.
+   * Resolves the number of records visited.
    */
-  async renameByDirectory(oldDir: string, newDir: string): Promise<void> {
-    if (!this.db) return;
+  async renameByDirectory(oldDir: string, newDir: string): Promise<number> {
+    if (!this.db) return 0;
     const oldPrefix = this.normalizeDirPrefix(oldDir);
     const newPrefix = this.normalizeDirPrefix(newDir);
-    if (!oldPrefix || !newPrefix || oldPrefix === newPrefix) return;
+    if (!oldPrefix || !newPrefix || oldPrefix === newPrefix) return 0;
 
-    await new Promise<void>((resolve, reject) => {
+    return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const range = IDBKeyRange.bound(oldPrefix, `${oldPrefix}\uffff`);
       const deletedRootIds: string[] = [];
       const updatedRoots: EmbeddingVector[] = [];
+      let visited = 0;
 
       tx.oncomplete = () => {
         for (const id of deletedRootIds) this.cache.delete(id);
         for (const vector of updatedRoots) this.cache.set(vector.id, vector);
         this.refreshPathsCache();
-        resolve();
+        resolve(visited);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
       tx.onabort = () => reject(tx.error || new Error("IndexedDB directory rename aborted."));
@@ -818,6 +826,7 @@ export class EmbeddingsStorage {
         // is advancing, which escapes the event callback as an unhandled
         // exception and aborts the whole vault operation.
         store.delete(cursor.primaryKey);
+        visited += 1;
         if (namespace) {
           const relativePath = (value.path || "").slice(oldPrefix.length);
           const newPath = `${newPrefix}${relativePath}`;
@@ -840,9 +849,9 @@ export class EmbeddingsStorage {
    * Remove all vectors under a directory prefix (e.g., when folder is deleted).
    * Streams keys via the path index to avoid full-store scans.
    */
-  async removeByDirectory(dir: string): Promise<void> {
+  async removeByDirectory(dir: string): Promise<number> {
     const prefix = this.normalizeDirPrefix(dir);
-    if (prefix) await this.removeIndexedPrefix("by_path", prefix);
+    return prefix ? this.removeIndexedPrefix("by_path", prefix) : 0;
   }
 
   /** Remove every vector in the current managed generation family. */

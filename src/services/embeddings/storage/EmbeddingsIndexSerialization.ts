@@ -3,9 +3,9 @@
  * embedding index.
  *
  * The on-disk IndexedDB store is scoped to a per-install `vaultInstanceId`, so it
- * is never captured by Obsidian Sync/backup and never restored on a new device.
+ * is never captured by vault sync or backups and never restored on a new device.
  * This module turns the store's `EmbeddingVector[]` into a versioned JSON
- * envelope that CAN live in the synced vault, and back again.
+ * envelope that CAN live in the vault folder, and back again.
  *
  * Vectors are encoded as explicit little-endian Float32 bytes (via DataView) and
  * base64'd, so the snapshot round-trips byte-for-byte across platforms. The

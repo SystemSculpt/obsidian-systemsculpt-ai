@@ -162,10 +162,16 @@ describe("writeEmbeddingsIndexSnapshot", () => {
 });
 
 describe("PortableCheckpointCoordinator", () => {
+  const timing = { quietMs: 60_000, maxWaitMs: 60_000, destructiveQuietMs: 1_000, destructiveMaxWaitMs: 5_000 };
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("coalesces ordinary edits into one atomic snapshot flush", async () => {
     const store = makeStore({ exportAll: jest.fn(async () => index(3)) });
     const file = makeFile();
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
 
     checkpoint.markChanged();
     checkpoint.markChanged();
@@ -180,12 +186,64 @@ describe("PortableCheckpointCoordinator", () => {
     checkpoint.cancel();
   });
 
-  it("commits destructive mutations immediately and deletes an empty checkpoint", async () => {
+  it("writes nothing when nothing changed", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(3)) });
+    const file = makeFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
+
+    await checkpoint.flush();
+
+    expect(store.exportAll).not.toHaveBeenCalled();
+    expect(file.write).not.toHaveBeenCalled();
+  });
+
+  it("waits out a quiet period for edits, bounded by the maximum wait", async () => {
+    jest.useFakeTimers();
+    const store = makeStore({ exportAll: jest.fn(async () => index(3)) });
+    const file = makeFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, {
+      ...timing,
+      quietMs: 30_000,
+      maxWaitMs: 120_000,
+    });
+
+    for (let minute = 0; minute < 3; minute += 1) {
+      for (let tick = 0; tick < 3; tick += 1) {
+        checkpoint.markChanged();
+        await jest.advanceTimersByTimeAsync(20_000);
+      }
+    }
+
+    // Continuous edits every 20 s never go quiet, so only the 2-minute cap fires.
+    expect(file.write).toHaveBeenCalledTimes(1);
+    checkpoint.cancel();
+  });
+
+  it("coalesces a burst of removals into one expedited write", async () => {
+    jest.useFakeTimers();
+    const store = makeStore({ exportAll: jest.fn(async () => index(2)) });
+    const file = makeFile({ remove: jest.fn(async () => undefined) });
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
+
+    for (let index = 0; index < 20; index += 1) {
+      checkpoint.markDestructive();
+      await jest.advanceTimersByTimeAsync(100);
+    }
+    expect(file.write).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1_000);
+
+    expect(store.exportAll).toHaveBeenCalledTimes(1);
+    expect(file.write).toHaveBeenCalledTimes(1);
+    checkpoint.cancel();
+  });
+
+  it("deletes an empty checkpoint after the last note is removed", async () => {
     const store = makeStore({ exportAll: jest.fn(async () => index(0)) });
     const file = makeFile({ remove: jest.fn(async () => undefined) });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
 
-    await checkpoint.commitDestructiveMutation();
+    checkpoint.markDestructive();
+    await checkpoint.flush();
 
     expect(store.exportAll).toHaveBeenCalledTimes(1);
     expect(file.write).not.toHaveBeenCalled();
@@ -196,7 +254,7 @@ describe("PortableCheckpointCoordinator", () => {
   it("clear always removes the portable checkpoint instead of preserving ghost notes", async () => {
     const store = makeStore({ exportAll: jest.fn(async () => index(4)) });
     const file = makeFile({ remove: jest.fn(async () => undefined) });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
     checkpoint.markChanged();
 
     await checkpoint.clear();
@@ -206,17 +264,37 @@ describe("PortableCheckpointCoordinator", () => {
     expect(checkpoint.status().pending).toBe(false);
   });
 
-  it("deletes a stale checkpoint when a destructive rewrite fails", async () => {
+  it("deletes a stale checkpoint and reports it when a removal rewrite fails", async () => {
+    jest.useFakeTimers();
     const store = makeStore({ exportAll: jest.fn(async () => index(2)) });
     const file = makeFile({
       write: jest.fn(async () => { throw new Error("sync adapter failed"); }),
       remove: jest.fn(async () => undefined),
     });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    const onError = jest.fn();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file, onError }, timing);
 
-    await expect(checkpoint.commitDestructiveMutation()).rejects.toThrow("sync adapter failed");
+    checkpoint.markDestructive();
+    await jest.advanceTimersByTimeAsync(1_000);
 
     expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "sync adapter failed" }), true);
     expect(checkpoint.status().pending).toBe(false);
+  });
+
+  it("keeps the previous snapshot when an ordinary rewrite fails", async () => {
+    const store = makeStore({ exportAll: jest.fn(async () => index(2)) });
+    const file = makeFile({
+      write: jest.fn(async () => { throw new Error("disk full"); }),
+      remove: jest.fn(async () => undefined),
+    });
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
+
+    checkpoint.markChanged();
+    await expect(checkpoint.flush()).rejects.toThrow("disk full");
+
+    expect(file.remove).not.toHaveBeenCalled();
+    expect(checkpoint.status().pending).toBe(true);
+    checkpoint.cancel();
   });
 });

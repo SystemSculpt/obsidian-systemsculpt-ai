@@ -230,16 +230,11 @@ export interface SystemSculptSettings {
   };
   /**
    * When true (default), persist a portable copy of the embedding index into the
-   * synced vault (`.systemsculpt/embeddings/`) so Obsidian Sync/backup restores
-   * it on a new device instead of re-embedding the whole vault.
+   * vault folder (`.systemsculpt/embeddings/`) so file-level vault sync or a
+   * backup restores it on a new device instead of re-embedding the whole vault.
+   * Obsidian Sync skips dot-folders and does not carry it.
    */
   embeddingsPortableIndex?: boolean;
-  /**
-   * Set true while a managed bulk rebuild is incomplete. On the next load the
-   * durable per-file completeness markers let the run resume without repeating
-   * completed files. Cleared after a clean vault completion.
-   */
-  embeddingsRebuildPending?: boolean;
   
   /**
    * Automatic backup settings
@@ -331,7 +326,6 @@ Please:
     respectObsidianExclusions: true
   },
   embeddingsPortableIndex: true,
-  embeddingsRebuildPending: false,
   
   /**
    * Automatic backup defaults

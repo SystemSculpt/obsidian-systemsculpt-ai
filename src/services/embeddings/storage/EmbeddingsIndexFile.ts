@@ -3,8 +3,10 @@
  * vault-relative path through Obsidian's `DataAdapter`.
  *
  * Living in the vault (default `.systemsculpt/embeddings/index.json`, alongside
- * `.systemsculpt/diagnostics`) is what lets Obsidian Sync/backup capture and
- * restore the index — unlike the per-device IndexedDB store.
+ * `.systemsculpt/diagnostics`) is what lets file-level vault sync and backups
+ * (iCloud, Dropbox, Syncthing, git) carry the index to another device, unlike
+ * the per-device IndexedDB store. Obsidian Sync skips dot-folders, so it does
+ * not. Every rewrite is uploaded by those tools, which is why writes are rare.
  *
  * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), including
  * adapters without a Node base path; no `node:fs`, so this stays within the

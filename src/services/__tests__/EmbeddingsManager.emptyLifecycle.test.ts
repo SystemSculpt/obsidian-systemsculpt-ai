@@ -161,7 +161,6 @@ function harness(initialContent: string) {
     embeddingsVectorFormatVersion: 5,
     embeddingsEnabled: false,
     embeddingsPortableIndex: false,
-    embeddingsRebuildPending: false,
     embeddingsExclusions: { folders: [], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
     chatsDirectory: "Chats",
     savedChatsDirectory: "Saved Chats",
@@ -232,7 +231,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toEqual({ total: 1, processed: 1, present: 0, needsProcessing: 0, failed: 0 });
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
     expect(state.index).not.toHaveBeenCalled();
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(false);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({
       phase: "idle",
       total: 1,
@@ -270,7 +268,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const result = await state.manager.processVault();
 
     expect(result).toMatchObject({ status: "complete", processed: 0, partialSuccess: true });
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(true);
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
     expect(state.index).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -494,14 +491,12 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const state = harness("A note that is indexed once.");
     await state.manager.initialize();
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
-    expect(state.updateSettings).toHaveBeenCalledWith({ embeddingsRebuildPending: true });
     state.updateSettings.mockClear();
 
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
 
-    expect(state.updateSettings).not.toHaveBeenCalledWith(
-      expect.objectContaining({ embeddingsRebuildPending: expect.anything() }),
-    );
+    // Indexing runs never save settings: the write-only rebuild flag is gone (#341).
+    expect(state.updateSettings).not.toHaveBeenCalled();
   });
 
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {

@@ -49,7 +49,6 @@ async function harness(fileCount: number) {
   const settings = {
     embeddingsEnabled: true,
     embeddingsPortableIndex: false,
-    embeddingsRebuildPending: false,
     embeddingsExclusions: {
       folders: [],
       patterns: [],
@@ -103,7 +102,7 @@ async function harness(fileCount: number) {
   };
   manager.markPortableIndexChanged = jest.fn();
   manager.flushPortableIndex = jest.fn(async () => undefined);
-  manager.commitPortableDestructiveMutation = jest.fn(async () => undefined);
+  manager.markPortableIndexDestructive = jest.fn();
   return { files, roots, queue, queueWrites, manager, settings, state };
 }
 
@@ -133,7 +132,7 @@ describe("EmbeddingsManager run bookkeeping", () => {
       lifecyclePhase: "error",
     },
   ])("keeps completed paths durable after $label", async ({ fatalError, cancelled, lifecyclePhase }) => {
-    const { files, roots, queue, manager, settings } = await harness(2);
+    const { files, roots, queue, manager } = await harness(2);
     await queue.enqueueImmediate(files[0].path, "reconcile", files[0].stat.mtime, 1);
     await queue.enqueueImmediate(files[1].path, "reconcile", files[1].stat.mtime, 1);
     manager.processor = {
@@ -157,9 +156,9 @@ describe("EmbeddingsManager run bookkeeping", () => {
     });
 
     expect(queue.snapshot().map((item) => item.path)).toEqual([files[1].path]);
-    expect(settings.embeddingsRebuildPending).toBe(true);
+    // New vectors ride the coalesced checkpoint instead of an immediate rewrite (#341).
     expect(manager.markPortableIndexChanged).toHaveBeenCalledTimes(1);
-    expect(manager.flushPortableIndex).toHaveBeenCalledTimes(1);
+    expect(manager.flushPortableIndex).not.toHaveBeenCalled();
     expect(manager.getLifecycleSnapshot()).toMatchObject({
       phase: lifecyclePhase,
       total: 2,
@@ -294,7 +293,7 @@ describe("EmbeddingsManager run bookkeeping", () => {
     await manager.processQueuedWork();
 
     expect(manager.markPortableIndexChanged).not.toHaveBeenCalled();
-    expect(manager.commitPortableDestructiveMutation).not.toHaveBeenCalled();
+    expect(manager.markPortableIndexDestructive).not.toHaveBeenCalled();
     expect(queue.size).toBe(0);
   });
 });

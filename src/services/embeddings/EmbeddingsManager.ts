@@ -183,6 +183,7 @@ export class EmbeddingsManager {
   private workTimer: number | null = null;
   private workTimerDueAt: number | null = null;
   private lifecycleRefreshTimer: number | null = null;
+  private enabledAtLastSync: boolean;
 
   constructor(
     private readonly app: App,
@@ -190,6 +191,7 @@ export class EmbeddingsManager {
     config?: Partial<EmbeddingsManagerConfig>,
   ) {
     this.config = this.buildConfig(config);
+    this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
     this.storage = new EmbeddingsStorage(
       EmbeddingsStorage.buildDbName(this.plugin.settings.vaultInstanceId || ""),
     );
@@ -285,26 +287,28 @@ export class EmbeddingsManager {
         currentPath: null,
         lastError: null,
       });
+      // Empty notes have nothing to index. Only a note that still had records
+      // changes the store; notes that are already absent must not count as a
+      // destructive change on every pass.
       const emptyFiles = eligibleFiles.filter((file) => this.isLocallyEmpty(file));
-      const emptyClaims = await this.captureWorkClaims(emptyFiles, "reconcile");
-      for (const file of emptyFiles) {
-        await this.storage.removeByPath(file.path);
-        this.failedFiles.delete(file.path);
+      let emptiedRecords = 0;
+      if (emptyFiles.length > 0) {
+        const emptyClaims = await this.captureWorkClaims(emptyFiles, "reconcile");
+        for (const file of emptyFiles) {
+          emptiedRecords += await this.storage.removeByPath(file.path) ?? 0;
+          this.failedFiles.delete(file.path);
+        }
+        await this.workQueue.complete(emptyClaims.values());
       }
-      await this.workQueue.complete(emptyClaims.values());
       const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessFile(file));
       if (files.length === 0) {
-        await this.setRebuildPending(false);
         await this.commitSearchNamespaceIfComplete();
         const pruned = await this.pruneSupersededNamespaces();
-        if (emptyFiles.length > 0 || pruned > 0) await this.commitPortableDestructiveMutation();
+        if (emptiedRecords > 0 || pruned > 0) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
         return { status: "complete", processed: 0 };
       }
 
-      // Marked only when a reconcile has work: a launch that finds the vault
-      // current writes nothing to data.json (#343).
-      await this.setRebuildPending(true);
       const workClaims = await this.captureWorkClaims(files, "reconcile");
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       this.emit("embeddings:processing-start", { scope: "vault", total: files.length, reason: "managed" });
@@ -323,10 +327,12 @@ export class EmbeddingsManager {
         reuseNamespace: this.getIndexingNamespace(),
         concurrency: BULK_INDEX_CONCURRENCY,
       });
-      await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      const failedPathList = await this.requeueChangedSources(result, workClaims);
+      await this.recordFailures(failedPathList, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
-      const failedPaths = new Set(result.failedPaths);
+      const failedPaths = new Set(failedPathList);
+      const failedCount = failedPathList.length;
       for (const path of completedPaths) this.failedFiles.delete(path);
       await this.workQueue.complete(
         [...completedPaths]
@@ -337,26 +343,23 @@ export class EmbeddingsManager {
       const unfinishedCount = files.reduce((count, file) => (
         completedPaths.has(file.path) || failedPaths.has(file.path) ? count : count + 1
       ), 0);
-      await this.setRebuildPending(
-        Boolean(result.fatalError) || result.cancelled || result.failed > 0 || unfinishedCount > 0,
-      );
       const completedCleanly = !result.fatalError
         && !result.cancelled
-        && result.failed === 0
+        && failedCount === 0
         && unfinishedCount === 0;
       if (completedCleanly) await this.commitSearchNamespaceIfComplete();
       // A single failed note must not keep every older generation alive.
       const pruned = await this.pruneSupersededNamespaces();
-      const destructive = emptyFiles.length > 0 || result.failed > 0 || pruned > 0;
-      if (destructive) {
-        await this.commitPortableDestructiveMutation();
+      // A failed note left its stored records untouched, so only real removals
+      // are destructive; new vectors ride the coalesced checkpoint.
+      if (emptiedRecords > 0 || pruned > 0) {
+        this.markPortableIndexDestructive();
       } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
-        await this.flushPortableIndex();
       }
-      const firstFailure = result.failedDetails?.[result.failedPaths[0] ?? ""];
+      const firstFailure = result.failedDetails?.[failedPathList[0] ?? ""];
       this.refreshLifecycle({
-        phase: result.fatalError || result.failed > 0
+        phase: result.fatalError || failedCount > 0
           ? "error"
           : this.processingSuspended
             ? "paused"
@@ -371,12 +374,12 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-complete", {
         scope: "vault",
         processed: result.completed,
-        failed: result.failed,
+        failed: failedCount,
         status: result.fatalError
           ? "error"
           : result.cancelled
             ? "aborted"
-            : result.failed > 0
+            : failedCount > 0
               ? "partial"
               : "success",
       });
@@ -401,7 +404,7 @@ export class EmbeddingsManager {
       return {
         status: "complete",
         processed: result.completed,
-        partialSuccess: result.failed > 0,
+        partialSuccess: failedCount > 0,
       };
     });
   }
@@ -643,13 +646,21 @@ export class EmbeddingsManager {
     return this.processingSuspended;
   }
 
+  /**
+   * Every settings save lands here. Only a change that affects which notes are
+   * indexed (enabling, or the exclusion rules) may start a vault pass; license
+   * checks, backups and unrelated toggles must not rescan the vault.
+   */
   public syncFromSettings(): void {
     const previous = this.config;
+    const wasEnabled = this.enabledAtLastSync;
     this.config = this.buildConfig();
-    if (JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions)) {
+    this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
+    const exclusionsChanged = JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions);
+    if (exclusionsChanged) {
       void this.cleanupExcludedEmbeddings().catch(() => undefined);
     }
-    if (this.plugin.settings.embeddingsEnabled) {
+    if (this.enabledAtLastSync && (!wasEnabled || exclusionsChanged)) {
       this.requestAutomaticProcessing();
     }
   }
@@ -676,7 +687,6 @@ export class EmbeddingsManager {
       this.queryCache.clear();
       this.gateway.activeGeneration = undefined;
       this.searchNamespace = null;
-      await this.setRebuildPending(false);
       await this.deleteCommittedNamespace();
       await this.getPortableCheckpoint()?.clear();
       this.refreshLifecycle({
@@ -724,7 +734,7 @@ export class EmbeddingsManager {
         this.searchNamespace = null;
         this.queryCache.clear();
         await this.deleteCommittedNamespace();
-        await this.commitPortableDestructiveMutation();
+        this.markPortableIndexDestructive();
       });
     } finally {
       this.processingSuspended = false;
@@ -779,15 +789,15 @@ export class EmbeddingsManager {
     this.fileWatchers.push(this.app.vault.on("rename", (file, oldPath) => {
       if (file instanceof TFile && file.extension === "md") {
         void this.processingMutex.runExclusive(async () => {
-          await this.storage.renameByPath(oldPath, file.path, file.basename);
+          const moved = await this.storage.renameByPath(oldPath, file.path, file.basename);
           await this.workQueue.rename(oldPath, file.path);
           this.failedFiles.delete(oldPath);
-          await this.commitPortableDestructiveMutation();
+          if (moved) this.markPortableIndexDestructive();
           this.requestFileProcessing(file, "rename");
         }).catch(() => undefined);
       } else {
         void this.processingMutex.runExclusive(async () => {
-          await this.storage.renameByDirectory(oldPath, file.path);
+          const moved = await this.storage.renameByDirectory(oldPath, file.path);
           await this.workQueue.renamePrefix(oldPath, file.path);
           const oldPrefix = `${oldPath.replace(/\/$/, "")}/`;
           const newPrefix = `${file.path.replace(/\/$/, "")}/`;
@@ -797,25 +807,27 @@ export class EmbeddingsManager {
             const nextPath = `${newPrefix}${path.slice(oldPrefix.length)}`;
             this.failedFiles.set(nextPath, { ...failure, path: nextPath });
           }
-          await this.commitPortableDestructiveMutation();
+          if (moved) this.markPortableIndexDestructive();
         }).catch(() => undefined);
       }
     }));
     this.fileWatchers.push(this.app.vault.on("delete", (file) => {
       void this.processingMutex.runExclusive(async () => {
+        let removed: number;
         if (file instanceof TFile) {
-          await this.storage.removeByPath(file.path);
+          removed = await this.storage.removeByPath(file.path);
           await this.workQueue.remove(file.path);
           this.failedFiles.delete(file.path);
         } else {
-          await this.storage.removeByDirectory(file.path);
+          removed = await this.storage.removeByDirectory(file.path);
           const prefix = `${file.path.replace(/\/$/, "")}/`;
           await this.workQueue.removePrefix(file.path);
           for (const path of [...this.failedFiles.keys()]) {
             if (path.startsWith(prefix)) this.failedFiles.delete(path);
           }
         }
-        await this.commitPortableDestructiveMutation();
+        // Deleting an unindexed file (an image, a canvas) changes nothing.
+        if (removed) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
       }).catch(() => undefined);
     }));
@@ -906,9 +918,8 @@ export class EmbeddingsManager {
       for (const item of due) {
         const abstract = this.app.vault.getAbstractFileByPath(item.path);
         if (!(abstract instanceof TFile) || abstract.extension !== "md" || this.isFileExcluded(abstract)) {
-          await this.storage.removeByPath(item.path);
+          if (await this.storage.removeByPath(item.path)) destructive = true;
           completedWithoutEmbedding.push(item);
-          destructive = true;
           continue;
         }
         const currentMtime = this.sourceMtime(abstract);
@@ -917,10 +928,9 @@ export class EmbeddingsManager {
           continue;
         }
         if (this.isLocallyEmpty(abstract)) {
-          await this.storage.removeByPath(item.path);
+          if (await this.storage.removeByPath(item.path)) destructive = true;
           completedWithoutEmbedding.push(item);
           this.failedFiles.delete(item.path);
-          destructive = true;
           continue;
         }
         if (!this.shouldProcessFile(abstract)) {
@@ -932,7 +942,7 @@ export class EmbeddingsManager {
       }
       await this.workQueue.complete(completedWithoutEmbedding);
       if (files.length === 0) {
-        if (destructive) await this.commitPortableDestructiveMutation();
+        if (destructive) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
         return;
       }
@@ -955,7 +965,8 @@ export class EmbeddingsManager {
         reuseNamespace: this.getIndexingNamespace(),
         concurrency: BULK_INDEX_CONCURRENCY,
       });
-      await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      const failedPaths = await this.requeueChangedSources(result, workClaims);
+      await this.recordFailures(failedPaths, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
       await this.workQueue.complete(
@@ -966,18 +977,18 @@ export class EmbeddingsManager {
       for (const path of completedPaths) this.failedFiles.delete(path);
       const completedCleanly = !result.fatalError
         && !result.cancelled
-        && result.failed === 0
+        && failedPaths.length === 0
         && result.completedPaths.length === files.length;
       if (completedCleanly) await this.commitSearchNamespaceIfComplete();
       const pruned = await this.pruneSupersededNamespaces();
-      if (destructive || result.failed > 0 || pruned > 0) {
-        await this.commitPortableDestructiveMutation();
+      if (destructive || pruned > 0) {
+        this.markPortableIndexDestructive();
       } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
       }
-      const firstFailure = result.failedDetails?.[result.failedPaths[0] ?? ""];
+      const firstFailure = result.failedDetails?.[failedPaths[0] ?? ""];
       this.refreshLifecycle({
-        phase: result.fatalError || result.failed > 0
+        phase: result.fatalError || failedPaths.length > 0
           ? "error"
           : this.processingSuspended
             ? "paused"
@@ -992,12 +1003,12 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-complete", {
         scope: "queue",
         processed: result.completed,
-        failed: result.failed,
+        failed: failedPaths.length,
         status: result.fatalError
           ? "error"
           : result.cancelled
             ? "aborted"
-            : result.failed > 0
+            : failedPaths.length > 0
               ? "partial"
               : "success",
       });
@@ -1022,6 +1033,31 @@ export class EmbeddingsManager {
         : "Not enough credits are available. Add credits to continue indexing notes.",
       402,
     );
+  }
+
+  /**
+   * A note edited while its request was in flight is newer work, not a
+   * failure: queue it again (the edit's own event usually already has) and
+   * leave it out of failure accounting. Returns the genuinely failed paths.
+   */
+  private async requeueChangedSources(
+    result: ProcessingResult,
+    workClaims: ReadonlyMap<string, SemanticWorkItem>,
+  ): Promise<string[]> {
+    const failed: string[] = [];
+    for (const path of result.failedPaths) {
+      if (result.failedDetails?.[path]?.code !== "source_changed") {
+        failed.push(path);
+        continue;
+      }
+      const claim = workClaims.get(path);
+      const current = this.workQueue.get(path);
+      if (claim && current && current.revision === claim.revision) {
+        const abstract = this.app.vault.getAbstractFileByPath(path);
+        await this.workQueue.enqueue(path, "modify", abstract instanceof TFile ? this.sourceMtime(abstract) : null);
+      }
+    }
+    return failed;
   }
 
   private async recordFailures(
@@ -1388,13 +1424,12 @@ export class EmbeddingsManager {
       const exclusions = this.exclusions();
       for (const path of this.storage.getDistinctPaths()) {
         if (exclusions.isExcluded(path)) {
-          await this.storage.removeByPath(path);
+          if (await this.storage.removeByPath(path)) changed = true;
           await this.workQueue.remove(path);
           this.failedFiles.delete(path);
-          changed = true;
         }
       }
-      if (changed) await this.commitPortableDestructiveMutation();
+      if (changed) this.markPortableIndexDestructive();
       this.refreshLifecycle();
     });
   }
@@ -1627,7 +1662,7 @@ export class EmbeddingsManager {
       .map((vector) => vector.id);
     if (legacyIds.length > 0) {
       await this.storage.removeIds(legacyIds);
-      await this.commitPortableDestructiveMutation();
+      this.markPortableIndexDestructive();
     }
     const committed = await this.readCommittedNamespace();
     if (committed && parseManagedNamespace(committed)?.indexSchemaVersion === 2) {
@@ -1672,10 +1707,27 @@ export class EmbeddingsManager {
   private getPortableCheckpoint(): PortableCheckpointCoordinator | null {
     const file = this.getPortableIndexFile();
     if (!file) return null;
-    this.portableCheckpoint ??= new PortableCheckpointCoordinator({ store: this.storage, file });
+    this.portableCheckpoint ??= new PortableCheckpointCoordinator({
+      store: this.storage,
+      file,
+      onError: (_error, destructive) => {
+        // An ordinary snapshot write failure is harmless: IndexedDB stays
+        // authoritative and the next change retries. A failed removal write
+        // deleted the snapshot, which the user should know about.
+        if (!destructive) return;
+        this.refreshLifecycle({
+          phase: "error",
+          lastError: {
+            code: "checkpoint_failed",
+            message: "The portable semantic index could not be updated.",
+          },
+        });
+      },
+    });
     return this.portableCheckpoint;
   }
 
+  /** New vectors: coalesced into a later snapshot write. */
   private markPortableIndexChanged(): void {
     this.getPortableCheckpoint()?.markChanged();
   }
@@ -1684,19 +1736,9 @@ export class EmbeddingsManager {
     try { await this.getPortableCheckpoint()?.flush(); } catch { /* local index remains authoritative */ }
   }
 
-  private async commitPortableDestructiveMutation(): Promise<void> {
-    try {
-      await this.getPortableCheckpoint()?.commitDestructiveMutation();
-    } catch (error) {
-      this.refreshLifecycle({
-        phase: "error",
-        lastError: {
-          code: "checkpoint_failed",
-          message: "The portable semantic index could not be updated.",
-        },
-      });
-      throw error;
-    }
+  /** Records were removed: the snapshot is rewritten after a short quiet period. */
+  private markPortableIndexDestructive(): void {
+    this.getPortableCheckpoint()?.markDestructive();
   }
 
   private hydrateFailuresFromWorkQueue(): void {
@@ -1908,15 +1950,6 @@ export class EmbeddingsManager {
       failed: this.failedFiles.size,
       ...patch,
     });
-  }
-
-  private async setRebuildPending(pending: boolean): Promise<void> {
-    if (this.plugin.settings.embeddingsRebuildPending === pending) return;
-    try {
-      await this.plugin.getSettingsManager().updateSettings({ embeddingsRebuildPending: pending });
-    } catch {
-      this.plugin.settings.embeddingsRebuildPending = pending;
-    }
   }
 
   private emit(event: string, payload: Record<string, unknown>): void {

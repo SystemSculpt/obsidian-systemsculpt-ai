@@ -193,6 +193,11 @@ export const LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12: readonly string[] =
   "managedTextOperations",
 ] as const;
 
+/** Write-only: nothing ever read it back, yet every indexing run saved settings to update it. */
+export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14: readonly string[] = [
+  "embeddingsRebuildPending",
+] as const;
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -329,6 +334,11 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
           ? settings.audioProcessorOutputPreset
           : "detailed",
     }),
+  },
+  {
+    to: 14,
+    describe: "Remove the write-only embeddings rebuild flag",
+    migrate: removeKeys(LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14),
   },
 ];
 
