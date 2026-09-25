@@ -1,8 +1,8 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { EmbeddingsStorage } from "../embeddings/storage/EmbeddingsStorage";
-import { EMBEDDINGS_INDEX_FORMAT } from "../embeddings/storage/EmbeddingsIndexSerialization";
 import type { EmbeddingVector } from "../embeddings/types";
 import { buildVectorId } from "../embeddings/utils/vectorId";
+import { installFakeIndexedDb } from "../embeddings/__tests__/support/fakeIndexedDb";
 
 function makeVector(path: string): EmbeddingVector {
   const namespace = "systemsculpt:managed:semantic-v1:v2:3";
@@ -24,34 +24,24 @@ function makeVector(path: string): EmbeddingVector {
 }
 
 describe("EmbeddingsStorage portable index", () => {
-  it("exportAll serializes the in-memory vectors into a versioned envelope", async () => {
-    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
-    const a = makeVector("A.md");
-    const b = makeVector("B.md");
-    (storage as unknown as { cache: Map<string, EmbeddingVector> }).cache.set(a.id, a);
-    (storage as unknown as { cache: Map<string, EmbeddingVector> }).cache.set(b.id, b);
+  it("imports restored records without reporting them as snapshot changes", async () => {
+    const fake = installFakeIndexedDb();
+    try {
+      const storage = new EmbeddingsStorage("SystemSculptEmbeddings::import");
+      await storage.initialize();
 
-    const index = await storage.exportAll();
+      const result = await storage.importVectors([makeVector("A.md"), makeVector("B.md")]);
 
-    expect(index.format).toBe(EMBEDDINGS_INDEX_FORMAT);
-    expect(index.vectorCount).toBe(2);
-    expect(index.vectors.map((v) => v.path).sort()).toEqual(["A.md", "B.md"]);
-  });
+      expect(result).toEqual({ imported: 2 });
+      expect(storage.getDistinctPaths().sort()).toEqual(["A.md", "B.md"]);
+      expect(storage.takePortableChanges()).toEqual({ all: false, paths: [] });
 
-  it("importVectors delegates validated records to storeVectors", async () => {
-    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
-    const stored: EmbeddingVector[][] = [];
-    jest
-      .spyOn(storage, "storeVectors")
-      .mockImplementation(async (vectors: EmbeddingVector[]) => {
-        stored.push(vectors);
-      });
-
-    const result = await storage.importVectors([makeVector("A.md"), makeVector("B.md")]);
-
-    expect(result).toEqual({ imported: 2 });
-    expect(stored).toHaveLength(1);
-    expect(stored[0].map((v) => v.path).sort()).toEqual(["A.md", "B.md"]);
+      await storage.storeVectors([makeVector("C.md")]);
+      expect(storage.takePortableChanges()).toEqual({ all: false, paths: ["C.md"] });
+      expect((await storage.readPaths(["A.md", "C.md"])).map((vector) => vector.path).sort()).toEqual(["A.md", "C.md"]);
+    } finally {
+      fake.restore();
+    }
   });
 
   it("importVectors stores nothing for an empty restore", async () => {

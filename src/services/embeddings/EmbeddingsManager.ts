@@ -305,6 +305,7 @@ export class EmbeddingsManager {
         await this.commitSearchNamespaceIfComplete();
         const pruned = await this.pruneSupersededNamespaces();
         if (emptiedRecords > 0 || pruned > 0) this.markPortableIndexDestructive();
+        await this.reconcilePortableIndexFormat();
         this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
         return { status: "complete", processed: 0 };
       }
@@ -357,6 +358,7 @@ export class EmbeddingsManager {
       } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
       }
+      await this.reconcilePortableIndexFormat();
       const firstFailure = result.failedDetails?.[failedPathList[0] ?? ""];
       this.refreshLifecycle({
         phase: result.fatalError || failedCount > 0
@@ -1710,6 +1712,7 @@ export class EmbeddingsManager {
     this.portableCheckpoint ??= new PortableCheckpointCoordinator({
       store: this.storage,
       file,
+      committedNamespace: () => this.getSearchNamespace(),
       onError: (_error, destructive) => {
         // An ordinary snapshot write failure is harmless: IndexedDB stays
         // authoritative and the next change retries. A failed removal write
@@ -1739,6 +1742,15 @@ export class EmbeddingsManager {
   /** Records were removed: the snapshot is rewritten after a short quiet period. */
   private markPortableIndexDestructive(): void {
     this.getPortableCheckpoint()?.markDestructive();
+  }
+
+  /**
+   * After a vault pass, schedule the one-time rewrite of an older release's
+   * single-file snapshot, or of shards missing from disk. A current snapshot
+   * costs a stat and a directory listing, and no write.
+   */
+  private async reconcilePortableIndexFormat(): Promise<void> {
+    try { await this.getPortableCheckpoint()?.reconcileFormat(); } catch { /* retried after the next pass */ }
   }
 
   private hydrateFailuresFromWorkQueue(): void {

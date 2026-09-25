@@ -42,3 +42,11 @@ Core controls:
 - If SystemSculpt updates the embeddings setup, a rebuild may be required.
   The index keeps the searchable generation and the one being built, and
   removes older generations automatically.
+- A portable copy of the index lives in `.systemsculpt/embeddings/`: a small
+  `index.json` plus binary files in `shards/`. File-level sync and backups
+  (iCloud, Dropbox, Syncthing, git) carry it to other devices, so a new
+  device can restore the index instead of re-embedding every note. Obsidian
+  Sync skips dot-folders and does not carry it. An edit rewrites only the
+  shard holding that note, and unchanged notes cause no writes. Releases
+  before this format write a single large `index.json`; this release still
+  restores from it and replaces it on its first update.

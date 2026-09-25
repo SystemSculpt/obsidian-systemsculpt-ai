@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { EmbeddingsIndexFile } from "../EmbeddingsIndexFile";
 import {
-  EMBEDDINGS_INDEX_FORMAT,
+  LEGACY_EMBEDDINGS_INDEX_FORMAT,
   type SerializedEmbeddingsIndex,
 } from "../EmbeddingsIndexSerialization";
 
@@ -27,7 +27,7 @@ function makeAdapter() {
 
 function sampleIndex(): SerializedEmbeddingsIndex {
   return {
-    format: EMBEDDINGS_INDEX_FORMAT,
+    format: LEGACY_EMBEDDINGS_INDEX_FORMAT,
     createdAt: 1700000000000,
     vectorCount: 1,
     vectors: [
@@ -247,5 +247,77 @@ describe("EmbeddingsIndexFile", () => {
     expect(adapter.files.has(next)).toBe(false);
     // The last good snapshot is still served through the .previous fallback.
     expect(await file.read()).toEqual({ old: true });
+  });
+
+  describe("shards", () => {
+    function binaryAdapter(options: { renameOverExisting?: boolean } = {}) {
+      const files = new Map<string, ArrayBuffer | string>();
+      const dirs = new Set<string>();
+      const adapter = {
+        files,
+        dirs,
+        exists: jest.fn(async (p: string) => files.has(p) || dirs.has(p)),
+        mkdir: jest.fn(async (p: string) => { dirs.add(p); }),
+        read: jest.fn(async (p: string) => files.get(p) as string),
+        write: jest.fn(async (p: string, data: string) => { files.set(p, data); }),
+        readBinary: jest.fn(async (p: string) => files.get(p) as ArrayBuffer),
+        writeBinary: jest.fn(async (p: string, data: ArrayBuffer) => { files.set(p, data); }),
+        stat: jest.fn(async (p: string) => {
+          const value = files.get(p);
+          if (value === undefined) return null;
+          return { type: "file", ctime: 0, mtime: 0, size: typeof value === "string" ? value.length : value.byteLength };
+        }),
+        list: jest.fn(async (dir: string) => ({
+          files: [...files.keys()].filter((path) => path.startsWith(`${dir}/`)),
+          folders: [],
+        })),
+        rename: jest.fn(async (from: string, to: string) => {
+          if (files.has(to) && options.renameOverExisting === false) throw new Error("target exists");
+          files.set(to, files.get(from)!);
+          files.delete(from);
+        }),
+        remove: jest.fn(async (p: string) => { files.delete(p); }),
+      };
+      return adapter;
+    }
+
+    it("replaces a shard through a temporary file, also where rename cannot overwrite", async () => {
+      const adapter = binaryAdapter({ renameOverExisting: false });
+      const file = new EmbeddingsIndexFile(adapter as never);
+
+      await file.writeShard(3, new Uint8Array([1, 2]).buffer);
+      await file.writeShard(3, new Uint8Array([3, 4, 5]).buffer);
+
+      expect(adapter.mkdir).toHaveBeenCalledWith(".systemsculpt/embeddings/shards");
+      expect(new Uint8Array((await file.readShard(3))!)).toEqual(new Uint8Array([3, 4, 5]));
+      expect(adapter.files.has(".systemsculpt/embeddings/shards/03.bin.next")).toBe(false);
+      expect(await file.listShards()).toEqual(new Set([3]));
+    });
+
+    it("reports the manifest size and removes shards along with the manifest", async () => {
+      const adapter = binaryAdapter();
+      const file = new EmbeddingsIndexFile(adapter as never);
+      await file.write({ format: 4 });
+      await file.writeShard(0, new Uint8Array([1]).buffer);
+      await file.writeShard(31, new Uint8Array([2]).buffer);
+
+      expect(await file.size()).toBe(JSON.stringify({ format: 4 }).length);
+
+      await file.remove();
+
+      expect(await file.size()).toBeNull();
+      expect(await file.listShards()).toEqual(new Set());
+      expect([...adapter.files.keys()]).toEqual([]);
+    });
+
+    it("drops an older release's parked recovery copy", async () => {
+      const adapter = binaryAdapter();
+      adapter.files.set(".systemsculpt/embeddings/index.json.previous", JSON.stringify(sampleIndex()));
+      const file = new EmbeddingsIndexFile(adapter as never);
+
+      await file.removeRecoveryCopy();
+
+      expect(adapter.files.size).toBe(0);
+    });
   });
 });

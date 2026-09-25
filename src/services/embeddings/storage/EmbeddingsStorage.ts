@@ -15,10 +15,6 @@ import {
   MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "../utils/namespace";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
-import {
-  serializeEmbeddingsIndex,
-  type SerializedEmbeddingsIndex,
-} from './EmbeddingsIndexSerialization';
 import { toError } from "../../../utils/errors";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
@@ -40,6 +36,11 @@ export class EmbeddingsStorage {
   private initialized = false;
   // Root records only: enough for synchronous freshness and path statistics.
   private pathsSet: Set<string> = new Set();
+  /**
+   * Paths whose records changed since the portable snapshot last took them.
+   * `all` covers bulk removals that do not enumerate paths.
+   */
+  private portableChanges = { all: false, paths: new Set<string>() };
 
   constructor(private readonly dbName: string) {}
 
@@ -68,6 +69,21 @@ export class EmbeddingsStorage {
     if (idx < 0) return 0;
     const parsed = parseInt(raw.slice(idx + 1), 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  private notePortableChange(paths: Iterable<string> | "all"): void {
+    if (paths === "all") {
+      this.portableChanges.all = true;
+      return;
+    }
+    for (const path of paths) if (path) this.portableChanges.paths.add(path);
+  }
+
+  /** Hand the accumulated snapshot changes to the portable index writer. */
+  takePortableChanges(): { all: boolean; paths: string[] } {
+    const taken = { all: this.portableChanges.all, paths: [...this.portableChanges.paths] };
+    this.portableChanges = { all: false, paths: new Set() };
+    return taken;
   }
 
   private refreshPathsCache(): void {
@@ -161,6 +177,10 @@ export class EmbeddingsStorage {
    * Store embeddings in batch using a single IndexedDB transaction
    */
   async storeVectors(vectors: EmbeddingVector[]): Promise<void> {
+    await this.putVectors(vectors, true);
+  }
+
+  private async putVectors(vectors: EmbeddingVector[], trackPortable: boolean): Promise<void> {
     if (!this.db || vectors.length === 0) return;
 
     return new Promise((resolve, reject) => {
@@ -188,6 +208,7 @@ export class EmbeddingsStorage {
             if (vector.path) this.pathsSet.add(vector.path);
           }
         }
+        if (trackPortable) this.notePortableChange(vectors.map((vector) => vector.path));
         resolve();
       };
       transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
@@ -250,6 +271,7 @@ export class EmbeddingsStorage {
         }
         this.cache.set(root.id, root);
         this.pathsSet.add(path);
+        this.notePortableChange([path]);
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -324,6 +346,7 @@ export class EmbeddingsStorage {
         }
         if (vectors.length > 0) this.pathsSet.add(path);
         else this.pathsSet.delete(path);
+        this.notePortableChange([path]);
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -519,20 +542,32 @@ export class EmbeddingsStorage {
   }
 
   /**
-   * Serialize every stored vector into a portable, versioned envelope that can
-   * live in the synced vault (so Obsidian Sync/backup restores it on a new
-   * device). Records are device-independent — no remapping needed on import.
+   * Import already-validated snapshot records into the store. They came from
+   * the snapshot, so they are not changes the snapshot needs to rewrite.
    */
-  async exportAll(): Promise<SerializedEmbeddingsIndex> {
-    const vectors = await this.getAllVectors();
-    return serializeEmbeddingsIndex(vectors, { createdAt: Date.now() });
-  }
-
-  /** Import already-validated snapshot records into the store. */
   async importVectors(vectors: EmbeddingVector[]): Promise<{ imported: number }> {
     if (vectors.length === 0) return { imported: 0 };
-    await this.storeVectors(vectors);
+    await this.putVectors(vectors, false);
     return { imported: vectors.length };
+  }
+
+  /** Every record for the given notes, read transiently in one transaction. */
+  async readPaths(paths: readonly string[]): Promise<EmbeddingVector[]> {
+    if (!this.db || paths.length === 0) return [];
+    return new Promise<EmbeddingVector[]>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readonly");
+      const index = tx.objectStore(STORE_NAME).index("by_path");
+      const records: EmbeddingVector[] = [];
+      for (const path of paths) {
+        const request = index.getAll(IDBKeyRange.only(path));
+        request.onsuccess = () => {
+          for (const record of (request.result || []) as EmbeddingVector[]) records.push(record);
+        };
+        request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      }
+      tx.oncomplete = () => resolve(records);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+    });
   }
 
   async getVectorsByNamespace(namespace: string): Promise<EmbeddingVector[]> {
@@ -611,6 +646,7 @@ export class EmbeddingsStorage {
       request.onsuccess = () => {
         this.cache.clear();
         this.pathsSet.clear();
+        this.notePortableChange("all");
         resolve();
       };
 
@@ -701,6 +737,7 @@ export class EmbeddingsStorage {
       tx.oncomplete = () => {
         for (const id of toRemove) this.cache.delete(id);
         this.refreshPathsCache();
+        this.notePortableChange("all");
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -731,6 +768,7 @@ export class EmbeddingsStorage {
           if (vector.path === path) this.cache.delete(id);
         }
         this.pathsSet.delete(path);
+        if (removed > 0) this.notePortableChange([path]);
         resolve(removed);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -774,7 +812,10 @@ export class EmbeddingsStorage {
           if ((vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) this.cache.set(vector.id, vector);
         }
         this.pathsSet.delete(oldPath);
-        if (updates.length > 0) this.pathsSet.add(newPath);
+        if (updates.length > 0) {
+          this.pathsSet.add(newPath);
+          this.notePortableChange([oldPath, newPath]);
+        }
         resolve(updates.length);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -799,12 +840,14 @@ export class EmbeddingsStorage {
       const range = IDBKeyRange.bound(oldPrefix, `${oldPrefix}\uffff`);
       const deletedRootIds: string[] = [];
       const updatedRoots: EmbeddingVector[] = [];
+      const touchedPaths = new Set<string>();
       let visited = 0;
 
       tx.oncomplete = () => {
         for (const id of deletedRootIds) this.cache.delete(id);
         for (const vector of updatedRoots) this.cache.set(vector.id, vector);
         this.refreshPathsCache();
+        this.notePortableChange(touchedPaths);
         resolve(visited);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -827,9 +870,11 @@ export class EmbeddingsStorage {
         // exception and aborts the whole vault operation.
         store.delete(cursor.primaryKey);
         visited += 1;
+        touchedPaths.add(value.path);
         if (namespace) {
           const relativePath = (value.path || "").slice(oldPrefix.length);
           const newPath = `${newPrefix}${relativePath}`;
+          touchedPaths.add(newPath);
           const updated: EmbeddingVector = {
             ...value,
             id: buildVectorId(namespace, newPath, chunkId),
@@ -913,10 +958,13 @@ export class EmbeddingsStorage {
       const tx = this.db!.transaction([STORE_NAME], "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const deletedRootIds: string[] = [];
+      const removedPaths = new Set<string>();
       let removed = 0;
       tx.oncomplete = () => {
         for (const id of deletedRootIds) this.cache.delete(id);
         this.refreshPathsCache();
+        // The path index names each removed note; a namespace sweep does not.
+        if (removed > 0) this.notePortableChange(indexName === "by_path" ? removedPaths : "all");
         resolve(removed);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -928,6 +976,7 @@ export class EmbeddingsStorage {
         if (!cursor) return;
         const id = String(cursor.primaryKey);
         if (this.cache.has(id)) deletedRootIds.push(id);
+        if (indexName === "by_path") removedPaths.add(String(cursor.key));
         store.delete(cursor.primaryKey);
         removed += 1;
         cursor.continue();
