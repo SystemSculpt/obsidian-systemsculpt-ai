@@ -23,11 +23,19 @@ export class SystemSculptSearchModal extends StandardModal {
   private readonly SEARCH_LIMIT = 30;
   private readonly RECENT_LIMIT = 25;
   private readonly STABLE_TOP_COUNT = 14;
+  private readonly SEARCH_DEBOUNCE_MS = 180;
+  /**
+   * Semantic results cost a managed query, so they wait until typing pauses
+   * this long, and never run for one- or two-character prefixes.
+   */
+  private readonly SEMANTIC_IDLE_MS = 400;
+  private readonly SEMANTIC_MIN_CHARS = 3;
   private readonly listId = `ss-search-results-${++SystemSculptSearchModal.nextListId}`;
   private currentQuery = "";
   private debounceHandle: number | null = null;
   private recentPreviewHandle: number | null = null;
   private indexRefreshHandle: number | null = null;
+  private semanticHandle: number | null = null;
   private searchAbortController: AbortController | null = null;
   private previewAbortController: AbortController | null = null;
   private querySerial = 0;
@@ -65,6 +73,7 @@ export class SystemSculptSearchModal extends StandardModal {
     this.cancelSearch();
     this.cancelRecentPreviewHydration();
     this.cancelIndexRefresh();
+    this.cancelSemanticPass();
     if (this.debounceHandle) {
       this.ownerWindow.clearTimeout(this.debounceHandle);
       this.debounceHandle = null;
@@ -151,12 +160,13 @@ export class SystemSculptSearchModal extends StandardModal {
     if (query.trim()) {
       this.cancelRecentPreviewHydration();
     }
+    this.cancelSemanticPass();
     if (this.debounceHandle) {
       this.ownerWindow.clearTimeout(this.debounceHandle);
     }
     this.debounceHandle = this.ownerWindow.setTimeout(() => {
       void this.executeSearch(query);
-    }, 180);
+    }, this.SEARCH_DEBOUNCE_MS);
   }
 
   private async executeSearch(query: string) {
@@ -173,6 +183,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.cancelRecentPreviewHydration();
     this.cancelIndexRefresh();
+    this.cancelSemanticPass();
     this.cancelSearch();
 
     const controller = new AbortController();
@@ -182,11 +193,14 @@ export class SystemSculptSearchModal extends StandardModal {
     }
 
     try {
+      // Lexical results on every debounced keystroke; semantic ones follow
+      // once typing pauses.
       const response = await this.engine.search(trimmed, {
         mode: "smart",
         sort: "relevance",
         limit: this.SEARCH_LIMIT,
         signal: controller.signal,
+        semantic: false,
       });
 
       if (serial < this.querySerial || controller.signal.aborted) return;
@@ -194,11 +208,52 @@ export class SystemSculptSearchModal extends StandardModal {
 
       if (response.stats.indexingPending && response.stats.metadataOnly) {
         this.scheduleIndexRefresh(trimmed, serial);
+      } else if (trimmed.length >= this.SEMANTIC_MIN_CHARS) {
+        this.scheduleSemanticPass(trimmed, serial);
       }
     } catch (error) {
       if (this.isAbortError(error) || serial < this.querySerial) return;
       this.setStatus("Search unavailable");
       this.renderError("Search failed", "Try the search again.");
+    } finally {
+      if (this.searchAbortController === controller) {
+        this.searchAbortController = null;
+      }
+    }
+  }
+
+  private scheduleSemanticPass(query: string, serial: number) {
+    this.cancelSemanticPass();
+    this.semanticHandle = this.ownerWindow.setTimeout(() => {
+      this.semanticHandle = null;
+      void this.runSemanticPass(query, serial);
+    }, Math.max(0, this.SEMANTIC_IDLE_MS - this.SEARCH_DEBOUNCE_MS));
+  }
+
+  private cancelSemanticPass() {
+    if (this.semanticHandle !== null) {
+      this.ownerWindow.clearTimeout(this.semanticHandle);
+      this.semanticHandle = null;
+    }
+  }
+
+  private async runSemanticPass(query: string, serial: number) {
+    if (serial !== this.querySerial || this.currentQuery.trim() !== query || !this.listEl) return;
+    const controller = new AbortController();
+    this.searchAbortController = controller;
+    try {
+      const response = await this.engine.search(query, {
+        mode: "smart",
+        sort: "relevance",
+        limit: this.SEARCH_LIMIT,
+        signal: controller.signal,
+      });
+      // Without semantic hits the lexical results already on screen stand.
+      if (serial === this.querySerial && !controller.signal.aborted && response.stats.usedEmbeddings) {
+        this.renderResponse(response, { stabilize: true });
+      }
+    } catch {
+      // The lexical results already on screen stand.
     } finally {
       if (this.searchAbortController === controller) {
         this.searchAbortController = null;

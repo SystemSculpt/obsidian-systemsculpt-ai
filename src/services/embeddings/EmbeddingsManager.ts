@@ -19,7 +19,7 @@ import {
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
-import { VectorSearch } from "./search/VectorSearch";
+import { toSearchResult } from "./search/VectorSearch";
 import { EmbeddingsStorage } from "./storage/EmbeddingsStorage";
 import { EmbeddingsIndexFile } from "./storage/EmbeddingsIndexFile";
 import {
@@ -32,6 +32,7 @@ import {
   parseNamespaceDimension,
 } from "./utils/namespace";
 import { buildVectorId } from "./utils/vectorId";
+import { dot } from "./utils/vector";
 import {
   isCurrentLocalEmptyEmbeddingMarker,
   isLocalEmptyEmbeddingMarker,
@@ -97,6 +98,9 @@ interface CommittedNamespaceState {
 
 const QUEUED_WORK_MUTEX_BACKOFF_MS = 75;
 const LIFECYCLE_REFRESH_COALESCE_MS = 1_000;
+const SIMILAR_RESULTS_CACHE_SIZE = 32;
+/** Final Float32 scores at or below this are not similar enough to show. */
+const MIN_SIMILARITY = 0.1;
 const COMMITTED_NAMESPACE_STATE_KEY = "semantic-committed-namespace-v1";
 
 type FileState = {
@@ -163,10 +167,11 @@ export class EmbeddingsManager {
   private readonly storage: EmbeddingsStorage;
   private readonly gateway: ManagedEmbeddingsIndexAdapter;
   private readonly processor: EmbeddingsProcessor;
-  private readonly search = new VectorSearch();
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
+  /** Recent Similar Notes answers, least recently used first. */
+  private readonly similarCache = new Map<string, SearchResult[]>();
   private readonly lifecycle = new SemanticIndexLifecycle();
   private readonly workQueue: SemanticWorkQueue;
   private config: EmbeddingsManagerConfig;
@@ -469,6 +474,16 @@ export class EmbeddingsManager {
     if (!namespace) return [];
     const sourceFile = this.app.vault.getAbstractFileByPath(filePath);
     if (!(sourceFile instanceof TFile) || !this.isFileReadyInNamespace(sourceFile, namespace)) return [];
+    // Same note, same stored revision, same index: same answer. Revisiting a
+    // note, or re-rendering after unrelated events, needs no search.
+    const root = this.storage.getVectorSync(buildVectorId(namespace, filePath, 0));
+    const cacheKey = [namespace, filePath, root?.metadata.mtime ?? 0, this.getIndexRevision(), limit].join("\u0000");
+    const cached = this.similarCache.get(cacheKey);
+    if (cached) {
+      this.similarCache.delete(cacheKey);
+      this.similarCache.set(cacheKey, cached);
+      return cached.map((result) => ({ ...result, metadata: { ...result.metadata } }));
+    }
 
     const storedSourceVectors = await this.storage.getVectorsByPath(filePath);
     if (signal?.aborted) return [];
@@ -486,7 +501,22 @@ export class EmbeddingsManager {
       filePath,
     );
     if (signal?.aborted) return [];
-    return this.mergeChunkResults(sets, limit, filePath);
+    const results = this.mergeChunkResults(sets, limit, filePath);
+    this.similarCache.set(cacheKey, results);
+    while (this.similarCache.size > SIMILAR_RESULTS_CACHE_SIZE) {
+      const oldest = this.similarCache.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.similarCache.delete(oldest);
+    }
+    return results.map((result) => ({ ...result, metadata: { ...result.metadata } }));
+  }
+
+  /**
+   * Changes whenever stored vectors change in a way search results can see.
+   * Callers key caches on it (Similar Notes results, the search indicator).
+   */
+  public getIndexRevision(): number {
+    return typeof this.storage.getRevision === "function" ? this.storage.getRevision() : 0;
   }
 
   getStats(): { total: number; processed: number; present: number; needsProcessing: number; failed: number } {
@@ -660,6 +690,7 @@ export class EmbeddingsManager {
     this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
     const exclusionsChanged = JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions);
     if (exclusionsChanged) {
+      this.similarCache.clear();
       void this.cleanupExcludedEmbeddings().catch(() => undefined);
     }
     if (this.enabledAtLastSync && (!wasEnabled || exclusionsChanged)) {
@@ -687,6 +718,7 @@ export class EmbeddingsManager {
       await this.workQueue.clear();
       this.failedFiles.clear();
       this.queryCache.clear();
+      this.similarCache.clear();
       this.gateway.activeGeneration = undefined;
       this.searchNamespace = null;
       await this.deleteCommittedNamespace();
@@ -714,6 +746,7 @@ export class EmbeddingsManager {
       this.initializationPromise = null;
       this.failedFiles.clear();
       this.queryCache.clear();
+      this.similarCache.clear();
       this.gateway.activeGeneration = undefined;
       this.gateway.metadata = undefined;
       this.searchNamespace = null;
@@ -735,6 +768,7 @@ export class EmbeddingsManager {
         await this.storage.removeCurrentManagedGeneration();
         this.searchNamespace = null;
         this.queryCache.clear();
+        this.similarCache.clear();
         await this.deleteCommittedNamespace();
         this.markPortableIndexDestructive();
       });
@@ -757,6 +791,8 @@ export class EmbeddingsManager {
     await this.processingMutex.runExclusive(() => this.flushPortableIndex());
     this.portableCheckpoint?.cancel();
     this.queryCache.clear();
+    this.similarCache.clear();
+    if (typeof this.storage.releaseSearchMatrices === "function") this.storage.releaseSearchMatrices();
     this.lifecycle.clearListeners();
   }
 
@@ -1488,21 +1524,12 @@ export class EmbeddingsManager {
     return candidates;
   }
 
-  private collectSearchableRootPaths(vectors: EmbeddingVector[]): Set<string> {
-    const paths = new Set<string>();
-    for (const vector of vectors) {
-      if (vector.chunkId !== 0 || vector.metadata.isEmpty === true || vector.metadata.complete === false) continue;
-      const file = this.app.vault.getAbstractFileByPath(vector.path);
-      if (
-        file instanceof TFile
-        && this.isFileReadyInNamespace(file, vector.metadata.namespace)
-      ) {
-        paths.add(vector.path);
-      }
-    }
-    return paths;
-  }
-
+  /**
+   * Score queries against the generation's packed in-memory matrix, deciding
+   * eligibility once per note, then rescore the few winners in Float32 from
+   * their stored records. The matrix is built on first use and kept current
+   * by storage, so a query no longer streams the whole store.
+   */
   private async searchIndexedNamespace(
     namespace: string,
     queries: Float32Array[],
@@ -1510,53 +1537,32 @@ export class EmbeddingsManager {
     signal?: AbortSignal,
     excludedPath?: string,
   ): Promise<SearchResult[][]> {
-    const storage = this.storage as EmbeddingsStorage & {
-      scanVectorsByNamespace?: EmbeddingsStorage["scanVectorsByNamespace"];
-    };
+    const empty = () => queries.map(() => [] as SearchResult[]);
+    const matrix = await this.storage.getSearchMatrix(namespace);
+    if (!matrix || signal?.aborted) return empty();
     const exclusions = this.exclusions();
-    if (typeof storage.scanVectorsByNamespace !== "function") {
-      const vectors = await this.storage.getVectorsByNamespace(namespace);
-      if (signal?.aborted) return queries.map(() => []);
-      const eligiblePaths = this.collectSearchableRootPaths(vectors);
-      const candidates = vectors.filter((vector) => (
-        vector.path !== excludedPath
-        && vector.metadata.isEmpty !== true
-        && eligiblePaths.has(vector.path)
-        && !exclusions.isExcluded(vector.path)
-      ));
-      const sets: SearchResult[][] = [];
-      for (const query of queries) {
-        if (signal?.aborted) return queries.map(() => []);
-        sets.push(await this.search.findSimilarAsync(query, candidates, limit, { signal }));
+    const isEligible = (path: string): boolean => {
+      if (path === excludedPath || exclusions.isExcluded(path)) return false;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile && this.isFileReadyInNamespace(file, namespace);
+    };
+    const candidateSets = await matrix.search(queries, limit, isEligible, { signal });
+    if (signal?.aborted) return empty();
+    const ids = [...new Set(candidateSets.flat().map((candidate) => (
+      buildVectorId(namespace, candidate.path, candidate.chunkId)
+    )))];
+    const records = new Map((await this.storage.readRecords(ids)).map((record) => [record.id, record]));
+    if (signal?.aborted) return empty();
+    return candidateSets.map((candidates, index) => {
+      const results: SearchResult[] = [];
+      for (const candidate of candidates) {
+        const record = records.get(buildVectorId(namespace, candidate.path, candidate.chunkId));
+        if (!record || record.path !== candidate.path || !isEligible(record.path)) continue;
+        const score = dot(queries[index], record.vector);
+        if (score > MIN_SIMILARITY) results.push(toSearchResult(record, score));
       }
-      return sets;
-    }
-
-    const eligiblePaths = new Set(
-      this.storage.getDistinctPaths().filter((path) => (
-        path !== excludedPath
-        && (() => {
-          const file = this.app.vault.getAbstractFileByPath(path);
-          return file instanceof TFile && this.isFileReadyInNamespace(file, namespace);
-        })()
-      )),
-    );
-    const sets = queries.map(() => [] as SearchResult[]);
-    await storage.scanVectorsByNamespace(namespace, (batch: EmbeddingVector[]) => {
-      if (signal?.aborted) return;
-      const candidates = batch.filter((vector) => (
-        vector.metadata.isEmpty !== true
-        && eligiblePaths.has(vector.path)
-        && !exclusions.isExcluded(vector.path)
-      ));
-      queries.forEach((query, index) => {
-        const additions = this.search.findSimilar(query, candidates, limit);
-        sets[index] = [...sets[index], ...additions]
-          .sort((left, right) => right.score - left.score)
-          .slice(0, limit);
-      });
-    }, { batchSize: 250, signal });
-    return signal?.aborted ? queries.map(() => []) : sets;
+      return results.sort((left, right) => right.score - left.score);
+    });
   }
 
   private selectQueryVectors(vectors: EmbeddingVector[]): EmbeddingVector[] {

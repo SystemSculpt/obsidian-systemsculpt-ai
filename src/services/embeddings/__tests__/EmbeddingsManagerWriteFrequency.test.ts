@@ -54,6 +54,7 @@ function harness(paths: Array<{ path: string; size?: number }>) {
     processingMutex: new Mutex(),
     failedFiles: new Map(),
     queryCache: new Map(),
+    similarCache: new Map(),
     fileWatchers: [],
     lifecycle: new SemanticIndexLifecycle(),
     lifecycleRefreshTimer: null,

@@ -1,5 +1,5 @@
 import type { TFile } from "obsidian";
-import type { EmbeddingVector } from "./types";
+import type { EmbeddingRootRecord, EmbeddingVector } from "./types";
 import { buildVectorId } from "./utils/vectorId";
 
 const LOCAL_EMPTY_DIMENSION = 1;
@@ -22,7 +22,7 @@ export function localEmptyEmbeddingMarkerId(path: string): string {
   return buildVectorId(LOCAL_EMPTY_EMBEDDING_NAMESPACE, path, 0);
 }
 
-export function isLocalEmptyEmbeddingMarker(vector: EmbeddingVector | null | undefined): boolean {
+export function isLocalEmptyEmbeddingMarker(vector: EmbeddingRootRecord | null | undefined): boolean {
   return Boolean(
     vector
     && vector.chunkId === 0
@@ -32,7 +32,7 @@ export function isLocalEmptyEmbeddingMarker(vector: EmbeddingVector | null | und
 }
 
 export function isCurrentLocalEmptyEmbeddingMarker(
-  vector: EmbeddingVector | null | undefined,
+  vector: EmbeddingRootRecord | null | undefined,
   file: TFile,
 ): boolean {
   return isLocalEmptyEmbeddingMarker(vector)

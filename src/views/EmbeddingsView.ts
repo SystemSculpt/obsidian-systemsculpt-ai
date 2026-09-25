@@ -43,6 +43,13 @@ export class EmbeddingsView extends ItemView {
   private unsubscribeIndexLifecycle: (() => void) | null = null;
   private lastIndexSnapshot: Readonly<SemanticIndexSnapshot> | null = null;
   private deletedSourcePath: string | null = null;
+  /**
+   * Index state of the current note and its results when they were last
+   * searched. An index run elsewhere re-queries only when this changes.
+   */
+  private lastQueryFingerprint: string | null = null;
+  /** The semantic query of the last completed chat search. */
+  private lastChatQueryHash: string | null = null;
   private readonly searchRuns: SimilaritySearchRunCoordinator;
   private readonly SEARCH_DELAY = 300; // 300ms delay
   
@@ -180,19 +187,15 @@ export class EmbeddingsView extends ItemView {
       })
     );
     
-    // Listen for file modifications
-    this.registerEvent(
-      this.app.vault.on('modify', (file) => {
-        if (file instanceof TFile && file === this.currentFile) {
-          this.debouncedSearchCurrentFile();
-        }
-      })
-    );
+    // Edits to the open note keep the current results on screen. Its
+    // re-embed finishes an index run, and that run re-queries (see
+    // bindIndexLifecycle), so typing never sends a query per autosave.
 
-    // Refresh Similar Notes when files are renamed/deleted (links + embeddings paths can change)
+    // A rename matters only when it moves the current note or one of its results.
     this.registerEvent(
-      this.app.vault.on("rename", (_file) => {
+      this.app.vault.on("rename", (file, oldPath: string) => {
         if (this.isDragging) return;
+        if (file !== this.currentFile && !this.touchesCurrentContext([oldPath, file?.path ?? ""])) return;
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
       })
@@ -259,7 +262,9 @@ export class EmbeddingsView extends ItemView {
       );
       const reconciliationSettled = previous?.phase === "reconciling"
         && snapshot.phase !== "reconciling";
-      if (generationChanged || reconciliationSettled) {
+      // After an index run, re-query only when the run touched the current
+      // note or one of its results.
+      if (generationChanged || (reconciliationSettled && this.queryFingerprint() !== this.lastQueryFingerprint)) {
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
       }
@@ -270,25 +275,47 @@ export class EmbeddingsView extends ItemView {
     this.searchRuns.scheduleTask(() => this.checkActiveFile(), this.SEARCH_DELAY);
   }
   
-  private debouncedSearchCurrentFile(): void {
-    if (this.currentFile) {
-      this.searchRuns.schedule(fileSimilaritySource(this.currentFile), this.SEARCH_DELAY * 2);
-    }
+  private debouncedSearchCurrentChat(): void {
+    if (!this.currentChatView) return;
+    // A chat save fires more than once per turn; only a changed query needs a search.
+    if (this.hashContent(this.extractChatContent(this.currentChatView)) === this.lastChatQueryHash) return;
+    this.searchRuns.schedule(chatSimilaritySource(this.currentChatView), this.SEARCH_DELAY * 2);
   }
 
-  private debouncedSearchCurrentChat(): void {
-    if (this.currentChatView) {
-      this.searchRuns.schedule(chatSimilaritySource(this.currentChatView), this.SEARCH_DELAY * 2);
-    }
+  /** True when any path is the current note, one of its results, or a folder holding one. */
+  private touchesCurrentContext(paths: readonly string[]): boolean {
+    return paths.some((path) => {
+      if (!path) return false;
+      const folder = `${path.replace(/\/$/, "")}/`;
+      const matches = (candidate: string | undefined) => (
+        Boolean(candidate) && (candidate === path || candidate!.startsWith(folder))
+      );
+      return matches(this.currentFile?.path) || this.currentResults.some((result) => matches(result.path));
+    });
+  }
+
+  /**
+   * The index state of everything the current results depend on: the source
+   * note and every result. Null when there is no source.
+   */
+  private queryFingerprint(): string | null {
+    if (!this.plugin.settings.embeddingsEnabled || (!this.currentFile && !this.currentChatView)) return null;
+    const manager = this.plugin.getOrCreateEmbeddingsManager();
+    const paths = [this.currentFile?.path ?? "", ...this.currentResults.map((result) => result.path)];
+    return paths.map((path) => {
+      if (!path) return "";
+      const snapshot = manager.getFileIndexSnapshot(path);
+      return `${path}\u0000${snapshot.state}\u0000${snapshot.indexedAt ?? ""}`;
+    }).join("\u0001");
   }
 
   private handleVaultDelete(file: { path?: string }): void {
     if (this.isDragging) return;
-    this.searchRuns.cancel();
     const deletedPath = typeof file?.path === "string" ? file.path : "";
     if (!deletedPath) return;
 
     if (deletedPath === this.currentFile?.path) {
+      this.searchRuns.cancel();
       this.deletedSourcePath = deletedPath;
       this.lastFileHash = "";
       this.forceRefreshNextCheck = false;
@@ -296,8 +323,13 @@ export class EmbeddingsView extends ItemView {
       return;
     }
 
-    if (this.currentResults.some((result) => result.path === deletedPath)) {
-      const filtered = this.currentResults.filter((result) => result.path !== deletedPath);
+    // Deletes elsewhere matter only when they remove a shown result.
+    if (!this.touchesCurrentContext([deletedPath])) return;
+    this.searchRuns.cancel();
+    const folder = `${deletedPath.replace(/\/$/, "")}/`;
+    const removed = (path: string) => path === deletedPath || path.startsWith(folder);
+    if (this.currentResults.some((result) => removed(result.path))) {
+      const filtered = this.currentResults.filter((result) => !removed(result.path));
       this.currentResults = filtered;
       if (this.currentFile) {
         void this.updateResults(filtered, this.currentFile).catch(() => undefined);
@@ -540,7 +572,9 @@ export class EmbeddingsView extends ItemView {
       this.showQuickLoading(chatTitle);
     }
     const results = await manager.searchSimilar(chatContent, 15, run.signal);
-    if (run.isCurrent()) await this.updateResults(results, null, chatTitle);
+    if (!run.isCurrent()) return;
+    await this.updateResults(results, null, chatTitle);
+    this.lastChatQueryHash = contentHash;
   }
 
   private extractChatContent(chatView: AgentChatView): string {
@@ -584,16 +618,19 @@ export class EmbeddingsView extends ItemView {
     this.currentFile = null;
     this.currentChatView = null;
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'idle' });
   }
 
   private showEmptyContent(): void {
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'empty-content' });
   }
 
   private showError(message: string, code?: string): void {
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({
       state: 'error',
       message: readEmbeddingErrorMessage(message, 'Similar notes are unavailable. Try again.'),
@@ -605,11 +642,13 @@ export class EmbeddingsView extends ItemView {
     this.currentFile = null;
     this.currentChatView = null;
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'disabled' });
   }
 
   private async updateResults(results: SearchResult[], sourceFile: TFile | null, sourceName?: string): Promise<void> {
     this.currentResults = results;
+    this.lastQueryFingerprint = this.queryFingerprint();
     const displayName = sourceName || sourceFile?.basename || 'Unknown';
     this.presentation?.render({
       state: 'results',
@@ -647,6 +686,7 @@ export class EmbeddingsView extends ItemView {
    */
   private showProcessingPrompt(): void {
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'index-required' });
   }
 
@@ -720,6 +760,7 @@ export class EmbeddingsView extends ItemView {
    */
   private showProcessingStatus(): void {
     this.currentResults = [];
+    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'processing' });
   }
   

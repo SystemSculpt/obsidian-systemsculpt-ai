@@ -56,6 +56,9 @@ export interface EmbeddingVector {
   };
 }
 
+/** A stored record without its vector: what the in-memory root cache holds. */
+export type EmbeddingRootRecord = Omit<EmbeddingVector, "vector">;
+
 export interface SearchResult {
   path: string;
   score: number;

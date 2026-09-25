@@ -7,17 +7,22 @@
  * - Concurrent read/write safety
  */
 
-import { EmbeddingVector } from '../types';
+import type { EmbeddingRootRecord, EmbeddingVector } from '../types';
 import { buildVectorId } from "../utils/vectorId";
 import { normalizeInPlace } from '../utils/vector';
 import {
   isManagedNamespace,
   MANAGED_EMBEDDING_FAMILY_PREFIX,
+  parseManagedNamespace,
 } from "../utils/namespace";
+import { SemanticMatrix } from "../search/SemanticMatrix";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import { toError } from "../../../utils/errors";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
+/** A search matrix nobody has queried for this long is released. */
+const SEARCH_MATRIX_IDLE_MS = 5 * 60_000;
+const SEARCH_MATRIX_PAGE_SIZE = 512;
 const DB_VERSION = 11;
 const STORE_NAME = 'embeddings';
 const STATE_STORE_NAME = "semantic_state";
@@ -32,7 +37,8 @@ export class EmbeddingsStorage {
   }
 
   private db: IDBDatabase | null = null;
-  private cache: Map<string, EmbeddingVector> = new Map();
+  /** Root records without their vectors: every reader needs only metadata. */
+  private cache: Map<string, EmbeddingRootRecord> = new Map();
   private initialized = false;
   // Root records only: enough for synchronous freshness and path statistics.
   private pathsSet: Set<string> = new Set();
@@ -41,6 +47,11 @@ export class EmbeddingsStorage {
    * `all` covers bulk removals that do not enumerate paths.
    */
   private portableChanges = { all: false, paths: new Set<string>() };
+  /** Lazily built per-generation search matrices, patched by every mutation. */
+  private readonly searchMatrices = new Map<string, SearchMatrixEntry>();
+  private searchMatrixReleaseTimer: number | null = null;
+  /** Bumps whenever stored records change in a way search results can see. */
+  private revision = 0;
 
   constructor(private readonly dbName: string) {}
 
@@ -69,6 +80,16 @@ export class EmbeddingsStorage {
     if (idx < 0) return 0;
     const parsed = parseInt(raw.slice(idx + 1), 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  private cacheRoot(vector: EmbeddingVector): void {
+    const { vector: _vector, ...root } = vector;
+    this.cache.set(vector.id, root);
+  }
+
+  /** Changes whenever stored records change in a way search results can see. */
+  getRevision(): number {
+    return this.revision;
   }
 
   private notePortableChange(paths: Iterable<string> | "all"): void {
@@ -164,7 +185,7 @@ export class EmbeddingsStorage {
           ? vector.chunkId
           : this.parseChunkIdFromId(vector.id);
         if (chunkId === 0) {
-          this.cache.set(vector.id, vector);
+          this.cacheRoot(vector);
           if (vector.path) this.pathsSet.add(vector.path);
         }
         cursor.continue();
@@ -204,11 +225,13 @@ export class EmbeddingsStorage {
             ? vector.chunkId
             : this.parseChunkIdFromId(vector.id);
           if (chunkId === 0) {
-            this.cache.set(vector.id, vector);
+            this.cacheRoot(vector);
             if (vector.path) this.pathsSet.add(vector.path);
           }
         }
         if (trackPortable) this.notePortableChange(vectors.map((vector) => vector.path));
+        // Arbitrary batches (restore, repairs) may hold partial notes; rebuild on demand.
+        this.patchSearchMatrices({ kind: "reset" });
         resolve();
       };
       transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
@@ -269,9 +292,10 @@ export class EmbeddingsStorage {
             this.cache.delete(id);
           }
         }
-        this.cache.set(root.id, root);
+        this.cacheRoot(root);
         this.pathsSet.add(path);
         this.notePortableChange([path]);
+        this.patchSearchMatrices({ kind: "publish", path, namespace, vectors });
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -308,7 +332,7 @@ export class EmbeddingsStorage {
       };
       request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       tx.oncomplete = () => {
-        if (root) this.cache.set(root.id, root);
+        if (root) this.cacheRoot(root);
         resolve(root !== null);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -341,12 +365,13 @@ export class EmbeddingsStorage {
         }
         for (const vector of vectors) {
           if ((vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) {
-            this.cache.set(vector.id, vector);
+            this.cacheRoot(vector);
           }
         }
         if (vectors.length > 0) this.pathsSet.add(path);
         else this.pathsSet.delete(path);
         this.notePortableChange([path]);
+        this.patchSearchMatrices({ kind: "replace", path, vectors });
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -368,7 +393,7 @@ export class EmbeddingsStorage {
         req.onsuccess = () => {
           const items = (req.result || []) as EmbeddingVector[];
           for (const v of items) {
-            if ((v.chunkId ?? this.parseChunkIdFromId(v.id)) === 0) this.cache.set(v.id, v);
+            if ((v.chunkId ?? this.parseChunkIdFromId(v.id)) === 0) this.cacheRoot(v);
           }
           resolve(items);
         };
@@ -379,10 +404,8 @@ export class EmbeddingsStorage {
     });
   }
 
-  /**
-   * Get vector synchronously from cache
-   */
-  getVectorSync(id: string): EmbeddingVector | null {
+  /** A cached root record's metadata; roots never carry their vector here. */
+  getVectorSync(id: string): EmbeddingRootRecord | null {
     return this.cache.get(id) || null;
   }
 
@@ -530,9 +553,9 @@ export class EmbeddingsStorage {
     return [...namespaces].sort();
   }
 
-  /** Read all records transiently. Search/snapshot callers must not hydrate a permanent cache. */
+  /** Read all records transiently (one-time migrations only). */
   async getAllVectors(): Promise<EmbeddingVector[]> {
-    if (!this.db) return [...this.cache.values()];
+    if (!this.db) return [];
     return await new Promise<EmbeddingVector[]>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], "readonly");
       const request = tx.objectStore(STORE_NAME).getAll();
@@ -570,66 +593,180 @@ export class EmbeddingsStorage {
     });
   }
 
-  async getVectorsByNamespace(namespace: string): Promise<EmbeddingVector[]> {
-    if (!namespace) return [];
-
-    if (!this.db) return [];
-
-    return new Promise((resolve, reject) => {
-      try {
-        const tx = this.db!.transaction([STORE_NAME], "readonly");
-        const store = tx.objectStore(STORE_NAME);
-        const index = store.index("by_namespace");
-        const req = index.getAll(IDBKeyRange.only(namespace));
-
-        req.onsuccess = () => {
-          const results = (req.result || []) as EmbeddingVector[];
-          resolve(results);
+  /** Records by id, read transiently in one transaction; missing ids are skipped. */
+  async readRecords(ids: readonly string[]): Promise<EmbeddingVector[]> {
+    if (!this.db || ids.length === 0) return [];
+    return new Promise<EmbeddingVector[]>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const records: EmbeddingVector[] = [];
+      for (const id of ids) {
+        const request = store.get(id);
+        request.onsuccess = () => {
+          if (request.result) records.push(request.result as EmbeddingVector);
         };
-        req.onerror = () => reject(toError(req.error, "IndexedDB request failed."));
-      } catch {
-        resolve([]);
+        request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
       }
+      tx.oncomplete = () => resolve(records);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
   }
 
-  /** Stream namespace records in bounded batches without retaining them in the root cache. */
-  async scanVectorsByNamespace(
+  /**
+   * The packed search matrix for one generation, built on first use from one
+   * paged read of that generation and then kept current by every mutation.
+   * Released after a few idle minutes. Resolves null when the store is closed.
+   */
+  async getSearchMatrix(namespace: string): Promise<SemanticMatrix | null> {
+    const dimensions = parseManagedNamespace(namespace)?.dimensions;
+    if (!this.db || !dimensions) return null;
+    let entry = this.searchMatrices.get(namespace);
+    if (!entry) {
+      entry = { matrix: null, building: null, pendingPaths: new Set(), invalidated: false, lastUsedAt: 0 };
+      this.searchMatrices.set(namespace, entry);
+    }
+    entry.lastUsedAt = Date.now();
+    this.scheduleSearchMatrixRelease();
+    if (entry.matrix) return entry.matrix;
+    const building = entry;
+    building.building ??= this.buildSearchMatrix(namespace, dimensions, building)
+      .finally(() => { building.building = null; });
+    return building.building;
+  }
+
+  /** Free every search matrix now (unload, or when search is not in use). */
+  releaseSearchMatrices(): void {
+    for (const entry of this.searchMatrices.values()) entry.invalidated = true;
+    this.searchMatrices.clear();
+    if (this.searchMatrixReleaseTimer !== null) window.clearTimeout(this.searchMatrixReleaseTimer);
+    this.searchMatrixReleaseTimer = null;
+  }
+
+  private scheduleSearchMatrixRelease(): void {
+    if (this.searchMatrixReleaseTimer !== null) window.clearTimeout(this.searchMatrixReleaseTimer);
+    this.searchMatrixReleaseTimer = window.setTimeout(() => {
+      this.searchMatrixReleaseTimer = null;
+      const cutoff = Date.now() - SEARCH_MATRIX_IDLE_MS;
+      for (const [namespace, entry] of this.searchMatrices) {
+        if (entry.lastUsedAt <= cutoff && !entry.building) this.searchMatrices.delete(namespace);
+      }
+      if (this.searchMatrices.size > 0) this.scheduleSearchMatrixRelease();
+    }, SEARCH_MATRIX_IDLE_MS);
+  }
+
+  /**
+   * Page through the generation by primary key (every record id starts with
+   * its namespace). Mutations that land while pages are read are replayed by
+   * re-reading the notes they touched; a bulk sweep restarts the build.
+   */
+  private async buildSearchMatrix(
     namespace: string,
-    onBatch: (vectors: EmbeddingVector[]) => void,
-    options: { batchSize?: number; signal?: AbortSignal } = {},
-  ): Promise<void> {
-    if (!this.db || !namespace || options.signal?.aborted) return;
-    const batchSize = Math.max(25, Math.min(1_000, Math.floor(options.batchSize ?? 250)));
-    await new Promise<void>((resolve, reject) => {
+    dimensions: number,
+    entry: SearchMatrixEntry,
+  ): Promise<SemanticMatrix | null> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!this.db || this.searchMatrices.get(namespace) !== entry) return null;
+      entry.invalidated = false;
+      entry.pendingPaths.clear();
+      const matrix = new SemanticMatrix(dimensions, await this.countNamespace(namespace) + 16);
+      const prefix = `${namespace}::`;
+      let lower: IDBKeyRange = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+      for (;;) {
+        const page = await this.readPage(lower, SEARCH_MATRIX_PAGE_SIZE);
+        for (const record of page) {
+          if (record.metadata?.namespace !== namespace || record.metadata.isEmpty === true) continue;
+          if (!(record.vector instanceof Float32Array)) continue;
+          matrix.appendRows(record.path, [{ chunkId: record.chunkId ?? this.parseChunkIdFromId(record.id), vector: record.vector }]);
+        }
+        if (entry.invalidated || page.length < SEARCH_MATRIX_PAGE_SIZE) break;
+        lower = IDBKeyRange.bound(page[page.length - 1].id, `${prefix}\uffff`, true);
+      }
+      while (!entry.invalidated && entry.pendingPaths.size > 0) {
+        const paths = [...entry.pendingPaths];
+        entry.pendingPaths.clear();
+        const records = await this.readPaths(paths);
+        if (entry.invalidated) break;
+        for (const path of paths) {
+          matrix.upsertPath(path, records
+            .filter((record) => record.path === path && record.metadata?.namespace === namespace && record.metadata.isEmpty !== true)
+            .map((record) => ({ chunkId: record.chunkId ?? this.parseChunkIdFromId(record.id), vector: record.vector })));
+        }
+      }
+      if (entry.invalidated) continue;
+      if (this.searchMatrices.get(namespace) !== entry) return null;
+      entry.matrix = matrix;
+      return matrix;
+    }
+    return null;
+  }
+
+  private countNamespace(namespace: string): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const index = store.index("by_namespace");
-      const request = index.openCursor(IDBKeyRange.only(namespace));
-      let batch: EmbeddingVector[] = [];
-      let stopped = false;
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor || options.signal?.aborted) {
-          if (batch.length > 0 && !options.signal?.aborted) onBatch(batch);
-          batch = [];
-          stopped = true;
-          return;
-        }
-        batch.push(cursor.value as EmbeddingVector);
-        if (batch.length >= batchSize) {
-          onBatch(batch);
-          batch = [];
-        }
-        cursor.continue();
-      };
+      const request = tx.objectStore(STORE_NAME).index("by_namespace").count(IDBKeyRange.only(namespace));
+      request.onsuccess = () => resolve(typeof request.result === "number" ? request.result : 0);
       request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
-      tx.oncomplete = () => {
-        if (!stopped && batch.length > 0 && !options.signal?.aborted) onBatch(batch);
-        resolve();
-      };
-      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
     });
+  }
+
+  private readPage(range: IDBKeyRange, count: number): Promise<EmbeddingVector[]> {
+    return new Promise<EmbeddingVector[]>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readonly");
+      const request = tx.objectStore(STORE_NAME).getAll(range, count);
+      request.onsuccess = () => resolve((request.result || []) as EmbeddingVector[]);
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+    });
+  }
+
+  /** Apply one committed mutation to every search matrix. */
+  private patchSearchMatrices(event: SearchMatrixPatch): void {
+    this.revision += 1;
+    for (const [namespace, entry] of this.searchMatrices) {
+      const matrix = entry.matrix;
+      if (event.kind === "reset") {
+        entry.invalidated = true;
+        this.searchMatrices.delete(namespace);
+        continue;
+      }
+      if (!matrix) {
+        // Still building: replay single-note changes afterwards, restart on sweeps.
+        if (event.kind === "publish" || event.kind === "replace" || event.kind === "remove") {
+          entry.pendingPaths.add(event.path);
+        } else if (event.kind === "rename") {
+          entry.pendingPaths.add(event.from);
+          entry.pendingPaths.add(event.to);
+        } else {
+          entry.invalidated = true;
+        }
+        continue;
+      }
+      switch (event.kind) {
+        case "publish":
+          if (event.namespace === namespace) {
+            matrix.upsertPath(event.path, event.vectors
+              .filter((vector) => vector.metadata.isEmpty !== true)
+              .map((vector) => ({ chunkId: vector.chunkId ?? this.parseChunkIdFromId(vector.id), vector: vector.vector })));
+          }
+          break;
+        case "replace":
+          matrix.upsertPath(event.path, event.vectors
+            .filter((vector) => vector.metadata.namespace === namespace && vector.metadata.isEmpty !== true)
+            .map((vector) => ({ chunkId: vector.chunkId ?? this.parseChunkIdFromId(vector.id), vector: vector.vector })));
+          break;
+        case "remove":
+          matrix.removePath(event.path);
+          break;
+        case "rename":
+          matrix.renamePath(event.from, event.to);
+          break;
+        case "renamePrefix":
+          matrix.renamePrefix(event.from, event.to);
+          break;
+        case "removePrefix":
+          matrix.removePrefix(event.prefix);
+          break;
+      }
+    }
   }
 
   /**
@@ -647,6 +784,7 @@ export class EmbeddingsStorage {
         this.cache.clear();
         this.pathsSet.clear();
         this.notePortableChange("all");
+        this.patchSearchMatrices({ kind: "reset" });
         resolve();
       };
 
@@ -665,6 +803,8 @@ export class EmbeddingsStorage {
     this.initialized = false;
     this.cache.clear();
     this.pathsSet.clear();
+    this.releaseSearchMatrices();
+    this.revision += 1;
 
     return new Promise((resolve, reject) => {
       const deleteRequest = indexedDB.deleteDatabase(this.dbName);
@@ -738,6 +878,7 @@ export class EmbeddingsStorage {
         for (const id of toRemove) this.cache.delete(id);
         this.refreshPathsCache();
         this.notePortableChange("all");
+        this.patchSearchMatrices({ kind: "reset" });
         resolve();
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -768,7 +909,10 @@ export class EmbeddingsStorage {
           if (vector.path === path) this.cache.delete(id);
         }
         this.pathsSet.delete(path);
-        if (removed > 0) this.notePortableChange([path]);
+        if (removed > 0) {
+          this.notePortableChange([path]);
+          this.patchSearchMatrices({ kind: "remove", path });
+        }
         resolve(removed);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -809,12 +953,13 @@ export class EmbeddingsStorage {
       tx.oncomplete = () => {
         for (const [id, vector] of this.cache) if (vector.path === oldPath) this.cache.delete(id);
         for (const vector of updates) {
-          if ((vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) this.cache.set(vector.id, vector);
+          if ((vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) this.cacheRoot(vector);
         }
         this.pathsSet.delete(oldPath);
         if (updates.length > 0) {
           this.pathsSet.add(newPath);
           this.notePortableChange([oldPath, newPath]);
+          this.patchSearchMatrices({ kind: "rename", from: oldPath, to: newPath });
         }
         resolve(updates.length);
       };
@@ -845,9 +990,10 @@ export class EmbeddingsStorage {
 
       tx.oncomplete = () => {
         for (const id of deletedRootIds) this.cache.delete(id);
-        for (const vector of updatedRoots) this.cache.set(vector.id, vector);
+        for (const vector of updatedRoots) this.cacheRoot(vector);
         this.refreshPathsCache();
         this.notePortableChange(touchedPaths);
+        if (visited > 0) this.patchSearchMatrices({ kind: "renamePrefix", from: oldPrefix, to: newPrefix });
         resolve(visited);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -945,13 +1091,14 @@ export class EmbeddingsStorage {
     indexName: "by_path" | "by_namespace",
     prefix: string,
   ): Promise<number> {
-    return this.removeIndexedRange(indexName, IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+    return this.removeIndexedRange(indexName, IDBKeyRange.bound(prefix, `${prefix}\uffff`), prefix);
   }
 
   /** Stream indexed keys and publish root-cache removals only after commit. */
   private async removeIndexedRange(
     indexName: "by_path" | "by_namespace",
     range: IDBKeyRange,
+    prefix: string | null = null,
   ): Promise<number> {
     if (!this.db) return 0;
     return new Promise<number>((resolve, reject) => {
@@ -964,7 +1111,12 @@ export class EmbeddingsStorage {
         for (const id of deletedRootIds) this.cache.delete(id);
         this.refreshPathsCache();
         // The path index names each removed note; a namespace sweep does not.
-        if (removed > 0) this.notePortableChange(indexName === "by_path" ? removedPaths : "all");
+        if (removed > 0) {
+          this.notePortableChange(indexName === "by_path" ? removedPaths : "all");
+          this.patchSearchMatrices(indexName === "by_path" && prefix !== null
+            ? { kind: "removePrefix", prefix }
+            : { kind: "reset" });
+        }
         resolve(removed);
       };
       tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
@@ -1003,93 +1155,101 @@ export class EmbeddingsStorage {
     const removedPaths = new Set<string>();
     const correctedPaths = new Set<string>();
 
-    for (const [id, vector] of this.cache.entries()) {
-      if (!vector || typeof vector !== 'object') {
-        removedIds.push(id);
-        continue;
-      }
-
-      const path = typeof vector.path === 'string' ? vector.path : '';
-      if (!path) {
-        removedIds.push(id);
-        continue;
-      }
-
-      if (!(vector.vector instanceof Float32Array)) {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
-
-      let invalidNumber = false;
-      for (const value of vector.vector) {
-        if (typeof value !== 'number' || !Number.isFinite(value)) {
-          invalidNumber = true;
-          break;
+    // The root cache holds metadata only; read the roots' vectors in pages.
+    const rootIds = [...this.cache.keys()];
+    const PAGE = 500;
+    for (let start = 0; start < rootIds.length; start += PAGE) {
+      const pageIds = rootIds.slice(start, start + PAGE);
+      const stored = new Map((await this.readRecords(pageIds)).map((record) => [record.id, record]));
+      for (const id of pageIds) {
+        const vector = stored.get(id);
+        if (!vector || typeof vector !== 'object') {
+          removedIds.push(id);
+          continue;
         }
-      }
-      if (invalidNumber) {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
 
-      const metadata = vector.metadata;
-      if (!metadata || typeof metadata !== 'object') {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
-
-      if (typeof metadata.contentHash !== 'string' || metadata.contentHash.length === 0) {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
-
-      if (typeof metadata.namespace !== 'string' || metadata.namespace.length === 0) {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
-
-      const dimension = vector.vector.length;
-      if (dimension === 0 && metadata.isEmpty !== true) {
-        removedIds.push(id);
-        removedPaths.add(path);
-        continue;
-      }
-
-      const EPSILON = 0.015;
-      let correctedVector: Float32Array | null = null;
-      const dimensionChanged = typeof metadata.dimension !== 'number'
-        || metadata.dimension <= 0
-        || metadata.dimension !== dimension;
-
-      if (metadata.isEmpty !== true) {
-        let sumSq = 0;
-        for (let index = 0; index < vector.vector.length; index += 1) {
-          const value = vector.vector[index];
-          sumSq += value * value;
+        const path = typeof vector.path === 'string' ? vector.path : '';
+        if (!path) {
+          removedIds.push(id);
+          continue;
         }
-        const norm = Math.sqrt(sumSq);
-        if (!Number.isFinite(norm) || Math.abs(norm - 1) > EPSILON) {
-          correctedVector = new Float32Array(vector.vector);
-          if (!normalizeInPlace(correctedVector)) {
-            removedIds.push(id);
-            removedPaths.add(path);
-            continue;
+
+        if (!(vector.vector instanceof Float32Array)) {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
+
+        let invalidNumber = false;
+        for (const value of vector.vector) {
+          if (typeof value !== 'number' || !Number.isFinite(value)) {
+            invalidNumber = true;
+            break;
           }
         }
-      }
+        if (invalidNumber) {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
 
-      if (dimensionChanged || correctedVector) {
-        correctedVectors.push({
-          ...vector,
-          vector: correctedVector ?? vector.vector,
-          metadata: { ...metadata, dimension },
-        });
-        correctedPaths.add(path);
+        const metadata = vector.metadata;
+        if (!metadata || typeof metadata !== 'object') {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
+
+        if (typeof metadata.contentHash !== 'string' || metadata.contentHash.length === 0) {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
+
+        if (typeof metadata.namespace !== 'string' || metadata.namespace.length === 0) {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
+
+        const dimension = vector.vector.length;
+        if (dimension === 0 && metadata.isEmpty !== true) {
+          removedIds.push(id);
+          removedPaths.add(path);
+          continue;
+        }
+
+        const EPSILON = 0.015;
+        let correctedVector: Float32Array | null = null;
+        const dimensionChanged = typeof metadata.dimension !== 'number'
+          || metadata.dimension <= 0
+          || metadata.dimension !== dimension;
+
+        if (metadata.isEmpty !== true) {
+          let sumSq = 0;
+          for (let index = 0; index < vector.vector.length; index += 1) {
+            const value = vector.vector[index];
+            sumSq += value * value;
+          }
+          const norm = Math.sqrt(sumSq);
+          if (!Number.isFinite(norm) || Math.abs(norm - 1) > EPSILON) {
+            correctedVector = new Float32Array(vector.vector);
+            if (!normalizeInPlace(correctedVector)) {
+              removedIds.push(id);
+              removedPaths.add(path);
+              continue;
+            }
+          }
+        }
+
+        if (dimensionChanged || correctedVector) {
+          correctedVectors.push({
+            ...vector,
+            vector: correctedVector ?? vector.vector,
+            metadata: { ...metadata, dimension },
+          });
+          correctedPaths.add(path);
+        }
       }
     }
 
@@ -1109,3 +1269,22 @@ export class EmbeddingsStorage {
     };
   }
 }
+
+interface SearchMatrixEntry {
+  matrix: SemanticMatrix | null;
+  building: Promise<SemanticMatrix | null> | null;
+  /** Notes changed while the matrix was being built; re-read afterwards. */
+  pendingPaths: Set<string>;
+  /** A sweep landed mid-build (or the entry was dropped): start over. */
+  invalidated: boolean;
+  lastUsedAt: number;
+}
+
+type SearchMatrixPatch =
+  | { kind: "publish"; path: string; namespace: string; vectors: readonly EmbeddingVector[] }
+  | { kind: "replace"; path: string; vectors: readonly EmbeddingVector[] }
+  | { kind: "remove"; path: string }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "renamePrefix"; from: string; to: string }
+  | { kind: "removePrefix"; prefix: string }
+  | { kind: "reset" };

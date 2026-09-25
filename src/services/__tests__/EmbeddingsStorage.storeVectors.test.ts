@@ -156,7 +156,9 @@ describe("EmbeddingsStorage.storeVectors", () => {
 
       transaction.oncomplete();
       await expect(publication).resolves.toBeUndefined();
-      expect((storage as any).cache.get(vectors[0].id)).toEqual(vectors[0]);
+      // The root cache keeps metadata only; vectors stay in IndexedDB.
+      const { vector: _vector, ...rootMetadata } = vectors[0];
+      expect((storage as any).cache.get(vectors[0].id)).toEqual(rootMetadata);
       expect((storage as any).pathsSet.has("Atomic.md")).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {
@@ -245,7 +247,8 @@ describe("EmbeddingsStorage.storeVectors", () => {
       await expect(publication).resolves.toBeUndefined();
       expect((storage as any).cache.has(current.id)).toBe(false);
       expect((storage as any).cache.has(replacement.id)).toBe(false);
-      expect((storage as any).cache.get(marker.id)).toBe(marker);
+      const { vector: _markerVector, ...markerMetadata } = marker;
+      expect((storage as any).cache.get(marker.id)).toEqual(markerMetadata);
       expect((storage as any).pathsSet.has(current.path)).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {

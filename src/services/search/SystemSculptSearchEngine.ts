@@ -2,7 +2,6 @@ import { App, EventRef, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { fuzzyMatchScore } from "../../tools/vault/searchUtils";
 import { containsNonAscii } from "../../utils/characterValidation";
-import { toError } from "../../utils/errors";
 import { extractCanvasText } from "./canvasTextExtractor";
 import { extractStudioText } from "./studioTextExtractor";
 import { resolveStudioEntry } from "../../studio/StudioEntry";
@@ -101,6 +100,9 @@ interface SearchableEmbeddingsManager {
   }>>;
   isReady?: () => boolean;
   hasAnyEmbeddings?: () => boolean;
+  /** Changes whenever indexed vectors change. */
+  getIndexRevision?: () => number;
+  getLifecycleSnapshot?: () => { updatedAt: number };
   getStats?: () => {
     total?: number;
     processed?: number;
@@ -144,6 +146,9 @@ export class SystemSculptSearchEngine {
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
   private readonly SEMANTIC_TIMEOUT_MS = 1500;
+  /** Smart mode skips semantic search for one- and two-character prefixes. */
+  private readonly MIN_SEMANTIC_QUERY_CHARS = 3;
+  private embeddingsIndicatorCache: { key: string; indicator: EmbeddingsIndicator } | null = null;
   private readonly UNICODE_TOKEN_PATTERN = /[\p{L}\p{N}\p{M}]+/gu;
   private lastLexicalInspect = 0;
 
@@ -156,7 +161,15 @@ export class SystemSculptSearchEngine {
   /**
    * Run a search across the vault
    */
-  async search(query: string, options?: { mode?: SearchMode; sort?: SortMode; limit?: number; signal?: AbortSignal }): Promise<SearchResponse> {
+  /**
+   * Run a search across the vault. `semantic: false` keeps a smart search
+   * lexical-only; the search modal uses it for fast per-keystroke results
+   * and adds semantic hits once typing pauses.
+   */
+  async search(
+    query: string,
+    options?: { mode?: SearchMode; sort?: SortMode; limit?: number; signal?: AbortSignal; semantic?: boolean },
+  ): Promise<SearchResponse> {
     const mode: SearchMode = options?.mode ?? "smart";
     const sort: SortMode = options?.sort ?? "relevance";
     const limit = options?.limit ?? 80;
@@ -246,7 +259,8 @@ export class SystemSculptSearchEngine {
       this.ensureEmbeddingsManager();
       embeddingsIndicator = this.getEmbeddingsIndicator();
     }
-    const embeddingsEligible = this.shouldUseEmbeddings(mode, embeddingsIndicator, terms);
+    const embeddingsEligible = options?.semantic !== false
+      && this.shouldUseEmbeddings(mode, embeddingsIndicator, terms, normalizedQuery);
 
     if (embeddingsEligible) {
       const semStart = performance.now();
@@ -1313,16 +1327,23 @@ export class SystemSculptSearchEngine {
   }
 
   private async runSemanticSearch(query: string, limit: number, signal?: AbortSignal): Promise<SearchHit[]> {
+    const manager = this.getExistingEmbeddingsManager();
+    if (!manager || signal?.aborted) return [];
+    // One controller for the whole semantic leg: the caller's cancellation and
+    // the timeout both abort the managed query and the vector scan behind it,
+    // instead of leaving them running after the results were dropped.
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = window.setTimeout(() => controller.abort(), this.SEMANTIC_TIMEOUT_MS);
     try {
-      const manager = this.getExistingEmbeddingsManager();
-      if (!manager || signal?.aborted) return [];
-      const semanticPromise = (async () => {
+      const semantic = (async (): Promise<SearchHit[]> => {
         if (typeof manager.awaitReady === "function") {
           await manager.awaitReady();
         }
-        if (signal?.aborted) return [];
-        const rawResults = await manager.searchSimilar(query, limit, signal);
-        if (signal?.aborted) return [];
+        if (controller.signal.aborted) return [];
+        const rawResults = await manager.searchSimilar(query, limit, controller.signal);
+        if (controller.signal.aborted) return [];
         return rawResults
           .map((item) => {
             const file = this.app.vault.getAbstractFileByPath(item.path);
@@ -1341,44 +1362,29 @@ export class SystemSculptSearchEngine {
           })
           .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
       })();
-
-      // Avoid long stalls; apply a timeout without leaking a dangling timer.
-      return await new Promise<SearchHit[]>((resolve, reject) => {
-        let settled = false;
-        const cleanup = () => {
-          window.clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-        };
-        const finish = (results: SearchHit[]) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolve(results);
-        };
-        const fail = (error: unknown) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(toError(error, "Search batch scheduling failed."));
-        };
-        const onAbort = () => finish([]);
-        const timer = window.setTimeout(() => finish([]), this.SEMANTIC_TIMEOUT_MS);
-        signal?.addEventListener("abort", onAbort, { once: true });
-        semanticPromise.then(
-          (results) => finish(results),
-          (error) => fail(error)
-        );
+      const aborted = new Promise<SearchHit[]>((resolve) => {
+        if (controller.signal.aborted) resolve([]);
+        controller.signal.addEventListener("abort", () => resolve([]), { once: true });
       });
+      return await Promise.race([semantic, aborted]);
     } catch {
       return [];
+    } finally {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 
-  private shouldUseEmbeddings(mode: SearchMode, indicator: EmbeddingsIndicator, terms: string[]): boolean {
+  private shouldUseEmbeddings(
+    mode: SearchMode,
+    indicator: EmbeddingsIndicator,
+    terms: string[],
+    query: string,
+  ): boolean {
     if (mode === "lexical") return false;
     if (!indicator.enabled || !indicator.ready || !indicator.available) return false;
     if (mode === "semantic") return true;
-    if (terms.length === 0) return false;
+    if (terms.length === 0 || query.length < this.MIN_SEMANTIC_QUERY_CHARS) return false;
 
     const total = indicator.total ?? 0;
     const processed = indicator.processed ?? 0;
@@ -1446,6 +1452,11 @@ export class SystemSculptSearchEngine {
     return sliced;
   }
 
+  /**
+   * Readiness summary shown with results. Counting indexed notes walks every
+   * eligible file, so the answer is cached until the index revision or the
+   * lifecycle snapshot changes.
+   */
   public getEmbeddingsIndicator(): EmbeddingsIndicator {
     const enabled = this.plugin.settings.embeddingsEnabled === true;
     if (!enabled) {
@@ -1458,16 +1469,24 @@ export class SystemSculptSearchEngine {
         return { enabled, ready: false, available: false, reason: "Embeddings not initialized" };
       }
       const ready = typeof manager.isReady === "function" ? manager.isReady() : true;
+      const key = typeof manager.getIndexRevision === "function" && typeof manager.getLifecycleSnapshot === "function"
+        ? `${ready}:${manager.getIndexRevision()}:${manager.getLifecycleSnapshot().updatedAt}`
+        : null;
+      if (key !== null && this.embeddingsIndicatorCache?.key === key) {
+        return { ...this.embeddingsIndicatorCache.indicator };
+      }
       const stats = typeof manager.getStats === "function" ? manager.getStats() : { total: 0, processed: 0, present: 0, needsProcessing: 0 };
       const available = typeof manager.hasAnyEmbeddings === "function" ? manager.hasAnyEmbeddings() : (stats.present ?? 0) > 0;
 
-      return {
+      const indicator: EmbeddingsIndicator = {
         enabled,
         ready,
         available,
         processed: stats.processed ?? stats.present ?? 0,
         total: stats.total,
       };
+      this.embeddingsIndicatorCache = key === null ? null : { key, indicator: { ...indicator } };
+      return indicator;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Embeddings unavailable";
       return { enabled, ready: false, available: false, reason: message };
