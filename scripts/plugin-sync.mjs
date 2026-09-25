@@ -17,6 +17,7 @@ import {
   normalizeApiBaseUrl,
 } from "./plugin-build-options.mjs";
 import { replaceFileAtomically } from "./platform-portability.mjs";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 
 export { replaceFileAtomically } from "./platform-portability.mjs";
 
@@ -85,6 +86,7 @@ function sha256(bytes) {
 function gitValue(root, args, fallback) {
   const result = spawnSync("git", ["-C", root, ...args], {
     encoding: "utf8",
+    env: createRepositoryScopedGitEnvironment(),
     stdio: "pipe",
   });
   return result.status === 0 ? String(result.stdout || "").trim() || fallback : fallback;

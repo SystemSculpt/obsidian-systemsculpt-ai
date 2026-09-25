@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import {
   createDevWatcherLaunchAgentPlist,
   DEV_WATCHER_SERVICE_LABEL,
@@ -11,10 +10,11 @@ import {
   inspectDevWatcherService,
   uninstallDevWatcherService,
 } from "./dev-watcher-service.mjs";
+import { execRepositoryGitSync } from "./repository-git.mjs";
 
 function tempRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "systemsculpt-dev-watcher-"));
-  execFileSync("git", ["init", "--quiet", root]);
+  execRepositoryGitSync(["init", "--quiet", root]);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }

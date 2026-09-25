@@ -106,6 +106,15 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   }
 });
 
+test("plugin check children never inherit Git repository routing", () => {
+  assert.match(source, /const childEnvironment = createRepositoryScopedGitEnvironment\(\);/);
+  assert.equal(source.match(/env: childEnvironment,/g)?.length, 2);
+  assert.ok(
+    source.indexOf("scripts/repository-git.test.mjs") > source.indexOf("const NORMAL_SCRIPT_TESTS"),
+    "the inherited GIT_DIR regression runs in the default plugin tier",
+  );
+});
+
 test("fast plugin checks include the live managed policy and exclude unbounded Jest work", () => {
   assert.match(source, /scripts\/check\/managed-only-policy\.test\.mjs/);
   assert.doesNotMatch(source, /scripts\/live-chat-smoke\.test\.mjs/);
