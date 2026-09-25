@@ -645,14 +645,6 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
-    coordinator.registerTask("critical", {
-      id: "updates.start",
-      label: "update notifications",
-      optional: true,
-      run: () => {
-        this.pluginUpdateService?.start();
-      },
-    });
   }
 
   private registerDeferredTasks(coordinator: LifecycleCoordinator): void {
@@ -666,6 +658,17 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
+    // The launch update check waits for the workspace instead of competing
+    // with startup; the service then checks at most every six hours (#338).
+    coordinator.registerTask("layout", {
+      id: "updates.start",
+      label: "update notifications",
+      optional: true,
+      run: () => {
+        this.pluginUpdateService?.start();
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
@@ -799,9 +802,20 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      lifecycle
-        .runPhase("layout")
-        .then(() => {
+      // Layout tasks read loaded settings. A plugin enabled after the
+      // workspace is ready reaches this callback before the critical phase
+      // has loaded them, so wait for it; a failed critical phase skips layout.
+      const critical = this.criticalInitializationPromise ?? Promise.resolve();
+      critical
+        .then(
+          () => this.isUnloading ? undefined : lifecycle.runPhase("layout"),
+          () => {
+            layoutPhase.complete({ skipped: true });
+            return "skipped" as const;
+          },
+        )
+        .then((result) => {
+          if (result === "skipped" || this.isUnloading) return;
           layoutPhase.complete({
             elapsedSinceLoadMs: Number((performance.now() - loadStart).toFixed(1)),
           });

@@ -9,8 +9,12 @@ import { PlatformRequestClient } from "./PlatformRequestClient";
 
 const RELEASE_CONTRACT = "plugin-release-v1" as const;
 const PLUGIN_ID = "systemsculpt-ai" as const;
-const CHECK_INTERVAL_MS = 60_000;
-const RETURN_CHECK_MIN_INTERVAL_MS = 30_000;
+/** Background checks run at most once per window; releases ship a few times a week. */
+const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+/** Longest wait a server cache or retry header can impose before the next check. */
+const MAX_CHECK_DELAY_MS = 24 * 60 * 60_000;
+/** First retry after a failed background check; doubles up to CHECK_INTERVAL_MS. */
+const FAILURE_RETRY_BASE_MS = 15 * 60_000;
 const REQUEST_TIMEOUT_MS = 8_000;
 const UPDATE_URI = "obsidian://show-plugin?id=systemsculpt-ai";
 const RELEASE_URL_PREFIX = "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/releases/tag/";
@@ -28,13 +32,53 @@ export type PluginUpdateCheckResult =
   | Readonly<{ outcome: "up_to_date"; release: PluginReleaseInfo }>
   | Readonly<{ outcome: "unavailable" }>;
 
+/**
+ * One release read. freshForMs carries the server's Cache-Control max-age so
+ * a longer server cache lifetime can stretch the next background check.
+ */
+export type PluginReleaseFetch = Readonly<{ body: unknown; freshForMs?: number }>;
+
+/** A failed release read; retryAfterMs carries the server's Retry-After. */
+export class PluginReleaseRequestError extends Error {
+  constructor(message: string, public readonly retryAfterMs?: number) {
+    super(message);
+    this.name = "PluginReleaseRequestError";
+  }
+}
+
 type PluginUpdateServiceOptions = Readonly<{
-  request?: () => Promise<unknown>;
+  request?: () => Promise<PluginReleaseFetch>;
   notify?: (message: string, durationMs?: number) => void;
   openUpdatePage?: () => void;
   showUpdatePrompt?: (version: string) => Promise<boolean>;
   now?: () => number;
 }>;
+
+function boundedDelayMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(MAX_CHECK_DELAY_MS, Math.floor(value));
+}
+
+/** Reads `max-age` from Cache-Control; `no-store`/`no-cache` give no hint. */
+export function cacheControlMaxAgeMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const directives = value.toLowerCase().split(",").map((part) => part.trim());
+  if (directives.some((directive) => directive === "no-store" || directive === "no-cache")) return undefined;
+  for (const directive of directives) {
+    const match = /^max-age=(\d{1,10})$/.exec(directive);
+    if (match) return Number(match[1]) * 1_000;
+  }
+  return undefined;
+}
+
+/** Reads Retry-After as delta-seconds or an HTTP date. */
+export function retryAfterMs(value: string | null, now: number): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d{1,10}$/.test(trimmed)) return Number(trimmed) * 1_000;
+  const at = Date.parse(trimmed);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
 
 function hasExactKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(record).sort();
@@ -72,6 +116,15 @@ export function parsePluginReleaseInfo(value: unknown): PluginReleaseInfo | null
   };
 }
 
+/**
+ * Announces published releases. Obsidian Community Plugins owns installation.
+ *
+ * Checks run once at launch, then at most once per CHECK_INTERVAL_MS. A single
+ * timeout is armed only while the window is visible and the host is online;
+ * returning to the app or reconnecting resumes a due check. Failed background
+ * checks back off from FAILURE_RETRY_BASE_MS to the normal interval, and
+ * server cache or Retry-After headers can only lengthen the wait.
+ */
 export class PluginUpdateService {
   private readonly request: NonNullable<PluginUpdateServiceOptions["request"]>;
   private readonly notify: NonNullable<PluginUpdateServiceOptions["notify"]>;
@@ -79,17 +132,21 @@ export class PluginUpdateService {
   private readonly showUpdatePrompt: NonNullable<PluginUpdateServiceOptions["showUpdatePrompt"]>;
   private readonly now: NonNullable<PluginUpdateServiceOptions["now"]>;
   private statusBarEl: HTMLElement | null = null;
-  private periodicCheck: number | null = null;
+  private scheduledCheck: number | null = null;
   private started = false;
-  private lastCheckAt = 0;
+  /** The next background check may not run before this time. */
+  private nextCheckAt = 0;
+  private consecutiveFailures = 0;
   private announcedVersion = "";
   private pendingCheck: Promise<PluginUpdateCheckResult> | null = null;
   private pendingManualFeedback = false;
 
-  private readonly handleReturnToApp = (): void => {
-    if (typeof document !== "undefined" && document.hidden) return;
-    if (this.now() - this.lastCheckAt < RETURN_CHECK_MIN_INTERVAL_MS) return;
-    void this.checkForUpdates();
+  private readonly handleWake = (): void => {
+    this.checkIfDue();
+  };
+
+  private readonly handlePause = (): void => {
+    this.clearScheduledCheck();
   };
 
   constructor(
@@ -122,6 +179,8 @@ export class PluginUpdateService {
   public start(): void {
     if (this.started) return;
     this.started = true;
+    // A scheduled check can never outlive an unload that skipped stop().
+    this.plugin.register(() => this.stop());
     this.prepareStatusBar();
     this.plugin.addCommand({
       id: "check-for-updates",
@@ -129,30 +188,26 @@ export class PluginUpdateService {
       callback: () => void this.checkForUpdates({ manual: true }),
     });
     if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", this.handleReturnToApp);
+      document.addEventListener("visibilitychange", this.handleWake);
     }
     if (typeof window !== "undefined") {
-      window.addEventListener("focus", this.handleReturnToApp);
-      // Registered with the plugin so the poll cannot outlive an unload that
-      // skipped stop().
-      this.periodicCheck = this.plugin.registerInterval(
-        window.setInterval(() => void this.checkForUpdates(), CHECK_INTERVAL_MS),
-      );
+      window.addEventListener("focus", this.handleWake);
+      window.addEventListener("online", this.handleWake);
+      window.addEventListener("offline", this.handlePause);
     }
     void this.recordInstalledVersion();
-    void this.checkForUpdates();
+    this.checkIfDue();
   }
 
   public stop(): void {
-    if (this.periodicCheck !== null && typeof window !== "undefined") {
-      window.clearInterval(this.periodicCheck);
-      this.periodicCheck = null;
-    }
+    this.clearScheduledCheck();
     if (typeof document !== "undefined") {
-      document.removeEventListener("visibilitychange", this.handleReturnToApp);
+      document.removeEventListener("visibilitychange", this.handleWake);
     }
     if (typeof window !== "undefined") {
-      window.removeEventListener("focus", this.handleReturnToApp);
+      window.removeEventListener("focus", this.handleWake);
+      window.removeEventListener("online", this.handleWake);
+      window.removeEventListener("offline", this.handlePause);
     }
     this.started = false;
     this.pendingCheck = null;
@@ -162,20 +217,57 @@ export class PluginUpdateService {
   public async checkForUpdates(options: { manual?: boolean } = {}): Promise<PluginUpdateCheckResult> {
     if (options.manual === true) this.pendingManualFeedback = true;
     if (this.pendingCheck) return this.pendingCheck;
+    this.clearScheduledCheck();
     this.pendingCheck = this.performCheck();
     try {
       return await this.pendingCheck;
     } finally {
       this.pendingCheck = null;
       this.pendingManualFeedback = false;
+      this.checkIfDue();
     }
   }
 
+  /**
+   * Runs a due background check, or arms one timeout for the next due time.
+   * Nothing is armed while the window is hidden or the host is offline.
+   */
+  private checkIfDue(): void {
+    if (!this.started || this.pendingCheck) return;
+    if (this.isPaused()) {
+      this.clearScheduledCheck();
+      return;
+    }
+    const waitMs = this.nextCheckAt - this.now();
+    if (waitMs <= 0) {
+      void this.checkForUpdates();
+      return;
+    }
+    if (this.scheduledCheck !== null || typeof window === "undefined") return;
+    this.scheduledCheck = window.setTimeout(() => {
+      this.scheduledCheck = null;
+      this.checkIfDue();
+    }, waitMs);
+  }
+
+  private isPaused(): boolean {
+    if (typeof document !== "undefined" && document.hidden) return true;
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  }
+
+  private clearScheduledCheck(): void {
+    if (this.scheduledCheck === null) return;
+    if (typeof window !== "undefined") window.clearTimeout(this.scheduledCheck);
+    this.scheduledCheck = null;
+  }
+
   private async performCheck(): Promise<PluginUpdateCheckResult> {
-    this.lastCheckAt = this.now();
     try {
-      const release = parsePluginReleaseInfo(await this.request());
+      const fetched = await this.request();
+      const release = parsePluginReleaseInfo(fetched.body);
       if (!release) throw new Error("Invalid plugin release response");
+      this.consecutiveFailures = 0;
+      this.nextCheckAt = this.now() + Math.max(CHECK_INTERVAL_MS, boundedDelayMs(fetched.freshForMs));
 
       if (compareNumericVersions(release.latestVersion, this.plugin.manifest.version) > 0) {
         this.showUpdateAction(release.latestVersion);
@@ -196,7 +288,16 @@ export class PluginUpdateService {
         this.notify(`SystemSculpt ${this.plugin.manifest.version} is current.`, 5_000);
       }
       return { outcome: "up_to_date", release };
-    } catch {
+    } catch (error) {
+      this.consecutiveFailures += 1;
+      const backoffMs = Math.min(
+        CHECK_INTERVAL_MS,
+        FAILURE_RETRY_BASE_MS * 2 ** Math.min(this.consecutiveFailures - 1, 16),
+      );
+      const serverRetryMs = error instanceof PluginReleaseRequestError
+        ? boundedDelayMs(error.retryAfterMs)
+        : 0;
+      this.nextCheckAt = this.now() + Math.max(backoffMs, serverRetryMs);
       if (this.pendingManualFeedback) {
         this.notify("Update check is temporarily unavailable. Try again.", 6_000);
       }
@@ -204,26 +305,28 @@ export class PluginUpdateService {
     }
   }
 
-  private async fetchLatestRelease(): Promise<unknown> {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const response = await new PlatformRequestClient().request({
-        url: `${API_BASE_URL}/releases/latest`,
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "x-plugin-version": this.plugin.manifest.version,
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`Plugin release request failed (${response.status})`);
-      const text = await response.text();
-      if (text.length > 8_192) throw new Error("Plugin release response is too large");
-      return JSON.parse(text) as unknown;
-    } finally {
-      window.clearTimeout(timeout);
+  private async fetchLatestRelease(): Promise<PluginReleaseFetch> {
+    const response = await new PlatformRequestClient().request({
+      url: `${API_BASE_URL}/releases/latest`,
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "x-plugin-version": this.plugin.manifest.version,
+      },
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
+    if (!response.ok) {
+      throw new PluginReleaseRequestError(
+        `Plugin release request failed (${response.status})`,
+        retryAfterMs(response.headers.get("retry-after"), this.now()),
+      );
     }
+    const text = await response.text();
+    if (text.length > 8_192) throw new Error("Plugin release response is too large");
+    return {
+      body: JSON.parse(text) as unknown,
+      freshForMs: cacheControlMaxAgeMs(response.headers.get("cache-control")),
+    };
   }
 
   private async recordInstalledVersion(): Promise<void> {
