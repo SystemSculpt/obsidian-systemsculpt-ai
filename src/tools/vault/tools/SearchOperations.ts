@@ -263,6 +263,8 @@ export class SearchOperations {
       }
       for (const child of folder.children) {
         if (child instanceof TFolder) {
+          // An excluded folder hides its whole subtree of folders.
+          if (exclusions.isFolderExcluded(child.path)) continue;
           if (this.isAllowedPath(child.path)) {
             consider(child.path, null);
           }
@@ -344,6 +346,8 @@ export class SearchOperations {
     const originalQuery = patterns.join(' ');
     const searchTerms = extractSearchTerms(originalQuery);
     // We keep two buckets: fileHits (actual matches) and metaResults (info, timeout, etc.)
+    // Meta entries carry their text under `notice`: the outbound tool-result
+    // sanitizer rewrites any `message` string as a failure.
     const metaResults: unknown[] = [];
     const fileHits: GrepFileHit[] = [];
     
@@ -670,7 +674,7 @@ export class SearchOperations {
       if (Date.now() - startTime > MAX_PROCESSING_TIME) {
         metaResults.push({
           file: "_timeout",
-          message: `Search timed out after ${MAX_PROCESSING_TIME / 1000} seconds to prevent UI freeze. Found ${resultsCount} results. Use more specific search terms or paths.`,
+          notice: `Search timed out after ${MAX_PROCESSING_TIME / 1000} seconds to prevent UI freeze. Found ${resultsCount} results. Use more specific search terms or paths.`,
           totalMatches: metrics.totalMatches,
           contexts: []
         });
@@ -681,7 +685,7 @@ export class SearchOperations {
       if (resultsCount >= FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS) {
         metaResults.push({
           file: "_summary",
-          message: `Search stopped after ${FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS} files with matches. More results may exist.`,
+          notice: `Search stopped after ${FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS} files with matches. More results may exist.`,
           totalMatches: metrics.totalMatches,
           contexts: []
         });
@@ -702,7 +706,7 @@ export class SearchOperations {
     if (metrics.processingTime > 2000 || metrics.filesSkipped > 10 || metrics.timeouts > 0) {
       metaResults.push({
         file: "_performance",
-        message: `Search completed in ${metrics.processingTime}ms. Processed: ${metrics.filesProcessed} files, Skipped: ${metrics.filesSkipped} files, Total matches: ${metrics.totalMatches}. Largest file: ${Math.round(metrics.largestFile / 1024)}KB.`,
+        notice: `Search completed in ${metrics.processingTime}ms. Processed: ${metrics.filesProcessed} files, Skipped: ${metrics.filesSkipped} files, Total matches: ${metrics.totalMatches}. Largest file: ${Math.round(metrics.largestFile / 1024)}KB.`,
         totalMatches: metrics.totalMatches,
         contexts: []
       });
@@ -717,7 +721,7 @@ export class SearchOperations {
         : ` within ${searchPaths.map((path) => path || "the vault root").join(", ")}`;
       metaResults.push({
         file: "_no_matches",
-        message: `No matches found${scopeDescription} for: ${patterns.map(p => `"${p}"`).join(", ")}. Try different words, adjust where you search (text vs. properties), or change the requested paths.`,
+        notice: `No matches found${scopeDescription} for: ${patterns.map(p => `"${p}"`).join(", ")}. Try different words, adjust where you search (text vs. properties), or change the requested paths.`,
         totalMatches: 0,
         contexts: []
       });

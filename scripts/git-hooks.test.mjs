@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES } from "./repository-git.mjs";
 
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -20,6 +21,20 @@ test("pre-push runs the exact exhaustive hosted gate", () => {
   assert.match(prePush, /^#!\/usr\/bin\/env bash/);
   assert.match(prePush, /set -euo pipefail/);
   assert.match(prePush, /npm run check:ci/);
+});
+
+test("pre-push clears the same Git repository routing as the script helper before the gate", () => {
+  const unsetLoop = prePush.indexOf('for name in $(compgen -e); do');
+  assert.ok(unsetLoop > prePush.indexOf("git rev-parse --show-toplevel"));
+  assert.ok(unsetLoop < prePush.indexOf("npm run check:ci"));
+  const pattern = /case "\$name" in\n([\s\S]*?)\)\n\s+unset "\$name"/.exec(prePush);
+  assert.ok(pattern, "pre-push must unset routing variables by name");
+  const names = pattern[1].replace(/\\\n/g, "").split("|").map((name) => name.trim());
+  assert.deepEqual(
+    names.filter((name) => !name.endsWith("_*")).sort(),
+    [...REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES].sort(),
+  );
+  assert.deepEqual(names.filter((name) => name.endsWith("_*")).sort(), ["GIT_CONFIG_KEY_*", "GIT_CONFIG_VALUE_*"]);
 });
 
 test("pre-commit scans staged paths without shell word splitting", () => {

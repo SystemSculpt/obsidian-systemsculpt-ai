@@ -120,6 +120,8 @@ export class PluginLogger {
   private readonly plugin: SystemSculptPlugin;
   private readonly buffer: PluginLogEntry[] = [];
   private readonly pendingFlush: PluginLogEntry[] = [];
+  /** Entries that were persistable when captured; only these may reach the log file. */
+  private readonly persistableEntries = new WeakSet<PluginLogEntry>();
   private flushTimer: number | null = null;
   private readonly maxEntries = 600;
   private readonly flushIntervalMs = 1500;
@@ -228,6 +230,7 @@ export class PluginLogger {
     }
 
     if (this.shouldPersist(level, context)) {
+      this.persistableEntries.add(entry);
       this.pendingFlush.push(entry);
       this.ensureFlushScheduled();
     }
@@ -435,9 +438,11 @@ export class PluginLogger {
       if (this.plugin?.isPluginUnloading?.()) {
         return;
       }
-      // Trim file to the last portion of buffered entries to keep context
+      // Trim file to the last portion of buffered entries to keep context.
+      // Filter on the capture-time decision: re-evaluating the current
+      // settings would write entries captured while recording was off.
       const recent = this.buffer
-        .filter((entry) => this.shouldPersist(entry.level, entry.context))
+        .filter((entry) => this.persistableEntries.has(entry))
         .slice(-200)
         .map((entry) => JSON.stringify(entry))
         .join("\n");

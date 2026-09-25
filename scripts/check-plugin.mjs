@@ -15,6 +15,7 @@ import path from "node:path";
 import { buildProductionPlugin } from "./plugin-artifacts.mjs";
 import { inspectPluginArtifacts } from "./plugin-artifacts.mjs";
 import { lintCssDirectory } from "./lint-css.mjs";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 import {
   writeArtifactInspectionEvidence,
   writeBuildProvenance,
@@ -25,6 +26,9 @@ const fast = args.includes("--fast");
 const skipTests = args.includes("--skip-tests");
 const root = process.cwd();
 const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "") || 20 * 60 * 1000;
+// The script suites create temp Git fixtures. Git hooks export GIT_DIR and
+// related variables, so child checks never inherit repository routing.
+const childEnvironment = createRepositoryScopedGitEnvironment();
 
 const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
@@ -47,6 +51,7 @@ const NORMAL_SCRIPT_TESTS = [
   "scripts/mobile-compatibility.test.mjs",
   "scripts/dev-watcher-service.test.mjs",
   "scripts/watcher-ownership.test.mjs",
+  "scripts/repository-git.test.mjs",
   "scripts/build-provenance.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
@@ -61,6 +66,7 @@ function run(command, options = {}) {
     const stdout = execSync(command, {
       cwd: root,
       encoding: "utf8",
+      env: childEnvironment,
       stdio: "pipe",
       timeout: timeoutMs,
       ...execOptions,
@@ -84,6 +90,7 @@ function runAsync(command, options = {}) {
     exec(command, {
       cwd: root,
       encoding: "utf8",
+      env: childEnvironment,
       timeout: timeoutMs,
       ...execOptions,
     }, (error, stdout, stderr) => {

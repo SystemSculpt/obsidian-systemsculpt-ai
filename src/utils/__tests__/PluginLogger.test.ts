@@ -316,6 +316,22 @@ describe("PluginLogger", () => {
       expect(rewritten).not.toContain("thin-agent:lifecycle");
     });
 
+    it("keeps entries captured while recording was off out of a later size-cap rewrite (#416)", async () => {
+      logger.lifecycle({ code: "run_started", phase: "response", runId: "run-while-off" });
+      mockPlugin.settings.showDiagnostics = true;
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
+      logger.lifecycle({ code: "run_finished_completed", phase: "response", runId: "run-while-on" });
+
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).not.toContain("run-while-off");
+      const rewritten = mockPlugin.app.vault.adapter.write.mock.calls[0][1];
+      expect(rewritten).toContain("run-while-on");
+      expect(rewritten).not.toContain("run-while-off");
+      expect(logger.getRecentEntries()).toHaveLength(2);
+    });
+
     it.each([
       "start",
       "session",

@@ -5,6 +5,11 @@ import { App, TFile, TFolder } from "obsidian";
 import { SearchOperations } from "../tools/SearchOperations";
 import { FILESYSTEM_LIMITS } from "../constants";
 import * as utils from "../utils";
+import {
+  outputAsToolResult,
+  safeOutboundVaultToolResult,
+  toJsonValue,
+} from "../../../chat/managed/WireConversation";
 
 jest.mock("../utils", () => {
   const actual = jest.requireActual("../utils");
@@ -455,7 +460,22 @@ describe("SearchOperations", () => {
 
       expect(result.metaInfo).toBeDefined();
       const noMatchesInfo = result.metaInfo.find((m: any) => m.file === "_no_matches");
-      expect(noMatchesInfo).toBeDefined();
+      expect(noMatchesInfo).toEqual(expect.objectContaining({
+        notice: expect.stringContaining('No matches found for: "xyz123". Try different words'),
+      }));
+      expect(noMatchesInfo).not.toHaveProperty("message");
+    });
+
+    it("keeps the no-match hint intact through managed tool-result delivery", async () => {
+      (app.vault.getFiles as jest.Mock).mockReturnValue([]);
+      const result = await searchOps.grepVault({ patterns: ["xyz123"] });
+
+      const outbound = safeOutboundVaultToolResult(outputAsToolResult(toJsonValue(result)));
+
+      expect(outbound).toEqual({ success: true, data: toJsonValue(result) });
+      const delivered = JSON.stringify(outbound);
+      expect(delivered).toContain('No matches found for: \\"xyz123\\". Try different words');
+      expect(delivered).not.toContain("The vault action failed.");
     });
 
     it("handles searchIn parameter for content", async () => {

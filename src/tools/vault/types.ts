@@ -42,6 +42,8 @@ export interface ListDirectoryResult {
   files?: FileInfo[];
   directories?: DirectoryInfo[];
   summary?: string;
+  /** Informational text for the model; kept out of `message`, which delivery treats as a failure. */
+  notice?: string;
   error?: string;
   offset: number;
   totalItems: number;

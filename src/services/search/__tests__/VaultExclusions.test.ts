@@ -120,6 +120,49 @@ describe("VaultExclusions", () => {
       expect(included.isExcluded("SystemSculpt/Chats/old.md")).toBe(false);
     });
 
+    it("excludes a folder only when a rule excludes everything beneath it", () => {
+      const exclusions = exclusionsFor(surface, {
+        exclusions: { folders: ["Private"], patterns: ["Daily/**", "**/Vendor/**", "Notes/*.md", "*.PNG"] },
+        userIgnoreFilters: ["Templates/", "Scratch", "/\\.excalidraw\\.md$/"],
+      });
+      for (const folder of [
+        "Private", "Private/Sub", "/Daily/", "Daily/Nested", "Vendor", "Code/Vendor", "Code/Vendor/lib",
+        "Templates", "templates/Sub", "Scratch", "Scratchpad", "SystemSculpt/Chats", "SystemSculpt/Chats/Old",
+      ]) {
+        expect([folder, exclusions.isFolderExcluded(folder)]).toEqual([folder, true]);
+      }
+      for (const folder of [
+        "Private Notes", "Journal/Daily", "Notes", "Images", "Vendors", "Projects/Templates",
+        "Drawings", "Notes/Chats", "SystemSculpt", "",
+      ]) {
+        expect([folder, exclusions.isFolderExcluded(folder)]).toEqual([folder, false]);
+      }
+      // A folder rule never widens file matching: the folder path alone is not a file.
+      expect(exclusions.isExcluded("Daily")).toBe(false);
+
+      const withChats = exclusionsFor(surface, { exclusions: { ignoreChatHistory: false } });
+      expect(withChats.isFolderExcluded("SystemSculpt/Chats")).toBe(false);
+    });
+
+    it.each([
+      ["Daily/*", "Daily", "Daily/sub/deep.md"],
+      ["**/Archive/*", "Projects/Archive", "Projects/Archive/Nested/old.md"],
+      ["*", "Notes", null],
+      ["Archive", "Projects/Archive", "Projects/Archive/plan.md"],
+      ["*.md", "Notes", "Notes/photo.png"],
+    ])("never hides a folder for %s, which can leave a descendant eligible", (pattern, folder, eligible) => {
+      const exclusions = exclusionsFor(surface, { exclusions: { patterns: [pattern] } });
+      expect(exclusions.isFolderExcluded(folder)).toBe(false);
+      if (eligible) expect(exclusions.isExcluded(eligible)).toBe(false);
+    });
+
+    it("never hides a folder for an Obsidian /regex/ entry, whatever it matches", () => {
+      const exclusions = exclusionsFor(surface, { userIgnoreFilters: ["/^Archive/", "/Old$/"] });
+      expect(exclusions.isExcluded("Archive/plan.md")).toBe(true);
+      expect(exclusions.isFolderExcluded("Archive")).toBe(false);
+      expect(exclusions.isFolderExcluded("Projects/Old")).toBe(false);
+    });
+
     it("normalizes separators and leading slashes in paths", () => {
       const exclusions = exclusionsFor(surface, { exclusions: { folders: ["Private"], patterns: ["Daily/**"] } });
       expect(exclusions.isExcluded("/Private/plan.md")).toBe(true);
@@ -149,6 +192,10 @@ describe("VaultExclusions", () => {
     ]) {
       expect(search.isExcluded(path)).toBe(true);
       expect(embeddings.isExcluded(path)).toBe(false);
+    }
+    for (const folder of ["Audio", ".config-obsidian", "node_modules", "Code/node_modules"]) {
+      expect(search.isFolderExcluded(folder)).toBe(true);
+      expect(embeddings.isFolderExcluded(folder)).toBe(false);
     }
   });
 

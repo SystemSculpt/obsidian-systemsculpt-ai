@@ -347,6 +347,56 @@ describe("ResourceMonitorService", () => {
       }
     });
 
+    it.each([
+      ["rejected", () => Promise.reject(new Error("disk full"))],
+      ["refused", () => Promise.resolve({ success: false })],
+    ])("keeps a %s batch queued and writes it with the next flush (#416)", async (_label, failure) => {
+      service.start();
+      await service.captureManualSample("first");
+      mockPlugin.storage.appendToFile.mockImplementationOnce(failure);
+      await service.flushPending();
+
+      expect((service as any).pendingWrites.map((sample: ResourceSample) => sample.note)).toEqual(["recording-started", "first"]);
+      await service.captureManualSample("second");
+      await service.flushPending();
+
+      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(2);
+      expect(mockPlugin.storage.appendToFile.mock.calls[1][2].trim().split("\n").map((line: string) => JSON.parse(line).note))
+        .toEqual(["recording-started", "first", "second"]);
+      expect((service as any).pendingWrites).toEqual([]);
+    });
+
+    it("removes only the written batch, keeping samples queued during the write", async () => {
+      let finish!: () => void;
+      mockPlugin.storage.appendToFile.mockImplementationOnce(() => new Promise((resolve) => {
+        finish = () => resolve({ success: true });
+      }));
+      service.start();
+      const flushing = service.flushPending();
+      await service.captureManualSample("during");
+
+      finish();
+      await flushing;
+
+      expect((service as any).pendingWrites.map((sample: ResourceSample) => sample.note)).toEqual(["during"]);
+    });
+
+    it("waits for another full batch of new samples before retrying a failed write", async () => {
+      mockPlugin.storage.appendToFile.mockRejectedValue(new Error("disk full"));
+      service.start();
+      for (let index = 0; index < 4; index += 1) await service.captureManualSample(`sample-${index}`);
+      await Promise.resolve();
+      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(1);
+      await service.flushPending();
+      mockPlugin.storage.appendToFile.mockClear();
+
+      for (let index = 0; index < 4; index += 1) await service.captureManualSample(`retry-${index}`);
+      expect(mockPlugin.storage.appendToFile).not.toHaveBeenCalled();
+      await service.captureManualSample("retry-4");
+      expect(mockPlugin.storage.appendToFile).toHaveBeenCalledTimes(1);
+      await service.flushPending();
+    });
+
     it("keeps pending samples when storage is not ready", async () => {
       mockPlugin.storage = null;
       service.start();
@@ -385,6 +435,50 @@ describe("ResourceMonitorService", () => {
       expect(retained.trim().split("\n").map((line: string) => JSON.parse(line).note)).toEqual(["recording-started", "over-cap"]);
       expect((service as any).metricsFileBytes).toBe(retained.length);
     });
+  });
+
+  it("never writes samples captured while recording was off, even in the size-cap rewrite (#416)", async () => {
+    await service.captureManualSample("support-while-off");
+    service.captureIncidentTerminalSample();
+    mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 999_990 });
+    service.start();
+    await service.flushPending();
+    await service.captureManualSample("over-cap");
+
+    await service.flushPending();
+
+    expect(service.getRecentSamples().map((sample) => sample.note))
+      .toEqual(["support-while-off", "incident-terminal", "recording-started", "over-cap"]);
+    expect(writtenLines(mockPlugin.storage.appendToFile).map((line) => line.note)).toEqual(["recording-started", "over-cap"]);
+    expect(mockPlugin.storage.writeFile).toHaveBeenCalledTimes(1);
+    const retained = mockPlugin.storage.writeFile.mock.calls[0][2];
+    expect(retained.trim().split("\n").map((line: string) => JSON.parse(line).note)).toEqual(["recording-started", "over-cap"]);
+  });
+
+  it("writes a sample captured during a cap-crossing append exactly once", async () => {
+    mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 999_990 });
+    service.start();
+    await service.flushPending();
+    await service.captureManualSample("over-cap");
+    let finishAppend!: () => void;
+    mockPlugin.storage.appendToFile.mockImplementationOnce(() => new Promise((resolve) => {
+      finishAppend = () => resolve({ success: true });
+    }));
+    const crossing = service.flushPending();
+    await service.captureManualSample("during-append");
+
+    finishAppend();
+    await crossing;
+    expect(mockPlugin.storage.writeFile).toHaveBeenCalledTimes(1);
+    const rewritten = mockPlugin.storage.writeFile.mock.calls[0][2].trim().split("\n")
+      .map((line: string) => JSON.parse(line).note);
+    mockPlugin.storage.appendToFile.mockClear();
+    await service.flushPending();
+
+    // The file is the rewrite followed by later appends: each sample once.
+    const fileAfterRewrite = [...rewritten, ...writtenLines(mockPlugin.storage.appendToFile).map((line) => line.note)];
+    expect(fileAfterRewrite).toEqual(["recording-started", "over-cap", "during-append"]);
+    expect((service as any).pendingWrites).toEqual([]);
   });
 
   describe("captureManualSample", () => {

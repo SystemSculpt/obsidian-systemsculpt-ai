@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { acquireWatcherLock, releaseWatcherLock, assertCanonicalWatcherCheckout, runWatcher } from "./watcher-ownership.mjs";
 import { installDevWatcherService } from "./dev-watcher-service.mjs";
+import { createRepositoryScopedGitEnvironment, execRepositoryGitSync as git } from "./repository-git.mjs";
 
 // The managed launchd/shell watcher is a POSIX development tool.
 const test = process.platform === "win32" ? nodeTest.skip : nodeTest;
@@ -103,15 +104,15 @@ test("linked worktree start and install fail before dependency repair or launchd
   const f = fixture(t);
   const main = path.join(f.root, "main");
   const linked = path.join(f.root, "linked");
-  execFileSync("git", ["init", "--quiet", main]);
+  git(["init", "--quiet", main]);
   fs.mkdirSync(path.join(main, "scripts"));
   for (const file of ["run.sh", "scripts/watcher-ownership.mjs", "scripts/repository-git.mjs"]) {
     fs.copyFileSync(new URL(`../${file}`, import.meta.url), path.join(main, file));
   }
-  execFileSync("git", ["-C", main, "add", "."]);
-  execFileSync("git", ["-C", main, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+  git(["-C", main, "add", "."]);
+  git(["-C", main, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "-m", "fixture"]);
-  execFileSync("git", ["-C", main, "worktree", "add", "--quiet", "--detach", linked]);
+  git(["-C", main, "worktree", "add", "--quiet", "--detach", linked]);
   assert.doesNotThrow(() => assertCanonicalWatcherCheckout(main));
   assert.throws(() => assertCanonicalWatcherCheckout(linked), /never a linked worktree/);
   const home = path.join(f.root, "home");
@@ -121,7 +122,8 @@ test("linked worktree start and install fail before dependency repair or launchd
   assert.deepEqual(commands, []);
   assert.equal(fs.existsSync(home), false);
   assert.throws(() => execFileSync("bash", [path.join(linked, "run.sh"), "--no-sync"], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: createRepositoryScopedGitEnvironment({
+      ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` }),
   }), (error) => {
     assert.match(error.stderr, /never a linked worktree/);
     assert.doesNotMatch(error.stdout, /Repairing JS dependencies/);
@@ -131,7 +133,7 @@ test("linked worktree start and install fail before dependency repair or launchd
 
 test("watcher lifetime forwards signals only to its live child handle and releases on close", async (t) => {
   const f = fixture(t);
-  execFileSync("git", ["init", "--quiet", f.root]);
+  git(["init", "--quiet", f.root]);
   const events = new EventEmitter();
   const child = new EventEmitter();
   child.exitCode = null; child.signalCode = null;
@@ -154,7 +156,7 @@ test("watcher lifetime forwards signals only to its live child handle and releas
 
 test("failed child startup releases watcher ownership", async (t) => {
   const f = fixture(t);
-  execFileSync("git", ["init", "--quiet", f.root]);
+  git(["init", "--quiet", f.root]);
   let released = false;
   await assert.rejects(runWatcher({ root: f.root, lockPath: f.lockPath, command: "unused",
     spawnChild: () => { throw new Error("spawn failed"); }, acquire: () => {}, release: () => { released = true; } }), /spawn failed/);
@@ -163,7 +165,7 @@ test("failed child startup releases watcher ownership", async (t) => {
 
 test("shutdown during child spawn is retained and forwarded before waiting", async (t) => {
   const f = fixture(t);
-  execFileSync("git", ["init", "--quiet", f.root]);
+  git(["init", "--quiet", f.root]);
   const events = new EventEmitter();
   const child = new EventEmitter();
   child.exitCode = null; child.signalCode = null;
@@ -179,7 +181,7 @@ test("shutdown during child spawn is retained and forwarded before waiting", asy
 
 test("shutdown while publishing ownership prevents child spawn", async (t) => {
   const f = fixture(t);
-  execFileSync("git", ["init", "--quiet", f.root]);
+  git(["init", "--quiet", f.root]);
   const events = new EventEmitter();
   let released = false;
   const result = await runWatcher({ root: f.root, lockPath: f.lockPath, command: "unused", events,

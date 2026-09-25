@@ -14,12 +14,16 @@ export async function createVaultFolder(app: App, path: string): Promise<void> {
   try {
     await app.vault.createFolder(path);
   } catch (error) {
-    if (await isExistingFolder(app, path)) return;
+    if (await isVaultFolder(app, path)) return;
     throw error;
   }
 }
 
-async function isExistingFolder(app: App, path: string): Promise<boolean> {
+/**
+ * Whether a folder exists at the path, from the vault tree or, when the tree
+ * cannot resolve it (see createVaultFolder), from the adapter.
+ */
+export async function isVaultFolder(app: App, path: string): Promise<boolean> {
   try {
     if (app.vault.getAbstractFileByPath(path) instanceof TFolder) return true;
     if (!(await app.vault.adapter.exists(path))) return false;

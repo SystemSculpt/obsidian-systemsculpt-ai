@@ -93,6 +93,9 @@ export class ResourceMonitorService {
   private readonly samples: ResourceSample[] = [];
   private readonly maxSamples = 120;
   private readonly pendingWrites: ResourceSample[] = [];
+  /** Samples captured while recording; only these may ever reach the metrics file. */
+  private readonly persistableSamples = new WeakSet<ResourceSample>();
+  private samplesSinceFlush = 0;
   private recording = false;
   private intervalId: number | null = null;
   private visibilityDocument: Document | null = null;
@@ -166,6 +169,7 @@ export class ResourceMonitorService {
     if (this.pendingWrites.length === 0) {
       return Promise.resolve();
     }
+    this.samplesSinceFlush = 0;
     const flush: Promise<void> = this.writeBatch()
       .catch(() => undefined)
       .finally(() => {
@@ -412,16 +416,24 @@ export class ResourceMonitorService {
     this.checkThresholds(sample);
   }
 
-  /** Queues a sample for the metrics file. Samples taken while not recording stay in memory only. */
+  /**
+   * Queues a sample for the metrics file. A sample taken while not recording
+   * stays in memory only and is never written later, including by the size-cap
+   * rewrite after recording is turned on.
+   */
   private enqueueWrite(sample: ResourceSample): void {
     if (!this.recording) {
       return;
     }
+    this.persistableSamples.add(sample);
     this.pendingWrites.push(sample);
     if (this.pendingWrites.length > MAX_PENDING_WRITES) {
       this.pendingWrites.shift();
     }
-    if (this.pendingWrites.length >= FLUSH_BATCH_SIZE) {
+    // Count new samples, not queue length: a batch kept after a failed write
+    // must not turn every later sample into another write attempt.
+    this.samplesSinceFlush += 1;
+    if (this.samplesSinceFlush >= FLUSH_BATCH_SIZE) {
       void this.flushPending();
     }
   }
@@ -529,7 +541,9 @@ export class ResourceMonitorService {
     if (!storage) {
       return;
     }
-    const batch = this.pendingWrites.splice(0, this.pendingWrites.length);
+    // The batch leaves the queue only after the append succeeds, so a failed
+    // write is retried by the next flush instead of dropping its samples.
+    const batch = this.pendingWrites.slice();
     const payload = batch.map((sample) => this.serializeSample(sample)).join("");
     try {
       const result = await storage.appendToFile("diagnostics", this.metricsFileName, payload);
@@ -537,6 +551,9 @@ export class ResourceMonitorService {
         this.reportWriteFailure(undefined);
         return;
       }
+      const written = new Set(batch);
+      const remaining = this.pendingWrites.filter((sample) => !written.has(sample));
+      this.pendingWrites.splice(0, this.pendingWrites.length, ...remaining);
       await this.enforceMetricsFileCap(payload);
     } catch (error) {
       this.reportWriteFailure(error);
@@ -560,7 +577,14 @@ export class ResourceMonitorService {
     if (this.metricsFileBytes <= MAX_METRICS_FILE_BYTES) {
       return;
     }
-    const retained = this.samples.map((sample) => this.serializeSample(sample)).join("");
+    // Samples still queued (captured during this append, or kept after a
+    // failed one) reach the file with a later append; writing them here too
+    // would record them twice.
+    const queued = new Set(this.pendingWrites);
+    const retained = this.samples
+      .filter((sample) => this.persistableSamples.has(sample) && !queued.has(sample))
+      .map((sample) => this.serializeSample(sample))
+      .join("");
     const result = await storage.writeFile("diagnostics", this.metricsFileName, retained);
     this.metricsFileBytes = result?.success === false ? null : retained.length;
   }
