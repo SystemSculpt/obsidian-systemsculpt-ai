@@ -23,6 +23,12 @@ type Callbacks = {
   templates: (projectPath: string) => Promise<{ id: string; title: string }[]>;
 };
 const MAX_ACTIVE = 8, MAX_PENDING = 100;
+/**
+ * The presentation cache holds at most this many runs across projects. Paging
+ * past it evicts the least recently changed runs that are not live, and the
+ * board then says it shows only the newest runs.
+ */
+export const MAX_LOADED_AGENT_RUNS = 1000;
 const tools: CodexJson[] = [
   {type: 'function', name: 'studio_read_document', description: 'Read this canvas and its revision for scoped concurrent edits. Use this and studio_edit_document instead of replacing the file.', inputSchema: {type: 'object', properties: {}, additionalProperties: false}},
   {type: 'function', name: 'studio_edit_document', description: 'Apply a batch to this canvas using heads from studio_read_document. Edits use kind set/create/delete/restore, entityId, optional path string array, value, remove. Text merges collaboratively; deletion prevents stale resurrection.', inputSchema: {type: 'object', properties: {heads: {type: 'array', items: {type: 'string'}}, edits: {type: 'array', items: {type: 'object', properties: {kind: {type: 'string', enum: ['set','create','delete','restore']}, entityId: {type: 'string'}, path: {type: 'array', items: {type: 'string'}}, value: {}, remove: {type: 'boolean'}}, required: ['kind','entityId'], additionalProperties: false}}}, required: ['heads','edits'], additionalProperties: false}},
@@ -42,6 +48,8 @@ export class StudioAgentRuns {
   private readonly loaded = new Map<string, Promise<void>>();
   /** Per project: the oldest loaded run ID and how many older records remain on disk. */
   private readonly older = new Map<string, { before: string; remaining: number }>();
+  /** Projects whose older loaded runs were evicted to keep the cache bounded. */
+  private readonly capped = new Set<string>();
   private readonly timers = new Map<string, number>();
   private readonly delivering = new Set<string>();
   private readonly notificationTimers = new Map<string, number>();
@@ -60,7 +68,7 @@ export class StudioAgentRuns {
   subscribe(listener: (projectId: string) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   list(projectId: string, nodeIds?: readonly string[]): readonly StudioAgentRunView[] {
     const allowed = nodeIds?.length ? new Set(nodeIds) : null;
-    // Every loaded run, including older pages the board asked for; memory stays bounded by prune().
+    // Every loaded run, including older pages; prune() keeps the cache at MAX_LOADED_AGENT_RUNS.
     return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
@@ -70,19 +78,26 @@ export class StudioAgentRuns {
     if (!this.machine && hasHostCapability('local-cli')) this.machine = (await desktopHost.os()).hostname();
   }
   async refresh(projectPath: string, projectId: string): Promise<void> {
-    await this.loaded.get(projectPath); this.loaded.delete(projectPath); await this.load(projectPath, projectId);
+    await this.loaded.get(projectPath); this.loaded.delete(projectPath); this.capped.delete(projectPath); await this.load(projectPath, projectId);
   }
+  /** True once paging this project evicted older runs; older pages are then no longer offered. */
+  isCapped(projectPath: string): boolean { return this.capped.has(projectPath); }
+  /**
+   * Keep the cache at MAX_LOADED_AGENT_RUNS by evicting the least recently
+   * changed runs. Live runs stay: controlled runs and their ancestors, active
+   * runs, open workflows and their assignments.
+   */
   private prune(): void {
-    if (this.records.size <= 1000) return;
+    if (this.records.size <= MAX_LOADED_AGENT_RUNS) return;
     const protectedIds = new Set(this.controls.keys());
     for (const id of this.controls.keys()) {
       let parent = this.records.get(id)?.parentRunId;
       for (let depth = 0; parent && depth < 8; depth++) { protectedIds.add(parent); parent = this.records.get(parent)?.parentRunId; }
     }
     for (const run of [...this.records.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))) {
-      if (this.records.size <= 1000) break;
+      if (this.records.size <= MAX_LOADED_AGENT_RUNS) break;
       if (protectedIds.has(run.id) || isActiveAgentRun(run.status) || workflowOpen(run.workflow) || (run.workflowId && workflowOpen(this.records.get(run.workflowId)?.workflow))) continue;
-      this.records.delete(run.id); this.loaded.delete(run.projectPath); this.older.delete(run.projectPath);
+      this.records.delete(run.id); this.capped.add(run.projectPath);
     }
   }
   async load(projectPath: string, projectId: string): Promise<void> {
@@ -99,16 +114,16 @@ export class StudioAgentRuns {
     })().catch(error => { this.loaded.delete(projectPath); throw error; }));
     await this.loaded.get(projectPath);
   }
-  hasOlder(projectPath: string): boolean { return (this.older.get(projectPath)?.remaining ?? 0) > 0; }
+  hasOlder(projectPath: string): boolean { return !this.capped.has(projectPath) && (this.older.get(projectPath)?.remaining ?? 0) > 0; }
   /** Read the next page of older records for the run board. */
   async loadOlder(projectPath: string, projectId: string): Promise<void> {
     await this.load(projectPath, projectId);
     const cursor = this.older.get(projectPath);
-    if (!cursor || cursor.remaining <= 0 || this.disposed) return;
+    if (!cursor || cursor.remaining <= 0 || this.capped.has(projectPath) || this.disposed) return;
     const page = await this.store.list(projectPath, projectId, { before: cursor.before });
     this.adopt(page);
     this.older.set(projectPath, page.before ? { before: page.before, remaining: page.olderRemaining } : { ...cursor, remaining: 0 });
-    this.emit(projectId);
+    this.prune(); this.emit(projectId);
   }
   private adopt(page: AgentRunPage): void {
     for (const run of page.records) {

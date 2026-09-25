@@ -28,8 +28,8 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
   const render = (): void => {
     if (disposed) return;
     const records = runs.list(options.projectId, options.sources).filter(run => (showCompleted || isActiveAgentRun(run.status)) && `${run.title} ${run.id} ${run.currentActivity}`.toLowerCase().includes(query));
-    const hasOlder = runs.hasOlder(options.projectPath);
-    const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, records.map(run => [run.id, run.status])]);
+    const hasOlder = runs.hasOlder(options.projectPath), capped = runs.isCapped(options.projectPath);
+    const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, capped, records.map(run => [run.id, run.status])]);
     if (signature === layoutSignature) {
       for (const run of records) {
         const card = liveCards.get(run.id); if (!card) continue;
@@ -40,7 +40,10 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
     }
     layoutSignature = signature; body.empty(); liveCards.clear();
     // Older records stay on disk until asked for, so opening a board reads one page.
-    const loadOlder = (): void => { if (hasOlder) createStudioAction(body, { label: 'Load older runs', testId: 'studio.run.older', onSelect: () => { void runs.loadOlder(options.projectPath, options.projectId).catch(report); } }); };
+    const loadOlder = (): void => {
+      if (hasOlder) createStudioAction(body, { label: 'Load older runs', testId: 'studio.run.older', onSelect: () => { void runs.loadOlder(options.projectPath, options.projectId).catch(report); } });
+      else if (capped) body.createDiv({ cls: 'ss-studio-run-meta', attr: { 'data-testid': 'studio.run.capped' }, text: `Showing the newest ${runs.list(options.projectId).length} runs. Older runs stay saved in this project.` });
+    };
     if (!records.length) { body.createDiv({ cls: 'ss-studio-run-empty', text: 'No runs yet.' }); loadOlder(); return; }
     const groups = groupBy === 'status' ? Object.keys(statusLabels) : [...new Set(records.map(run => run.nodeId))];
     for (const group of groups) {

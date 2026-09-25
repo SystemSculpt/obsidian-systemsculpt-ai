@@ -1,4 +1,5 @@
-import { StudioAgentRuns } from '../StudioAgentRuns';
+import { MAX_LOADED_AGENT_RUNS, StudioAgentRuns } from '../StudioAgentRuns';
+import { createStudioWorkflow } from '../StudioWorkflow';
 import { agentRunFolder } from '../StudioAgentRunStore';
 import { runLocalCodex } from '../LocalCodexClient';
 import { codexActivity } from '../CodexActivity';
@@ -198,6 +199,33 @@ it('recovers an open workflow after reload even when newer runs push it past the
   expect(reloaded.runs.get(root.id)?.workflow?.status).toBe('active');
   expect(sessions).toHaveLength(2); expect(sessions[1].threadId).toBe(root.threadId);
   await reloaded.runs.dispose();
+});
+it('keeps the loaded runs bounded when the board pages past the cap, keeping live runs', async () => {
+  const { runs, files } = fixture();
+  const folder = agentRunFolder('project.systemsculpt');
+  const total = MAX_LOADED_AGENT_RUNS + 200;
+  for (let index = 1; index < total; index++) { const run = savedRun(index); files.set(`${folder}/${run.id}.json`, run.content); }
+  const open = savedRun(0, { machine: 'laptop', status: 'waiting', workflow: { ...createStudioWorkflow('Long-running'), status: 'waiting' } });
+  files.set(`${folder}/${open.id}.json`, open.content);
+  const newest = savedRun(total - 1).id;
+
+  await runs.load('project.systemsculpt', 'project');
+  for (let page = 0; page < 40 && runs.hasOlder('project.systemsculpt'); page++) await runs.loadOlder('project.systemsculpt', 'project');
+
+  const loaded = runs.list('project');
+  expect(loaded).toHaveLength(MAX_LOADED_AGENT_RUNS);
+  expect(runs.isCapped('project.systemsculpt')).toBe(true);
+  expect(runs.hasOlder('project.systemsculpt')).toBe(false);
+  expect(loaded.map(run => run.id)).toEqual(expect.arrayContaining([open.id, newest]));
+
+  // Paging again is refused rather than growing the cache.
+  await runs.loadOlder('project.systemsculpt', 'project');
+  expect(runs.list('project')).toHaveLength(MAX_LOADED_AGENT_RUNS);
+
+  await runs.refresh('project.systemsculpt', 'project');
+  expect(runs.isCapped('project.systemsculpt')).toBe(false);
+  expect(runs.list('project').length).toBeLessThanOrEqual(MAX_LOADED_AGENT_RUNS);
+  await runs.dispose();
 });
 it('recovers an old open workflow after reload when the run index is missing', async () => {
   const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
