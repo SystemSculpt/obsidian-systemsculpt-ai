@@ -31,7 +31,10 @@ export type PlatformRequestInput = {
    * PlatformRequestTimeoutError. Non-streaming requests default to
    * PLATFORM_REQUEST_TIMEOUT_MS, extended for the declared transfer size (see
    * platformTransferTimeoutMs); raw uploads never get less than two minutes.
-   * Streaming requests have no default deadline. `null` disables it.
+   * The deadline covers a non-streaming response body too; over direct fetch
+   * that body is read before the request resolves. A streaming deadline
+   * covers only the response headers. Streaming requests have no default
+   * deadline. `null` disables it.
    */
   timeoutMs?: number | null;
   /**
@@ -126,6 +129,60 @@ function abortError(): DOMException {
 
 type Deadline = Readonly<{ at: number; timeoutMs: number }>;
 
+/** Statuses whose response carries no body, not even an empty buffered one. */
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/**
+ * Reads a direct fetch response's body now, so the request deadline covers
+ * it, and returns an equivalent response over the buffered bytes.
+ */
+async function bufferedResponse(response: Response): Promise<Response> {
+  const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.arrayBuffer();
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+/**
+ * Returns `response` with a body that calls `release` once it has been read
+ * to the end, has failed, or was cancelled.
+ */
+function releaseAfterBody(response: Response, release: () => void): Response {
+  const source = response.body;
+  if (!source) {
+    release();
+    return response;
+  }
+  const reader = source.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          release();
+          controller.close();
+        } else {
+          controller.enqueue(chunk.value);
+        }
+      } catch (error) {
+        release();
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      release();
+      return reader.cancel(reason);
+    },
+  });
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 function defaultTimeoutMs(input: PlatformRequestInput, body: ArrayBuffer | string | undefined): number | null {
   // A stream stays open for a whole turn; its caller owns cancellation, and
   // the transport choice before it has its own bounded probe.
@@ -213,7 +270,7 @@ export class PlatformRequestClient {
       );
       const response = deadline === null
         ? await send(input.signal)
-        : await this.within(input.signal, deadline, true, send);
+        : await this.fetchWithin(input.signal, deadline, true, send);
       return markResponseDeliveryMode(
         response,
         transport === "fetch" ? "fetch_stream" : "request_url_buffered",
@@ -221,17 +278,22 @@ export class PlatformRequestClient {
     }
 
     if (transport === "fetch" && typeof window.fetch === "function") {
+      let responded = false;
       try {
-        const send = (signal?: AbortSignal) => window.fetch(input.url, {
-          method: input.method,
-          headers,
-          body,
-          cache: input.cache ?? "no-store",
-          signal,
-        });
+        const send = async (signal?: AbortSignal) => {
+          const response = await window.fetch(input.url, {
+            method: input.method,
+            headers,
+            body,
+            cache: input.cache ?? "no-store",
+            signal,
+          });
+          responded = true;
+          return response;
+        };
         const response = deadline === null
           ? await send(input.signal)
-          : await this.within(input.signal, deadline, true, send);
+          : await this.fetchWithin(input.signal, deadline, input.stream === true, send);
         this.observeTransport(input, "fetch");
         return input.stream
           ? markResponseDeliveryMode(response, "fetch_stream")
@@ -241,7 +303,8 @@ export class PlatformRequestClient {
         if (input.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
           throw error;
         }
-        if (directLoopbackFetch || input.allowTransportFallback === false) throw error;
+        // A body that failed after the server answered is never replayed.
+        if (responded || directLoopbackFetch || input.allowTransportFallback === false) throw error;
       }
     }
     if (directLoopbackFetch) {
@@ -255,7 +318,7 @@ export class PlatformRequestClient {
     this.observeTransport(input, "requestUrl");
     // requestUrl takes no signal: on abort or deadline the client only stops
     // waiting, and the host finishes or fails the detached request itself.
-    const result = await this.within(input.signal, deadline, false, () => requestUrl({
+    const result = await this.within(input.signal, deadline, () => requestUrl({
       url: input.url,
       method: input.method,
       headers,
@@ -294,26 +357,60 @@ export class PlatformRequestClient {
   }
 
   /**
+   * Runs a direct fetch under the deadline with a signal linked to the
+   * caller's. A non-streaming body is read before the deadline lapses. The
+   * link is removed once the request has settled (for a stream, once its body
+   * has been consumed), so a long-lived caller signal never accumulates
+   * finished requests.
+   */
+  private async fetchWithin(
+    signal: AbortSignal | undefined,
+    deadline: Deadline,
+    stream: boolean,
+    send: (signal: AbortSignal) => Promise<Response>,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const forward = (): void => controller.abort();
+    const unlink = (): void => signal?.removeEventListener("abort", forward);
+    signal?.addEventListener("abort", forward, { once: true });
+    let response: Response;
+    try {
+      response = await this.within(
+        signal,
+        deadline,
+        async () => {
+          const received = await send(controller.signal);
+          return stream ? received : await bufferedResponse(received);
+        },
+        () => controller.abort(),
+      );
+    } catch (error) {
+      unlink();
+      throw error;
+    }
+    if (!stream) {
+      unlink();
+      return response;
+    }
+    return releaseAfterBody(response, unlink);
+  }
+
+  /**
    * Settles one transport attempt at the first of its own result, the
-   * caller's abort, or the deadline. With `linkSignal` the attempt receives a
-   * signal that aborts on either; it stays linked to the caller's signal after
-   * the attempt settles so a fetch body read later remains cancellable.
+   * caller's abort, or the deadline. `onDeadline` stops the attempt's network
+   * work when the deadline passes; a requestUrl attempt has none to stop.
    */
   private within<T>(
     signal: AbortSignal | undefined,
     deadline: Deadline | null,
-    linkSignal: boolean,
-    attempt: (signal: AbortSignal | undefined) => Promise<T>,
+    attempt: () => Promise<T>,
+    onDeadline?: () => void,
   ): Promise<T> {
     if (signal?.aborted) return Promise.reject(abortError());
-    if (!deadline && !signal) return attempt(undefined);
+    if (!deadline && !signal) return attempt();
     const remainingMs = deadline ? deadline.at - Date.now() : 0;
     if (deadline && remainingMs <= 0) {
       return Promise.reject(new PlatformRequestTimeoutError(deadline.timeoutMs));
-    }
-    const controller = linkSignal ? new AbortController() : null;
-    if (controller && signal) {
-      signal.addEventListener("abort", () => controller.abort(), { once: true });
     }
     return new Promise<T>((resolve, reject) => {
       let timer: number | undefined;
@@ -331,12 +428,12 @@ export class PlatformRequestClient {
           settle();
           // Reject first so the attempt's own abort rejection is ignored.
           reject(new PlatformRequestTimeoutError(deadline.timeoutMs));
-          controller?.abort();
+          onDeadline?.();
         }, remainingMs);
       }
       let pending: Promise<T>;
       try {
-        pending = Promise.resolve(attempt(controller?.signal ?? signal));
+        pending = Promise.resolve(attempt());
       } catch (error) {
         settle();
         reject(toError(error, "The request failed."));

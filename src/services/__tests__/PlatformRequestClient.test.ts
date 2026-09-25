@@ -1,3 +1,4 @@
+import { getEventListeners } from "events";
 import { requestUrl } from "obsidian";
 import {
   getPlatformResponseDeliveryMode,
@@ -608,24 +609,117 @@ describe("PlatformRequestClient", () => {
       expect(requestUrl).not.toHaveBeenCalled();
     });
 
-    it("keeps a caller abort linked to a fetch body read after the response arrives", async () => {
+    it("keeps the deadline over a direct fetch body that stalls after its headers", async () => {
       const client = new PlatformRequestClient();
-      const controller = new AbortController();
       let fetchSignal: AbortSignal | undefined;
       global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
         fetchSignal = init?.signal ?? undefined;
-        return new Response("{}", { status: 200 });
+        // The headers arrive at once; the body never does.
+        return new Response(new ReadableStream<Uint8Array>({
+          start(body) {
+            fetchSignal?.addEventListener("abort", () => body.error(new DOMException("aborted", "AbortError")));
+          },
+        }), { status: 200 });
       }) as typeof fetch;
 
-      await client.request({
+      const request = client.request({
         url: "http://127.0.0.1:8787/api/plugin/license/validate",
         method: "GET",
-        signal: controller.signal,
       });
-      expect(fetchSignal).not.toBe(controller.signal);
-      expect(fetchSignal?.aborted).toBe(false);
+      const rejected = expect(request).rejects.toBeInstanceOf(PlatformRequestTimeoutError);
+      await jest.advanceTimersByTimeAsync(PLATFORM_REQUEST_TIMEOUT_MS - 1);
+      expect(await settled(request)).toBe("pending");
+      await jest.advanceTimersByTimeAsync(1);
+
+      await rejected;
+      expect(fetchSignal?.aborted).toBe(true);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("reads a direct fetch body within the deadline, then unlinks a reused caller signal", async () => {
+      const client = new PlatformRequestClient();
+      const controller = new AbortController();
+      const fetchSignals: AbortSignal[] = [];
+      global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        fetchSignals.push(init?.signal as AbortSignal);
+        return new Response(JSON.stringify({ status: "processing" }), {
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": "application/json", "x-request-id": "req-1" },
+        });
+      }) as typeof fetch;
+
+      for (let poll = 0; poll < 3; poll += 1) {
+        const response = await client.request({
+          url: "http://127.0.0.1:8787/api/plugin/documents/doc-1",
+          method: "GET",
+          signal: controller.signal,
+        });
+        expect(response).toMatchObject({ status: 200, statusText: "OK" });
+        expect(response.headers.get("x-request-id")).toBe("req-1");
+        await expect(response.json()).resolves.toEqual({ status: "processing" });
+      }
+
+      // No finished request stays reachable from the long-lived signal.
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      controller.abort();
+      expect(fetchSignals.some((signal) => signal.aborted)).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("buffers a bodiless direct fetch response", async () => {
+      const client = new PlatformRequestClient();
+      global.fetch = jest.fn(async () => new Response(null, { status: 204 })) as typeof fetch;
+
+      const response = await client.request({
+        url: "http://127.0.0.1:8787/api/plugin/embeddings/index",
+        method: "DELETE",
+      });
+
+      expect(response.status).toBe(204);
+      await expect(response.text()).resolves.toBe("");
+    });
+
+    it("keeps a streaming body linked to the caller only until it is consumed", async () => {
+      const client = new PlatformRequestClient();
+      const controller = new AbortController();
+      const encoder = new TextEncoder();
+      let fetchSignal: AbortSignal | undefined;
+      let finishBody!: () => void;
+      global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        fetchSignal = init?.signal ?? undefined;
+        return new Response(new ReadableStream<Uint8Array>({
+          start(body) {
+            body.enqueue(encoder.encode("data: 1\n\n"));
+            finishBody = () => body.close();
+            fetchSignal?.addEventListener("abort", () => body.error(new DOMException("aborted", "AbortError")));
+          },
+        }), { status: 200, headers: { "content-type": "text/event-stream" } });
+      }) as typeof fetch;
+      const openStream = () => client.request({
+        url: "http://127.0.0.1:8787/api/plugin/agent/turn",
+        method: "POST",
+        body: {},
+        stream: true,
+        preserveResponseHeaders: true,
+        signal: controller.signal,
+        timeoutMs: 5_000,
+      });
+
+      const finished = await openStream();
+      // A streaming deadline bounds only the headers; the open body outlives it.
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
+      finishBody();
+      await expect(finished.text()).resolves.toBe("data: 1\n\n");
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+
+      const open = await openStream();
+      const reader = open.body!.getReader();
+      await reader.read();
       controller.abort();
       expect(fetchSignal?.aborted).toBe(true);
+      await expect(reader.read()).rejects.toMatchObject({ name: "AbortError" });
     });
 
     it("never puts a deadline on a streaming turn, whichever transport carries it", async () => {
