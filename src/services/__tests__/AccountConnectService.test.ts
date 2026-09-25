@@ -38,6 +38,7 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
     settings,
     getSettingsManager: () => ({ updateSettings }),
     getLicenseManager: () => ({ validateLicenseKeyDetailed }),
+    register: jest.fn(),
     registerInterval: jest.fn((timer: number) => timer),
     updateSettings,
     validateLicenseKeyDetailed,
@@ -649,5 +650,113 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
     await jest.advanceTimersByTimeAsync(3_500);
     expect(nativeCalls("/auth/poll")).toHaveLength(2);
     expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+  });
+});
+
+/**
+ * Leaving the sign-in screen stops the poll timer (#359); a return to the app
+ * polls once. The node test window has no events, so these tests install
+ * event targets for the window and document.
+ */
+describe("AccountConnectService abandoned sign-in", () => {
+  const windowEvents = new EventTarget();
+  const documentEvents = Object.assign(new EventTarget(), { hidden: false });
+  let restoreHost: () => void = () => undefined;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    request.mockReset();
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
+    const host = window as unknown as Record<string, unknown>;
+    const saved = {
+      addEventListener: host.addEventListener,
+      removeEventListener: host.removeEventListener,
+      dispatchEvent: host.dispatchEvent,
+      document: (globalThis as Record<string, unknown>).document,
+    };
+    host.addEventListener = windowEvents.addEventListener.bind(windowEvents);
+    host.removeEventListener = windowEvents.removeEventListener.bind(windowEvents);
+    host.dispatchEvent = windowEvents.dispatchEvent.bind(windowEvents);
+    (globalThis as Record<string, unknown>).document = documentEvents;
+    restoreHost = () => {
+      host.addEventListener = saved.addEventListener;
+      host.removeEventListener = saved.removeEventListener;
+      host.dispatchEvent = saved.dispatchEvent;
+      (globalThis as Record<string, unknown>).document = saved.document;
+    };
+  });
+
+  afterEach(() => {
+    // End every sign-in while the host events it listens to still exist.
+    createdServices.splice(0).forEach((service) => service.cancelPending());
+    restoreHost();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  function createPollingService() {
+    const created = createService();
+    const outcomes: ConnectOutcome[] = [];
+    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    return { ...created, outcomes };
+  }
+
+  it("stops polling an abandoned sign-in and polls once each time the user returns", async () => {
+    const { service, plugin, outcomes } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    service.pausePolling();
+    await jest.advanceTimersByTimeAsync(10 * 3_500);
+    expect(request).not.toHaveBeenCalled();
+    expect(service.hasPendingRequest()).toBe(true);
+
+    window.dispatchEvent(new Event("focus"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(10 * 3_500);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(plugin.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ licenseKey: "skss-connected" }),
+    );
+    expect(outcomes).toHaveLength(1);
+
+    // A finished sign-in leaves no return listeners behind.
+    window.dispatchEvent(new Event("focus"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("still completes a paused sign-in from its deep link", async () => {
+    const { service, openedUrls } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    service.pausePolling();
+    const { state } = parseConnectUrl(openedUrls[0]);
+
+    await expect(service.handleProtocolCallback({ state, code: "one-time" })).resolves.toMatchObject({
+      kind: "signed-in",
+    });
+    expect(request.mock.calls[0][0].url).toBe(`${API_BASE_URL}/auth/exchange`);
+  });
+
+  it("ends a pending sign-in when the plugin unloads", async () => {
+    const { service, plugin } = createPollingService();
+    await service.begin("sign-in");
+    service.pausePolling();
+
+    const onUnload = plugin.register.mock.calls[0][0] as () => void;
+    onUnload();
+    window.dispatchEvent(new Event("focus"));
+    await jest.advanceTimersByTimeAsync(10 * 3_500);
+
+    expect(service.hasPendingRequest()).toBe(false);
+    expect(request).not.toHaveBeenCalled();
   });
 });

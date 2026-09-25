@@ -103,6 +103,8 @@ export class AccountConnectService {
   private readonly openUrl: (url: string, ownerWindow?: Window) => Promise<boolean>;
   private pending: PendingConnectRequest | null = null;
   private pollTimer: number | null = null;
+  /** Detaches the one-poll-per-return listeners of a paused sign-in. */
+  private detachReturnPoll: (() => void) | null = null;
   /** Settles when the poll holding the in-flight slot is answered or gives the slot back. */
   private pollSlot: Promise<void> | null = null;
   /** The completion of the latest sign-in, adopted by an exchange that was waiting on it. */
@@ -117,6 +119,8 @@ export class AccountConnectService {
   ) {
     this.requestClient = requestClient;
     this.openUrl = openUrl;
+    // Unloading ends any pending sign-in: its timer, listeners, and requests.
+    this.plugin.register(() => this.endPending());
   }
 
   public hasPendingRequest(): boolean {
@@ -126,6 +130,28 @@ export class AccountConnectService {
   public cancelPending(): void {
     this.endPending();
     this.completion = null;
+  }
+
+  /**
+   * The user left the sign-in screen without finishing it (#359). The poll
+   * timer stops; the pending sign-in stays open until it expires, so the deep
+   * link, a pasted code, or coming back to Obsidian (one poll per return)
+   * still completes it.
+   */
+  public pausePolling(): void {
+    if (!this.activePending()) return;
+    this.stopPolling();
+    if (this.detachReturnPoll || typeof window === "undefined") return;
+    const pollOnReturn = (): void => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void this.pollOnce();
+    };
+    window.addEventListener("focus", pollOnReturn);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", pollOnReturn);
+    this.detachReturnPoll = () => {
+      window.removeEventListener("focus", pollOnReturn);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", pollOnReturn);
+    };
   }
 
   /**
@@ -184,6 +210,7 @@ export class AccountConnectService {
 
   private startPolling(): void {
     this.stopPolling();
+    this.stopReturnPoll();
     if (typeof window === "undefined") return;
     const timer = window.setInterval(() => {
       void this.pollOnce();
@@ -200,6 +227,11 @@ export class AccountConnectService {
     }
   }
 
+  private stopReturnPoll(): void {
+    this.detachReturnPoll?.();
+    this.detachReturnPoll = null;
+  }
+
   /**
    * Ends the pending sign-in, whether it completed, failed, was cancelled,
    * superseded, or expired: stops polling and aborts its requests in flight.
@@ -209,6 +241,7 @@ export class AccountConnectService {
     this.pending = null;
     this.pollSlot = null;
     this.stopPolling();
+    this.stopReturnPoll();
     pending?.controller.abort();
   }
 

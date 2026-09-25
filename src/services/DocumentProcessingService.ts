@@ -11,7 +11,6 @@ import { sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { ManagedJobClient } from "./managed/ManagedJobClient";
-import { ManagedJobRecoveryStore } from "./managed/ManagedJobRecoveryStore";
 import {
   ManagedDocumentProcessingAdapter,
   type ManagedDocumentDownloadResult,
@@ -21,7 +20,6 @@ import {
   ManagedDocumentLocalStaging,
   type ManagedDocumentStagedArtifact,
 } from "./managed/ManagedDocumentLocalStaging";
-import { ObsidianManagedRecoveryAdapter } from "./managed/adapters/ObsidianManagedRecoveryAdapter";
 
 const STAGE_ICONS: Record<DocumentProcessingStage, string> = {
   queued: "inbox",
@@ -220,7 +218,7 @@ export class DocumentProcessingService {
     this.managedAdapter = new ManagedDocumentProcessingAdapter({
       admission: graph.admission,
       jobs: new ManagedJobClient(graph.transport).documents,
-      recovery: new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app)),
+      recovery: graph.recovery,
     });
     return this.managedAdapter;
   }

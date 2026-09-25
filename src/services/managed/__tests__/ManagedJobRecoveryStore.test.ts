@@ -291,7 +291,47 @@ describe("ManagedJobRecoveryStore hardening", () => {
     ["video_generation", "queued", "processing"], ["video_generation", "processing", "processing"], ["video_generation", "succeeded", "result_ready"], ["video_generation", "failed", "result_ready"], ["video_generation", "expired", "result_ready"],
   ] as const)("reconciles acknowledged processing %s %s → %s", async (capability, status, expected) => {
     const adapter = new MemoryAdapter(); const id = `processing-${capability}-${status}`; const record = { schemaVersion: 1, revision: 1, capability, operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
-    adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const result = await new ManagedJobRecoveryStore(adapter).applyReconciliation(capability, id, 1, status); expect(result).toMatchObject({ phase: expected, revision: 2 });
+    adapter.files.set(`.systemsculpt/managed-jobs/${capability}/${id}.json`, JSON.stringify(record)); const result = await new ManagedJobRecoveryStore(adapter).applyReconciliation(capability, id, 1, status);
+    // A job still running keeps its phase, so the record is not rewritten.
+    expect(result).toMatchObject({ phase: expected, revision: expected === "processing" ? 1 : 2 });
+    expect(adapter.events.some((event) => event.startsWith("write:"))).toBe(expected !== "processing");
+  });
+
+  it("polls a running job without any recovery writes and persists the terminal transition once", async () => {
+    const adapter = new MemoryAdapter(); const id = "running-transcription"; const path = `.systemsculpt/managed-jobs/transcription/${id}.json`;
+    adapter.files.set(path, JSON.stringify({ schemaVersion: 1, revision: 1, capability: "transcription", operationId: id, source: { identity: "vault:source", fingerprint: `sha256:${"a".repeat(64)}` }, jobId: "job", phase: "processing", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }));
+    const store = new ManagedJobRecoveryStore(adapter);
+    let record = await store.read("transcription", id);
+    for (const status of ["queued", "processing", "processing", "processing"] as const) {
+      record = await store.applyReconciliation("transcription", id, record.revision, status);
+    }
+    expect(adapter.events).toEqual([]);
+    expect(record).toMatchObject({ phase: "processing", revision: 1 });
+
+    record = await store.applyReconciliation("transcription", id, record.revision, "succeeded");
+    expect(record).toMatchObject({ phase: "result_ready", revision: 2 });
+    expect(JSON.parse(adapter.files.get(path)!)).toMatchObject({ phase: "result_ready", revision: 2 });
+  });
+
+  it("scans the recovery directory once per store however many jobs use it", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new ManagedJobRecoveryStore(adapter);
+    const list = jest.spyOn(adapter, "list");
+
+    await Promise.all([store.initialize(), store.initialize()]);
+    await store.initialize();
+
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed recovery scan on the next use", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new ManagedJobRecoveryStore(adapter);
+    const list = jest.spyOn(adapter, "list").mockRejectedValueOnce(new Error("busy"));
+
+    await expect(store.initialize()).rejects.toThrow("busy");
+    await expect(store.initialize()).resolves.toBeUndefined();
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it.each([

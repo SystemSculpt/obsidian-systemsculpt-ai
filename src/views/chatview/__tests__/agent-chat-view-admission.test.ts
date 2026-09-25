@@ -798,7 +798,7 @@ describe("AgentChatView composer admission", () => {
       plugin: {
         settings: { licenseKey: "test-license" },
       },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       workspace: { setCreditsBalance },
       creditsPromise: null,
       creditsBalance: null,
@@ -848,7 +848,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordClientRequestLifecycle },
       workspace: { setCreditsBalance: jest.fn() },
       creditsPromise: null,
@@ -1128,7 +1128,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
       workspace: { setCreditsBalance },
       creditsPromise: null,
@@ -1171,7 +1171,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
       workspace: { setCreditsBalance: jest.fn() },
       creditsPromise: null,

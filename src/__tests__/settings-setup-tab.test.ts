@@ -18,7 +18,7 @@ jest.mock("../services/SystemSculptService", () => {
   return {
     SystemSculptService: {
       getInstance: jest.fn(() => ({
-        getCreditsBalance: getCreditsBalanceMock,
+        readCreditsBalance: getCreditsBalanceMock,
       })),
     },
   };

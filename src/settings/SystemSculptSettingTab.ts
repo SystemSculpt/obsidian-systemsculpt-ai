@@ -453,7 +453,19 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
   hide(): void {
     this.disposeRender();
+    this.pauseUnfinishedSignIn();
     super.hide();
+  }
+
+  /**
+   * Closing settings leaves a browser sign-in started here without its screen,
+   * so its poll timer stops (#359). Returning to Obsidian, the deep link, or a
+   * pasted code still completes it.
+   */
+  private pauseUnfinishedSignIn(): void {
+    const plugin = this.plugin as Partial<Pick<SystemSculptPlugin, "getAccountConnectService">>;
+    if (typeof plugin.getAccountConnectService !== "function") return;
+    plugin.getAccountConnectService().pausePolling();
   }
 
   private disposeRender(): void {

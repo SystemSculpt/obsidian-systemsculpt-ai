@@ -986,7 +986,7 @@ export class EmbeddingsManager {
   private async preflightCredits(): Promise<void> {
     let balance;
     try {
-      balance = await this.plugin.aiService.getCreditsBalance();
+      balance = await this.plugin.aiService.readCreditsBalance();
     } catch {
       // The managed route remains authoritative when balance lookup is unavailable.
       return;

@@ -53,7 +53,22 @@ export class ManagedJobRecoveryStore {
     this.locks = domainLocks.get(adapter.storageDomain) ?? new Map<string, Promise<void>>(); domainLocks.set(adapter.storageDomain, this.locks);
   }
 
-  async initialize(): Promise<void> {
+  private initialization: Promise<void> | null = null;
+
+  /**
+   * Recovers and prunes every record once per store. The plugin shares one
+   * store, so later jobs do not rescan the directory; a failed scan is
+   * retried by the next caller.
+   */
+  initialize(): Promise<void> {
+    const pending = this.initialization ??= this.scan();
+    void pending.catch(() => {
+      if (this.initialization === pending) this.initialization = null;
+    });
+    return pending;
+  }
+
+  private async scan(): Promise<void> {
     await this.adapter.mkdir(this.root); const files = await this.adapter.list(this.root);
     const bases = new Set(files.map(p => p.replace(/\.(?:tmp|journal|bak|delete-journal|deleting)$/, "")).filter(p => p.endsWith(".json"))); const errors: ManagedRecoveryError[] = [];
     for (const path of [...bases].sort()) { try { await this.serial(path, async () => { await this.recover(path); if (await this.adapter.exists(path)) { const record = await this.readCandidate(path); if (this.shouldPruneInitializedRecord(record)) await this.deleteRecord(path, record); } }); } catch (error) { errors.push(error instanceof ManagedRecoveryError ? error : new ManagedRecoveryError("recovery_corrupt", "Recovery initialization failed.")); } }
@@ -184,7 +199,8 @@ export class ManagedJobRecoveryStore {
   acknowledgePart(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number, part: { partNumber: number; etag: string }) { return this.mutate(c, id, rev, r => { if (r.phase !== "part_dispatching" || r.pendingDispatch?.partNumber !== part.partNumber || !part.etag || part.etag.length > 1024) this.illegal(); return { ...r, phase: "uploading", pendingDispatch: undefined, completedParts: [...(r.completedParts ?? []).filter(x => x.partNumber !== part.partNumber), part] }; }); }
   acknowledgeComplete(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number) { return this.ack(c, id, rev, "complete_dispatching", "upload_completed"); }
   acknowledgeStarted(c: Exclude<ManagedRecoveryCapability, "image_generation" | "video_generation">, id: string, rev: number) { return this.ack(c, id, rev, "start_dispatching", "processing"); }
-  applyReconciliation(c: ManagedRecoveryCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { const dispatching = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"].includes(r.phase); if (!dispatching && r.phase !== "processing") this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); if (!dispatching && phase === "blocked_ambiguous") throw new ManagedRecoveryError("reconciliation_error", "Invalid observed status for acknowledged processing job."); return { ...r, phase, pendingDispatch: undefined }; }); }
+  /** An unchanged processing phase is not rewritten: polls of a running job cost no writes. */
+  applyReconciliation(c: ManagedRecoveryCapability, id: string, rev: number, observedStatus: WireStatus) { return this.mutate(c, id, rev, r => { const dispatching = ["prepare_dispatching", "create_dispatching", "part_dispatching", "complete_dispatching", "start_dispatching", "abort_dispatching"].includes(r.phase); if (!dispatching && r.phase !== "processing") this.illegal("Record is not reconcilable."); const phase = ManagedJobRecoveryStore.reconcile(c, r.phase, observedStatus); if (!dispatching && phase === "blocked_ambiguous") throw new ManagedRecoveryError("reconciliation_error", "Invalid observed status for acknowledged processing job."); if (!dispatching && phase === r.phase) return r; return { ...r, phase, pendingDispatch: undefined }; }); }
 
   delete(c: ManagedRecoveryCapability, id: string, rev: number): Promise<void> {
     const path = this.path(c, id); return this.serial(path, async () => {
@@ -212,7 +228,8 @@ export class ManagedJobRecoveryStore {
   }
 
   private ack(c: ManagedRecoveryCapability, id: string, rev: number, from: ManagedRecoveryPhase, to: ManagedRecoveryPhase, extra: Partial<ManagedJobRecoveryRecord> = {}) { return this.mutate(c, id, rev, r => { if (r.phase !== from) this.illegal(); return { ...r, ...extra, phase: to, pendingDispatch: undefined }; }); }
-  private mutate(c: ManagedRecoveryCapability, id: string, rev: number, fn: (r: ManagedJobRecoveryRecord) => ManagedJobRecoveryRecord): Promise<ManagedJobRecoveryRecord> { const path = this.path(c, id); return this.serial(path, async () => { await this.recover(path); const current = await this.readRecord(path, c, id); this.cas(current, rev, c, id); const proposed = fn(current); const next = { ...proposed, schemaVersion: 1 as const, revision: current.revision + 1, capability: current.capability, operationId: current.operationId, source: current.source, createdAt: current.createdAt, updatedAt: this.now() }; this.validateRecord(next); await this.persist(path, next, current.revision); return next; }); }
+  /** A mutation that returns the current record unchanged is not persisted. */
+  private mutate(c: ManagedRecoveryCapability, id: string, rev: number, fn: (r: ManagedJobRecoveryRecord) => ManagedJobRecoveryRecord): Promise<ManagedJobRecoveryRecord> { const path = this.path(c, id); return this.serial(path, async () => { await this.recover(path); const current = await this.readRecord(path, c, id); this.cas(current, rev, c, id); const proposed = fn(current); if (proposed === current) return current; const next = { ...proposed, schemaVersion: 1 as const, revision: current.revision + 1, capability: current.capability, operationId: current.operationId, source: current.source, createdAt: current.createdAt, updatedAt: this.now() }; this.validateRecord(next); await this.persist(path, next, current.revision); return next; }); }
   private serial<T>(key: string, fn: () => Promise<T>): Promise<T> { const previous = this.locks.get(key) ?? Promise.resolve(); let release!: () => void; const gate = new Promise<void>(r => { release = r; }); const tail = previous.catch(() => undefined).then(() => gate); this.locks.set(key, tail); return previous.catch(() => undefined).then(fn).finally(() => { release(); if (this.locks.get(key) === tail) this.locks.delete(key); }); }
   private path(c: ManagedRecoveryCapability, id: string) { if (!capabilities.includes(c) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) throw new ManagedRecoveryError("invalid_record", "Invalid recovery identity."); return `${this.root}/${c}/${id}.json`; }
   private illegal(message = "Illegal recovery transition."): never { throw new ManagedRecoveryError("illegal_transition", message); }

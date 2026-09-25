@@ -109,14 +109,16 @@ function createPlugin(settings: Record<string, unknown> = {}) {
   const begin = jest.fn().mockResolvedValue(true);
   const reopen = jest.fn().mockResolvedValue(true);
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
+  const pausePolling = jest.fn();
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
-    getAccountConnectService: () => ({ begin, reopen, submitManualCode }),
+    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pausePolling }),
     openNewChat: jest.fn(),
     begin,
     reopen,
     submitManualCode,
+    pausePolling,
   } as any;
 }
 
@@ -238,6 +240,46 @@ describe("UpgradePlanModal", () => {
 
     expect(modal.modalEl.textContent).toContain("Couldn't open your browser.");
     modal.onClose();
+  });
+
+  it("stops sign-in polling when the user leaves the browser handoff", async () => {
+    const plugin = createPlugin();
+    const dismissed = new UpgradePlanModal(plugin);
+    dismissed.onOpen();
+    findButtonByText(dismissed.modalEl, "Sign in").click();
+    await flushPromises();
+    dismissed.onClose();
+    expect(plugin.pausePolling).toHaveBeenCalledTimes(1);
+
+    const backedOut = new UpgradePlanModal(plugin);
+    backedOut.onOpen();
+    findButtonByText(backedOut.modalEl, "Sign in").click();
+    await flushPromises();
+    findButtonByText(backedOut.modalEl, "Back").click();
+    expect(plugin.pausePolling).toHaveBeenCalledTimes(2);
+    backedOut.onClose();
+    expect(plugin.pausePolling).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps sign-in polling when the modal closes for a completed sign-in or a pasted code", async () => {
+    const plugin = createPlugin();
+    const completed = UpgradePlanModal.openOnce(plugin);
+    findButtonByText(completed.modalEl, "Sign in").click();
+    await flushPromises();
+    UpgradePlanModal.closeCurrent();
+    completed.onClose();
+
+    const pasted = new UpgradePlanModal(plugin);
+    pasted.onOpen();
+    findButtonByText(pasted.modalEl, "Sign in").click();
+    await flushPromises();
+    const codeInput = pasted.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
+    codeInput!.value = "code-123";
+    findButtonByText(pasted.modalEl, "Complete sign-in").click();
+    await flushPromises();
+    pasted.onClose();
+
+    expect(plugin.pausePolling).not.toHaveBeenCalled();
   });
 
   it("renders the soft onboarding welcome with an explore escape hatch", () => {

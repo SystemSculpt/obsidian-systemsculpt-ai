@@ -291,7 +291,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("This note would otherwise be uploaded for embeddings. ".repeat(4));
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => ({
+      readCreditsBalance: jest.fn(async () => ({
         usageClass: "customer",
         totalRemaining: 5,
         heldInFlight: 5,
@@ -320,7 +320,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const balanceStarted = new Promise<void>((resolve) => { signalBalanceStarted = resolve; });
     const balanceRelease = new Promise<void>((resolve) => { releaseBalance = resolve; });
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => {
+      readCreditsBalance: jest.fn(async () => {
         signalBalanceStarted();
         await balanceRelease;
         return {

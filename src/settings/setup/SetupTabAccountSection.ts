@@ -323,7 +323,7 @@ export function renderAccountSection(
     const syncCredits = async () => {
       try {
         creditsSetting.setDesc("Fetching credits balance…");
-        const balance = await aiService.getCreditsBalance();
+        const balance = await aiService.readCreditsBalance();
         if (
           (
             balance.usageClass === "master_auth"

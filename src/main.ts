@@ -57,6 +57,8 @@ import { ManagedTextGenerationAdapter } from "./services/managed/ManagedTextGene
 import { ManagedEmbeddingsIndexAdapter } from "./services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { ManagedAdmission } from "./services/managed/ManagedAdmission";
 import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
+import { ManagedJobRecoveryStore } from "./services/managed/ManagedJobRecoveryStore";
+import { ObsidianManagedRecoveryAdapter } from "./services/managed/adapters/ObsidianManagedRecoveryAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AccountConnectModal } from "./modals/AccountConnectModal";
@@ -73,6 +75,8 @@ export type ManagedCapabilityGraph = Readonly<{
   admission: ManagedAdmission;
   textGeneration: ManagedTextGenerationAdapter;
   embeddingsIndex: ManagedEmbeddingsIndexAdapter;
+  /** The one recovery ledger for this plugin's managed jobs. */
+  recovery: ManagedJobRecoveryStore;
 }>;
 
 const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
@@ -208,7 +212,8 @@ export default class SystemSculptPlugin extends Plugin {
       const admission = new ManagedAdmission({ transport, licenseKey });
       const textGeneration = new ManagedTextGenerationAdapter({ admission, transport });
       const embeddingsIndex = new ManagedEmbeddingsIndexAdapter(transport);
-      this.managedCapabilityGraph = Object.freeze({ transport, admission, textGeneration, embeddingsIndex });
+      const recovery = new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app));
+      this.managedCapabilityGraph = Object.freeze({ transport, admission, textGeneration, embeddingsIndex, recovery });
     }
     return this.managedCapabilityGraph;
   }
@@ -2029,7 +2034,8 @@ export default class SystemSculptPlugin extends Plugin {
         fallbackPurchaseUrl: LICENSE_URL,
         loadBalance: async () => {
           try {
-            const balance = await this.aiService.getCreditsBalance();
+            // The modal is an explicit look: read fresh and update every view.
+            const balance = await this.aiService.readCreditsBalance({ fresh: true });
             lastKnownBalance = balance;
             if (
               (
