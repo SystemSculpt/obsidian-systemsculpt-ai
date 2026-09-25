@@ -28,6 +28,18 @@ const RECORD_FILE_NAME = /^[a-f0-9]{64}\.json$/;
 export const MAX_LEGACY_JOURNAL_CHARACTERS = 4 * 1024 * 1024;
 export const MAX_LEGACY_JOURNAL_BYTES = 4 * 1024 * 1024;
 export const MAX_LEGACY_JOURNAL_RECORDS = 10_000;
+/**
+ * A receipt only matters while the server may still ask for its tool call
+ * again after a reconnect, which is minutes, not weeks.
+ */
+export const MUTATION_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
+/** The size bound never removes a receipt from the last day. */
+const MIN_TRIMMED_RECEIPT_AGE_MS = 24 * 60 * 60 * 1000;
+/** Cleanup yields to claims between batches. */
+const CLEANUP_BATCH = 32;
+
+export type MutationReceiptRetention = Readonly<{ maxAgeMs: number; maxReceipts: number }>;
 
 export function canonicalAgentToolInput(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? String(value);
@@ -144,6 +156,7 @@ type SharedJournalState = {
   operations: Promise<void>;
   directoryReady: boolean;
   unavailable: boolean;
+  cleanupScheduled: boolean;
 };
 
 const SHARED_JOURNALS = new WeakMap<object, Map<string, SharedJournalState>>();
@@ -161,6 +174,7 @@ function sharedJournalState(adapter: object, path: string): SharedJournalState {
       operations: Promise.resolve(),
       directoryReady: false,
       unavailable: false,
+      cleanupScheduled: false,
     };
     byPath.set(path, state);
   }
@@ -180,7 +194,9 @@ export type ThinAgentMutationClaim =
 
 /**
  * Crash-safe receipt store for local vault mutations. Each action has one
- * keyed receipt file. Receipts live until their conversation is deleted.
+ * keyed receipt file. The first time a conversation goes idle in a session,
+ * receipts older than 30 days are removed in the background, then the oldest
+ * beyond 5,000.
  */
 export class AgentMutationJournal {
   private readonly state: SharedJournalState;
@@ -191,6 +207,10 @@ export class AgentMutationJournal {
     private readonly adapter: MutationJournalAdapter,
     private readonly path: string,
     private readonly now: () => number = Date.now,
+    private readonly retention: MutationReceiptRetention = {
+      maxAgeMs: MUTATION_RECEIPT_RETENTION_MS,
+      maxReceipts: MAX_RETAINED_MUTATION_RECEIPTS,
+    },
   ) {
     this.state = sharedJournalState(adapter, path);
     this.recordsPath = `${path}.records`;
@@ -339,8 +359,80 @@ export class AgentMutationJournal {
     });
   }
 
+  /**
+   * Settles when every queued receipt operation has. Conversation detach is
+   * the idle point that starts the once-per-session receipt cleanup, which
+   * runs after the returned promise so detach never waits for it.
+   */
   public idle(): Promise<void> {
-    return this.state.operations;
+    const settled = this.state.operations;
+    this.scheduleReceiptCleanup();
+    return settled;
+  }
+
+  private scheduleReceiptCleanup(): void {
+    const list = this.adapter.list;
+    const remove = this.adapter.remove;
+    if (this.state.cleanupScheduled || this.state.unavailable || !list || !remove) return;
+    this.state.cleanupScheduled = true;
+    const prefix = `${this.recordsPath}/`;
+    void this.serialize(async () => {
+      // Finish any legacy migration first, and leave a damaged journal alone.
+      await this.ensureInitialized();
+      if (this.state.unavailable || !(await this.adapter.exists(this.recordsPath))) return [];
+      const listed: { files: string[] } = await list.call(this.adapter, this.recordsPath);
+      return listed.files.filter((storagePath) =>
+        storagePath.startsWith(prefix) && RECORD_FILE_NAME.test(storagePath.slice(prefix.length)));
+    }).then((paths) => this.cleanupReceipts(paths, 0, [])).catch(() => undefined);
+  }
+
+  /** Age out receipts one batch at a time, then trim the oldest beyond the size bound. */
+  private async cleanupReceipts(
+    paths: readonly string[],
+    offset: number,
+    retained: Array<{ storagePath: string; updatedAt: number }>,
+  ): Promise<void> {
+    if (offset < paths.length) {
+      await this.serialize(async () => {
+        if (this.state.unavailable) return;
+        const now = this.now();
+        for (const storagePath of paths.slice(offset, offset + CLEANUP_BATCH)) {
+          const updatedAt = await this.receiptUpdatedAt(storagePath, now);
+          if (updatedAt === null) continue;
+          if (now - updatedAt >= this.retention.maxAgeMs) await this.adapter.remove!(storagePath);
+          else retained.push({ storagePath, updatedAt });
+        }
+      });
+      return this.cleanupReceipts(paths, offset + CLEANUP_BATCH, retained);
+    }
+    const now = this.now();
+    const excess = retained
+      .sort((first, second) => first.updatedAt - second.updatedAt)
+      .slice(0, Math.max(0, retained.length - this.retention.maxReceipts))
+      .filter((receipt) => now - receipt.updatedAt >= MIN_TRIMMED_RECEIPT_AGE_MS);
+    for (let index = 0; index < excess.length; index += CLEANUP_BATCH) {
+      await this.serialize(async () => {
+        if (this.state.unavailable) return;
+        for (const receipt of excess.slice(index, index + CLEANUP_BATCH)) {
+          await this.adapter.remove!(receipt.storagePath);
+        }
+      });
+    }
+  }
+
+  /**
+   * A recent modification time proves a receipt is recent without reading it.
+   * An older one is confirmed from the receipt itself before removal. A
+   * receipt that cannot be read is left in place.
+   */
+  private async receiptUpdatedAt(storagePath: string, now: number): Promise<number | null> {
+    try {
+      const stat = this.adapter.stat ? await this.adapter.stat.call(this.adapter, storagePath) : null;
+      if (stat && Number.isFinite(stat.mtime) && now - stat.mtime < this.retention.maxAgeMs) return stat.mtime;
+      return parseKeyedJournal(JSON.parse(await this.adapter.read(storagePath))).updatedAt;
+    } catch {
+      return null;
+    }
   }
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {

@@ -3,6 +3,7 @@ import {
   AgentMutationJournal,
   MAX_LEGACY_JOURNAL_CHARACTERS,
   MAX_LEGACY_JOURNAL_RECORDS,
+  MUTATION_RECEIPT_RETENTION_MS,
   canonicalAgentToolInput,
 } from "../MutationJournal";
 
@@ -622,5 +623,112 @@ describe("AgentMutationJournal", () => {
       toolCallId: "call-0",
     });
     expect(harness.adapter.list).toHaveBeenCalledTimes(1);
+  });
+
+  describe("idle receipt cleanup", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    async function settle(journal: AgentMutationJournal): Promise<void> {
+      for (let turn = 0; turn < 20; turn += 1) await journal.idle();
+    }
+
+    it("removes receipts older than 30 days after a conversation goes idle, once per session", async () => {
+      const harness = adapterHarness();
+      let clock = 1_000;
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock);
+      await journal.claim("conversation-old", "call-old", "write", { index: 0 });
+      await journal.complete("conversation-old", "call-old", "write", { index: 0 }, { success: true });
+      clock += MUTATION_RECEIPT_RETENTION_MS;
+      await journal.claim("conversation-new", "call-new", "move", {});
+      expect(harness.adapter.list).not.toHaveBeenCalled();
+
+      // Detach waits only for queued receipt work, not for the cleanup.
+      await journal.idle();
+      expect(recordsIn(harness)).toHaveLength(2);
+      await settle(journal);
+
+      expect(recordsIn(harness)).toEqual([
+        expect.objectContaining({ conversationId: "conversation-new", toolCallId: "call-new" }),
+      ]);
+      await expect(journal.inspect("conversation-old", "call-old", "write", { index: 0 }))
+        .resolves.toEqual({ kind: "absent" });
+      await expect(journal.inspect("conversation-new", "call-new", "move", {}))
+        .resolves.toEqual({ kind: "outcome-unknown" });
+
+      harness.adapter.list.mockClear();
+      await settle(journal);
+      expect(harness.adapter.list).not.toHaveBeenCalled();
+    });
+
+    it("trims the oldest receipts beyond the size bound but keeps the last day", async () => {
+      const harness = adapterHarness();
+      let clock = 0;
+      // Report real modification times, which order receipts without reading them.
+      harness.adapter.stat.mockImplementation(async (path: string) => {
+        const content = harness.file(path);
+        if (content === undefined) return null;
+        const mtime = (JSON.parse(content) as { record: { updatedAt: number } }).record.updatedAt;
+        return { type: "file" as const, ctime: mtime, mtime, size: content.length };
+      });
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock, {
+        maxAgeMs: MUTATION_RECEIPT_RETENTION_MS,
+        maxReceipts: 1,
+      });
+      for (const [index, at] of [0, DAY, 2 * DAY, 2 * DAY + 60_000].entries()) {
+        clock = at;
+        await journal.claim("conversation", `call-${index}`, "write", { index });
+      }
+      clock = 2 * DAY + 60 * 60_000;
+
+      harness.adapter.read.mockClear();
+      await settle(journal);
+
+      expect(recordsIn(harness).map((record) => (record as { toolCallId: string }).toolCallId).sort())
+        .toEqual(["call-2", "call-3"]);
+      expect(harness.adapter.read).not.toHaveBeenCalled();
+    });
+
+    it("leaves unreadable receipts in place and keeps the journal available", async () => {
+      const harness = adapterHarness();
+      const clock = MUTATION_RECEIPT_RETENTION_MS * 2;
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock);
+      await journal.claim("conversation", "call-1", "write", {});
+      const damaged = `${RECORDS_PATH}/${"f".repeat(64)}.json`;
+      harness.setFile(damaged, "{damaged");
+
+      await settle(journal);
+
+      expect(harness.file(damaged)).toBe("{damaged");
+      expect(harness.file(MIGRATION_MARKER_PATH)).toBeUndefined();
+      await expect(journal.claim("conversation", "call-2", "write", {}))
+        .resolves.toEqual({ kind: "execute" });
+    });
+
+    it("leaves every receipt alone when the journal cannot initialize", async () => {
+      const source = adapterHarness();
+      await new AgentMutationJournal(source.adapter, JOURNAL_PATH, () => 0)
+        .claim("conversation", "call-1", "write", {});
+      const harness = adapterHarness(source.files());
+      harness.setFile(JOURNAL_PATH, "{not a journal");
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => MUTATION_RECEIPT_RETENTION_MS * 2);
+
+      await settle(journal);
+
+      expect(recordsIn(harness)).toHaveLength(1);
+      expect(harness.adapter.remove).not.toHaveBeenCalled();
+    });
+
+    it("skips cleanup when the adapter cannot list or remove files", async () => {
+      const harness = adapterHarness();
+      const journal = new AgentMutationJournal({
+        exists: harness.adapter.exists,
+        read: harness.adapter.read,
+        write: harness.adapter.write,
+        mkdir: harness.adapter.mkdir,
+      }, JOURNAL_PATH, () => MUTATION_RECEIPT_RETENTION_MS * 2);
+      await journal.claim("conversation", "call-1", "write", {});
+      await settle(journal);
+      expect(recordsIn(harness)).toHaveLength(1);
+    });
   });
 });

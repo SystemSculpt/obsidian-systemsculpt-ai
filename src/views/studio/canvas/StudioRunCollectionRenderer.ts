@@ -28,7 +28,8 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
   const render = (): void => {
     if (disposed) return;
     const records = runs.list(options.projectId, options.sources).filter(run => (showCompleted || isActiveAgentRun(run.status)) && `${run.title} ${run.id} ${run.currentActivity}`.toLowerCase().includes(query));
-    const signature = JSON.stringify([groupBy, query, showCompleted, limit, records.map(run => [run.id, run.status])]);
+    const hasOlder = runs.hasOlder(options.projectPath);
+    const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, records.map(run => [run.id, run.status])]);
     if (signature === layoutSignature) {
       for (const run of records) {
         const card = liveCards.get(run.id); if (!card) continue;
@@ -38,7 +39,9 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
       return;
     }
     layoutSignature = signature; body.empty(); liveCards.clear();
-    if (!records.length) { body.createDiv({ cls: 'ss-studio-run-empty', text: 'No runs yet.' }); return; }
+    // Older records stay on disk until asked for, so opening a board reads one page.
+    const loadOlder = (): void => { if (hasOlder) createStudioAction(body, { label: 'Load older runs', testId: 'studio.run.older', onSelect: () => { void runs.loadOlder(options.projectPath, options.projectId).catch(report); } }); };
+    if (!records.length) { body.createDiv({ cls: 'ss-studio-run-empty', text: 'No runs yet.' }); loadOlder(); return; }
     const groups = groupBy === 'status' ? Object.keys(statusLabels) : [...new Set(records.map(run => run.nodeId))];
     for (const group of groups) {
       const members = records.filter(run => (groupBy === 'status' ? run.status : run.nodeId) === group);
@@ -60,6 +63,7 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
       }
       if (members.length > limit) createStudioAction(lane, { label: 'Show more', testId: 'studio.run.more', onSelect: () => { limit += 25; render(); } });
     }
+    loadOlder();
   };
   const unsubscribe = runs.subscribe(projectId => { if (projectId === options.projectId) render(); });
   void runs.load(options.projectPath, options.projectId).then(render).catch(error => { if (!disposed) body.setText(error instanceof Error ? error.message : 'Run history could not load.'); });
