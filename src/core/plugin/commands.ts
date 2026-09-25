@@ -35,6 +35,8 @@ type StudioCommandViewLike = {
 
 type ChatCommandViewLike = {
   messages: ChatMessage[];
+  /** Cheap emptiness check; `messages` copies the transcript. */
+  messageCount?: number;
   addFileToContext(file: TFile): Promise<void>;
   focusInput(): void;
   getChatHistoryFilePath?(): string | null;
@@ -398,7 +400,7 @@ export class CommandManager {
         // First check if we're in a chat view
         const chatView = this.getActiveChatView();
         if (chatView) {
-          if (chatView.messages.length === 0) return false;
+          if ((chatView.messageCount ?? chatView.messages.length) === 0) return false;
           if (!checking) {
             void (async () => {
               // Show initial notice

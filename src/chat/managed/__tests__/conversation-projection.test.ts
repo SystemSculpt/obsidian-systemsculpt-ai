@@ -1,4 +1,5 @@
 import { ConversationProjection, type RunPresentation } from "../ConversationProjection";
+import { deepFreeze } from "../../../utils/immutableJson";
 import type { AgentSessionSnapshot } from "../AuthoritativeSession";
 import type { LocalToolCall, WireMessage, WirePart } from "../WireConversation";
 import type { ThinAgentRunTerminalData } from "../../../services/managed/ThinAgentV1Contract";
@@ -151,6 +152,64 @@ describe("ConversationProjection", () => {
     projection.observe(snapshot([user()]), turn);
     expect(projection.present(turn, facts({ tools: [], executingToolIds: [call.callId] })))
       .toMatchObject({ status: "waiting", waitingReason: "local_tool", statusLabel: "Working in your vault" });
+  });
+
+  it("keys history by revision and reuses it for equal content without serializing the transcript", () => {
+    const { projection, turn } = setup();
+    const stringify = jest.spyOn(JSON, "stringify");
+    try {
+      projection.observe(snapshot(deepFreeze([user(), assistant([{ type: "text", text: "Done" }])])), turn);
+      const first = projection.history({ kind: "presentation", now: 1 })!;
+      // A full resynchronization delivers equal content as new objects.
+      projection.observe(snapshot(deepFreeze([user(), assistant([{ type: "text", text: "Done" }])])), turn);
+      const second = projection.history({ kind: "presentation", now: 2 })!;
+      expect(second).toBe(first);
+      expect(first.key.length).toBeLessThan(32);
+      expect(stringify.mock.calls.some(([value]) => Array.isArray(value)
+        && value.some((entry) => (entry as { id?: unknown })?.id === "user-1"))).toBe(false);
+
+      projection.observe(snapshot(deepFreeze([user(), assistant([{ type: "text", text: "Changed" }])])), turn);
+      const third = projection.history({ kind: "presentation", now: 3 })!;
+      expect(third.key).not.toBe(first.key);
+      expect(Object.isFrozen(third.messages[1])).toBe(true);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
+  it("answers per-frame terminal and assistant checks without analyzing tools", () => {
+    const { projection, turn } = setup();
+    projection.observe(snapshot([user(), assistant([request(), tool()])]), turn);
+    const analyze = jest.spyOn(projection as unknown as { analyze: () => unknown }, "analyze");
+    try {
+      const evidence = projection.inspect(turn, "authoritative", RUN_ID);
+      expect(evidence.terminal).toBeNull();
+      expect(evidence.hasAssistant).toBe(true);
+      expect(analyze).not.toHaveBeenCalled();
+      expect(evidence.tools.map((entry) => entry.callId)).toEqual(["call-read"]);
+      expect(evidence.clientTools).toHaveLength(1);
+      expect(analyze).toHaveBeenCalledTimes(1);
+      expect(evidence.hasAssistant).toBe(true);
+    } finally {
+      analyze.mockRestore();
+    }
+  });
+
+  it("canonicalizes each frozen tool input once across presented frames", () => {
+    const { projection, turn } = setup();
+    const frozenCall = deepFreeze({ callId: "call-read", name: "read", input: { paths: ["Note.md"] } });
+    projection.observe(snapshot(deepFreeze([user(), assistant([request(frozenCall), tool({}, frozenCall)])])), turn);
+    const presented = facts({ tools: [{ call: frozenCall, identityConfirmed: true }] });
+    projection.present(turn, presented);
+    const stringify = jest.spyOn(JSON, "stringify");
+    try {
+      for (let frame = 0; frame < 5; frame += 1) projection.present(turn, presented);
+      // Neither the action key nor the canonical input text is rebuilt.
+      expect(stringify.mock.calls.filter(([value]) => value === "paths"
+        || (Array.isArray(value) && value[0] === "call-read"))).toEqual([]);
+    } finally {
+      stringify.mockRestore();
+    }
   });
 
   it("protects cached durable graphs and canonical evidence without freezing the caller's wire graph", () => {

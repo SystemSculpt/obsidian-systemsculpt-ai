@@ -280,7 +280,7 @@ export class ChatStorageService {
   // Master save method - always saves in the new, simple format
   async saveChat(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: SaveChatOptions = {},
   ): Promise<{ version: number }> {
     try {
@@ -305,7 +305,7 @@ export class ChatStorageService {
   /** Creates a new chat in the configured folder and returns that folder. */
   async createChatExclusive(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: Omit<SaveChatOptions, "chatDirectory"> = {},
   ): Promise<{ version: number; chatDirectory: string } | null> {
     const chatDirectory = this.chatDirectory;
@@ -327,7 +327,7 @@ export class ChatStorageService {
 
   private async saveChatSimple(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: SaveChatOptions = {},
     exclusiveCreate: boolean,
     chatDirectory: string,
