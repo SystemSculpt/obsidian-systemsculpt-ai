@@ -212,6 +212,26 @@ describe("ConversationProjection", () => {
     }
   });
 
+  it("saves a bounded summary of each tool result while keeping presented fields", () => {
+    const { projection, turn } = setup();
+    const content = "Note body. ".repeat(2_000);
+    const output = { success: true, data: { files: [{ path: "Note.md", content }] } };
+    projection.observe(snapshot([user(), assistant([
+      request(),
+      tool({ state: "output-available", output }),
+    ])]), turn);
+    const saved = projection.history({ kind: "presentation", now: 1 })!.messages[1];
+    const result = saved.tool_calls![0].result!;
+    const file = (result.data as { files: Array<{ path: string; content: string }> }).files[0];
+    expect(result.success).toBe(true);
+    expect(file.path).toBe("Note.md");
+    expect(file.content.length).toBeLessThan(600);
+    expect(file.content).toContain("more characters]");
+    expect(saved.messageParts?.find((part) => part.type === "tool_call")?.data)
+      .toBe(saved.tool_calls![0]);
+    expect(output.data.files[0].content).toBe(content);
+  });
+
   it("protects cached durable graphs and canonical evidence without freezing the caller's wire graph", () => {
     const { projection, turn } = setup();
     const output = { success: true, data: { files: [{ path: "Note.md" }] } };

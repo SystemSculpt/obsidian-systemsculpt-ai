@@ -12,7 +12,7 @@ import {
 } from "../../utils/ThinAgentLifecycleSchema";
 import { requiresUserApproval, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { replaceControlCharacters } from "../../utils/characterValidation";
-import { deepFreeze, isDeeplyFrozen, sameJsonValue } from "../../utils/immutableJson";
+import { deepFreeze, sameJsonValue } from "../../utils/immutableJson";
 import type {
   AgentConversationSnapshot,
   AgentPart,
@@ -27,6 +27,7 @@ import {
   parseAttachedTextContent,
 } from "../ChatAttachmentContent";
 import type { AgentConnectionState, AgentSessionSnapshot } from "./AuthoritativeSession";
+import { durableToolResult } from "./DurableToolResult";
 import { canonicalAgentToolInput } from "./MutationJournal";
 import type { VaultActionDecision } from "./VaultActionAuthorization";
 import {
@@ -519,12 +520,12 @@ function durableTool(
   const state = tool.part.state;
   if (!isAuthoritativeTerminalToolPart(tool.part)) return null;
   if (state === "output-available") {
-    // Durable graphs are frozen in place; never freeze a caller's live output.
-    const output = toolOutput(tool.part);
-    const result = safeToolResult(
-      outputAsToolResult(isDeeplyFrozen(output) ? output : structuredClone(output)),
+    // The saved chat keeps a bounded copy; the server holds the full result.
+    // Being a new graph, it can be frozen without touching the live output.
+    const result = durableToolResult(safeToolResult(
+      outputAsToolResult(toolOutput(tool.part)),
       tool,
-    );
+    ));
     return {
       id: tool.callId,
       messageId: "",
@@ -549,7 +550,7 @@ function durableTool(
     },
     state: "failed",
     timestamp,
-    result: {
+    result: durableToolResult({
       success: false,
       error: state === "output-denied"
         ? { code: "USER_DENIED", message: "The user denied this vault action." }
@@ -561,7 +562,7 @@ function durableTool(
                 ? tool.part.errorText
                 : "The vault action failed.",
           },
-    },
+    }),
     ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
   };
 }
@@ -956,9 +957,9 @@ export type HistoryProjection = Readonly<{
 }>;
 
 /**
- * Freeze a freshly built durable graph in place. The only objects it borrows
- * are tool outputs, which are either already deeply frozen wire data or
- * copied by durableTool, so no whole-graph copy is needed.
+ * Freeze a freshly built durable graph in place. It borrows no objects from
+ * the wire or from local results (tool results are bounded copies), so no
+ * whole-graph copy is needed.
  */
 function immutableHistory<T>(value: T): Immutable<T> {
   return deepFreeze(value) as Immutable<T>;

@@ -102,20 +102,22 @@ function normalizeProjectedServerTimestamps(message: ChatMessage): ChatMessage {
 // transcript version — and rebuild history rows — for every turn's echo.
 // Messages are compared one by one, by identity first, so shared unchanged
 // messages cost nothing and no whole-transcript string is ever built.
+function isSameProjectedMessage(left: ChatMessage, right: ChatMessage): boolean {
+  return left === right || (
+    left.message_id === right.message_id
+    && sameJsonValue(
+      normalizeProjectedServerTimestamps(left),
+      normalizeProjectedServerTimestamps(right),
+    )
+  );
+}
+
 function isSameProjectedServerHistory(
   left: readonly ChatMessage[],
   right: readonly ChatMessage[],
 ): boolean {
-  return left.length === right.length && left.every((message, index) => {
-    const other = right[index];
-    return message === other || (
-      message.message_id === other.message_id
-      && sameJsonValue(
-        normalizeProjectedServerTimestamps(message),
-        normalizeProjectedServerTimestamps(other),
-      )
-    );
-  });
+  return left.length === right.length
+    && left.every((message, index) => isSameProjectedMessage(message, right[index]));
 }
 
 function hasUniqueIds(values: readonly string[]): boolean {
@@ -478,7 +480,9 @@ export class AgentTranscriptRepository {
     return this.serializeForGeneration(generation, async () => {
       const incoming = ownedMessage(message);
       const next = this.nextAssistantMessages(incoming);
-      await this.persist(next, false, generation);
+      // Terminal reconciliation normally stored this response already; the
+      // commit is still announced because the response is durable.
+      if (next) await this.persist(next, false, generation);
       const snapshot = this.snapshot();
       this.emitCommit({ snapshot, role: "assistant", messageId: incoming.message_id });
       return snapshot;
@@ -624,7 +628,8 @@ export class AgentTranscriptRepository {
     return [...this.messages.slice(0, actualIndex), message];
   }
 
-  private nextAssistantMessages(incoming: ChatMessage): ChatMessage[] {
+  /** The transcript with `incoming` merged in, or null when nothing would change. */
+  private nextAssistantMessages(incoming: ChatMessage): ChatMessage[] | null {
     if (incoming.role !== "assistant") {
       throw new Error("Agent transcript accepts only assistant messages through assistant persistence.");
     }
@@ -634,11 +639,13 @@ export class AgentTranscriptRepository {
       next.push(incoming);
     } else {
       const previous = next[index];
-      next[index] = deepFreeze({
+      const merged = {
         ...previous,
         ...incoming,
         tool_calls: mergeToolCalls(previous.tool_calls, incoming.tool_calls),
-      });
+      };
+      if (isSameProjectedMessage(merged, previous)) return null;
+      next[index] = deepFreeze(merged);
     }
     return next;
   }

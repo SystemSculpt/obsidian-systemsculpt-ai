@@ -105,7 +105,6 @@ export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 type ChatLeafState = Readonly<{
   chatId?: string;
   chatTitle?: string;
-  version?: number;
   chatFontSize?: "small" | "medium" | "large";
   approvalMode?: ChatApprovalMode;
   draftKey?: string;
@@ -442,6 +441,8 @@ export class AgentChatView extends ItemView {
   public chatId = "";
   public chatTitle: string;
   public chatVersion = 0;
+  /** The leaf state this view last pushed; unchanged state is not pushed again. */
+  private appliedViewState: string | null = null;
   public chatFontSize: "small" | "medium" | "large";
   public approvalMode: ChatApprovalMode;
   public isFullyLoaded = false;
@@ -522,7 +523,6 @@ export class AgentChatView extends ItemView {
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
     this.chatId = initial.chatId?.trim() || "";
     this.chatTitle = initial.chatTitle?.trim() || generateDefaultChatTitle();
-    this.chatVersion = initial.version ?? 0;
     this.chatFontSize = initial.chatFontSize || plugin.settings.chatFontSize || "medium";
     this.approvalMode = initial.approvalMode === "full-access" ? "full-access" : "ask";
     this.draftKey = initial.draftKey?.trim() || messageId("draft");
@@ -780,11 +780,15 @@ export class AgentChatView extends ItemView {
     this.workspace.focus();
   }
 
+  /*
+   * The leaf state names which chat is open and how it is shown. The
+   * transcript version changes every turn and stays out of it, so Obsidian's
+   * workspace layout is not rewritten after each response.
+   */
   public getState(): Record<string, unknown> {
     return {
       chatId: this.chatId,
       chatTitle: this.chatTitle,
-      version: this.chatVersion,
       chatFontSize: this.chatFontSize,
       approvalMode: this.approvalMode,
       draftKey: this.draftKey,
@@ -793,6 +797,7 @@ export class AgentChatView extends ItemView {
   }
 
   public async setState(state: ChatLeafState): Promise<void> {
+    this.appliedViewState = null;
     if (!state?.chatId) {
       const incomingDraftKey = state?.draftKey?.trim();
       const preservesCurrentDraft = this.isFullyLoaded
@@ -3175,7 +3180,11 @@ export class AgentChatView extends ItemView {
 
   private updateViewState(): void {
     if (!this.leaf) return;
-    void this.leaf.setViewState({ type: CHAT_VIEW_TYPE, state: this.getState() }, { focus: false });
+    const state = this.getState();
+    const applied = JSON.stringify(state);
+    if (applied === this.appliedViewState) return;
+    this.appliedViewState = applied;
+    void this.leaf.setViewState({ type: CHAT_VIEW_TYPE, state }, { focus: false });
   }
 
   private installWorkspaceBindings(): void {

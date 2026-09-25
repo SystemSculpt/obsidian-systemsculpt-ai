@@ -427,6 +427,31 @@ describe("AgentTranscriptRepository", () => {
     expect(records.get(accepted.chatId).version).toBe(2);
   });
 
+  it("announces an already reconciled response without writing the chat again", async () => {
+    const { repository, storage } = createHarness();
+    const commits: string[] = [];
+    repository.subscribeToCommits(({ role, messageId }) => commits.push(`${role}:${messageId}`));
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const reconciled = await repository.reconcileServerHistory(projectedServerHistory(100));
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+
+    // The terminal assistant save carries its own synthesized timestamps.
+    const saved = await repository.persistAssistant(projectedServerHistory(20_000)[1]);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(saved.version).toBe(reconciled.version);
+    expect(saved.messages).toBe(reconciled.messages);
+    expect(commits).toEqual(["user:user-1", "assistant:assistant-1"]);
+
+    const changed = await repository.persistAssistant(
+      projectedServerHistory(20_000, "A revised plan.")[1],
+    );
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(changed.messages[1].content).toBe("A revised plan.");
+  });
+
   it("preserves local response duration when authoritative history omits it", async () => {
     const { repository, storage } = createHarness();
     await repository.commitUser({

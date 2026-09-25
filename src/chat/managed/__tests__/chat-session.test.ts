@@ -3752,6 +3752,37 @@ describe("AgentChatSession", () => {
     expect(dispatch).not.toHaveProperty("toolExecutionOrdinal");
   });
 
+  it("reconciles the terminal turn before the assistant save so a turn is written once", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_single_write";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Answer in two steps"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_step_1", "Step one")));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_step_2", "Step two")));
+    await tick();
+    harness.reconcileHistory.mockClear();
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(waitForResult(run)).resolves.toMatchObject({ kind: "completed" });
+
+    const terminalSync = harness.reconcileHistory.mock.calls.findIndex(([messages]) =>
+      (messages as readonly ChatMessage[]).some((message) =>
+        message.message_id === "assistant_step_2"));
+    expect(terminalSync).toBeGreaterThanOrEqual(0);
+    expect(harness.persistAssistant).toHaveBeenCalledTimes(1);
+    expect(harness.reconcileHistory.mock.invocationCallOrder[terminalSync])
+      .toBeLessThan(harness.persistAssistant.mock.invocationCallOrder[0]!);
+    // Persistence shares the projection's frozen graph instead of a clone.
+    const [saved] = harness.persistAssistant.mock.calls[0]!;
+    expect(Object.isFrozen(saved)).toBe(true);
+  });
+
   it("projects a streamed burst once per render window instead of once per frame", async () => {
     const harness = trackedHarness();
     const server = await harness.open();

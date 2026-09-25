@@ -3374,6 +3374,10 @@ export class AgentChatSession implements ChatSession {
     });
     // The projection's durable graph is deeply frozen; persistence shares it.
     const assistantMessage = history?.assistant as ChatMessage | undefined;
+    // One durable write per turn: terminal reconciliation writes the whole
+    // authoritative turn first, so the assistant save below is a no-op unless
+    // reconciliation was unavailable, deferred, or failed.
+    await this.reconcileMessages(history, "terminal").catch(() => undefined);
     if (assistantMessage) {
       const durable = assistantMessage;
       this.recordLifecycle({
@@ -3406,7 +3410,6 @@ export class AgentChatSession implements ChatSession {
         this.reportLocalIssue(error);
       }
     }
-    await this.reconcileMessages(history, "terminal").catch(() => undefined);
     const snapshot = active.projectionOwner.present(active.projection, this.presentationFacts(active));
     this.commitSnapshot(snapshot);
     const result: AgentRunResult = terminal.outcome === "succeeded"
