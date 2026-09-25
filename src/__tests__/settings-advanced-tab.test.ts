@@ -158,6 +158,34 @@ describe("Advanced settings tab", () => {
     expect(container.textContent).not.toContain("Development mode");
   });
 
+  it("exposes diagnostics recording as a toggle that is off by default", async () => {
+    const app = new App();
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    const container = document.createElement("div");
+    const tab: any = {
+      app,
+      plugin: {
+        settings: { showDiagnostics: false },
+        getSettingsManager: jest.fn(() => ({ updateSettings })),
+      },
+      renderQuickActionsSection: jest.fn(),
+    };
+
+    displayAdvancedTabContent(container, tab);
+
+    const setting = Array.from(container.querySelectorAll(".setting-item"))
+      .find((item) => item.querySelector(".setting-item-name")?.textContent === "Record diagnostics");
+    const toggle = setting?.querySelector<HTMLInputElement>("input.setting-item-toggle");
+    expect(setting?.querySelector(".setting-item-description")?.textContent).toContain(".systemsculpt/diagnostics");
+    expect(toggle?.checked).toBe(false);
+
+    toggle!.checked = true;
+    toggle!.dispatchEvent(new Event("change"));
+    await Promise.resolve();
+
+    expect(updateSettings).toHaveBeenCalledWith({ showDiagnostics: true });
+  });
+
   it("does not render a dead file-manager action when the host cannot reveal folders", () => {
     (hasHostCapability as jest.Mock).mockReturnValue(false);
     const app = new App();

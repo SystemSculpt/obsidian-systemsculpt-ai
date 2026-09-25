@@ -322,7 +322,8 @@ function createPluginLogger(): Readonly<{
 }> {
   const localLogWrites: string[] = [];
   const plugin = {
-    settings: { debugMode: false, logLevel: 0 },
+    // Recording on, so the privacy assertions cover lifecycle bytes on disk too.
+    settings: { debugMode: false, logLevel: 0, showDiagnostics: true },
     isPluginUnloading: () => false,
     storage: {
       appendToFile: async (_directory: string, _file: string, data: string) => {
@@ -332,7 +333,6 @@ function createPluginLogger(): Readonly<{
       getPath: (directory: string, file: string) => `${directory}/${file}`,
     },
     app: { vault: { adapter: { stat: async () => null } } },
-    getErrorCollector: () => null,
   };
   return {
     logger: new PluginLogger(plugin as never),

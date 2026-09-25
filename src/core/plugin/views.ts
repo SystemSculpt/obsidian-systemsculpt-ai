@@ -21,12 +21,6 @@ type AppWithViewRegistry = App & {
   };
 };
 
-type DiagnosticsWindow = Window & {
-  FreezeMonitor?: {
-    mark?: (label: string) => void;
-  };
-};
-
 type ChatViewLike = ItemView & {
   isFullyLoaded: boolean;
   setState(state: ChatState): Promise<void>;
@@ -71,9 +65,6 @@ export class ViewManager {
       void restoreStudioReloadState(this.app).catch(() => {
         new Notice("Studio could not restore an open tab yet. Its reload state has been retained.");
       });
-      try { (window as DiagnosticsWindow).FreezeMonitor?.mark?.('view-manager:onLayoutReady'); } catch {
-        // Diagnostic markers must never block layout initialization.
-      }
       this.initializeInBackground().catch(() => undefined);
     });
 

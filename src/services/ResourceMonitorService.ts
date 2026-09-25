@@ -4,6 +4,7 @@ import {
   type DesktopCpuUsage,
 } from "../platform/desktopOnly";
 import type { PluginLogger } from "../utils/PluginLogger";
+import { FreezeMonitor, type FreezeMonitorOptions, type FreezeReport } from "./FreezeMonitor";
 
 export interface ResourceSample {
   timestamp: number;
@@ -36,9 +37,12 @@ export interface IncidentResourceWindowOptions {
 }
 
 interface MonitorOptions {
+  /** Periodic sampling interval while recording; values below one minute are raised to one minute. */
   intervalMs?: number;
   metricsFileName?: string;
   sessionId?: string;
+  /** Defaults to the host PerformanceObserver. */
+  freezeObserverConstructor?: FreezeMonitorOptions["observerConstructor"];
 }
 
 type PerformanceWithMemory = Performance & {
@@ -51,93 +55,128 @@ type PerformanceWithMemory = Performance & {
 
 const DEFAULT_METRICS_FILE = "resource-metrics.ndjson";
 const INCIDENT_TERMINAL_NOTE = "incident-terminal";
+const RECORDING_STARTED_NOTE = "recording-started";
+const FREEZE_NOTE = "freeze";
 const DEFAULT_INCIDENT_WINDOW_BEFORE_MS = 60_000;
 const DEFAULT_INCIDENT_WINDOW_AFTER_MS = 5_000;
 const DEFAULT_INCIDENT_WINDOW_LIMIT = 12;
 const MAX_INCIDENT_WINDOW_MS = 5 * 60_000;
 const MAX_INCIDENT_WINDOW_LIMIT = 24;
-const LAG_WARN_THRESHOLD_MS = 200;
+const MIN_SAMPLING_INTERVAL_MS = 60_000;
+const FLUSH_BATCH_SIZE = 5;
+const MAX_PENDING_WRITES = 120;
+const MAX_METRICS_FILE_BYTES = 1_000_000;
+const FREEZE_THRESHOLD_MS = 200;
+const FREEZE_MIN_REPORT_INTERVAL_MS = 2_000;
 const FREEZE_WARN_THRESHOLD_MS = 800;
 const ALERT_COOLDOWN_MS: Record<string, number> = {
   memory: 60_000,
   cpu: 60_000,
-  lag: 60_000,
   freeze: 5_000,
 };
 
 /**
- * Periodically collects runtime resource metrics to help debug lag and memory leaks.
+ * Samples runtime resource metrics for support snapshots and incident reports.
+ *
+ * On-demand samples are always available and stay in memory. Periodic
+ * sampling, long-frame observation and the metrics file run only while
+ * diagnostics recording is on (#337): at most one sample per minute, paused
+ * while the window is hidden, appended in batches to a size-capped file.
  */
 export class ResourceMonitorService {
   private readonly plugin: SystemSculptPlugin;
   private readonly logger: PluginLogger;
-  private samplingIntervalMs: number;
-  private intervalId: number | null = null;
-  private lagIntervalId: number | null = null;
-  private startupBurstIntervalId: number | null = null;
-  private lastLagMs = 0;
-  private lagSampleInterval = 1000;
+  private readonly samplingIntervalMs: number;
+  private readonly metricsFileName: string;
+  private readonly sessionId?: string;
+  private readonly freezeMonitor: FreezeMonitor;
   private readonly samples: ResourceSample[] = [];
   private readonly maxSamples = 120;
+  private readonly pendingWrites: ResourceSample[] = [];
+  private recording = false;
+  private intervalId: number | null = null;
+  private visibilityDocument: Document | null = null;
+  private unloadCleanupRegistered = false;
+  private activeFlush: Promise<void> | null = null;
+  private metricsFileBytes: number | null = null;
   private lastCpuUsage?: DesktopCpuUsage;
   private lastCpuTimestamp?: number;
   private readonly lastAlertAt: Record<string, number> = {};
-  private freezeEventHandler?: (event: Event) => void;
-  private readonly metricsFileName: string;
-  private readonly sessionId?: string;
-  private readonly startupBurstDurationMs = 60_000;
-  private readonly startupBurstIntervalMs = 3000;
 
   constructor(plugin: SystemSculptPlugin, options?: MonitorOptions) {
     this.plugin = plugin;
     this.logger = plugin.getLogger();
-    this.samplingIntervalMs = options?.intervalMs ?? 15000;
+    const intervalMs = options?.intervalMs;
+    this.samplingIntervalMs = typeof intervalMs === "number" && Number.isFinite(intervalMs)
+      ? Math.max(MIN_SAMPLING_INTERVAL_MS, intervalMs)
+      : MIN_SAMPLING_INTERVAL_MS;
     this.metricsFileName = options?.metricsFileName ?? DEFAULT_METRICS_FILE;
     this.sessionId = options?.sessionId;
+    this.freezeMonitor = new FreezeMonitor({
+      thresholdMs: FREEZE_THRESHOLD_MS,
+      minReportIntervalMs: FREEZE_MIN_REPORT_INTERVAL_MS,
+      observerConstructor: options?.freezeObserverConstructor,
+      onFreeze: (report) => this.recordFreeze(report),
+    });
   }
 
-  start() {
-    if (this.intervalId) {
+  /** Starts periodic recording. Idempotent. */
+  start(): void {
+    if (this.recording) {
       return;
     }
-    this.logger.debug("Resource monitor starting", {
+    this.recording = true;
+    this.registerUnloadCleanup();
+    this.logger.debug("Resource monitor recording started", {
       source: "ResourceMonitor",
       metadata: { intervalMs: this.samplingIntervalMs },
     });
-    void this.collectAndPersistSample("startup").catch(() => undefined);
-    if (typeof window !== "undefined") {
-      // registerInterval ties the timer to plugin unload, so a teardown path
-      // that never reaches stop() cannot leave it ticking after a reload.
-      this.intervalId = this.plugin.registerInterval(window.setInterval(() => {
-        void this.collectAndPersistSample().catch(() => undefined);
-      }, this.samplingIntervalMs));
-      this.startStartupBurstSampling();
-      this.startLagProbe();
-      this.subscribeToFreezeEvents();
+    this.recordSampleSafely(RECORDING_STARTED_NOTE);
+    if (typeof window === "undefined") {
+      return;
+    }
+    this.freezeMonitor.start();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this.handleVisibilityChange);
+      this.visibilityDocument = document;
+    }
+    if (!this.visibilityDocument?.hidden) {
+      this.startSampling();
     }
   }
 
-  stop() {
-    if (this.intervalId && typeof window !== "undefined") {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
+  /** Stops periodic recording. Queued samples stay pending until flushPending(). */
+  stop(): void {
+    this.recording = false;
+    this.stopSampling();
+    this.freezeMonitor.stop();
+    this.visibilityDocument?.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    this.visibilityDocument = null;
+  }
+
+  isRecording(): boolean {
+    return this.recording;
+  }
+
+  /** Appends every queued sample. Never rejects. */
+  flushPending(): Promise<void> {
+    if (this.activeFlush) {
+      return this.activeFlush.then(() => this.flushPending());
     }
-    if (this.lagIntervalId && typeof window !== "undefined") {
-      window.clearInterval(this.lagIntervalId);
-      this.lagIntervalId = null;
+    if (this.pendingWrites.length === 0) {
+      return Promise.resolve();
     }
-    if (this.startupBurstIntervalId && typeof window !== "undefined") {
-      window.clearInterval(this.startupBurstIntervalId);
-      this.startupBurstIntervalId = null;
-    }
-    if (this.freezeEventHandler && typeof window !== "undefined") {
-      window.removeEventListener("systemsculpt:freeze-detected", this.freezeEventHandler);
-      this.freezeEventHandler = undefined;
-    }
+    const flush: Promise<void> = this.writeBatch()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.activeFlush === flush) this.activeFlush = null;
+      });
+    this.activeFlush = flush;
+    return flush;
   }
 
   async captureManualSample(note: string = "manual"): Promise<ResourceSample> {
-    return this.collectAndPersistSample(note);
+    return this.recordSample(note);
   }
 
   /**
@@ -147,7 +186,11 @@ export class ResourceMonitorService {
   captureIncidentTerminalSample(): IncidentResourceSample {
     const sample = this.collectSample(INCIDENT_TERMINAL_NOTE);
     this.bufferAndCheckSample(sample);
-    this.writeSampleDetached(sample);
+    try {
+      this.enqueueWrite(sample);
+    } catch {
+      // Resource diagnostics must stay observational.
+    }
     return projectIncidentResourceSample(sample) ?? Object.freeze({ captured_at: sample.iso });
   }
 
@@ -264,11 +307,100 @@ export class ResourceMonitorService {
     };
   }
 
-  private async collectAndPersistSample(note?: string): Promise<ResourceSample> {
+  private readonly handleVisibilityChange = (): void => {
+    if (!this.recording) {
+      return;
+    }
+    if (this.visibilityDocument?.hidden) {
+      // Hidden windows get no samples: nothing changes that a user can see,
+      // and a sleeping laptop should not wake just to record it.
+      this.stopSampling();
+      void this.flushPending();
+    } else {
+      this.startSampling();
+    }
+  };
+
+  private startSampling(): void {
+    if (this.intervalId !== null || typeof window === "undefined") {
+      return;
+    }
+    this.intervalId = window.setInterval(() => this.recordSampleSafely(), this.samplingIntervalMs);
+  }
+
+  private stopSampling(): void {
+    if (this.intervalId === null) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.clearInterval(this.intervalId);
+    }
+    this.intervalId = null;
+  }
+
+  private registerUnloadCleanup(): void {
+    if (this.unloadCleanupRegistered || typeof this.plugin.register !== "function") {
+      return;
+    }
+    this.unloadCleanupRegistered = true;
+    // One registration ties the timer, observer and listener to plugin unload,
+    // even when a teardown path never reaches stop().
+    this.plugin.register(() => this.stop());
+  }
+
+  private recordSample(note?: string): ResourceSample {
     const sample = this.collectSample(note);
     this.bufferAndCheckSample(sample);
-    await this.writeSample(sample);
+    this.enqueueWrite(sample);
     return sample;
+  }
+
+  private recordSampleSafely(note?: string): void {
+    try {
+      this.recordSample(note);
+    } catch {
+      // Periodic diagnostics must never add a failure to the host event loop.
+    }
+  }
+
+  private recordFreeze(report: FreezeReport): void {
+    try {
+      if (!this.recording) {
+        return;
+      }
+      const timestamp = Date.now();
+      let memoryUsage: Partial<ResourceSample> = {};
+      try {
+        memoryUsage = { ...this.readMemoryUsage() };
+      } catch {
+        // A failed platform metric must not suppress the remaining freeze evidence.
+      }
+
+      let cpuPercent: number | undefined;
+      try {
+        cpuPercent = this.captureCpuPercent(timestamp);
+      } catch {
+        // CPU APIs differ across Electron versions and can fail independently.
+      }
+
+      const sample: ResourceSample = {
+        timestamp,
+        iso: new Date(timestamp).toISOString(),
+        freezeDeltaMs: report.durationMs,
+        eventLoopLagMs: report.durationMs,
+        note: FREEZE_NOTE,
+        ...memoryUsage,
+        cpuPercent,
+      };
+      try {
+        this.bufferAndCheckSample(sample);
+      } catch {
+        // Buffer and threshold logging failures must not block best-effort persistence.
+      }
+      this.enqueueWrite(sample);
+    } catch {
+      // Freeze reporting must never add a second failure to the application event loop.
+    }
   }
 
   private bufferAndCheckSample(sample: ResourceSample): void {
@@ -280,19 +412,31 @@ export class ResourceMonitorService {
     this.checkThresholds(sample);
   }
 
+  /** Queues a sample for the metrics file. Samples taken while not recording stay in memory only. */
+  private enqueueWrite(sample: ResourceSample): void {
+    if (!this.recording) {
+      return;
+    }
+    this.pendingWrites.push(sample);
+    if (this.pendingWrites.length > MAX_PENDING_WRITES) {
+      this.pendingWrites.shift();
+    }
+    if (this.pendingWrites.length >= FLUSH_BATCH_SIZE) {
+      void this.flushPending();
+    }
+  }
+
   private collectSample(note?: string): ResourceSample {
     const timestamp = Date.now();
     const iso = new Date(timestamp).toISOString();
     const memoryUsage = this.readMemoryUsage();
     const cpuPercent = this.captureCpuPercent(timestamp);
-    const eventLoopLagMs = this.lastLagMs ? Number(this.lastLagMs.toFixed(1)) : undefined;
 
     return {
       timestamp,
       iso,
       ...memoryUsage,
       cpuPercent,
-      eventLoopLagMs,
       note,
     };
   }
@@ -376,116 +520,69 @@ export class ResourceMonitorService {
     return undefined;
   }
 
-  private async writeSample(sample: ResourceSample) {
+  private serializeSample(sample: ResourceSample): string {
+    return `${JSON.stringify({ ...sample, sessionId: this.sessionId ?? null })}\n`;
+  }
+
+  private async writeBatch(): Promise<void> {
     const storage = this.plugin.storage;
     if (!storage) {
       return;
     }
+    const batch = this.pendingWrites.splice(0, this.pendingWrites.length);
+    const payload = batch.map((sample) => this.serializeSample(sample)).join("");
     try {
-      const payload = {
-        ...sample,
-        sessionId: this.sessionId ?? null,
-      };
-      const result = await storage.appendToFile("diagnostics", this.metricsFileName, `${JSON.stringify(payload)}\n`);
+      const result = await storage.appendToFile("diagnostics", this.metricsFileName, payload);
       if (result?.success === false) {
-        this.logger.error("Failed to write resource metrics", undefined, {
-          source: "ResourceMonitor",
-        });
+        this.reportWriteFailure(undefined);
+        return;
       }
+      await this.enforceMetricsFileCap(payload);
     } catch (error) {
+      this.reportWriteFailure(error);
+    }
+  }
+
+  /**
+   * Caps the in-session metrics file like the plugin log's 1 MB cap: past the
+   * limit it is rewritten with the newest in-memory samples. Only the first
+   * batch of a session stats the file; later batches count appended bytes.
+   */
+  private async enforceMetricsFileCap(appended: string): Promise<void> {
+    const storage = this.plugin.storage;
+    if (!storage) {
+      return;
+    }
+    // Samples serialize to ASCII JSON, so string length is the byte count.
+    this.metricsFileBytes = this.metricsFileBytes === null
+      ? (await this.readMetricsFileBytes()) ?? appended.length
+      : this.metricsFileBytes + appended.length;
+    if (this.metricsFileBytes <= MAX_METRICS_FILE_BYTES) {
+      return;
+    }
+    const retained = this.samples.map((sample) => this.serializeSample(sample)).join("");
+    const result = await storage.writeFile("diagnostics", this.metricsFileName, retained);
+    this.metricsFileBytes = result?.success === false ? null : retained.length;
+  }
+
+  private async readMetricsFileBytes(): Promise<number | null> {
+    try {
+      const storage = this.plugin.storage;
+      const stat = await this.plugin.app.vault.adapter.stat(storage.getPath("diagnostics", this.metricsFileName));
+      return stat && Number.isFinite(stat.size) ? stat.size : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private reportWriteFailure(error: unknown): void {
+    try {
       this.logger.error("Failed to write resource metrics", error, {
         source: "ResourceMonitor",
       });
-    }
-  }
-
-  private writeSampleDetached(sample: ResourceSample): void {
-    try {
-      void this.writeSample(sample).catch(() => undefined);
     } catch {
-      // Resource diagnostics must stay observational, including synchronous write failures.
+      // Resource diagnostics must stay observational, including logger failures.
     }
-  }
-
-  private startLagProbe() {
-    if (typeof window === "undefined") {
-      return;
-    }
-    let lastTick = performance.now();
-    this.lagIntervalId = this.plugin.registerInterval(window.setInterval(() => {
-      const now = performance.now();
-      const delta = now - lastTick;
-      lastTick = now;
-      const lag = Math.max(0, delta - this.lagSampleInterval);
-      this.lastLagMs = lag;
-    }, this.lagSampleInterval));
-  }
-
-  private subscribeToFreezeEvents() {
-    if (typeof window === "undefined") {
-      return;
-    }
-    this.freezeEventHandler = (event: Event) => {
-      try {
-        const detail = (event as CustomEvent).detail;
-        const deltaMs = detail?.deltaMs;
-        if (typeof deltaMs !== "number") {
-          return;
-        }
-
-        const timestamp = Date.now();
-        let memoryUsage: Partial<ResourceSample> = {};
-        try {
-          memoryUsage = { ...this.readMemoryUsage() };
-        } catch {
-          // A failed platform metric must not suppress the remaining freeze evidence.
-        }
-
-        let cpuPercent: number | undefined;
-        try {
-          cpuPercent = this.captureCpuPercent(timestamp);
-        } catch {
-          // CPU APIs differ across Electron versions and can fail independently.
-        }
-
-        const lagValue = Math.max(this.lastLagMs, deltaMs);
-        const sample: ResourceSample = {
-          timestamp,
-          iso: new Date(timestamp).toISOString(),
-          freezeDeltaMs: deltaMs,
-          eventLoopLagMs: Number(lagValue.toFixed(1)),
-          note: "freeze",
-          ...memoryUsage,
-          cpuPercent,
-        };
-        try {
-          this.bufferAndCheckSample(sample);
-        } catch {
-          // Buffer and threshold logging failures must not block best-effort persistence.
-        }
-        this.writeSampleDetached(sample);
-      } catch {
-        // Freeze reporting must never add a second failure to the application event loop.
-      }
-    };
-    window.addEventListener("systemsculpt:freeze-detected", this.freezeEventHandler);
-  }
-
-  private startStartupBurstSampling(): void {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const stopAt = Date.now() + this.startupBurstDurationMs;
-    this.startupBurstIntervalId = this.plugin.registerInterval(window.setInterval(() => {
-      if (Date.now() > stopAt) {
-        if (this.startupBurstIntervalId) {
-          window.clearInterval(this.startupBurstIntervalId);
-          this.startupBurstIntervalId = null;
-        }
-        return;
-      }
-      void this.collectAndPersistSample("startup-burst").catch(() => undefined);
-    }, this.startupBurstIntervalMs));
   }
 
   private checkThresholds(sample: ResourceSample) {
@@ -513,22 +610,6 @@ export class ResourceMonitorService {
         source: "ResourceMonitor",
         metadata: {
           cpuPercent: sample.cpuPercent,
-        },
-      });
-    }
-
-    const isFreezeSample = typeof sample.freezeDeltaMs === "number" || sample.note === "freeze";
-
-    if (
-      typeof sample.eventLoopLagMs === "number" &&
-      sample.eventLoopLagMs > LAG_WARN_THRESHOLD_MS &&
-      !isFreezeSample &&
-      this.shouldAlert("lag", now)
-    ) {
-      this.logger.debug("Event loop lag detected", {
-        source: "ResourceMonitor",
-        metadata: {
-          lagMs: Number(sample.eventLoopLagMs.toFixed(1)),
         },
       });
     }

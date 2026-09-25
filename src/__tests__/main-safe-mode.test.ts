@@ -3,7 +3,6 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
-import { FreezeMonitor } from "../services/FreezeMonitor";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -267,10 +266,16 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
   it("flushes and disposes diagnostics before the unload guard flips", async () => {
     const plugin = makePlugin();
     const order: string[] = [];
-    jest.spyOn(FreezeMonitor, "stop").mockImplementation(() => {
-      order.push("freeze-monitor");
-      throw new Error("simulated monitor stop failure");
-    });
+    (plugin as any).resourceMonitor = {
+      stop: jest.fn(() => {
+        order.push("resource-monitor-stop");
+        throw new Error("simulated monitor stop failure");
+      }),
+      flushPending: jest.fn(async () => {
+        expect(plugin.isPluginUnloading()).toBe(false);
+        order.push("resource-monitor-flush");
+      }),
+    };
     const logger = createLogger();
     logger.flushBeforeUnload.mockImplementation(async () => {
       expect(plugin.isPluginUnloading()).toBe(false);
@@ -293,7 +298,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
 
     expect(logger.flushBeforeUnload).toHaveBeenCalledTimes(1);
     expect(logger.dispose).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["recorder", "freeze-monitor", "flush", "dispose"]);
+    expect(order).toEqual(["recorder", "resource-monitor-stop", "flush", "resource-monitor-flush", "dispose"]);
     expect(plugin.isPluginUnloading()).toBe(true);
   });
 

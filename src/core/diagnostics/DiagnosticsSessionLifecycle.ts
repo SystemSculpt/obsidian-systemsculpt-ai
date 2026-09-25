@@ -53,6 +53,7 @@ export interface DiagnosticsSessionStorage {
   initialize(): Promise<void>;
   getPath(type: "diagnostics"): string;
   writeFile(type: "diagnostics", fileName: string, data: string | object): Promise<unknown>;
+  appendToFile(type: "diagnostics", fileName: string, data: string): Promise<unknown>;
 }
 
 export type DiagnosticsSessionLifecycleOptions = Readonly<{
@@ -60,11 +61,6 @@ export type DiagnosticsSessionLifecycleOptions = Readonly<{
   storage: DiagnosticsSessionStorage;
   pluginVersion: unknown;
   getObsidianVersion: () => unknown;
-}>;
-
-type DiagnosticsSessionSchedule = Readonly<{
-  sessionId: string;
-  startedAt: string;
 }>;
 
 function compareDiagnosticsPaths(left: AutomaticDiagnosticsFile, right: AutomaticDiagnosticsFile): number {
@@ -102,11 +98,20 @@ export function sanitizePublicDiagnosticsVersion(value: unknown): string {
   return /^\d{1,4}(?:\.\d{1,4}){1,3}$/u.test(value) ? value : "unknown";
 }
 
+/**
+ * Owns the diagnostics session around the automatic `-latest` files.
+ *
+ * Every launch archives the previous session's files (rename only) and prunes
+ * archives, so diagnostics stay bounded even while recording is off. Session
+ * records are written only while diagnostics recording is on (#337).
+ */
 export class DiagnosticsSessionLifecycle {
   readonly logFileName = "systemsculpt-latest.log";
   readonly metricsFileName = "resource-metrics-latest.ndjson";
   private activeSessionId: string | null = null;
+  private startedAt: Date | null = null;
   private startup: Promise<void> | null = null;
+  private sessionRecord: Promise<void> | null = null;
   private admissionOpen = true;
 
   constructor(private readonly options: DiagnosticsSessionLifecycleOptions) {}
@@ -115,9 +120,14 @@ export class DiagnosticsSessionLifecycle {
     return this.activeSessionId;
   }
 
-  /** Prepares one session. Concurrent callers share rotation and metadata writes. */
+  /** Prepares one session. Concurrent callers share archiving and cleanup. */
   start(): Promise<void> {
     return this.startup ??= this.prepare();
+  }
+
+  /** Writes this session's header and metadata once, when diagnostics recording is on. */
+  recordSession(): Promise<void> {
+    return this.sessionRecord ??= this.writeSessionRecord();
   }
 
   private async prepare(): Promise<void> {
@@ -136,13 +146,17 @@ export class DiagnosticsSessionLifecycle {
       "-", pad(startedAt.getHours()), pad(startedAt.getMinutes()), pad(startedAt.getSeconds()),
     ].join("");
     this.activeSessionId = sessionId;
-    const header = `SystemSculpt diagnostics session ${sessionId} (plugin v${sanitizePublicDiagnosticsVersion(this.options.pluginVersion)})\n`;
-    await this.rotate(this.logFileName, `systemsculpt-${sessionId}.log`, header);
+    this.startedAt = startedAt;
+    await this.rotate(this.logFileName, `systemsculpt-${sessionId}.log`);
     await this.rotate(this.metricsFileName, `resource-metrics-${sessionId}.ndjson`);
-    await this.schedule({ sessionId, startedAt: startedAt.toISOString() });
+
+    if (!this.admissionOpen) return;
+    const cleanup = Promise.resolve().then(() => this.run());
+    void cleanup.catch(() => undefined);
   }
 
-  private async rotate(latestName: string, archiveName: string, header = ""): Promise<void> {
+  /** Archives a previous session's file. Nothing is created: writers append on demand. */
+  private async rotate(latestName: string, archiveName: string): Promise<void> {
     if (!this.admissionOpen) return;
     const { adapter, storage } = this.options;
     const basePath = storage.getPath("diagnostics");
@@ -155,22 +169,32 @@ export class DiagnosticsSessionLifecycle {
     } catch {
       warnDiagnostics("Failed to rotate file");
     }
-    if (!this.admissionOpen) return;
-    try {
-      await adapter.write(latestPath, header);
-    } catch {
-      warnDiagnostics("Failed to reset file");
-    }
   }
 
-  private async schedule(session: DiagnosticsSessionSchedule): Promise<void> {
+  private async writeSessionRecord(): Promise<void> {
+    await this.start();
+    const sessionId = this.activeSessionId;
+    const startedAt = this.startedAt;
+    if (!this.admissionOpen || !sessionId || !startedAt) return;
+    const { storage } = this.options;
+    const pluginVersion = sanitizePublicDiagnosticsVersion(this.options.pluginVersion);
+    try {
+      await storage.appendToFile(
+        "diagnostics",
+        this.logFileName,
+        `SystemSculpt diagnostics session ${sessionId} (plugin v${pluginVersion})\n`,
+      );
+    } catch {
+      warnDiagnostics("Failed to write session header");
+    }
+
     if (!this.admissionOpen) return;
     const metadata: DiagnosticsSessionMetadata = {
       schemaVersion: 2,
-      sessionId: session.sessionId,
-      startedAt: session.startedAt,
+      sessionId,
+      startedAt: startedAt.toISOString(),
       environment: {
-        pluginVersion: sanitizePublicDiagnosticsVersion(this.options.pluginVersion),
+        pluginVersion,
         obsidianVersion: sanitizePublicDiagnosticsVersion(this.options.getObsidianVersion()),
         hostDevice: getHostDeviceType(),
         operatingSystem: getHostOperatingSystem(),
@@ -178,15 +202,11 @@ export class DiagnosticsSessionLifecycle {
     };
 
     try {
-      await this.options.storage.writeFile("diagnostics", "session-latest.json", metadata);
-      await this.options.storage.writeFile("diagnostics", `session-${session.sessionId}.json`, metadata);
+      await storage.writeFile("diagnostics", "session-latest.json", metadata);
+      await storage.writeFile("diagnostics", `session-${sessionId}.json`, metadata);
     } catch {
       warnDiagnostics("Failed to write session metadata");
     }
-
-    if (!this.admissionOpen) return;
-    const cleanup = Promise.resolve().then(() => this.run());
-    void cleanup.catch(() => undefined);
   }
 
   close(): void {

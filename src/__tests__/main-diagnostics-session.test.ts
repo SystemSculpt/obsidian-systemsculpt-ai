@@ -3,6 +3,8 @@
 import { App, Platform } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { DiagnosticsSessionLifecycle } from "../core/diagnostics/DiagnosticsSessionLifecycle";
+import { ResourceMonitorService } from "../services/ResourceMonitorService";
+import { DEFAULT_SETTINGS } from "../types";
 
 const DIAGNOSTICS_PATH = ".systemsculpt/diagnostics";
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -18,9 +20,14 @@ function installStorage(plugin: SystemSculptPlugin, writeFile: jest.Mock = jest.
   plugin.storage = {
     initialize: jest.fn(async () => undefined),
     writeFile,
+    appendToFile: jest.fn(async () => ({ success: true, path: "saved" })),
     getPath: jest.fn(() => DIAGNOSTICS_PATH),
   } as any;
   return writeFile;
+}
+
+function applySettings(plugin: SystemSculptPlugin, overrides: Partial<typeof DEFAULT_SETTINGS> = {}): void {
+  plugin._internal_settings_systemsculpt_plugin = { ...DEFAULT_SETTINGS, ...overrides };
 }
 
 async function prepareAndWaitForCleanup(plugin: SystemSculptPlugin): Promise<void> {
@@ -85,7 +92,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
   it.each([
     { isAndroidApp: true, isIosApp: false, operatingSystem: "Android" },
     { isAndroidApp: false, isIosApp: true, operatingSystem: "iOS" },
-  ])("writes the exact mobile metadata allowlist to both session files on $operatingSystem", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
+  ])("records the exact mobile metadata allowlist to both session files on $operatingSystem", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
     platform.isAndroidApp = isAndroidApp;
@@ -113,7 +120,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
       },
     };
 
-    await expect((plugin as any).getDiagnosticsSessionLifecycle().start()).resolves.toBeUndefined();
+    await expect((plugin as any).getDiagnosticsSessionLifecycle().recordSession()).resolves.toBeUndefined();
 
     expect(writeFile.mock.calls).toEqual([
       ["diagnostics", "session-latest.json", metadata],
@@ -121,6 +128,74 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     ]);
     expect(writeFile.mock.calls[0]?.[2]).toEqual(writeFile.mock.calls[1]?.[2]);
     expect(JSON.stringify(writeFile.mock.calls)).not.toMatch(/PRIVATE_VAULT_CANARY|private-config-canary|private-plugin-canary/u);
+  });
+
+  it("keeps diagnostics idle while recording is off", async () => {
+    jest.useFakeTimers();
+    const plugin = makePlugin();
+    const writeFile = installStorage(plugin);
+    applySettings(plugin);
+    jest.spyOn(DiagnosticsSessionLifecycle.prototype, "run").mockResolvedValue(undefined);
+    await (plugin as any).getDiagnosticsSessionLifecycle().start();
+    const monitor = new ResourceMonitorService(plugin);
+    (plugin as any).resourceMonitor = monitor;
+
+    (plugin as any).syncDiagnosticsRecording();
+    await jest.advanceTimersByTimeAsync(10 * 60_000);
+    await monitor.flushPending();
+
+    expect(monitor.isRecording()).toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect((plugin.storage as any).appendToFile).not.toHaveBeenCalled();
+    expect(JSON.parse(plugin.buildDiagnosticsSnapshot()).status.resource_monitor_running).toBe(false);
+  });
+
+  it("follows the diagnostics toggle on and off", async () => {
+    jest.useFakeTimers();
+    const plugin = makePlugin();
+    const writeFile = installStorage(plugin);
+    applySettings(plugin, { showDiagnostics: true });
+    jest.spyOn(DiagnosticsSessionLifecycle.prototype, "run").mockResolvedValue(undefined);
+    const monitor = new ResourceMonitorService(plugin);
+    (plugin as any).resourceMonitor = monitor;
+
+    (plugin as any).syncDiagnosticsRecording();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(monitor.isRecording()).toBe(true);
+    expect(JSON.parse(plugin.buildDiagnosticsSnapshot()).status.resource_monitor_running).toBe(true);
+    expect(writeFile.mock.calls.map(([, name]) => name)).toEqual([
+      "session-latest.json",
+      expect.stringMatching(/^session-\d{8}-\d{6}\.json$/u),
+    ]);
+
+    applySettings(plugin, { showDiagnostics: false });
+    (plugin as any).syncDiagnosticsRecording();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(monitor.isRecording()).toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
+    expect((plugin.storage as any).appendToFile).toHaveBeenCalledWith(
+      "diagnostics",
+      "resource-metrics.ndjson",
+      expect.stringContaining("recording-started"),
+    );
+  });
+
+  it("does not create or scan the incident store at launch", async () => {
+    const app = new App();
+    const adapter = app.vault.adapter as any;
+    const plugin = makePlugin(app);
+
+    (plugin as any).initializeAgentIncidentCoordinator();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(plugin.getAgentIncidentCoordinator()?.getStatus().initializationState).toBe("not_started");
+    expect(adapter.exists).not.toHaveBeenCalled();
+    expect(adapter.mkdir).not.toHaveBeenCalled();
+    expect(adapter.list).not.toHaveBeenCalled();
   });
 
   it("does not wait for detached archive cleanup during diagnostics startup", async () => {
