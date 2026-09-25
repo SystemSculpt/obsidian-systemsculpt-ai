@@ -387,24 +387,41 @@ describe("AccountConnectService background polling", () => {
     expect(service.hasPendingRequest()).toBe(false);
   });
 
-  it("gives each poll its own deadline and aborts the in-flight poll on cancel", async () => {
+  it("observes each sign-in request until it settles and aborts it when the sign-in is cancelled", async () => {
     const { service } = createPollingService();
     request.mockImplementation(() => new Promise<Response>(() => undefined));
 
     await service.begin("sign-in");
     await jest.advanceTimersByTimeAsync(3_500);
 
+    // The request may yet deliver the one-time license key, so it gets no
+    // client deadline; only the poll's hold on the in-flight slot is bounded.
     const pollInput = request.mock.calls[0][0];
-    expect(pollInput.timeoutMs).toBe(15_000);
+    expect(pollInput.timeoutMs).toBeNull();
+    await jest.advanceTimersByTimeAsync(15_000 + 3_500);
+    expect(request).toHaveBeenCalledTimes(2);
     expect(pollInput.signal.aborted).toBe(false);
     service.cancelPending();
     expect(pollInput.signal.aborted).toBe(true);
+    expect(request.mock.calls[1][0].signal.aborted).toBe(true);
+  });
+
+  it("still reports an invalid code when every earlier request of the sign-in was answered", async () => {
+    const { service } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+    request.mockResolvedValueOnce(jsonResponse(401, { error: "invalid_code" }));
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    await expect(service.submitManualCode("wrong-code")).resolves.toEqual({ kind: "error", reason: "invalid-code" });
+    expect(service.hasPendingRequest()).toBe(false);
   });
 });
 
-describe("AccountConnectService hung sign-in polls", () => {
-  // Drives the production request client so the poll deadline is the one the
-  // plugin actually enforces, over a native request that never answers.
+describe("AccountConnectService sign-in requests that answer late or never", () => {
+  // Drives the production request client over native requests the plugin
+  // cannot abort, only stop waiting for: they may answer late, or never.
   const nativeRequest = requestUrl as jest.Mock;
   const native = (status: number, payload: unknown) => ({
     status,
@@ -426,6 +443,27 @@ describe("AccountConnectService hung sign-in polls", () => {
     jest.useRealTimers();
     nativeRequest.mockReset();
   });
+
+  /** A native answer the test delivers later; until then the request is in flight. */
+  function late() {
+    let land!: (value: unknown) => void;
+    const answer = new Promise((resolve) => { land = resolve; });
+    return { respond: () => answer, land };
+  }
+
+  /**
+   * Serves /auth/poll and /auth/exchange from their own queues. A poll with
+   * nothing queued finds no unused code, which is also what the server says
+   * once an earlier request burned it.
+   */
+  function serve(polls: Array<() => Promise<unknown>>, exchanges: Array<() => Promise<unknown>> = []) {
+    nativeRequest.mockImplementation(({ url }: { url: string }) => {
+      const queue = url === `${API_BASE_URL}/auth/poll` ? polls : exchanges;
+      const next = queue.shift();
+      return next ? next() : Promise.resolve(native(200, { status: "pending" }));
+    });
+  }
+  const invalidCode = () => Promise.resolve(native(401, { error: "invalid_code" }));
 
   function createNativeService() {
     const created = createService(createPlugin(), new PlatformRequestClient());
@@ -474,6 +512,127 @@ describe("AccountConnectService hung sign-in polls", () => {
     await jest.advanceTimersByTimeAsync(5_000);
     await expect(manual).resolves.toMatchObject({ kind: "signed-in" });
     expect(nativeCalls("/auth/exchange")).toHaveLength(1);
+  });
+
+  it("adopts a timed-out poll that burned the code when a manual exchange then finds it used", async () => {
+    const { service, plugin, outcomes } = createNativeService();
+    const poll = late();
+    serve([poll.respond], [invalidCode]);
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    let settled = false;
+    const manual = service.submitManualCode("manual-code").finally(() => { settled = true; });
+
+    // The poll outlives its slot; the exchange then runs and is told the code
+    // is used, because the server burned it for that poll.
+    await jest.advanceTimersByTimeAsync(15_000);
+    expect(nativeCalls("/auth/exchange")).toHaveLength(1);
+    expect(settled).toBe(false);
+
+    // The poll's answer lands late and completes the sign-in exactly once.
+    poll.land(native(200, successPayload));
+    await expect(manual).resolves.toMatchObject({ kind: "signed-in", email: "user@example.com" });
+    expect(outcomes).toHaveLength(0); // the awaiting exchange owns the outcome
+    expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
+    expect(plugin.settings.licenseKey).toBe("skss-connected");
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("gives an accurate retry, never invalid-code, when the poll that burned the code never answers", async () => {
+    const { service, openedUrls, outcomes } = createNativeService();
+    serve([hang], [invalidCode]);
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    const manual = service.submitManualCode("manual-code");
+    await jest.advanceTimersByTimeAsync(15_000 + 15_000);
+
+    await expect(manual).resolves.toEqual({ kind: "error", reason: "unconfirmed" });
+    expect(service.hasPendingRequest()).toBe(true);
+
+    // The retry: the browser page for the same request mints a fresh code,
+    // and the resumed polling redeems it.
+    expect(await service.reopen()).toBe(true);
+    expect(parseConnectUrl(openedUrls[1]).challenge).toBe(parseConnectUrl(openedUrls[0]).challenge);
+    serve([() => Promise.resolve(native(200, successPayload))]);
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("treats a poll that failed after reaching the server as a possible sign-in", async () => {
+    const { service } = createNativeService();
+    serve([() => Promise.reject(new Error("socket hang up"))], [invalidCode]);
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    await expect(service.submitManualCode("manual-code")).resolves.toEqual({ kind: "error", reason: "unconfirmed" });
+    expect(service.hasPendingRequest()).toBe(true);
+  });
+
+  it("completes the sign-in from a timed-out poll that lands after the next poll found the code used", async () => {
+    const { service, plugin, outcomes } = createNativeService();
+    const poll = late();
+    serve([poll.respond]);
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    // The slot is released after 15 s; the next tick polls and finds no
+    // unused code, since the first poll burned it.
+    await jest.advanceTimersByTimeAsync(15_000 + 3_500);
+    expect(nativeCalls("/auth/poll")).toHaveLength(2);
+    expect(outcomes).toHaveLength(0);
+    expect(service.hasPendingRequest()).toBe(true);
+
+    poll.land(native(200, successPayload));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
+    expect(service.hasPendingRequest()).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(nativeCalls("/auth/poll")).toHaveLength(2);
+    expect(outcomes).toHaveLength(1);
+  });
+
+  it("completes the sign-in in the background when an exchange lands after it reported a network failure", async () => {
+    const { service, outcomes } = createNativeService();
+    const exchange = late();
+    serve([], [exchange.respond]);
+
+    await service.begin("sign-in");
+    const manual = service.submitManualCode("manual-code");
+    await jest.advanceTimersByTimeAsync(30_000);
+    await expect(manual).resolves.toEqual({ kind: "error", reason: "network" });
+    expect(service.hasPendingRequest()).toBe(true);
+
+    exchange.land(native(200, successPayload));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("lets a retried code adopt the first exchange that lands late with the sign-in", async () => {
+    const { service, plugin, outcomes } = createNativeService();
+    const first = late();
+    serve([], [first.respond, invalidCode]);
+
+    await service.begin("sign-in");
+    const firstAttempt = service.submitManualCode("manual-code");
+    await jest.advanceTimersByTimeAsync(30_000);
+    await expect(firstAttempt).resolves.toEqual({ kind: "error", reason: "network" });
+
+    // The retry is told the code is used: the first exchange burned it.
+    const retry = service.submitManualCode("manual-code");
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(nativeCalls("/auth/exchange")).toHaveLength(2);
+
+    first.land(native(200, successPayload));
+    await expect(retry).resolves.toMatchObject({ kind: "signed-in" });
+    expect(outcomes).toHaveLength(0);
+    expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
   });
 
   it("does not let a hung poll for a cancelled sign-in block a new one", async () => {
