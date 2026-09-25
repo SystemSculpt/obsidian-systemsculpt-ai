@@ -131,6 +131,23 @@ describe("HostedTransportAdapter", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("never lets an admission read of a new epoch join one that started before it", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const finish: Array<(value: Response) => void> = [];
+    request.mockImplementation(() => new Promise<Response>((resolve) => { finish.push(resolve); }));
+
+    const before = adapter.getAdmission(undefined, { epoch: 0 });
+    const sameEpoch = adapter.getAdmission(undefined, { epoch: 0 });
+    const after = adapter.getAdmission(undefined, { epoch: 1 });
+    expect(request).toHaveBeenCalledTimes(2);
+
+    finish[0](response(200, admission("allowed")));
+    finish[1](response(403, admission("license_rejected", { reason: "revoked" })));
+    await expect(before).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(sameEpoch).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(after).resolves.toMatchObject({ outcome: "license_rejected" });
+  });
+
   it("reports 401 and 403 from managed endpoints, but not from admission itself", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
     const rejected = jest.fn();

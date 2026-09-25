@@ -133,7 +133,7 @@ describe("ManagedAdmission", () => {
     const controller = new AbortController();
     await create().acquireLease({ alias: "systemsculpt/chat" }, controller.signal);
     expect(getCatalog).toHaveBeenCalledWith(controller.signal);
-    expect(getAdmission).toHaveBeenCalledWith(controller.signal);
+    expect(getAdmission).toHaveBeenCalledWith(controller.signal, { epoch: 0 });
   });
 
   it("rejects with the caller's abort instead of a lease when cancelled mid-request", async () => {
@@ -233,6 +233,40 @@ describe("ManagedAdmission", () => {
     await admission.acquireLease({ alias: "systemsculpt/chat" });
     await expect(admission.checkLicense(undefined, { fresh: true })).resolves.toMatchObject({ outcome: "allowed" });
     expect(getAdmission).toHaveBeenCalledTimes(2);
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("never refills the cache from a read that was pending when a 401 or 403 invalidated it", async () => {
+    let rejected: (() => void) | null = null;
+    let finishStale!: (value: unknown) => void;
+    getAdmission
+      .mockReturnValueOnce(new Promise((resolve) => { finishStale = resolve; }))
+      .mockResolvedValue({ outcome: "allowed", diagnostics: { status: 200 } });
+    const admission = new ManagedAdmission({
+      transport: {
+        getCatalog,
+        getAdmission,
+        onAuthorizationRejected: (listener: () => void) => {
+          rejected = listener;
+          return () => undefined;
+        },
+      } as any,
+      licenseKey,
+      now: () => now,
+    });
+
+    const stale = admission.checkLicense();
+    expect(getAdmission).toHaveBeenLastCalledWith(undefined, { epoch: 0 });
+    rejected!();
+    finishStale({ outcome: "allowed", diagnostics: { status: 200 } });
+    await expect(stale).resolves.toMatchObject({ outcome: "allowed" });
+
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+    // The read after the rejection cannot join the stale in-flight one.
+    expect(getAdmission).toHaveBeenLastCalledWith(undefined, { epoch: 1 });
+    // A read started after the rejection is trusted again.
     await admission.checkLicense();
     expect(getAdmission).toHaveBeenCalledTimes(2);
   });

@@ -107,9 +107,13 @@ export class HostedTransportAdapter {
     }, signal);
   }
 
-  /** One admission-v1 license read; concurrent callers share it. */
-  getAdmission(signal?: AbortSignal): Promise<HostedLicenseAdmission> {
-    return this.reads.run(`admission:${this.key() ?? ""}`, async (shared) => {
+  /**
+   * One admission-v1 license read; concurrent callers of the same epoch share
+   * it. A caller that invalidated its admission passes a new epoch so it
+   * never joins a read that started before the invalidation.
+   */
+  getAdmission(signal?: AbortSignal, options: Readonly<{ epoch?: number }> = {}): Promise<HostedLicenseAdmission> {
+    return this.reads.run(`admission:${this.key() ?? ""}:${options.epoch ?? 0}`, async (shared) => {
       const result = await this.send({ path: ADMISSION_PATH, method: "GET", signal: shared }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
       let body: unknown;
       try { body = await result.response.clone().json(); } catch {

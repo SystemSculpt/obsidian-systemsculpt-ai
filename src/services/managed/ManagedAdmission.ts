@@ -31,6 +31,11 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 export class ManagedAdmission {
   private cache: Cache | null = null;
   private admissionCache: AdmissionCache | null = null;
+  /**
+   * Bumped by invalidate(). A read that started under an older generation
+   * may still resolve as allowed, but it never refills the cache.
+   */
+  private admissionGeneration = 0;
 
   constructor(private readonly options: Options) {
     options.transport.onAuthorizationRejected?.(() => this.invalidate());
@@ -38,6 +43,7 @@ export class ManagedAdmission {
 
   /** Forgets the cached admission, e.g. after a 401 or 403 from a job endpoint. */
   invalidate(): void {
+    this.admissionGeneration += 1;
     this.admissionCache = null;
   }
 
@@ -81,9 +87,10 @@ export class ManagedAdmission {
     ) {
       return cached.admission;
     }
-    const admission = await this.options.transport.getAdmission(signal);
+    const generation = this.admissionGeneration;
+    const admission = await this.options.transport.getAdmission(signal, { epoch: generation });
     throwIfAborted(signal);
-    if (licenseKey === this.options.licenseKey().trim()) {
+    if (generation === this.admissionGeneration && licenseKey === this.options.licenseKey().trim()) {
       this.admissionCache = admission.outcome === "allowed"
         ? { admission, licenseKey, checkedAt: (this.options.now ?? Date.now)() }
         : null;
