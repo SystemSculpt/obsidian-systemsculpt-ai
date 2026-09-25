@@ -41,13 +41,40 @@ const CLEANUP_BATCH = 32;
 
 export type MutationReceiptRetention = Readonly<{ maxAgeMs: number; maxReceipts: number }>;
 
+/*
+ * Canonical text of deeply frozen inputs. Wire tool inputs are frozen and are
+ * compared on every presented frame, so each is canonicalized once.
+ */
+const canonicalInputs = new WeakMap<object, string>();
+
+function canonicalize(value: unknown): Readonly<{ text: string; frozen: boolean }> {
+  if (value === null || typeof value !== "object") {
+    return { text: JSON.stringify(value) ?? String(value), frozen: true };
+  }
+  const cached = canonicalInputs.get(value);
+  if (cached !== undefined) return { text: cached, frozen: true };
+  let frozen = Object.isFrozen(value);
+  let text: string;
+  if (Array.isArray(value)) {
+    text = `[${value.map((entry) => {
+      const child = canonicalize(entry);
+      frozen &&= child.frozen;
+      return child.text;
+    }).join(",")}]`;
+  } else {
+    const object = value as Record<string, unknown>;
+    text = `{${Object.keys(object).sort().map((key) => {
+      const child = canonicalize(object[key]);
+      frozen &&= child.frozen;
+      return `${JSON.stringify(key)}:${child.text}`;
+    }).join(",")}}`;
+  }
+  if (frozen) canonicalInputs.set(value, text);
+  return { text, frozen };
+}
+
 export function canonicalAgentToolInput(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? String(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalAgentToolInput).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) =>
-    `${JSON.stringify(key)}:${canonicalAgentToolInput(object[key])}`,
-  ).join(",")}}`;
+  return canonicalize(value).text;
 }
 
 async function sha256(value: string): Promise<string> {

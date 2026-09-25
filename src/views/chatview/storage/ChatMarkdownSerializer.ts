@@ -92,7 +92,7 @@ export class ChatMarkdownSerializer {
    * Convert an array of chat messages into the markdown body that lives below
    * the YAML front-matter.  (Front-matter itself is *not* produced here.)
    */
-  public static serializeMessages(messages: ChatMessage[]): string {
+  public static serializeMessages(messages: readonly ChatMessage[]): string {
     const unsupported = messages.find((message) => message.role !== "user" && message.role !== "assistant");
     if (unsupported) {
       throw new Error(`Managed chat persistence does not support ${unsupported.role} messages.`);

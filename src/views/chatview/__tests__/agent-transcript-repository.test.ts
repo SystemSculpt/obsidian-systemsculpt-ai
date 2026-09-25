@@ -1294,10 +1294,30 @@ describe("AgentTranscriptRepository", () => {
       .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
   });
 
-  it("returns copies so UI code cannot mutate durable state", async () => {
+  it("shares deeply frozen messages so UI code cannot mutate durable state", async () => {
     const { repository } = createHarness();
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
-    (accepted.messages[0] as ChatMessage).content = "tampered";
+    const input = user("u1");
+    const accepted = await repository.commitUser({ kind: "append", message: input });
+    input.content = "caller edit";
+    expect(() => {
+      (accepted.messages[0] as ChatMessage).content = "tampered";
+    }).toThrow(TypeError);
+    expect(Object.isFrozen(accepted.messages)).toBe(true);
     expect(repository.snapshot().messages[0].content).toBe("u1");
+    // Snapshots and accessors share the stored graph instead of cloning it.
+    expect(repository.snapshot().messages).toBe(accepted.messages);
+    expect(repository.currentMessages).toBe(accepted.messages);
+    expect(repository.has("u1")).toBe(true);
+    expect(repository.has("u2")).toBe(false);
+  });
+
+  it("keeps unchanged messages by reference across mutations", async () => {
+    const { repository } = createHarness();
+    const first = await repository.commitUser({ kind: "append", message: user("u1") });
+    const second = await repository.persistAssistant(assistant("a1"));
+    const third = await repository.commitUser({ kind: "append", message: user("u2") });
+    expect(second.messages[0]).toBe(first.messages[0]);
+    expect(third.messages[1]).toBe(second.messages[1]);
+    expect(repository.conversationId).toBeUndefined();
   });
 });

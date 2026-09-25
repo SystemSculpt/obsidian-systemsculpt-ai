@@ -712,6 +712,10 @@ export class AgentChatView extends ItemView {
     return this.transcript.snapshot().messages.map((message) => ({ ...message }));
   }
 
+  public get messageCount(): number {
+    return this.transcript.snapshot().messages.length;
+  }
+
   public getViewType(): string { return CHAT_VIEW_TYPE; }
   public getDisplayText(): string { return this.chatTitle || "SystemSculpt"; }
 
