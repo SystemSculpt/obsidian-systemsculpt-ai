@@ -28,8 +28,8 @@ export const AGENT_RUN_PAGE_SIZE = 50;
 /** On-disk retention mirrors the in-memory cap, plus an age limit. Live runs are never removed. */
 export const AGENT_RUN_RETAINED_RECORDS = 1000;
 export const AGENT_RUN_RETAINED_DAYS = 90;
-/** Each retention pass reads at most this many records before deleting them. */
-const RETENTION_READ_BUDGET = 500;
+/** Background retention yields to the host after this many records. */
+const RECORD_BATCH = 50;
 const INDEX_WRITE_DELAY_MS = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECORD_FILE = /\/(agent_([0-9]+)_[a-f0-9-]+)\.json$/;
@@ -41,7 +41,12 @@ const INDEX_SCHEMA = 'studio.agent-run-index.v1';
  * reach the index once this machine reads them.
  */
 type IndexEntry = { status: AgentRunStatus; day: string; workflowOpen?: true; workflowId?: string; parentRunId?: string };
-type RunIndex = { entries: Map<string, IndexEntry>; dirty: boolean; timer: number | null };
+/**
+ * `complete` means every record on disk was indexed at some point. An index
+ * that is missing, damaged or incomplete is seeded from all records before it
+ * decides which runs are live.
+ */
+type RunIndex = { entries: Map<string, IndexEntry>; complete: boolean; seeding: Promise<void> | null; dirty: boolean; timer: number | null };
 
 const indexEntry = (record: StudioAgentRun): IndexEntry => ({
   status: record.status, day: record.updatedAt.slice(0, 10),
@@ -102,6 +107,7 @@ export class StudioAgentRunStore {
     if (!await adapter.exists(folder)) return { records: [], before: null, olderRemaining: 0 };
     const ids = await this.listIds(folder);
     const index = await this.index(projectPath);
+    if (!options.before) await this.seedIndex(projectPath, projectId, index, ids);
     const older = options.before ? ids.filter(id => id < options.before!) : ids;
     const page = older.slice(-Math.max(1, options.limit ?? AGENT_RUN_PAGE_SIZE));
     const wanted = new Set(page);
@@ -172,11 +178,15 @@ export class StudioAgentRunStore {
   private index(projectPath: string): Promise<RunIndex> {
     if (!this.indexes.has(projectPath)) this.indexes.set(projectPath, (async (): Promise<RunIndex> => {
       const path = `${agentRunFolder(projectPath)}/index.json`, entries = new Map<string, IndexEntry>();
+      let complete = false;
       try {
         const saved: unknown = await this.app.vault.adapter.exists(path) ? JSON.parse(await this.app.vault.adapter.read(path)) : null;
-        if (isRecord(saved) && saved.schema === INDEX_SCHEMA && isRecord(saved.runs)) for (const [id, value] of Object.entries(saved.runs)) { const entry = readIndexEntry(value); if (entry) entries.set(id, entry); }
-      } catch { /* A damaged index is rebuilt from the records as they are read. */ }
-      return { entries, dirty: false, timer: null };
+        if (isRecord(saved) && saved.schema === INDEX_SCHEMA && isRecord(saved.runs)) {
+          for (const [id, value] of Object.entries(saved.runs)) { const entry = readIndexEntry(value); if (entry) entries.set(id, entry); }
+          complete = saved.complete === true;
+        }
+      } catch { /* A damaged index is seeded again from the records. */ }
+      return { entries, complete, seeding: null, dirty: false, timer: null };
     })());
     return this.indexes.get(projectPath)!;
   }
@@ -194,18 +204,46 @@ export class StudioAgentRunStore {
     if (!index.dirty) return;
     index.dirty = false;
     const path = `${agentRunFolder(projectPath)}/index.json`;
-    const snapshot = JSON.stringify({ schema: INDEX_SCHEMA, runs: Object.fromEntries([...index.entries].sort(([a], [b]) => a.localeCompare(b))) });
+    const snapshot = JSON.stringify({ schema: INDEX_SCHEMA, complete: index.complete, runs: Object.fromEntries([...index.entries].sort(([a], [b]) => a.localeCompare(b))) });
     const pending = (this.writes.get(path) || Promise.resolve()).catch(() => {}).then(async () => {
       if (await this.app.vault.adapter.exists(agentRunFolder(projectPath))) await this.app.vault.adapter.write(path, snapshot);
     });
     this.track(path, pending);
   }
+  /**
+   * One pass over every record the index lacks, four reads at a time, so an
+   * old open workflow is found even when the index was never written or was
+   * damaged. It runs once per project; unreadable records are skipped, as the
+   * board would refuse them anyway.
+   */
+  private seedIndex(projectPath: string, projectId: string, index: RunIndex, ids: readonly string[]): Promise<void> {
+    if (index.complete) return Promise.resolve();
+    index.seeding ??= (async () => {
+      const adapter = this.app.vault.adapter, folder = agentRunFolder(projectPath);
+      const missing = ids.filter(id => !index.entries.has(id));
+      for (let start = 0; start < missing.length; start += 4) {
+        await Promise.all(missing.slice(start, start + 4).map(async id => {
+          try {
+            const path = `${folder}/${id}.json`, stat = await adapter.stat(path);
+            if (!stat || stat.size > 2_000_000) return;
+            index.entries.set(id, indexEntry(parseRunRecord(await adapter.read(path), projectPath, projectId)));
+          } catch { /* Left for the board to report when it reads the record. */ }
+        }));
+      }
+      index.complete = true;
+      this.scheduleIndex(projectPath, index);
+    })().finally(() => { index.seeding = null; });
+    return index.seeding;
+  }
+  private yieldToHost(): Promise<void> { return new Promise(resolve => window.setTimeout(resolve, 0)); }
   private async prunePass(projectPath: string, projectId: string, keep: ReadonlySet<string>, now: number): Promise<number> {
     const adapter = this.app.vault.adapter, folder = agentRunFolder(projectPath);
     if (!await adapter.exists(folder) || typeof adapter.remove !== 'function') return 0;
     if (this.closed) return 0;
     const ids = await this.listIds(folder), present = new Set(ids);
     const index = await this.index(projectPath);
+    await this.seedIndex(projectPath, projectId, index, ids);
+    if (this.closed) return 0;
     for (const id of index.entries.keys()) if (!present.has(id)) { index.entries.delete(id); index.dirty = true; }
     const cutoff = new Date(now - AGENT_RUN_RETAINED_DAYS * DAY_MS).toISOString().slice(0, 10);
     const newest = new Set(ids.slice(-AGENT_RUN_RETAINED_RECORDS));
@@ -213,9 +251,12 @@ export class StudioAgentRunStore {
     const created = (id: string): number => { const at = Number(RECORD_FILE.exec(`/${id}.json`)?.[2]); return Number.isFinite(at) && at <= now ? at : now; };
     const lastChanged = (id: string): string => index.entries.get(id)?.day ?? new Date(created(id)).toISOString().slice(0, 10);
     const live = liveRunIds(index.entries, present);
-    const candidates = ids.filter(id => !keep.has(id) && !live.has(id) && (!newest.has(id) || lastChanged(id) < cutoff)).slice(0, RETENTION_READ_BUDGET);
+    const candidates = ids.filter(id => !keep.has(id) && !live.has(id) && (!newest.has(id) || lastChanged(id) < cutoff));
     let removed = 0;
-    for (const id of candidates) {
+    // Drain the whole backlog in the background, yielding between batches.
+    for (const [position, id] of candidates.entries()) {
+      if (this.closed) break;
+      if (position > 0 && position % RECORD_BATCH === 0) await this.yieldToHost();
       if (this.closed) break;
       const path = `${folder}/${id}.json`;
       let record: StudioAgentRun;

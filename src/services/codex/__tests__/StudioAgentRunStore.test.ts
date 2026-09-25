@@ -46,17 +46,26 @@ function fixture(records: StudioAgentRun[], index?: unknown) {
   return { store, files, adapter, savedIndex, recordReads };
 }
 
+/** A complete index, as a previous session would have left it. */
+function completeIndex(runs: StudioAgentRun[]) {
+  return {
+    schema: 'studio.agent-run-index.v1', complete: true,
+    runs: Object.fromEntries(runs.map(run => [run.id, {
+      status: run.status, day: run.updatedAt.slice(0, 10),
+      ...(run.workflow && ['active', 'waiting'].includes(run.workflow.status) ? { workflowOpen: true } : {}),
+      ...(run.workflowId ? { workflowId: run.workflowId } : {}),
+      ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}),
+    }])),
+  };
+}
+
 afterEach(() => jest.useRealTimers());
 
 it('opens a board by reading one page plus the runs the index marks as live, even past 5,000 records', async () => {
   const runs = Array.from({ length: 5_100 }, (_, sequence) => record(sequence));
   runs[3] = record(3, { status: 'waiting', workflow: { ...createStudioWorkflow('Ship'), status: 'waiting' } });
   runs[4] = record(4, { status: 'interrupted', workflowId: runId(3), parentRunId: runId(3) });
-  const index = { schema: 'studio.agent-run-index.v1', runs: {
-    [runId(3)]: { status: 'waiting', day: '2026-09-24', workflowOpen: true },
-    [runId(4)]: { status: 'interrupted', day: '2026-09-24', workflowId: runId(3), parentRunId: runId(3) },
-  } };
-  const { store, recordReads, adapter } = fixture(runs, index);
+  const { store, recordReads, adapter } = fixture(runs, completeIndex(runs));
 
   const page = await store.list(projectPath, 'project');
 
@@ -83,11 +92,12 @@ it('indexes status and workflow changes once, not every activity update', async 
   jest.useFakeTimers();
   const { store, adapter, savedIndex } = fixture([]);
   const run = record(1, { status: 'running', updatedAt: '2026-09-25T10:00:00.000Z' });
+  await store.list(projectPath, 'project');
   await store.write(run);
   await store.write({ ...run, currentActivity: 'Reading', updatedAt: '2026-09-25T10:00:05.000Z' });
   jest.advanceTimersByTime(1_000);
   await store.flush();
-  expect(savedIndex()).toEqual({ schema: 'studio.agent-run-index.v1', runs: { [run.id]: { status: 'running', day: '2026-09-25' } } });
+  expect(savedIndex()).toEqual({ schema: 'studio.agent-run-index.v1', complete: true, runs: { [run.id]: { status: 'running', day: '2026-09-25' } } });
   const indexWrites = () => adapter.write.mock.calls.filter(([path]) => String(path).endsWith('index.json')).length;
   expect(indexWrites()).toBe(1);
 
@@ -112,6 +122,29 @@ it('rebuilds a damaged index from the records it reads', async () => {
 
   expect(Object.keys(savedIndex().runs)).toEqual([runId(1), runId(2)]);
   expect(savedIndex().runs[runId(2)].status).toBe('running');
+  expect(savedIndex().complete).toBe(true);
+});
+
+it('seeds a missing index from every record once, so an old open workflow is still found', async () => {
+  const runs = Array.from({ length: 120 }, (_, sequence) => record(sequence));
+  runs[0] = record(0, { status: 'interrupted', workflow: { ...createStudioWorkflow('Ship'), status: 'active' } });
+  runs[1] = record(1, { status: 'interrupted', workflowId: runId(0), parentRunId: runId(0) });
+  const first = fixture(runs);
+
+  const page = await first.store.list(projectPath, 'project');
+  await first.store.flush();
+
+  expect(page.records.map(run => run.id)).toEqual(expect.arrayContaining([runId(0), runId(1)]));
+  expect(page.records).toHaveLength(AGENT_RUN_PAGE_SIZE + 2);
+  // One pass reads each record once, then the page reuses what it needs.
+  expect(first.recordReads()).toBe(120 + AGENT_RUN_PAGE_SIZE + 2);
+  expect(first.savedIndex().complete).toBe(true);
+
+  // The next session trusts the complete index and reads only what it shows.
+  const next = fixture([], undefined);
+  for (const [path, content] of first.files) next.files.set(path, content);
+  expect((await next.store.list(projectPath, 'project')).records.map(run => run.id)).toEqual(expect.arrayContaining([runId(0), runId(1)]));
+  expect(next.recordReads()).toBe(AGENT_RUN_PAGE_SIZE + 2);
 });
 
 describe('on-disk retention', () => {
@@ -122,15 +155,15 @@ describe('on-disk retention', () => {
     runs[0] = record(0, { status: 'running' });
     runs[1] = record(1, { workflow: { ...createStudioWorkflow('Open'), status: 'active' } });
     runs[2] = record(2, { workflowId: runId(1), parentRunId: runId(1) });
-    const { store, files, recordReads } = fixture(runs);
+    const { store, files, recordReads } = fixture(runs, completeIndex(runs));
 
     const removed = await store.prune(projectPath, 'project', new Set([runId(4)]), NOW);
 
     const kept = (sequence: number) => files.has(`${folder}/${runId(sequence)}.json`);
     expect([0, 1, 2, 3, 4, 5].map(kept)).toEqual([true, true, true, false, true, true]);
     expect(removed).toBe(1);
-    // Only the four runs beyond the newest 1,000 are read, never the retained ones.
-    expect(recordReads()).toBe(4);
+    // With a complete index only the one eligible record is read, to confirm it.
+    expect(recordReads()).toBe(1);
   });
 
   it('removes records unchanged for 90 days and keeps an old run that changed recently', async () => {
@@ -148,8 +181,9 @@ describe('on-disk retention', () => {
     expect(files.has(`${folder}/${runs[0].id}.json`)).toBe(false);
     expect(files.has(`${folder}/${runs[1].id}.json`)).toBe(true);
     expect(files.has(`${folder}/${runs[2].id}.json`)).toBe(true);
-    expect(recordReads()).toBe(2);
-    expect(savedIndex().runs).toEqual({ [runs[1].id]: { status: 'completed', day: runs[1].updatedAt.slice(0, 10) } });
+    // Seeding reads all three once; only the old one is read again to confirm.
+    expect(recordReads()).toBe(4);
+    expect(Object.keys(savedIndex().runs)).toEqual([runs[1].id, runs[2].id]);
   });
 
   it('re-reads a candidate first and keeps a run another machine reopened', async () => {
@@ -174,6 +208,17 @@ describe('on-disk retention', () => {
 
     expect(files.has(`${folder}/${root.id}.json`)).toBe(true);
     expect(files.has(`${folder}/${child.id}.json`)).toBe(true);
+  });
+
+  it('drains a backlog far beyond one batch in a single pass, yielding between batches', async () => {
+    const runs = Array.from({ length: 620 }, (_, sequence) => record(sequence, { updatedAt: oldDay }, 120));
+    const { store, files } = fixture([...runs, record(700)], completeIndex(runs));
+    const yields = jest.spyOn(window, 'setTimeout');
+
+    expect(await store.prune(projectPath, 'project', new Set(), NOW)).toBe(620);
+
+    expect([...files.keys()].filter(path => /agent_/.test(path))).toEqual([`${folder}/${runId(700)}.json`]);
+    expect(yields.mock.calls.filter(([, delay]) => delay === 0).length).toBeGreaterThanOrEqual(12);
   });
 
   it('runs once per project per session and not after the store closes', async () => {

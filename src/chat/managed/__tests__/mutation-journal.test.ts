@@ -660,32 +660,97 @@ describe("AgentMutationJournal", () => {
       expect(harness.adapter.list).not.toHaveBeenCalled();
     });
 
-    it("trims the oldest receipts beyond the size bound but keeps the last day", async () => {
-      const harness = adapterHarness();
-      let clock = 0;
-      // Report real modification times, which order receipts without reading them.
+    /** Report real modification times, which order receipts without reading them. */
+    function withRealModificationTimes(harness: ReturnType<typeof adapterHarness>) {
       harness.adapter.stat.mockImplementation(async (path: string) => {
         const content = harness.file(path);
         if (content === undefined) return null;
         const mtime = (JSON.parse(content) as { record: { updatedAt: number } }).record.updatedAt;
         return { type: "file" as const, ctime: mtime, mtime, size: content.length };
       });
+    }
+
+    async function completedReceipts(
+      journal: AgentMutationJournal,
+      times: readonly number[],
+      setClock: (at: number) => void,
+    ): Promise<void> {
+      for (const [index, at] of times.entries()) {
+        setClock(at);
+        await journal.claim("conversation", `call-${index}`, "write", { index });
+        await journal.complete("conversation", `call-${index}`, "write", { index }, { success: true });
+      }
+    }
+
+    const toolCallIds = (harness: ReturnType<typeof adapterHarness>) =>
+      recordsIn(harness).map((record) => (record as { toolCallId: string }).toolCallId).sort();
+
+    it("trims the oldest completed receipts beyond the size bound but keeps the last day", async () => {
+      const harness = adapterHarness();
+      withRealModificationTimes(harness);
+      let clock = 0;
       const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock, {
         maxAgeMs: MUTATION_RECEIPT_RETENTION_MS,
         maxReceipts: 1,
       });
-      for (const [index, at] of [0, DAY, 2 * DAY, 2 * DAY + 60_000].entries()) {
-        clock = at;
-        await journal.claim("conversation", `call-${index}`, "write", { index });
-      }
+      await completedReceipts(journal, [0, DAY, 2 * DAY, 2 * DAY + 60_000], (at) => { clock = at; });
       clock = 2 * DAY + 60 * 60_000;
 
-      harness.adapter.read.mockClear();
       await settle(journal);
 
-      expect(recordsIn(harness).map((record) => (record as { toolCallId: string }).toolCallId).sort())
-        .toEqual(["call-2", "call-3"]);
-      expect(harness.adapter.read).not.toHaveBeenCalled();
+      expect(toolCallIds(harness)).toEqual(["call-2", "call-3"]);
+    });
+
+    it("never trims a started receipt, whose action may still be in flight", async () => {
+      const harness = adapterHarness();
+      withRealModificationTimes(harness);
+      let clock = 0;
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock, {
+        maxAgeMs: MUTATION_RECEIPT_RETENTION_MS,
+        maxReceipts: 1,
+      });
+      await journal.claim("conversation", "call-started", "write", {});
+      clock = DAY;
+      await journal.claim("conversation", "call-later", "write", {});
+      clock = 3 * DAY;
+
+      await settle(journal);
+
+      expect(toolCallIds(harness)).toEqual(["call-later", "call-started"]);
+    });
+
+    it("keeps a receipt that was rewritten after the trim chose it", async () => {
+      const harness = adapterHarness();
+      withRealModificationTimes(harness);
+      let clock = 0;
+      const journal = new AgentMutationJournal(harness.adapter, JOURNAL_PATH, () => clock, {
+        maxAgeMs: MUTATION_RECEIPT_RETENTION_MS,
+        maxReceipts: 1,
+      });
+      await completedReceipts(journal, [0, DAY, 2 * DAY], (at) => { clock = at; });
+      clock = 3 * DAY;
+      const chosen = keyedRecordPath("conversation", "call-0");
+      const stat = harness.adapter.stat.getMockImplementation()!;
+      let stats = 0;
+      harness.adapter.stat.mockImplementation(async (path: string) => {
+        const result = await stat(path);
+        // After the age pass has looked at every receipt, and so after the
+        // trim picked its candidates, the oldest receipt is written again,
+        // as a replayed completion would.
+        stats += 1;
+        if (stats === 3) {
+          const current = JSON.parse(harness.file(chosen)!);
+          harness.setFile(chosen, JSON.stringify({ ...current, record: { ...current.record, updatedAt: clock } }));
+        }
+        return result;
+      });
+
+      await settle(journal);
+
+      expect(stats).toBe(3);
+      expect(toolCallIds(harness)).toEqual(["call-0", "call-2"]);
+      await expect(journal.inspect("conversation", "call-0", "write", { index: 0 }))
+        .resolves.toEqual({ kind: "replay", result: { success: true } });
     });
 
     it("leaves unreadable receipts in place and keeps the journal available", async () => {

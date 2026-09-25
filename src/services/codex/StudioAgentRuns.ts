@@ -60,7 +60,8 @@ export class StudioAgentRuns {
   subscribe(listener: (projectId: string) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   list(projectId: string, nodeIds?: readonly string[]): readonly StudioAgentRunView[] {
     const allowed = nodeIds?.length ? new Set(nodeIds) : null;
-    return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200);
+    // Every loaded run, including older pages the board asked for; memory stays bounded by prune().
+    return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
   canControl(id: string): boolean { const run = this.records.get(id); return !!run && hasHostCapability('local-cli') && run.machine === this.machine; }

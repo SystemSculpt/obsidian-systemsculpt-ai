@@ -136,7 +136,7 @@ A completed receipt returns its recorded result. A started receipt has an unknow
 
 If receipt persistence fails after a mutation returns, the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN`. It does not repeat the mutation.
 
-A receipt only matters while the server may still replay its tool call. The first time a conversation goes idle in a session, the journal removes receipts older than 30 days in the background, then the oldest beyond 5,000, but never one from the last day. A replayed call whose receipt was removed fails closed as unapproved.
+A receipt only matters while the server may still replay its tool call. The first time a conversation goes idle in a session, the journal removes receipts older than 30 days in the background, then the oldest completed receipts beyond 5,000, but never one from the last day. Each receipt is re-read immediately before removal, inside the same serialized step as claims and completions, so a receipt rewritten in the meantime is kept. A replayed call whose receipt was removed fails closed as unapproved.
 
 ## Diagnostics
 

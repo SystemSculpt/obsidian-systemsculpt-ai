@@ -34,7 +34,7 @@ export const MAX_LEGACY_JOURNAL_RECORDS = 10_000;
  */
 export const MUTATION_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
-/** The size bound never removes a receipt from the last day. */
+/** The size bound only removes completed receipts, and never one from the last day. */
 const MIN_TRIMMED_RECEIPT_AGE_MS = 24 * 60 * 60 * 1000;
 /** Cleanup yields to claims between batches. */
 const CLEANUP_BATCH = 32;
@@ -196,7 +196,7 @@ export type ThinAgentMutationClaim =
  * Crash-safe receipt store for local vault mutations. Each action has one
  * keyed receipt file. The first time a conversation goes idle in a session,
  * receipts older than 30 days are removed in the background, then the oldest
- * beyond 5,000.
+ * completed receipts beyond 5,000.
  */
 export class AgentMutationJournal {
   private readonly state: SharedJournalState;
@@ -413,7 +413,23 @@ export class AgentMutationJournal {
     for (let index = 0; index < excess.length; index += CLEANUP_BATCH) {
       await this.serialize(async () => {
         if (this.state.unavailable) return;
+        const current = this.now();
         for (const receipt of excess.slice(index, index + CLEANUP_BATCH)) {
+          // Compare and delete inside the serialized step: a claim or
+          // completion queued since selection may have rewritten this
+          // receipt. Only an unchanged, completed, day-old receipt goes; a
+          // started receipt may belong to an action still in flight.
+          let record: JournalRecord;
+          try {
+            record = parseKeyedJournal(JSON.parse(await this.adapter.read(receipt.storagePath)));
+          } catch {
+            continue;
+          }
+          if (
+            record.state !== "completed"
+            || record.updatedAt > receipt.updatedAt
+            || current - record.updatedAt < MIN_TRIMMED_RECEIPT_AGE_MS
+          ) continue;
           await this.adapter.remove!(receipt.storagePath);
         }
       });
