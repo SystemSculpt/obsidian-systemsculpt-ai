@@ -713,11 +713,6 @@ export function parseAndMigrateStudioProject(
   return migrateStudioProjectToPathOnlyPorts(project).project;
 }
 
-/** An older dialect is migrated on adoption, so Studio's first write replaces its original content. */
-export function isLegacyStudioProjectText(rawText: string): boolean {
-  return !isCurrentStudioDialect(JSON.parse(rawText));
-}
-
 function isCurrentStudioDialect(parsed: unknown): boolean {
   return isRecord(parsed) && asString(parsed.schema).trim() === STUDIO_PROJECT_SCHEMA_V2;
 }
@@ -729,12 +724,9 @@ function readStudioProject(parsed: unknown, context?: StudioProjectParseContext)
 
   const schema = asString(parsed.schema).trim();
   if (schema === STUDIO_PROJECT_SCHEMA_V2) {
-    const project = restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
-    if (isRecord(parsed.document)) {
-      if (parsed.document.engine !== "automerge" || typeof parsed.document.state !== "string" || !Array.isArray(parsed.document.heads) || !parsed.document.heads.every((head: unknown) => typeof head === "string")) throw new Error("Invalid Studio merge state.");
-      project.document = {engine: "automerge", state: parsed.document.state, heads: [...parsed.document.heads] as string[]};
-    }
-    return project;
+    // A 6.10 file may still embed its former merge state in `document`. The
+    // readable canvas is the content; that state is history and is dropped.
+    return restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
   }
   if (schema !== STUDIO_PROJECT_SCHEMA_V1) {
     const migrated = migrateLegacyProject(parsed);
@@ -807,7 +799,6 @@ export function serializeStudioProject(project: StudioProjectV1): string {
           : `${arrow.fromShapeId} -> ${arrow.toShapeId}`
       ),
     },
-    ...(project.document ? { document: { engine: project.document.engine, state: project.document.state, heads: [...project.document.heads].sort() } } : {}),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }

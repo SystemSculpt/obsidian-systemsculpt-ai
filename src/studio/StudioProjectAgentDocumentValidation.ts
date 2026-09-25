@@ -666,6 +666,8 @@ function assertLayoutAndParents(container: Record<string, unknown>, nodes: unkno
 }
 
 function assertStrictProjectV2(document: Record<string, unknown>): void {
+  // Former 6.10 merge state: still accepted so those files open and edit, then
+  // dropped by the next save. Studio never writes it.
   if (hasOwn(document, "document")) {
     const basis = assertClosedObject(document.document, new Set(["engine", "state", "heads"]), ["engine", "state", "heads"], "document");
     if (basis.engine !== "automerge" || typeof basis.state !== "string" || !basis.state || !Array.isArray(basis.heads) || !basis.heads.every(head => typeof head === "string" && /^[a-f0-9]{64}$/.test(head))) throw new Error("Invalid Studio merge state.");

@@ -2,11 +2,12 @@
 /**
  * Compiled Studio document round trip.
  *
- * Proves the shipped main.js initializes the embedded merge engine and can
- * create, edit through the agent API, reopen and merge one collaborative
- * `.systemsculpt` file through an adapter without desktop filesystem access.
+ * Proves the shipped main.js can create, edit through the agent API, reopen
+ * and merge one plain-JSON `.systemsculpt` file through an adapter without
+ * desktop filesystem access, and that it no longer ships a merge engine.
  */
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
@@ -35,12 +36,19 @@ function inMemoryAdapter() {
   return adapter;
 }
 
-describe("built bundle Studio collaborative document", () => {
+describe("built bundle Studio document", () => {
   beforeAll(() => {
     if (!existsSync(BUNDLE_PATH)) throw new Error("Built bundle not found; run `npm run build` first.");
   });
 
-  it("creates, edits, reopens and merges one collaborative document through the compiled plugin", async () => {
+  it("contains no embedded WebAssembly merge engine", () => {
+    const bundle = readFileSync(BUNDLE_PATH, "utf8");
+    expect(bundle).not.toMatch(/initializeBase64Wasm|__wbindgen/);
+    // A base64 WebAssembly module starts with "\0asm" = "AGFzbQ".
+    expect(bundle).not.toContain("AGFzbQ");
+  });
+
+  it("creates, edits, reopens and merges one plain-JSON document through the compiled plugin", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const bundleModule = require(BUNDLE_PATH);
     const PluginClass = bundleModule?.default ?? bundleModule;
@@ -57,13 +65,13 @@ describe("built bundle Studio collaborative document", () => {
     const studio = plugin.getStudioService();
 
     const created = await studio.createProjectFile({ name: "Bundle Round Trip", projectPath: "Studio/Bundle Round Trip.systemsculpt" });
-    const raw = JSON.parse(adapter.files.get(created.path)!);
-    expect(raw.document?.engine).toBe("automerge");
-    expect(raw.document?.heads).toHaveLength(1);
+    const raw = adapter.files.get(created.path)!;
+    expect(Object.keys(JSON.parse(raw))).toEqual(["schema", "id", "name", "docs", "canvas"]);
     expect([...adapter.files.keys()].filter((f) => f.includes(".tmp"))).toEqual([]);
 
+    // The revision is the SHA-256 of the canonical file text.
     const read = await studio.readAgentDocument(created.path);
-    expect(read.heads).toEqual(raw.document.heads);
+    expect(read.heads).toEqual([createHash("sha256").update(raw).digest("hex")]);
 
     const edited = await studio.editAgentDocument(created.path, read.heads, [
       { kind: "create", entityId: "node:note", value: { id: "note", kind: "text", x: 40, y: 60, config: { value: "Hello from the bundle" } } },
@@ -76,7 +84,8 @@ describe("built bundle Studio collaborative document", () => {
       studio.editAgentDocument(created.path, edited.heads, [{ kind: "set", entityId: "node:note", path: ["config", "value"], value: "Hello from the bundle, left" }]),
       studio.editAgentDocument(created.path, edited.heads, [{ kind: "set", entityId: "node:note", path: ["x"], value: 400 }]),
     ]);
-    expect(left.heads.length + right.heads.length).toBeGreaterThan(0);
+    expect(left.heads).toHaveLength(1);
+    expect(right.heads).toHaveLength(1);
 
     // A fresh plugin instance reopens the same bytes and observes both edits.
     const secondPlugin = new PluginClass(app, manifest);

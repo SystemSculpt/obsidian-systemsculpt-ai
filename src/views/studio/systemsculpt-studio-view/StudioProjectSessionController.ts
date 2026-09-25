@@ -772,9 +772,9 @@ export class StudioProjectSessionController {
       const result = await this.host.plugin.getStudioService().reconcileProjectFile(path, rawText);
       if (this.currentProjectSession !== session) return;
       this.currentProject = session.getProject();
-      this.projectFileWarning = result.conflicts.length
-        ? "Studio preserved conflicting edits in the document transaction history. Resolve the conflicting fields before continuing those edits."
-        : null;
+      // Field conflicts are preserved by the session and offered as Undo; the
+      // document only reports a file it cannot read yet.
+      this.projectFileWarning = result.conflicts.length ? result.conflicts.join(" ") : null;
       this.projectFileRetryCount = 0;
       session.resumeProjectFileWrites();
       this.host.setLastError(null);

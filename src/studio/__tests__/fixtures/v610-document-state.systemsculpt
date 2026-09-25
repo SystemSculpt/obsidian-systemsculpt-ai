@@ -1,0 +1,56 @@
+{
+  "schema": "studio.project.v2",
+  "id": "proj_4481469f-8a24-4d5b-b850-6ea1125cd6d4",
+  "name": "Release 6.10 canvas",
+  "docs": "SystemSculpt/Studio/AGENTS.md",
+  "canvas": {
+    "layout": {
+      "mode": "manual"
+    },
+    "nodes": [
+      {
+        "id": "brief",
+        "kind": "text",
+        "title": "Brief",
+        "x": 80,
+        "y": 80,
+        "config": {
+          "value": "Summarize the weekly interviews and flag risks."
+        }
+      },
+      {
+        "id": "summary",
+        "kind": "text_generation",
+        "title": "Summarize",
+        "x": 520,
+        "y": 80,
+        "config": {
+          "systemPrompt": "Write three short paragraphs."
+        }
+      }
+    ],
+    "edges": [
+      "brief.text -> summary.prompt"
+    ],
+    "groups": [],
+    "shapes": [
+      {
+        "id": "note",
+        "shape": "note",
+        "x": 960,
+        "y": 80,
+        "width": 240,
+        "height": 120,
+        "label": "Review on Fridays"
+      }
+    ],
+    "arrows": []
+  },
+  "document": {
+    "engine": "automerge",
+    "state": "hW9Kg/KKspsA9AoHIFHJgZnvep3ruq98+J9LZLoreFupxpS3QYhFTd8PAgXwIFbKBUJLuI8hQxKGVR9WN5Xu/29VxhJMOpD+Hzyp5ZN5IGi2g3qiL1E30wL+qCG/MaXnhkyp+DRt92H5WQ9oBjXJIJo+KJBsrhWVtd4rXpBZoOXSu3I26MEvbrSHU38kw/KyIJ+jISa7pcjahStcgOzLMlauUMmTrTGXmG33uBFHTJiyILe/tCUmZBfW65CBXs3MO57IcAmtiBuYKQTVrLGSId7HIN7gMWhctU6P7PrgYLueEQJeaA5wG37u90oi3jgv3BFvAfiM0mxB80Ecn5aaQJ3RWlM0xdKG9S1cw6CaJ2nBNBlnBwEIAwQTCiMCQAhDCFYCDgEKAlQRWhOkAR26ASEiI1Q0DkI0Vi9f8QGAARWBAQWDAQZ5BgMFBAIAAX8BBgB5wQD+ARpnHQwBBwB/AAMBfwICAXkAAQACfwIBBwcAA8QABowCAxcFAAMpAQYrfywTLX5BQhxDB2B/YQViC2MFZDBnB50Bf54BB58BC6ABB6EBFqQBB9QBf9UBB9YBFtcBCdgBHdsBB58CBKECEaICBKMCBMACBMUCD8oCAAQoBgAIEgYAAxsDAAkEAwABCgMAAQQDAAEfAwQCCwB/AwAJBgMAAQoDAAEGAwABFQMACQYDAAEVAwABCAMAARwDAAgDAwABEAMAAQMDAAEDBQABAwUAAQ4FAAN+AAInAQAHflcuEQEAAn5BxAAaAQAIfqJ/6AADAX6Vf+0ACQF+in/4AAMBfoV//QAeAX+/AQ4Bf7N+AAh+5X6lAQUBftZ+rAEJAX7LfrcBBQF+xH6+ARQBAAh+rn7cAQUBfp9+4wEUAX6JfvkBBwF+gH6CAhsBAAd+432nAgIBftd9qwIPAX7GfbwCAgF+wn3BAgIBfr19xgICAX64fcsCDQGNzz9PAkEQBfDlwgISOlsLKC0EawoaQ2HnV1huHrcD++eyOyCbIJ/deF5jY+jmJb+ZvPkaExwENEEQFkZ+aFM8oJZ3Us9lAWqw3iXGfim4yPxlM88n700qyzZF38o0ROrFrBtznYzUtg+/dtzfnGZrWqxDFAyD8VCPtz9L+mzcCerpNqpj2HNTMVXDIwe6amFxGFwGpTfbO8zqPzPLJQv8R/eFeisjC26sVEzamR2c7rrqTyaxP169fgMsBgQDfgYDFAZ/ASADfwU4AwQCDAAEA38FNgN/BecAAxcFfcEAalYpAXkYHj032H7zAY5+EwF+qgLZfRwBfwICAX7dAaR+NwF/vwEPAX6zfgICAX6lAdx+MgF/AgIBfvMAjn/GAAF/Ah8BfwIDAX8CAwF/Ag4BAykHEwIcCEUILwhDBzACAH8EKQEGAH8EFAF/BBwBfwAEBAIBfwTFAAF/AAQEAgF/BC8BfwAEBAIBfwTEAAEDBDMBAwApFgcAExZ+AgAcFgUAAiR/AMUAFgUAAiR/AC8WBQACJH8AwwAWfyQDAAMkMBZNjkFOw0AMRQeBxDV8gYyaahKFDQuEOEC7YFk5GScZmsxEHrclnIAlR+IIOQpLligpoC688Pf30xs4vOyMKVKT39VJgWuTGJuVSVlkqyQnTNN1Vtncmg11hJEg1+kKKvRHjCU7qrXQq0ByD/HQ98ijHjj0g0xqUss9ysG6sLQe5n271NwbgbQEJ6J9N4LzQnx0dIqA3kLdYQPs4j5qPamP61gxStVeoLbn5JE6ErJQUh2YgM+O7zeT+rW5eNk15IlRXPD/Ds/sZBZhIohtYIEBGRvGoY36W31dfd5OygehDc12EDw8sbM4xjmcqX9zQf8B5gAAfwHJAAB/AQIAfwE2AH8B/wAAfgUEAgV+wAIAAgUG",
+    "heads": [
+      "f88cd26c41f3411c9f969a409dd15a5334c5d286f52d5cc3a09a2769c1341967"
+    ]
+  }
+}

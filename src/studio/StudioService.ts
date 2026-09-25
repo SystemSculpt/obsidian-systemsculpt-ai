@@ -224,10 +224,8 @@ export class StudioService {
     const session = new StudioProjectSession({
       projectPath,
       project,
-      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject, intent) => {
-        return this.projectStore.saveProject(nextProjectPath, nextProject, {
-          onBeforeProjectWrite, baseProject, restoreDeletedEntities: intent?.restoreDeletedEntities,
-        });
+      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject) => {
+        return this.projectStore.saveProject(nextProjectPath, nextProject, { onBeforeProjectWrite, baseProject });
       },
       readProjectRawText: async (nextProjectPath) => {
         return this.projectStore.readProjectRawText(nextProjectPath);
@@ -298,23 +296,22 @@ export class StudioService {
     return {conflicts: result.conflicts};
   }
 
+  /** `heads` holds one revision: the SHA-256 of the canonical document text. */
   async readAgentDocument(path: string): Promise<unknown> {
     path = this.requireProjectPath(path);
     await this.getProjectSession(path)?.flushPendingSaveWork({force: true});
-    const project = await this.projectStore.loadProject(path);
-    const readable = JSON.parse(serializeStudioProject(project));
-    delete readable.document;
-    return {heads: project.document?.heads, canvas: readable, entities: projectToEntities(project)};
+    const {project, revision} = await this.projectStore.readDocument(path);
+    return {heads: [revision], canvas: JSON.parse(serializeStudioProject(project)), entities: projectToEntities(project)};
   }
 
   async editAgentDocument(path: string, heads: string[], edits: StudioDocumentEdit[]): Promise<unknown> {
     path = this.requireProjectPath(path);
-    if (!Array.isArray(heads) || !heads.length || !heads.every(head => typeof head === "string" && /^[0-9a-f]{64}$/.test(head))) throw new Error("Read the Studio revision before editing.");
+    if (!Array.isArray(heads) || heads.length !== 1 || typeof heads[0] !== "string" || !/^[0-9a-f]{64}$/.test(heads[0])) throw new Error("Read the Studio revision before editing.");
     const session = this.getProjectSession(path);
     await session?.flushPendingSaveWork({force: true});
-    const result = await this.projectStore.editDocument(path, heads, edits);
+    const result = await this.projectStore.editDocument(path, heads[0], edits);
     await session?.reconcileExternalProject(result.project, serializeStudioProject(result.project));
-    return {heads: result.project.document?.heads, entities: projectToEntities(result.project)};
+    return {heads: [result.revision], entities: projectToEntities(result.project)};
   }
 
   async releaseProjectSession(path: string): Promise<void> {

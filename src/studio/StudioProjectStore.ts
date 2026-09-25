@@ -2,7 +2,7 @@ import type { App } from "obsidian";
 import type { StudioProjectV1, StudioPermissionPolicyV1 } from "./types";
 import { createEmptyStudioProject, createDefaultStudioPolicy, parseStudioPolicy, serializeStudioPolicy, serializeStudioProject, parseStudioProject } from "./schema";
 import { DEFAULT_STUDIO_PROJECTS_DIR, deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "./paths";
-import { StudioProjectDocument, type StudioDocumentEdit, type StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
+import { StudioProjectDocument, type StudioDocumentEdit, type StudioDocumentEditResult, type StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
 import type { StudioProjectReconciliation } from "./StudioProjectReconciliation";
 import { resolveStudioEntry } from "./StudioEntry";
 import { reconcileStudioSupportDocument } from "./persistence/StudioSupportReconciliation";
@@ -70,11 +70,13 @@ export class StudioProjectStore {
   async loadProject(path: string, _options?: {forceReload?: boolean}): Promise<StudioProjectV1> { return (await this.document(path).refresh()).project; }
   async readProjectRawText(path: string): Promise<string | null> { try { return serializeStudioProject(await this.loadProject(path)); } catch { return null; } }
   async readVisibleProjectRawText(path: string): Promise<string> { return (await resolveStudioEntry(this.app.vault.adapter, path)).raw; }
-  async saveProject(path: string, project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1; restoreDeletedEntities?: boolean}): Promise<StudioProjectReconciliation> {
+  async saveProject(path: string, project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1}): Promise<StudioProjectReconciliation> {
     return this.document(path).save(project, options);
   }
-  async importProjectText(path: string, raw: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(raw); }
-  async editDocument(path: string, heads: string[], edits: StudioDocumentEdit[]): Promise<StudioProjectReconciliation> { return this.document(path).edit(heads, edits); }
+  /** A watcher's bytes only announce a change: the current file is what gets imported. */
+  async importProjectText(path: string, _raw: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
+  async readDocument(path: string): Promise<StudioProjectReconciliation & {revision: string}> { return this.document(path).read(); }
+  async editDocument(path: string, revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> { return this.document(path).edit(revision, edits); }
   async refreshDocument(path: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
 
   async renameProject(path: string, name: string, options?: {project?: StudioProjectV1}): Promise<{oldPath: string; newPath: string; project: StudioProjectV1}> {

@@ -120,10 +120,10 @@ _Avoid_: Ordinary native run, automatic continuation
 A generated Studio result placed on the canvas with its producing node and run identity.
 _Avoid_: Source node, input attachment
 
-**Collaborative document**:
-One authored Studio file containing readable canvas JSON and embedded merge state. Stable entity IDs and causal revisions let the shared edit service merge independent changes.
-_Avoid_: Sidecar transaction folder, conflict copy
+**Studio document**:
+One authored Studio file of readable canvas JSON. Stable entity IDs let the shared edit service merge each writer's changes by entity and field onto the current file.
+_Avoid_: Sidecar transaction folder, conflict copy, collaborative document
 
 **Document revision**:
-The set of accepted change heads used as the basis for a scoped edit. Text edits merge within one value; deletion requires explicit restoration.
-_Avoid_: File modification time
+The SHA-256 of a document's canonical text, used as the basis for a scoped agent edit. Changes since the revision merge by field; a batch that conflicts with a later change to the same field is rejected. Deletion requires explicit restoration.
+_Avoid_: File modification time, heads
