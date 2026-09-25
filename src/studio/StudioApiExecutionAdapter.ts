@@ -54,10 +54,11 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       recovery: this.recovery,
     });
     // Video rides the negotiated media contract: frame stills upload through
-    // the image input prepare endpoint, admission is the plain license check.
+    // the image input prepare endpoint, admission is the plain license check,
+    // through the shared admission cache.
     this.videos = new ManagedVideoGenerationAdapter({
       availability: signal => getVideoGenerationAvailability(plugin, {}, signal),
-      admission: signal => graph.transport.getAdmission(signal),
+      admission: signal => graph.admission.checkLicense(signal),
       jobs: mediaJobs.videos,
       prepareFrames: mediaJobs.images.prepareInputs,
       recovery: this.recovery,
