@@ -3,7 +3,13 @@
  */
 import { App, TFile } from "obsidian";
 import type { ChatMessage } from "../../../types";
-import { ChatStorageService } from "../ChatStorageService";
+import type SystemSculptPlugin from "../../../main";
+import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
+import {
+  ChatStorageService,
+  resolveChatsDirectory,
+  resolveKnownChatsDirectories,
+} from "../ChatStorageService";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { ChatAttachmentVaultStore, type ChatAttachmentStoreAdapter } from "../attachments/ChatAttachmentVaultStore";
 
@@ -207,5 +213,234 @@ describe("ChatStorageService attachment hydration", () => {
     const service = new ChatStorageService(app, "SystemSculpt/Chats");
 
     await expect(service.collectAttachmentRefKeys()).resolves.toBeNull();
+  });
+});
+
+/**
+ * An in-memory vault shared by every "session". Attachment-store claims are
+ * per adapter object, so `nextSession()` hands out a fresh adapter identity
+ * over the same files: cleanup there is protected only by what it scans.
+ */
+function memoryVault() {
+  const notes = new Map<string, string>();
+  const binaries = new Map<string, Uint8Array>();
+  const folders = new Set<string>();
+  const parentOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+  const addFolders = (path: string) => {
+    const segments = path.split("/").filter(Boolean);
+    for (let index = 1; index <= segments.length; index += 1) {
+      folders.add(segments.slice(0, index).join("/"));
+    }
+  };
+  const failingLists = new Set<string>();
+  const adapterFunctions = {
+    exists: async (path: string) => notes.has(path) || binaries.has(path) || folders.has(path),
+    list: async (path: string) => {
+      if (failingLists.has(path)) throw new Error("listing failed");
+      return {
+        files: [...notes.keys(), ...binaries.keys()].filter((file) => parentOf(file) === path),
+        folders: [...folders].filter((folder) => folder !== path && parentOf(folder) === path),
+      };
+    },
+    read: async (path: string) => {
+      const content = notes.get(path);
+      if (content === undefined) throw new Error(`missing ${path}`);
+      return content;
+    },
+    readBinary: async (path: string) => {
+      const bytes = binaries.get(path);
+      if (!bytes) throw new Error(`missing ${path}`);
+      return bytes.slice().buffer;
+    },
+    writeBinary: async (path: string, data: ArrayBuffer) => {
+      addFolders(parentOf(path));
+      binaries.set(path, new Uint8Array(data));
+    },
+    mkdir: async (path: string) => { addFolders(path); },
+    remove: async (path: string) => { binaries.delete(path); notes.delete(path); },
+    // Every payload is far past the orphan grace period.
+    stat: async (path: string) => (binaries.has(path) || notes.has(path) ? { mtime: 0, ctime: 0 } : null),
+  };
+  const nextSession = () => {
+    const adapter = { ...adapterFunctions };
+    const app = {
+      vault: {
+        adapter,
+        getAbstractFileByPath: (path: string) => (notes.has(path) ? new TFile({ path }) : null),
+        read: async (file: TFile) => notes.get(file.path)!,
+        cachedRead: async (file: TFile) => notes.get(file.path)!,
+        modify: async (file: TFile, content: string) => { notes.set(file.path, content); },
+        create: async (path: string, content: string) => {
+          if (notes.has(path)) throw new Error("File already exists.");
+          addFolders(parentOf(path));
+          notes.set(path, content);
+          return new TFile({ path });
+        },
+        createFolder: async (path: string) => { addFolders(path); },
+      },
+    } as unknown as App;
+    return { app, adapter };
+  };
+  return { notes, binaries, failingLists, nextSession };
+}
+
+/** The slice of the plugin storage reads, with an appending settings manager. */
+function pluginStub(settings: { chatsDirectory: string; knownChatsDirectories?: string[] }) {
+  const plugin = {
+    settings,
+    getSettingsManager: () => ({ updateSettings }),
+  };
+  const updateSettings = jest.fn(async (patch: { knownChatsDirectories?: string[] }) => {
+    plugin.settings = {
+      ...plugin.settings,
+      knownChatsDirectories: [
+        ...(plugin.settings.knownChatsDirectories ?? []),
+        ...(patch.knownChatsDirectories ?? []),
+      ],
+    };
+  });
+  return { plugin, updateSettings };
+}
+
+function liveStorage(app: App, plugin: ReturnType<typeof pluginStub>["plugin"]) {
+  return new ChatStorageService(
+    app,
+    () => resolveChatsDirectory(plugin.settings),
+    plugin as unknown as SystemSculptPlugin,
+  );
+}
+
+describe("ChatStorageService after the chats folder setting changes", () => {
+  it("keeps saving an open chat to its own file, and only new chats use the new folder", async () => {
+    const vault = memoryVault();
+    const { app } = vault.nextSession();
+    const { plugin } = pluginStub({ chatsDirectory: "Old/Chats", knownChatsDirectories: ["Old/Chats"] });
+    const storage = liveStorage(app, plugin);
+    const transcript = new AgentTranscriptRepository(storage, () => ({}));
+
+    const created = await transcript.commitUser({
+      kind: "append",
+      message: { role: "user", message_id: "user-1", content: "Hello" },
+    });
+    const chatPath = `Old/Chats/${created.chatId}.md`;
+    expect([...vault.notes.keys()]).toEqual([chatPath]);
+
+    plugin.settings = { ...plugin.settings, chatsDirectory: "New/Chats" };
+    await transcript.persistAssistant({ role: "assistant", message_id: "assistant-1", content: "Hi" });
+    await transcript.saveMetadata();
+
+    // No second transcript: the chat did not fork into the new folder.
+    expect([...vault.notes.keys()]).toEqual([chatPath]);
+    expect(transcript.chatPath(created.chatId)).toBe(chatPath);
+    expect(ChatMarkdownSerializer.parseMarkdown(vault.notes.get(chatPath)!)?.messages
+      .map((message) => message.message_id)).toEqual(["user-1", "assistant-1"]);
+
+    // Reopened later (a restored leaf), the chat is found in the folder it
+    // stayed in and keeps saving there.
+    const reopened = new AgentTranscriptRepository(storage, () => ({}));
+    await expect(reopened.load(created.chatId)).resolves.toMatchObject({ version: 3 });
+    await reopened.persistAssistant({ role: "assistant", message_id: "assistant-1", content: "Hi again" });
+    expect([...vault.notes.keys()]).toEqual([chatPath]);
+
+    const next = await new AgentTranscriptRepository(storage, () => ({})).commitUser({
+      kind: "append",
+      message: { role: "user", message_id: "user-2", content: "New chat" },
+    });
+    expect(vault.notes.has(`New/Chats/${next.chatId}.md`)).toBe(true);
+  });
+
+  it("keeps attachments referenced only by a chat left in an earlier chats folder", async () => {
+    const vault = memoryVault();
+    // Seeded while the default folder was configured; the user then moved
+    // chats to Old/Chats before creating this chat.
+    const { plugin, updateSettings } = pluginStub({
+      chatsDirectory: "Old/Chats",
+      knownChatsDirectories: ["SystemSculpt/Chats"],
+    });
+
+    const first = vault.nextSession();
+    const firstStore = new ChatAttachmentVaultStore(first.adapter);
+    const [kept, orphan] = await firstStore.externalizeAttachments([
+      imageAttachment("image-kept"),
+      { ...imageAttachment("image-orphan"), contentPart: { type: "image_url" as const, image_url: { url: "data:image/png;base64,BAUG" } } },
+    ]);
+    const transcript = new AgentTranscriptRepository(liveStorage(first.app, plugin), () => ({}));
+    await transcript.commitUser({
+      kind: "append",
+      message: {
+        role: "user",
+        message_id: "user-1",
+        content: [{ type: "text", text: "Compare this" }, kept.contentPart],
+        attachmentMetadata: [{
+          id: kept.id,
+          name: kept.name,
+          mimeType: kept.mimeType,
+          byteLength: kept.byteLength,
+          kind: kept.kind,
+          contentPartIndex: 1,
+          contentRef: kept.contentRef,
+        }],
+      },
+    });
+    expect(updateSettings).toHaveBeenCalledWith({ knownChatsDirectories: ["Old/Chats"] });
+
+    plugin.settings = { ...plugin.settings, chatsDirectory: "New/Chats" };
+    const next = vault.nextSession();
+    const storage = liveStorage(next.app, plugin);
+    const store = new ChatAttachmentVaultStore(next.adapter);
+    await store.pruneOncePerSession(() => storage.collectAttachmentRefKeys());
+
+    const payloadPath = (ref: { payload: string; sha256: string }) =>
+      `.systemsculpt/chat-attachments/${ref.sha256.slice(0, 2)}/${ref.sha256}.${ref.payload === "image-bytes" ? "bin" : "txt"}`;
+    expect(vault.binaries.has(payloadPath(kept.contentRef))).toBe(true);
+    expect(vault.binaries.has(payloadPath(orphan.contentRef))).toBe(false);
+  });
+
+  it("skips cleanup when an earlier chats folder cannot be listed", async () => {
+    const vault = memoryVault();
+    const { plugin } = pluginStub({
+      chatsDirectory: "New/Chats",
+      knownChatsDirectories: ["Old/Chats", "Gone/Chats"],
+    });
+    const first = vault.nextSession();
+    const [orphan] = await new ChatAttachmentVaultStore(first.adapter)
+      .externalizeAttachments([imageAttachment("image-1")]);
+    await first.app.vault.create("Old/Chats/Plain note.md", "note");
+    vault.failingLists.add("Old/Chats");
+
+    const next = vault.nextSession();
+    const storage = liveStorage(next.app, plugin);
+    await expect(storage.collectAttachmentRefKeys()).resolves.toBeNull();
+    await new ChatAttachmentVaultStore(next.adapter)
+      .pruneOncePerSession(() => storage.collectAttachmentRefKeys());
+    expect([...vault.binaries.keys()]).toEqual([
+      `.systemsculpt/chat-attachments/${orphan.contentRef.sha256.slice(0, 2)}/${orphan.contentRef.sha256}.bin`,
+    ]);
+
+    // Gone/Chats no longer exists: it holds no chats and is skipped.
+    vault.failingLists.clear();
+    await expect(storage.collectAttachmentRefKeys()).resolves.toEqual(new Set());
+  });
+
+  it("records a chats folder once, before its first transcript is written", async () => {
+    const vault = memoryVault();
+    const { app } = vault.nextSession();
+    const { plugin, updateSettings } = pluginStub({
+      chatsDirectory: "SystemSculpt/Chats",
+      knownChatsDirectories: [],
+    });
+    const storage = liveStorage(app, plugin);
+
+    // The default folder is always scanned; it needs no entry.
+    await storage.createChatExclusive("chat-default", [{ role: "user", message_id: "u1", content: "a" }]);
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    plugin.settings = { ...plugin.settings, chatsDirectory: "Work/Chats/" };
+    await expect(storage.createChatExclusive("chat-work", [{ role: "user", message_id: "u2", content: "b" }]))
+      .resolves.toEqual({ version: 1, chatDirectory: "Work/Chats" });
+    await storage.createChatExclusive("chat-work-2", [{ role: "user", message_id: "u3", content: "c" }]);
+    expect(updateSettings.mock.calls).toEqual([[{ knownChatsDirectories: ["Work/Chats"] }]]);
+    expect(resolveKnownChatsDirectories({ ...plugin.settings, chatsDirectory: "Home/Chats" }))
+      .toEqual(["Home/Chats", "SystemSculpt/Chats", "Work/Chats"]);
   });
 });

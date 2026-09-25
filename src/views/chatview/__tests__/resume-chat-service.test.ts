@@ -217,9 +217,15 @@ describe("ResumeChatService", () => {
 
       expect(service.isChatHistoryFile(oldFile)).toBe(false);
       expect(service.isChatHistoryFile(movedFile)).toBe(true);
+      app.vault.getAbstractFileByPath.mockClear();
       await expect((service as any).chatStorage.getChatResumeDescriptor("chat-1"))
         .resolves.toBeNull();
-      expect(app.vault.getAbstractFileByPath).toHaveBeenLastCalledWith("Archive/Chats/chat-1.md");
+      // The live folder is searched first, then the folders chats may have
+      // stayed in after the setting changed.
+      expect(app.vault.getAbstractFileByPath.mock.calls).toEqual([
+        ["Archive/Chats/chat-1.md"],
+        ["SystemSculpt/Chats/chat-1.md"],
+      ]);
     });
 
     it("handles cache returning null", () => {

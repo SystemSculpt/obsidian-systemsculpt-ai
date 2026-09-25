@@ -36,6 +36,12 @@ type SaveChatOptions = {
   approvalMode?: ChatApprovalMode;
   agentConversationId?: string;
   /**
+   * The folder this chat was loaded from or created in. A chat keeps its file
+   * when the chats folder setting changes; only new chats use the configured
+   * folder. Omitted means the configured folder.
+   */
+  chatDirectory?: string;
+  /**
    * Reserved for a validated, server-authoritative history reconciliation.
    * Ordinary local saves must keep the empty-over-nonempty race guard.
    */
@@ -62,6 +68,34 @@ export function resolveChatsDirectory(
     ? settings.chatsDirectory.replace(/\/+$/u, "")
     : "";
   return configured || DEFAULT_CHATS_DIRECTORY;
+}
+
+/**
+ * Every folder that may hold chat transcripts: the configured one first, then
+ * the default and each recorded folder (see `knownChatsDirectories`). Chats
+ * stay where they were created when the setting changes, so attachment
+ * cleanup and chat lookup must cover all of them.
+ */
+export function resolveKnownChatsDirectories(
+  settings: Readonly<{ chatsDirectory?: unknown; knownChatsDirectories?: unknown }>,
+): string[] {
+  return [...new Set([
+    resolveChatsDirectory(settings),
+    ...recordedChatsDirectories(settings),
+  ])];
+}
+
+/** The default folder and every folder recorded in settings, normalized. */
+function recordedChatsDirectories(
+  settings: Readonly<{ knownChatsDirectories?: unknown }>,
+): string[] {
+  const recorded: unknown[] = Array.isArray(settings.knownChatsDirectories)
+    ? settings.knownChatsDirectories
+    : [];
+  return [
+    DEFAULT_CHATS_DIRECTORY,
+    ...recorded.map((chatsDirectory) => resolveChatsDirectory({ chatsDirectory })),
+  ];
 }
 
 /** Folder containment on a path boundary: `Chats-old/x.md` is not in `Chats`. */
@@ -207,6 +241,26 @@ export class ChatStorageService {
     return this.resolveChatDirectory();
   }
 
+  /** The configured folder first, then every other folder a chat may be in. */
+  private knownChatDirectories(): string[] {
+    return [...new Set([
+      this.chatDirectory,
+      ...resolveKnownChatsDirectories(this.plugin?.settings ?? {}),
+    ])];
+  }
+
+  /**
+   * Records a folder before the first transcript is written to it, so cleanup
+   * keeps scanning it after the setting moves elsewhere.
+   */
+  private async rememberChatDirectory(directory: string): Promise<void> {
+    if (!this.plugin
+      || recordedChatsDirectories(this.plugin.settings).includes(directory)) return;
+    await this.plugin.getSettingsManager().updateSettings({
+      knownChatsDirectories: [directory],
+    });
+  }
+
   private normalizeTag(tag: string): string {
     return tag.trim().replace(/^#+/, "");
   }
@@ -234,6 +288,8 @@ export class ChatStorageService {
         chatId,
         messages,
         options,
+        false,
+        options.chatDirectory ?? this.chatDirectory,
       );
       return { version };
     } catch (error) {
@@ -246,16 +302,18 @@ export class ChatStorageService {
     }
   }
   
+  /** Creates a new chat in the configured folder and returns that folder. */
   async createChatExclusive(
     chatId: string,
     messages: ChatMessage[],
-    options: SaveChatOptions = {},
-  ): Promise<{ version: number } | null> {
+    options: Omit<SaveChatOptions, "chatDirectory"> = {},
+  ): Promise<{ version: number; chatDirectory: string } | null> {
     const chatDirectory = this.chatDirectory;
     const filePath = `${chatDirectory}/${chatId}.md`;
+    await this.rememberChatDirectory(chatDirectory);
     try {
       const result = await this.saveChatSimple(chatId, messages, options, true, chatDirectory);
-      return { version: result.version };
+      return { version: result.version, chatDirectory };
     } catch (error) {
       // Obsidian's vault.create is exclusive. A path that exists after the
       // failed create means another writer won the race; callers should try
@@ -271,8 +329,8 @@ export class ChatStorageService {
     chatId: string,
     messages: ChatMessage[],
     options: SaveChatOptions = {},
-    exclusiveCreate: boolean = false,
-    chatDirectory: string = this.chatDirectory,
+    exclusiveCreate: boolean,
+    chatDirectory: string,
   ): Promise<{ filePath: string; version: number }> {
     const filePath = `${chatDirectory}/${chatId}.md`;
       const now = new Date().toISOString();
@@ -435,15 +493,25 @@ export class ChatStorageService {
   public async collectAttachmentRefKeys(): Promise<ReadonlySet<string> | null> {
     const adapter = this.app.vault.adapter;
     try {
-      const chatDirectory = this.chatDirectory;
-      if (!await adapter.exists(chatDirectory)) return new Set();
-      const directories = [chatDirectory];
-      const chatFiles: string[] = [];
-      while (directories.length > 0) {
-        const directory = directories.pop()!;
-        const entries = await adapter.list(directory);
-        chatFiles.push(...entries.files.filter((path) => path.endsWith(".md")));
-        directories.push(...entries.folders);
+      // Chats keep their folder when the setting changes, so every folder
+      // that has held chats is scanned, not only the configured one. A folder
+      // that no longer exists holds no transcripts; any listing failure fails
+      // the whole scan closed.
+      const chatFiles = new Set<string>();
+      const listed = new Set<string>();
+      for (const chatDirectory of this.knownChatDirectories()) {
+        if (!await adapter.exists(chatDirectory)) continue;
+        const directories = [chatDirectory];
+        while (directories.length > 0) {
+          const directory = directories.pop()!;
+          if (listed.has(directory)) continue;
+          listed.add(directory);
+          const entries = await adapter.list(directory);
+          for (const path of entries.files) {
+            if (path.endsWith(".md")) chatFiles.add(path);
+          }
+          directories.push(...entries.folders);
+        }
       }
 
       const references = new Set<string>();
@@ -464,21 +532,37 @@ export class ChatStorageService {
     }
   }
 
-  async loadChat(chatId: string): Promise<LoadedChatRecord | null> {
+  /**
+   * Loads a chat from the configured folder or, failing that, from an earlier
+   * chats folder it stayed in. The record names the folder it came from so
+   * later saves go back to the same file.
+   */
+  async loadChat(
+    chatId: string,
+  ): Promise<(LoadedChatRecord & { chatDirectory: string }) | null> {
     try {
-      const filePath = `${this.chatDirectory}/${chatId}.md`;
-      const file = this.app.vault.getAbstractFileByPath(filePath);
-
-      if (!(file instanceof TFile)) {
+      let chatDirectory: string | undefined;
+      let file: TFile | undefined;
+      for (const directory of this.knownChatDirectories()) {
+        const candidate = this.app.vault.getAbstractFileByPath(`${directory}/${chatId}.md`);
+        if (candidate instanceof TFile) {
+          chatDirectory = directory;
+          file = candidate;
+          break;
+        }
+      }
+      if (!file || chatDirectory === undefined) {
         return null;
       }
 
+      const filePath = `${chatDirectory}/${chatId}.md`;
       const content = await this.app.vault.read(file);
       const parsed = this.parseDirectChatLoad(content, filePath);
       if (!parsed) return null;
       this.attachmentStore?.claimMessageReferences(parsed.messages);
       return {
         ...parsed,
+        chatDirectory,
         // Keep CAS-backed attachment payloads lazy. The chat surface can render
         // compact metadata immediately, while request preparation resolves the
         // bytes only if the user actually continues or retries this chat.

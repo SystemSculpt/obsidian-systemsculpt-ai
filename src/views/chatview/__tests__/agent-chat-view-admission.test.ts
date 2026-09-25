@@ -1786,11 +1786,12 @@ describe("AgentChatView composer admission", () => {
     });
   });
 
-  it("names the chat history file in the live chats folder", () => {
+  it("names a not-yet-loaded chat's history file in the live chats folder", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       chatId: "2026-09-24 10-00-00",
       plugin: { settings: { chatsDirectory: "SystemSculpt/Chats" } },
+      transcript: new AgentTranscriptRepository({} as ChatStorageService, () => ({})),
     });
     expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
 
@@ -1799,6 +1800,32 @@ describe("AgentChatView composer admission", () => {
 
     view.plugin = { settings: { chatsDirectory: "" } };
     expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
+  });
+
+  it("keeps naming a loaded chat's own file after the chats folder changes", async () => {
+    const chatId = "2026-09-24 10-00-00";
+    const transcript = new AgentTranscriptRepository({
+      loadChat: jest.fn(async () => ({
+        id: chatId,
+        title: "Moved setting",
+        version: 3,
+        messages: [],
+        lastModified: 0,
+        chatPath: `SystemSculpt/Chats/${chatId}.md`,
+        chatDirectory: "SystemSculpt/Chats",
+      })),
+    } as unknown as ChatStorageService, () => ({}));
+    await transcript.load(chatId);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      chatId,
+      plugin: { settings: { chatsDirectory: "Archive/Chats" } },
+      transcript,
+    });
+
+    expect(view.getExpectedChatHistoryFilePath()).toBe(`SystemSculpt/Chats/${chatId}.md`);
+    view.chatId = "2026-09-24 11-00-00";
+    expect(view.getExpectedChatHistoryFilePath()).toBe("Archive/Chats/2026-09-24 11-00-00.md");
   });
 
   it("does not pin a file merely because the agent read it", async () => {

@@ -107,6 +107,7 @@ describe("ChatStorageService", () => {
       directory = "Archive/Chats";
       await live.saveChat("chat-live", []);
       await live.createChatExclusive("chat-new", []);
+      mockVault.getAbstractFileByPath.mockClear();
       await live.loadChat("chat-live");
 
       expect(mockVault.create.mock.calls.map(([path]: [string]) => path)).toEqual([
@@ -114,7 +115,12 @@ describe("ChatStorageService", () => {
         "Archive/Chats/chat-live.md",
         "Archive/Chats/chat-new.md",
       ]);
-      expect(mockVault.getAbstractFileByPath).toHaveBeenLastCalledWith("Archive/Chats/chat-live.md");
+      // The live folder is searched first; a chat that stayed in an earlier
+      // chats folder is still found there.
+      expect(mockVault.getAbstractFileByPath.mock.calls).toEqual([
+        ["Archive/Chats/chat-live.md"],
+        ["SystemSculpt/Chats/chat-live.md"],
+      ]);
     });
   });
 

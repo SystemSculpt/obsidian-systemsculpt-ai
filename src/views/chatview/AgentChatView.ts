@@ -1092,9 +1092,12 @@ export class AgentChatView extends ItemView {
   }
 
   public getExpectedChatHistoryFilePath(): string | null {
-    return this.chatId
-      ? `${resolveChatsDirectory(this.plugin.settings)}/${this.chatId}.md`
-      : null;
+    if (!this.chatId) return null;
+    // A loaded or created chat keeps its file after the chats folder setting
+    // changes. A chat id from restored leaf state that has not loaded yet
+    // resolves against the configured folder.
+    return this.transcript.chatPath(this.chatId)
+      ?? `${resolveChatsDirectory(this.plugin.settings)}/${this.chatId}.md`;
   }
 
   public getChatHistoryFilePath(): string | null {

@@ -164,6 +164,39 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings).not.toHaveProperty("serverUrl");
   });
 
+  it("seeds the known chats folders from the configured folder and only ever appends to them", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatsDirectory: "Archive/Chats",
+    });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    // Chats saved before the list existed are in the folder configured now.
+    expect(manager.settings.knownChatsDirectories).toEqual(["Archive/Chats"]);
+
+    await Promise.all([
+      manager.updateSettings({ knownChatsDirectories: ["Work/Chats"] }),
+      manager.updateSettings({ knownChatsDirectories: ["Home/Chats"] }),
+      manager.updateSettings({ chatsDirectory: "Home/Chats" }),
+    ]);
+    expect(manager.settings.knownChatsDirectories)
+      .toEqual(["Archive/Chats", "Work/Chats", "Home/Chats"]);
+
+    // A restored backup, which carries its own list, cannot drop a folder
+    // that chats may still be in.
+    await manager.restoreFromExternalSettings({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatsDirectory: "SystemSculpt/Chats",
+      knownChatsDirectories: ["SystemSculpt/Chats"],
+    });
+    expect(manager.settings.knownChatsDirectories)
+      .toEqual(["Archive/Chats", "Work/Chats", "Home/Chats", "SystemSculpt/Chats"]);
+    expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({
+      knownChatsDirectories: ["Archive/Chats", "Work/Chats", "Home/Chats", "SystemSculpt/Chats"],
+    });
+  });
+
   it("removes retired recorder settings and synced microphone preferences", async () => {
     const plugin = createPlugin({
       schemaVersion: 8,

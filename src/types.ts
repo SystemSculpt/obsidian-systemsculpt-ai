@@ -116,6 +116,14 @@ export interface SystemSculptSettings {
   subscriptionStatus?: string;
   chatsDirectory: string;
   /**
+   * Every chats folder that has held transcripts: the folder configured when
+   * this list was first seeded and each folder a chat was created in since.
+   * A chat keeps its folder when chatsDirectory changes, and attachment
+   * cleanup scans every listed folder. The list only grows; updateSettings
+   * appends the entries it is given.
+   */
+  knownChatsDirectories?: string[];
+  /**
    * Directory where notes created via the "Save chat as note" feature are stored
    */
   savedChatsDirectory: string;
