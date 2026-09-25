@@ -6,8 +6,27 @@ import {
   createUiAction,
   createUiState,
   SurfaceCombobox,
+  updateUiAction,
 } from "../../core/ui/surface";
+import { hasHostCapability } from "../../platform/hostCapabilities";
 import type { SystemSculptHistoryEntry } from "./types";
+
+/** Rows rendered at once; "Show more" adds another page. */
+const HISTORY_ROW_PAGE = 100;
+/** Full-text search starts at this query length, after typing pauses. */
+const CONTENT_SEARCH_MIN_CHARACTERS = 2;
+const CONTENT_SEARCH_DEBOUNCE_MS = 250;
+const DESKTOP_CONTENT_SEARCH_CONCURRENCY = 8;
+const PORTABLE_CONTENT_SEARCH_CONCURRENCY = 1;
+
+function normalizeQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+type ContentSearch = Readonly<{
+  query: string;
+  matches: ReadonlySet<SystemSculptHistoryEntry>;
+}>;
 
 interface SystemSculptHistoryModalOptions {
   loadEntries?: (signal?: AbortSignal) => Promise<SystemSculptHistoryEntry[]>;
@@ -22,6 +41,13 @@ export class SystemSculptHistoryModal extends StandardModal {
   private searchInput!: HTMLInputElement;
   private combobox: SurfaceCombobox<SystemSculptHistoryEntry> | null = null;
   private isLoading = false;
+  private showMoreEl!: HTMLButtonElement;
+  private rowLimit = HISTORY_ROW_PAGE;
+  private matchedCount = 0;
+  private activeQuery = "";
+  private contentSearch: ContentSearch | null = null;
+  private pendingContentQuery: string | null = null;
+  private contentSearchTimer: number | null = null;
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -52,7 +78,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.searchInput = this.addSearchBar(
       "history.search",
       "Search chats and Studio sessions…",
-      (query) => this.combobox?.setQuery(query, { writeInput: false }),
+      (query) => this.handleQuery(query),
     );
   }
 
@@ -63,6 +89,83 @@ export class SystemSculptHistoryModal extends StandardModal {
         id: "systemsculpt-history-results",
       },
     });
+    this.showMoreEl = createUiAction(this.contentEl, {
+      label: "Show more",
+      testId: "history.show-more",
+      size: "small",
+    });
+    this.showMoreEl.addClass("systemsculpt-history-show-more");
+    this.showMoreEl.toggleAttribute("hidden", true);
+    this.registerDomEvent(this.showMoreEl, "click", () => {
+      this.rowLimit += HISTORY_ROW_PAGE;
+      this.combobox?.refresh();
+    });
+  }
+
+  /**
+   * Titles filter on every keystroke. Message text is searched once typing
+   * pauses and the query has at least two characters.
+   */
+  private handleQuery(query: string): void {
+    const normalized = normalizeQuery(query);
+    if (normalized !== this.activeQuery) {
+      this.activeQuery = normalized;
+      this.rowLimit = HISTORY_ROW_PAGE;
+    }
+    this.scheduleContentSearch(normalized);
+    this.combobox?.setQuery(query, { writeInput: false });
+  }
+
+  private scheduleContentSearch(query: string): void {
+    this.cancelContentSearchTimer();
+    if (
+      query.length < CONTENT_SEARCH_MIN_CHARACTERS
+      || this.contentSearch?.query === query
+      || !this.entries.some((entry) => entry.loadSearchText)
+    ) {
+      this.pendingContentQuery = null;
+      return;
+    }
+    this.pendingContentQuery = query;
+    const ownerWindow = this.modalEl.ownerDocument.defaultView ?? window;
+    this.contentSearchTimer = ownerWindow.setTimeout(() => {
+      this.contentSearchTimer = null;
+      void this.searchContent(query);
+    }, CONTENT_SEARCH_DEBOUNCE_MS);
+  }
+
+  private cancelContentSearchTimer(): void {
+    if (this.contentSearchTimer === null) return;
+    const ownerWindow = this.modalEl.ownerDocument.defaultView ?? window;
+    ownerWindow.clearTimeout(this.contentSearchTimer);
+    this.contentSearchTimer = null;
+  }
+
+  private async searchContent(query: string): Promise<void> {
+    const task = this.beginAsyncTask("history-content-search");
+    const searchable = this.entries.filter((entry) => entry.loadSearchText);
+    const matches = new Set<SystemSculptHistoryEntry>();
+    let next = 0;
+    const concurrency = hasHostCapability("local-filesystem")
+      ? DESKTOP_CONTENT_SEARCH_CONCURRENCY
+      : PORTABLE_CONTENT_SEARCH_CONCURRENCY;
+    await Promise.all(Array.from(
+      { length: Math.min(concurrency, searchable.length) },
+      async () => {
+        while (next < searchable.length && task.isCurrent()) {
+          const entry = searchable[next++];
+          try {
+            if ((await entry.loadSearchText!()).includes(query)) matches.add(entry);
+          } catch {
+            // An unreadable chat simply does not match.
+          }
+        }
+      },
+    ));
+    if (!task.isCurrent()) return;
+    this.contentSearch = { query, matches };
+    if (this.pendingContentQuery === query) this.pendingContentQuery = null;
+    this.combobox?.refresh();
   }
 
   private initializeCombobox(): void {
@@ -81,27 +184,69 @@ export class SystemSculptHistoryModal extends StandardModal {
       scrollBehavior: "smooth",
       getItemKey: (entry) => `${entry.kind}:${entry.id}`,
       filterItems: (entries, query) => {
-        const normalizedQuery = query.trim().toLowerCase();
-        if (!normalizedQuery) return entries;
-        return entries.filter((entry) =>
-          entry.searchText.includes(normalizedQuery)
-          || entry.title.toLowerCase().includes(normalizedQuery));
+        const normalizedQuery = normalizeQuery(query);
+        const contentMatches = this.contentSearch?.query === normalizedQuery
+          ? this.contentSearch.matches
+          : null;
+        const matched = normalizedQuery
+          ? entries.filter((entry) =>
+            entry.searchText.includes(normalizedQuery)
+            || entry.title.toLowerCase().includes(normalizedQuery)
+            || contentMatches?.has(entry) === true)
+          : entries;
+        this.matchedCount = matched.length;
+        return matched.length > this.rowLimit ? matched.slice(0, this.rowLimit) : matched;
       },
       renderOption: ({ item }) => this.renderEntry(item),
       renderEmpty: ({ query }) => {
         if (this.isLoading) return;
+        const normalizedQuery = normalizeQuery(query);
+        if (normalizedQuery && this.pendingContentQuery === normalizedQuery) {
+          this.showState("loading", "Searching chat text");
+          return;
+        }
         this.showState(
           "empty",
-          query.trim() ? "No history matches your search" : "No history yet",
+          normalizedQuery ? "No history matches your search" : "No history yet",
         );
       },
+      onRender: () => this.syncShowMore(),
       onResultsChange: (entries) => {
         if (!this.isLoading && entries.length > 0) {
           this.hideState();
         }
       },
-      onCommit: ({ item }) => this.openEntry(item),
+      // Row controls are handled here, through the option's own listener,
+      // instead of registering a listener per rendered row.
+      onCommit: ({ item, event }) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest?.(".systemsculpt-history-item-favorite")) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.toggleFavorite(item);
+          return;
+        }
+        return this.openEntry(item);
+      },
       onEscape: () => this.close(),
+    });
+  }
+
+  private syncShowMore(): void {
+    const remaining = this.matchedCount - this.rowLimit;
+    this.showMoreEl.toggleAttribute("hidden", remaining <= 0);
+    if (remaining > 0) {
+      updateUiAction(this.showMoreEl, {
+        label: `Show ${Math.min(remaining, HISTORY_ROW_PAGE)} more`,
+      });
+    }
+  }
+
+  private toggleFavorite(entry: SystemSculptHistoryEntry): void {
+    if (!entry.toggleFavorite) return;
+    void entry.toggleFavorite().then((nextState) => {
+      entry.isFavorite = nextState;
+      this.combobox?.refresh();
     });
   }
 
@@ -115,6 +260,8 @@ export class SystemSculptHistoryModal extends StandardModal {
       const entries = await this.loadEntries(task.signal);
       if (!task.isCurrent()) return;
       this.entries = entries;
+      this.contentSearch = null;
+      this.scheduleContentSearch(this.activeQuery);
     } catch (error) {
       if (!task.isCurrent()) return;
       this.entries = [];
@@ -140,7 +287,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     }
 
     const historyProviders = await import("./historyProviders");
-    return historyProviders.loadSystemSculptHistoryEntries(this.plugin);
+    return historyProviders.loadSystemSculptHistoryEntries(this.plugin, signal);
   }
 
   private renderEntry(entry: SystemSculptHistoryEntry): HTMLElement {
@@ -171,16 +318,6 @@ export class SystemSculptHistoryModal extends StandardModal {
       if (entry.isFavorite) {
         favoriteButton.addClass("is-favorite");
       }
-
-      this.registerDomEvent(favoriteButton, "click", (event: Event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!entry.toggleFavorite) return;
-        void entry.toggleFavorite().then((nextState) => {
-          entry.isFavorite = nextState;
-          this.combobox?.refresh();
-        });
-      });
     }
 
     const titleEl = row.createDiv("systemsculpt-history-item-title");
@@ -232,6 +369,9 @@ export class SystemSculptHistoryModal extends StandardModal {
   }
 
   onClose(): void {
+    this.cancelContentSearchTimer();
+    this.pendingContentQuery = null;
+    this.contentSearch = null;
     this.combobox?.destroy();
     this.combobox = null;
     this.stateEl = null;

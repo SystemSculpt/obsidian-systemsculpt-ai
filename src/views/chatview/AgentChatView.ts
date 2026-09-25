@@ -21,6 +21,7 @@ import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy"
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
@@ -146,6 +147,8 @@ const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
 const AGENT_SESSION_RESTORE_ERROR =
   "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
+/** Longest wait for an idle moment before attachment cleanup runs anyway. */
+const ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS = 30_000;
 const LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS = 3;
 const LOCAL_FAILED_RECEIPT_RETRY_DELAY_MS = 250;
 const CHAT_VIEW_CLOSE_PERSISTENCE_DEADLINE_MS = 750;
@@ -776,7 +779,7 @@ export class AgentChatView extends ItemView {
     if (this.chatId) await this.loadChatById(this.chatId);
     else await this.startNewChat(false, undefined, this.draftKey);
     void this.refreshCreditsBalance({ reason: "view_open" });
-    void this.pruneAttachmentStore().catch(() => {});
+    this.scheduleAttachmentPrune();
     this.workspace.focus();
   }
 
@@ -3138,6 +3141,19 @@ export class AgentChatView extends ItemView {
 
   private scheduleQueuePersistence(): void {
     void this.persistQueueState().catch((error) => this.reportQueuePersistenceError(error));
+  }
+
+  /**
+   * Attachment cleanup is background maintenance: it waits until the host is
+   * idle instead of competing with startup and the first chat render, and a
+   * view closed before then never starts it.
+   */
+  private scheduleAttachmentPrune(): void {
+    const controller = new AbortController();
+    this.register(() => controller.abort());
+    void waitForIdle(ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS, controller.signal).then((idle) => {
+      if (idle) return this.pruneAttachmentStore();
+    }).catch(() => {});
   }
 
   private pruneAttachmentStore(): Promise<void> {
