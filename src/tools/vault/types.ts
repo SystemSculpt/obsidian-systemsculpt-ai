@@ -100,6 +100,17 @@ export interface WriteFileParams {
   appendNewline?: boolean | null;
 }
 
+/**
+ * `path` is where the content was written. When the requested name would not
+ * work on every device, `requestedPath` and `notice` say what changed.
+ */
+export interface WriteFileResult {
+  path: string;
+  success: boolean;
+  requestedPath?: string;
+  notice?: string;
+}
+
 export interface FileEditRange {
   startLine?: number | null;
   endLine?: number | null;

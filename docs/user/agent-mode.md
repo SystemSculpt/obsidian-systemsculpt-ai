@@ -57,6 +57,12 @@ approval mode.
 - Filesystem paths are vault-relative.
 - URL-encoded paths are normalized by tool layers when possible.
 - Tool arguments must match each tool schema exactly.
+- New files and folders get names that work on every device and in Obsidian
+  Sync. When a requested name contains characters such as `:` `?` `*` `#` `[`
+  `]` `|`, starts or ends with a dot or space, or is a reserved Windows name
+  such as `CON`, the write, folder creation, or move uses a portable name
+  instead and tells the model the path it used. Existing files keep their exact
+  names, so the agent can still edit or rename them.
 
 ## Practical safety tips
 

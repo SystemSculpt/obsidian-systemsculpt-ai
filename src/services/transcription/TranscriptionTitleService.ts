@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { sanitizeChatTitle } from "../../utils/titleUtils";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
 const TRANSCRIPT_LABEL = "transcript";
 const MAX_TITLE_CONTEXT_CHARS = 2_800;
@@ -37,7 +37,9 @@ export class TranscriptionTitleService {
       .replace(/\.md$/i, "")
       .trim();
 
-    const sanitized = sanitizeChatTitle(normalized).replace(/\s+/g, " ").trim();
+    const sanitized = toSafeVaultFileName(normalized, { replacement: "", fallback: "" })
+      .replace(/\s+/g, " ")
+      .trim();
     return sanitized.replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim();
   }
 

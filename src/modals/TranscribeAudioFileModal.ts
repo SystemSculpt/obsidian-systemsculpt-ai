@@ -25,6 +25,7 @@ import {
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import type { SystemSculptSettings } from "../types";
 import { formatFileSize, validateBrowserFileSize } from "../utils/FileValidator";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 
 type AudioSource = "vault" | "device";
@@ -38,7 +39,7 @@ const DEFAULT_RECORDINGS_DIRECTORY = "SystemSculpt/Recordings";
 const MAX_VISIBLE_FILES = 50;
 
 const sanitizeFileName = (name: string): string =>
-  name.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+  toSafeVaultFileName(name.replace(/\s+/g, " "), { replacement: "-", fallback: "" });
 
 /**
  * A mobile-first handoff from a concrete audio source to the managed

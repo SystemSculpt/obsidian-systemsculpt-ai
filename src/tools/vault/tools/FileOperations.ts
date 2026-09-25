@@ -3,6 +3,7 @@ import {
   FileReadMetadata,
   ReadFilesParams,
   WriteFileParams,
+  WriteFileResult,
   EditFileParams,
   EditFileResult,
   MultiEditParams,
@@ -19,6 +20,8 @@ import {
   ensureAdapterFolder,
   ensureVaultFolder,
   adapterPathExists,
+  resolvePortableVaultPath,
+  portableVaultPathNotice,
   readAdapterText,
   writeAdapterText,
   statAdapterPath,
@@ -252,9 +255,11 @@ export class FileOperations {
   }
 
   /**
-   * Write or overwrite a single file
+   * Write or overwrite a single file. An existing file is written at its exact
+   * path; a new file whose requested name would not sync is created under a
+   * portable name, which the result reports as `path` plus a `notice`.
    */
-  async writeFile(params: WriteFileParams): Promise<{ path: string, success: boolean }> {
+  async writeFile(params: WriteFileParams): Promise<WriteFileResult> {
     const path = params.path;
     const content = params.content;
     const createDirs = params.createDirs ?? true;
@@ -270,16 +275,26 @@ export class FileOperations {
       throw new Error(`Content too large (${content.length} characters). Maximum allowed is ${FILESYSTEM_LIMITS.MAX_CONTENT_SIZE} characters`);
     }
     
-    const normalizedPath = normalizePath(normalizeVaultPath(path));
+    const requestedPath = normalizePath(normalizeVaultPath(path));
+    const normalizedPath = this.shouldUseAdapter(requestedPath)
+      || this.app.vault.getAbstractFileByPath(requestedPath) instanceof TFile
+      ? requestedPath
+      : resolvePortableVaultPath(this.app, requestedPath);
+    if (!validatePath(normalizedPath, this.allowedPaths)) {
+      throw new Error(`Access denied: ${normalizedPath}`);
+    }
+    const renamed = normalizedPath === requestedPath
+      ? {}
+      : { requestedPath, notice: portableVaultPathNotice(requestedPath, normalizedPath) };
     const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
     const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 
     if (file && file instanceof TFile) {
       if (ifExists === 'skip') {
-        return { path: normalizedPath || path, success: true };
+        return { path: normalizedPath || path, success: true, ...renamed };
       }
       if (ifExists === 'error') {
-        throw new Error(`File already exists: ${path}`);
+        throw new Error(`File already exists: ${normalizedPath || path}`);
       }
       if (ifExists === 'append') {
         const current = await this.app.vault.read(file);
@@ -322,7 +337,7 @@ export class FileOperations {
       const adapter = this.app.vault.adapter;
       const exists = await adapterPathExists(adapter, normalizedPath);
       if (exists && ifExists === "skip") {
-        return { path: normalizedPath || path, success: true };
+        return { path: normalizedPath || path, success: true, ...renamed };
       }
       if (exists && ifExists === "error") {
         throw new Error(`File already exists: ${path}`);
@@ -378,7 +393,7 @@ export class FileOperations {
       await this.app.vault.create(normalizedPath, content);
     }
     
-    return { path: normalizedPath || path, success: true };
+    return { path: normalizedPath || path, success: true, ...renamed };
   }
 
   /**

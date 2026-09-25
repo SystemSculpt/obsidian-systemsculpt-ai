@@ -1,6 +1,6 @@
 import { TFile, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { replaceControlCharacters } from "../../utils/characterValidation";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 import { AudioProcessorApiError } from "./AudioProcessorApiClient";
 import { AUDIO_PROCESSOR_OUTPUT_DIRECTORY, type AudioProcessorArtifactKind } from "./types";
@@ -353,13 +353,11 @@ function stableCollisionToken(jobId: string): string {
 function sanitizeMarkdownFilename(filename: string): string {
   const basename = filename.split(/[\\/]/).pop() ?? "Audio note";
   const withoutExtension = basename.replace(/\.md$/i, "");
-  const sanitized = replaceControlCharacters(withoutExtension, "-")
-    .replace(/[<>:"/\\|?*#[\]^]/g, "-")
-    .replace(/\s+/g, " ")
-    .replace(/[. ]+$/g, "")
-    .trim()
-    .slice(0, 120);
-  return sanitized || "Audio note";
+  return toSafeVaultFileName(withoutExtension.replace(/\s+/g, " "), {
+    replacement: "-",
+    fallback: "Audio note",
+    maxBytes: 120,
+  });
 }
 
 function addVaultNavigation(

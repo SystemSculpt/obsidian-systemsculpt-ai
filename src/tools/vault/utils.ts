@@ -1,6 +1,7 @@
 import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
 import { joinFilesystemPath } from "../../utils/vaultPathUtils";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { FILESYSTEM_LIMITS } from "./constants";
 export { fuzzyMatchScore } from "./searchUtils";
 
@@ -326,6 +327,40 @@ export async function ensureVaultFolder(app: App, folderPath: string): Promise<v
       }
     }
   }
+}
+
+/**
+ * The path a create or move will actually produce. Segments that already
+ * exist are kept exactly, so an agent can still address, overwrite or rename
+ * a file whose name cannot sync. Every segment the call would create goes
+ * through the shared vault file-name sanitizer.
+ */
+export function resolvePortableVaultPath(app: App, path: string): string {
+  const resolved: string[] = [];
+  let creating = false;
+  for (const segment of path.split("/").filter(Boolean)) {
+    if (segment === "." || segment === "..") {
+      resolved.push(segment);
+      continue;
+    }
+    if (!creating && app.vault.getAbstractFileByPath([...resolved, segment].join("/"))) {
+      resolved.push(segment);
+      continue;
+    }
+    creating = true;
+    resolved.push(toSafeVaultFileName(segment));
+  }
+  return resolved.join("/");
+}
+
+/**
+ * Tool results carry this under `notice`, which reaches the model intact;
+ * error text does not. The agent must learn the path it should use next.
+ */
+export function portableVaultPathNotice(requested: string, actual: string): string {
+  return `Used "${actual}" instead of "${requested}" because that name would not work on every device or in Obsidian Sync. `
+    + "Names cannot contain : ? * \" < > | \\ # ^ [ ] or control characters, start with a dot or space, end with a dot or space, or be a reserved Windows name such as CON. "
+    + `Use "${actual}" in later steps.`;
 }
 
 /**

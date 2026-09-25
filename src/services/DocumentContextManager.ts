@@ -9,6 +9,7 @@ import {
 } from "../constants/fileTypes";
 import { TranscriptionService } from "./TranscriptionService";
 import { TranscriptionTitleService } from "./transcription/TranscriptionTitleService";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import {
   createLocalCommitReceipt,
   verifyLocalCommitReceipt,
@@ -439,7 +440,7 @@ export class DocumentContextManager {
       },
       async (text, operationId) => {
         const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() || "";
-        const baseName = file.basename.replace(/[\\/:*?"<>|]/g, "-").trim();
+        const baseName = toSafeVaultFileName(file.basename, { replacement: "-", fallback: "audio" });
         const baseParent = extractionFolder || (file.parent?.path ?? "");
         const parentPath = baseParent ? `${baseParent}/${baseName}` : baseName;
 

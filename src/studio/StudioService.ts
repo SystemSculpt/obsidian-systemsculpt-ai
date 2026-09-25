@@ -7,7 +7,7 @@ import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettin
 import type { StudioAgentRunView } from '../services/codex/StudioAgentRunStore';
 import { Notice, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
-import { replaceControlCharacters } from "../utils/characterValidation";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
 import { StudioGraphCompiler } from "./StudioGraphCompiler";
@@ -61,12 +61,9 @@ const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
 function sanitizeImportedFileSegment(value: string): string {
   const trimmed = String(value || "").trim();
   const leaf = trimmed.split(/[\\/]/).pop() || "";
-  const sanitized = replaceControlCharacters(leaf, " ")
-    .replace(/[<>:"/\\|?*]/g, " ")
+  const sanitized = toSafeVaultFileName(leaf, { fallback: "" })
     .replace(/\s+/g, "-")
-    .replace(/[.-]+$/g, "")
-    .trim()
-    .replace(/^-+/g, "");
+    .replace(/^[.-]+|[.-]+$/g, "");
   return sanitized || IMPORTED_FILE_SEGMENT_FALLBACK;
 }
 
