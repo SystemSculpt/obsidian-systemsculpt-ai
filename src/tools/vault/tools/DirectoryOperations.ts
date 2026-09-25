@@ -259,11 +259,14 @@ export class DirectoryOperations {
         let allItems: (TFile | TFolder)[] = [];
         const exclusions = searchVaultExclusions(this.plugin);
         
+        const isVisible = (child: TFile | TFolder) => child instanceof TFile
+          ? !exclusions.isExcluded(child.path)
+          : !exclusions.isFolderExcluded(child.path);
         const collectItems = (folder: TFolder) => {
           for (const child of folder.children) {
             if (child instanceof TFile || child instanceof TFolder) {
-              // Skip chat history and system files for files
-              if (child instanceof TFile && exclusions.isExcluded(child.path)) {
+              // Skip excluded files and folders, such as chat history and system folders
+              if (!isVisible(child)) {
                 continue;
               }
               allItems.push(child);
@@ -362,7 +365,8 @@ export class DirectoryOperations {
                 const folderInfo: DirectoryInfo = {
                   path: child.path,
                   name: child.name,
-                  itemCount: child.children.length,
+                  itemCount: child.children.filter((entry) =>
+                    (entry instanceof TFile || entry instanceof TFolder) && isVisible(entry)).length,
                   modified: undefined // Folders don't have stat in Obsidian API
                 };
                 

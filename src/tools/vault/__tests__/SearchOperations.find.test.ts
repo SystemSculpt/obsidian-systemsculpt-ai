@@ -18,7 +18,7 @@ type FindResponse = {
 
 const MTIME = Date.UTC(2026, 8, 24, 12, 0, 0);
 
-function vault(paths: string[], exclusions: Record<string, unknown> = {}) {
+function vault(paths: string[], exclusions: Record<string, unknown> = {}, userIgnoreFilters: string[] = []) {
   const files = paths.map((path) => new TFile({ path, stat: { ctime: MTIME, mtime: MTIME, size: 100 } }));
   const folders = new Map<string, TFolder>();
   const root = new TFolder({ path: "/" });
@@ -48,7 +48,7 @@ function vault(paths: string[], exclusions: Record<string, unknown> = {}) {
         ...exclusions,
       },
     },
-    app: { vault: { configDir: ".obsidian", getConfig: jest.fn(() => []) } },
+    app: { vault: { configDir: ".obsidian", getConfig: jest.fn(() => userIgnoreFilters) } },
   };
   return new SearchOperations(app, ["/"], plugin as any);
 }
@@ -133,6 +133,24 @@ describe("find", () => {
 
     expect(response.results.map((result) => result.path)).not.toContain("Daily/budget.md");
     expect(response.totalFound).toBe(3);
+  });
+
+  it("skips excluded folders and the folders beneath them", async () => {
+    const ops = vault([
+      ...paths,
+      "Private/Budget Plans/q3.md",
+      "Daily/Budget Reviews/2026-09.md",
+      "Templates/Budget/template.md",
+      "SystemSculpt/Chats/Budget Talks/chat.md",
+    ], { folders: ["Private"], patterns: ["Daily/**"] }, ["Templates/"]);
+
+    const response = await find(ops, ["budget"]);
+
+    expect(response.results.map((result) => result.path).sort()).toEqual([
+      "Archive/Old/budget-2019.md",
+      "Household/Golden Retriever/budget.md",
+      "Notes/budget.md",
+    ]);
   });
 
   it("keeps the no-match notice intact through managed tool-result delivery", async () => {

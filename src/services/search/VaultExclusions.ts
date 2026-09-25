@@ -15,6 +15,10 @@
  * - Search surfaces also hide the configured plugin working folders
  *   (recordings, attachments, extractions), the Obsidian config folder, and
  *   node_modules. Embeddings only index notes the user can exclude directly.
+ * - A folder is excluded when its own path matches, or when a rule covers
+ *   everything under it: `Daily/**`, Obsidian's `Archive/` entries, and the
+ *   SystemSculpt chat-folder rule describe a folder's contents, not the
+ *   folder path itself.
  *
  * Rules compile once per distinct settings revision. Every input that changes
  * matching is part of the signature, including Obsidian's filters, which
@@ -60,6 +64,7 @@ export interface VaultExclusions {
   /** Changes whenever an input that affects matching changes. */
   readonly signature: string;
   isExcluded(path: string): boolean;
+  isFolderExcluded(path: string): boolean;
 }
 
 type CompiledGlob = Readonly<{ regex: RegExp; matchesPath: boolean }>;
@@ -124,28 +129,35 @@ function compileVaultExclusions(
   const prefixes = [...new Set(directories.map((directory) => directory.toLowerCase()))];
   const globs = patterns.map(compileGlob);
   const filters = ignoreFilters.flatMap(compileUserIgnoreFilter);
+  const matches = (normalized: string): boolean => {
+    const lower = normalized.toLowerCase();
+    for (const prefix of prefixes) {
+      if (lower === prefix || lower.startsWith(`${prefix}/`)) return true;
+    }
+    if (
+      excludeChatHistory
+      && lower.includes("systemsculpt")
+      && (lower.includes("/chats/") || lower.includes("/saved chats/"))
+    ) return true;
+    const name = normalized.slice(normalized.lastIndexOf("/") + 1);
+    for (const glob of globs) {
+      if (glob.regex.test(glob.matchesPath ? normalized : name)) return true;
+    }
+    for (const filter of filters) {
+      if (filter.test(normalized)) return true;
+    }
+    return false;
+  };
   return Object.freeze({
     signature,
     isExcluded(path: string): boolean {
       const normalized = normalizePath(path);
-      if (!normalized) return false;
-      const lower = normalized.toLowerCase();
-      for (const prefix of prefixes) {
-        if (lower === prefix || lower.startsWith(`${prefix}/`)) return true;
-      }
-      if (
-        excludeChatHistory
-        && lower.includes("systemsculpt")
-        && (lower.includes("/chats/") || lower.includes("/saved chats/"))
-      ) return true;
-      const name = normalized.slice(normalized.lastIndexOf("/") + 1);
-      for (const glob of globs) {
-        if (glob.regex.test(glob.matchesPath ? normalized : name)) return true;
-      }
-      for (const filter of filters) {
-        if (filter.test(normalized)) return true;
-      }
-      return false;
+      return normalized.length > 0 && matches(normalized);
+    },
+    isFolderExcluded(path: string): boolean {
+      const normalized = normalizePath(path);
+      // The trailing slash asks whether a rule covers the folder's contents.
+      return normalized.length > 0 && (matches(normalized) || matches(`${normalized}/`));
     },
   });
 }
