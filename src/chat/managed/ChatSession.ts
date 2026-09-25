@@ -28,11 +28,12 @@ import {
   THIN_AGENT_CONTRACT_VERSION,
   parseThinAgentBootstrapRequest,
   parseThinAgentBootstrapResponse,
+  isThinAgentContextWithinLimits,
   parseThinAgentContextResponse,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
   type ThinAgentBootstrapResponse,
   type ThinAgentContextResponse,
-  type ThinAgentContextSource,
   type ThinAgentRunTerminalData,
 } from "../../services/managed/ThinAgentV1Contract";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
@@ -1035,7 +1036,7 @@ export class AgentChatSession implements ChatSession {
 
   public async stageContext(
     rootMessageId: string,
-    contextSources: readonly ThinAgentContextSource[],
+    measuredContext: MeasuredThinAgentContext,
     signal?: AbortSignal,
   ): Promise<ThinAgentContextResponse> {
     const conversationId = this.conversationId ?? undefined;
@@ -1048,16 +1049,23 @@ export class AgentChatSession implements ChatSession {
     });
     try {
       const bootstrap = await this.issueBootstrap();
+      // The view measured every source while reading it, against the limits
+      // it knew then. Bootstrap may have just negotiated lower ones, so the
+      // measured sizes are checked again here, before any upload. Re-running
+      // the untrusted contract parser instead would re-encode every text
+      // block and rescan every image. The server still validates the staged
+      // request.
+      if (!isThinAgentContextWithinLimits(measuredContext, bootstrap.client_input_limits)) {
+        throw Object.assign(new Error("Selected vault context is too large."), {
+          code: "context_too_large",
+          retryable: false,
+        });
+      }
       const url = new URL(THIN_AGENT_CONTEXT_PATH, this.options.baseUrl);
-      // The view assembled these sources and measured every byte against the
-      // negotiated limits while reading them. Re-running the untrusted
-      // contract parser here would re-encode every text block and rescan
-      // every image; the server validates the staged request and answers an
-      // oversized one with 413.
       const request = {
         contract_version: THIN_AGENT_CONTRACT_VERSION,
         root_message_id: rootMessageId,
-        context_sources: contextSources,
+        context_sources: measuredContext.sources,
       };
       const response = await this.requestClient.request({
         url: url.toString(),

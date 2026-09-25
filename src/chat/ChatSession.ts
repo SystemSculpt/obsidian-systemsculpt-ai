@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../types";
 import type { ToolApprovalPolicy } from "../utils/toolPolicy";
-import type { ThinAgentContextResponse, ThinAgentContextSource } from "../services/managed/ThinAgentV1Contract";
+import type { MeasuredThinAgentContext, ThinAgentContextResponse } from "../services/managed/ThinAgentV1Contract";
 import type { AgentConversationSnapshot, ManagedAgentError } from "./ChatConversation";
 import type { AgentUserMessage } from "./managed/Protocol";
 import type { AgentLifecycleInput } from "./managed/Lifecycle";
@@ -43,7 +43,7 @@ export interface ChatSession {
   subscribe(listener: (snapshot: AgentConversationSnapshot) => void): () => void;
   hydrate(conversationId: string): Promise<void>;
   start(input: AgentRunInput): Promise<AgentRunResult>;
-  stageContext(id: string, sources: readonly ThinAgentContextSource[], signal?: AbortSignal): Promise<ThinAgentContextResponse>;
+  stageContext(id: string, context: MeasuredThinAgentContext, signal?: AbortSignal): Promise<ThinAgentContextResponse>;
   cancel(): Promise<void>;
   detach(): Promise<void>;
   disconnect(): void;

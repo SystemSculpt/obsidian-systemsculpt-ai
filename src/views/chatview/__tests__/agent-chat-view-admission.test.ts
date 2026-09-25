@@ -21,9 +21,23 @@ import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
 import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
 import {
+  isThinAgentContextWithinLimits,
   parseThinAgentContextRequest,
+  type MeasuredThinAgentContext,
   type ThinAgentContextSource,
 } from "../../../services/managed/ThinAgentV1Contract";
+
+const EMPTY_CONTEXT: MeasuredThinAgentContext = {
+  sources: [],
+  measurement: {
+    largestTextBlockBytes: 0,
+    totalTextBytes: 0,
+    imageCount: 0,
+    largestImageBytes: 0,
+    totalImageBytes: 0,
+    imageMimeTypes: [],
+  },
+};
 
 jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 
@@ -230,7 +244,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     thinClientId: `client_${"c".repeat(32)}`,
     chatId: "",
     chatTitle: "New chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -360,7 +374,7 @@ function createHistoricalResubmitHarness(
     thinClientId: `client_${"c".repeat(32)}`,
     chatId: "2026-07-30 08-02-11",
     chatTitle: "Saved chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -540,7 +554,7 @@ async function createPersistentHistoricalResubmitHarness(
     thinClientId: `client_${"c".repeat(32)}`,
     chatId,
     chatTitle: "Saved chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     prepareSubmission: jest.fn(async (submission: AgentComposerSubmit) => submission),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -1668,7 +1682,7 @@ describe("AgentChatView composer admission", () => {
     const capturedPinnedSets: string[][] = [];
     const readThinAgentContextSources = jest.fn(async (entries: ReadonlySet<string>) => {
       capturedPinnedSets.push([...entries]);
-      return [];
+      return EMPTY_CONTEXT;
     });
     (harness.view as any).contextManager = { getPinnedFiles };
     (harness.view as any).readThinAgentContextSources = readThinAgentContextSources;
@@ -1701,7 +1715,7 @@ describe("AgentChatView composer admission", () => {
 
   describe("pinned image context", () => {
     function contextView(
-      images: Record<string, { bytes: number; statSize?: number }>,
+      images: Record<string, { bytes: number; statSize?: number; text?: string }>,
       limits = DEFAULT_THIN_AGENT_INPUT_LIMITS,
     ) {
       const files = new Map(Object.entries(images).map(([path, image]) => [
@@ -1709,6 +1723,7 @@ describe("AgentChatView composer admission", () => {
         {
           file: new TFile({ path, stat: { size: image.statSize ?? image.bytes } }),
           bytes: image.bytes,
+          text: image.text ?? "",
         },
       ]));
       const readBinary = jest.fn(async (file: TFile) =>
@@ -1723,13 +1738,14 @@ describe("AgentChatView composer admission", () => {
           vault: {
             getAbstractFileByPath: jest.fn((path: string) => files.get(path)?.file ?? null),
             readBinary,
-            read: jest.fn(async () => ""),
+            read: jest.fn(async (file: TFile) => files.get(file.path)?.text ?? ""),
           },
         },
       });
-      const read = (...entries: string[]) =>
-        (view as any).readThinAgentContextSources(new Set(entries)) as Promise<ThinAgentContextSource[]>;
-      return { read, readBinary };
+      const readContext = (...entries: string[]) =>
+        (view as any).readThinAgentContextSources(new Set(entries)) as Promise<MeasuredThinAgentContext>;
+      const read = async (...entries: string[]) => (await readContext(...entries)).sources;
+      return { read, readContext, readBinary };
     }
 
     it("reads pinned images above 4 MiB and at the 6 MiB limit into sources the contract accepts", async () => {
@@ -1757,6 +1773,38 @@ describe("AgentChatView composer admission", () => {
         root_message_id: "user-large-images",
         context_sources: sources,
       }, DEFAULT_THIN_AGENT_INPUT_LIMITS).context_sources).toEqual(sources);
+    });
+
+    it("measures what it read so staging can re-check it against negotiated limits", async () => {
+      const { readContext } = contextView({
+        "Photos/a.png": { bytes: 2 * 1024 * 1024 },
+        "Photos/b.jpg": { bytes: 3 * 1024 * 1024 },
+        "Notes/Brief.md": { bytes: 0, text: "é".repeat(1_000) },
+        "Notes/Plan.md": { bytes: 0, text: "plan" },
+      });
+
+      const context = await readContext(
+        "[[Photos/a.png]]",
+        "[[Photos/b.jpg]]",
+        "[[Notes/Brief.md]]",
+        "[[Notes/Plan.md]]",
+      );
+
+      expect(context.measurement).toEqual({
+        largestTextBlockBytes: 2_000,
+        totalTextBytes: "Notes/Brief.md".length + 2_000 + "Notes/Plan.md".length + 4,
+        imageCount: 2,
+        largestImageBytes: 3 * 1024 * 1024,
+        totalImageBytes: 5 * 1024 * 1024,
+        imageMimeTypes: ["image/png", "image/jpeg"],
+      });
+      // Accepted under the limits it was read against; a server that
+      // negotiates a lower image limit gets it refused before upload.
+      expect(isThinAgentContextWithinLimits(context, DEFAULT_THIN_AGENT_INPUT_LIMITS)).toBe(true);
+      expect(isThinAgentContextWithinLimits(context, {
+        ...DEFAULT_THIN_AGENT_INPUT_LIMITS,
+        maxImageBytes: 2 * 1024 * 1024,
+      })).toBe(false);
     });
 
     it("measures the bytes actually read rather than trusting a stale stat", async () => {
@@ -2790,7 +2838,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Old chat",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -2932,7 +2980,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Settlement test",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -3033,7 +3081,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Cache missed settlement",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),

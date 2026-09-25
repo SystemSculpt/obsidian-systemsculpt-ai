@@ -29,7 +29,7 @@ it('streams and persists a native reply without managed authentication or transp
 });
 it('resumes the saved native thread on a follow-up and includes pinned text', async () => {
   const { session } = setup(); await session.start(input());
-  await session.start({ ...input('message_2'), buildBody: async () => { await session.stageContext('message_2', [{ kind: 'text', path: 'note.md', content: 'important context' }]); return undefined; } });
+  await session.start({ ...input('message_2'), buildBody: async () => { await session.stageContext('message_2', { sources: [{ kind: 'text', path: 'note.md', content: 'important context' }], measurement: { largestTextBlockBytes: 17, totalTextBytes: 24, imageCount: 0, largestImageBytes: 0, totalImageBytes: 0, imageMimeTypes: [] } }); return undefined; } });
   expect(native.mock.calls[1][0]).toMatchObject({ threadId: 'native-thread', prompt: expect.stringContaining('important context') });
 });
 it('cancels and detaches the active native request', async () => {

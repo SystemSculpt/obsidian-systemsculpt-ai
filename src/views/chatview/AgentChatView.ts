@@ -82,6 +82,7 @@ import {
   THIN_AGENT_CAPABILITIES,
   THIN_AGENT_CAPABILITY_CONTRACT_VERSION,
   THIN_AGENT_CONTRACT_VERSION,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
   type ThinAgentContextSource,
 } from "../../services/managed/ThinAgentV1Contract";
@@ -1836,11 +1837,19 @@ export class AgentChatView extends ItemView {
     return Object.freeze({ ...submission, attachments });
   }
 
+  /**
+   * Reads pinned context and measures every source once, against the limits
+   * known now. Staging re-checks these measurements against the limits the
+   * server negotiates at bootstrap.
+   */
   private async readThinAgentContextSources(
     pinnedEntries: ReadonlySet<string>,
-  ): Promise<ThinAgentContextSource[]> {
+  ): Promise<MeasuredThinAgentContext> {
     const sources: ThinAgentContextSource[] = [];
+    const imageMimeTypes = new Set<string>();
+    let largestTextBlockBytes = 0;
     let textBytes = 0;
+    let largestImageBytes = 0;
     let imageBytes = 0;
     let imageCount = 0;
     for (const entry of pinnedEntries) {
@@ -1897,6 +1906,8 @@ export class AgentChatView extends ItemView {
         if (bytes.byteLength > this.chatInputLimits.maxImageBytes) {
           throw new Error(`${resolved.name} exceeds the pinned image limit.`);
         }
+        imageMimeTypes.add(mimeType);
+        largestImageBytes = Math.max(largestImageBytes, bytes.byteLength);
         imageBytes += bytes.byteLength;
         if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
           throw new Error("Pinned images exceed the total per-message image limit.");
@@ -1912,6 +1923,7 @@ export class AgentChatView extends ItemView {
         if (byteLength > this.chatInputLimits.maxTextBytesPerBlock) {
           throw new Error(`${resolved.name} exceeds the pinned text file limit.`);
         }
+        largestTextBlockBytes = Math.max(largestTextBlockBytes, byteLength);
         textBytes += new TextEncoder().encode(resolved.path).byteLength + byteLength;
         if (textBytes > this.chatInputLimits.maxTotalTextBytes) {
           throw new Error("Pinned files exceed the total per-message text limit.");
@@ -1919,7 +1931,17 @@ export class AgentChatView extends ItemView {
         sources.push({ kind: "text", path: resolved.path, content });
       }
     }
-    return sources;
+    return {
+      sources,
+      measurement: {
+        largestTextBlockBytes,
+        totalTextBytes: textBytes,
+        imageCount,
+        largestImageBytes,
+        totalImageBytes: imageBytes,
+        imageMimeTypes: [...imageMimeTypes],
+      },
+    };
   }
 
   /**
@@ -2106,7 +2128,7 @@ export class AgentChatView extends ItemView {
       await this.workspace?.setHistory(optimisticHistory);
       if (!this.isCurrentSubmissionOperation(operation)) return;
 
-      const [hydratedUserMessage, contextSources, pluginBuildId] = await Promise.all([
+      const [hydratedUserMessage, context, pluginBuildId] = await Promise.all([
         this.attachmentStore.hydrateMessage(admittedUserMessage),
         this.readThinAgentContextSources(
           options.includeContextFiles === false
@@ -2146,10 +2168,10 @@ export class AgentChatView extends ItemView {
           }
           // No sources means there is nothing to stage; context_ref is
           // optional on the wire, so skip the staging round trip entirely.
-          if (contextSources.length === 0) return undefined;
+          if (context.sources.length === 0) return undefined;
           const staged = await this.agent.stageContext(
             admittedUserMessage.message_id,
-            contextSources,
+            context,
             signal,
           );
           if (!this.isCurrentSubmissionOperation(operation)) {

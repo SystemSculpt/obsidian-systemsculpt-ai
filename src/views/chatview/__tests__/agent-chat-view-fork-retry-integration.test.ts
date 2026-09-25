@@ -403,11 +403,21 @@ describe("AgentChatView historical Retry integration", () => {
       // A non-empty pinned set keeps the staging round trip (and its
       // context_ref on the forked replacement) part of this scenario: an
       // empty set now skips staging entirely.
-      readThinAgentContextSources: jest.fn(async () => [{
-        kind: "document_ref" as const,
-        path: "doc:11111111-1111-4111-8111-111111111111",
-        document_id: "11111111-1111-4111-8111-111111111111",
-      }]),
+      readThinAgentContextSources: jest.fn(async () => ({
+        sources: [{
+          kind: "document_ref" as const,
+          path: "doc:11111111-1111-4111-8111-111111111111",
+          document_id: "11111111-1111-4111-8111-111111111111",
+        }],
+        measurement: {
+          largestTextBlockBytes: 0,
+          totalTextBytes: 0,
+          imageCount: 0,
+          largestImageBytes: 0,
+          totalImageBytes: 0,
+          imageMimeTypes: [],
+        },
+      })),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),

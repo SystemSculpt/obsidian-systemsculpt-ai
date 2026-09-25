@@ -94,6 +94,43 @@ export type ThinAgentContextSource =
   | Readonly<{ kind: "image"; path: string; data_url: string }>
   | Readonly<{ kind: "document_ref"; path: string; document_id: string }>;
 
+/**
+ * Sizes taken while the context sources were read. Staging re-checks them
+ * against the limits negotiated at bootstrap without encoding text or
+ * scanning base64 again.
+ */
+export type ThinAgentContextMeasurement = Readonly<{
+  /** UTF-8 bytes of the largest text block's content. */
+  largestTextBlockBytes: number;
+  /** UTF-8 bytes of every text block's path and content. */
+  totalTextBytes: number;
+  imageCount: number;
+  /** Decoded bytes of the largest image. */
+  largestImageBytes: number;
+  totalImageBytes: number;
+  imageMimeTypes: readonly string[];
+}>;
+
+export type MeasuredThinAgentContext = Readonly<{
+  sources: readonly ThinAgentContextSource[];
+  measurement: ThinAgentContextMeasurement;
+}>;
+
+/** True when already-measured context fits `limits`; nothing is re-read. */
+export function isThinAgentContextWithinLimits(
+  context: MeasuredThinAgentContext,
+  limits: ThinAgentInputLimits,
+): boolean {
+  const { measurement } = context;
+  return context.sources.length <= limits.maxContentBlocksPerMessage
+    && measurement.largestTextBlockBytes <= limits.maxTextBytesPerBlock
+    && measurement.totalTextBytes <= limits.maxTotalTextBytes
+    && measurement.imageCount <= limits.maxImagesPerTurn
+    && measurement.largestImageBytes <= limits.maxImageBytes
+    && measurement.totalImageBytes <= limits.maxTotalImageBytes
+    && measurement.imageMimeTypes.every((mimeType) => limits.imageMimeTypes.includes(mimeType));
+}
+
 type ThinAgentContextRequest = Readonly<{
   contract_version: typeof THIN_AGENT_CONTRACT_VERSION;
   root_message_id: string;
