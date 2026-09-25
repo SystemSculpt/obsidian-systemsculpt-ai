@@ -1,9 +1,6 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { EmbeddingsStorage } from "../embeddings/storage/EmbeddingsStorage";
-import {
-  EMBEDDINGS_INDEX_FORMAT,
-  serializeEmbeddingsIndex,
-} from "../embeddings/storage/EmbeddingsIndexSerialization";
+import { EMBEDDINGS_INDEX_FORMAT } from "../embeddings/storage/EmbeddingsIndexSerialization";
 import type { EmbeddingVector } from "../embeddings/types";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
@@ -41,7 +38,7 @@ describe("EmbeddingsStorage portable index", () => {
     expect(index.vectors.map((v) => v.path).sort()).toEqual(["A.md", "B.md"]);
   });
 
-  it("importAll deserializes and delegates to storeVectors", async () => {
+  it("importVectors delegates validated records to storeVectors", async () => {
     const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
     const stored: EmbeddingVector[][] = [];
     jest
@@ -50,20 +47,18 @@ describe("EmbeddingsStorage portable index", () => {
         stored.push(vectors);
       });
 
-    const envelope = serializeEmbeddingsIndex([makeVector("A.md"), makeVector("B.md")]);
-    const result = await storage.importAll(envelope);
+    const result = await storage.importVectors([makeVector("A.md"), makeVector("B.md")]);
 
     expect(result).toEqual({ imported: 2 });
     expect(stored).toHaveLength(1);
     expect(stored[0].map((v) => v.path).sort()).toEqual(["A.md", "B.md"]);
-    expect(stored[0][0].vector).toBeInstanceOf(Float32Array);
   });
 
-  it("importAll ignores an unreadable envelope without storing anything", async () => {
+  it("importVectors stores nothing for an empty restore", async () => {
     const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
     const spy = jest.spyOn(storage, "storeVectors").mockResolvedValue();
 
-    const result = await storage.importAll({ format: 999, vectors: [] } as never);
+    const result = await storage.importVectors([]);
 
     expect(result).toEqual({ imported: 0 });
     expect(spy).not.toHaveBeenCalled();

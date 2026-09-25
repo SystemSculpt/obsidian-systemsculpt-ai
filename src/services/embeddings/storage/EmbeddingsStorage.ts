@@ -14,8 +14,8 @@ import {
   isManagedNamespace,
   MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "../utils/namespace";
+import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import {
-  deserializeEmbeddingsIndex,
   serializeEmbeddingsIndex,
   type SerializedEmbeddingsIndex,
 } from './EmbeddingsIndexSerialization';
@@ -419,6 +419,41 @@ export class EmbeddingsStorage {
     return best?.namespace ?? null;
   }
 
+  /**
+   * The managed namespace whose complete roots were written most recently. A
+   * server generation bump writes every new root into the new namespace, so
+   * this is the in-progress generation even while it covers fewer notes than
+   * the committed one.
+   */
+  public peekLatestManagedNamespace(): string | null {
+    let latest: { namespace: string; createdAt: number } | null = null;
+    for (const vector of this.cache.values()) {
+      const namespace = vector?.metadata?.namespace;
+      if (!isManagedNamespace(namespace) || vector.metadata.complete !== true) continue;
+      const chunkId = typeof vector.chunkId === "number" ? vector.chunkId : this.parseChunkIdFromId(vector.id);
+      if (chunkId !== 0) continue;
+      const createdAt = typeof vector.metadata.createdAt === "number" ? vector.metadata.createdAt : 0;
+      if (
+        !latest
+        || createdAt > latest.createdAt
+        || (createdAt === latest.createdAt && namespace.localeCompare(latest.namespace) < 0)
+      ) {
+        latest = { namespace, createdAt };
+      }
+    }
+    return latest?.namespace ?? null;
+  }
+
+  /** Every namespace represented by a cached root, managed or not. */
+  public listRootNamespaces(): string[] {
+    const namespaces = new Set<string>();
+    for (const vector of this.cache.values()) {
+      const namespace = vector?.metadata?.namespace;
+      if (typeof namespace === "string" && namespace) namespaces.add(namespace);
+    }
+    return [...namespaces].sort();
+  }
+
   /** All managed namespaces represented by complete or partial cached roots. */
   public listManagedRootNamespaces(): string[] {
     const namespaces = new Set<string>();
@@ -456,13 +491,8 @@ export class EmbeddingsStorage {
     return serializeEmbeddingsIndex(vectors, { createdAt: Date.now() });
   }
 
-  /**
-   * Import a portable envelope into the store. Malformed records and unknown
-   * formats are dropped by the deserializer, so this never throws on a partially
-   * synced or corrupt snapshot.
-   */
-  async importAll(index: SerializedEmbeddingsIndex): Promise<{ imported: number }> {
-    const vectors = deserializeEmbeddingsIndex(index);
+  /** Import already-validated snapshot records into the store. */
+  async importVectors(vectors: EmbeddingVector[]): Promise<{ imported: number }> {
     if (vectors.length === 0) return { imported: 0 };
     await this.storeVectors(vectors);
     return { imported: vectors.length };
@@ -783,22 +813,59 @@ export class EmbeddingsStorage {
     await this.removeIndexedPrefix("by_namespace", MANAGED_EMBEDDING_FAMILY_PREFIX);
   }
 
-  async removeNamespacesExcept(prefix: string, keepNamespace: string): Promise<number> {
-    if (!prefix || !keepNamespace) return 0;
-    return this.removeIndexedPrefix("by_namespace", prefix, keepNamespace);
+  /** Distinct namespaces in the store, including chunks whose root is gone. */
+  async listStoredNamespaces(): Promise<string[]> {
+    if (!this.db) return [];
+    return new Promise<string[]>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readonly");
+      const namespaces: string[] = [];
+      const request = tx.objectStore(STORE_NAME).index("by_namespace").openKeyCursor(null, "nextunique");
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        namespaces.push(String(cursor.key));
+        cursor.continue();
+      };
+      request.onerror = () => reject(toError(request.error, "IndexedDB cursor failed."));
+      tx.oncomplete = () => resolve(namespaces);
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+    });
+  }
+
+  /**
+   * Delete every namespace except the given managed generations and local
+   * empty markers: superseded generations and pre-managed provider namespaces
+   * can never be queried again. `keepManaged === null` keeps every managed
+   * generation and only drops non-managed namespaces.
+   */
+  async retainNamespaces(keepManaged: ReadonlySet<string> | null): Promise<number> {
+    const doomed = (await this.listStoredNamespaces()).filter((namespace) => (
+      namespace !== LOCAL_EMPTY_EMBEDDING_NAMESPACE
+      && !(isManagedNamespace(namespace) && (keepManaged === null || keepManaged.has(namespace)))
+    ));
+    let removed = 0;
+    for (const namespace of doomed) {
+      removed += await this.removeIndexedRange("by_namespace", IDBKeyRange.only(namespace));
+    }
+    return removed;
+  }
+
+  private removeIndexedPrefix(
+    indexName: "by_path" | "by_namespace",
+    prefix: string,
+  ): Promise<number> {
+    return this.removeIndexedRange(indexName, IDBKeyRange.bound(prefix, `${prefix}\uffff`));
   }
 
   /** Stream indexed keys and publish root-cache removals only after commit. */
-  private async removeIndexedPrefix(
+  private async removeIndexedRange(
     indexName: "by_path" | "by_namespace",
-    prefix: string,
-    keepKey?: string,
+    range: IDBKeyRange,
   ): Promise<number> {
     if (!this.db) return 0;
     return new Promise<number>((resolve, reject) => {
       const tx = this.db!.transaction([STORE_NAME], "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
       const deletedRootIds: string[] = [];
       let removed = 0;
       tx.oncomplete = () => {
@@ -813,12 +880,10 @@ export class EmbeddingsStorage {
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return;
-        if (keepKey === undefined || cursor.key !== keepKey) {
-          const id = String(cursor.primaryKey);
-          if (this.cache.has(id)) deletedRootIds.push(id);
-          store.delete(cursor.primaryKey);
-          removed += 1;
-        }
+        const id = String(cursor.primaryKey);
+        if (this.cache.has(id)) deletedRootIds.push(id);
+        store.delete(cursor.primaryKey);
+        removed += 1;
         cursor.continue();
       };
     });

@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import {
   restoreEmbeddingsIndexIfEmpty,
+  retainRestorableGenerations,
   writeEmbeddingsIndexSnapshot,
   PortableCheckpointCoordinator,
   type PortableIndexFile,
@@ -8,18 +9,41 @@ import {
 } from "../EmbeddingsPortableIndex";
 import {
   EMBEDDINGS_INDEX_FORMAT,
+  serializeEmbeddingsIndex,
   type SerializedEmbeddingsIndex,
 } from "../EmbeddingsIndexSerialization";
+import type { EmbeddingVector } from "../../types";
+import { buildVectorId } from "../../utils/vectorId";
+import { createLocalEmptyEmbeddingMarkerForRevision } from "../../LocalEmptyEmbeddingMarker";
 
 function index(vectorCount: number): SerializedEmbeddingsIndex {
   return { format: EMBEDDINGS_INDEX_FORMAT, createdAt: 1, vectorCount, vectors: [] };
+}
+
+function root(namespace: string, path: string, createdAt: number, chunkId = 0): EmbeddingVector {
+  return {
+    id: buildVectorId(namespace, path, chunkId),
+    path,
+    chunkId,
+    vector: new Float32Array([1, 0, 0]),
+    metadata: {
+      title: path,
+      mtime: 1,
+      contentHash: `${path}:${chunkId}`,
+      generation: "semantic-v1",
+      dimension: 3,
+      createdAt,
+      namespace,
+      ...(chunkId === 0 ? { complete: true, chunkCount: 1 } : {}),
+    },
+  };
 }
 
 function makeStore(overrides: Partial<PortableIndexStore> = {}): jest.Mocked<PortableIndexStore> {
   return {
     countVectors: jest.fn(async () => 0),
     exportAll: jest.fn(async () => index(0)),
-    importAll: jest.fn(async () => ({ imported: 0 })),
+    importVectors: jest.fn(async (vectors: EmbeddingVector[]) => ({ imported: vectors.length })),
     ...overrides,
   } as jest.Mocked<PortableIndexStore>;
 }
@@ -34,18 +58,41 @@ function makeFile(overrides: Partial<PortableIndexFile> = {}): jest.Mocked<Porta
 
 describe("restoreEmbeddingsIndexIfEmpty", () => {
   it("imports the snapshot when the local store is empty", async () => {
-    const snapshot = index(5);
-    const store = makeStore({
-      countVectors: jest.fn(async () => 0),
-      importAll: jest.fn(async () => ({ imported: 5 })),
-    });
+    const namespace = "systemsculpt:managed:semantic-v1:v3:3";
+    const snapshot = serializeEmbeddingsIndex([root(namespace, "A.md", 1), root(namespace, "B.md", 1)]);
+    const store = makeStore({ countVectors: jest.fn(async () => 0) });
     const file = makeFile({ read: jest.fn(async () => snapshot) });
 
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
 
     expect(file.read).toHaveBeenCalledTimes(1);
-    expect(store.importAll).toHaveBeenCalledWith(snapshot);
-    expect(result).toEqual({ restored: true, imported: 5, reason: "restored" });
+    expect(store.importVectors).toHaveBeenCalledTimes(1);
+    expect(store.importVectors.mock.calls[0][0].map((vector) => vector.path)).toEqual(["A.md", "B.md"]);
+    expect(result).toEqual({ restored: true, imported: 2, reason: "restored" });
+  });
+
+  it("restores only the committed and in-progress generations of an old snapshot", async () => {
+    const v2 = "systemsculpt:managed:semantic-v1:v2:3";
+    const v3 = "systemsculpt:managed:semantic-v1:v3:3";
+    const v4 = "systemsculpt:managed:semantic-v1:v4:3";
+    const snapshot = serializeEmbeddingsIndex([
+      root(v2, "A.md", 10), root(v2, "B.md", 10),
+      root(v3, "A.md", 20), root(v3, "B.md", 20), root(v3, "C.md", 20), root(v3, "C.md", 20, 1),
+      root(v4, "A.md", 30),
+      createLocalEmptyEmbeddingMarkerForRevision({ path: "Empty.md", basename: "Empty", mtime: 1 }, ""),
+    ]);
+    const store = makeStore();
+    const file = makeFile({ read: jest.fn(async () => snapshot) });
+
+    await restoreEmbeddingsIndexIfEmpty({ store, file });
+
+    const restored = store.importVectors.mock.calls[0][0];
+    expect([...new Set(restored.map((vector) => vector.metadata.namespace))].sort()).toEqual([
+      "systemsculpt:local-empty:v1:1",
+      v3,
+      v4,
+    ].sort());
+    expect(restored.filter((vector) => vector.metadata.namespace === v3)).toHaveLength(4);
   });
 
   it("skips entirely when the store already has vectors", async () => {
@@ -55,7 +102,7 @@ describe("restoreEmbeddingsIndexIfEmpty", () => {
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
 
     expect(file.read).not.toHaveBeenCalled();
-    expect(store.importAll).not.toHaveBeenCalled();
+    expect(store.importVectors).not.toHaveBeenCalled();
     expect(result).toEqual({ restored: false, imported: 0, reason: "store-not-empty" });
   });
 
@@ -65,19 +112,29 @@ describe("restoreEmbeddingsIndexIfEmpty", () => {
 
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
 
-    expect(store.importAll).not.toHaveBeenCalled();
+    expect(store.importVectors).not.toHaveBeenCalled();
     expect(result).toEqual({ restored: false, imported: 0, reason: "no-snapshot" });
   });
 
   it("reports an empty/unusable snapshot without claiming a restore", async () => {
-    const store = makeStore({
-      countVectors: jest.fn(async () => 0),
-      importAll: jest.fn(async () => ({ imported: 0 })),
-    });
+    const store = makeStore({ countVectors: jest.fn(async () => 0) });
     const file = makeFile({ read: jest.fn(async () => index(0)) });
 
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
     expect(result).toEqual({ restored: false, imported: 0, reason: "empty-snapshot" });
+  });
+});
+
+describe("retainRestorableGenerations", () => {
+  it("prefers the committed generation named by the snapshot over the most complete one", () => {
+    const v2 = "systemsculpt:managed:semantic-v1:v2:3";
+    const v3 = "systemsculpt:managed:semantic-v1:v3:3";
+    const v4 = "systemsculpt:managed:semantic-v1:v4:3";
+    const vectors = [root(v2, "A.md", 1), root(v2, "B.md", 1), root(v3, "A.md", 1), root(v4, "A.md", 9)];
+    const namespaces = (kept: EmbeddingVector[]) => [...new Set(kept.map((vector) => vector.metadata.namespace))].sort();
+
+    expect(namespaces(retainRestorableGenerations(vectors))).toEqual([v2, v4]);
+    expect(namespaces(retainRestorableGenerations(vectors, v3))).toEqual([v3, v4]);
   });
 });
 

@@ -83,7 +83,7 @@ async function harness(fileCount: number) {
     removeByPath: jest.fn(async (path: string) => {
       for (const [id, vector] of roots) if (vector.path === path) roots.delete(id);
     }),
-    removeNamespacesExcept: jest.fn(async () => 0),
+    retainNamespaces: jest.fn(async () => 0),
     writeState: jest.fn(async () => undefined),
     deleteState: jest.fn(async () => undefined),
   };

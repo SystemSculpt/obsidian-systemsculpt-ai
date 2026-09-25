@@ -8,12 +8,18 @@
  * a thin call.
  */
 
-import type { SerializedEmbeddingsIndex } from "./EmbeddingsIndexSerialization";
+import type { EmbeddingVector } from "../types";
+import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
+import { isManagedNamespace } from "../utils/namespace";
+import {
+  deserializeEmbeddingsIndex,
+  type SerializedEmbeddingsIndex,
+} from "./EmbeddingsIndexSerialization";
 
 export interface PortableIndexStore {
   countVectors(): Promise<number>;
   exportAll(): Promise<SerializedEmbeddingsIndex>;
-  importAll(index: SerializedEmbeddingsIndex): Promise<{ imported: number }>;
+  importVectors(vectors: EmbeddingVector[]): Promise<{ imported: number }>;
 }
 
 export interface PortableIndexFile {
@@ -152,11 +158,51 @@ export async function restoreEmbeddingsIndexIfEmpty(deps: {
     return { restored: false, imported: 0, reason: "no-snapshot" };
   }
 
-  const { imported } = await store.importAll(snapshot);
+  const vectors = retainRestorableGenerations(deserializeEmbeddingsIndex(snapshot));
+  const { imported } = await store.importVectors(vectors);
   if (imported > 0) {
     return { restored: true, imported, reason: "restored" };
   }
   return { restored: false, imported: 0, reason: "empty-snapshot" };
+}
+
+/**
+ * Keep at most two managed generations from a snapshot: the committed one
+ * (named by the snapshot, else the one with the most complete roots) and the
+ * most recently written one, which is the generation an interrupted rebuild
+ * was moving to. Older snapshots carried every generation a vault ever used
+ * (#324); restoring them would only resurrect vectors nothing can query.
+ */
+export function retainRestorableGenerations(
+  vectors: EmbeddingVector[],
+  committedNamespace?: string | null,
+): EmbeddingVector[] {
+  const generations = new Map<string, { completeRoots: number; latestCreatedAt: number }>();
+  for (const vector of vectors) {
+    const namespace = vector.metadata.namespace;
+    if (vector.chunkId !== 0 || vector.metadata.complete !== true || !isManagedNamespace(namespace)) continue;
+    const entry = generations.get(namespace) ?? { completeRoots: 0, latestCreatedAt: 0 };
+    entry.completeRoots += 1;
+    entry.latestCreatedAt = Math.max(entry.latestCreatedAt, vector.metadata.createdAt || 0);
+    generations.set(namespace, entry);
+  }
+  const ranked = [...generations.entries()];
+  const pick = (score: (entry: { completeRoots: number; latestCreatedAt: number }) => number) => (
+    ranked
+      .slice()
+      .sort((left, right) => score(right[1]) - score(left[1]) || left[0].localeCompare(right[0]))[0]?.[0]
+  );
+  const keep = new Set<string>();
+  const committed = committedNamespace && generations.has(committedNamespace)
+    ? committedNamespace
+    : pick((entry) => entry.completeRoots);
+  if (committed) keep.add(committed);
+  const latest = pick((entry) => entry.latestCreatedAt);
+  if (latest) keep.add(latest);
+  return vectors.filter((vector) => (
+    vector.metadata.namespace === LOCAL_EMPTY_EMBEDDING_NAMESPACE
+    || keep.has(vector.metadata.namespace)
+  ));
 }
 
 /**

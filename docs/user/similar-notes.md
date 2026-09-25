@@ -40,3 +40,5 @@ Core controls:
   A pattern without `/` matches file names. Obsidian exclusions follow
   Obsidian's own rules.
 - If SystemSculpt updates the embeddings setup, a rebuild may be required.
+  The index keeps the searchable generation and the one being built, and
+  removes older generations automatically.

@@ -28,12 +28,12 @@ import {
   isManagedNamespace,
   parseManagedNamespace,
   parseNamespaceDimension,
-  MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "./utils/namespace";
 import { buildVectorId } from "./utils/vectorId";
 import {
   isCurrentLocalEmptyEmbeddingMarker,
   isLocalEmptyEmbeddingMarker,
+  LOCAL_EMPTY_EMBEDDING_NAMESPACE,
   localEmptyEmbeddingMarkerId,
 } from "./LocalEmptyEmbeddingMarker";
 import {
@@ -291,9 +291,9 @@ export class EmbeddingsManager {
       const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessFile(file));
       if (files.length === 0) {
         await this.setRebuildPending(false);
-        if (emptyFiles.length > 0) await this.commitPortableDestructiveMutation();
-        const committed = await this.commitSearchNamespaceIfComplete();
-        if (committed) await this.pruneInactiveManagedNamespaces();
+        await this.commitSearchNamespaceIfComplete();
+        const pruned = await this.pruneSupersededNamespaces();
+        if (emptyFiles.length > 0 || pruned > 0) await this.commitPortableDestructiveMutation();
         this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
         return { status: "complete", processed: 0 };
       }
@@ -343,10 +343,9 @@ export class EmbeddingsManager {
         && !result.cancelled
         && result.failed === 0
         && unfinishedCount === 0;
-      const committed = completedCleanly
-        ? await this.commitSearchNamespaceIfComplete()
-        : false;
-      const pruned = committed ? await this.pruneInactiveManagedNamespaces() : 0;
+      if (completedCleanly) await this.commitSearchNamespaceIfComplete();
+      // A single failed note must not keep every older generation alive.
+      const pruned = await this.pruneSupersededNamespaces();
       const destructive = emptyFiles.length > 0 || result.failed > 0 || pruned > 0;
       if (destructive) {
         await this.commitPortableDestructiveMutation();
@@ -944,10 +943,8 @@ export class EmbeddingsManager {
         && !result.cancelled
         && result.failed === 0
         && result.completedPaths.length === files.length;
-      const committed = completedCleanly
-        ? await this.commitSearchNamespaceIfComplete()
-        : false;
-      const pruned = committed ? await this.pruneInactiveManagedNamespaces() : 0;
+      if (completedCleanly) await this.commitSearchNamespaceIfComplete();
+      const pruned = await this.pruneSupersededNamespaces();
       if (destructive || result.failed > 0 || pruned > 0) {
         await this.commitPortableDestructiveMutation();
       } else if (completedPaths.size > 0) {
@@ -1181,11 +1178,12 @@ export class EmbeddingsManager {
       if (searchNamespace) await this.writeCommittedNamespace(searchNamespace);
     }
     this.searchNamespace = searchNamespace;
+    const current = await this.compactStoredGenerations(searchNamespace ?? inferred) ?? inferred;
 
     // The indexing generation may be partial; it is never queryable until the
     // durable commit above exists (or full corpus coverage was revalidated).
-    const namespace = inferred && isManagedNamespace(inferred)
-      ? inferred
+    const namespace = current && isManagedNamespace(current)
+      ? current
       : searchNamespace ?? candidates[0] ?? null;
     if (!namespace) return;
     const identity = parseManagedNamespace(namespace);
@@ -1196,6 +1194,31 @@ export class EmbeddingsManager {
       indexNamespace: namespace,
       dimensions: identity.dimensions,
     };
+  }
+
+  /**
+   * Existing vaults can hold every generation they ever used (#324). On load
+   * the published generation is not known yet, so keep the committed one and
+   * the most recently written one (where a server generation bump sends every
+   * new note). Returns the most complete surviving generation when anything
+   * was removed, so the indexing identity never names a deleted generation.
+   */
+  private async compactStoredGenerations(committed: string | null): Promise<string | null> {
+    const storage = this.storage as EmbeddingsStorage & {
+      peekLatestManagedNamespace?: EmbeddingsStorage["peekLatestManagedNamespace"];
+    };
+    const latest = typeof storage.peekLatestManagedNamespace === "function"
+      ? storage.peekLatestManagedNamespace()
+      : null;
+    try {
+      const pruned = await this.pruneSupersededNamespaces([committed, latest], { verifyStore: true });
+      if (pruned === 0) return null;
+      this.markPortableIndexChanged();
+      return this.storage.peekCurrentManagedNamespace();
+    } catch {
+      // Compaction is an optimization; the next completed run retries it.
+      return null;
+    }
   }
 
   private namespaceCoversEligibleCorpus(namespace: string): boolean {
@@ -1351,15 +1374,56 @@ export class EmbeddingsManager {
     });
   }
 
-  private async pruneInactiveManagedNamespaces(): Promise<number> {
-    const namespace = this.getSearchNamespace();
-    if (!namespace) return 0;
+  /**
+   * Keep only the committed (searchable) generation and the in-progress one.
+   * Anything else is a superseded generation or a pre-managed provider
+   * namespace that can never be queried again (#324). After a run the
+   * published generation is known, so the in-progress generation is exactly
+   * the indexing namespace; at load it is the most recently written one.
+   */
+  private async pruneSupersededNamespaces(
+    candidates: ReadonlyArray<string | null> = this.liveGenerationCandidates(),
+    options: { verifyStore?: boolean } = {},
+  ): Promise<number> {
     const storage = this.storage as EmbeddingsStorage & {
-      removeNamespacesExcept?: EmbeddingsStorage["removeNamespacesExcept"];
+      retainNamespaces?: EmbeddingsStorage["retainNamespaces"];
+      listRootNamespaces?: EmbeddingsStorage["listRootNamespaces"];
     };
-    return typeof storage.removeNamespacesExcept === "function"
-      ? storage.removeNamespacesExcept(MANAGED_EMBEDDING_FAMILY_PREFIX, namespace)
-      : 0;
+    if (typeof storage.retainNamespaces !== "function") return 0;
+    const keep = new Set(candidates.filter((namespace): namespace is string => (
+      Boolean(namespace && isManagedNamespace(namespace))
+    )));
+    // Cached roots name every namespace a finished run can leave behind, so
+    // routine runs skip the store walk when nothing outside `keep` remains.
+    if (
+      !options.verifyStore
+      && typeof storage.listRootNamespaces === "function"
+      && storage.listRootNamespaces().every((namespace) => (
+        namespace === LOCAL_EMPTY_EMBEDDING_NAMESPACE || keep.has(namespace)
+      ))
+    ) {
+      return 0;
+    }
+    // With no trusted generation yet, drop only namespaces that are not managed.
+    return storage.retainNamespaces(keep.size > 0 ? keep : null);
+  }
+
+  /**
+   * The committed generation plus every stored generation the server still
+   * publishes. The indexing identity can lag behind a generation bump until the
+   * first note of the run is written, so published-generation roots count too.
+   */
+  private liveGenerationCandidates(): Array<string | null> {
+    const candidates = [this.getSearchNamespace(), this.getIndexingNamespace()];
+    const storage = this.storage as EmbeddingsStorage & {
+      listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
+    };
+    if (this.gateway.metadata?.generation && typeof storage.listManagedRootNamespaces === "function") {
+      candidates.push(...storage.listManagedRootNamespaces().filter((namespace) => (
+        this.namespaceMatchesPublishedGeneration(namespace)
+      )));
+    }
+    return candidates;
   }
 
   private collectSearchableRootPaths(vectors: EmbeddingVector[]): Set<string> {
