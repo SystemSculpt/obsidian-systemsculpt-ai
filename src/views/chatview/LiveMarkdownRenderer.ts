@@ -25,6 +25,10 @@ const LEASED_STREAM_MARKDOWN_SELECTOR = [
   "select",
   "textarea",
 ].join(",");
+const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+const LIST_ITEM_LINE = /^[ \t]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+const PARTIAL_LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)]?)$/;
 
 type SelectionPoint = Readonly<{
   node: Node;
@@ -74,6 +78,16 @@ type PreservedDomState = Readonly<{
   copies: readonly PreservedCopyState[];
 }>;
 
+/**
+ * The trailing run of a target's child nodes that one commit may replace.
+ * Nodes up to and including `after` belong to settled Markdown blocks and are
+ * never touched while the rest of the message streams.
+ */
+type DomRegion = Readonly<{
+  root: HTMLElement;
+  after: Node | null;
+}>;
+
 type RenderWaiter = Readonly<{
   revision: number;
   resolve: () => void;
@@ -87,7 +101,7 @@ type RenderOutcome =
       error: unknown;
       revision: number | null;
     }>
-  | Readonly<{ status: "stale" }>;
+  | Readonly<{ status: "stale"; retry?: boolean }>;
 
 type RenderedMarkdownBlock = Readonly<{
   signature: string;
@@ -102,6 +116,29 @@ type PlainBlockRange = Readonly<{
   start: number;
 }>;
 
+/**
+ * Markdown blocks that can no longer change while the message streams. They
+ * are parsed and mounted once; only the open tail after them is re-rendered.
+ */
+type SettledMarkdown = {
+  markdown: string;
+  anchor: Node | null;
+  leases: Component[];
+};
+
+/*
+ * `tailStart` is where the re-rendered open region begins. Zero renders the
+ * whole message, which is the only shape a final render may take. Blocks in
+ * [settleStart, tailStart) became complete since the last commit and are
+ * parsed once on their own before joining the settled prefix.
+ */
+type RenderPlan = Readonly<{
+  markdown: string;
+  resetSettled: boolean;
+  settleStart: number;
+  tailStart: number;
+}>;
+
 type LiveMarkdownState = {
   target: HTMLElement;
   markdown: string;
@@ -109,10 +146,16 @@ type LiveMarkdownState = {
   committedRevision: number;
   committedMarkdown: string | null;
   committedFinal: boolean;
+  /** Block signatures of the committed open region only. */
   committedBlocks: readonly RenderedMarkdownBlock[];
+  committedTail: string | null;
+  committedTailStart: number;
+  /** Lease for the nodes of the committed open region. */
   lease: Component | null;
+  settled: SettledMarkdown;
   failedRevision: number | null;
-  lastStartedAt: number;
+  lastFinishedAt: number;
+  lastRenderDurationMs: number;
   timer: number | null;
   inFlight: Promise<RenderOutcome> | null;
   renderImmediatelyAfterFlight: boolean;
@@ -161,14 +204,155 @@ function isDomInstance<T extends Element>(
     : Object.prototype.isPrototypeOf.call(constructor.prototype, node);
 }
 
+function countOccurrences(line: string, token: string): number {
+  let count = 0;
+  for (
+    let index = line.indexOf(token);
+    index !== -1;
+    index = line.indexOf(token, index + token.length)
+  ) count += 1;
+  return count;
+}
+
+/**
+ * Returns the offset where the last streamed Markdown block that may still
+ * change begins, scanning from a previous boundary. Everything before it is a
+ * run of complete top-level blocks: a blank line ends them, the next line
+ * starts at column zero, and no fence, math block, comment, or loose list
+ * spans the boundary. Unknown shapes keep more text in the open tail, which
+ * costs time but never changes what is shown. The final render always parses
+ * the whole message, so reference links and footnotes resolve on settlement.
+ */
+export function stableMarkdownBoundary(markdown: string, start = 0): number {
+  let boundary = start;
+  let fence: Readonly<{ char: string; length: number }> | null = null;
+  let math = false;
+  let obsidianComment = false;
+  let htmlComment = false;
+  let blockHasListItem = false;
+  let blankAfterContent = false;
+  let sawContent = false;
+  let lineStart = start;
+  while (lineStart < markdown.length) {
+    const newline = markdown.indexOf("\n", lineStart);
+    const complete = newline !== -1;
+    const line = markdown.slice(lineStart, complete ? newline : markdown.length);
+    if (fence) {
+      const close = FENCE_CLOSE.exec(line);
+      if (
+        close
+        && close[1][0] === fence.char
+        && close[1].length >= fence.length
+      ) fence = null;
+    } else if (math) {
+      if (countOccurrences(line, "$$") % 2 === 1) math = false;
+    } else if (obsidianComment) {
+      if (countOccurrences(line, "%%") % 2 === 1) obsidianComment = false;
+    } else if (htmlComment) {
+      if (line.includes("-->")) htmlComment = false;
+    } else if (line.trim().length === 0) {
+      blankAfterContent = sawContent;
+    } else {
+      const listItem = LIST_ITEM_LINE.test(line)
+        || (!complete && PARTIAL_LIST_MARKER.test(line));
+      if (
+        blankAfterContent
+        && !/^[ \t]/.test(line)
+        && !(listItem && blockHasListItem)
+      ) {
+        boundary = lineStart;
+        blockHasListItem = false;
+      }
+      blankAfterContent = false;
+      sawContent = true;
+      if (listItem) blockHasListItem = true;
+      const open = FENCE_OPEN.exec(line);
+      if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
+        fence = { char: open[1][0], length: open[1].length };
+      } else if (countOccurrences(line, "$$") % 2 === 1) {
+        math = true;
+      } else if (countOccurrences(line, "%%") % 2 === 1) {
+        obsidianComment = true;
+      } else if (
+        line.lastIndexOf("<!--") > line.lastIndexOf("-->")
+      ) {
+        htmlComment = true;
+      }
+    }
+    if (!complete) break;
+    lineStart = newline + 1;
+  }
+  return boundary;
+}
+
+function regionStart(region: DomRegion): ChildNode | null {
+  return region.after ? region.after.nextSibling : region.root.firstChild;
+}
+
+function regionNodes(region: DomRegion): ChildNode[] {
+  const nodes: ChildNode[] = [];
+  for (let node = regionStart(region); node; node = node.nextSibling) {
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+function regionOffset(region: DomRegion): number {
+  return region.after
+    ? Array.prototype.indexOf.call(region.root.childNodes, region.after) + 1
+    : 0;
+}
+
+function regionContains(region: DomRegion, node: Node): boolean {
+  if (!region.after) return region.root.contains(node);
+  let top: Node | null = node;
+  while (top && top.parentNode !== region.root) top = top.parentNode;
+  return Boolean(
+    top
+    && top !== region.after
+    && region.after.compareDocumentPosition(top) & Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+}
+
+function regionQueryAll<T extends Element>(
+  region: DomRegion,
+  selector: string,
+): T[] {
+  if (!region.after) {
+    return Array.from(region.root.querySelectorAll<T>(selector));
+  }
+  const matches: T[] = [];
+  for (const node of regionNodes(region)) {
+    if (!isDomInstance(node, getDomRealm(node).Element)) continue;
+    if (node.matches(selector)) matches.push(node as unknown as T);
+    matches.push(...Array.from(node.querySelectorAll<T>(selector)));
+  }
+  return matches;
+}
+
+function regionQuery<T extends Element>(
+  region: DomRegion,
+  selector: string,
+): T | null {
+  if (!region.after) return region.root.querySelector<T>(selector);
+  for (const node of regionNodes(region)) {
+    if (!isDomInstance(node, getDomRealm(node).Element)) continue;
+    if (node.matches(selector)) return node as unknown as T;
+    const match = node.querySelector<T>(selector);
+    if (match) return match;
+  }
+  return null;
+}
+
 function pointOffset(
-  root: HTMLElement,
+  region: DomRegion,
   node: Node,
   offset: number,
 ): number | null {
   try {
-    const range = root.ownerDocument.createRange();
-    range.selectNodeContents(root);
+    const range = region.root.ownerDocument.createRange();
+    range.selectNodeContents(region.root);
+    if (region.after) range.setStartAfter(region.after);
     range.setEnd(node, offset);
     return range.toString().length;
   } catch {
@@ -176,7 +360,8 @@ function pointOffset(
   }
 }
 
-function captureSelection(root: HTMLElement): PreservedSelection | null {
+function captureSelection(region: DomRegion): PreservedSelection | null {
+  const root = region.root;
   const selection = root.ownerDocument.getSelection();
   if (
     !selection?.anchorNode
@@ -186,8 +371,8 @@ function captureSelection(root: HTMLElement): PreservedSelection | null {
   ) {
     return null;
   }
-  const anchor = pointOffset(root, selection.anchorNode, selection.anchorOffset);
-  const focus = pointOffset(root, selection.focusNode, selection.focusOffset);
+  const anchor = pointOffset(region, selection.anchorNode, selection.anchorOffset);
+  const focus = pointOffset(region, selection.focusNode, selection.focusOffset);
   return anchor === null || focus === null
     ? null
     : {
@@ -205,29 +390,36 @@ function captureSelection(root: HTMLElement): PreservedSelection | null {
 }
 
 function textPoint(
-  root: HTMLElement,
+  region: DomRegion,
   requestedOffset: number,
 ): Readonly<{ node: Node; offset: number }> {
-  const walker = root.ownerDocument.createTreeWalker(root, TEXT_NODE_FILTER);
   let remaining = Math.max(0, requestedOffset);
   let lastText: Text | null = null;
-  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
-    const text = current as Text;
-    lastText = text;
-    if (remaining <= text.data.length) {
-      return { node: text, offset: remaining };
+  for (const top of regionNodes(region)) {
+    const walker = region.root.ownerDocument.createTreeWalker(top, TEXT_NODE_FILTER);
+    for (
+      let current: Node | null = top.nodeType === Node.TEXT_NODE ? top : walker.nextNode();
+      current;
+      current = walker.nextNode()
+    ) {
+      const text = current as Text;
+      lastText = text;
+      if (remaining <= text.data.length) {
+        return { node: text, offset: remaining };
+      }
+      remaining -= text.data.length;
     }
-    remaining -= text.data.length;
   }
   if (lastText) return { node: lastText, offset: lastText.data.length };
-  return { node: root, offset: 0 };
+  return { node: region.root, offset: regionOffset(region) };
 }
 
 function restoreSelection(
-  root: HTMLElement,
+  region: DomRegion,
   preserved: PreservedSelection | null,
 ): void {
   if (!preserved) return;
+  const root = region.root;
   const selection = root.ownerDocument.getSelection();
   if (!selection) return;
   const restorePoint = (
@@ -242,7 +434,7 @@ function restoreSelection(
         offset: Math.min(point.nodeOffset, maximumOffset),
       };
     }
-    return textPoint(root, point.textOffset);
+    return textPoint(region, point.textOffset);
   };
   const anchor = restorePoint(preserved.anchor);
   const focus = restorePoint(preserved.focus);
@@ -266,40 +458,45 @@ function restoreSelection(
   }
 }
 
-function childPath(root: HTMLElement, target: HTMLElement): number[] {
+function childPath(region: DomRegion, target: HTMLElement): number[] {
   const path: number[] = [];
   let current: Node | null = target;
-  while (current && current !== root) {
+  while (current && current !== region.root) {
     const parent: Node | null = current.parentNode;
     if (!parent) return [];
     path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
     current = parent;
   }
-  return current === root ? path : [];
+  if (current !== region.root || path.length === 0) return [];
+  path[0] -= regionOffset(region);
+  return path;
 }
 
-function nodeAtPath(root: HTMLElement, path: readonly number[]): Node | null {
-  let current: Node = root;
-  for (const index of path) {
-    const next: Node | undefined = current.childNodes[index];
+function nodeAtPath(region: DomRegion, path: readonly number[]): Node | null {
+  let current: Node = region.root;
+  for (const [depth, index] of path.entries()) {
+    const next: Node | undefined = current.childNodes[
+      depth === 0 ? index + regionOffset(region) : index
+    ];
     if (!next) return null;
     current = next;
   }
   return current;
 }
 
-function captureFocus(root: HTMLElement): PreservedFocus | null {
+function captureFocus(region: DomRegion): PreservedFocus | null {
+  const root = region.root;
   const active = root.ownerDocument.activeElement;
   if (
     !active
     || !isDomInstance(active, getDomRealm(root).HTMLElement)
-    || !root.contains(active)
+    || !regionContains(region, active)
   ) {
     return null;
   }
   return {
     element: active,
-    path: childPath(root, active),
+    path: childPath(region, active),
     tagName: active.tagName,
     ...(active.dataset.focusKey ? { focusKey: active.dataset.focusKey } : {}),
     ...(active.id ? { id: active.id } : {}),
@@ -310,11 +507,13 @@ function escapeAttribute(value: string, css: typeof CSS | undefined): string {
   return css?.escape ? css.escape(value) : value.replace(/["\\]/g, "\\$&");
 }
 
-function restoreFocus(root: HTMLElement, preserved: PreservedFocus | null): void {
+function restoreFocus(region: DomRegion, preserved: PreservedFocus | null): void {
   if (!preserved) return;
+  const root = region.root;
   if (preserved.element.isConnected && root.contains(preserved.element)) return;
   const byFocusKey = preserved.focusKey
-    ? root.querySelector<HTMLElement>(
+    ? regionQuery<HTMLElement>(
+        region,
         `[data-focus-key="${escapeAttribute(
           preserved.focusKey,
           getDomRealm(root).CSS,
@@ -322,11 +521,14 @@ function restoreFocus(root: HTMLElement, preserved: PreservedFocus | null): void
       )
     : null;
   const byId = !byFocusKey && preserved.id
-    ? root.querySelector<HTMLElement>(
+    ? regionQuery<HTMLElement>(
+        region,
         `#${escapeAttribute(preserved.id, getDomRealm(root).CSS)}`,
       )
     : null;
-  const byPath = nodeAtPath(root, preserved.path);
+  const byPath = preserved.path.length > 0
+    ? nodeAtPath(region, preserved.path)
+    : null;
   const candidate = byFocusKey
     ?? byId
     ?? (
@@ -344,29 +546,31 @@ function restoreFocus(root: HTMLElement, preserved: PreservedFocus | null): void
   }
 }
 
-function captureDomState(root: HTMLElement): PreservedDomState {
+function captureDomState(region: DomRegion): PreservedDomState {
   return {
-    selection: captureSelection(root),
-    focus: captureFocus(root),
-    scroll: Array.from(root.querySelectorAll<HTMLElement>(
+    selection: captureSelection(region),
+    focus: captureFocus(region),
+    scroll: regionQueryAll<HTMLElement>(
+      region,
       "pre, .callout, .markdown-embed-content",
-    )).map((element) => ({
+    ).map((element) => ({
       element,
       top: element.scrollTop,
       left: element.scrollLeft,
     })),
-    details: Array.from(root.querySelectorAll<HTMLDetailsElement>("details"))
+    details: regionQueryAll<HTMLDetailsElement>(region, "details")
       .map((element) => ({ element, open: element.open })),
-    callouts: Array.from(root.querySelectorAll<HTMLElement>(".callout"))
+    callouts: regionQueryAll<HTMLElement>(region, ".callout")
       .map((element) => ({
         element,
         collapsed: element.classList.contains("is-collapsed"),
         expanded: element.querySelector<HTMLElement>(".callout-title")
           ?.getAttribute("aria-expanded") ?? null,
       })),
-    copies: Array.from(root.querySelectorAll<HTMLButtonElement>(
+    copies: regionQueryAll<HTMLButtonElement>(
+      region,
       ".systemsculpt-agent-code-copy",
-    )).map((element) => ({
+    ).map((element) => ({
       element,
       children: Array.from(element.childNodes, (child) => child.cloneNode(true)),
       copied: element.classList.contains("is-copied"),
@@ -379,8 +583,10 @@ function captureDomState(root: HTMLElement): PreservedDomState {
   };
 }
 
-function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
-  const scrolling = root.querySelectorAll<HTMLElement>(
+function restoreDomState(region: DomRegion, state: PreservedDomState): void {
+  const root = region.root;
+  const scrolling = regionQueryAll<HTMLElement>(
+    region,
     "pre, .callout, .markdown-embed-content",
   );
   state.scroll.forEach((entry, index) => {
@@ -392,7 +598,7 @@ function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
     target.scrollLeft = entry.left;
   });
 
-  const details = root.querySelectorAll<HTMLDetailsElement>("details");
+  const details = regionQueryAll<HTMLDetailsElement>(region, "details");
   state.details.forEach((entry, index) => {
     const target = entry.element.isConnected && root.contains(entry.element)
       ? entry.element
@@ -400,7 +606,7 @@ function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
     if (target) target.open = entry.open;
   });
 
-  const callouts = root.querySelectorAll<HTMLElement>(".callout");
+  const callouts = regionQueryAll<HTMLElement>(region, ".callout");
   state.callouts.forEach((entry, index) => {
     const target = entry.element.isConnected && root.contains(entry.element)
       ? entry.element
@@ -413,7 +619,8 @@ function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
     }
   });
 
-  const copies = root.querySelectorAll<HTMLButtonElement>(
+  const copies = regionQueryAll<HTMLButtonElement>(
+    region,
     ".systemsculpt-agent-code-copy",
   );
   state.copies.forEach((entry, index) => {
@@ -431,8 +638,8 @@ function restoreDomState(root: HTMLElement, state: PreservedDomState): void {
     if (entry.copyAttempt) target.dataset.copyAttempt = entry.copyAttempt;
   });
 
-  restoreFocus(root, state.focus);
-  restoreSelection(root, state.selection);
+  restoreFocus(region, state.focus);
+  restoreSelection(region, state.selection);
 }
 
 function compatibleNode(current: Node, incoming: Node): boolean {
@@ -493,7 +700,7 @@ function stableBlockMatchesLiveNode(
 }
 
 function plainBlockRange(
-  target: HTMLElement,
+  region: DomRegion,
   previousMarkdown: string | null,
   markdown: string,
   previous: readonly RenderedMarkdownBlock[],
@@ -504,8 +711,9 @@ function plainBlockRange(
     !hasRetainedLease
     || previousMarkdown === null
     || !markdown.startsWith(previousMarkdown)
-    || target.childNodes.length !== previous.length
   ) return null;
+  const live = regionNodes(region);
+  if (live.length !== previous.length) return null;
 
   let start = 0;
   while (
@@ -535,7 +743,6 @@ function plainBlockRange(
     || incoming.slice(start, incomingEnd).some((block) => block.leased)
   ) return null;
 
-  const live = Array.from(target.childNodes);
   for (let index = 0; index < start; index += 1) {
     if (!stableBlockMatchesLiveNode(previous[index], live[index])) return null;
   }
@@ -603,11 +810,18 @@ function reconcileCompatibleTree(current: Node, incoming: Node): void {
     return;
   }
   syncAttributes(current, incoming);
-  reconcileChildNodes(current, incoming);
+  reconcileChildNodes(current, Array.from(current.childNodes), incoming);
 }
 
-function reconcileChildNodes(currentParent: Node, incomingParent: Node): void {
-  const current = Array.from(currentParent.childNodes);
+/*
+ * The current nodes always run to the end of their parent, so appended
+ * incoming nodes land after them.
+ */
+function reconcileChildNodes(
+  currentParent: Node,
+  current: readonly ChildNode[],
+  incomingParent: Node,
+): void {
   const incoming = Array.from(incomingParent.childNodes);
   for (let index = 0; index < current.length || index < incoming.length; index += 1) {
     const currentNode = current[index];
@@ -628,12 +842,12 @@ function reconcileChildNodes(currentParent: Node, incomingParent: Node): void {
 }
 
 function reconcilePlainBlockRange(
-  target: HTMLElement,
+  region: DomRegion,
   staging: HTMLElement,
   range: PlainBlockRange,
 ): void {
-  const preserved = captureDomState(target);
-  const current = Array.from(target.childNodes);
+  const preserved = captureDomState(region);
+  const current = regionNodes(region);
   const currentRange = current.slice(range.start, range.previousEnd);
   const incomingRange = Array.from(staging.childNodes)
     .slice(range.start, range.incomingEnd)
@@ -647,7 +861,7 @@ function reconcilePlainBlockRange(
     const currentNode = currentRange[index];
     const incomingNode = incomingRange[index];
     if (!currentNode && incomingNode) {
-      target.insertBefore(incomingNode, suffixAnchor);
+      region.root.insertBefore(incomingNode, suffixAnchor);
     } else if (currentNode && !incomingNode) {
       currentNode.remove();
     } else if (currentNode && incomingNode) {
@@ -659,7 +873,13 @@ function reconcilePlainBlockRange(
       }
     }
   }
-  restoreDomState(target, preserved);
+  restoreDomState(region, preserved);
+}
+
+function reconcileRegion(region: DomRegion, staging: HTMLElement): void {
+  const preserved = captureDomState(region);
+  reconcileChildNodes(region.root, regionNodes(region), staging);
+  restoreDomState(region, preserved);
 }
 
 /**
@@ -671,30 +891,44 @@ export function reconcileLiveMarkdownDom(
   target: HTMLElement,
   staging: HTMLElement,
 ): void {
-  const preserved = captureDomState(target);
-  reconcileChildNodes(target, staging);
-  restoreDomState(target, preserved);
+  reconcileRegion({ root: target, after: null }, staging);
 }
 
-function replaceLiveMarkdownDom(
-  target: HTMLElement,
-  staging: HTMLElement,
+function replaceRegion(
+  region: DomRegion,
+  ...stagings: readonly HTMLElement[]
 ): void {
-  const preserved = captureDomState(target);
-  target.replaceChildren(...Array.from(staging.childNodes));
-  restoreDomState(target, preserved);
+  const preserved = captureDomState(region);
+  for (const node of regionNodes(region)) node.parentNode?.removeChild(node);
+  for (const staging of stagings) {
+    region.root.append(...Array.from(staging.childNodes));
+  }
+  restoreDomState(region, preserved);
 }
 
-function cloneRenderedMarkdownDom(staging: HTMLElement): HTMLElement {
-  const clone = createSurfaceElement(staging.ownerDocument, "div");
-  clone.append(...Array.from(staging.childNodes, (node) => node.cloneNode(true)));
+function cloneRenderedMarkdownDom(...stagings: readonly HTMLElement[]): HTMLElement {
+  const clone = createSurfaceElement(stagings[0].ownerDocument, "div");
+  for (const staging of stagings) {
+    clone.append(...Array.from(staging.childNodes, (node) => node.cloneNode(true)));
+  }
   return clone;
+}
+
+function hasLeasedMarkdown(staging: HTMLElement): boolean {
+  return staging.querySelector(LEASED_STREAM_MARKDOWN_SELECTOR) !== null;
+}
+
+function emptySettledMarkdown(): SettledMarkdown {
+  return { markdown: "", anchor: null, leases: [] };
 }
 
 /**
  * Coalesces token snapshots into detached Obsidian Markdown renders. Streaming
- * updates never await the parser. Settlement reuses an exact committed render
- * or waits for the newest snapshot.
+ * updates never await the parser. Blocks that can no longer change are parsed
+ * and mounted once; later frames re-render only the open tail after them, so
+ * the work for one streamed message stays linear in its length. Settlement
+ * reuses an exact committed whole-message render or parses the newest
+ * snapshot in full.
  */
 export class LiveMarkdownRenderer extends Component {
   private readonly states = new Map<HTMLElement, LiveMarkdownState>();
@@ -759,6 +993,7 @@ export class LiveMarkdownRenderer extends Component {
       this.cancelTimer(state);
       this.disposeLease(state.lease);
       state.lease = null;
+      this.disposeSettled(state);
       state.waiters.splice(0).forEach((waiter) => waiter.resolve());
       this.states.delete(candidate);
     }
@@ -788,9 +1023,13 @@ export class LiveMarkdownRenderer extends Component {
         committedMarkdown: null,
         committedFinal: false,
         committedBlocks: [],
+        committedTail: null,
+        committedTailStart: 0,
         lease: null,
+        settled: emptySettledMarkdown(),
         failedRevision: null,
-        lastStartedAt: Number.NEGATIVE_INFINITY,
+        lastFinishedAt: Number.NEGATIVE_INFINITY,
+        lastRenderDurationMs: 0,
         timer: null,
         inFlight: null,
         renderImmediatelyAfterFlight: false,
@@ -818,15 +1057,22 @@ export class LiveMarkdownRenderer extends Component {
     this.commitDom(state.target, () => {
       const previousLease = state.lease;
       state.lease = null;
-      replaceLiveMarkdownDom(state.target, staging);
+      replaceRegion({ root: state.target, after: null }, staging);
       this.disposeLease(previousLease);
+      this.disposeSettled(state);
       state.target.classList.add("is-live-markdown-fallback");
       state.committedFinal = false;
       state.committedBlocks = [];
+      state.committedTail = null;
       state.fallbackVisible = true;
     });
   }
 
+  /*
+   * The interval runs from the end of the previous parse and stretches to its
+   * duration, so slow renders leave the main thread idle at least half the
+   * time instead of running back to back.
+   */
   private schedule(state: LiveMarkdownState, immediate: boolean): void {
     if (state.disposed) return;
     if (state.inFlight) {
@@ -839,9 +1085,10 @@ export class LiveMarkdownRenderer extends Component {
       return;
     }
     if (state.timer !== null || state.failedRevision === state.revision) return;
-    const elapsed = this.now() - state.lastStartedAt;
+    const elapsed = this.now() - state.lastFinishedAt;
+    const interval = Math.max(this.throttleMs, state.lastRenderDurationMs);
     const delay = Number.isFinite(elapsed)
-      ? Math.max(0, this.throttleMs - elapsed)
+      ? Math.max(0, interval - elapsed)
       : 0;
     if (delay === 0) {
       void this.startRender(state);
@@ -854,17 +1101,54 @@ export class LiveMarkdownRenderer extends Component {
     }, delay);
   }
 
+  private planRender(state: LiveMarkdownState): RenderPlan {
+    const markdown = state.markdown;
+    const settled = state.settled;
+    const whole = state.finalRevision === state.revision;
+    const resetSettled = settled.markdown.length > 0 && (
+      whole
+      || !markdown.startsWith(settled.markdown)
+      || (settled.anchor !== null && settled.anchor.parentNode !== state.target)
+    );
+    if (whole) return { markdown, resetSettled, settleStart: 0, tailStart: 0 };
+    const settleStart = resetSettled ? 0 : settled.markdown.length;
+    return {
+      markdown,
+      resetSettled,
+      settleStart,
+      tailStart: stableMarkdownBoundary(markdown, settleStart),
+    };
+  }
+
   private async startRender(state: LiveMarkdownState): Promise<void> {
     if (state.disposed || state.inFlight) return;
     const revision = state.revision;
-    const markdown = state.markdown;
-    state.lastStartedAt = this.now();
+    const plan = this.planRender(state);
+    const markdown = plan.markdown;
+    const startedAt = this.now();
     const task = (async (): Promise<RenderOutcome> => {
-      const staging = createSurfaceElement(state.target.ownerDocument, "div");
+      const ownerDocument = state.target.ownerDocument;
+      const settling = plan.tailStart > plan.settleStart
+        ? {
+            staging: createSurfaceElement(ownerDocument, "div"),
+            lease: this.addChild(new Component()),
+          }
+        : null;
+      const staging = createSurfaceElement(ownerDocument, "div");
       const lease = this.addChild(new Component());
+      let retainedSettlingLease = false;
       let retainedLease = false;
       try {
-        await this.options.render(markdown, staging, lease);
+        if (settling) {
+          await this.options.render(
+            markdown.slice(plan.settleStart, plan.tailStart),
+            settling.staging,
+            settling.lease,
+          );
+          if (state.disposed) return { status: "stale" };
+        }
+        const tail = markdown.slice(plan.tailStart);
+        await this.options.render(tail, staging, lease);
         if (state.disposed) {
           return { status: "stale" };
         }
@@ -879,63 +1163,117 @@ export class LiveMarkdownRenderer extends Component {
         ) {
           return { status: "stale" };
         }
-        const hasLeasedContent = staging.querySelector(
-          LEASED_STREAM_MARKDOWN_SELECTOR,
-        ) !== null;
+        const region: DomRegion = {
+          root: state.target,
+          after: plan.resetSettled ? null : state.settled.anchor,
+        };
+        if (region.after && region.after.parentNode !== state.target) {
+          // Something outside this renderer rewrote the target. Parse the
+          // whole message again rather than splice into unknown nodes.
+          this.disposeSettled(state);
+          state.committedTail = null;
+          return { status: "stale", retry: true };
+        }
+        const hasLeasedContent = hasLeasedMarkdown(staging);
+        if (settling) {
+          const settlingLeased = hasLeasedMarkdown(settling.staging);
+          const settledCount = settling.staging.childNodes.length;
+          const blocks = hasLeasedContent ? renderedMarkdownBlocks(staging) : [];
+          this.commitDom(state.target, () => {
+            const previousLease = state.lease;
+            const previousSettled = plan.resetSettled ? state.settled : null;
+            if (!settlingLeased && !hasLeasedContent && previousLease === null) {
+              // Plain blocks keep their mounted nodes: the newly complete
+              // blocks usually match what the previous frame already showed.
+              reconcileRegion(
+                region,
+                cloneRenderedMarkdownDom(settling.staging, staging),
+              );
+            } else {
+              replaceRegion(region, settling.staging, staging);
+            }
+            let anchor = region.after;
+            for (
+              let index = 0, node = regionStart(region);
+              index < settledCount && node;
+              index += 1, node = node.nextSibling
+            ) anchor = node;
+            if (previousSettled) state.settled = emptySettledMarkdown();
+            state.settled.markdown = markdown.slice(0, plan.tailStart);
+            state.settled.anchor = anchor;
+            if (settlingLeased) {
+              state.settled.leases.push(settling.lease);
+              retainedSettlingLease = true;
+            }
+            state.lease = hasLeasedContent ? lease : null;
+            retainedLease = hasLeasedContent;
+            this.disposeLease(previousLease);
+            if (previousSettled) this.disposeLeases(previousSettled.leases);
+            this.markCommitted(state, markdown, revision, false, blocks, tail, plan.tailStart);
+          });
+          return { status: "committed" };
+        }
         // A settle request can arrive while an identical streaming parse is
         // already in flight. Promote that parse to the final install instead
-        // of scheduling the same Markdown twice.
+        // of scheduling the same Markdown twice. Only a whole-message parse
+        // can become final.
         const installFinalRender = exactLatestMarkdown
-          && state.finalRevision !== null;
+          && state.finalRevision !== null
+          && plan.tailStart === 0;
         // Final renders install the full tree and never compare block
         // signatures again. Avoid retaining a serialized copy of rich HTML.
         const blocks = !installFinalRender && (hasLeasedContent || state.lease !== null)
           ? renderedMarkdownBlocks(staging)
           : [];
+        const comparable = !plan.resetSettled
+          && state.committedTailStart === plan.tailStart;
         const plainRange = installFinalRender
           ? null
           : plainBlockRange(
-            state.target,
-            state.committedMarkdown,
-            markdown,
+            region,
+            comparable ? state.committedTail : null,
+            tail,
             state.committedBlocks,
             blocks,
             state.lease !== null,
           );
         this.commitDom(state.target, () => {
+          const previousSettled = plan.resetSettled ? state.settled : null;
           if (plainRange) {
             // An append-only plain range can update around unchanged rich
             // blocks. Their connected nodes keep the lease that created them;
             // this detached render and its duplicate rich nodes are discarded.
-            reconcilePlainBlockRange(state.target, staging, plainRange);
+            reconcilePlainBlockRange(region, staging, plainRange);
           } else if (installFinalRender || hasLeasedContent) {
             const previousLease = state.lease;
             // Final renders always install their actual staging tree. Known
             // changed interactive ranges do the same, so callbacks cannot keep
             // render-local state from an older snapshot.
-            replaceLiveMarkdownDom(state.target, staging);
+            replaceRegion(region, staging);
             state.lease = lease;
             retainedLease = true;
             this.disposeLease(previousLease);
           } else {
             // Plain streamed Markdown stays stable through in-place
             // reconciliation. Its detached render lease is not retained.
-            reconcileLiveMarkdownDom(
-              state.target,
-              cloneRenderedMarkdownDom(staging),
-            );
+            reconcileRegion(region, cloneRenderedMarkdownDom(staging));
             const previousLease = state.lease;
             state.lease = null;
             this.disposeLease(previousLease);
           }
-          state.target.classList.remove("is-live-markdown-fallback");
-          state.fallbackVisible = false;
-          state.committedMarkdown = markdown;
-          state.committedRevision = installFinalRender
-            ? state.revision
-            : revision;
-          state.committedFinal = installFinalRender;
-          state.committedBlocks = blocks;
+          if (previousSettled) {
+            state.settled = emptySettledMarkdown();
+            this.disposeLeases(previousSettled.leases);
+          }
+          this.markCommitted(
+            state,
+            markdown,
+            installFinalRender ? state.revision : revision,
+            installFinalRender,
+            blocks,
+            tail,
+            plan.tailStart,
+          );
         });
         return { status: "committed" };
       } catch (error) {
@@ -952,11 +1290,14 @@ export class LiveMarkdownRenderer extends Component {
         return { status: "failed", error, revision: failedRevision };
       } finally {
         if (!retainedLease) this.disposeLease(lease);
+        if (settling && !retainedSettlingLease) this.disposeLease(settling.lease);
       }
     })();
     state.inFlight = task;
     const outcome = await task;
     if (state.inFlight === task) state.inFlight = null;
+    state.lastFinishedAt = this.now();
+    state.lastRenderDurationMs = Math.max(0, state.lastFinishedAt - startedAt);
     if (state.disposed) return;
     if (outcome.status === "committed") {
       this.resolveWaiters(state);
@@ -964,7 +1305,10 @@ export class LiveMarkdownRenderer extends Component {
       this.rejectWaiters(state, outcome.revision, outcome.error);
     }
 
-    const hasNewerRevision = revision < state.revision
+    const hasNewerRevision = (
+      revision < state.revision
+      || (outcome.status === "stale" && outcome.retry === true)
+    )
       && state.committedRevision < state.revision
       && state.failedRevision !== state.revision;
     const forceImmediate = state.renderImmediatelyAfterFlight
@@ -976,6 +1320,25 @@ export class LiveMarkdownRenderer extends Component {
     }
   }
 
+  private markCommitted(
+    state: LiveMarkdownState,
+    markdown: string,
+    revision: number,
+    final: boolean,
+    blocks: readonly RenderedMarkdownBlock[],
+    tail: string,
+    tailStart: number,
+  ): void {
+    state.target.classList.remove("is-live-markdown-fallback");
+    state.fallbackVisible = false;
+    state.committedMarkdown = markdown;
+    state.committedRevision = revision;
+    state.committedFinal = final;
+    state.committedBlocks = blocks;
+    state.committedTail = tail;
+    state.committedTailStart = tailStart;
+  }
+
   private reuseCommittedMarkdown(
     state: LiveMarkdownState,
     requireFinal: boolean,
@@ -985,7 +1348,13 @@ export class LiveMarkdownRenderer extends Component {
       || state.committedMarkdown !== state.markdown
     ) return false;
     if (requireFinal && !state.committedFinal) {
-      if (state.inFlight || !state.lease) return false;
+      // Only a whole-message parse with its live lease can stand in for the
+      // final render; settled streaming blocks were parsed out of context.
+      if (
+        state.inFlight
+        || !state.lease
+        || state.settled.markdown.length > 0
+      ) return false;
       state.committedFinal = true;
     }
     if (state.target.classList.contains("is-live-markdown-fallback")) {
@@ -1052,6 +1421,16 @@ export class LiveMarkdownRenderer extends Component {
     const ownerWindow = getSurfaceOwnerWindow(state.target);
     ownerWindow.clearTimeout(state.timer);
     state.timer = null;
+  }
+
+  private disposeSettled(state: LiveMarkdownState): void {
+    const settled = state.settled;
+    state.settled = emptySettledMarkdown();
+    this.disposeLeases(settled.leases);
+  }
+
+  private disposeLeases(leases: readonly Component[]): void {
+    for (const lease of leases) this.disposeLease(lease);
   }
 
   private disposeLease(lease: Component | null): void {

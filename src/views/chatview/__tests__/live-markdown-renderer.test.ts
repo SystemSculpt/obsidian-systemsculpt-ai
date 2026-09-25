@@ -6,6 +6,7 @@ import { Component } from "obsidian";
 import {
   LiveMarkdownRenderer,
   reconcileLiveMarkdownDom,
+  stableMarkdownBoundary,
 } from "../LiveMarkdownRenderer";
 
 type Deferred = Readonly<{
@@ -23,6 +24,65 @@ function deferred(): Deferred {
 
 function renderParagraph(markdown: string, staging: HTMLElement): void {
   staging.createEl("p", { text: `rendered:${markdown}` });
+}
+
+/*
+ * A block-faithful stand-in for Obsidian's renderer: fenced code becomes a
+ * pre with a copy button, `[label](#x)` lines become links, and every other
+ * blank-line separated block becomes a paragraph.
+ */
+function renderBlocks(markdown: string, staging: HTMLElement): void {
+  const lines = markdown.split("\n");
+  let paragraph: string[] = [];
+  const closeParagraph = () => {
+    const text = paragraph.join("\n").trim();
+    paragraph = [];
+    if (!text) return;
+    const link = /^\[(.+)\]\((#.+)\)$/.exec(text);
+    if (link) {
+      staging.createEl("p").createEl("a", { text: link[1], href: link[2] });
+      return;
+    }
+    staging.createEl("p", { text });
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.startsWith("```")) {
+      closeParagraph();
+      const code: string[] = [];
+      for (index += 1; index < lines.length && !lines[index].startsWith("```"); index += 1) {
+        code.push(lines[index]);
+      }
+      const pre = staging.createEl("pre", { cls: "systemsculpt-agent-code-block" });
+      pre.createEl("code", { text: code.join("\n") });
+      pre.createEl("button", {
+        cls: "systemsculpt-agent-code-copy",
+        text: "Copy",
+        attr: { "aria-label": "Copy code" },
+      });
+    } else if (line.trim() === "") {
+      closeParagraph();
+    } else {
+      paragraph.push(line);
+    }
+  }
+  closeParagraph();
+}
+
+function longStreamedResponse(blocks: number): string {
+  const parts: string[] = [];
+  for (let index = 0; index < blocks; index += 1) {
+    if (index % 10 === 3) {
+      parts.push(`\`\`\`ts\nconst value${index} = ${index};\n\nreturn value${index};\n\`\`\``);
+    } else if (index % 10 === 7) {
+      parts.push(`- item ${index} a\n- item ${index} b\n\n- item ${index} c`);
+    } else if (index % 10 === 9) {
+      parts.push(`[Link ${index}](#link-${index})`);
+    } else {
+      parts.push(`Paragraph ${index} ${"lorem ipsum dolor sit amet ".repeat(6).trim()}.`);
+    }
+  }
+  return parts.join("\n\n");
 }
 
 describe("LiveMarkdownRenderer", () => {
@@ -160,15 +220,15 @@ describe("LiveMarkdownRenderer", () => {
     expect(render).toHaveBeenCalledTimes(1);
 
     now = 30;
-    live.stream(target, "Hello world again\n\nNext");
+    live.stream(target, "Hello world again\nNext");
     expect(target.textContent).toBe("rendered:Hello");
 
     await live.flush(target);
-    expect(target.textContent).toBe("rendered:Hello world again\n\nNext");
+    expect(target.textContent).toBe("rendered:Hello world again\nNext");
     expect(target.querySelector("p")?.childNodes).toHaveLength(1);
     expect(render).toHaveBeenCalledTimes(2);
     expect(render.mock.calls[render.mock.calls.length - 1]?.[0])
-      .toBe("Hello world again\n\nNext");
+      .toBe("Hello world again\nNext");
     live.unload();
   });
 
@@ -392,7 +452,8 @@ describe("LiveMarkdownRenderer", () => {
     const target = document.body.createDiv();
     const activations: string[] = [];
     const cleanups: jest.Mock[] = [];
-    const prefix = "[Docs](#docs)\n\nTail";
+    // A heading ends at its line, so both blocks share one open region.
+    const prefix = "# [Docs](#docs)\nTail";
     const live = new LiveMarkdownRenderer({
       throttleMs: 0,
       render: async (
@@ -404,7 +465,7 @@ describe("LiveMarkdownRenderer", () => {
         const link = linked.createEl("a", { text: "Docs", href: "#docs" });
         staging.createEl("p", {
           cls: "plain-tail",
-          text: markdown.slice("[Docs](#docs)\n\n".length),
+          text: markdown.slice("# [Docs](#docs)\n".length),
         });
         const activate = (event: Event) => {
           event.preventDefault();
@@ -436,7 +497,7 @@ describe("LiveMarkdownRenderer", () => {
       expect(target.querySelector("a")).toBe(link);
       expect(target.querySelector(".plain-tail")).toBe(tail);
       expect(tail.firstChild).toBe(tailText);
-      expect(tail.textContent).toBe(markdown.slice("[Docs](#docs)\n\n".length));
+      expect(tail.textContent).toBe(markdown.slice("# [Docs](#docs)\n".length));
       expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
     }
 
@@ -455,7 +516,7 @@ describe("LiveMarkdownRenderer", () => {
     const target = document.body.createDiv();
     const copied: string[] = [];
     const cleanups: jest.Mock[] = [];
-    const sourcePrefix = "Rich blocks\n\n";
+    const sourcePrefix = "Rich blocks\n";
     const live = new LiveMarkdownRenderer({
       throttleMs: 0,
       render: async (
@@ -1495,6 +1556,334 @@ describe("LiveMarkdownRenderer", () => {
     expect(second).not.toBe(first);
     second.click();
     expect(activations).toEqual(["second"]);
+    live.unload();
+  });
+  it("finds the last boundary that no later text can change", () => {
+    expect(stableMarkdownBoundary("")).toBe(0);
+    expect(stableMarkdownBoundary("One")).toBe(0);
+    expect(stableMarkdownBoundary("One\n\nTwo")).toBe(5);
+    expect(stableMarkdownBoundary("One\n\nTwo\n\nThr")).toBe(10);
+    expect(stableMarkdownBoundary("One\n\n")).toBe(0);
+    expect(stableMarkdownBoundary("One\n\n  indented continuation")).toBe(0);
+    expect(stableMarkdownBoundary("One\nTwo")).toBe(0);
+    expect(stableMarkdownBoundary("\n\nOne")).toBe(0);
+
+    const fenced = "Intro\n\n```ts\nconst a = 1;\n\nconst b = 2;";
+    expect(stableMarkdownBoundary(fenced)).toBe(7);
+    expect(stableMarkdownBoundary(`${fenced}\n\`\`\`\n\nAfter`)).toBe(fenced.length + 6);
+    expect(stableMarkdownBoundary("~~~~\na\n\n```\n\nb")).toBe(0);
+    expect(stableMarkdownBoundary("~~~~\na\n~~~~\n\nb")).toBe(13);
+    expect(stableMarkdownBoundary("```js```\n\nNext")).toBe(10);
+
+    expect(stableMarkdownBoundary("- a\n- b\n\n- c")).toBe(0);
+    expect(stableMarkdownBoundary("Intro\n- a\n\n1. b")).toBe(0);
+    expect(stableMarkdownBoundary("- a\n\n  more of a\n\n- b")).toBe(0);
+    expect(stableMarkdownBoundary("Intro\n\n- a\n- b")).toBe(7);
+    expect(stableMarkdownBoundary("- a\n- b\n\nAfter")).toBe(9);
+    expect(stableMarkdownBoundary("- a\n\nAfter\n\n- b")).toBe(12);
+    expect(stableMarkdownBoundary("- a\n\n1")).toBe(0);
+    expect(stableMarkdownBoundary("- a\n\n2024 was")).toBe(5);
+
+    expect(stableMarkdownBoundary("$$\na\n\nb")).toBe(0);
+    expect(stableMarkdownBoundary("$$\na\n\nb\n$$\n\nc")).toBe(12);
+    expect(stableMarkdownBoundary("Inline $$x$$ math\n\nNext")).toBe(19);
+    expect(stableMarkdownBoundary("%%\nhidden\n\nhidden\n%%\n\nShown")).toBe(22);
+    expect(stableMarkdownBoundary("%%\nhidden\n\nhidden")).toBe(0);
+    expect(stableMarkdownBoundary("<!--\nhidden\n\nhidden")).toBe(0);
+    expect(stableMarkdownBoundary("<!--\nhidden\n\n-->\n\nShown")).toBe(18);
+
+    const text = "Settled\n\nMore\n\nTail";
+    expect(stableMarkdownBoundary(text, 9)).toBe(15);
+    expect(stableMarkdownBoundary(text, 15)).toBe(15);
+  });
+
+  it("keeps render work linear in the length of a long streamed response", async () => {
+    const markdown = longStreamedResponse(240);
+    const target = document.body.createDiv();
+    const rendered: string[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging) => {
+        rendered.push(chunk);
+        renderBlocks(chunk, staging);
+      },
+    });
+    live.load();
+
+    for (let end = 12; end < markdown.length + 12; end += 12) {
+      live.stream(target, markdown.slice(0, Math.min(end, markdown.length)));
+      await live.flush(target);
+    }
+    const streamedCharacters = rendered.reduce((total, chunk) => total + chunk.length, 0);
+    const streamedCalls = rendered.length;
+    const frames = Math.ceil(markdown.length / 12);
+    // Rendering every frame's full prefix would parse about
+    // frames * length / 2 characters (roughly 2.2 million here).
+    expect(streamedCharacters).toBeLessThan(markdown.length * 12);
+    expect(streamedCalls).toBeLessThan(frames + 260);
+    expect(target.querySelectorAll("pre")).toHaveLength(24);
+    expect(target.querySelectorAll("a")).toHaveLength(24);
+
+    const renderedBeforeSettle = rendered.length;
+    await live.settle(target, markdown);
+    expect(rendered.slice(renderedBeforeSettle)).toEqual([markdown]);
+    const expected = document.createElement("div");
+    renderBlocks(markdown, expected);
+    expect(target.innerHTML).toBe(expected.innerHTML);
+    live.unload();
+  });
+
+  it("parses each completed block once and leaves its nodes and lease mounted", async () => {
+    const target = document.body.createDiv();
+    const rendered: string[] = [];
+    const cleanups = new Map<string, jest.Mock>();
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging, component) => {
+        rendered.push(chunk);
+        renderBlocks(chunk, staging);
+        const cleanup = jest.fn();
+        cleanups.set(chunk, cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, "[Docs](#docs)\n\nTa");
+    await live.flush(target);
+    const link = target.querySelector("a")!;
+    const tail = target.querySelector("p:last-child")!;
+    expect(rendered).toEqual(["[Docs](#docs)\n\n", "Ta"]);
+
+    for (const markdown of [
+      "[Docs](#docs)\n\nTail",
+      "[Docs](#docs)\n\nTail grows",
+      "[Docs](#docs)\n\nTail grows.",
+    ]) {
+      live.stream(target, markdown);
+      await live.flush(target);
+      expect(target.querySelector("a")).toBe(link);
+      expect(target.querySelector("p:last-child")).toBe(tail);
+    }
+    expect(tail.textContent).toBe("Tail grows.");
+    expect(rendered).toEqual([
+      "[Docs](#docs)\n\n",
+      "Ta",
+      "Tail",
+      "Tail grows",
+      "Tail grows.",
+    ]);
+    expect(cleanups.get("[Docs](#docs)\n\n")).not.toHaveBeenCalled();
+    expect(cleanups.get("Tail grows")).toHaveBeenCalledTimes(1);
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    await live.settle(target, "[Docs](#docs)\n\nTail grows.");
+    expect(rendered[rendered.length - 1]).toBe("[Docs](#docs)\n\nTail grows.");
+    expect(target.querySelector("a")).not.toBe(link);
+    expect(cleanups.get("[Docs](#docs)\n\n")).toHaveBeenCalledTimes(1);
+    expect(cleanups.get("[Docs](#docs)\n\nTail grows.")).not.toHaveBeenCalled();
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    live.unload();
+    expect(cleanups.get("[Docs](#docs)\n\nTail grows.")).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps selection and focus when the open block is settled", async () => {
+    const target = document.body.createDiv();
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging) => renderBlocks(chunk, staging),
+    });
+    live.load();
+
+    live.stream(target, "Intro\n\n```ts\nconst alpha = 1;\n```");
+    await live.flush(target);
+    const intro = target.querySelector("p")!;
+    const copy = target.querySelector<HTMLButtonElement>("button")!;
+    copy.classList.add("is-copied");
+    copy.setText("Copied");
+    copy.focus();
+    const codeText = target.querySelector("code")!.firstChild!;
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.setStart(codeText, 6);
+    range.setEnd(codeText, 11);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(selection.toString()).toBe("alpha");
+
+    live.stream(target, "Intro\n\n```ts\nconst alpha = 1;\n```\n\nAfter");
+    await live.flush(target);
+
+    const settledCopy = target.querySelector<HTMLButtonElement>("button")!;
+    expect(target.querySelector("p")).toBe(intro);
+    expect(settledCopy).not.toBe(copy);
+    expect(document.activeElement).toBe(settledCopy);
+    expect(settledCopy.classList).toContain("is-copied");
+    expect(settledCopy.textContent).toBe("Copied");
+    expect(selection.toString()).toBe("alpha");
+    expect(target.textContent).toBe("Introconst alpha = 1;CopiedAfter");
+
+    live.stream(target, "Intro\n\n```ts\nconst alpha = 1;\n```\n\nAfter more");
+    await live.flush(target);
+    expect(target.querySelector("button")).toBe(settledCopy);
+    expect(document.activeElement).toBe(settledCopy);
+    expect(selection.toString()).toBe("alpha");
+    live.unload();
+  });
+
+  it("parses the whole message again when streamed text stops extending the settled blocks", async () => {
+    const target = document.body.createDiv();
+    const rendered: string[] = [];
+    const cleanups: jest.Mock[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging, component) => {
+        rendered.push(chunk);
+        renderBlocks(chunk, staging);
+        const cleanup = jest.fn();
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, "[One](#one)\n\nTwo");
+    await live.flush(target);
+    expect(rendered).toEqual(["[One](#one)\n\n", "Two"]);
+    expect(cleanups[0]).not.toHaveBeenCalled();
+
+    live.stream(target, "Rewritten\n\nTail");
+    await live.flush(target);
+    expect(rendered.slice(2)).toEqual(["Rewritten\n\n", "Tail"]);
+    expect(cleanups[0]).toHaveBeenCalledTimes(1);
+    expect(target.textContent).toBe("RewrittenTail");
+    expect(target.querySelector("a")).toBeNull();
+
+    live.stream(target, "Rewritten");
+    await live.flush(target);
+    expect(rendered[rendered.length - 1]).toBe("Rewritten");
+    expect(target.textContent).toBe("Rewritten");
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(0);
+    live.unload();
+  });
+
+  it("does not reuse a streamed frame with settled blocks as the final render", async () => {
+    const target = document.body.createDiv();
+    const rendered: string[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging) => {
+        rendered.push(chunk);
+        renderBlocks(chunk, staging);
+      },
+    });
+    live.load();
+
+    live.stream(target, "[One](#one)\n\n[Two](#two)");
+    await live.flush(target);
+    expect(rendered).toEqual(["[One](#one)\n\n", "[Two](#two)"]);
+
+    await live.settle(target, "[One](#one)\n\n[Two](#two)");
+    expect(rendered).toEqual([
+      "[One](#one)\n\n",
+      "[Two](#two)",
+      "[One](#one)\n\n[Two](#two)",
+    ]);
+    await live.settle(target, "[One](#one)\n\n[Two](#two)");
+    expect(rendered).toHaveLength(3);
+    live.unload();
+  });
+
+  it("measures the throttle from the end of the previous parse", async () => {
+    const origin = Date.now();
+    const target = document.body.createDiv();
+    const started: number[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 48,
+      render: async (markdown, staging) => {
+        started.push(Date.now() - origin);
+        // Each parse takes 100 ms of main-thread time.
+        jest.setSystemTime(Date.now() + 100);
+        renderParagraph(markdown, staging);
+      },
+    });
+    live.load();
+
+    live.stream(target, "a");
+    await jest.advanceTimersByTimeAsync(0);
+    expect(started).toEqual([0]);
+
+    // The parse ended at 100 and took 100 ms, so the next one waits until 200
+    // rather than starting 48 ms after the previous start.
+    live.stream(target, "ab");
+    live.stream(target, "abc");
+    await jest.advanceTimersByTimeAsync(99);
+    expect(started).toEqual([0]);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(started).toEqual([0, 200]);
+    expect(target.textContent).toBe("rendered:abc");
+
+    // A fast parse falls back to the configured interval after it ends.
+    live.stream(target, "abcd");
+    await jest.advanceTimersByTimeAsync(99);
+    expect(started).toEqual([0, 200]);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(started).toEqual([0, 200, 400]);
+    live.unload();
+  });
+
+  it("forgets settled block leases with the target", async () => {
+    const wrapper = document.body.createDiv();
+    const target = wrapper.createDiv();
+    const cleanups: jest.Mock[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging, component) => {
+        renderBlocks(chunk, staging);
+        const cleanup = jest.fn();
+        cleanups.push(cleanup);
+        const child = new Component();
+        child.register(cleanup);
+        component.addChild(child);
+      },
+    });
+    live.load();
+
+    live.stream(target, "[One](#one)\n\n[Two](#two)\n\nTail");
+    await live.flush(target);
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(1);
+
+    live.forget(wrapper);
+    expect(cleanups.every((cleanup) => cleanup.mock.calls.length === 1)).toBe(true);
+    expect((live as unknown as { children: Component[] }).children).toHaveLength(0);
+    live.unload();
+  });
+
+  it("parses the whole message when something else replaced settled nodes", async () => {
+    const target = document.body.createDiv();
+    const rendered: string[] = [];
+    const live = new LiveMarkdownRenderer({
+      throttleMs: 0,
+      render: async (chunk, staging) => {
+        rendered.push(chunk);
+        renderBlocks(chunk, staging);
+      },
+    });
+    live.load();
+
+    live.stream(target, "One\n\nTwo");
+    await live.flush(target);
+    target.empty();
+
+    live.stream(target, "One\n\nTwo more");
+    await live.flush(target);
+    expect(rendered.slice(2)).toEqual(["One\n\n", "Two more"]);
+    expect(target.textContent).toBe("OneTwo more");
     live.unload();
   });
 });
