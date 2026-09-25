@@ -3,10 +3,22 @@ import { getDevelopmentBuildIdentity } from "./DevelopmentBuildIdentity";
 
 const SHA256_DIGEST = /^[a-f0-9]{64}$/;
 /** Device-local memo of the last hashed bundle, keyed by its file stat. */
-const BUILD_ID_CACHE_KEY = "systemsculpt-ai:loaded-bundle-identity";
+const BUILD_ID_CACHE_KEY = "systemsculpt-ai:loaded-bundle-identity-v2";
 
-type BundleStat = Readonly<{ mtime: number; size: number }>;
-type CachedBuildId = Readonly<{ path: string; mtime: number; size: number; digest: string }>;
+/**
+ * The memo key. ctime changes whenever the file's metadata or bytes are
+ * written, so a same-size bundle restored with its old mtime still misses;
+ * an inode is included where the adapter exposes one.
+ */
+type BundleStat = Readonly<{ mtime: number; ctime: number; size: number; ino: number | null }>;
+type CachedBuildId = BundleStat & Readonly<{ path: string; digest: string }>;
+
+function sameStat(left: BundleStat, right: Partial<BundleStat>): boolean {
+  return left.mtime === right.mtime
+    && left.ctime === right.ctime
+    && left.size === right.size
+    && left.ino === (right.ino ?? null);
+}
 
 async function sha256(bytes: ArrayBuffer): Promise<string> {
   const crypto = window.crypto;
@@ -23,8 +35,19 @@ async function statBundle(app: App, path: string): Promise<BundleStat | null> {
   try {
     const stat = await app.vault.adapter.stat(path);
     if (!stat || stat.type !== "file") return null;
-    if (!Number.isFinite(stat.mtime) || !Number.isSafeInteger(stat.size) || stat.size < 0) return null;
-    return { mtime: stat.mtime, size: stat.size };
+    if (
+      !Number.isFinite(stat.mtime)
+      || !Number.isFinite(stat.ctime)
+      || !Number.isSafeInteger(stat.size)
+      || stat.size < 0
+    ) return null;
+    const ino = (stat as { ino?: unknown }).ino;
+    return {
+      mtime: stat.mtime,
+      ctime: stat.ctime,
+      size: stat.size,
+      ino: typeof ino === "number" && Number.isSafeInteger(ino) ? ino : null,
+    };
   } catch {
     return null;
   }
@@ -38,8 +61,7 @@ function readCachedBuildId(app: App, path: string, stat: BundleStat): string | n
       if (
         cached
         && cached.path === path
-        && cached.mtime === stat.mtime
-        && cached.size === stat.size
+        && sameStat(stat, cached)
         && typeof cached.digest === "string"
         && SHA256_DIGEST.test(cached.digest)
       ) return cached.digest;
@@ -63,10 +85,12 @@ function writeCachedBuildId(app: App, value: CachedBuildId): void {
  * Development sync manifests record the expected digest, but every install is
  * independently read from the active plugin directory and hashed.
  *
- * The digest is memoized per device by the bundle's mtime and size, so an
- * unchanged install is not re-read and re-hashed at every launch (#343). The
- * memo is written only when the file's stat is identical before and after the
- * read, and any change to the file misses it.
+ * A release install's digest is memoized per device by the bundle's mtime,
+ * ctime, size, and inode where exposed, so an unchanged install is not
+ * re-read and re-hashed at every launch (#343). The memo is written only when
+ * the stat is identical before and after the read. A development install is
+ * always re-read and hashed, because its manifest comparison must verify the
+ * bytes actually installed.
  */
 export async function getLoadedPluginBuildId(
   app: App,
@@ -81,9 +105,10 @@ export async function getLoadedPluginBuildId(
     "main.js",
   ].join("/"));
   try {
-    const before = await statBundle(app, path);
+    const memoizable = !development;
+    const before = memoizable ? await statBundle(app, path) : null;
     const cached = before ? readCachedBuildId(app, path, before) : null;
-    if (cached && (!recorded || recorded === cached)) return `sha256:${cached}`;
+    if (cached) return `sha256:${cached}`;
 
     const bytes = await app.vault.adapter.readBinary(path);
     const digest = await sha256(bytes);
@@ -95,9 +120,7 @@ export async function getLoadedPluginBuildId(
     }
     if (before && before.size === bytes.byteLength) {
       const after = await statBundle(app, path);
-      if (after && after.mtime === before.mtime && after.size === before.size) {
-        writeCachedBuildId(app, { path, mtime: before.mtime, size: before.size, digest });
-      }
+      if (after && sameStat(before, after)) writeCachedBuildId(app, { path, ...before, digest });
     }
     return `sha256:${digest}`;
   } catch (error) {

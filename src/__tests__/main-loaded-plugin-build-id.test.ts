@@ -3,6 +3,7 @@
 import { createHash, webcrypto } from "node:crypto";
 import { App, requireApiVersion } from "obsidian";
 import SystemSculptPlugin from "../main";
+import { getLoadedPluginBuildId } from "../core/plugin/LoadedPluginBuildIdentity";
 import { AgentChatView } from "../views/chatview/AgentChatView";
 
 function deferred<T>() {
@@ -185,6 +186,79 @@ describe("SystemSculptPlugin loaded plugin build identity", () => {
     stat.size = updatedBytes.byteLength;
     await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(updatedBytes));
     expect(readBinary).toHaveBeenCalledTimes(2);
+  }));
+
+  it("re-hashes a same-size bundle restored with its old mtime, or with a new inode", () => withLocalStorageApi(async () => {
+    const original = bytes("original bundle bytes\n");
+    const restored = bytes("restored bundle bytes\n");
+    expect(restored.byteLength).toBe(original.byteLength);
+    const readBinary = jest.fn(async () => original);
+    const storage = new Map<string, unknown>();
+    const stat: Record<string, unknown> = { type: "file", ctime: 100, mtime: 1_700_000_000_000, size: original.byteLength, ino: 7 };
+    const launch = (): SystemSculptPlugin => {
+      const plugin = makePlugin(readBinary);
+      (plugin.app.vault.adapter as any).stat = jest.fn(async () => ({ ...stat }));
+      (plugin.app as any).loadLocalStorage = (key: string) => storage.get(key) ?? null;
+      (plugin.app as any).saveLocalStorage = (key: string, value: unknown) => storage.set(key, value);
+      return plugin;
+    };
+
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(original));
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(original));
+    expect(readBinary).toHaveBeenCalledTimes(1);
+
+    // Same size and mtime, but the restore changed ctime: the new bytes are read.
+    readBinary.mockResolvedValue(restored);
+    stat.ctime = 200;
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(restored));
+    expect(readBinary).toHaveBeenCalledTimes(2);
+
+    // A replaced file with an identical stat but a new inode is read too.
+    readBinary.mockResolvedValue(original);
+    stat.ino = 8;
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(original));
+    expect(readBinary).toHaveBeenCalledTimes(3);
+  }));
+
+  it("always re-reads and verifies a development install instead of using the memo", () => withLocalStorageApi(async () => {
+    const installed = bytes("development bundle\n");
+    const readBinary = jest.fn(async () => installed);
+    const saveLocalStorage = jest.fn();
+    const loadLocalStorage = jest.fn(() => ({
+      path: ".obsidian/plugins/systemsculpt-ai/main.js",
+      mtime: 5, ctime: 5, size: installed.byteLength, ino: null,
+      digest: "a".repeat(64),
+    }));
+    const app = new App();
+    (app.vault as any).configDir = ".obsidian";
+    (app.vault.adapter as any).readBinary = readBinary;
+    (app.vault.adapter as any).stat = jest.fn(async () => ({ type: "file", ctime: 5, mtime: 5, size: installed.byteLength }));
+    (app as any).loadLocalStorage = loadLocalStorage;
+    (app as any).saveLocalStorage = saveLocalStorage;
+    const digest = buildId(installed).slice("sha256:".length);
+    const manifest = {
+      id: "systemsculpt-ai",
+      version: "6.6.0",
+      systemsculptDevBuild: {
+        schemaVersion: 1,
+        id: "dev-1",
+        revision: "abcdef1",
+        branch: "main",
+        dirty: false,
+        syncedAt: "2026-09-25T00:00:00.000Z",
+        sourcePath: "/src",
+        artifacts: { "main.js": digest, "manifest.json": "b".repeat(64), "styles.css": "c".repeat(64) },
+      },
+    } as any;
+
+    await expect(getLoadedPluginBuildId(app, manifest)).resolves.toBe(buildId(installed));
+    await expect(getLoadedPluginBuildId(app, manifest)).resolves.toBe(buildId(installed));
+    expect(readBinary).toHaveBeenCalledTimes(2);
+    expect(loadLocalStorage).not.toHaveBeenCalled();
+    expect(saveLocalStorage).not.toHaveBeenCalled();
+
+    readBinary.mockResolvedValue(bytes("tampered development bundle\n"));
+    await expect(getLoadedPluginBuildId(app, manifest)).rejects.toThrow("could not verify this plugin update");
   }));
 
   it("does not memoize a digest when the bundle changes during the read", () => withLocalStorageApi(async () => {
