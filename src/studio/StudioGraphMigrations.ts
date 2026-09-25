@@ -47,6 +47,14 @@ const LEGACY_TEXT_NODE_KIND_RENAMES: Record<string, string> = {
   "studio.label": "studio.text",
 };
 
+/** Node kinds a v1 file can still carry that the registry no longer defines; the passes below rewrite or remove them. */
+export const RETIRED_STUDIO_NODE_KINDS: ReadonlySet<string> = new Set([
+  "studio.label",
+  "studio.http_request",
+  "studio.prompt_template",
+  "studio.resend_audience_sync",
+]);
+
 const LEGACY_OUTPUT_PORT_REMAP: Record<string, Record<string, string>> = {
   "studio.image_generation": {
     first_image: "images",

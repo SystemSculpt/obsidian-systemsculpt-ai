@@ -152,7 +152,7 @@ export class StudioGraphGroupController {
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.canvasEl = canvas;
-    this.bindWindowListeners();
+    this.syncWindowListeners();
     const frameLayerAttached = this.frameLayerEl && this.frameLayerEl.parentElement === canvas;
     const tagLayerAttached = this.tagLayerEl && this.tagLayerEl.parentElement === canvas;
     if (!frameLayerAttached || !tagLayerAttached) {
@@ -196,6 +196,7 @@ export class StudioGraphGroupController {
 
     const project = this.host.getCurrentProject();
     if (!project) {
+      this.syncWindowListeners();
       return;
     }
 
@@ -289,6 +290,7 @@ export class StudioGraphGroupController {
     }
 
     this.refreshGroupBounds();
+    this.syncWindowListeners();
 
     if (this.pendingNameEditGroupId) {
       const pendingId = this.pendingNameEditGroupId;
@@ -338,6 +340,7 @@ export class StudioGraphGroupController {
     this.host.onGroupSelected?.();
     this.selectedGroupId = groupId;
     this.refreshSelectionClasses();
+    this.syncWindowListeners();
   }
 
   clearSelection(): void {
@@ -345,6 +348,7 @@ export class StudioGraphGroupController {
     if (!this.selectedGroupId) return;
     this.selectedGroupId = null;
     this.refreshSelectionClasses();
+    this.syncWindowListeners();
   }
 
   private refreshSelectionClasses(): void {
@@ -492,6 +496,18 @@ export class StudioGraphGroupController {
     }
 
     this.host.requestRender();
+  }
+
+  /**
+   * Owner-window listeners dismiss a group selection or color palette, so they
+   * are bound only while one of them is active on the canvas.
+   */
+  private syncWindowListeners(): void {
+    if (this.canvasEl && (this.selectedGroupId || this.openColorPaletteGroupId)) {
+      this.bindWindowListeners();
+    } else {
+      this.unbindWindowListeners();
+    }
   }
 
   private bindWindowListeners(): void {
@@ -961,6 +977,7 @@ export class StudioGraphGroupController {
 
     this.openColorPaletteGroupId = null;
     this.previewColorByGroupId.delete(normalizedGroupId);
+    this.syncWindowListeners();
     this.editingGroupId = normalizedGroupId;
     elements.nameSlotEl.empty();
     elements.nameButtonEl = null;

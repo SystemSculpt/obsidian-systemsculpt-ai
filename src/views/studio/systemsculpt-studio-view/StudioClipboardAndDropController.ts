@@ -45,7 +45,8 @@ export type StudioCreatedNodesFinalization = {
  * the existing note-node materializer, which remains part of note runtime.
  */
 export interface StudioClipboardAndDropHost {
-  isActive(): boolean;
+  /** Whether the active Studio view owns an event aimed at this target, not a modal or other surface. */
+  ownsEventTarget(target: EventTarget | null): boolean;
   isBusy(): boolean;
   isEditableTarget(target: EventTarget | null): boolean;
   getCurrentProject(): StudioProjectV1 | null;
@@ -297,7 +298,7 @@ export class StudioClipboardAndDropController {
   async handlePaste(event: ClipboardEvent): Promise<void> {
     if (
       event.defaultPrevented ||
-      !this.host.isActive() ||
+      !this.host.ownsEventTarget(event.target) ||
       this.host.isBusy() ||
       !this.host.getCurrentProject() ||
       !this.host.getProjectPath() ||

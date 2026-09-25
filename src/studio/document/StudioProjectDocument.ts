@@ -1,11 +1,12 @@
 import type { DataAdapter } from "obsidian";
-import { parseStudioProject, serializeStudioProject } from "../schema";
+import { isLegacyStudioProjectText, parseAndMigrateStudioProject, parseStudioProject, serializeStudioProject } from "../schema";
 import { assertValidStudioProjectAgentDocumentStructure } from "../StudioProjectAgentDocumentValidation";
 import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
 import type { StudioProjectV1 } from "../types";
 import type { StudioProjectReconciliation } from "../StudioProjectReconciliation";
-import { resolveStudioEntry } from "../StudioEntry";
-import { deriveStudioPolicyPath } from "../paths";
+import { resolveStudioEntry, type StudioEntryResolution } from "../StudioEntry";
+import { deriveStudioAssetsDir, deriveStudioPolicyPath } from "../paths";
+import { RETIRED_STUDIO_NODE_KINDS } from "../StudioGraphMigrations";
 import { entitiesToProject, projectToEntities } from "./StudioProjectEntities";
 import { StudioCollaborationScope, releaseStudioCollaboration, createStudioCollaboration, loadStudioCollaboration, serializeStudioCollaboration, studioCollaborationEntities, mergeStudioCollaboration, changeStudioCollaboration, studioCollaborationAt, type StudioCollaborativeState } from "./StudioCollaborativeDocument";
 import { writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
@@ -14,12 +15,15 @@ type Accepted = {state: StudioCollaborativeState; template: StudioProjectV1};
 const accepted = new WeakMap<object, Map<string, Accepted>>();
 const tails = new WeakMap<object, Map<string, Promise<unknown>>>();
 export type StudioDocumentEdit = {entityId: string; kind?: "set" | "create" | "delete" | "restore"; path?: string[]; value?: unknown; remove?: boolean};
+/** The untouched bytes of a pre-v2 file, kept before Studio first republishes it as v2. */
+export type StudioLegacyOriginalCopy = Readonly<{projectPath: string; copyPath: string; retiredNodes: readonly Readonly<{title: string; kind: string}>[]}>;
+const LEGACY_ORIGINAL_SUFFIX = "-v1-original.json";
 class StudioWriteRace extends Error {}
 
 /** One file and one shared mutation service. The canvas and merge state travel together. */
 export class StudioProjectDocument {
   private readonly cache: Map<string, Accepted>;
-  constructor(private readonly adapter: DataAdapter, private readonly path: string) {
+  constructor(private readonly adapter: DataAdapter, private readonly path: string, private readonly onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void) {
     let cache = accepted.get(adapter); if (!cache) {cache = new Map(); accepted.set(adapter, cache);} this.cache = cache;
   }
   async forget(): Promise<void> {
@@ -50,12 +54,42 @@ export class StudioProjectDocument {
     };
     return run();
   }
+  /** Every write replaces the resolved file; an older dialect first keeps its original bytes. */
+  private async publish(entry: StudioEntryResolution, next: string): Promise<boolean> {
+    if (next !== entry.raw && isLegacyStudioProjectText(entry.raw) && !await this.keepLegacyOriginal(entry)) return false;
+    return writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, next);
+  }
+  /** Migration retires node kinds and drops their configuration, so the v1 bytes are copied once per distinct original. */
+  private async keepLegacyOriginal(entry: StudioEntryResolution): Promise<boolean> {
+    const original = await this.adapter.readBinary(entry.path), bytes = new Uint8Array(original);
+    // Copy only the bytes that were imported; a concurrent writer makes the caller retry.
+    if (await this.adapter.read(entry.path) !== entry.raw) return false;
+    const folder = `${deriveStudioAssetsDir(this.path)}/legacy`;
+    if (await this.adapter.exists(folder)) {
+      for (const file of (await this.adapter.list(folder)).files) {
+        if (!file.endsWith(LEGACY_ORIGINAL_SUFFIX)) continue;
+        const kept = new Uint8Array(await this.adapter.readBinary(file));
+        if (kept.length === bytes.length && kept.every((byte, index) => byte === bytes[index])) return true;
+      }
+    }
+    let current = "";
+    for (const part of folder.split("/")) { current = current ? `${current}/${part}` : part; if (!await this.adapter.exists(current)) { try { await this.adapter.mkdir(current); } catch (error) { if (!await this.adapter.exists(current)) throw error; } } }
+    // JSON, not .systemsculpt: the copy must never be listed, opened, or migrated as a project itself.
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    let copyPath = `${folder}/${stamp}${LEGACY_ORIGINAL_SUFFIX}`;
+    for (let suffix = 2; await this.adapter.exists(copyPath); suffix++) copyPath = `${folder}/${stamp}-${suffix}${LEGACY_ORIGINAL_SUFFIX}`;
+    await this.adapter.writeBinary(copyPath, original);
+    const retiredNodes = parseStudioProject(entry.raw).graph.nodes.filter(node => RETIRED_STUDIO_NODE_KINDS.has(node.kind)).map(node => ({title: node.title.trim() || node.kind, kind: node.kind}));
+    this.onLegacyOriginalCopied?.({projectPath: this.path, copyPath, retiredNodes});
+    return true;
+  }
   private project(value: Accepted): StudioProjectV1 {
     return entitiesToProject(studioCollaborationEntities(value.state), value.template, serializeStudioCollaboration(value.state));
   }
   private async import(raw: string): Promise<Accepted> {
     assertValidStudioProjectAgentDocumentStructure(JSON.parse(raw));
-    const candidate = parseStudioProject(raw, {projectPath: this.path});
+    // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
+    const candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
     // Grants belong to the file's own location; an authored reference cannot select another project's policy.
     candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
     validateStudioProjectForAgentEdit(candidate);
@@ -89,7 +123,7 @@ export class StudioProjectDocument {
         try { value = await this.import(entry.raw); } catch { return {project: this.project(value), conflicts: ["Studio is waiting for a complete valid file edit."]}; }
       }
       const project = this.project(value);
-      if (!await writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, serializeStudioProject(project))) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
+      if (!await this.publish(entry, serializeStudioProject(project))) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
       return {project, conflicts: []};
     });
   }
@@ -109,7 +143,7 @@ export class StudioProjectDocument {
       validateStudioProjectForAgentEdit(saved);
       const text = serializeStudioProject(saved);
       options?.onBeforeProjectWrite?.(text);
-      const wrote = await writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, text);
+      const wrote = await this.publish(entry, text);
       if (!wrote) { throw new StudioWriteRace("Another writer changed the Studio file; your edit is still pending and will be rebased on retry."); }
       this.remember(next); scope.retain(next.state);
       return {project: saved, conflicts: []};
@@ -156,7 +190,7 @@ export class StudioProjectDocument {
       const next = {state, template: current.template};
       const project = this.project(next);
       validateStudioProjectForAgentEdit(project);
-      if (!await writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, serializeStudioProject(project))) { throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits."); }
+      if (!await this.publish(entry, serializeStudioProject(project))) { throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits."); }
       this.remember(next); scope.retain(state);
       return {project, conflicts: []};
       } finally { scope.close(); }

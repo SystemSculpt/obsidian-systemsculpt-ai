@@ -80,6 +80,11 @@ directly from the file:
 - Studio still reads v1 and legacy documents and rewrites them as v2 on the
   next save. The schema never moves backward, and agent file tools validate
   every proposed edit before bytes reach the vault.
+- Migration converts retired node kinds (Label, HTTP Request, Prompt Template,
+  Resend Audience Sync); retired request nodes lose their configuration.
+  Before the first v2 rewrite, Studio copies the original file byte for byte
+  to legacy/<timestamp>-v1-original.json in the assets directory, once per
+  distinct original, and names that copy in a notice.
 
 ## Persistence
 
@@ -92,6 +97,7 @@ My Project.systemsculpt-assets/
   assets/sha256/
   runs/
   cache/node-results.json
+  legacy/
 ~~~
 
 Project creation never overwrites an existing project or asset directory.

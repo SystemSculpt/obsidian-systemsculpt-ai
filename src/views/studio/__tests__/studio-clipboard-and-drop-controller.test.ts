@@ -84,7 +84,7 @@ function createHarness(options?: {
   const copyText = jest.fn(async () => true);
   let boundViewport: HTMLElement | null = null;
   const host: Harness["host"] = {
-    isActive: jest.fn(() => true),
+    ownsEventTarget: jest.fn(() => true),
     isBusy: jest.fn(() => false),
     isEditableTarget: jest.fn(() => false),
     getCurrentProject: jest.fn(() => project),
@@ -231,6 +231,21 @@ describe("StudioClipboardAndDropController", () => {
     const whitespaceEvent = clipboardEvent({ text: "  \n  " });
     await harness.controller.handlePaste(whitespaceEvent);
     expect(whitespaceEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("ignores a paste aimed at a surface the view does not own, such as a modal", async () => {
+    const harness = createHarness();
+    const modalButton = document.body.createEl("button");
+    (harness.host.ownsEventTarget as jest.Mock).mockImplementation((target) => target !== modalButton);
+    const pasteText = jest.spyOn(harness.controller, "pasteClipboardText");
+    const event = { ...clipboardEvent({ text: "pasted into a modal" }), target: modalButton } as ClipboardEvent;
+
+    await harness.controller.handlePaste(event);
+
+    expect(harness.host.ownsEventTarget).toHaveBeenCalledWith(modalButton);
+    expect(pasteText).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(harness.getProject()?.graph.nodes).toHaveLength(0);
   });
 
   it("routes note references to note runtime but keeps multiline content as text", async () => {

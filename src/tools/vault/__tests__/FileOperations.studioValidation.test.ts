@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { App, TFile } from "obsidian";
 import { assertValidStudioProjectAgentDocumentStructure } from "../../../studio/StudioProjectAgentDocumentValidation";
 import { assertValidStudioProjectAgentFileMutation } from "../../../studio/StudioProjectAgentFileGuard";
@@ -423,6 +425,28 @@ describe("FileOperations Studio agent edits", () => {
       previousContent: upgraded,
       content: v1Document,
     })).toThrow("schema may only move from studio.project.v1 to studio.project.v2");
+  });
+
+  it("accepts an edit to a v1 file whose retired node kinds Studio migrates on import", () => {
+    const v1Document = readFileSync(
+      join(__dirname, "../../../studio/__tests__/fixtures/v1-retired-node-kinds.systemsculpt"),
+      "utf8"
+    );
+    const mutation = {
+      path: "SystemSculpt/Studio/Legacy API digest.systemsculpt",
+      exists: true,
+      mode: "edit" as const,
+      previousContent: v1Document,
+    };
+
+    expect(() => assertValidStudioProjectAgentFileMutation({
+      ...mutation,
+      content: v1Document.replace("Fetch items", "Fetch the item list"),
+    })).not.toThrow();
+    expect(() => assertValidStudioProjectAgentFileMutation({
+      ...mutation,
+      content: v1Document.replace('"studio.label"', '"studio.unknown_kind"'),
+    })).toThrow('missing node definition for "studio.unknown_kind@1.0.0"');
   });
 
   it("keeps the Studio-owned project identity stable", async () => {

@@ -23,7 +23,10 @@ import {
   nowIso,
   randomId,
 } from "./utils";
-import { ALL_STUDIO_GRAPH_MIGRATION_IDS } from "./StudioGraphMigrations";
+import {
+  ALL_STUDIO_GRAPH_MIGRATION_IDS,
+  migrateStudioProjectToPathOnlyPorts,
+} from "./StudioGraphMigrations";
 import { deriveStudioPolicyPath } from "./paths";
 import {
   convertLegacyShapeNodesToDiagram,
@@ -686,7 +689,40 @@ export function parseStudioProject(
   rawText: string,
   context?: StudioProjectParseContext
 ): StudioProjectV1 {
+  return readStudioProject(JSON.parse(rawText), context);
+}
+
+/**
+ * Parse a project file and bring an older dialect up to the current graph
+ * before anything validates or compiles it. v1 files can still carry node
+ * kinds that later releases renamed or retired (studio.label,
+ * studio.http_request, studio.prompt_template, studio.resend_audience_sync);
+ * only the graph migrations rewrite them, and the built-in registry no longer
+ * defines them. v2 content is written in the current dialect by definition,
+ * so it is returned as parsed.
+ */
+export function parseAndMigrateStudioProject(
+  rawText: string,
+  context?: StudioProjectParseContext
+): StudioProjectV1 {
   const parsed: unknown = JSON.parse(rawText);
+  const project = readStudioProject(parsed, context);
+  if (isCurrentStudioDialect(parsed)) {
+    return project;
+  }
+  return migrateStudioProjectToPathOnlyPorts(project).project;
+}
+
+/** An older dialect is migrated on adoption, so Studio's first write replaces its original content. */
+export function isLegacyStudioProjectText(rawText: string): boolean {
+  return !isCurrentStudioDialect(JSON.parse(rawText));
+}
+
+function isCurrentStudioDialect(parsed: unknown): boolean {
+  return isRecord(parsed) && asString(parsed.schema).trim() === STUDIO_PROJECT_SCHEMA_V2;
+}
+
+function readStudioProject(parsed: unknown, context?: StudioProjectParseContext): StudioProjectV1 {
   if (!isRecord(parsed)) {
     throw new Error("Invalid Studio project: root JSON value must be an object.");
   }

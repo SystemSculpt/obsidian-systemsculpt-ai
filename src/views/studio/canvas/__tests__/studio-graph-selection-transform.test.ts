@@ -164,10 +164,10 @@ describe("resolveStudioSelectionResizePatches", () => {
       });
 
       expect(result.bounds).toEqual({ left: 10, top: 100, width: 990, height: 400 });
-      // Raw interpolated x is 10 — the shared 24px canvas floor applies.
+      // The canvas is unbounded: the interpolated x is written as-is.
       expect(patchFor(result, "terminal")).toEqual({
         size: { width: 440 },
-        position: { x: 24, y: 100 },
+        position: { x: 10, y: 100 },
       });
       expect(patchFor(result, "generic")).toEqual({
         size: { width: 330 },
@@ -187,7 +187,7 @@ describe("resolveStudioSelectionResizePatches", () => {
       expect(result.bounds).toEqual({ left: 100, top: 0, width: 900, height: 500 });
       expect(patchFor(result, "terminal")).toEqual({
         size: { height: 500 },
-        position: { x: 100, y: 24 },
+        position: { x: 100, y: 0 },
       });
       expect(patchFor(result, "generic")).toEqual({
         size: { height: 250 },
@@ -394,7 +394,7 @@ describe("resolveStudioSelectionResizePatches", () => {
       expect(patchFor(result, "wide")?.position).toEqual({ x: 350, y: 100 });
     });
 
-    it("floors interpolated positions at the canvas minimum", () => {
+    it("writes interpolated positions past the origin without flooring", () => {
       const nodes: StudioSelectionResizeNodeSnapshot[] = [
         snapshot({ nodeId: "a", rect: { left: 30, top: 40, width: 200, height: 100 } }),
         snapshot({ nodeId: "b", rect: { left: 330, top: 40, width: 200, height: 100 } }),
@@ -407,7 +407,26 @@ describe("resolveStudioSelectionResizePatches", () => {
         nodes,
       });
 
-      expect(patchFor(result, "a")?.position?.x).toBe(24);
+      expect(patchFor(result, "a")?.position).toEqual({ x: -70, y: 40 });
+      expect(patchFor(result, "b")?.position).toEqual({ x: 290, y: 40 });
+    });
+
+    it("keeps negative coordinates on the axis that is not being dragged", () => {
+      const nodes: StudioSelectionResizeNodeSnapshot[] = [
+        snapshot({ nodeId: "a", rect: { left: -400, top: -300, width: 200, height: 100 } }),
+        snapshot({ nodeId: "b", rect: { left: -100, top: -300, width: 200, height: 100 } }),
+      ];
+      const result = resolveStudioSelectionResizePatches({
+        zone: "e",
+        deltaX: 50,
+        deltaY: 0,
+        startBounds: { left: -400, top: -300, width: 500, height: 100 },
+        nodes,
+      });
+
+      expect(result.bounds).toEqual({ left: -400, top: -300, width: 550, height: 100 });
+      expect(patchFor(result, "a")?.position).toEqual({ x: -400, y: -300 });
+      expect(patchFor(result, "b")?.position).toEqual({ x: -70, y: -300 });
     });
 
     it("excludes interaction-locked nodes from patches", () => {

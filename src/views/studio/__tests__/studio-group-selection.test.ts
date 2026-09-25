@@ -28,6 +28,30 @@ let cleanup:()=>void=()=>{};
 afterEach(()=>{cleanup();document.body.innerHTML='';});
 
 describe('group background selection and fit',()=>{
+  it('binds owner-window listeners only while a group is selected or its color palette is open',()=>{
+    const bound=new Set<EventListenerOrEventListenerObject>();
+    const add=window.addEventListener.bind(window), remove=window.removeEventListener.bind(window);
+    jest.spyOn(window,'addEventListener').mockImplementation((type,listener,options)=>{if(type==='keydown'||type==='pointerdown')bound.add(listener);add(type,listener,options);});
+    jest.spyOn(window,'removeEventListener').mockImplementation((type,listener,options)=>{if(type==='keydown'||type==='pointerdown')bound.delete(listener);remove(type,listener,options);});
+    const h=harness();cleanup=()=>{h.engine.clearRenderBindings();jest.restoreAllMocks();};
+    expect(bound.size).toBe(0);
+
+    h.select();
+    expect(bound.size).toBeGreaterThan(0);
+    h.canvas.dispatchEvent(pointer('pointerdown'));
+    expect(h.frame().getAttribute('aria-pressed')).toBe('false');
+    expect(bound.size).toBe(0);
+
+    h.canvas.querySelector<HTMLButtonElement>('.ss-studio-group-color-button')!.click();
+    expect(h.canvas.querySelector('.ss-studio-group-color-palette')).not.toBeNull();
+    expect(bound.size).toBeGreaterThan(0);
+    window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    expect(h.canvas.querySelector('.ss-studio-group-color-palette')).toBeNull();
+    expect(bound.size).toBe(0);
+
+    h.select();h.engine.clearRenderBindings();
+    expect(bound.size).toBe(0);
+  });
   it('selects a group without moving it, clears stale member selections, and fits only its frame',()=>{
     const h=harness();cleanup=()=>h.engine.clearRenderBindings();h.engine.setSelectedNodeIds(['outside']);
     h.select();

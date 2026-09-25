@@ -51,12 +51,6 @@ export const STUDIO_GRAPH_RESIZE_EDGE_HIT_PX = 6;
 /** Side length of the square corner hit zones. */
 export const STUDIO_GRAPH_RESIZE_CORNER_HIT_PX = 12;
 
-/**
- * Mirror of the canvas position floor applied by the node-drag path in
- * StudioGraphSelectionController.
- */
-const STUDIO_GRAPH_MIN_NODE_CANVAS_POSITION = 24;
-
 /** Guard against inverted/degenerate scale factors on text drags. */
 const STUDIO_GRAPH_MIN_TEXT_SCALE = 0.05;
 
@@ -198,10 +192,6 @@ function readInitialSizeFromNode(
   };
 }
 
-function floorCanvasPosition(value: number): number {
-  return Math.max(STUDIO_GRAPH_MIN_NODE_CANVAS_POSITION, Math.round(value));
-}
-
 export function mountStudioGraphNodeResizeFrame(
   options: MountStudioGraphNodeResizeFrameOptions
 ): () => void {
@@ -284,8 +274,8 @@ export function mountStudioGraphNodeResizeFrame(
         width,
         height,
         fontSize: startFontSize,
-        x: direction.x === -1 ? floorCanvasPosition(startX + (startWidth - width)) : startX,
-        y: direction.y === -1 ? floorCanvasPosition(startY + (startHeight - height)) : startY,
+        x: direction.x === -1 ? Math.round(startX + (startWidth - width)) : startX,
+        y: direction.y === -1 ? Math.round(startY + (startHeight - height)) : startY,
         writesWidth: direction.x !== 0,
         writesHeight: direction.y !== 0,
         writesFontSize: false,
@@ -316,11 +306,8 @@ export function mountStudioGraphNodeResizeFrame(
         width,
         height: startHeight,
         fontSize: startFontSize,
-        x: direction.x === -1 ? floorCanvasPosition(startX + (startWidth - width)) : startX,
-        y:
-          direction.y === -1
-            ? floorCanvasPosition(startY + (startHeight - impliedHeight))
-            : startY,
+        x: direction.x === -1 ? Math.round(startX + (startWidth - width)) : startX,
+        y: direction.y === -1 ? Math.round(startY + (startHeight - impliedHeight)) : startY,
         writesWidth: true,
         writesHeight: false,
         writesFontSize: false,
@@ -338,7 +325,7 @@ export function mountStudioGraphNodeResizeFrame(
         width,
         height: startHeight,
         fontSize: startFontSize,
-        x: direction.x === -1 ? floorCanvasPosition(startX + (startWidth - width)) : startX,
+        x: direction.x === -1 ? Math.round(startX + (startWidth - width)) : startX,
         y: startY,
         writesWidth: true,
         writesHeight: false,
@@ -361,10 +348,7 @@ export function mountStudioGraphNodeResizeFrame(
         height: startHeight,
         fontSize,
         x: startX,
-        y:
-          direction.y === -1
-            ? floorCanvasPosition(startY + (safeStartHeight - predictedHeight))
-            : startY,
+        y: direction.y === -1 ? Math.round(startY + (safeStartHeight - predictedHeight)) : startY,
         writesWidth: false,
         writesHeight: false,
         writesFontSize: true,
@@ -392,11 +376,8 @@ export function mountStudioGraphNodeResizeFrame(
       width,
       height: startHeight,
       fontSize,
-      x: direction.x === -1 ? floorCanvasPosition(startX + (startWidth - width)) : startX,
-      y:
-        direction.y === -1
-          ? floorCanvasPosition(startY + (safeStartHeight - predictedHeight))
-          : startY,
+      x: direction.x === -1 ? Math.round(startX + (startWidth - width)) : startX,
+      y: direction.y === -1 ? Math.round(startY + (safeStartHeight - predictedHeight)) : startY,
       writesWidth: true,
       writesHeight: false,
       writesFontSize: true,

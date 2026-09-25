@@ -1,6 +1,9 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   createDefaultStudioPolicy,
   createEmptyStudioProject,
+  parseAndMigrateStudioProject,
   parseStudioPolicy,
   parseStudioProject,
   serializeStudioProject,
@@ -218,6 +221,31 @@ describe("Studio schema", () => {
 
     // v2 never persists entry IDs, so stale ones cannot survive an upgrade.
     expect(parseStudioProject(serializeStudioProject(project)).graph.entryNodeIds).toEqual([]);
+  });
+
+  it("migrates retired v1 node kinds between parse and validation, leaving v2 as parsed", () => {
+    const v1Text = readFileSync(join(__dirname, "fixtures/v1-retired-node-kinds.systemsculpt"), "utf8");
+
+    expect(parseStudioProject(v1Text).graph.nodes.map((node) => node.kind)).toEqual([
+      "studio.label",
+      "studio.input",
+      "studio.http_request",
+      "studio.text",
+    ]);
+    const migrated = parseAndMigrateStudioProject(v1Text);
+    expect(migrated.graph.nodes.map((node) => node.kind)).toEqual([
+      "studio.text",
+      "studio.input",
+      "studio.retired_http_request",
+      "studio.text_output",
+    ]);
+
+    // v2 is written in the current dialect, so the migration pass never rewrites it.
+    const v2Document = JSON.parse(serializeStudioProject(migrated));
+    v2Document.canvas.nodes[0].kind = "label";
+    const v2Text = JSON.stringify(v2Document);
+    expect(parseAndMigrateStudioProject(v2Text).graph).toEqual(parseStudioProject(v2Text).graph);
+    expect(parseAndMigrateStudioProject(v2Text).graph.nodes[0].kind).toBe("studio.label");
   });
 
   it("migrates legacy canvas-like payloads into v1", () => {

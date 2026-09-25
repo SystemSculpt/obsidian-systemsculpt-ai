@@ -8,7 +8,7 @@ import { isStudioGraphEditableTarget } from "../StudioGraphDomTargeting";
  * Canvas tool shortcuts must work across the canvas and leave typing alone.
  */
 type KeydownContext = {
-  isActiveStudioView: jest.Mock<boolean, []>;
+  ownsKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   activeCanvasTool: StudioCanvasTool;
   selectCanvasTool: jest.Mock<void, [StudioCanvasTool]>;
@@ -19,14 +19,14 @@ type KeydownContext = {
   removeNodes: jest.Mock<void, [string[]]>;
 };
 
-const handleWindowKeyDown = (SystemSculptStudioView as any).prototype.handleWindowKeyDown as (
+const handleCanvasKeyDown = (SystemSculptStudioView as any).prototype.handleCanvasKeyDown as (
   this: KeydownContext,
   event: KeyboardEvent
-) => void;
+) => boolean;
 
 function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
   return {
-    isActiveStudioView: jest.fn(() => true),
+    ownsKeyboardTarget: jest.fn(() => true),
     isEditableKeyboardTarget: jest.fn(isStudioGraphEditableTarget),
     activeCanvasTool: "diamond",
     selectCanvasTool: jest.fn(),
@@ -66,7 +66,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext();
     const event = createKeydownEvent({ key });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith(tool);
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -77,7 +77,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext();
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -87,7 +87,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext({ activeCanvasTool: "ellipse" });
     const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
@@ -100,7 +100,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
       const context = createContext();
       const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, [modifier]: true });
 
-      handleWindowKeyDown.call(context, event);
+      handleCanvasKeyDown.call(context, event);
 
       expect(context.selectCanvasTool).not.toHaveBeenCalled();
       expect(event.preventDefault).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
   it("disarms the arrow tool too", () => {
     const context = createContext({ activeCanvasTool: "arrow" });
 
-    handleWindowKeyDown.call(context, createKeydownEvent());
+    handleCanvasKeyDown.call(context, createKeydownEvent());
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
   });
@@ -119,7 +119,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
@@ -140,11 +140,11 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext();
     for (const key of ["b", "c", "s", "a", "Escape"]) {
       const event = createKeydownEvent({ key, target });
-      handleWindowKeyDown.call(context, event);
+      handleCanvasKeyDown.call(context, event);
       expect(event.preventDefault).not.toHaveBeenCalled();
     }
     const selectEvent = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, target });
-    handleWindowKeyDown.call(context, selectEvent);
+    handleCanvasKeyDown.call(context, selectEvent);
     expect(selectEvent.preventDefault).not.toHaveBeenCalled();
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
   });
@@ -154,7 +154,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     (modifier) => {
       const context = createContext();
       const event = createKeydownEvent({ key: "b", [modifier]: true });
-      handleWindowKeyDown.call(context, event);
+      handleCanvasKeyDown.call(context, event);
       expect(context.selectCanvasTool).not.toHaveBeenCalled();
       expect(event.preventDefault).not.toHaveBeenCalled();
     }
@@ -163,11 +163,11 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
   it.each([
     { busy: true },
     { currentProject: null },
-    { isActiveStudioView: jest.fn(() => false) },
+    { ownsKeyboardTarget: jest.fn(() => false) },
   ])("ignores tool shortcuts when unavailable (%j)", (overrides) => {
     const context = createContext(overrides);
     const event = createKeydownEvent({ key: "b" });
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
@@ -176,7 +176,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext({ activeCanvasTool: "select" });
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
@@ -186,7 +186,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext();
     const event = createKeydownEvent({ key: "a", code: "KeyA", [modifier]: true });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(context.graphInteraction.setSelectedNodeIds).toHaveBeenCalledWith(["card"]);

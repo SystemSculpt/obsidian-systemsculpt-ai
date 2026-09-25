@@ -3,7 +3,7 @@ import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
   assertValidStudioProjectAgentDocumentStructure,
 } from "./StudioProjectAgentDocumentValidation";
-import { parseStudioProject } from "./schema";
+import { parseAndMigrateStudioProject } from "./schema";
 
 export type StudioProjectAgentFileMutation = Readonly<{
   path: string;
@@ -80,7 +80,8 @@ export function assertValidStudioProjectAgentFileMutation(
       const previous = parseAgentProjectDocument(mutation.previousContent);
       assertStableStudioProjectAgentDocumentFieldsUnchanged(document, previous);
     }
-    const project = parseStudioProject(mutation.content, { projectPath: path });
+    // Validate what Studio will adopt: a v1 file's retired node kinds are migrated on import.
+    const project = parseAndMigrateStudioProject(mutation.content, { projectPath: path });
     validateStudioProjectForAgentEdit(project);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
