@@ -37,6 +37,11 @@ export interface PendingRecorderCapture {
    * session marks audio from a capture that Obsidian quit or crashed during.
    */
   captureInProgress?: true;
+  /**
+   * An abandoned fragment of a capture that fell back to memory. Recovery
+   * deletes the file and never treats it as a recording.
+   */
+  discarded?: true;
 }
 
 export interface PendingAudioProcessorUploadPart {

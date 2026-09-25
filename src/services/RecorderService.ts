@@ -24,6 +24,7 @@ import { getCurrentHostPreferredMicrophoneId } from "./recorder/RecorderPreferen
 import {
   RECORDINGS_IN_PROGRESS_DIRECTORY,
   ensureAdapterDirectory,
+  isDiscardedRecordingPath,
   isInProgressRecordingPath,
   moveRecordingIntoVault,
   recordingPathIn,
@@ -199,7 +200,7 @@ export class RecorderService {
     }
     this.clearPendingRecoveryVisibilityResume();
 
-    const settled = pending.filter((capture) => !capture.captureInProgress);
+    const settled = pending.filter((capture) => !capture.captureInProgress && !capture.discarded);
     if (!settled.length) return;
     const recoverable = settled.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
@@ -370,6 +371,7 @@ export class RecorderService {
       hostContext,
       maxEncodedBytes: memoryCaptureLimitBytes(),
       onCaptureFileCreated: (capture) => this.rememberCaptureInProgress(session, capture),
+      onCaptureFileDiscarded: (filePath) => this.rememberDiscardedFragment(filePath),
       onStatus: (status) => {
         if (this.session !== session) return;
         if (this.state === "recording" && !session.isRecording()) {
@@ -968,13 +970,22 @@ export class RecorderService {
    */
   private async recoverInterruptedCaptures(): Promise<void> {
     const adapter = this.app.vault.adapter;
-    const entries = (this.plugin.settings.pendingRecorderCaptures ?? [])
-      .filter((capture) => capture.captureInProgress);
-    const known = new Set(entries.map((capture) => capture.filePath));
+    const pending = this.plugin.settings.pendingRecorderCaptures ?? [];
+    const discarded = pending.filter((capture) => capture.discarded);
+    const entries = pending.filter((capture) => capture.captureInProgress && !capture.discarded);
+    const known = new Set([...entries, ...discarded].map((capture) => capture.filePath));
+    for (const capture of discarded) {
+      if (this.unloaded) return;
+      await this.deleteDiscardedFragment(capture.filePath);
+    }
     const orphans: PendingRecorderCapture[] = [];
     if (await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) {
       for (const filePath of (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files) {
         if (known.has(filePath)) continue;
+        if (isDiscardedRecordingPath(filePath)) {
+          await adapter.remove(filePath).catch(() => undefined);
+          continue;
+        }
         orphans.push({
           filePath,
           startedAt: 0,
@@ -991,6 +1002,40 @@ export class RecorderService {
       if (this.isActiveCaptureFile(capture.filePath)) continue;
       await this.recoverInterruptedCapture(capture);
     }
+  }
+
+  /**
+   * A capture that fell back to memory could neither delete nor rename the
+   * fragment of its in-progress file. Record it so recovery deletes it
+   * instead of presenting it as an interrupted recording.
+   */
+  private rememberDiscardedFragment(filePath: string): void {
+    if (this.unloaded) return;
+    const entry: PendingRecorderCapture = {
+      filePath,
+      startedAt: Date.now(),
+      durationMs: 0,
+      sizeBytes: 0,
+      stopReason: "interrupted",
+      destination: "note",
+      discarded: true,
+    };
+    void this.mutatePendingCaptures((current) => [
+      ...current.filter((existing) => existing.filePath !== filePath),
+      entry,
+    ]).catch((error) => {
+      logError("RecorderService", "Could not record an abandoned recording fragment", error);
+    });
+  }
+
+  private async deleteDiscardedFragment(filePath: string): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (await adapter.exists(filePath)) await adapter.remove(filePath);
+    } catch {
+      return; // Kept, and skipped again, until it can be deleted.
+    }
+    await this.forgetPendingCapture(filePath);
   }
 
   /** The in-progress file of the capture running now, which recovery must not move. */

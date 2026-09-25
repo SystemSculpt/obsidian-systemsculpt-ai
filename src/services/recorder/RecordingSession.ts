@@ -6,6 +6,7 @@ import {
 } from "./RecorderFormats";
 import type { RecorderHostContext } from "./RecorderHostContext";
 import {
+  DISCARDED_RECORDING_SUFFIX,
   RECORDINGS_IN_PROGRESS_DIRECTORY,
   availableRecordingPath,
   ensureAdapterDirectory,
@@ -61,6 +62,11 @@ export interface RecordingSessionOptions {
    * file, so the caller can register that file for recovery after a crash.
    */
   onCaptureFileCreated?: (capture: RecordingCaptureFile) => void;
+  /**
+   * Called when a fragment of an abandoned in-progress file could be neither
+   * deleted nor renamed, so the caller can record that recovery must skip it.
+   */
+  onCaptureFileDiscarded?: (filePath: string) => void;
 }
 
 type CaptureState =
@@ -571,8 +577,9 @@ export class RecordingSession {
     try {
       await adapter.writeBinary(path, bytes);
     } catch (error) {
-      // The capture falls back to memory; a fragment must not be recovered later.
-      await adapter.remove(path).catch(() => undefined);
+      // The capture falls back to memory, so a fragment must never be
+      // recovered later as a second, partial recording.
+      await this.discardFragment(path);
       throw error;
     }
     this.streamPath = path;
@@ -587,6 +594,32 @@ export class RecordingSession {
       logError("RecordingSession", "Could not register the partial recording", error);
     }
     return bytes.byteLength;
+  }
+
+  /**
+   * Delete an abandoned fragment. If that fails, rename it so recovery skips
+   * it; if that fails too, ask the caller to record it as discarded.
+   */
+  private async discardFragment(path: string): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (!(await adapter.exists(path))) return;
+      await adapter.remove(path);
+      return;
+    } catch {
+      // Fall through to the rename.
+    }
+    try {
+      await adapter.rename(path, `${path}${DISCARDED_RECORDING_SUFFIX}`);
+      return;
+    } catch {
+      // Fall through to the caller's record.
+    }
+    try {
+      this.options.onCaptureFileDiscarded?.(path);
+    } catch (error) {
+      logError("RecordingSession", "Could not mark an abandoned recording fragment", error);
+    }
   }
 
   /**

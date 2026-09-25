@@ -1858,6 +1858,62 @@ describe("RecorderService", () => {
       expect(files.has("SystemSculpt/Recordings/second.webm")).toBe(true);
     });
 
+    it("deletes abandoned fragments instead of recovering them", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const renamed = ".systemsculpt/recordings-in-progress/renamed.webm.discarded";
+      const recorded = ".systemsculpt/recordings-in-progress/recorded.webm";
+      const { files, adapter } = vaultWithHiddenFiles({ [renamed]: { size: 10 }, [recorded]: { size: 10 } });
+      adapter.remove.mockImplementation(async (path: string) => { files.delete(path); });
+      plugin.settings.pendingRecorderCaptures = [
+        interruptedEntry({ filePath: recorded, sizeBytes: 0, captureInProgress: undefined, discarded: true }),
+      ];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect([...files.keys()]).toEqual([]);
+      expect(adapter.rename).not.toHaveBeenCalled();
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+      expect(mockTranscriptionStart).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([]);
+    });
+
+    it("keeps skipping a recorded fragment it still cannot delete", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      plugin.settings.autoTranscribeRecordings = true;
+      const recorded = ".systemsculpt/recordings-in-progress/recorded.webm";
+      const { adapter } = vaultWithHiddenFiles({ [recorded]: { size: 10 } });
+      adapter.remove.mockRejectedValue(new Error("Locked"));
+      const entry = interruptedEntry({ filePath: recorded, sizeBytes: 0, captureInProgress: undefined, discarded: true });
+      plugin.settings.pendingRecorderCaptures = [entry];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([entry]);
+      expect(adapter.rename).not.toHaveBeenCalled();
+      expect(mockTranscriptionStart).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([]);
+    });
+
+    it("records a fragment the session could not remove", async () => {
+      const service = RecorderService.getInstance(app, plugin);
+      const running = service.toggleRecording();
+      await flush();
+      harness.setRecording(true);
+      harness.start.resolve({ filePath, startedAt: 1_000, microphoneLabel: "Default microphone" });
+      await running;
+
+      mockSessionInstances[0].options.onCaptureFileDiscarded(hiddenPath);
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([
+        expect.objectContaining({ filePath: hiddenPath, discarded: true }),
+      ]);
+    });
+
     it("forgets an interrupted entry whose audio never reached the disk", async () => {
       vaultWithHiddenFiles({});
       plugin.settings.pendingRecorderCaptures = [interruptedEntry()];

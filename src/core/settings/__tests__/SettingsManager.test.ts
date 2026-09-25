@@ -448,6 +448,38 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.pendingRecorderCaptures[1]).not.toHaveProperty("captureInProgress");
   });
 
+  it("keeps a discarded recording fragment even though it has no recorded size", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      pendingRecorderCaptures: [
+        {
+          filePath: ".systemsculpt/recordings-in-progress/fragment.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 0,
+          stopReason: "interrupted",
+          destination: "note",
+          discarded: true,
+        },
+        {
+          filePath: "SystemSculpt/Recordings/empty.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 0,
+          stopReason: "manual",
+          destination: "note",
+        },
+      ],
+    });
+    const manager = new SettingsManager(plugin);
+
+    await manager.loadSettings();
+
+    expect(manager.settings.pendingRecorderCaptures).toEqual([
+      expect.objectContaining({ filePath: ".systemsculpt/recordings-in-progress/fragment.webm", discarded: true }),
+    ]);
+  });
+
   it("logs primary save and backup failures without breaking updates", async () => {
     const plugin = createPlugin();
     const manager = new SettingsManager(plugin);

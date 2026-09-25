@@ -1104,6 +1104,47 @@ describe("RecordingSession streaming to disk", () => {
     expect(result.sizeBytes).toBe(2);
   });
 
+  it("renames a fragment it cannot delete so recovery skips it", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const onCaptureFileDiscarded = jest.fn();
+    const harness = streamingHarness({ onCaptureFileDiscarded });
+    harness.adapter.writeBinary.mockImplementationOnce(async (path: string, data: ArrayBuffer) => {
+      harness.files.set(path, bytesOf(data).slice(0, 1));
+      throw new Error("Disk went away");
+    });
+    harness.adapter.remove.mockRejectedValueOnce(new Error("Locked"));
+    const started = await harness.session.start();
+    const hidden = `${HIDDEN}/${nameOf(started.filePath)}`;
+    emitBytes([1, 2]);
+    await settleWrites();
+
+    const result = await harness.session.stop();
+    expect(harness.files.has(hidden)).toBe(false);
+    expect(harness.files.get(`${hidden}.discarded`)).toEqual([1]);
+    expect(onCaptureFileDiscarded).not.toHaveBeenCalled();
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+    expect(result.sizeBytes).toBe(2);
+  });
+
+  it("asks to record a fragment it can neither delete nor rename", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const onCaptureFileDiscarded = jest.fn();
+    const harness = streamingHarness({ onCaptureFileDiscarded });
+    harness.adapter.writeBinary.mockImplementationOnce(async (path: string, data: ArrayBuffer) => {
+      harness.files.set(path, bytesOf(data).slice(0, 1));
+      throw new Error("Disk went away");
+    });
+    harness.adapter.remove.mockRejectedValueOnce(new Error("Locked"));
+    harness.adapter.rename.mockRejectedValueOnce(new Error("Locked"));
+    const started = await harness.session.start();
+    emitBytes([1, 2]);
+    await settleWrites();
+
+    await harness.session.stop();
+    expect(onCaptureFileDiscarded).toHaveBeenCalledWith(`${HIDDEN}/${nameOf(started.filePath)}`);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+  });
+
   it("falls back to the in-memory capture when the in-progress file cannot be created", async () => {
     jest.spyOn(console, "debug").mockImplementation(() => undefined);
     const harness = streamingHarness();

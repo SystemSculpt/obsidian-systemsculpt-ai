@@ -6,6 +6,11 @@ import { TFile, type App, type DataAdapter, type TAbstractFile } from "obsidian"
  * only the finished file is moved to where Sync and the vault see it.
  */
 export const RECORDINGS_IN_PROGRESS_DIRECTORY = ".systemsculpt/recordings-in-progress";
+/**
+ * An in-progress file the capture abandoned, renamed so recovery never
+ * mistakes it for an interrupted recording. Recovery deletes it.
+ */
+export const DISCARDED_RECORDING_SUFFIX = ".discarded";
 /** How long a moved recording may take to appear in the vault index. */
 const VAULT_INDEX_WAIT_MS = 5_000;
 
@@ -22,6 +27,10 @@ export function inProgressRecordingPath(finalPath: string): string {
 
 export function isInProgressRecordingPath(path: string): boolean {
   return path.startsWith(`${RECORDINGS_IN_PROGRESS_DIRECTORY}/`);
+}
+
+export function isDiscardedRecordingPath(path: string): boolean {
+  return path.endsWith(DISCARDED_RECORDING_SUFFIX);
 }
 
 /** The final path for a recovered in-progress file, in the given recordings folder. */
