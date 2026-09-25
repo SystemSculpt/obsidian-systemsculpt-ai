@@ -190,3 +190,126 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
   });
 });
+
+describe("mobile host layout observation scope", () => {
+  const platform = Platform as MutablePlatform;
+  const NativeMutationObserver = window.MutationObserver;
+  type Observation = { target: Node; options: MutationObserverInit };
+  const active = new Map<MutationObserver, Observation[]>();
+
+  class RecordingMutationObserver extends NativeMutationObserver {
+    override observe(target: Node, options?: MutationObserverInit): void {
+      const list = active.get(this) ?? [];
+      list.push({ target, options: options ?? {} });
+      active.set(this, list);
+      super.observe(target, options);
+    }
+
+    override disconnect(): void {
+      active.delete(this);
+      super.disconnect();
+    }
+  }
+
+  const observations = (): Observation[] => [...active.values()].flat();
+  const subtreeObservations = (): Observation[] => observations().filter(({ options }) => options.subtree === true);
+
+  beforeEach(() => {
+    active.clear();
+    window.MutationObserver = RecordingMutationObserver as typeof MutationObserver;
+    platform.isDesktopApp = true;
+    delete platform.isMobile;
+    delete platform.isMobileApp;
+    document.body.className = "";
+    document.body.replaceChildren();
+  });
+
+  afterEach(() => {
+    disposeMobileHostLayoutStates();
+    window.MutationObserver = NativeMutationObserver;
+    platform.isDesktopApp = true;
+    delete platform.isMobile;
+    delete platform.isMobileApp;
+    document.body.className = "";
+  });
+
+  it("watches only body class changes on desktop, with no subtree or resize listeners", () => {
+    const addEventListener = jest.spyOn(window, "addEventListener");
+
+    ensureMobileHostLayoutState(document);
+
+    expect(observations()).toEqual([
+      { target: document.body, options: { attributes: true, attributeFilter: ["class"] } },
+    ]);
+    expect(addEventListener).not.toHaveBeenCalledWith("resize", expect.anything());
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.layout)).toBe(false);
+    addEventListener.mockRestore();
+  });
+
+  it("follows mobile emulation on and off, installing navbar tracking only while mobile", async () => {
+    ensureMobileHostLayoutState(document);
+    const navbar = document.createElement("nav");
+    navbar.className = "mobile-navbar-action";
+    document.body.appendChild(navbar);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
+
+    document.body.classList.add("is-mobile");
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.layout)).toBe(true);
+    expect(subtreeObservations()).toEqual([]);
+    expect(observations().some(({ target }) => target === navbar)).toBe(true);
+
+    document.body.classList.remove("is-mobile");
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.layout, false);
+    expect(observations()).toEqual([
+      { target: document.body, options: { attributes: true, attributeFilter: ["class"] } },
+    ]);
+  });
+
+  it("stops subtree discovery once the navbar is found and resumes it when the navbar leaves", async () => {
+    platform.isDesktopApp = false;
+    platform.isMobile = true;
+    platform.isMobileApp = true;
+    ensureMobileHostLayoutState(document);
+    expect(subtreeObservations()).toEqual([
+      { target: document.body, options: { childList: true, subtree: true } },
+    ]);
+
+    const wrapper = document.createElement("div");
+    const navbar = document.createElement("nav");
+    navbar.className = "mobile-navbar-action";
+    wrapper.appendChild(navbar);
+    document.body.appendChild(wrapper);
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
+
+    expect(subtreeObservations()).toEqual([]);
+    const tracked = observations().filter(({ options }) => options.subtree !== true);
+    expect(tracked.map(({ target }) => target)).toEqual(expect.arrayContaining([navbar, wrapper, document.body]));
+
+    wrapper.remove();
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
+    expect(subtreeObservations()).toEqual([
+      { target: document.body, options: { childList: true, subtree: true } },
+    ]);
+  });
+
+  it("ignores unrelated body descendants once the navbar is tracked", async () => {
+    platform.isDesktopApp = false;
+    platform.isMobile = true;
+    platform.isMobileApp = true;
+    const navbar = document.createElement("nav");
+    navbar.className = "mobile-navbar-action";
+    document.body.appendChild(navbar);
+    const pane = document.createElement("div");
+    document.body.appendChild(pane);
+    ensureMobileHostLayoutState(document);
+    const querySelector = jest.spyOn(Element.prototype, "querySelector");
+
+    pane.setAttribute("style", "width: 10px");
+    pane.appendChild(document.createElement("span"));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(querySelector).not.toHaveBeenCalled();
+    querySelector.mockRestore();
+  });
+});
