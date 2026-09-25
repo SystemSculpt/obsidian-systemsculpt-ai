@@ -35,6 +35,31 @@ describe("ManagedImageGenerationAdapter", () => {
     expect(acquireLease).not.toHaveBeenCalled();
   });
 
+  it("stops waiting on admission when cancelled and reports its own cancellation", async () => {
+    const controller = new AbortController();
+    const acquireLease = jest.fn((_operation: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }));
+    const buildPayload = jest.fn();
+    const adapter = new ManagedImageGenerationAdapter({
+      admission: { acquireLease } as never,
+      jobs: {} as never,
+      recovery: {} as never,
+    });
+
+    const running = adapter.generate({
+      operationId: "studio-image-run-node",
+      sourceIdentity: "studio:project:run:node",
+      buildPayload,
+      signal: controller.signal,
+    });
+    expect(acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/images" }, controller.signal);
+    controller.abort();
+
+    await expect(running).rejects.toMatchObject({ name: "AbortError", message: "Image generation was cancelled locally." });
+    expect(buildPayload).not.toHaveBeenCalled();
+  });
+
   it("admits before lazy payload work, preserves uploaded keys, and downloads named verified outputs", async () => {
     const events: string[] = [];
     let current = record("admitted", 1);

@@ -117,6 +117,34 @@ describe("ManagedVideoGenerationAdapter", () => {
     expect(createAdmitted).not.toHaveBeenCalled();
   });
 
+  it("stops waiting on admission when cancelled and reports its own cancellation", async () => {
+    const controller = new AbortController();
+    const admission = jest.fn((signal?: AbortSignal) => new Promise<{ outcome: string }>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }));
+    const buildPayload = jest.fn();
+    const adapter = new ManagedVideoGenerationAdapter({
+      availability: jest.fn(async () => ({ canOpen: true, authoritative: true })),
+      admission,
+      jobs: {} as never,
+      prepareFrames: jest.fn(),
+      recovery: {} as never,
+    });
+
+    const running = adapter.generate({
+      operationId: "studio-video-run-node",
+      sourceIdentity: "studio:project:run:node",
+      buildPayload,
+      signal: controller.signal,
+    });
+    for (let turn = 0; turn < 20 && admission.mock.calls.length === 0; turn += 1) await Promise.resolve();
+    expect(admission).toHaveBeenCalledWith(controller.signal);
+    controller.abort();
+
+    await expect(running).rejects.toMatchObject({ name: "AbortError", message: "Video generation was cancelled locally." });
+    expect(buildPayload).not.toHaveBeenCalled();
+  });
+
   it("blocks when hosted videos is not served or admission is denied", async () => {
     const adapter = new ManagedVideoGenerationAdapter({
       availability: jest.fn(async () => ({ canOpen: false, authoritative: true })),

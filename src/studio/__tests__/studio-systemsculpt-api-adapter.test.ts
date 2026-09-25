@@ -258,6 +258,30 @@ describe("StudioApiExecutionAdapter per-model input limits", () => {
     await expect(run({ prompt: "x", inputImages: [reference] })).rejects.toThrow("Plain is text-only");
   });
 
+  it("stops waiting on the model catalog once the run is cancelled", async () => {
+    const { plugin } = createPlugin();
+    (plugin as { getManagedCapabilityGraph: unknown }).getManagedCapabilityGraph = () => ({
+      admission: {},
+      transport: { request: () => new Promise(() => undefined) },
+    });
+    const adapter = new StudioApiExecutionAdapter(plugin as never);
+    const generate = jest.fn(async (operation: { buildPayload: () => Promise<Record<string, unknown>> }) => ({
+      operationId: "op", jobId: "job", outputs: [], payload: await operation.buildPayload(),
+    }));
+    Object.assign(adapter as object, { images: { generate } });
+    const controller = new AbortController();
+
+    const running = adapter.generateImage({
+      runId: "run", nodeId: "node", projectPath: "Studio/Test.systemsculpt", signal: controller.signal,
+      buildPayload: async () => ({ prompt: "x", model: "maker/plain" }) as never, storeOutput: jest.fn(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(running).resolves.toBeDefined();
+    await expect(generate.mock.results[0]!.value).resolves.toMatchObject({ payload: { model: "maker/plain" } });
+  });
+
   it("keeps the client limit when a model supports sixteen reference images", async () => {
     const { run, reference } = fixture(16);
     await expect(run({ prompt: "x", model: "maker/refs", inputImages: Array(5).fill(reference) })).rejects.toThrow("at most 4 reference images;");

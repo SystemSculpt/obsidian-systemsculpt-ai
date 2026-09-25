@@ -215,7 +215,10 @@ export class ManagedTranscriptionAdapter {
         return await this.resumeRecord(preserved, source, context, signal, releaseSource);
       }
 
-      const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/transcription" });
+      // Cancel must not wait on a slow license check: admission stops
+      // waiting as soon as the signal aborts.
+      throwIfAborted(signal);
+      const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/transcription" }, signal);
       throwIfAborted(signal);
       if (lease.outcome !== "allowed") throw new Error(`Managed transcription is unavailable (${lease.outcome}).`);
       const freshFingerprint = await this.readFingerprint(source, signal);

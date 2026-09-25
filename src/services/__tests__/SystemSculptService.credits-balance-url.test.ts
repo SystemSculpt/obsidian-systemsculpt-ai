@@ -6,6 +6,7 @@ import {
   decodeCreditsBalance,
   normalizeCreditsCheckoutUrl,
   parseCreditsBalanceServerTiming,
+  SystemSculptService,
 } from "../SystemSculptService";
 
 const creditsBalancePayload = {
@@ -87,6 +88,27 @@ describe("decodeCreditsBalance", () => {
     expect(() => decodeCreditsBalance(payload)).toThrow(
       "Unable to read credits balance.",
     );
+  });
+});
+
+describe("credits requests", () => {
+  afterEach(() => SystemSculptService.clearInstance());
+
+  it("forward the caller's signal to the balance and usage requests", async () => {
+    const service = SystemSculptService.getInstance({ settings: { licenseKey: "license" }, app: {} } as never);
+    const request = jest.fn(async (input: { url: string }) => new Response(JSON.stringify(
+      input.url.includes("usage") ? { items: [], next_before: null } : creditsBalancePayload,
+    ), { status: 200, headers: { "content-type": "application/json" } }));
+    (service as unknown as { requestClient: { request: typeof request } }).requestClient.request = request;
+    const controller = new AbortController();
+
+    await service.getCreditsBalance({ signal: controller.signal });
+    await service.getCreditsUsage({ limit: 5, signal: controller.signal });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    for (const [input] of request.mock.calls) {
+      expect((input as { signal?: AbortSignal }).signal).toBe(controller.signal);
+    }
   });
 });
 

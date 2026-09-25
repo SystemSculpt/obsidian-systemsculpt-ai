@@ -1,4 +1,4 @@
-import { PlatformRequestClient } from "../../services/PlatformRequestClient";
+import { PlatformRequestClient, platformTransferTimeoutMs } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
 import type {
   AudioProcessorArtifactDescriptor,
@@ -71,6 +71,7 @@ const STAGES: readonly AudioProcessorStage[] = [
 ];
 const MAX_JSON_RESPONSE_CHARS = 1024 * 1024;
 const MAX_NOTE_BYTES = 32 * 1024 * 1024;
+const NOTE_DOWNLOAD_TIMEOUT_MS = platformTransferTimeoutMs(MAX_NOTE_BYTES);
 
 export class AudioProcessorApiError extends Error {
   constructor(
@@ -300,6 +301,7 @@ export class AudioProcessorApiClient {
       preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
+      timeoutMs: NOTE_DOWNLOAD_TIMEOUT_MS,
     });
     if (!response.ok) {
       throw new AudioProcessorApiError(

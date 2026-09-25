@@ -226,7 +226,12 @@ export class ManagedJobClient {
     if (options.imageOutputContract) Object.assign(headers, { "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": this.requestId() });
     if (descriptor.version.includes(operation)) headers["x-plugin-version"] = this.transport.pluginVersion;
     if (descriptor.idempotent.includes(operation)) { if (!options.operationId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.operationId)) this.invalid("A durable operation ID is required."); const idempotencyOperation = operation === "upload_complete" ? "complete" : operation === "generation_create" ? "create" : operation; const idempotencyKey = `${options.operationId}:${idempotencyOperation}`; if (idempotencyKey.length > 128) this.invalid("The durable operation ID is too long for the idempotency contract."); headers["idempotency-key"] = idempotencyKey; }
-    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal }, !options.imageOutputContract);
+    // A converted document returns its markdown and extracted images inline in
+    // one JSON body with no size limit, and requestUrl exposes neither its
+    // length nor its progress before all of it has arrived. No fixed deadline
+    // admits every legitimate result on a slow link, so the download has none
+    // and the caller's signal bounds it.
+    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal, ...(operation === "download" ? { timeoutMs: null } : {}) }, !options.imageOutputContract);
     const parsed = await this.parse(capability, operation, result, options.imageOutputContract ? headers["x-request-id"] : undefined) as T;
     if (
       (operation === "status" || operation === "generation_status")

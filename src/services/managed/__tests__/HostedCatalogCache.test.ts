@@ -74,6 +74,34 @@ describe.each([ManagedImageModelCatalog, ManagedVideoModelCatalog])("%p cache ow
     expect(await catalog.load()).not.toBe(loaded);
     expect(request).toHaveBeenCalledTimes(3);
   });
+
+  it("ends only the aborted caller's wait while the shared read still fills the cache", async () => {
+    const read = deferred<ReturnType<typeof response>>();
+    const request = jest.fn().mockReturnValueOnce(read.promise);
+    const catalog = new Catalog({ request } as never);
+    const controller = new AbortController();
+
+    const cancelled = catalog.load(controller.signal);
+    const other = catalog.load();
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+
+    read.resolve(response());
+    const loaded = await other;
+    expect(catalog.peek()).toBe(loaded);
+    await expect(catalog.load(new AbortController().signal)).resolves.toBe(loaded);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a read for an already cancelled caller", async () => {
+    const request = jest.fn(async () => response());
+    const catalog = new Catalog({ request } as never);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(catalog.load(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).not.toHaveBeenCalled();
+  });
 });
 
 it("keeps one shared Studio catalog owner while invalidating both catalogs on license changes", async () => {

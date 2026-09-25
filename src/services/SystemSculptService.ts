@@ -364,13 +364,14 @@ export class SystemSculptService {
   }
 
   // DELEGATE TO LICENSE SERVICE
-  async validateLicenseDetailed(): Promise<LicenseValidationResult> {
+  async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
     this.refreshSettings(); // Ensure settings are current before validation
-    return this.licenseService.validateLicenseDetailed();
+    return this.licenseService.validateLicenseDetailed(signal);
   }
 
   public async getCreditsBalance(options: Readonly<{
     onObservation?: (observation: CreditsBalanceObservation) => void;
+    signal?: AbortSignal;
   }> = {}): Promise<CreditsBalanceSnapshot> {
     this.refreshSettings();
 
@@ -397,6 +398,7 @@ export class SystemSculptService {
         url,
         method: "GET",
         headers,
+        signal: options.signal,
         onTransportSelected: (selected) => { transport = selected; },
       });
     } catch (error) {
@@ -441,6 +443,7 @@ export class SystemSculptService {
     limit?: number;
     before?: string;
     endpoints?: string[];
+    signal?: AbortSignal;
   }): Promise<CreditsUsageHistoryPage> {
     this.refreshSettings();
 
@@ -479,6 +482,7 @@ export class SystemSculptService {
       url: requestUrlValue.toString(),
       method: "GET",
       headers,
+      signal: params?.signal,
     });
 
     if (!response.ok) {

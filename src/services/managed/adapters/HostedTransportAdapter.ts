@@ -27,14 +27,14 @@ export class HostedTransportAdapter {
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
   private key(): string | undefined { const key = this.options.licenseKey().trim(); return key || undefined; }
 
-  async getCatalog() {
-    const result = await this.send({ path: "/api/plugin/config", method: "GET" }, { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT });
+  async getCatalog(signal?: AbortSignal) {
+    const result = await this.send({ path: "/api/plugin/config", method: "GET", signal }, { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT });
     if (!result.response.ok) throw new Error(`Catalog unavailable (${result.response.status})`);
     return ManagedCapabilityCatalog.parse(await result.response.json());
   }
 
-  async getAdmission(): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
-    const result = await this.send({ path: "/api/plugin/license/validate", method: "GET" }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
+  async getAdmission(signal?: AbortSignal): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
+    const result = await this.send({ path: "/api/plugin/license/validate", method: "GET", signal }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
     let body: unknown;
     try { body = await result.response.clone().json(); } catch {
       // Admission decoding handles an absent response body.
@@ -212,6 +212,7 @@ export class HostedTransportAdapter {
       body: operation.body, stream: false, preserveResponseHeaders: true,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
+      ...(operation.timeoutMs !== undefined ? { timeoutMs: operation.timeoutMs } : {}),
       ...requestOverrides,
     });
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);

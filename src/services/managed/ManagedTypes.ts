@@ -89,6 +89,8 @@ export interface ManagedTransportResult { response: Response; diagnostics: Manag
 export interface ManagedTransportOperation {
   path: string; method?: string; body?: unknown; capability?: ManagedRequestContractId;
   idempotencyKey?: string; headers?: Record<string, string>; signal?: AbortSignal;
+  /** Client deadline override; see PlatformRequestInput.timeoutMs. */
+  timeoutMs?: number | null;
 }
 
 export type ManagedJobCapability = "transcription" | "document_processing" | "image_generation";

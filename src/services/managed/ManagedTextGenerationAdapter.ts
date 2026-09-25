@@ -90,6 +90,12 @@ type JsonRecord = { readonly [key: string]: unknown };
 
 const ROUTE_PATH = "/api/plugin/chat/completions" as const;
 const ROUTE_METHOD = "POST" as const;
+/**
+ * The server generates the whole completion inside this one request, so the
+ * ordinary JSON deadline would cut off long transcripts. This bound only ends
+ * a stalled exchange; hitting it is still an ambiguous post-dispatch outcome.
+ */
+const GENERATION_TIMEOUT_MS = 10 * 60_000;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const MAX_MESSAGES = 8;
@@ -378,6 +384,9 @@ export class ManagedTextGenerationAdapter {
     const lease = await this.dependencies.admission.acquireLease({
       alias: "systemsculpt/chat",
       requestContract: "text_generation",
+    }, operation.signal).catch((error: unknown) => {
+      throwIfAborted(operation.signal, operation.operationId, false);
+      throw error;
     });
     throwIfAborted(operation.signal, operation.operationId, false);
     if (lease.outcome !== "allowed") {
@@ -423,6 +432,7 @@ export class ManagedTextGenerationAdapter {
         : {}),
       body,
       signal: operation.signal,
+      timeoutMs: GENERATION_TIMEOUT_MS,
       });
       result = await pending;
     } catch (error) {

@@ -13,6 +13,7 @@ const ERROR_COPY: Record<ConnectErrorReason, string> = {
   "invalid-code": "The connection code was invalid or expired. Start sign-in again from SystemSculpt settings.",
   "rate-limited": "Too many sign-in attempts. Wait a moment, then try again.",
   unavailable: "Sign-in is temporarily unavailable. Try again in a moment.",
+  unconfirmed: "Your sign-in may have gone through, but Obsidian didn't receive the confirmation. Start sign-in again to finish connecting.",
 };
 
 /** Error reasons a fresh browser sign-in can recover from in one tap. */
@@ -20,6 +21,7 @@ const RETRYABLE_REASONS: ReadonlySet<ConnectErrorReason> = new Set([
   "expired",
   "state-mismatch",
   "invalid-code",
+  "unconfirmed",
 ]);
 
 /**

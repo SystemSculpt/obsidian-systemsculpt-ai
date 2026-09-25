@@ -58,7 +58,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     // the image input prepare endpoint, admission is the plain license check.
     this.videos = new ManagedVideoGenerationAdapter({
       availability: signal => getVideoGenerationAvailability(plugin, {}, signal),
-      admission: () => graph.transport.getAdmission(),
+      admission: signal => graph.transport.getAdmission(signal),
       jobs: mediaJobs.videos,
       prepareFrames: mediaJobs.images.prepareInputs,
       recovery: this.recovery,
@@ -107,7 +107,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       signal: request.signal,
       buildPayload: async () => {
         const payload = await request.buildPayload();
-        const model = await this.findImageModel(payload.model);
+        const model = await this.findImageModel(payload.model, request.signal);
         const references = payload.inputImages || [];
         // The catalog is the per-model truth for inputs; a job the service
         // would reject fails here with the reason instead of after a hold.
@@ -153,7 +153,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       ...(request.onProgress ? { onProgress: request.onProgress } : {}),
       buildPayload: async () => {
         const payload = await request.buildPayload();
-        const model = await this.findVideoModel(payload.model);
+        const model = await this.findVideoModel(payload.model, request.signal);
         for (const frame of payload.frameImages || []) {
           if (model && !model.supportedFrameRoles.includes(frame.role)) {
             throw new Error(`${model.name} does not accept a ${frame.role === "first_frame" ? "first" : "last"} frame. Disconnect that input or choose a model that supports it.`);
@@ -198,18 +198,18 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
    * Returns null when the catalog is unreachable or the model is unknown;
    * the raw request then goes through and the server stays the validator.
    */
-  private async findVideoModel(modelId: string): Promise<ManagedVideoModel | null> {
+  private async findVideoModel(modelId: string, signal?: AbortSignal): Promise<ManagedVideoModel | null> {
     try {
-      return (await getStudioMediaCatalogs(this.plugin).videos.load()).models.find(model => model.id === modelId) ?? null;
+      return (await getStudioMediaCatalogs(this.plugin).videos.load(signal)).models.find(model => model.id === modelId) ?? null;
     } catch {
       return null;
     }
   }
 
   /** Blank means the service default; its capabilities are the ones that apply. */
-  private async findImageModel(modelId: string | undefined): Promise<ManagedImageModel | null> {
+  private async findImageModel(modelId: string | undefined, signal?: AbortSignal): Promise<ManagedImageModel | null> {
     try {
-      const snapshot = await getStudioMediaCatalogs(this.plugin).images.load();
+      const snapshot = await getStudioMediaCatalogs(this.plugin).images.load(signal);
       const id = modelId || snapshot.defaultModelId;
       return snapshot.models.find(model => model.id === id) ?? null;
     } catch {

@@ -114,7 +114,11 @@ export class ManagedDocumentProcessingAdapter {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
 
-    const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/documents" });
+    const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/documents" }, signal)
+      .catch((error: unknown) => {
+        throwIfAborted(signal);
+        throw error;
+      });
     throwIfAborted(signal);
     if (lease.outcome !== "allowed") {
       const error = new Error(`Managed document processing is unavailable (${lease.outcome}).`);

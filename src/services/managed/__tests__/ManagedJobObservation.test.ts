@@ -4,6 +4,7 @@ import {
   observeManagedJob,
   retryAfterHeaderMs,
 } from "../ManagedJobObservation";
+import { PlatformRequestTimeoutError } from "../../PlatformRequestClient";
 
 describe("ManagedJobObservation", () => {
   it("keeps observing past historical client limits and follows server poll hints", async () => {
@@ -52,6 +53,11 @@ describe("ManagedJobObservation", () => {
 
     await expect(running()).rejects.toMatchObject({ name: "AbortError" });
     expect(reads).toBe(40);
+  });
+
+  it("retries a request that hit its client deadline but never a local cancel", () => {
+    expect(isRetryableManagedJobObservationError(new PlatformRequestTimeoutError(30_000))).toBe(true);
+    expect(isRetryableManagedJobObservationError(new DOMException("Aborted", "AbortError"))).toBe(false);
   });
 
   it("parses bounded Retry-After delta seconds and HTTP dates", () => {
