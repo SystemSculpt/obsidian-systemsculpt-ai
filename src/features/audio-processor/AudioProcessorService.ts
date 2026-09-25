@@ -596,6 +596,7 @@ export class AudioProcessorService {
       },
       isRetryableError: isRetryableManagedJobObservationError,
       retryAfterMs: error => (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs,
+      onRetrying: () => this.reportServerProgress(job, options, true),
       wait: (milliseconds, signal) => job.status === "awaiting_funds"
         ? this.waitForFunding(milliseconds, signal)
         : this.sleep(milliseconds, signal),
@@ -673,6 +674,7 @@ export class AudioProcessorService {
   private reportServerProgress(
     job: AudioProcessorJob,
     options: ProcessAudioOptions,
+    stillWaiting = false,
   ): void {
     const messages: Record<AudioProcessorJob["stage"], string> = {
       uploading: "Receiving audio…",
@@ -696,9 +698,11 @@ export class AudioProcessorService {
     options.onProgress?.({
       stage: job.stage,
       progress: Math.max(0.36, Math.min(0.98, job.progress)),
-      message: job.status === "failed" && job.transcriptArtifact
-        ? "Transcript ready; primary note unavailable"
-        : messages[job.stage],
+      message: stillWaiting
+        ? "Still waiting for the audio service. Retrying…"
+        : job.status === "failed" && job.transcriptArtifact
+          ? "Transcript ready; primary note unavailable"
+          : messages[job.stage],
       serverOwned: true,
       quotedCredits: job.quotedCredits,
       chargedCredits: job.chargedCredits,

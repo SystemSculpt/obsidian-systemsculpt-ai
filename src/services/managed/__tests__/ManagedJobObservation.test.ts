@@ -51,34 +51,43 @@ describe("ManagedJobObservation", () => {
     expect(normalizedPollAfterMs(undefined)).toBe(2_000);
   });
 
-  it("backs off transient observations and surfaces the last failure after a bounded streak", async () => {
+  it("keeps observing a live job through a long outage, backing off to five minutes and reporting it", async () => {
     let reads = 0;
     const waits: number[] = [];
-    const running = async () => {
-      for await (const _status of observeManagedJob({
-        read: async () => {
-          reads += 1;
-          throw Object.assign(new Error(`temporarily unavailable ${reads}`), { status: 503 });
-        },
-        signal: new AbortController().signal,
-        isRetryableError: isRetryableManagedJobObservationError,
-        wait: async (milliseconds) => {
-          waits.push(milliseconds);
-        },
-      })) {
-        // Transient reads never yield.
-      }
-    };
+    const retries: Array<{ consecutiveFailures: number; retryInMs: number }> = [];
+    let yielded: { done: boolean } | undefined;
+    for await (const status of observeManagedJob({
+      read: async () => {
+        reads += 1;
+        if (reads <= 40) throw Object.assign(new Error(`temporarily unavailable ${reads}`), { status: 503 });
+        return { done: true };
+      },
+      signal: new AbortController().signal,
+      isRetryableError: isRetryableManagedJobObservationError,
+      onRetrying: ({ consecutiveFailures, retryInMs }) => retries.push({ consecutiveFailures, retryInMs }),
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    })) {
+      yielded = status;
+      break;
+    }
 
-    await expect(running()).rejects.toThrow("temporarily unavailable 14");
-    expect(reads).toBe(14);
-    expect(waits.slice(0, 6)).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000]);
-    expect(waits.reduce((total, milliseconds) => total + milliseconds, 0)).toBeLessThanOrEqual(5 * 60_000);
+    // A paid result arriving after a long outage is still delivered.
+    expect(yielded).toEqual({ done: true });
+    expect(reads).toBe(41);
+    expect(waits.slice(0, 10)).toEqual([
+      1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 300_000,
+    ]);
+    expect(Math.max(...waits)).toBe(300_000);
+    expect(retries).toHaveLength(40);
+    expect(retries[39]).toEqual({ consecutiveFailures: 40, retryInMs: 300_000 });
   });
 
-  it("resets the failure streak after a successful read", async () => {
+  it("resets the backoff after a successful read", async () => {
     let reads = 0;
     let yielded = 0;
+    const waits: number[] = [];
     for await (const _status of observeManagedJob({
       read: async () => {
         reads += 1;
@@ -87,14 +96,37 @@ describe("ManagedJobObservation", () => {
       },
       signal: new AbortController().signal,
       isRetryableError: isRetryableManagedJobObservationError,
-      maxConsecutiveTransientFailures: 3,
-      wait: async () => undefined,
+      pollAfterMs: () => 1_500,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
     })) {
       yielded += 1;
-      if (yielded === 5) break;
+      if (yielded === 3) break;
     }
 
-    expect(reads).toBe(15);
+    expect(reads).toBe(9);
+    expect(waits).toEqual([1_000, 2_000, 1_500, 1_000, 2_000, 1_500, 1_000, 2_000]);
+  });
+
+  it("keeps observing when a still-waiting display throws", async () => {
+    let reads = 0;
+    for await (const _status of observeManagedJob({
+      read: async () => {
+        reads += 1;
+        if (reads === 1) throw Object.assign(new Error("blip"), { status: 503 });
+        return { ok: true };
+      },
+      signal: new AbortController().signal,
+      isRetryableError: isRetryableManagedJobObservationError,
+      onRetrying: () => {
+        throw new Error("display failed");
+      },
+      wait: async () => undefined,
+    })) {
+      break;
+    }
+    expect(reads).toBe(2);
   });
 
   it("aborts transient retries during a wait", async () => {
@@ -148,12 +180,13 @@ describe("ManagedJobObservation", () => {
     }
   });
 
-  it("does not spend the failure budget on reads that failed while offline", async () => {
+  it("does not back off on reads that failed while offline", async () => {
     let online = true;
     const onLine = Object.getOwnPropertyDescriptor(window.navigator, "onLine");
     Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => online });
     try {
       let reads = 0;
+      const waits: number[] = [];
       const waitForOnline = jest.fn(async () => {
         online = true;
       });
@@ -168,13 +201,16 @@ describe("ManagedJobObservation", () => {
         },
         signal: new AbortController().signal,
         isRetryableError: isRetryableManagedJobObservationError,
-        maxConsecutiveTransientFailures: 2,
-        wait: async () => undefined,
+        wait: async (milliseconds) => {
+          waits.push(milliseconds);
+        },
         waitForOnline,
       })) {
         break;
       }
       expect(reads).toBe(6);
+      expect(waits).toEqual([]);
+      expect(waitForOnline).toHaveBeenCalledTimes(6);
     } finally {
       if (onLine) Object.defineProperty(window.navigator, "onLine", onLine);
       else Reflect.deleteProperty(window.navigator, "onLine");

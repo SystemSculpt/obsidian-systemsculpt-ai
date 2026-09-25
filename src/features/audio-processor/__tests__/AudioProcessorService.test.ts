@@ -1274,6 +1274,33 @@ describe("AudioProcessorService", () => {
     nowSpy.mockRestore();
   });
 
+  it("shows a still-waiting state through a long status outage and still delivers the note", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    api.createYouTubeJob.mockResolvedValue({ job: job("processing", "transcribing", 0.5), upload: null });
+    const outage = Object.assign(new Error("Audio service unavailable."), { status: 503 });
+    api.getJob.mockReset();
+    for (let attempt = 0; attempt < 20; attempt += 1) api.getJob.mockRejectedValueOnce(outage);
+    api.getJob.mockResolvedValueOnce(job("succeeded", "complete", 1));
+    const messages: string[] = [];
+    const service = new AudioProcessorService(plugin, {
+      apiClient: api as unknown as AudioProcessorApiClient,
+      pollIntervalMs: 2_000,
+      sleep: jest.fn(async () => undefined),
+    });
+
+    await expect(service.process({
+      type: "youtube",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }, {
+      signal: new AbortController().signal,
+      onProgress: (event) => messages.push(event.message),
+    })).resolves.toEqual(expect.objectContaining({ primaryNoteAvailable: true }));
+
+    expect(api.getJob).toHaveBeenCalledTimes(21);
+    expect(messages.filter((message) => message.startsWith("Still waiting"))).toHaveLength(20);
+  });
+
   it("rechecks an awaiting-funds job at once when a balance read shows credits", async () => {
     const { plugin } = createPlugin();
     const api = createApi();

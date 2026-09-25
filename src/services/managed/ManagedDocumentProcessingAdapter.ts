@@ -286,6 +286,7 @@ export class ManagedDocumentProcessingAdapter {
       document: { id: string; status: ManagedJobStatus; progress: number };
       poll_after_ms?: number;
     };
+    let lastProgress = 75;
     try {
       for await (const status of observeManagedJob<DocumentStatus>({
         read: async () => await this.dependencies.jobs.status(documentId, signal) as DocumentStatus,
@@ -293,6 +294,7 @@ export class ManagedDocumentProcessingAdapter {
         pollAfterMs: value => value.poll_after_ms,
         isRetryableError: isRetryableManagedJobObservationError,
         retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+        onRetrying: () => context.onProgress?.(lastProgress, "Still waiting for the document service. Retrying…"),
         wait: this.wait,
       })) {
         if (status.document.id !== documentId) throw new Error("Managed document status returned a different document ID.");
@@ -300,7 +302,8 @@ export class ManagedDocumentProcessingAdapter {
           record = await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, status.document.status);
           throwIfAborted(signal);
         }
-        context.onProgress?.(75 + Math.floor(Math.min(1, status.document.progress) * 20), "Processing document…");
+        lastProgress = 75 + Math.floor(Math.min(1, status.document.progress) * 20);
+        context.onProgress?.(lastProgress, "Processing document…");
         if (status.document.status === "completed") {
           if (!["result_ready", "local_commit_pending"].includes(record.phase)) throw new Error("Managed document completion could not be reconciled.");
           const downloaded = await this.dependencies.jobs.download(documentId, signal) as { result: ManagedDocumentDownloadResult };
