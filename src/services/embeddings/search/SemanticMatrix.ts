@@ -68,6 +68,12 @@ export class SemanticMatrix {
   private rowCount = 0;
   private liveRows = 0;
   private readonly slotPaths: string[] = [];
+  /**
+   * Bumped whenever a slot starts naming a different note (reuse or rename),
+   * so a search in progress re-decides eligibility instead of trusting the
+   * verdict it made for the slot's previous note.
+   */
+  private readonly slotGenerations: number[] = [];
   private readonly slotByPath = new Map<string, number>();
   private readonly rowsBySlot = new Map<number, number[]>();
   private readonly freeSlots: number[] = [];
@@ -107,6 +113,7 @@ export class SemanticMatrix {
     if (slot === undefined) {
       slot = this.freeSlots.pop() ?? this.slotPaths.length;
       this.slotPaths[slot] = path;
+      this.slotGenerations[slot] = (this.slotGenerations[slot] ?? 0) + 1;
       this.slotByPath.set(path, slot);
     }
     const rows = this.rowsBySlot.get(slot) ?? [];
@@ -144,6 +151,7 @@ export class SemanticMatrix {
     this.slotByPath.delete(oldPath);
     this.slotByPath.set(newPath, slot);
     this.slotPaths[slot] = newPath;
+    this.slotGenerations[slot] = (this.slotGenerations[slot] ?? 0) + 1;
   }
 
   /** Folder rename: every note under `oldPrefix` moves under `newPrefix`. */
@@ -161,8 +169,10 @@ export class SemanticMatrix {
 
   /**
    * Score every eligible row against each query and keep the best `limit`
-   * candidates per query. `isEligible` runs once per note. Yields to the event
-   * loop between slices and returns empty sets once `signal` aborts.
+   * candidates per query. `isEligible` runs once per note, lazily, and again
+   * whenever a slot starts naming another note between slices (a note removed
+   * and another added, or a rename). Yields to the event loop between slices
+   * and returns empty sets once `signal` aborts.
    */
   async search(
     queries: readonly Float32Array[],
@@ -175,8 +185,17 @@ export class SemanticMatrix {
     const usable = queries.filter((query) => query.length === this.dimensions);
     if (k === 0 || usable.length === 0 || options.signal?.aborted) return empty();
 
-    const eligibleSlots = new Uint8Array(this.slotPaths.length);
-    for (const [path, slot] of this.slotByPath) eligibleSlots[slot] = isEligible(path) ? 1 : 0;
+    // Verdicts per slot, valid only for the slot generation they were made for.
+    const decidedGeneration: number[] = [];
+    const eligibleSlots: boolean[] = [];
+    const eligible = (slot: number): boolean => {
+      const generation = this.slotGenerations[slot];
+      if (decidedGeneration[slot] !== generation) {
+        decidedGeneration[slot] = generation;
+        eligibleSlots[slot] = isEligible(this.slotPaths[slot]);
+      }
+      return eligibleSlots[slot];
+    };
 
     const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
     const slice = Math.max(1, options.rowsPerSlice ?? DEFAULT_ROWS_PER_SLICE);
@@ -188,7 +207,7 @@ export class SemanticMatrix {
       const end = Math.min(this.rowCount, start + slice);
       for (let row = start; row < end; row += 1) {
         const slot = this.rowSlot[row];
-        if (slot < 0 || eligibleSlots[slot] !== 1) continue;
+        if (slot < 0 || !eligible(slot)) continue;
         const offset = row * dimensions;
         const scale = this.scales[row];
         for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {

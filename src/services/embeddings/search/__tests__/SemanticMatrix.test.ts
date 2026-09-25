@@ -78,6 +78,47 @@ describe("SemanticMatrix", () => {
     expect(top.map((candidate) => candidate.path)).toEqual(["X.md", "Y.md"]);
   });
 
+  it("finds a note that takes over a removed note's slot between slices", async () => {
+    jest.useFakeTimers();
+    try {
+      const matrix = new SemanticMatrix(2);
+      matrix.upsertPath("Excluded.md", [{ chunkId: 0, vector: unit(0, 1) }]);
+      for (let index = 0; index < 6; index += 1) matrix.upsertPath(`N${index}.md`, [{ chunkId: 0, vector: unit(0.2, 1) }]);
+      const isEligible = jest.fn((path: string) => path !== "Excluded.md");
+
+      const search = matrix.search([unit(1, 0)], 3, isEligible, { rowsPerSlice: 2, minScore: 0 });
+      // Between slices: the excluded note goes away and a strong match reuses its slot.
+      matrix.removePath("Excluded.md");
+      matrix.upsertPath("Fresh.md", [{ chunkId: 0, vector: unit(1, 0) }]);
+      await jest.runAllTimersAsync();
+      const [top] = await search;
+
+      expect(top[0]?.path).toBe("Fresh.md");
+      expect(isEligible).toHaveBeenCalledWith("Fresh.md");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("re-decides eligibility for a note renamed between slices", async () => {
+    jest.useFakeTimers();
+    try {
+      const matrix = new SemanticMatrix(2);
+      for (let index = 0; index < 4; index += 1) matrix.upsertPath(`N${index}.md`, [{ chunkId: 0, vector: unit(0.2, 1) }]);
+      matrix.upsertPath("Moving.md", [{ chunkId: 0, vector: unit(1, 0) }]);
+
+      const search = matrix.search([unit(1, 0)], 3, (path) => !path.startsWith("Private/"), { rowsPerSlice: 2 });
+      matrix.renamePath("Moving.md", "Private/Moving.md");
+      await jest.runAllTimersAsync();
+      const [top] = await search;
+
+      expect(top.map((candidate) => candidate.path)).not.toContain("Private/Moving.md");
+      expect(top.map((candidate) => candidate.path)).not.toContain("Moving.md");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("returns nothing once cancelled between slices", async () => {
     jest.useFakeTimers();
     try {
