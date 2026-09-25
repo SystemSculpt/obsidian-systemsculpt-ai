@@ -62,6 +62,14 @@ const PENDING_CONNECT_TTL_MS = 10 * 60_000;
 const CONNECT_POLL_INTERVAL_MS = 3_500;
 
 /**
+ * Once the user leaves the sign-in screen, polling slows to this cadence
+ * until the sign-in expires (#359). It still finishes a sign-in whose deep
+ * link was lost (the mobile callback-loss path, #322) while Obsidian stays
+ * in the foreground.
+ */
+const CONNECT_BACKGROUND_POLL_INTERVAL_MS = 30_000;
+
+/**
  * Each poll owns the in-flight slot until it is answered, and a code exchange
  * waits on it. A poll the network does not answer gives that slot back after
  * a few intervals so later polls and the exchange can proceed; its request
@@ -103,8 +111,10 @@ export class AccountConnectService {
   private readonly openUrl: (url: string, ownerWindow?: Window) => Promise<boolean>;
   private pending: PendingConnectRequest | null = null;
   private pollTimer: number | null = null;
-  /** Detaches the one-poll-per-return listeners of a paused sign-in. */
+  /** Detaches the one-poll-per-return listeners of a background sign-in. */
   private detachReturnPoll: (() => void) | null = null;
+  /** The sign-in screen was left: poll at the background cadence. */
+  private backgroundPolling = false;
   /** Settles when the poll holding the in-flight slot is answered or gives the slot back. */
   private pollSlot: Promise<void> | null = null;
   /** The completion of the latest sign-in, adopted by an exchange that was waiting on it. */
@@ -133,14 +143,16 @@ export class AccountConnectService {
   }
 
   /**
-   * The user left the sign-in screen without finishing it (#359). The poll
-   * timer stops; the pending sign-in stays open until it expires, so the deep
-   * link, a pasted code, or coming back to Obsidian (one poll per return)
-   * still completes it.
+   * The user left the sign-in screen without finishing it (#359). Polling
+   * slows from every 3.5 s to every 30 s until the sign-in expires, and each
+   * return to Obsidian polls at once. The deep link or a pasted code still
+   * completes it; a new sign-in or plugin unload ends it.
    */
-  public pausePolling(): void {
+  public pollInBackground(): void {
     if (!this.activePending()) return;
-    this.stopPolling();
+    this.backgroundPolling = true;
+    // An exchange in progress restarts polling itself when it needs to.
+    if (!this.exchangeInProgress) this.startPolling();
     if (this.detachReturnPoll || typeof window === "undefined") return;
     const pollOnReturn = (): void => {
       if (typeof document !== "undefined" && document.hidden) return;
@@ -173,6 +185,7 @@ export class AccountConnectService {
     // A superseded sign-in's requests must neither hold the slot nor complete this one.
     this.endPending();
     this.completion = null;
+    this.backgroundPolling = false;
     this.pending = {
       state,
       verifier,
@@ -210,11 +223,11 @@ export class AccountConnectService {
 
   private startPolling(): void {
     this.stopPolling();
-    this.stopReturnPoll();
+    if (!this.backgroundPolling) this.stopReturnPoll();
     if (typeof window === "undefined") return;
     const timer = window.setInterval(() => {
       void this.pollOnce();
-    }, CONNECT_POLL_INTERVAL_MS);
+    }, this.backgroundPolling ? CONNECT_BACKGROUND_POLL_INTERVAL_MS : CONNECT_POLL_INTERVAL_MS);
     this.pollTimer = timer;
     // Registered so a plugin unload can never leak the interval.
     this.plugin.registerInterval(timer);
@@ -251,7 +264,8 @@ export class AccountConnectService {
       this.stopPolling();
       return;
     }
-    if (this.pollSlot) return;
+    // An exchange owns the single-use code while it runs; never race it.
+    if (this.pollSlot || this.exchangeInProgress) return;
     const answer = this.send(pending, "/auth/poll", { verifier: pending.verifier });
     const slot = this.waitFor(answer, CONNECT_POLL_TIMEOUT_MS).then(() => undefined);
     this.pollSlot = slot;

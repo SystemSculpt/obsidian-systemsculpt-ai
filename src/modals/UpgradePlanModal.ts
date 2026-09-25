@@ -105,14 +105,14 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   /**
-   * Leaving the browser handoff without finishing stops sign-in polling
-   * (#359). The sign-in itself stays open: its deep link, a pasted code, or
-   * returning to Obsidian still completes it.
+   * Leaving the browser handoff without finishing slows sign-in polling to a
+   * background cadence (#359). The sign-in itself stays open: background
+   * polls, its deep link, a pasted code, or returning to Obsidian complete it.
    */
   private abandonSignIn(): void {
     if (!this.awaitingSignIn) return;
     this.awaitingSignIn = false;
-    this.plugin.getAccountConnectService().pausePolling();
+    this.plugin.getAccountConnectService().pollInBackground();
   }
 
   private renderMain(): void {

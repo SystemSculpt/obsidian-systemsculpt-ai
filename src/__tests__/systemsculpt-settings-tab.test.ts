@@ -384,13 +384,13 @@ describe("SystemSculptSettingTab native layout", () => {
 
   it("stops polling an unfinished browser sign-in when settings close", async () => {
     const plugin = createPluginStub() as any;
-    const pausePolling = jest.fn();
-    plugin.getAccountConnectService = jest.fn(() => ({ pausePolling }));
+    const pollInBackground = jest.fn();
+    plugin.getAccountConnectService = jest.fn(() => ({ pollInBackground }));
     const tab = new SystemSculptSettingTab(app, plugin);
 
     tab.hide();
 
-    expect(pausePolling).toHaveBeenCalledTimes(1);
+    expect(pollInBackground).toHaveBeenCalledTimes(1);
   });
 
   it("cancels delayed settings indexing when the surface hides", async () => {

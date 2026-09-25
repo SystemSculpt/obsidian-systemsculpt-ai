@@ -109,16 +109,16 @@ function createPlugin(settings: Record<string, unknown> = {}) {
   const begin = jest.fn().mockResolvedValue(true);
   const reopen = jest.fn().mockResolvedValue(true);
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
-  const pausePolling = jest.fn();
+  const pollInBackground = jest.fn();
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
-    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pausePolling }),
+    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground }),
     openNewChat: jest.fn(),
     begin,
     reopen,
     submitManualCode,
-    pausePolling,
+    pollInBackground,
   } as any;
 }
 
@@ -249,16 +249,16 @@ describe("UpgradePlanModal", () => {
     findButtonByText(dismissed.modalEl, "Sign in").click();
     await flushPromises();
     dismissed.onClose();
-    expect(plugin.pausePolling).toHaveBeenCalledTimes(1);
+    expect(plugin.pollInBackground).toHaveBeenCalledTimes(1);
 
     const backedOut = new UpgradePlanModal(plugin);
     backedOut.onOpen();
     findButtonByText(backedOut.modalEl, "Sign in").click();
     await flushPromises();
     findButtonByText(backedOut.modalEl, "Back").click();
-    expect(plugin.pausePolling).toHaveBeenCalledTimes(2);
+    expect(plugin.pollInBackground).toHaveBeenCalledTimes(2);
     backedOut.onClose();
-    expect(plugin.pausePolling).toHaveBeenCalledTimes(2);
+    expect(plugin.pollInBackground).toHaveBeenCalledTimes(2);
   });
 
   it("keeps sign-in polling when the modal closes for a completed sign-in or a pasted code", async () => {
@@ -279,7 +279,7 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
     pasted.onClose();
 
-    expect(plugin.pausePolling).not.toHaveBeenCalled();
+    expect(plugin.pollInBackground).not.toHaveBeenCalled();
   });
 
   it("renders the soft onboarding welcome with an explore escape hatch", () => {

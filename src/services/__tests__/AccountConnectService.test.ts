@@ -701,43 +701,97 @@ describe("AccountConnectService abandoned sign-in", () => {
     return { ...created, outcomes };
   }
 
-  it("stops polling an abandoned sign-in and polls once each time the user returns", async () => {
+  it("slows an abandoned sign-in to a 30 s background poll and polls at once when the user returns", async () => {
     const { service, plugin, outcomes } = createPollingService();
-    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
-    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    request.mockResolvedValue(jsonResponse(200, { status: "pending" }));
 
     await service.begin("sign-in");
-    service.pausePolling();
-    await jest.advanceTimersByTimeAsync(10 * 3_500);
+    service.pollInBackground();
+    await jest.advanceTimersByTimeAsync(29_999);
     expect(request).not.toHaveBeenCalled();
-    expect(service.hasPendingRequest()).toBe(true);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(request).toHaveBeenCalledTimes(2);
 
     window.dispatchEvent(new Event("focus"));
     await jest.advanceTimersByTimeAsync(0);
-    expect(request).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(10 * 3_500);
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(3);
 
+    request.mockResolvedValue(jsonResponse(200, successPayload));
     documentEvents.dispatchEvent(new Event("visibilitychange"));
     await jest.advanceTimersByTimeAsync(0);
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(4);
     expect(plugin.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({ licenseKey: "skss-connected" }),
     );
     expect(outcomes).toHaveLength(1);
 
-    // A finished sign-in leaves no return listeners behind.
+    // A finished sign-in leaves no timer or return listeners behind.
     window.dispatchEvent(new Event("focus"));
-    await jest.advanceTimersByTimeAsync(0);
-    expect(request).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(10 * 30_000);
+    expect(request).toHaveBeenCalledTimes(4);
   });
 
-  it("still completes a paused sign-in from its deep link", async () => {
+  it("completes a dismissed sign-in whose deep link was lost while Obsidian stays in front", async () => {
+    const { service, outcomes } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "pending" }));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+
+    await service.begin("sign-in");
+    service.pollInBackground();
+    await jest.advanceTimersByTimeAsync(60_000);
+
+    expect(outcomes).toEqual([
+      { kind: "signed-in", name: "User", email: "user@example.com", licenseValid: true },
+    ]);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("stops background polling when the sign-in expires, and a new sign-in polls at full speed", async () => {
+    const { service } = createPollingService();
+    request.mockResolvedValue(jsonResponse(200, { status: "pending" }));
+
+    await service.begin("sign-in");
+    service.pollInBackground();
+    await jest.advanceTimersByTimeAsync(10 * 60_000 + 30_000);
+    const polledWhilePending = request.mock.calls.length;
+    expect(polledWhilePending).toBeLessThanOrEqual(21);
+    expect(service.hasPendingRequest()).toBe(false);
+    await jest.advanceTimersByTimeAsync(5 * 30_000);
+    expect(request).toHaveBeenCalledTimes(polledWhilePending);
+
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(request).toHaveBeenCalledTimes(polledWhilePending + 1);
+  });
+
+  it("never lets a background or return poll race a code exchange", async () => {
+    const { service } = createPollingService();
+    let finishExchange!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishExchange = resolve; }));
+
+    await service.begin("sign-in");
+    service.pollInBackground();
+    const exchange = service.submitManualCode("one-time");
+    await jest.advanceTimersByTimeAsync(0);
+    window.dispatchEvent(new Event("focus"));
+    service.pollInBackground();
+    // Within the exchange's own wait for its answer.
+    await jest.advanceTimersByTimeAsync(25_000);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0].url).toBe(`${API_BASE_URL}/auth/exchange`);
+
+    finishExchange(jsonResponse(200, successPayload));
+    await expect(exchange).resolves.toMatchObject({ kind: "signed-in" });
+  });
+
+  it("still completes a background sign-in from its deep link", async () => {
     const { service, openedUrls } = createPollingService();
     request.mockResolvedValueOnce(jsonResponse(200, successPayload));
 
     await service.begin("sign-in");
-    service.pausePolling();
+    service.pollInBackground();
     const { state } = parseConnectUrl(openedUrls[0]);
 
     await expect(service.handleProtocolCallback({ state, code: "one-time" })).resolves.toMatchObject({
@@ -749,12 +803,12 @@ describe("AccountConnectService abandoned sign-in", () => {
   it("ends a pending sign-in when the plugin unloads", async () => {
     const { service, plugin } = createPollingService();
     await service.begin("sign-in");
-    service.pausePolling();
+    service.pollInBackground();
 
     const onUnload = plugin.register.mock.calls[0][0] as () => void;
     onUnload();
     window.dispatchEvent(new Event("focus"));
-    await jest.advanceTimersByTimeAsync(10 * 3_500);
+    await jest.advanceTimersByTimeAsync(5 * 30_000);
 
     expect(service.hasPendingRequest()).toBe(false);
     expect(request).not.toHaveBeenCalled();
