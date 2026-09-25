@@ -785,6 +785,17 @@ describe("RecordingSession streaming to disk", () => {
       }),
       copy: jest.fn(async (from: string, to: string) => { files.set(to, [...(files.get(from) ?? [])]); }),
       remove: jest.fn(async (path: string) => { files.delete(path); }),
+      stat: jest.fn(async (path: string) => {
+        const current = files.get(path);
+        return current ? { type: "file", ctime: 0, mtime: 0, size: current.length } : null;
+      }),
+    };
+    /** Make the next append write only its first `count` bytes, then fail. */
+    const failAfterWriting = (count: number) => {
+      adapter.appendBinary.mockImplementationOnce(async (path: string, data: ArrayBuffer) => {
+        files.set(path, [...(files.get(path) ?? []), ...bytesOf(data).slice(0, count)]);
+        throw new Error("Disk went away");
+      });
     };
     const onCaptureFileCreated = jest.fn();
     const harness = createHarness({ onCaptureFileCreated, ...overrides }, adapter, vaultExtras);
@@ -793,7 +804,7 @@ describe("RecordingSession streaming to disk", () => {
       files.set(path, bytesOf(data));
       return { path };
     });
-    return { ...harness, adapter, files, folders, onCaptureFileCreated };
+    return { ...harness, adapter, files, folders, onCaptureFileCreated, failAfterWriting };
   }
 
   let now: jest.SpyInstance<number, []>;
@@ -1014,6 +1025,83 @@ describe("RecordingSession streaming to disk", () => {
     await expect(harness.session.retrySave()).resolves.toMatchObject({ sizeBytes: 2 });
     expect(harness.createBinary).not.toHaveBeenCalled();
     expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+  });
+
+  it("resumes after a partly written streaming append without duplicating audio", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+
+    harness.failAfterWriting(2);
+    now.mockReturnValue(20_000);
+    emitBytes([2, 3, 4]);
+    await settleWrites();
+    const hidden = `${HIDDEN}/${nameOf(started.filePath)}`;
+    expect(harness.files.get(hidden)).toEqual([1, 2, 3]);
+
+    emitBytes([5]);
+    const result = await harness.session.stop();
+
+    expect(harness.files.get(started.filePath)).toEqual([1, 2, 3, 4, 5]);
+    expect(result.sizeBytes).toBe(5);
+    expect(bytesOf(harness.adapter.appendBinary.mock.calls.at(-1)![1])).toEqual([4, 5]);
+  });
+
+  it("appends only the missing part of a tail on Retry save after a partial write", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+
+    harness.failAfterWriting(1);
+    now.mockReturnValue(20_000);
+    emitBytes([2, 3]);
+    await settleWrites();
+    harness.failAfterWriting(1);
+    emitBytes([4]);
+
+    await expect(harness.session.stop()).rejects.toThrow("Audio is still in memory, but it could not be saved: Disk went away");
+    const hidden = `${HIDDEN}/${nameOf(started.filePath)}`;
+    expect(harness.files.get(hidden)).toEqual([1, 2, 3]);
+
+    await expect(harness.session.retrySave()).resolves.toMatchObject({ sizeBytes: 4 });
+    expect(harness.files.get(started.filePath)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("refuses to append when the in-progress file no longer matches what was written", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1, 2]);
+    await settleWrites();
+    harness.failAfterWriting(0);
+    now.mockReturnValue(20_000);
+    emitBytes([3]);
+    await settleWrites();
+    harness.files.set(`${HIDDEN}/${nameOf(started.filePath)}`, [1]);
+
+    await expect(harness.session.stop()).rejects.toThrow("changed unexpectedly");
+    expect(harness.adapter.appendBinary).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes a partly created in-progress file before falling back to memory", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    harness.adapter.writeBinary.mockImplementationOnce(async (path: string, data: ArrayBuffer) => {
+      harness.files.set(path, bytesOf(data).slice(0, 1));
+      throw new Error("Disk went away");
+    });
+    const started = await harness.session.start();
+    emitBytes([1, 2]);
+    await settleWrites();
+
+    const result = await harness.session.stop();
+    expect(harness.files.has(`${HIDDEN}/${nameOf(started.filePath)}`)).toBe(false);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+    expect(result.sizeBytes).toBe(2);
   });
 
   it("falls back to the in-memory capture when the in-progress file cannot be created", async () => {

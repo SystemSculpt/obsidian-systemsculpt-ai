@@ -198,6 +198,11 @@ export class RecordingSession {
   private captureLimitReached = false;
   /** The hidden in-progress file, once its first audio is written. */
   private streamPath: string | null = null;
+  /**
+   * An append failed, so the file may hold part of that buffer beyond
+   * `persistedBytes`, the length known to be good.
+   */
+  private streamUncertain = false;
   private streamFailed = false;
   private streamWrite: Promise<void> | null = null;
   private lastStreamFlushAt = 0;
@@ -334,6 +339,11 @@ export class RecordingSession {
 
   public isRecording(): boolean {
     return this.state === "recording";
+  }
+
+  /** The hidden file this capture streams into, once it exists. */
+  public get inProgressPath(): string | null {
+    return this.streamPath;
   }
 
   /** The capture bound in force: disk-backed while streaming, memory otherwise. */
@@ -539,7 +549,6 @@ export class RecordingSession {
         // keeps them in order for the in-memory fallback.
         if (this.chunks === chunks) chunks.splice(0, count);
         this.bufferedBytes = Math.max(0, this.bufferedBytes - written);
-        this.persistedBytes += written;
       })
       .catch((error: unknown) => {
         this.streamFailed = true;
@@ -559,8 +568,15 @@ export class RecordingSession {
     }
     const adapter = this.app.vault.adapter;
     await ensureAdapterDirectory(adapter, RECORDINGS_IN_PROGRESS_DIRECTORY);
-    await adapter.writeBinary(path, bytes);
+    try {
+      await adapter.writeBinary(path, bytes);
+    } catch (error) {
+      // The capture falls back to memory; a fragment must not be recovered later.
+      await adapter.remove(path).catch(() => undefined);
+      throw error;
+    }
     this.streamPath = path;
+    this.persistedBytes = bytes.byteLength;
     try {
       this.options.onCaptureFileCreated?.({
         filePath: path,
@@ -573,12 +589,31 @@ export class RecordingSession {
     return bytes.byteLength;
   }
 
+  /**
+   * Append `bytes` after the audio known to be on disk. After a failed append
+   * the file may already hold a prefix of these bytes, so its size decides
+   * where to resume and no audio is written twice.
+   */
   private async appendToStream(bytes: ArrayBuffer): Promise<void> {
     const adapter = this.app.vault.adapter as BinaryAppendAdapter;
     if (!this.streamPath || typeof adapter.appendBinary !== "function") {
       throw new Error("The recording file is no longer available for appending.");
     }
-    await adapter.appendBinary(this.streamPath, bytes);
+    let written = 0;
+    if (this.streamUncertain) {
+      const stat = typeof adapter.stat === "function" ? await adapter.stat(this.streamPath) : null;
+      const onDisk = stat ? stat.size : this.persistedBytes;
+      if (onDisk < this.persistedBytes || onDisk > this.persistedBytes + bytes.byteLength) {
+        throw new Error("The in-progress recording changed unexpectedly, so nothing more was appended.");
+      }
+      written = onDisk - this.persistedBytes;
+    }
+    if (written < bytes.byteLength) {
+      this.streamUncertain = true;
+      await adapter.appendBinary(this.streamPath, written > 0 ? bytes.slice(written) : bytes);
+    }
+    this.streamUncertain = false;
+    this.persistedBytes += bytes.byteLength;
   }
 
   /** Wait for in-flight appends, then write whatever is still buffered. */

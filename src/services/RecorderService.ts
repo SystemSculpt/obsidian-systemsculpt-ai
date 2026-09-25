@@ -172,9 +172,9 @@ export class RecorderService {
    */
   public recoverPendingCaptures(): void {
     if (this.unloaded || this.pendingRecoveryRunning) return;
-    if (!this.interruptedCapturesRecovered && !this.session) {
-      // Once per session, before any capture starts: bring audio from a
-      // capture that Obsidian quit or crashed during out of hiding.
+    if (!this.interruptedCapturesRecovered) {
+      // Once per session: bring audio from a capture that Obsidian quit or
+      // crashed during out of hiding. A capture running now is left alone.
       this.interruptedCapturesRecovered = true;
       this.pendingRecoveryRunning = true;
       void this.recoverInterruptedCaptures()
@@ -987,9 +987,16 @@ export class RecorderService {
       }
     }
     for (const capture of [...entries, ...orphans]) {
-      if (this.unloaded || this.session) return;
+      if (this.unloaded) return;
+      if (this.isActiveCaptureFile(capture.filePath)) continue;
       await this.recoverInterruptedCapture(capture);
     }
+  }
+
+  /** The in-progress file of the capture running now, which recovery must not move. */
+  private isActiveCaptureFile(filePath: string): boolean {
+    return filePath === this.captureInProgressPath
+      || (this.session !== null && filePath === this.session.inProgressPath);
   }
 
   private async recoverInterruptedCapture(capture: PendingRecorderCapture): Promise<void> {

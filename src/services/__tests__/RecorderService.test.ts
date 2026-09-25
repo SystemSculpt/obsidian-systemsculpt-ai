@@ -1814,6 +1814,50 @@ describe("RecorderService", () => {
       ]);
     });
 
+    it("recovers other in-progress files while a new recording streams, leaving only its file alone", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const older = ".systemsculpt/recordings-in-progress/older.webm";
+      const { files } = vaultWithHiddenFiles({
+        [older]: { size: 1_000 },
+        [hiddenPath]: { size: 12_000 },
+      });
+      const service = RecorderService.getInstance(app, plugin);
+      await startStreamedCapture(service);
+
+      service.recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(files.has("SystemSculpt/Recordings/older.webm")).toBe(true);
+      expect(files.has(hiddenPath)).toBe(true);
+      expect(app.vault.adapter.rename).not.toHaveBeenCalledWith(hiddenPath, expect.anything());
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+    });
+
+    it("keeps recovering after a recording starts in the middle of recovery", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const first = ".systemsculpt/recordings-in-progress/first.webm";
+      const second = ".systemsculpt/recordings-in-progress/second.webm";
+      const { files, adapter } = vaultWithHiddenFiles({ [first]: { size: 1_000 }, [second]: { size: 1_000 } });
+      const firstMove = deferred<void>();
+      const rename = adapter.rename.getMockImplementation()!;
+      adapter.rename.mockImplementationOnce(async (from: string, to: string) => {
+        await firstMove.promise;
+        await rename(from, to);
+      });
+      const service = RecorderService.getInstance(app, plugin);
+
+      service.recoverPendingCaptures();
+      await flush();
+      await startStreamedCapture(service);
+      firstMove.resolve();
+      await flush();
+      await flush();
+
+      expect(files.has("SystemSculpt/Recordings/first.webm")).toBe(true);
+      expect(files.has("SystemSculpt/Recordings/second.webm")).toBe(true);
+    });
+
     it("forgets an interrupted entry whose audio never reached the disk", async () => {
       vaultWithHiddenFiles({});
       plugin.settings.pendingRecorderCaptures = [interruptedEntry()];
