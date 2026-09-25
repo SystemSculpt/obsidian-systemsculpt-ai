@@ -3728,7 +3728,9 @@ describe("AgentWorkspace", () => {
       currentSnapshot = snapshot(formattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
       await settleLiveMarkdown();
-      expectedMarkdownCalls += 1;
+      // The completed leading blocks are parsed once on their own; the open
+      // code fence is the only part later frames parse again.
+      expectedMarkdownCalls += 2;
       expect(textPart.firstChild).toBe(streamedTextNode);
       streamedTextNode = textPart.firstChild;
       expect(textPart.textContent).toBe(formattedStream);
@@ -4574,7 +4576,8 @@ describe("AgentWorkspace", () => {
     expect(selection.toString()).toBe("Reading");
     expect(selection.anchorNode).toBe(bodyText);
     expect(selection.focusNode).toBe(bodyText);
-    expect(markdownRender).toHaveBeenCalledTimes(2);
+    // Completed blocks and the open code fence are parsed separately.
+    expect(markdownRender).toHaveBeenCalledTimes(3);
 
     header.focus();
     details.open = false;
@@ -4589,12 +4592,12 @@ describe("AgentWorkspace", () => {
     bodyText = body.firstChild!;
     expect(document.activeElement).toBe(header);
     expect(iconCalls()).toBe(initialIconCalls);
-    expect(markdownRender).toHaveBeenCalledTimes(2);
+    expect(markdownRender).toHaveBeenCalledTimes(3);
 
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(markdownRender).toHaveBeenCalledTimes(3);
+    expect(markdownRender).toHaveBeenCalledTimes(5);
 
     await workspace.setAgentSnapshot(
       snapshot(finalSummary, "complete"),
@@ -4608,7 +4611,7 @@ describe("AgentWorkspace", () => {
     expect(details.open).toBe(true);
     expect(document.activeElement).toBe(header);
     expect(iconCalls()).toBe(initialIconCalls + 1);
-    expect(markdownRender).toHaveBeenCalledTimes(4);
+    expect(markdownRender).toHaveBeenCalledTimes(6);
     markdownRender.mockRestore();
     workspace.unload();
   });
