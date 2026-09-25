@@ -293,6 +293,37 @@ describe("mobile host layout observation scope", () => {
     ]);
   });
 
+  it("follows a connected navbar moved under a hidden container and back out", async () => {
+    platform.isDesktopApp = false;
+    platform.isMobile = true;
+    platform.isMobileApp = true;
+    const visibleHost = document.createElement("div");
+    const hiddenHost = document.createElement("div");
+    hiddenHost.hidden = true;
+    const navbar = document.createElement("nav");
+    navbar.className = "mobile-navbar-action";
+    visibleHost.appendChild(navbar);
+    document.body.append(visibleHost, hiddenHost);
+    ensureMobileHostLayoutState(document);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+
+    hiddenHost.appendChild(navbar);
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+    expect(subtreeObservations()).toEqual([]);
+    expect(observations().some(({ target }) => target === hiddenHost)).toBe(true);
+
+    // The new host's own visibility is now observed directly.
+    hiddenHost.hidden = false;
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
+
+    hiddenHost.hidden = true;
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, false);
+    visibleHost.appendChild(navbar);
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible, true);
+    expect(subtreeObservations()).toEqual([]);
+  });
+
   it("ignores unrelated body descendants once the navbar is tracked", async () => {
     platform.isDesktopApp = false;
     platform.isMobile = true;

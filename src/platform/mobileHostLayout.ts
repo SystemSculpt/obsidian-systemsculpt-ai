@@ -18,6 +18,8 @@ type MobileHostLayoutController = {
   /** Installed only in a mobile layout: finds the navbar, then follows it. */
   navbarObserver: MutationObserver | null;
   trackedNavbar: HTMLElement | null;
+  /** The observed ancestor chain of the tracked navbar, navbar first. */
+  trackedChain: HTMLElement[];
   mobileActive: boolean;
   scheduledFrame: number | null;
   update: () => void;
@@ -87,6 +89,7 @@ function createController(document: Document): MobileHostLayoutController {
     bodyObserver: null,
     navbarObserver: null,
     trackedNavbar: null,
+    trackedChain: [],
     mobileActive: false,
     scheduledFrame: null,
     update(): void {
@@ -124,30 +127,50 @@ function createController(document: Document): MobileHostLayoutController {
     },
   };
 
+  const ancestorChain = (navbar: HTMLElement): HTMLElement[] => {
+    const chain: HTMLElement[] = [];
+    for (let element: HTMLElement | null = navbar; element; element = element.parentElement) {
+      chain.push(element);
+      if (element === document.body) break;
+    }
+    return chain;
+  };
+
+  /** True when the tracked navbar left the document or moved under other ancestors. */
+  const trackedNavbarMoved = (): boolean => {
+    const navbar = controller.trackedNavbar;
+    if (!navbar) return false;
+    if (!navbar.isConnected) return true;
+    const chain = ancestorChain(navbar);
+    return chain.length !== controller.trackedChain.length
+      || chain.some((element, index) => element !== controller.trackedChain[index]);
+  };
+
   /**
    * Discovery watches body descendants for the navbar's insertion. Once found,
    * only the navbar and its ancestors are observed, without subtree: their
-   * visibility attributes, and their child lists to notice the navbar leaving.
+   * visibility attributes, and their child lists to notice the navbar leaving
+   * or being moved under other ancestors, which re-tracks the new chain.
    */
   function trackNavbar(): void {
     const observer = controller.navbarObserver;
     if (!observer) return;
     const navbar = document.querySelector<HTMLElement>(HOST_MOBILE_NAV_SELECTOR);
     const found = navbar?.isConnected ? navbar : null;
-    if (found && found === controller.trackedNavbar) return;
+    if (found && found === controller.trackedNavbar && !trackedNavbarMoved()) return;
     observer.disconnect();
     controller.trackedNavbar = found;
+    controller.trackedChain = found ? ancestorChain(found) : [];
     if (!found) {
       observer.observe(document.body, { childList: true, subtree: true });
       return;
     }
-    for (let element: HTMLElement | null = found; element; element = element.parentElement) {
+    for (const element of controller.trackedChain) {
       observer.observe(element, {
         attributes: true,
         attributeFilter: NAVBAR_VISIBILITY_ATTRIBUTES,
         childList: element !== found,
       });
-      if (element === document.body) break;
     }
   }
 
@@ -159,7 +182,8 @@ function createController(document: Document): MobileHostLayoutController {
       controller.navbarObserver = new MutationObserverCtor((records) => {
         const tracked = controller.trackedNavbar;
         if (tracked) {
-          if (!tracked.isConnected) {
+          const moved = records.some((record) => record.type === "childList") && trackedNavbarMoved();
+          if (moved) {
             trackNavbar();
             controller.schedule();
           } else if (records.some((record) => record.type === "attributes")) {
@@ -182,6 +206,7 @@ function createController(document: Document): MobileHostLayoutController {
     controller.navbarObserver?.disconnect();
     controller.navbarObserver = null;
     controller.trackedNavbar = null;
+    controller.trackedChain = [];
     ownerWindow?.removeEventListener("resize", controller.schedule);
     ownerWindow?.visualViewport?.removeEventListener("resize", controller.schedule);
   }
