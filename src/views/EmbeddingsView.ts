@@ -43,15 +43,16 @@ export class EmbeddingsView extends ItemView {
   private unsubscribeIndexLifecycle: (() => void) | null = null;
   private lastIndexSnapshot: Readonly<SemanticIndexSnapshot> | null = null;
   private deletedSourcePath: string | null = null;
-  /**
-   * Index state of the current note and its results when they were last
-   * searched. An index run elsewhere re-queries only when this changes.
-   */
-  private lastQueryFingerprint: string | null = null;
   /** The semantic query of the last completed chat search. */
   private lastChatQueryHash: string | null = null;
   private readonly searchRuns: SimilaritySearchRunCoordinator;
   private readonly SEARCH_DELAY = 300; // 300ms delay
+  /**
+   * Any finished index run may have produced a better match for the current
+   * note. Re-querying is an in-memory scan, so it follows every run, once
+   * a burst of runs has settled.
+   */
+  private readonly INDEX_SETTLED_REFRESH_DELAY = 2_000;
   
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
@@ -262,11 +263,13 @@ export class EmbeddingsView extends ItemView {
       );
       const reconciliationSettled = previous?.phase === "reconciling"
         && snapshot.phase !== "reconciling";
-      // After an index run, re-query only when the run touched the current
-      // note or one of its results.
-      if (generationChanged || (reconciliationSettled && this.queryFingerprint() !== this.lastQueryFingerprint)) {
+      if (generationChanged) {
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
+      } else if (reconciliationSettled) {
+        // Hidden views defer the search until they are shown again.
+        this.forceRefreshNextCheck = true;
+        this.searchRuns.scheduleTask(() => this.checkActiveFile(), this.INDEX_SETTLED_REFRESH_DELAY);
       }
     });
   }
@@ -292,21 +295,6 @@ export class EmbeddingsView extends ItemView {
       );
       return matches(this.currentFile?.path) || this.currentResults.some((result) => matches(result.path));
     });
-  }
-
-  /**
-   * The index state of everything the current results depend on: the source
-   * note and every result. Null when there is no source.
-   */
-  private queryFingerprint(): string | null {
-    if (!this.plugin.settings.embeddingsEnabled || (!this.currentFile && !this.currentChatView)) return null;
-    const manager = this.plugin.getOrCreateEmbeddingsManager();
-    const paths = [this.currentFile?.path ?? "", ...this.currentResults.map((result) => result.path)];
-    return paths.map((path) => {
-      if (!path) return "";
-      const snapshot = manager.getFileIndexSnapshot(path);
-      return `${path}\u0000${snapshot.state}\u0000${snapshot.indexedAt ?? ""}`;
-    }).join("\u0001");
   }
 
   private handleVaultDelete(file: { path?: string }): void {
@@ -618,19 +606,16 @@ export class EmbeddingsView extends ItemView {
     this.currentFile = null;
     this.currentChatView = null;
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'idle' });
   }
 
   private showEmptyContent(): void {
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'empty-content' });
   }
 
   private showError(message: string, code?: string): void {
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({
       state: 'error',
       message: readEmbeddingErrorMessage(message, 'Similar notes are unavailable. Try again.'),
@@ -642,13 +627,11 @@ export class EmbeddingsView extends ItemView {
     this.currentFile = null;
     this.currentChatView = null;
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'disabled' });
   }
 
   private async updateResults(results: SearchResult[], sourceFile: TFile | null, sourceName?: string): Promise<void> {
     this.currentResults = results;
-    this.lastQueryFingerprint = this.queryFingerprint();
     const displayName = sourceName || sourceFile?.basename || 'Unknown';
     this.presentation?.render({
       state: 'results',
@@ -686,7 +669,6 @@ export class EmbeddingsView extends ItemView {
    */
   private showProcessingPrompt(): void {
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'index-required' });
   }
 
@@ -760,7 +742,6 @@ export class EmbeddingsView extends ItemView {
    */
   private showProcessingStatus(): void {
     this.currentResults = [];
-    this.lastQueryFingerprint = null;
     this.presentation?.render({ state: 'processing' });
   }
   

@@ -99,6 +99,12 @@ interface CommittedNamespaceState {
 const QUEUED_WORK_MUTEX_BACKOFF_MS = 75;
 const LIFECYCLE_REFRESH_COALESCE_MS = 1_000;
 const SIMILAR_RESULTS_CACHE_SIZE = 32;
+/**
+ * A query's vector depends only on its text and the generation, which is
+ * checked on every reuse. Similar Notes re-runs chat queries after index
+ * runs, so the vector stays cached long enough to make those local scans.
+ */
+const QUERY_VECTOR_TTL_MS = 15 * 60_000;
 /** Final Float32 scores at or below this are not similar enough to show. */
 const MIN_SIMILARITY = 0.1;
 const COMMITTED_NAMESPACE_STATE_KEY = "semantic-committed-namespace-v1";
@@ -1639,7 +1645,7 @@ export class EmbeddingsManager {
       const oldest = this.queryCache.keys().next().value;
       if (typeof oldest === "string") this.queryCache.delete(oldest);
     }
-    this.queryCache.set(key, { vector, namespace, expiresAt: Date.now() + 60_000 });
+    this.queryCache.set(key, { vector, namespace, expiresAt: Date.now() + QUERY_VECTOR_TTL_MS });
   }
 
   private buildConfig(overrides?: Partial<EmbeddingsManagerConfig>): EmbeddingsManagerConfig {

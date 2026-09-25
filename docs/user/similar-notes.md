@@ -32,8 +32,8 @@ Core controls:
 
 - Processing is background/on-demand, not a single one-shot job.
 - While you edit a note, Similar Notes keeps showing its current results. They
-  refresh once the edited note is re-indexed, when you switch notes, or when a
-  result is renamed or deleted.
+  refresh shortly after any indexing run finishes (so newly indexed notes can
+  appear), when you switch notes, or when a result is renamed or deleted.
 - Vault search shows text matches as you type and adds semantic matches once
   you pause, for queries of three or more characters.
 - Exclusions can dramatically reduce indexed content.

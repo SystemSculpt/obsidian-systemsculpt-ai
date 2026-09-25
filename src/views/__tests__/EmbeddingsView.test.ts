@@ -421,15 +421,8 @@ describe("EmbeddingsView", () => {
       expect(vaultEvents).not.toContain("modify");
     });
 
-    it("re-queries after an index run only when it touched the note or its results", async () => {
+    it("refreshes after index runs once they settle for two seconds, and only while visible", async () => {
       const current = new TFile({ path: "notes/current.md", stat: { mtime: 1, size: 100 } });
-      const indexedAt = new Map<string, number>([["notes/current.md", 1], ["notes/result.md", 1]]);
-      mockManager.getFileIndexSnapshot.mockImplementation((path: string) => ({
-        state: "ready", ready: true, indexedAt: indexedAt.get(path) ?? null, generation: null,
-      }));
-      mockManager.findSimilar.mockResolvedValue([
-        { path: "notes/result.md", score: 0.9, metadata: { title: "Result", excerpt: "", lastModified: 1 } },
-      ]);
       let emit!: (snapshot: any) => void;
       mockManager.subscribeLifecycle.mockImplementation((listener: (snapshot: any) => void) => {
         emit = listener;
@@ -439,19 +432,29 @@ describe("EmbeddingsView", () => {
       mockPlugin.app.workspace.getActiveFile.mockReturnValue(current);
       (view as any).bindIndexLifecycle();
       (view as any).currentFile = current;
-      await (view as any).searchForSimilar(current);
-      const checkActiveFile = jest.spyOn(view as any, "checkActiveFile");
+      const settle = () => {
+        emit({ ...mockManager.getLifecycleSnapshot(), phase: "reconciling" });
+        emit({ ...mockManager.getLifecycleSnapshot(), phase: "idle" });
+      };
 
-      emit({ ...mockManager.getLifecycleSnapshot(), phase: "reconciling" });
-      emit({ ...mockManager.getLifecycleSnapshot(), phase: "idle" });
-      await jest.advanceTimersByTimeAsync(300);
-      expect(checkActiveFile).not.toHaveBeenCalled();
+      // A newly indexed note elsewhere may now be the best match: re-query.
+      settle();
+      await jest.advanceTimersByTimeAsync(1_000);
+      settle();
+      await jest.advanceTimersByTimeAsync(1_999);
+      expect(mockManager.findSimilar).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(1);
 
-      indexedAt.set("notes/result.md", 2);
-      emit({ ...mockManager.getLifecycleSnapshot(), phase: "reconciling" });
-      emit({ ...mockManager.getLifecycleSnapshot(), phase: "idle" });
-      await jest.advanceTimersByTimeAsync(300);
-      expect(checkActiveFile).toHaveBeenCalledTimes(1);
+      (view as any).isViewVisible.mockReturnValue(false);
+      settle();
+      await jest.advanceTimersByTimeAsync(2_500);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(1);
+
+      (view as any).isViewVisible.mockReturnValue(true);
+      (view as any).searchRuns.reconcileVisibility();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(2);
     });
 
     it("ignores renames and deletes that do not touch the current note or its results", () => {
