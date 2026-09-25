@@ -60,6 +60,10 @@ const FATAL_MANAGED_ERROR_CODES = new Set([
   "capability_unavailable",
 ]);
 
+function sha256Hex(markdown: string): Promise<string> {
+  return sha256HexFromArrayBuffer(new TextEncoder().encode(markdown).buffer);
+}
+
 class StaleEmbeddingSourceError extends Error {
   constructor() {
     super("The note changed while its semantic index was being generated.");
@@ -103,7 +107,7 @@ export class EmbeddingsProcessor {
       try {
         const markdown = await app.vault.read(file);
         if (this.cancelled || fatalError) return;
-        const sourceSha256 = await sha256HexFromArrayBuffer(new TextEncoder().encode(markdown).buffer);
+        const sourceSha256 = await sha256Hex(markdown);
         if (this.cancelled || fatalError) return;
         if (await this.reuseUnchangedSource(file, revision, sourceSha256, options.reuseNamespace)) {
           completedPaths.push(revision.path);
@@ -115,6 +119,8 @@ export class EmbeddingsProcessor {
           });
           if (this.cancelled) return;
           this.assertSourceCurrent(file, revision);
+          await this.assertSourceBytesUnchanged(app, file, sourceSha256);
+          if (this.cancelled) return;
           await this.publishResult(revision, markdown, indexed);
           if (indexed.generation) generation = indexed.generation;
           completedPaths.push(revision.path);
@@ -303,9 +309,17 @@ export class EmbeddingsProcessor {
   }
 
   /**
-   * The note is read once. A later write changes its stat and re-queues a
-   * newer work revision, so a second full read here would only repeat that.
+   * A note can change while its request is in flight without its reported
+   * mtime moving (coarse filesystem clocks, sync tools that preserve mtimes).
+   * Compare the bytes that are current now with the bytes that were sent,
+   * through Obsidian's in-memory cache, before publishing their vectors.
    */
+  private async assertSourceBytesUnchanged(app: App, file: TFile, sentSha256: string): Promise<void> {
+    const current = await app.vault.cachedRead(file);
+    if (await sha256Hex(current) !== sentSha256) throw new StaleEmbeddingSourceError();
+  }
+
+  /** The note's path, name and mtime are still the revision that was read. */
   private assertSourceCurrent(file: TFile, revision: EmbeddingSourceRevision): void {
     if (
       file.path !== revision.path

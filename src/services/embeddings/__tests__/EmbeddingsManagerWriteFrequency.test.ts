@@ -172,4 +172,30 @@ describe("EmbeddingsManager portable index write frequency (#341)", () => {
     expect(manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });
     expect(manager.markPortableIndexDestructive).not.toHaveBeenCalled();
   });
+
+  it("sends a same-mtime edit through the processor so its bytes are compared", async () => {
+    const { files, roots, manager } = harness([{ path: "A.md" }, { path: "B.md" }]);
+    for (const file of files) roots.set(root(file).id, root(file));
+    await manager.workQueue.enqueueImmediate("A.md", "modify", 1, 1);
+    await manager.workQueue.enqueueImmediate("B.md", "reconcile", 1, 1);
+    manager.processor.processFiles.mockImplementation(async (queued: TFile[]): Promise<ProcessingResult> => ({
+      completed: queued.length,
+      completedPaths: queued.map((file) => file.path),
+      reusedPaths: queued.map((file) => file.path),
+      failed: 0,
+      failedPaths: [],
+      cancelled: false,
+      fatalError: null,
+    }));
+    manager.clearWorkTimer = jest.fn();
+    manager.scheduleQueuedWork = jest.fn();
+
+    await manager.processQueuedWork();
+
+    // The modified note is checked even though its mtime still matches its root;
+    // an up-to-date reconcile claim settles without any work.
+    expect(manager.processor.processFiles.mock.calls[0][0].map((file: TFile) => file.path)).toEqual(["A.md"]);
+    expect(manager.workQueue.size).toBe(0);
+    expect(manager.markPortableIndexChanged).not.toHaveBeenCalled();
+  });
 });

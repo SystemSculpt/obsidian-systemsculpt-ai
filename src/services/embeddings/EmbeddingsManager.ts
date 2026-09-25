@@ -971,7 +971,11 @@ export class EmbeddingsManager {
           this.failedFiles.delete(item.path);
           continue;
         }
-        if (!this.shouldProcessFile(abstract)) {
+        // A modify or create event is evidence of new bytes even when the
+        // mtime did not move, so the processor compares content hashes (and
+        // reuses the stored vectors, with no request, when nothing changed).
+        const eventWithoutNewMtime = item.reason === "modify" || item.reason === "create";
+        if (!this.shouldProcessFile(abstract) && !eventWithoutNewMtime) {
           completedWithoutEmbedding.push(item);
           continue;
         }

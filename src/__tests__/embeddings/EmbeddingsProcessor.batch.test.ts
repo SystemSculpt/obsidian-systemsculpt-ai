@@ -78,7 +78,10 @@ function fixture(result = indexedResult()) {
     stat: { mtime: 123, size: 20 },
   };
   let content = "# Heading\n\nPrivate note";
-  const app = { vault: { read: jest.fn(async () => content) } };
+  const read = jest.fn(async (_file?: unknown) => content);
+  // Obsidian's cache holds what is on disk now; mirror read's current behavior.
+  const cachedRead = jest.fn(async (file?: unknown) => (read.getMockImplementation() ?? (async () => content))(file));
+  const app = { vault: { read, cachedRead } };
   return {
     app,
     file,
@@ -398,7 +401,7 @@ describe("EmbeddingsProcessor server indexing", () => {
     };
     const processor = new EmbeddingsProcessor({ index } as never, storage as never);
     const file = { path: "Note.md", basename: "Note", stat: { mtime: 123, size: 20 } };
-    const app = { vault: { read: jest.fn(async () => content) } };
+    const app = { vault: { read: jest.fn(async () => content), cachedRead: jest.fn(async () => content) } };
 
     const unchanged = await processor.processFiles([file] as never, app as never, undefined, {
       reuseNamespace: namespace,
@@ -440,7 +443,7 @@ describe("EmbeddingsProcessor server indexing", () => {
 
     await processor.processFiles(
       [{ path: "Note.md", basename: "Note", stat: { mtime: 2 } }] as never,
-      { vault: { read: jest.fn(async () => content) } } as never,
+      { vault: { read: jest.fn(async () => content), cachedRead: jest.fn(async () => content) } } as never,
       undefined,
       { reuseNamespace: "systemsculpt:managed:semantic-v1:v3:3" },
     );
@@ -483,5 +486,26 @@ describe("EmbeddingsProcessor server indexing", () => {
     expect(peak).toBe(3);
     expect(state.index).toHaveBeenCalledTimes(7);
     expect(processed.completedPaths).toHaveLength(7);
+  });
+
+  it("discards a response when the note changed in flight without a new mtime", async () => {
+    const state = fixture();
+    let release!: (result: ManagedEmbeddingsIndexResult) => void;
+    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+
+    const processing = state.processor.processFiles([state.file] as never, state.app as never);
+    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    // Same reported mtime, different bytes: a coarse clock or a sync tool.
+    state.setContent("# Heading\n\nEdited while the request was in flight");
+    release(indexedResult());
+    const processed = await processing;
+
+    expect(processed).toMatchObject({
+      completed: 0,
+      failed: 1,
+      failedDetails: { "Note.md": { code: "source_changed" } },
+    });
+    expect(state.storage.publishPath).not.toHaveBeenCalled();
+    expect(state.app.vault.cachedRead).toHaveBeenCalledTimes(1);
   });
 });

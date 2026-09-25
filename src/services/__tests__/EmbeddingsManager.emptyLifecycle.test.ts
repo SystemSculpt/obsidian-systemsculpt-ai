@@ -172,6 +172,7 @@ function harness(initialContent: string) {
     getMarkdownFiles: jest.fn(() => [file]),
     getAbstractFileByPath: jest.fn(() => file),
     read: jest.fn(async () => content),
+    cachedRead: jest.fn(async () => content),
     on: jest.fn((event: string, callback: (...args: any[]) => void) => {
       watchers.set(event, callback);
       return {};
