@@ -182,10 +182,12 @@ export class EmbeddingsIndexFile {
     return shards;
   }
 
-  public async shardSize(shard: number): Promise<number | null> {
+  /** Size and modification time of one shard file, or null when it is missing. */
+  public async shardStat(shard: number): Promise<{ size: number; mtime: number | null } | null> {
     try {
       const stat = await this.adapter.stat(this.shardPath(shard));
-      return stat && typeof stat.size === "number" ? stat.size : null;
+      if (!stat || typeof stat.size !== "number") return null;
+      return { size: stat.size, mtime: typeof stat.mtime === "number" ? stat.mtime : null };
     } catch {
       return null;
     }

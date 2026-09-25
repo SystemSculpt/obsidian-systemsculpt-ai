@@ -18,6 +18,7 @@ import {
   encodePortableShard,
   parsePortableManifest,
   portableShardOf,
+  readPortableShardChecksum,
   PORTABLE_SHARD_COUNT,
   type PortableIndexManifest,
 } from "./EmbeddingsIndexSerialization";
@@ -45,8 +46,8 @@ export interface PortableIndexFile {
   size(): Promise<number | null>;
   listShards(): Promise<Set<number>>;
   readShard(shard: number): Promise<ArrayBuffer | null>;
-  /** Byte size of one shard file, or null when it is missing. */
-  shardSize(shard: number): Promise<number | null>;
+  /** Size and modification time of one shard file, or null when it is missing. */
+  shardStat(shard: number): Promise<{ size: number; mtime: number | null } | null>;
   writeShard(shard: number, bytes: ArrayBuffer): Promise<void>;
   removeShard(shard: number): Promise<void>;
   removeRecoveryCopy?(): Promise<void>;
@@ -81,8 +82,12 @@ export interface PortableCheckpointTiming {
 interface ShardRecord {
   /** Byte size of the file this device wrote (or restored from). */
   size: number;
-  /** Signature of the notes the file holds; see shardSignature. */
+  /** Signature of the notes the file holds; see shardSignatures. */
   signature: string;
+  /** The content checksum in that file's prefix. */
+  checksum: number | null;
+  /** The file's modification time when last verified; a change prompts a checksum check. */
+  mtime: number | null;
 }
 
 interface ShardRecords {
@@ -203,8 +208,8 @@ export class PortableCheckpointCoordinator {
    * that already match. A missing or older-release `index.json` schedules
    * every shard (the one-time migration). Otherwise a shard is rewritten when
    * the notes it should hold differ from what this device last wrote there,
-   * when its file size differs from that write (another writer, a partial
-   * sync), when it is missing, or when it exists with no notes left.
+   * when it is missing, when it exists with no notes left, or when its file is
+   * no longer the file this device wrote (another writer, a partial sync).
    */
   async reconcileFormat(): Promise<void> {
     const { store, file } = this.deps;
@@ -217,6 +222,7 @@ export class PortableCheckpointCoordinator {
     ]);
     if (!manifestCurrent) this.writtenManifest = null;
     const stale: number[] = [];
+    let recordsChanged = false;
     for (const shard of allShards()) {
       const signature = expected.get(shard);
       const record = records.shards[String(shard)];
@@ -224,13 +230,35 @@ export class PortableCheckpointCoordinator {
         stale.push(shard);
       } else if (!signature || !onDisk.has(shard)) {
         if (Boolean(signature) !== onDisk.has(shard)) stale.push(shard);
-      } else if (!record || record.signature !== signature || await file.shardSize(shard) !== record.size) {
+      } else if (!record || record.signature !== signature) {
         stale.push(shard);
+      } else {
+        const verified = await this.verifyShardFile(shard, record);
+        if (verified === "replaced") stale.push(shard);
+        if (verified === "touched") recordsChanged = true;
       }
     }
+    if (recordsChanged) await store.writeState(SHARD_RECORDS_STATE_KEY, records).catch(() => undefined);
     if (stale.length === 0) return;
     for (const shard of stale) this.pendingShards.add(shard);
     this.markChanged();
+  }
+
+  /**
+   * Is the shard file still the one this device wrote? A stat answers when
+   * size and modification time are unchanged. When only the time moved (a
+   * sync tool re-downloading, or a same-size replacement), the checksum the
+   * writer stored in the file's prefix settles it without hashing the file.
+   */
+  private async verifyShardFile(shard: number, record: ShardRecord): Promise<"same" | "touched" | "replaced"> {
+    const stat = await this.deps.file.shardStat(shard);
+    if (!stat || stat.size !== record.size) return "replaced";
+    if (record.mtime !== null && stat.mtime === record.mtime) return "same";
+    const bytes = await this.deps.file.readShard(shard);
+    const checksum = bytes ? readPortableShardChecksum(bytes) : null;
+    if (checksum === null || record.checksum === null || checksum !== record.checksum) return "replaced";
+    record.mtime = stat.mtime;
+    return "touched";
   }
 
   async clear(): Promise<void> {
@@ -326,7 +354,12 @@ export class PortableCheckpointCoordinator {
         const bytes = paths.length > 0 ? encodePortableShard(shard, await store.readPaths(paths)) : null;
         if (bytes) {
           await file.writeShard(shard, bytes);
-          records.shards[String(shard)] = { size: bytes.byteLength, signature: signatures.get(shard) ?? "" };
+          records.shards[String(shard)] = {
+            size: bytes.byteLength,
+            signature: signatures.get(shard) ?? "",
+            checksum: readPortableShardChecksum(bytes),
+            mtime: (await file.shardStat(shard))?.mtime ?? null,
+          };
         } else {
           await file.removeShard(shard);
           delete records.shards[String(shard)];
@@ -467,6 +500,8 @@ export async function readPortableSnapshot(file: PortableIndexFile): Promise<Por
       shards.set(shard, {
         size: bytes.byteLength,
         signature: shardSignatures(decoded).get(shard) ?? "",
+        checksum: readPortableShardChecksum(bytes),
+        mtime: (await file.shardStat(shard))?.mtime ?? null,
       });
     } catch {
       // A shard that fails validation is treated as absent.

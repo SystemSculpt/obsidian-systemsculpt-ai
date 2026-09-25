@@ -342,6 +342,19 @@ export function encodePortableShard(shard: number, vectors: readonly EmbeddingVe
   return buffer;
 }
 
+/**
+ * The content checksum a shard's writer stored in its prefix, read without
+ * decoding or hashing the shard. Null when the prefix is not a shard this
+ * build can read, or its lengths do not match the file.
+ */
+export function readPortableShardChecksum(buffer: ArrayBuffer): number | null {
+  if (buffer.byteLength < SHARD_PREFIX_BYTES) return null;
+  const view = new DataView(buffer);
+  if (view.getUint32(0, true) !== SHARD_MAGIC || view.getUint32(4, true) !== SHARD_LAYOUT_VERSION) return null;
+  if (SHARD_PREFIX_BYTES + view.getUint32(8, true) + view.getUint32(12, true) !== buffer.byteLength) return null;
+  return view.getUint32(16, true);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

@@ -93,6 +93,8 @@ function buildManifest(): PortableIndexManifest {
 function memoryFile(initial: { index?: Record<string, unknown> | null } = {}) {
   let index: Record<string, unknown> | null = initial.index ?? null;
   const shards = new Map<number, ArrayBuffer>();
+  const modified = new WeakMap<ArrayBuffer, number>();
+  let clock = 0;
   const file = {
     shards,
     get index() { return index; },
@@ -101,7 +103,13 @@ function memoryFile(initial: { index?: Record<string, unknown> | null } = {}) {
     size: jest.fn(async () => (index ? JSON.stringify(index).length : null)),
     listShards: jest.fn(async () => new Set(shards.keys())),
     readShard: jest.fn(async (shard: number) => shards.get(shard) ?? null),
-    shardSize: jest.fn(async (shard: number) => shards.get(shard)?.byteLength ?? null),
+    // Every new file contents gets a new modification time, as on disk.
+    shardStat: jest.fn(async (shard: number) => {
+      const bytes = shards.get(shard);
+      if (!bytes) return null;
+      if (!modified.has(bytes)) modified.set(bytes, ++clock);
+      return { size: bytes.byteLength, mtime: modified.get(bytes)! };
+    }),
     writeShard: jest.fn(async (shard: number, bytes: ArrayBuffer) => { shards.set(shard, bytes); }),
     removeShard: jest.fn(async (shard: number) => { shards.delete(shard); }),
     removeRecoveryCopy: jest.fn(async () => undefined),
@@ -515,6 +523,70 @@ describe("PortableCheckpointCoordinator", () => {
 
     expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
     expect((await readPortableSnapshot(file))!.vectors.map((vector) => vector.path)).not.toContain("Ghost.md");
+    checkpoint.cancel();
+  });
+
+  it("rewrites a shard a sync tool replaced with different contents of the same size", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/5.md");
+    const original = file.shards.get(shard)!;
+    const inShard = readBack(original, shard);
+    // Same notes and byte length, different bytes: one content hash differs.
+    const altered = inShard.map((record) => record.path === "Notes/5.md"
+      ? { ...record, metadata: { ...record.metadata, contentHash: record.metadata.contentHash.replace(/.$/, "X") } }
+      : record);
+    const replacement = encodePortableShard(shard, altered)!;
+    expect(replacement.byteLength).toBe(original.byteLength);
+    file.shards.set(shard, replacement);
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    const restored = (await readPortableSnapshot(file))!.vectors.find((vector) => vector.path === "Notes/5.md")!;
+    expect(restored.metadata.contentHash).toBe("Notes/5.md:0");
+    checkpoint.cancel();
+  });
+
+  it("rewrites a same-size shard whose prefix is unreadable", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/5.md");
+    file.shards.set(shard, new ArrayBuffer(file.shards.get(shard)!.byteLength));
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    checkpoint.cancel();
+  });
+
+  it("only stats shards that are unchanged, and accepts a re-touched identical shard", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    file.readShard.mockClear();
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    expect(file.readShard).not.toHaveBeenCalled();
+
+    // A sync tool rewrote identical bytes: new modification time, same checksum.
+    const shard = portableShardOf("Notes/5.md");
+    file.shards.set(shard, file.shards.get(shard)!.slice(0));
+    await checkpoint.reconcileFormat();
+    expect(file.readShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    expect(checkpoint.status().pending).toBe(false);
+
+    file.readShard.mockClear();
+    await checkpoint.reconcileFormat();
+    expect(file.readShard).not.toHaveBeenCalled();
+    expect(file.writeShard).not.toHaveBeenCalled();
     checkpoint.cancel();
   });
 
