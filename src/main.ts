@@ -41,7 +41,7 @@ import {
   openLocalFolder,
 } from "./platform/hostCapabilities";
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
-import { yieldToEventLoop } from "./utils/yieldToEventLoop";
+import { waitForIdle, yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
@@ -76,6 +76,8 @@ export type ManagedCapabilityGraph = Readonly<{
 }>;
 
 const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
+/** Deferred startup work runs when the host is idle, or after this at the latest. */
+const DEFERRED_STARTUP_IDLE_TIMEOUT_MS = 5_000;
 type PublicSupportResourceSample = Readonly<{
   captured_at?: string;
   heap_used_mb?: number;
@@ -181,6 +183,8 @@ export default class SystemSculptPlugin extends Plugin {
   private settingsFocusCleanupRegistered = false;
   // Removed complex settings callback system - embeddings are now completely on-demand
 
+  /** Aborted on unload so idle-deferred startup work never starts afterwards. */
+  private readonly deferredStartup = new AbortController();
   private criticalInitializationPromise: Promise<void> | null = null;
   private deferredInitializationPromise: Promise<void> | null = null;
   private managersInitialized = false;
@@ -499,8 +503,12 @@ export default class SystemSculptPlugin extends Plugin {
     coordinator.registerTask("bootstrap", {
       id: "storage.prepare",
       label: "storage manager",
-      run: async () => {
-        await this.getDiagnosticsSessionLifecycle().start();
+      run: () => {
+        // Archiving the previous diagnostics session is not on the load path
+        // (#343): a layout task runs it when idle. A diagnostics write that
+        // comes first starts it, so no -latest file is appended before it.
+        const diagnostics = this.getDiagnosticsSessionLifecycle();
+        this.storage.setDiagnosticsWriteGate(() => diagnostics.start());
       },
     });
 
@@ -670,6 +678,18 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("layout", {
+      id: "diagnostics.archive",
+      label: "diagnostics archive",
+      optional: true,
+      run: () => {
+        void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then((idle) => {
+          if (!idle || this.isUnloading) return;
+          void this.getDiagnosticsSessionLifecycle().start().catch(() => undefined);
+        });
+      },
+    });
+
+    coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
       optional: true,
@@ -679,6 +699,12 @@ export default class SystemSculptPlugin extends Plugin {
       },
       run: async () => {
         if (!this.settings.embeddingsEnabled) {
+          return;
+        }
+        // Opening the semantic index walks the whole vector store. Start it
+        // once the workspace is idle, never in the critical phase (#343).
+        const idle = await waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal);
+        if (!idle || this.isUnloading || !this.settings.embeddingsEnabled) {
           return;
         }
 
@@ -1585,6 +1611,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private async unloadAsync(): Promise<void> {
+    this.deferredStartup.abort();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1789,9 +1816,24 @@ export default class SystemSculptPlugin extends Plugin {
     return this.resourceMonitor;
   }
 
+  /**
+   * Identity of the installed bundle, computed on first use (a chat bootstrap)
+   * rather than at launch (#343). Incident reports pick it up once known.
+   */
   public getLoadedPluginBuildId(): Promise<`sha256:${string}`> {
-    return this.loadedPluginBuildIdPromise
-      ??= getLoadedPluginBuildId(this.app, this.manifest);
+    if (!this.loadedPluginBuildIdPromise) {
+      const pending = getLoadedPluginBuildId(this.app, this.manifest);
+      this.loadedPluginBuildIdPromise = pending;
+      void pending.then(
+        (buildId) => {
+          this.agentIncidentLoadedBundleId = buildId;
+        },
+        () => {
+          this.agentIncidentLoadedBundleId = null;
+        },
+      );
+    }
+    return this.loadedPluginBuildIdPromise;
   }
 
   public getAgentIncidentCoordinator(): AgentIncidentCoordinator | null {
@@ -1851,14 +1893,7 @@ export default class SystemSculptPlugin extends Plugin {
       // The store is not initialized here: it creates its directory and
       // enforces retention on the first failed run that needs a report, so a
       // healthy launch neither creates directories nor scans reports (#337).
-      void this.getLoadedPluginBuildId().then(
-        (buildId) => {
-          this.agentIncidentLoadedBundleId = buildId;
-        },
-        () => {
-          this.agentIncidentLoadedBundleId = null;
-        },
-      );
+      // Nor is the bundle hashed here: the first chat bootstrap computes it.
     } catch {
       this.agentIncidentCoordinator = null;
       this.agentIncidentLoadedBundleId = null;

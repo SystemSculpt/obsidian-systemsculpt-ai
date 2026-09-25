@@ -192,9 +192,11 @@ or removes `data.json`.
 A successful command must report the configured plugin reload. A failed
 Obsidian CLI reload makes `npm run sync:local` fail instead of reporting a
 completed installation. At runtime the plugin hashes the installed `main.js`
-through the vault adapter and, for a development install, rejects any mismatch
-with the generated manifest claim. The runtime does not use that claim as the
-loaded bundle identity.
+through the vault adapter when a chat first needs it and, for a development
+install, rejects any mismatch with the generated manifest claim. The digest is
+memoized per device by the file's mtime and size, so an unchanged install is
+not re-read at every launch. The runtime does not use the manifest claim as
+the loaded bundle identity.
 
 Use the official Obsidian CLI or Computer Use to verify real desktop UI.
 Mobile release confidence comes from portable architecture, focused

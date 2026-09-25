@@ -479,6 +479,31 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     warn.mockRestore();
   });
 
+  it("validates stored vectors once per vector format instead of at every launch", async () => {
+    const first = harness("A note indexed in an earlier session.");
+    await first.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+    expect(mockState.get("semantic-vector-validation")).toMatchObject({ version: 1 });
+
+    const relaunched = harness("A note indexed in an earlier session.");
+    await relaunched.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes no settings when a launch reconcile finds the vault current", async () => {
+    const state = harness("A note that is indexed once.");
+    await state.manager.initialize();
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
+    expect(state.updateSettings).toHaveBeenCalledWith({ embeddingsRebuildPending: true });
+    state.updateSettings.mockClear();
+
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
+
+    expect(state.updateSettings).not.toHaveBeenCalledWith(
+      expect.objectContaining({ embeddingsRebuildPending: expect.anything() }),
+    );
+  });
+
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
     const state = harness("A note whose corrupted stored vector must be rebuilt.");
     (mockStorage.purgeCorruptedVectors as jest.Mock).mockResolvedValueOnce({

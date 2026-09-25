@@ -38,6 +38,9 @@ export class StorageManager {
   
   // Track created directories to avoid redundant checks
   private createdDirectories: Set<string> = new Set<string>();
+
+  /** Awaited before any diagnostics write; see setDiagnosticsWriteGate. */
+  private diagnosticsWriteGate: (() => Promise<void>) | null = null;
   
   /**
    * Create a new StorageManager
@@ -56,6 +59,25 @@ export class StorageManager {
    */
   private isUnloading(): boolean {
     return this.plugin?.isPluginUnloading?.() === true;
+  }
+
+  /**
+   * Diagnostics writers append to `-latest` files that the diagnostics
+   * session archives before its first write. The archive runs off the load
+   * path, so every diagnostics write first awaits this gate, which starts it
+   * when it has not run yet (#343). A failed archive never blocks the write.
+   */
+  setDiagnosticsWriteGate(gate: (() => Promise<void>) | null): void {
+    this.diagnosticsWriteGate = gate;
+  }
+
+  private async passWriteGate(type: StorageLocationType): Promise<void> {
+    if (type !== "diagnostics" || !this.diagnosticsWriteGate) return;
+    try {
+      await this.diagnosticsWriteGate();
+    } catch {
+      // Archiving is best-effort; the write proceeds without it.
+    }
   }
 
   /**
@@ -257,6 +279,7 @@ export class StorageManager {
     }
 
     try {
+      await this.passWriteGate(type);
       // Ensure storage and the target location are initialized
       await this.ensureLocation(type);
       
@@ -295,6 +318,7 @@ export class StorageManager {
     }
 
     try {
+      await this.passWriteGate(type);
       await this.ensureLocation(type);
 
       const path = this.getPath(type, fileName);

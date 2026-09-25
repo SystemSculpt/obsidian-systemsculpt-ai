@@ -833,12 +833,25 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
+const MOCK_API_VERSION = "1.5.0";
+
+function requireApiVersion(version) {
+  const current = MOCK_API_VERSION.split(".").map(Number);
+  const required = String(version).split(".").map(Number);
+  for (let index = 0; index < Math.max(current.length, required.length); index += 1) {
+    const difference = (current[index] ?? 0) - (required[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+}
+
 module.exports = {
   App,
   View,
   arrayBufferToBase64,
   base64ToArrayBuffer,
-  apiVersion: "1.5.0",
+  apiVersion: MOCK_API_VERSION,
+  requireApiVersion: jest.fn(requireApiVersion),
   Plugin,
   Scope,
   Notice: class Notice {

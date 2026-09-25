@@ -94,6 +94,27 @@ describe("EmbeddingsStatusBar", () => {
     expect(activateEmbeddingsView).toHaveBeenCalledTimes(3);
   });
 
+  it("shows Starting at launch without constructing the embeddings manager", () => {
+    statusBar.unload();
+    const launchElement = document.createElement("div");
+    installObsidianDomHelpers(launchElement);
+    plugin.addStatusBarItem.mockReturnValue(launchElement);
+    const manager = plugin.embeddingsManager;
+    plugin.embeddingsManager = null;
+    plugin.getOrCreateEmbeddingsManager.mockClear();
+
+    const launch = new EmbeddingsStatusBar(plugin);
+    launch.load();
+
+    expect(plugin.getOrCreateEmbeddingsManager).not.toHaveBeenCalled();
+    expect(launchElement.hidden).toBe(false);
+    expect(launchElement.textContent).toBe("Starting");
+
+    launch.startMonitoring(manager);
+    expect(launchElement.textContent).toBe("12");
+    launch.unload();
+  });
+
   it("is absent while embeddings are disabled", () => {
     statusBar.unload();
     const disabledElement = document.createElement("div");

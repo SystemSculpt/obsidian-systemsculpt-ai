@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { createHash, webcrypto } from "node:crypto";
-import { App } from "obsidian";
+import { App, requireApiVersion } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AgentChatView } from "../views/chatview/AgentChatView";
 
@@ -81,6 +81,9 @@ describe("SystemSculptPlugin loaded plugin build identity", () => {
     const secondView = makeView(plugin, `conversation_${"b".repeat(32)}`);
 
     (plugin as any).initializeAgentIncidentCoordinator();
+    await Promise.resolve();
+    // Launch no longer reads or hashes the bundle; the first chat use does.
+    expect(readBinary).not.toHaveBeenCalled();
     const cachedPromise = plugin.getLoadedPluginBuildId();
     expect(plugin.getLoadedPluginBuildId()).toBe(cachedPromise);
     const firstPreparation = (firstView as any).prepareThinConversation(
@@ -89,6 +92,7 @@ describe("SystemSculptPlugin loaded plugin build identity", () => {
     const secondPreparation = (secondView as any).prepareThinConversation(
       (secondView as any).pendingThinConversationId,
     );
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
 
     expect(readBinary).toHaveBeenCalledTimes(1);
     expect(digest).not.toHaveBeenCalled();
@@ -131,6 +135,76 @@ describe("SystemSculptPlugin loaded plugin build identity", () => {
     expect(readBinary).toHaveBeenCalledTimes(1);
     expect((plugin as any).agentIncidentLoadedBundleId).toBeNull();
   });
+
+  const withLocalStorageApi = async (run: () => Promise<void>): Promise<void> => {
+    const gate = requireApiVersion as unknown as jest.Mock;
+    const original = gate.getMockImplementation();
+    gate.mockImplementation(() => true);
+    try {
+      await run();
+    } finally {
+      gate.mockImplementation(original);
+    }
+  };
+
+  it("hashes at every launch on hosts without vault localStorage", async () => {
+    const readBinary = jest.fn(async () => bytes("old host bundle\n"));
+    const launch = () => {
+      const plugin = makePlugin(readBinary);
+      (plugin.app.vault.adapter as any).stat = jest.fn(async () => ({ type: "file", ctime: 1, mtime: 5, size: 16 }));
+      return plugin;
+    };
+    await launch().getLoadedPluginBuildId();
+    await launch().getLoadedPluginBuildId();
+    expect(readBinary).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses the digest of an unchanged bundle across launches without reading it", () => withLocalStorageApi(async () => {
+    const installedBytes = bytes("stable installed bundle\n");
+    const readBinary = jest.fn(async () => installedBytes);
+    const storage = new Map<string, unknown>();
+    const stat = { type: "file", ctime: 1, mtime: 1_700_000_000_000, size: installedBytes.byteLength };
+    const launch = (): SystemSculptPlugin => {
+      const plugin = makePlugin(readBinary);
+      (plugin.app.vault.adapter as any).stat = jest.fn(async () => ({ ...stat }));
+      (plugin.app as any).loadLocalStorage = (key: string) => storage.get(key) ?? null;
+      (plugin.app as any).saveLocalStorage = (key: string, value: unknown) => storage.set(key, value);
+      return plugin;
+    };
+
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(installedBytes));
+    expect(readBinary).toHaveBeenCalledTimes(1);
+
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(installedBytes));
+    expect(readBinary).toHaveBeenCalledTimes(1);
+
+    // Any change to the file's stat re-reads and re-hashes the new bytes.
+    const updatedBytes = bytes("updated installed bundle, longer\n");
+    readBinary.mockResolvedValue(updatedBytes);
+    stat.mtime += 1_000;
+    stat.size = updatedBytes.byteLength;
+    await expect(launch().getLoadedPluginBuildId()).resolves.toBe(buildId(updatedBytes));
+    expect(readBinary).toHaveBeenCalledTimes(2);
+  }));
+
+  it("does not memoize a digest when the bundle changes during the read", () => withLocalStorageApi(async () => {
+    const installedBytes = bytes("bundle being replaced\n");
+    const readBinary = jest.fn(async () => installedBytes);
+    const saveLocalStorage = jest.fn();
+    const plugin = makePlugin(readBinary);
+    let mtime = 10;
+    (plugin.app.vault.adapter as any).stat = jest.fn(async () => ({
+      type: "file",
+      ctime: 1,
+      mtime: mtime++,
+      size: installedBytes.byteLength,
+    }));
+    (plugin.app as any).loadLocalStorage = () => null;
+    (plugin.app as any).saveLocalStorage = saveLocalStorage;
+
+    await expect(plugin.getLoadedPluginBuildId()).resolves.toBe(buildId(installedBytes));
+    expect(saveLocalStorage).not.toHaveBeenCalled();
+  }));
 
   it("keeps unloaded and reloaded plugin instances isolated", async () => {
     const firstBytes = bytes("first plugin session\n");
