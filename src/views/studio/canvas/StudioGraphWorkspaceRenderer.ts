@@ -1,6 +1,4 @@
 import { StudioEditorRevision } from "../../../studio/document/StudioEditorRevision";
-import { materializeStudioProject } from "../../../studio/document/StudioProjectCollaboration";
-import { cloneStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 import type { RenderStudioGraphNodeCardOptions } from "./StudioGraphNodeCardTypes";
 import type { StudioProjectV1 } from "../../../studio/types";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
@@ -491,42 +489,26 @@ export function renderStudioGraphWorkspace(
   const nodeSignatures = new Map<string, string>();
   const nodeStructureSignatures = new Map<string, string>();
   const nodeEditing = new Map<string, boolean>();
-  const editorBases = new WeakMap<object, StudioProjectV1>();
+  const cardEditors = new Map<string, StudioEditorRevision>();
   const mountCard = (node: StudioProjectV1["graph"]["nodes"][number], renderOptions: StudioGraphWorkspaceRendererOptions): StudioGraphNodeCardHandle => {
     const inboundEdges = renderOptions.currentProject!.graph.edges
       .filter(edge => edge.toNodeId === node.id)
       .map(edge => ({ fromNodeId: edge.fromNodeId, fromPortId: edge.fromPortId, toPortId: edge.toPortId }));
-    let editor: StudioEditorRevision | undefined;
-    if (renderOptions.currentProject?.document) {
-      let basis = editorBases.get(renderOptions);
-      if (!basis) {
-        basis = cloneStudioProjectSnapshot(materializeStudioProject(renderOptions.currentProject));
-        renderOptions.currentProject.document = basis.document ? {...basis.document, heads: [...basis.document.heads]} : undefined;
-        editorBases.set(renderOptions, basis);
-      }
-      editor = new StudioEditorRevision(basis);
-    }
+    // The card's controls show these values; later keystrokes are relative to them.
+    const editor = new StudioEditorRevision();
+    editor.display("title", node.title);
+    for (const [key, value] of Object.entries(node.config)) editor.display(`config:${key}`, value);
+    cardEditors.set(node.id, editor);
+    const liveNode = (nodeId: string) => renderOptions.currentProject?.graph.nodes.find(item => item.id === nodeId);
     const handle = renderStudioGraphNodeCard( {
       ...renderOptions,
       onNodeConfigValueChange: (nodeId, key, value, changeOptions) => {
-        const project = renderOptions.currentProject!;
-        if (!editor || typeof value !== "string" || !renderOptions.onNodeConfigValueChange) {
-          renderOptions.onNodeConfigValueChange?.(nodeId, key, value, changeOptions); return;
-        }
-        const merged = editor.edit(nodeId, {config: key}, value, project);
-        const next = merged.graph.nodes.find(node => node.id === nodeId);
-        if (!next) return;
-        renderOptions.onNodeConfigValueChange(nodeId, key, next.config[key], changeOptions);
-        project.document = merged.document;
+        const current = typeof value === "string" && nodeId === node.id ? liveNode(nodeId) : undefined;
+        renderOptions.onNodeConfigValueChange?.(nodeId, key, current ? editor.commit(`config:${key}`, value as string, current.config[key]) : value, changeOptions);
       },
-      onNodeTitleInput: (node, value) => {
-        const project = renderOptions.currentProject!;
-        if (!editor) { renderOptions.onNodeTitleInput(node, value); return; }
-        const merged = editor.edit(node.id, {title: true}, value, project);
-        const next = merged.graph.nodes.find(item => item.id === node.id);
-        if (!next) return;
-        renderOptions.onNodeTitleInput(node, next.title);
-        project.document = merged.document;
+      onNodeTitleInput: (target, value) => {
+        const current = target.id === node.id ? liveNode(target.id) : undefined;
+        renderOptions.onNodeTitleInput(target, current ? editor.commit("title", value, current.title) : value);
       },
       projectId: renderOptions.currentProject!.projectId,
       projectPath: renderOptions.currentProjectPath!,
@@ -584,6 +566,7 @@ export function renderStudioGraphWorkspace(
       handle.dispose();
       handle.element.remove();
       cardHandles.delete(nodeId);
+      cardEditors.delete(nodeId);
       nodeSignatures.delete(nodeId);
       nodeStructureSignatures.delete(nodeId);
       nodeEditing.delete(nodeId);
@@ -611,7 +594,7 @@ export function renderStudioGraphWorkspace(
       const editingChanged = nodeEditing.get(node.id) !== editing;
       const active = existing.element.ownerDocument.activeElement;
       const titleInput = existing.element.querySelector<HTMLInputElement>(".ss-studio-node-title-input");
-      if (titleInput && active !== titleInput) titleInput.value = node.title;
+      if (titleInput && active !== titleInput) { titleInput.value = node.title; cardEditors.get(node.id)?.display("title", node.title); }
       const structureSignature = studioNodeStructureSignature(node, next);
       if (!editingChanged && nodeStructureSignatures.get(node.id) === structureSignature) {
         nodeSignatures.set(node.id, signature);
@@ -674,6 +657,7 @@ export function renderStudioGraphWorkspace(
       shapeHandle.cancelArrowGesture();
       for (const handle of cardHandles.values()) handle.dispose();
       cardHandles.clear();
+      cardEditors.clear();
       nodeSignatures.clear();
       nodeStructureSignatures.clear();
       nodeEditing.clear();

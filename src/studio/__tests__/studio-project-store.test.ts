@@ -487,20 +487,25 @@ describe("single authored file", () => {
     expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello world");
   });
 
-  it("preserves agent text while a mounted editor continues from its displayed revision", async () => {
+  it("merges agent text into what a mounted editor displayed and commits plain values otherwise", async () => {
     const {store} = createStore();
     const {path, project} = await store.createProject(options);
     const {project: base} = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
-    const editor = new StudioEditorRevision(cloneStudioProjectSnapshot(base));
+    const editor = new StudioEditorRevision();
+    editor.display("config:value", base.graph.nodes[0].config.value);
     const remote = await store.editDocument(path, base.document!.heads, [{entityId: "node:a", path: ["config", "value"], value: "hello remote"}]);
-    let merged = editor.edit("a", {config: "value"}, "hello!", remote.project);
-    merged = (await store.saveProject(path, merged)).project;
-    merged = editor.edit("a", {config: "value"}, "hello!!", merged);
-    const result = (await store.saveProject(path, merged)).project.graph.nodes[0].config.value as string;
-    expect(result).toContain("remote");
-    expect(result.match(/hello/g)).toHaveLength(1);
-    expect(result.match(/!/g)).toHaveLength(2);
-    expect(result.match(/remote/g)).toHaveLength(1);
+    // The card still shows "hello": the typed character lands in the agent's text.
+    const first = editor.commit("config:value", "hello!", remote.project.graph.nodes[0].config.value);
+    expect(first).toBe("hello! remote");
+    const draft = cloneStudioProjectSnapshot(remote.project); draft.graph.nodes[0].config.value = first;
+    const saved = (await store.saveProject(path, draft)).project;
+    expect(editor.commit("config:value", "hello!!", saved.graph.nodes[0].config.value)).toBe("hello!! remote");
+    // A change that overlaps the typed range cannot be merged without guessing: the typed value wins.
+    expect(editor.commit("config:value", "bye", "hello!! remote")).toBe("bye");
+    // Without another writer, a keystroke is its plain value.
+    editor.display("title", "Title");
+    expect(editor.commit("title", "Title!", "Title")).toBe("Title!");
+    expect(editor.commit("title", "Title!!", "Title!")).toBe("Title!!");
   });
 
   it("round-trips labeled and unlabeled arrows and shape group membership", async () => {

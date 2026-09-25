@@ -1,17 +1,24 @@
-import type { StudioProjectV1 } from '../types';
-import {cloneStudioProjectSnapshot} from '../StudioProjectSnapshots';
-import {materializeStudioProject, mergeStudioProjects} from './StudioProjectCollaboration';
+import { mergeStudioText } from './StudioTextMerge';
 
-/** A mounted editor submits changes against the text it actually displayed. */
+/**
+ * A mounted editor submits changes against the text it actually displayed.
+ * A keystroke commits its plain value. Only when another writer changed the
+ * field after it was displayed are the two edits merged, and a merge that
+ * would have to guess keeps the typed value.
+ */
 export class StudioEditorRevision {
-  constructor(private basis: StudioProjectV1) {}
+  private readonly shown = new Map<string, string>();
 
-  edit(nodeId: string, field: {config: string} | {title: true}, value: string, current: StudioProjectV1): StudioProjectV1 {
-    const next = cloneStudioProjectSnapshot(this.basis);
-    const node = next.graph.nodes.find(node => node.id === nodeId);
-    if (!node) throw new Error('The edited node no longer exists.');
-    if ('config' in field) node.config[field.config] = value; else node.title = value;
-    this.basis = materializeStudioProject(next);
-    return mergeStudioProjects(this.basis, current);
+  /** Record the value a control displays, at mount or when patched in place. */
+  display(field: string, value: unknown): void {
+    if (typeof value === 'string') this.shown.set(field, value); else this.shown.delete(field);
+  }
+
+  /** The value to commit for `typed`, given the field's current value in the project. */
+  commit(field: string, typed: string, current: unknown): string {
+    const shown = this.shown.get(field);
+    this.shown.set(field, typed);
+    if (shown === undefined || typeof current !== 'string' || current === shown || current === typed) return typed;
+    return mergeStudioText(shown, typed, current) ?? typed;
   }
 }
