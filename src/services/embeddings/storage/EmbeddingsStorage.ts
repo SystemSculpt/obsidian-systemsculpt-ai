@@ -404,6 +404,11 @@ export class EmbeddingsStorage {
     });
   }
 
+  /** Every cached root record (metadata only). */
+  listRoots(): IterableIterator<EmbeddingRootRecord> {
+    return this.cache.values();
+  }
+
   /** A cached root record's metadata; roots never carry their vector here. */
   getVectorSync(id: string): EmbeddingRootRecord | null {
     return this.cache.get(id) || null;

@@ -7,6 +7,8 @@ import { SemanticWorkQueue } from "../SemanticWorkQueue";
 import type { EmbeddingVector, ProcessingResult } from "../types";
 import { buildVectorId } from "../utils/vectorId";
 import { installFakeIndexedDb } from "./support/fakeIndexedDb";
+import { EmbeddingsIndexFile } from "../storage/EmbeddingsIndexFile";
+import { PortableCheckpointCoordinator } from "../storage/EmbeddingsPortableIndex";
 
 const LEGACY = "systemsculpt:openrouter/openai/text-embedding-3-small:v2:2";
 const V2 = "systemsculpt:managed:semantic-v1:v2:2";
@@ -37,8 +39,8 @@ function pluginStub(files: TFile[]) {
     vaultInstanceId: "generation-pruning",
     embeddingsVectorFormatVersion: 8,
     embeddingsEnabled: false,
-    embeddingsPortableIndex: false,
-    embeddingsExclusions: { folders: [], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
+    embeddingsPortableIndex: false as boolean,
+    embeddingsExclusions: { folders: [] as string[], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
     chatsDirectory: "Chats",
     savedChatsDirectory: "Saved Chats",
   };
@@ -192,5 +194,57 @@ describe("EmbeddingsManager superseded generation pruning (#324)", () => {
     await manager.pruneSupersededNamespaces();
 
     expect(manager.storage.retainNamespaces).toHaveBeenCalledWith(new Set([COMMITTED, IN_PROGRESS]));
+  });
+});
+
+describe("EmbeddingsManager portable restore filter", () => {
+  let fake: ReturnType<typeof installFakeIndexedDb>;
+  beforeEach(() => { fake = installFakeIndexedDb(); });
+  afterEach(() => fake.restore());
+
+  it("restores only notes that exist in this vault and are not excluded", async () => {
+    const files = new Map<string, ArrayBuffer | string>();
+    const adapter = {
+      exists: async (path: string) => files.has(path) || [...files.keys()].some((key) => key.startsWith(`${path}/`)),
+      mkdir: async () => undefined,
+      read: async (path: string) => files.get(path) as string,
+      write: async (path: string, data: string) => { files.set(path, data); },
+      readBinary: async (path: string) => files.get(path) as ArrayBuffer,
+      writeBinary: async (path: string, data: ArrayBuffer) => { files.set(path, data); },
+      stat: async (path: string) => {
+        const value = files.get(path);
+        return value === undefined ? null : { size: typeof value === "string" ? value.length : value.byteLength };
+      },
+      list: async (dir: string) => ({ files: [...files.keys()].filter((path) => path.startsWith(`${dir}/`)), folders: [] }),
+      rename: async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
+      remove: async (path: string) => { files.delete(path); },
+    };
+    const source = new EmbeddingsStorage("SystemSculptEmbeddings::source-device");
+    await source.initialize();
+    for (const path of ["Kept.md", "Deleted.md", "Private/Secret.md"]) {
+      await source.publishPath(path, COMMITTED, [record(COMMITTED, path, 3)]);
+    }
+    const writer = new PortableCheckpointCoordinator({ store: source, file: new EmbeddingsIndexFile(adapter as never) });
+    writer.markChanged();
+    await writer.flush();
+    writer.cancel();
+
+    const vaultFiles = ["Kept.md", "Private/Secret.md"].map((path) => new TFile({
+      path,
+      name: path.split("/").pop(),
+      extension: "md",
+      stat: { mtime: 1, size: 100 },
+    }));
+    const { app, plugin } = pluginStub(vaultFiles);
+    (app.vault as { adapter: unknown }).adapter = adapter;
+    plugin.settings.embeddingsPortableIndex = true;
+    (plugin.settings.embeddingsExclusions as { folders: string[] }).folders = ["Private"];
+    const manager = new EmbeddingsManager(app as never, plugin as never);
+
+    await manager.initialize();
+
+    const storage = (manager as unknown as { storage: EmbeddingsStorage }).storage;
+    expect(storage.getDistinctPaths()).toEqual(["Kept.md"]);
+    await manager.cleanup();
   });
 });

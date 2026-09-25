@@ -132,6 +132,37 @@ describe("portable index round trip through real storage and files", () => {
     }
     // Restored records are the snapshot itself, not changes to write back.
     expect(second.takePortableChanges()).toEqual({ all: false, paths: [] });
+    const secondCheckpoint = new PortableCheckpointCoordinator({ store: second, file: new EmbeddingsIndexFile(folder as never) });
+    await secondCheckpoint.reconcileFormat();
+    expect(secondCheckpoint.status().pending).toBe(false);
+    secondCheckpoint.cancel();
+  });
+
+  it("restores only notes this vault still has and rewrites the shards that held the rest", async () => {
+    const folder = vaultFolder();
+    const first = await openStorage("device-with-extra-notes");
+    for (const [index, path] of ["Kept.md", "Deleted.md", "Private/Secret.md"].entries()) {
+      await first.publishPath(path, V3, records(V3, path, 1, index));
+    }
+    const writer = new PortableCheckpointCoordinator({ store: first, file: new EmbeddingsIndexFile(folder as never) });
+    writer.markChanged();
+    await writer.flush();
+    writer.cancel();
+
+    const second = await openStorage("device-without-them");
+    const file = new EmbeddingsIndexFile(folder as never);
+    await restoreEmbeddingsIndexIfEmpty({ store: second, file, isRestorable: (path) => path === "Kept.md" });
+    await second.loadEmbeddings();
+    expect(second.getDistinctPaths()).toEqual(["Kept.md"]);
+
+    const checkpoint = new PortableCheckpointCoordinator({ store: second, file });
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    checkpoint.cancel();
+    const third = await openStorage("device-restoring-later");
+    await restoreEmbeddingsIndexIfEmpty({ store: third, file: new EmbeddingsIndexFile(folder as never) });
+    await third.loadEmbeddings();
+    expect(third.getDistinctPaths()).toEqual(["Kept.md"]);
   });
 
   it("migrates an older release's index.json in place and keeps restores working", async () => {

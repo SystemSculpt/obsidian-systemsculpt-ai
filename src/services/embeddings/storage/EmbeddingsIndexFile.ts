@@ -182,6 +182,15 @@ export class EmbeddingsIndexFile {
     return shards;
   }
 
+  public async shardSize(shard: number): Promise<number | null> {
+    try {
+      const stat = await this.adapter.stat(this.shardPath(shard));
+      return stat && typeof stat.size === "number" ? stat.size : null;
+    } catch {
+      return null;
+    }
+  }
+
   public async readShard(shard: number): Promise<ArrayBuffer | null> {
     const path = this.shardPath(shard);
     try {

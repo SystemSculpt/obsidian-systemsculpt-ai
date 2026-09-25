@@ -8,7 +8,7 @@
  * unit-testable with fakes and the EmbeddingsManager wiring stays a thin call.
  */
 
-import type { EmbeddingVector } from "../types";
+import type { EmbeddingRootRecord, EmbeddingVector } from "../types";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import { isManagedNamespace } from "../utils/namespace";
 import {
@@ -27,10 +27,14 @@ export interface PortableIndexStore {
   importVectors(vectors: EmbeddingVector[]): Promise<{ imported: number }>;
   /** Paths that have a root record. */
   getDistinctPaths(): string[];
+  /** Every root record (metadata only), used to describe what each shard should hold. */
+  listRoots(): Iterable<EmbeddingRootRecord>;
   /** Every record for the given notes, read transiently. */
   readPaths(paths: readonly string[]): Promise<EmbeddingVector[]>;
   /** Paths changed since the last call (`all` for sweeps that do not name paths). */
   takePortableChanges(): { all: boolean; paths: string[] };
+  readState<T>(key: string): Promise<T | null>;
+  writeState<T>(key: string, value: T): Promise<void>;
 }
 
 export interface PortableIndexFile {
@@ -41,6 +45,8 @@ export interface PortableIndexFile {
   size(): Promise<number | null>;
   listShards(): Promise<Set<number>>;
   readShard(shard: number): Promise<ArrayBuffer | null>;
+  /** Byte size of one shard file, or null when it is missing. */
+  shardSize(shard: number): Promise<number | null>;
   writeShard(shard: number, bytes: ArrayBuffer): Promise<void>;
   removeShard(shard: number): Promise<void>;
   removeRecoveryCopy?(): Promise<void>;
@@ -58,8 +64,12 @@ const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
 /** Removals are expedited so deleted or excluded notes leave the snapshot soon. */
 const DEFAULT_DESTRUCTIVE_QUIET_MS = 1_000;
 const DEFAULT_DESTRUCTIVE_MAX_WAIT_MS = 10_000;
+/** Consecutive failed writes back off up to this long between retries. */
+const MAX_RETRY_DELAY_MS = 5 * 60_000;
 /** A format-4 manifest is tiny; anything larger is an older release's whole index. */
 const MAX_MANIFEST_BYTES = 64 * 1024;
+/** What this device last wrote to each shard file, so reconciliation can compare contents. */
+const SHARD_RECORDS_STATE_KEY = "semantic-portable-shards-v1";
 
 export interface PortableCheckpointTiming {
   quietMs?: number;
@@ -68,8 +78,65 @@ export interface PortableCheckpointTiming {
   destructiveMaxWaitMs?: number;
 }
 
+interface ShardRecord {
+  /** Byte size of the file this device wrote (or restored from). */
+  size: number;
+  /** Signature of the notes the file holds; see shardSignature. */
+  signature: string;
+}
+
+interface ShardRecords {
+  version: 1;
+  shards: Record<string, ShardRecord>;
+}
+
 function allShards(): number[] {
   return Array.from({ length: PORTABLE_SHARD_COUNT }, (_, shard) => shard);
+}
+
+function isRootRecord(record: Pick<EmbeddingRootRecord, "id" | "chunkId">): boolean {
+  if (typeof record.chunkId === "number") return record.chunkId === 0;
+  return record.id.endsWith("#0");
+}
+
+/**
+ * Identify which notes and which embeddings a shard holds: every root's path,
+ * generation, creation time and chunk count. A re-embed changes the creation
+ * time; an mtime-only touch of unchanged bytes does not, and needs no write.
+ */
+function shardSignatures(roots: Iterable<EmbeddingRootRecord>): Map<number, string> {
+  const entries = new Map<number, string[]>();
+  for (const root of roots) {
+    if (!root?.path || !isRootRecord(root)) continue;
+    const shard = portableShardOf(root.path);
+    const entry = [
+      root.path,
+      root.metadata.namespace,
+      root.metadata.createdAt,
+      root.metadata.chunkCount ?? "",
+      root.metadata.complete === true ? 1 : 0,
+    ].join("\u0000");
+    const list = entries.get(shard);
+    if (list) list.push(entry);
+    else entries.set(shard, [entry]);
+  }
+  const signatures = new Map<number, string>();
+  for (const [shard, list] of entries) {
+    let hash = 0x811c9dc5;
+    for (const character of list.sort().join("\u0001")) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    signatures.set(shard, `${list.length}:${(hash >>> 0).toString(16)}`);
+  }
+  return signatures;
+}
+
+async function readShardRecords(store: PortableIndexStore): Promise<ShardRecords> {
+  const stored = await store.readState<ShardRecords>(SHARD_RECORDS_STATE_KEY);
+  return stored?.version === 1 && stored.shards && typeof stored.shards === "object"
+    ? { version: 1, shards: { ...stored.shards } }
+    : { version: 1, shards: {} };
 }
 
 /**
@@ -77,7 +144,9 @@ function allShards(): number[] {
  * Edits wait for a long quiet period; removals use a short one so bursts (a
  * folder of deletes, a rename storm) still become one write. A failed write
  * after a removal deletes the affected shards: a missing shard only costs a
- * re-embed on restore, while a stale one would resurrect removed notes.
+ * re-embed on restore, while a stale one would resurrect removed notes. A
+ * shard that could be neither rewritten nor deleted stays pending and is
+ * retried, with backoff, until it is.
  */
 export class PortableCheckpointCoordinator {
   private timer: number | null = null;
@@ -88,6 +157,7 @@ export class PortableCheckpointCoordinator {
   private destructiveRevision = 0;
   private writeChain: Promise<void> = Promise.resolve();
   private lastWrittenAt: number | null = null;
+  private consecutiveFailures = 0;
   /** Shards that still need writing, beyond the store's pending changes. */
   private readonly pendingShards = new Set<number>();
   /** The manifest this session last wrote; null forces one write per session. */
@@ -129,20 +199,35 @@ export class PortableCheckpointCoordinator {
   }
 
   /**
-   * Bring the files on disk in line with the current format without a
-   * rewrite when they already are: a missing or older-release `index.json`
-   * schedules every shard (the one-time migration); otherwise only shards
-   * missing from disk, or on disk with no notes left, are scheduled.
+   * Bring the files on disk in line with the store without rewriting shards
+   * that already match. A missing or older-release `index.json` schedules
+   * every shard (the one-time migration). Otherwise a shard is rewritten when
+   * the notes it should hold differ from what this device last wrote there,
+   * when its file size differs from that write (another writer, a partial
+   * sync), when it is missing, or when it exists with no notes left.
    */
   async reconcileFormat(): Promise<void> {
-    const expected = new Set(this.deps.store.getDistinctPaths().map((path) => portableShardOf(path)));
+    const { store, file } = this.deps;
+    const expected = shardSignatures(store.listRoots());
     if (expected.size === 0) return;
-    const [manifestCurrent, onDisk] = await Promise.all([
+    const [manifestCurrent, onDisk, records] = await Promise.all([
       this.manifestIsCurrent(),
-      this.deps.file.listShards(),
+      file.listShards(),
+      readShardRecords(store),
     ]);
-    const stale = allShards().filter((shard) => !manifestCurrent || expected.has(shard) !== onDisk.has(shard));
     if (!manifestCurrent) this.writtenManifest = null;
+    const stale: number[] = [];
+    for (const shard of allShards()) {
+      const signature = expected.get(shard);
+      const record = records.shards[String(shard)];
+      if (!manifestCurrent) {
+        stale.push(shard);
+      } else if (!signature || !onDisk.has(shard)) {
+        if (Boolean(signature) !== onDisk.has(shard)) stale.push(shard);
+      } else if (!record || record.signature !== signature || await file.shardSize(shard) !== record.size) {
+        stale.push(shard);
+      }
+    }
     if (stale.length === 0) return;
     for (const shard of stale) this.pendingShards.add(shard);
     this.markChanged();
@@ -155,11 +240,13 @@ export class PortableCheckpointCoordinator {
     this.destructiveRevision = 0;
     this.firstDirtyAt = null;
     this.firstDestructiveAt = null;
+    this.consecutiveFailures = 0;
     this.pendingShards.clear();
     this.deps.store.takePortableChanges();
     this.writtenManifest = null;
     this.writeChain = this.writeChain.catch(() => undefined).then(async () => {
       await this.deps.file.remove?.();
+      await this.deps.store.writeState<ShardRecords>(SHARD_RECORDS_STATE_KEY, { version: 1, shards: {} });
       this.lastWrittenAt = Date.now();
     });
     await this.writeChain;
@@ -177,9 +264,14 @@ export class PortableCheckpointCoordinator {
     });
     try {
       await this.writeChain;
+      this.consecutiveFailures = 0;
     } catch (error) {
-      // The affected shards were dropped; there is nothing stale left to retry.
-      if (destructive) this.writtenRevision = Math.max(this.writtenRevision, targetRevision);
+      this.consecutiveFailures += 1;
+      // Failed shards were deleted instead; nothing stale is left to retry.
+      // A shard that could not even be deleted keeps the change pending.
+      if (destructive && this.pendingShards.size === 0) {
+        this.writtenRevision = Math.max(this.writtenRevision, targetRevision);
+      }
       throw error;
     } finally {
       if (this.writtenRevision >= this.destructiveRevision) this.firstDestructiveAt = null;
@@ -219,18 +311,26 @@ export class PortableCheckpointCoordinator {
     }
     if (pathsByShard.size === 0) {
       // Nothing left to snapshot; an empty snapshot would only shadow a restore.
+      await file.remove?.();
       this.pendingShards.clear();
       this.writtenManifest = null;
-      await file.remove?.();
+      await store.writeState<ShardRecords>(SHARD_RECORDS_STATE_KEY, { version: 1, shards: {} });
       return;
     }
 
+    const records = await readShardRecords(store);
+    const signatures = shardSignatures(store.listRoots());
     try {
       for (const shard of [...this.pendingShards].sort((left, right) => left - right)) {
         const paths = pathsByShard.get(shard) ?? [];
         const bytes = paths.length > 0 ? encodePortableShard(shard, await store.readPaths(paths)) : null;
-        if (bytes) await file.writeShard(shard, bytes);
-        else await file.removeShard(shard);
+        if (bytes) {
+          await file.writeShard(shard, bytes);
+          records.shards[String(shard)] = { size: bytes.byteLength, signature: signatures.get(shard) ?? "" };
+        } else {
+          await file.removeShard(shard);
+          delete records.shards[String(shard)];
+        }
         this.pendingShards.delete(shard);
       }
       const manifest = buildPortableManifest(this.deps.committedNamespace?.() ?? null);
@@ -242,15 +342,19 @@ export class PortableCheckpointCoordinator {
       }
     } catch (error) {
       if (destructive) {
-        // Never leave shards holding records that were just removed.
+        // Never leave shards holding records that were just removed. A shard
+        // that cannot be deleted either stays pending for the next attempt.
         for (const shard of [...this.pendingShards]) {
           try {
             await file.removeShard(shard);
+            delete records.shards[String(shard)];
             this.pendingShards.delete(shard);
-          } catch { /* the next write retries this shard */ }
+          } catch { /* retried by the next flush */ }
         }
       }
       throw error;
+    } finally {
+      await store.writeState(SHARD_RECORDS_STATE_KEY, records).catch(() => undefined);
     }
   }
 
@@ -267,7 +371,10 @@ export class PortableCheckpointCoordinator {
     const deadline = destructive
       ? (this.firstDestructiveAt ?? now) + this.timing.destructiveMaxWaitMs
       : (this.firstDirtyAt ?? now) + this.timing.maxWaitMs;
-    const dueAt = Math.max(now, Math.min(now + quiet, deadline));
+    let dueAt = Math.max(now, Math.min(now + quiet, deadline));
+    if (this.consecutiveFailures > 0) {
+      dueAt = Math.max(dueAt, now + Math.min(MAX_RETRY_DELAY_MS, quiet * 2 ** this.consecutiveFailures));
+    }
     this.cancelTimer();
     this.timer = window.setTimeout(() => {
       this.timer = null;
@@ -287,34 +394,89 @@ export interface RestoreResult {
   reason: "restored" | "store-not-empty" | "no-snapshot" | "empty-snapshot";
 }
 
-/**
- * Read whatever snapshot the vault folder holds: the format-4 manifest and its
- * shards, or an older release's single-file index. Shards are read even when
- * the manifest has not synced yet. A corrupt or partially synced shard is
- * skipped; its notes are re-embedded.
- */
-export async function readPortableSnapshot(file: PortableIndexFile): Promise<{
+export interface PortableSnapshot {
   committedNamespace: string | null;
   vectors: EmbeddingVector[];
-} | null> {
+  /** What each readable shard file held when it was read. */
+  shards: Map<number, ShardRecord>;
+}
+
+function noteKey(vector: EmbeddingVector): string {
+  return `${vector.metadata.namespace}\u0000${vector.path}`;
+}
+
+/** A note's root, which dates its embedding: source mtime, then embedding time. */
+function newerNote(left: EmbeddingVector[], right: EmbeddingVector[]): EmbeddingVector[] {
+  const leftRoot = left.find((vector) => vector.chunkId === 0);
+  const rightRoot = right.find((vector) => vector.chunkId === 0);
+  if (!rightRoot) return left;
+  if (!leftRoot) return right;
+  const byMtime = (rightRoot.metadata.mtime || 0) - (leftRoot.metadata.mtime || 0);
+  if (byMtime !== 0) return byMtime > 0 ? right : left;
+  return (rightRoot.metadata.createdAt || 0) > (leftRoot.metadata.createdAt || 0) ? right : left;
+}
+
+/**
+ * Combine the sharded snapshot with an older release's single-file index when
+ * both are present (a device on an older release rewrote index.json after
+ * the shards were written, or the shards synced first). Each note keeps its
+ * newer embedding; the shards win ties.
+ */
+function mergeNewestPerNote(sharded: EmbeddingVector[], legacy: EmbeddingVector[]): EmbeddingVector[] {
+  if (legacy.length === 0) return sharded;
+  if (sharded.length === 0) return legacy;
+  const group = (vectors: EmbeddingVector[]) => {
+    const groups = new Map<string, EmbeddingVector[]>();
+    for (const vector of vectors) {
+      const key = noteKey(vector);
+      const list = groups.get(key);
+      if (list) list.push(vector);
+      else groups.set(key, [vector]);
+    }
+    return groups;
+  };
+  const merged = group(sharded);
+  for (const [key, notes] of group(legacy)) {
+    const current = merged.get(key);
+    merged.set(key, current ? newerNote(current, notes) : notes);
+  }
+  return [...merged.values()].flat();
+}
+
+/**
+ * Read whatever snapshot the vault folder holds: the format-4 manifest and its
+ * shards, an older release's single-file index, or both. Shards are read
+ * whenever they exist, even when `index.json` is missing, unparseable, not
+ * yet synced, or an older release's file. A corrupt or partially synced shard
+ * is skipped; its notes are re-embedded.
+ */
+export async function readPortableSnapshot(file: PortableIndexFile): Promise<PortableSnapshot | null> {
   const index = await file.read();
   const manifest = parsePortableManifest(index);
-  if (index && !manifest) {
-    return { committedNamespace: null, vectors: deserializeEmbeddingsIndex(index) };
-  }
-  const shards = await file.listShards();
-  if (!manifest && shards.size === 0) return null;
-  const vectors: EmbeddingVector[] = [];
-  for (const shard of [...shards].sort((left, right) => left - right)) {
+  const legacy = index && !manifest ? deserializeEmbeddingsIndex(index) : [];
+  const shardFiles = await file.listShards();
+  if (!index && shardFiles.size === 0) return null;
+  const sharded: EmbeddingVector[] = [];
+  const shards = new Map<number, ShardRecord>();
+  for (const shard of [...shardFiles].sort((left, right) => left - right)) {
     const bytes = await file.readShard(shard);
     if (!bytes) continue;
     try {
-      vectors.push(...decodePortableShard(bytes, shard));
+      const decoded = decodePortableShard(bytes, shard);
+      sharded.push(...decoded);
+      shards.set(shard, {
+        size: bytes.byteLength,
+        signature: shardSignatures(decoded).get(shard) ?? "",
+      });
     } catch {
       // A shard that fails validation is treated as absent.
     }
   }
-  return { committedNamespace: manifest?.committedNamespace ?? null, vectors };
+  return {
+    committedNamespace: manifest?.committedNamespace ?? null,
+    vectors: mergeNewestPerNote(sharded, legacy),
+    shards,
+  };
 }
 
 /**
@@ -322,12 +484,17 @@ export async function readPortableSnapshot(file: PortableIndexFile): Promise<{
  * empty (a fresh device / wiped IndexedDB). A populated store always wins so we
  * never clobber newer local vectors with a stale snapshot — mirroring the
  * existing legacy-DB import guard.
+ *
+ * `isRestorable` filters notes against this vault: a note that no longer
+ * exists, or that the current exclusions hide, is never restored, whatever
+ * the snapshot still holds.
  */
 export async function restoreEmbeddingsIndexIfEmpty(deps: {
   store: PortableIndexStore;
   file: PortableIndexFile;
+  isRestorable?: (path: string) => boolean;
 }): Promise<RestoreResult> {
-  const { store, file } = deps;
+  const { store, file, isRestorable } = deps;
 
   const count = await store.countVectors();
   if (count > 0) {
@@ -339,8 +506,16 @@ export async function restoreEmbeddingsIndexIfEmpty(deps: {
     return { restored: false, imported: 0, reason: "no-snapshot" };
   }
 
-  const vectors = retainRestorableGenerations(snapshot.vectors, snapshot.committedNamespace);
+  const present = isRestorable
+    ? snapshot.vectors.filter((vector) => isRestorable(vector.path))
+    : snapshot.vectors;
+  const vectors = retainRestorableGenerations(present, snapshot.committedNamespace);
   const { imported } = await store.importVectors(vectors);
+  // Record what each shard file held, so reconciliation rewrites exactly the
+  // shards that still carry notes this restore left out.
+  const shards: Record<string, ShardRecord> = {};
+  for (const [shard, record] of snapshot.shards) shards[String(shard)] = record;
+  await store.writeState<ShardRecords>(SHARD_RECORDS_STATE_KEY, { version: 1, shards });
   if (imported > 0) {
     return { restored: true, imported, reason: "restored" };
   }

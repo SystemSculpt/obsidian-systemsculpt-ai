@@ -1705,10 +1705,30 @@ export class EmbeddingsManager {
     const file = this.getPortableIndexFile();
     if (!file) return false;
     try {
-      return (await restoreEmbeddingsIndexIfEmpty({ store: this.storage, file })).restored === true;
+      return (await restoreEmbeddingsIndexIfEmpty({
+        store: this.storage,
+        file,
+        isRestorable: this.restorablePathFilter(),
+      })).restored === true;
     } catch {
       return false; /* best effort */
     }
+  }
+
+  /**
+   * A snapshot can hold notes this vault has since deleted or now excludes;
+   * restoring them would bring them back. Checks existence only once the
+   * vault reports its notes, so a vault still loading does not drop everything.
+   */
+  private restorablePathFilter(): (path: string) => boolean {
+    const exclusions = this.exclusions();
+    const vaultListed = this.app.vault.getMarkdownFiles().length > 0;
+    return (path) => {
+      if (exclusions.isExcluded(path)) return false;
+      if (!vaultListed) return true;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile && file.extension === "md";
+    };
   }
 
   private async validateStoredVectors(restoredPortableIndex: boolean): Promise<StoredVectorRepair> {
