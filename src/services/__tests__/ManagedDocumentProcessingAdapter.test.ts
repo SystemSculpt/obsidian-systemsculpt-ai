@@ -1,8 +1,10 @@
+import { requestUrl } from "obsidian";
 import fixture from "../../../testing/fixtures/managed/managed-job-protocol-v1.json";
 import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed/ManagedJobRecoveryStore";
 import { ManagedDocumentProcessingAdapter } from "../managed/ManagedDocumentProcessingAdapter";
 import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
+import { PlatformRequestClient } from "../PlatformRequestClient";
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
 
@@ -359,6 +361,45 @@ describe("managed document processing adapter contract", () => {
       jobId: documentId,
     });
     expect(resumedRecord.pendingDispatch).toBeUndefined();
+  });
+
+  it("never cuts a slow result download off with a client deadline, and cancel still stops it", async () => {
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
+    const nativeRequest = requestUrl as jest.Mock;
+    try {
+      // The production job client and request client carry the download, over
+      // a native request that is still receiving a large result.
+      nativeRequest.mockImplementation(() => new Promise(() => undefined));
+      const documents = new ManagedJobClient(new HostedTransportAdapter({
+        baseUrl: "https://api.test",
+        pluginVersion: "6.0.0",
+        licenseKey: () => "license",
+        requestClient: new PlatformRequestClient(),
+      })).documents;
+      const { adapter, jobs } = managedHarness();
+      jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
+      const controller = new AbortController();
+      let settled = false;
+      const running = adapter.process({
+        identity: "vault:documents/report.pdf",
+        fingerprint: () => `sha256:${"f".repeat(64)}`,
+        load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer }),
+      }, { signal: controller.signal }).finally(() => { settled = true; });
+      const outcome = running.catch((error: unknown) => error);
+
+      await jest.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      expect(nativeRequest).toHaveBeenCalledWith(expect.objectContaining({
+        url: `https://api.test/api/plugin/documents/${documentId}/download`,
+      }));
+      expect(settled).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+
+      controller.abort();
+      await expect(outcome).resolves.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+    } finally {
+      nativeRequest.mockReset();
+      jest.useRealTimers();
+    }
   });
 
   it("fences a late download with the conversion signal", async () => {
