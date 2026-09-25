@@ -120,6 +120,47 @@ describe("CreditsBalanceCache", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("never publishes a response overtaken by a fresh read", async () => {
+    const older = deferred<CreditsBalanceSnapshot>();
+    const fresh = deferred<CreditsBalanceSnapshot>();
+    const fetch = jest.fn()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const cache = create(fetch);
+    const listener = jest.fn();
+    cache.subscribe(listener);
+
+    const stale = cache.read();
+    const current = cache.read({ fresh: true });
+    fresh.resolve(balance(0));
+    await current;
+    older.resolve(balance(9));
+    // The stale response still answers its own caller.
+    await expect(stale).resolves.toMatchObject({ totalRemaining: 9 });
+
+    expect(listener.mock.calls).toEqual([[balance(0)]]);
+  });
+
+  it("never publishes or caches a previous account's balance", async () => {
+    const previous = deferred<CreditsBalanceSnapshot>();
+    const fetch = jest.fn()
+      .mockReturnValueOnce(previous.promise)
+      .mockResolvedValueOnce(balance(0));
+    const cache = create(fetch);
+    const listener = jest.fn();
+    cache.subscribe(listener);
+
+    const pending = cache.read();
+    licenseKey = "license-b";
+    previous.resolve(balance(50));
+    await pending;
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(cache.peek()).toBeNull();
+    await expect(cache.read()).resolves.toMatchObject({ totalRemaining: 0 });
+    expect(listener.mock.calls).toEqual([[balance(0)]]);
+  });
+
   it("cancels one caller without failing the shared read", async () => {
     const pending = deferred<CreditsBalanceSnapshot>();
     const fetch = jest.fn(() => pending.promise);

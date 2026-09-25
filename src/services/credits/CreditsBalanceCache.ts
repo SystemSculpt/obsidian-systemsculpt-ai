@@ -42,7 +42,8 @@ function abortError(): DOMException {
  * Callers that arrive while a read is in flight join it and receive its
  * transport observation. A fresh read always starts its own request, and an
  * older response never replaces a newer one. Failures are not cached.
- * Subscribers hear every balance read from the server.
+ * Subscribers hear each balance that becomes the current account's newest;
+ * a stale or previous-account response is never published.
  */
 export class CreditsBalanceCache {
   private cached: { key: string; sequence: number; at: number; balance: CreditsBalanceSnapshot } | null = null;
@@ -97,10 +98,13 @@ export class CreditsBalanceCache {
     }).then(
       (balance) => {
         if (this.inFlight?.sequence === sequence) this.inFlight = null;
-        if (!this.cached || this.cached.sequence < sequence) {
+        // Only the newest balance for the current account is published. An
+        // older or previous-account response still answers its own callers.
+        const current = key === this.options.licenseKey().trim();
+        if (current && (!this.cached || this.cached.sequence < sequence)) {
           this.cached = { key, sequence, at: (this.options.now ?? Date.now)(), balance };
+          this.notify(balance);
         }
-        this.notify(balance);
         return balance;
       },
       (error: unknown) => {
