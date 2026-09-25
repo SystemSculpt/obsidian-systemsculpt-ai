@@ -19,10 +19,13 @@ jest.mock("../utils", () => {
 // Mock searchScoring module
 jest.mock("../searchScoring", () => ({
   extractSearchTerms: jest.fn((query: string) => query.split(/\s+/).filter(Boolean)),
-  calculateScore: jest.fn((path: string, _content: string, _options: any) => ({
+  calculateScore: jest.fn((path: string, _content: string, options: any) => ({
     path,
     score: 50,
-    matchDetails: { reasoning: "test match" },
+    matchDetails: {
+      reasoning: "test match",
+      keywordsFound: options.searchTerms.filter((term: string) => path.toLowerCase().includes(term.toLowerCase())),
+    },
     contexts: [],
   })),
   sortByScore: jest.fn((results: any[]) =>
@@ -210,7 +213,7 @@ describe("SearchOperations", () => {
       }
     });
 
-    it("limits results to MAX_SEARCH_RESULTS * 3", async () => {
+    const useManyMatchingFiles = () => {
       const manyFiles = Array.from({ length: 100 }, (_, i) =>
         new TFile({ path: `file${i}.md` })
       );
@@ -218,29 +221,32 @@ describe("SearchOperations", () => {
         (file.stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 100 };
       });
       (app.vault.getFiles as jest.Mock).mockReturnValue(manyFiles);
+    };
+
+    it("limits results to MAX_SEARCH_RESULTS * 3", async () => {
+      useManyMatchingFiles();
 
       const result = await searchOps.findFiles({ patterns: ["file"] });
 
-      // Results include files and folders, so check that formatScoredResults was called with limit
-      expect(result.results).toBeDefined();
+      expect(result.results).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
+      expect(result.totalFound).toBe(100);
     });
 
     it("honors a smaller positive maxResults request", async () => {
-      const result = await searchOps.findFiles({ patterns: ["test"], maxResults: 1 });
+      useManyMatchingFiles();
+
+      const result = await searchOps.findFiles({ patterns: ["file"], maxResults: 1 });
 
       expect(result.results).toHaveLength(1);
-      expect(jest.requireMock("../searchScoring").formatScoredResults)
-        .toHaveBeenLastCalledWith(expect.any(Array), 1);
+      expect(result.totalFound).toBe(100);
     });
 
     it("clamps maxResults to the existing global result ceiling", async () => {
-      await searchOps.findFiles({ patterns: ["test"], maxResults: Number.MAX_SAFE_INTEGER });
+      useManyMatchingFiles();
 
-      expect(jest.requireMock("../searchScoring").formatScoredResults)
-        .toHaveBeenLastCalledWith(
-          expect.any(Array),
-          FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3,
-        );
+      const result = await searchOps.findFiles({ patterns: ["file"], maxResults: Number.MAX_SAFE_INTEGER });
+
+      expect(result.results).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
     });
 
     it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(

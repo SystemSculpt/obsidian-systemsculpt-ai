@@ -37,7 +37,6 @@ jest.mock("../../utils", () => ({
     }
     return results;
   }),
-  shouldExcludeFromSearch: jest.fn(() => false),
   isHiddenSystemPath: jest.fn((path) => String(path ?? "").replace(/^\/+/, "").startsWith(".systemsculpt/")),
   ensureAdapterFolder: jest.fn(async () => {}),
   ensureVaultFolder: jest.fn(async () => {}),
@@ -233,6 +232,31 @@ describe("DirectoryOperations", () => {
       expect(result.results[0].files?.length).toBe(1);
       expect(result.results[0].directories?.length).toBe(1);
       expect(result.results[0].summary).toContain("2 items");
+    });
+
+    it("hides files excluded by the shared vault exclusions", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: [],
+        patterns: ["*.PNG", "**/Archive/*"],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const folder = new TFolder({
+        path: "test",
+        children: [
+          new TFile({ path: "test/file.md", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFile({ path: "test/photo.png", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFolder({
+            path: "test/Archive",
+            children: [new TFile({ path: "test/Archive/old.md", stat: { ctime: 1000, mtime: 2000, size: 100 } })],
+          }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["test"], recursive: true, filter: "files" } as any);
+
+      expect(result.results[0].files?.map((file: any) => file.path)).toEqual(["test/file.md"]);
     });
 
     it("filters to only files when filter is files", async () => {

@@ -2,7 +2,7 @@ import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
 import { joinFilesystemPath } from "../../utils/vaultPathUtils";
 import { FILESYSTEM_LIMITS } from "./constants";
-export { fuzzyMatchScore, shouldExcludeFromSearch } from "./searchUtils";
+export { fuzzyMatchScore } from "./searchUtils";
 
 type VaultDataAdapter = DataAdapter & {
   getBasePath?: () => string;

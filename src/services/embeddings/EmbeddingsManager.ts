@@ -46,6 +46,7 @@ import {
   type SemanticWorkItem,
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
+import { resolveVaultExclusions, type VaultExclusions } from "../search/VaultExclusions";
 
 export type EmbeddingsRunStatus = "complete" | "aborted";
 
@@ -148,7 +149,6 @@ export class EmbeddingsManager {
   private readonly search = new VectorSearch();
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
-  private readonly exclusionMatchers = new Map<string, RegExp>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
   private readonly lifecycle = new SemanticIndexLifecycle();
   private readonly workQueue: SemanticWorkQueue;
@@ -204,19 +204,18 @@ export class EmbeddingsManager {
     await this.migrateToManagedNamespaceContract();
     const repair = await this.storage.purgeCorruptedVectors();
     await this.hydrateManagedIdentityFromStorage();
-    for (const path of repair.removedPaths) {
+    if (repair.removedPaths.length > 0) {
       const failedAt = Date.now();
       const error = { code: "invalid_response", message: "Stored vector was invalid." };
-      const abstract = this.app.vault.getAbstractFileByPath(path);
-      const claim = await this.workQueue.enqueueImmediate(
-        path,
-        "reconcile",
-        abstract instanceof TFile ? this.sourceMtime(abstract) : null,
+      const claims = await this.workQueue.enqueueManyImmediate(repair.removedPaths.map((path) => {
+        const abstract = this.app.vault.getAbstractFileByPath(path);
+        return { path, sourceMtime: abstract instanceof TFile ? this.sourceMtime(abstract) : null };
+      }), "reconcile", failedAt);
+      const recorded = await this.workQueue.failMany(
+        [...claims.values()].map((claim) => ({ claim, failure: error })),
         failedAt,
       );
-      if (claim && await this.workQueue.fail(claim, error, failedAt)) {
-        this.failedFiles.set(path, { path, error, failedAt });
-      }
+      for (const path of recorded) this.failedFiles.set(path, { path, error, failedAt });
     }
     this.setupFileWatchers();
     this.initialized = true;
@@ -260,7 +259,8 @@ export class EmbeddingsManager {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
       }
       await this.setRebuildPending(true);
-      const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !this.isFileExcluded(file));
+      const exclusions = this.exclusions();
+      const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !exclusions.isExcluded(file.path));
       this.refreshLifecycle({
         phase: "reconciling",
         total: eligibleFiles.length,
@@ -630,7 +630,6 @@ export class EmbeddingsManager {
   public syncFromSettings(): void {
     const previous = this.config;
     this.config = this.buildConfig();
-    this.exclusionMatchers.clear();
     if (JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions)) {
       void this.cleanupExcludedEmbeddings().catch(() => undefined);
     }
@@ -994,6 +993,11 @@ export class EmbeddingsManager {
     fatalError: ManagedEmbeddingsError | null,
   ): Promise<void> {
     const failedAt = Date.now();
+    const failures: Array<{
+      claim: SemanticWorkItem;
+      error: FailedEmbeddingFile["error"];
+      failure: FailedProcessingDetail;
+    }> = [];
     for (const path of paths) {
       const detail = details?.[path];
       const error = {
@@ -1002,14 +1006,21 @@ export class EmbeddingsManager {
       };
       const claim = workClaims.get(path);
       if (!claim) continue;
-      const recorded = await this.workQueue.fail(claim, {
-        ...error,
-        ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
-        ...(detail?.requestId ? { requestId: detail.requestId } : {}),
-      }, failedAt);
-      if (!recorded) continue;
-      this.failedFiles.set(path, {
-        path,
+      failures.push({
+        claim,
+        error,
+        failure: {
+          ...error,
+          ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
+          ...(detail?.requestId ? { requestId: detail.requestId } : {}),
+        },
+      });
+    }
+    const recorded = await this.workQueue.failMany(failures, failedAt);
+    for (const { claim, error } of failures) {
+      if (!recorded.has(claim.path)) continue;
+      this.failedFiles.set(claim.path, {
+        path: claim.path,
         error,
         failedAt,
       });
@@ -1021,6 +1032,7 @@ export class EmbeddingsManager {
     reason: SemanticWorkReason,
   ): Promise<Map<string, SemanticWorkItem>> {
     const claims = new Map<string, SemanticWorkItem>();
+    const unclaimed: Array<{ path: string; sourceMtime: number | null }> = [];
     for (const file of files) {
       const sourceMtime = this.sourceMtime(file);
       const existing = this.workQueue.get(file.path);
@@ -1028,9 +1040,12 @@ export class EmbeddingsManager {
         claims.set(file.path, existing);
         continue;
       }
-      const claim = await this.workQueue.enqueueImmediate(file.path, reason, sourceMtime);
-      if (claim) claims.set(file.path, claim);
+      unclaimed.push({ path: file.path, sourceMtime });
     }
+    // One durable write for the whole batch: a full reindex used to rewrite
+    // the entire queue once per file.
+    const enqueued = await this.workQueue.enqueueManyImmediate(unclaimed, reason);
+    for (const [path, claim] of enqueued) claims.set(path, claim);
     return claims;
   }
 
@@ -1277,7 +1292,8 @@ export class EmbeddingsManager {
   private eligibleFiles(): TFile[] {
     const cached = this.plugin.vaultFileCache?.getMarkdownFiles();
     const files = Array.isArray(cached) ? cached : this.app.vault.getMarkdownFiles();
-    return files.filter((file): file is TFile => file instanceof TFile && !this.isFileExcluded(file));
+    const exclusions = this.exclusions();
+    return files.filter((file): file is TFile => file instanceof TFile && !exclusions.isExcluded(file.path));
   }
 
   private isFileExcluded(file: TFile): boolean {
@@ -1289,54 +1305,25 @@ export class EmbeddingsManager {
   }
 
   private isPathExcluded(path: string): boolean {
-    const normalizedPath = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    if (!normalizedPath) return false;
-    for (const folder of this.config.exclusions.folders) {
-      const prefix = String(folder || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/?$/, "/");
-      if (prefix && normalizedPath.startsWith(prefix)) return true;
-    }
-    const basename = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
-    for (const pattern of this.config.exclusions.patterns) {
-      if (this.matchesGlob(pattern.includes("/") ? normalizedPath : basename, pattern)) return true;
-    }
-    if (this.config.exclusions.ignoreChatHistory) {
-      const chatDirectories = [this.plugin.settings.chatsDirectory, this.plugin.settings.savedChatsDirectory]
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .map((value) => value.replace(/^\/+/, "").replace(/\/?$/, "/").toLowerCase());
-      const lower = normalizedPath.toLowerCase();
-      if (chatDirectories.some((directory) => lower.startsWith(directory))) return true;
-      if (lower.includes("systemsculpt") && (lower.includes("/saved chats/") || lower.includes("/chats/"))) return true;
-    }
-    if (this.config.exclusions.respectObsidianExclusions !== false) {
-      const vault = this.app.vault as unknown as { getConfig?: (key: string) => unknown };
-      const filters = vault.getConfig?.("userIgnoreFilters");
-      if (Array.isArray(filters) && filters.some((filter) => typeof filter === "string" && normalizedPath.includes(filter))) {
-        return true;
-      }
-    }
-    return false;
+    return this.exclusions().isExcluded(path);
   }
 
-  private matchesGlob(target: string, pattern: string): boolean {
-    if (!pattern) return false;
-    let matcher = this.exclusionMatchers.get(pattern);
-    if (!matcher) {
-      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-      const source = escaped.replace(/\*\*\/|\*\*|\*|\?/g, (token) => (
-        token === "**/" ? "(?:.*/)?" : token === "**" ? ".*" : token === "*" ? "[^/]*" : "[^/]"
-      ));
-      matcher = new RegExp(`^${source}$`, "i");
-      this.exclusionMatchers.set(pattern, matcher);
-    }
-    return matcher.test(target);
+  /** Shared vault exclusion rules, compiled once per settings revision. */
+  private exclusions(): VaultExclusions {
+    return resolveVaultExclusions({
+      exclusions: this.config.exclusions,
+      settings: this.plugin.settings,
+      vault: this.app.vault,
+    }, "embeddings");
   }
 
   private async cleanupExcludedEmbeddings(): Promise<void> {
     await this.awaitReady();
     await this.processingMutex.runExclusive(async () => {
       let changed = false;
+      const exclusions = this.exclusions();
       for (const path of this.storage.getDistinctPaths()) {
-        if (this.isPathExcluded(path)) {
+        if (exclusions.isExcluded(path)) {
           await this.storage.removeByPath(path);
           await this.workQueue.remove(path);
           this.failedFiles.delete(path);
@@ -1384,6 +1371,7 @@ export class EmbeddingsManager {
     const storage = this.storage as EmbeddingsStorage & {
       scanVectorsByNamespace?: EmbeddingsStorage["scanVectorsByNamespace"];
     };
+    const exclusions = this.exclusions();
     if (typeof storage.scanVectorsByNamespace !== "function") {
       const vectors = await this.storage.getVectorsByNamespace(namespace);
       if (signal?.aborted) return queries.map(() => []);
@@ -1392,7 +1380,7 @@ export class EmbeddingsManager {
         vector.path !== excludedPath
         && vector.metadata.isEmpty !== true
         && eligiblePaths.has(vector.path)
-        && !this.isPathExcluded(vector.path)
+        && !exclusions.isExcluded(vector.path)
       ));
       const sets: SearchResult[][] = [];
       for (const query of queries) {
@@ -1417,7 +1405,7 @@ export class EmbeddingsManager {
       const candidates = batch.filter((vector) => (
         vector.metadata.isEmpty !== true
         && eligiblePaths.has(vector.path)
-        && !this.isPathExcluded(vector.path)
+        && !exclusions.isExcluded(vector.path)
       ));
       queries.forEach((query, index) => {
         const additions = this.search.findSimilar(query, candidates, limit);

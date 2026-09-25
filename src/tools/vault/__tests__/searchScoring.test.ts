@@ -154,33 +154,27 @@ describe("searchScoring", () => {
       expect(resultWithPhrase.score).toBeGreaterThan(resultWithTerms.score);
     });
 
-    it("applies penalty for archive directories", () => {
-      const resultNormal = calculateScore(
-        "src/license/main.ts",
-        "",
-        context
-      );
-      const resultArchive = calculateScore(
-        "archive/license/main.ts",
-        "",
-        context
-      );
-      expect(resultArchive.score).toBeLessThan(resultNormal.score);
+    it("scores the same match equally regardless of unrelated folder names", () => {
+      const plain = calculateScore("Notes/license.md", "", context);
+      for (const path of [
+        "marketing/email/campaign/license.md",
+        "Brand Templates/Drafts/license.md",
+        "Archive/Backup/license.md",
+        "Household/Golden Folder/license.md",
+      ]) {
+        const result = calculateScore(path, "", context);
+        expect(result.score).toBe(plain.score);
+        expect(result.matchDetails.reasoning).not.toMatch(/directory/i);
+      }
     });
 
-    it("gives bonus for relevant directory paths", () => {
-      const resultNormal = calculateScore(
-        "src/license/main.ts",
-        "",
-        context
-      );
-      const resultWithRelevantPath = calculateScore(
-        "marketing/email/campaign/license.ts",
-        "",
-        context
-      );
-      expect(resultWithRelevantPath.score).toBeGreaterThan(resultNormal.score);
-      expect(resultWithRelevantPath.matchDetails.reasoning).toContain("Relevant directory");
+    it("gives a name without any search term no score", () => {
+      const result = calculateScore("marketing/email/campaign/brand-template-draft.md", "", {
+        searchTerms: ["zzqxv", "nonexistent"],
+        originalQuery: "zzqxv nonexistent",
+      });
+      expect(result.score).toBe(0);
+      expect(result.matchDetails.keywordsFound).toEqual([]);
     });
 
     it("caps score at 100", () => {
