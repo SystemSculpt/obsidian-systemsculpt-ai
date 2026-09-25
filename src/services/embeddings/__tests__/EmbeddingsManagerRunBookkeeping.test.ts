@@ -49,7 +49,6 @@ async function harness(fileCount: number) {
   const settings = {
     embeddingsEnabled: true,
     embeddingsPortableIndex: false,
-    embeddingsRebuildPending: false,
     embeddingsExclusions: {
       folders: [],
       patterns: [],
@@ -83,7 +82,7 @@ async function harness(fileCount: number) {
     removeByPath: jest.fn(async (path: string) => {
       for (const [id, vector] of roots) if (vector.path === path) roots.delete(id);
     }),
-    removeNamespacesExcept: jest.fn(async () => 0),
+    retainNamespaces: jest.fn(async () => 0),
     writeState: jest.fn(async () => undefined),
     deleteState: jest.fn(async () => undefined),
   };
@@ -103,7 +102,7 @@ async function harness(fileCount: number) {
   };
   manager.markPortableIndexChanged = jest.fn();
   manager.flushPortableIndex = jest.fn(async () => undefined);
-  manager.commitPortableDestructiveMutation = jest.fn(async () => undefined);
+  manager.markPortableIndexDestructive = jest.fn();
   return { files, roots, queue, queueWrites, manager, settings, state };
 }
 
@@ -133,7 +132,7 @@ describe("EmbeddingsManager run bookkeeping", () => {
       lifecyclePhase: "error",
     },
   ])("keeps completed paths durable after $label", async ({ fatalError, cancelled, lifecyclePhase }) => {
-    const { files, roots, queue, manager, settings } = await harness(2);
+    const { files, roots, queue, manager } = await harness(2);
     await queue.enqueueImmediate(files[0].path, "reconcile", files[0].stat.mtime, 1);
     await queue.enqueueImmediate(files[1].path, "reconcile", files[1].stat.mtime, 1);
     manager.processor = {
@@ -157,9 +156,9 @@ describe("EmbeddingsManager run bookkeeping", () => {
     });
 
     expect(queue.snapshot().map((item) => item.path)).toEqual([files[1].path]);
-    expect(settings.embeddingsRebuildPending).toBe(true);
+    // New vectors ride the coalesced checkpoint instead of an immediate rewrite (#341).
     expect(manager.markPortableIndexChanged).toHaveBeenCalledTimes(1);
-    expect(manager.flushPortableIndex).toHaveBeenCalledTimes(1);
+    expect(manager.flushPortableIndex).not.toHaveBeenCalled();
     expect(manager.getLifecycleSnapshot()).toMatchObject({
       phase: lifecyclePhase,
       total: 2,
@@ -268,5 +267,33 @@ describe("EmbeddingsManager run bookkeeping", () => {
     expect(manager.failedFiles.get(failed[0].path)).toEqual(expect.objectContaining({
       error: { code: "temporarily_unavailable", message: "Try again later." },
     }));
+  });
+
+  it("does not rewrite the portable index for notes whose unchanged bytes were reused", async () => {
+    const { files, roots, queue, manager } = await harness(1);
+    roots.set(root(files[0]).id, root(files[0]));
+    files[0].stat.mtime = 2;
+    await queue.enqueueImmediate(files[0].path, "modify", files[0].stat.mtime, 1);
+    manager.processor = {
+      processFiles: jest.fn(async (_files: unknown, _app: unknown, _progress: unknown, options: any): Promise<ProcessingResult> => {
+        expect(options).toMatchObject({ reuseNamespace: namespace, concurrency: 3 });
+        roots.set(root(files[0]).id, root(files[0]));
+        return {
+          completed: 1,
+          completedPaths: [files[0].path],
+          reusedPaths: [files[0].path],
+          failed: 0,
+          failedPaths: [],
+          cancelled: false,
+          fatalError: null,
+        };
+      }),
+    };
+
+    await manager.processQueuedWork();
+
+    expect(manager.markPortableIndexChanged).not.toHaveBeenCalled();
+    expect(manager.markPortableIndexDestructive).not.toHaveBeenCalled();
+    expect(queue.size).toBe(0);
   });
 });

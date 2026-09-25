@@ -242,7 +242,43 @@ describe("SystemSculptSearchModal", () => {
         sort: "relevance",
         limit: 30,
         signal: expect.any(AbortSignal),
+        semantic: false,
       });
+    });
+
+    it("adds semantic results only after typing pauses for about 400 ms", async () => {
+      modal.onOpen();
+      const searchInput = (modal as any).searchInputEl as HTMLInputElement;
+      plugin._testEngine.search.mockImplementation(async (_query: string, options: { semantic?: boolean }) => (
+        createMockSearchResponse({
+          stats: { ...createMockSearchResponse().stats, usedEmbeddings: options.semantic !== false },
+        })
+      ));
+
+      for (const value of ["t", "te", "tes", "test"]) {
+        searchInput.value = value;
+        searchInput.dispatchEvent(new Event("input"));
+        await jest.advanceTimersByTimeAsync(190);
+      }
+      const semanticCalls = () => plugin._testEngine.search.mock.calls.filter(
+        ([, options]: [string, { semantic?: boolean }]) => options.semantic !== false,
+      );
+      expect(semanticCalls()).toHaveLength(0);
+
+      await jest.advanceTimersByTimeAsync(400);
+      expect(semanticCalls()).toEqual([["test", expect.objectContaining({ mode: "smart" })]]);
+    });
+
+    it("never runs a semantic pass for a query shorter than three characters", async () => {
+      modal.onOpen();
+      const searchInput = (modal as any).searchInputEl as HTMLInputElement;
+
+      searchInput.value = "ai";
+      searchInput.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(2_000);
+
+      expect(plugin._testEngine.search).toHaveBeenCalledTimes(1);
+      expect(plugin._testEngine.search.mock.calls[0][1]).toMatchObject({ semantic: false });
     });
 
     it("clears the active query and returns to recents with the clear button", async () => {

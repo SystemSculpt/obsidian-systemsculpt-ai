@@ -57,7 +57,7 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(13);
+    expect(plugin.settings.schemaVersion).toBe(14);
     expect(plugin.settings).not.toHaveProperty("webSearchEnabledByDefault");
     expect(plugin.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(plugin.settings.licenseKey).toBe("");

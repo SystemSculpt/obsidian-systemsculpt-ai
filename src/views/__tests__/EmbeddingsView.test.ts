@@ -414,21 +414,82 @@ describe("EmbeddingsView", () => {
       expect(checkActiveFileSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("debounces file-modify by 600ms", async () => {
-      const mockFile = new TFile({ path: "notes/test.md", stat: { mtime: Date.now(), size: 100 } });
-      (view as any).currentFile = mockFile;
+    it("keeps the current results while the open note is edited", () => {
+      (view as any).registerEvents();
 
-      (view as any).debouncedSearchCurrentFile();
+      const vaultEvents = mockPlugin.app.vault.on.mock.calls.map(([eventName]: [string]) => eventName);
+      expect(vaultEvents).not.toContain("modify");
+    });
 
+    it("refreshes after index runs once they settle for two seconds, and only while visible", async () => {
+      const current = new TFile({ path: "notes/current.md", stat: { mtime: 1, size: 100 } });
+      let emit!: (snapshot: any) => void;
+      mockManager.subscribeLifecycle.mockImplementation((listener: (snapshot: any) => void) => {
+        emit = listener;
+        listener({ ...mockManager.getLifecycleSnapshot(), phase: "idle" });
+        return jest.fn();
+      });
+      mockPlugin.app.workspace.getActiveFile.mockReturnValue(current);
+      (view as any).bindIndexLifecycle();
+      (view as any).currentFile = current;
+      const settle = () => {
+        emit({ ...mockManager.getLifecycleSnapshot(), phase: "reconciling" });
+        emit({ ...mockManager.getLifecycleSnapshot(), phase: "idle" });
+      };
+
+      // A newly indexed note elsewhere may now be the best match: re-query.
+      settle();
+      await jest.advanceTimersByTimeAsync(1_000);
+      settle();
+      await jest.advanceTimersByTimeAsync(1_999);
       expect(mockManager.findSimilar).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(1);
 
+      (view as any).isViewVisible.mockReturnValue(false);
+      settle();
+      await jest.advanceTimersByTimeAsync(2_500);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(1);
+
+      (view as any).isViewVisible.mockReturnValue(true);
+      (view as any).searchRuns.reconcileVisibility();
+      await jest.advanceTimersByTimeAsync(100);
+      expect(mockManager.findSimilar).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores renames and deletes that do not touch the current note or its results", () => {
+      (view as any).registerEvents();
+      (view as any).currentFile = new TFile({ path: "notes/current.md", stat: { mtime: 1, size: 100 } });
+      (view as any).currentResults = [{ path: "Projects/result.md", score: 0.9, metadata: {} }];
+      const handlers = new Map(mockPlugin.app.vault.on.mock.calls.map(([eventName, handler]: [string, any]) => [eventName, handler]));
+      const check = jest.spyOn(view as any, "debouncedCheckActiveFile");
+
+      handlers.get("rename")(new TFile({ path: "Elsewhere/new.md" }), "Elsewhere/old.md");
+      handlers.get("delete")({ path: "Elsewhere/gone.md" });
+      expect(check).not.toHaveBeenCalled();
+
+      handlers.get("delete")({ path: "Projects" });
+      expect(check).toHaveBeenCalledTimes(1);
+      expect((view as any).currentResults).toEqual([]);
+    });
+
+    it("skips a chat save that leaves the semantic query unchanged", async () => {
+      const chatView = createMockChatView({
+        chatId: "chat-current",
+        messages: [{ message_id: "1", role: "user", content: "Same question" }],
+      });
+      (view as any).currentChatView = chatView;
+      await (view as any).searchForSimilarFromChat(chatView);
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(1);
+
+      (view as any).debouncedSearchCurrentChat();
       await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(1);
 
-      expect(mockManager.findSimilar).toHaveBeenCalledWith(
-        mockFile.path,
-        15,
-        expect.any(AbortSignal),
-      );
+      chatView.getMessages.mockReturnValue([{ message_id: "1", role: "user", content: "A new question" }]);
+      (view as any).debouncedSearchCurrentChat();
+      await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(2);
     });
 
     it("cancels previous debounce on new call", () => {

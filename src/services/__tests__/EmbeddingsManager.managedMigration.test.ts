@@ -137,7 +137,6 @@ function createHarness(vectorFormatVersion: number) {
       embeddingsVectorFormatVersion: vectorFormatVersion,
       embeddingsEnabled: false,
       embeddingsPortableIndex: false,
-      embeddingsRebuildPending: false,
       embeddingsExclusions: {
         folders: [],
         patterns: [],

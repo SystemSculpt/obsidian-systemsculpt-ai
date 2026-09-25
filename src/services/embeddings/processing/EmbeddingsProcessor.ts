@@ -8,6 +8,9 @@ import {
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
 import {
   createLocalEmptyEmbeddingMarkerForRevision,
+  isLocalEmptyEmbeddingMarker,
+  LOCAL_EMPTY_EMBEDDING_NAMESPACE,
+  localEmptyEmbeddingMarkerId,
 } from "../LocalEmptyEmbeddingMarker";
 import type {
   EmbeddingVector,
@@ -17,6 +20,8 @@ import type {
 } from "../types";
 import type { EmbeddingsStorage } from "../storage/EmbeddingsStorage";
 import { buildVectorId } from "../utils/vectorId";
+import { parseManagedNamespace } from "../utils/namespace";
+import { sha256HexFromArrayBuffer } from "../../../utils/sha256";
 
 /** Stable source identity captured before remote inference begins. */
 export interface EmbeddingSourceRevision {
@@ -28,10 +33,24 @@ export interface EmbeddingSourceRevision {
 export interface EmbeddingsProcessingOptions {
   sourceRevisions?: ReadonlyMap<TFile, EmbeddingSourceRevision>;
   preflight?: () => Promise<void>;
+  /**
+   * Generation whose stored roots may be reused when a note's bytes are
+   * unchanged. Null or absent always asks the server.
+   */
+  reuseNamespace?: string | null;
+  /** Notes indexed at once. Bulk runs use a small bound; edits use one. */
+  concurrency?: number;
 }
 
+/** Bulk runs overlap a few requests instead of one round trip per note. */
+export const BULK_INDEX_CONCURRENCY = 3;
+const MAX_INDEX_CONCURRENCY = 4;
+
 type IndexGateway = Pick<ManagedEmbeddingsIndexAdapter, "index">;
-type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath">;
+type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath"> & Partial<Pick<
+  EmbeddingsStorage,
+  "getVectorSync" | "touchPath"
+>>;
 
 const FATAL_MANAGED_ERROR_CODES = new Set([
   "payment_required",
@@ -40,6 +59,10 @@ const FATAL_MANAGED_ERROR_CODES = new Set([
   "version_unsupported",
   "capability_unavailable",
 ]);
+
+function sha256Hex(markdown: string): Promise<string> {
+  return sha256HexFromArrayBuffer(new TextEncoder().encode(markdown).buffer);
+}
 
 class StaleEmbeddingSourceError extends Error {
   constructor() {
@@ -66,14 +89,14 @@ export class EmbeddingsProcessor {
     this.cancelled = false;
     this.operationController = new AbortController();
     const completedPaths: string[] = [];
+    const reusedPaths: string[] = [];
     const failedPaths: string[] = [];
     const failedDetails: Record<string, FailedProcessingDetail> = {};
     let generation: ManagedEmbeddingsIndexGeneration | undefined;
     let fatalError: ManagedEmbeddingsError | null = null;
-    let preflightAttempted = false;
+    let next = 0;
 
-    for (const file of files) {
-      if (this.cancelled) break;
+    const processOne = async (file: TFile): Promise<void> => {
       const revision = options.sourceRevisions?.get(file) ?? this.captureSourceRevision(file);
       onProgress?.({
         current: completedPaths.length,
@@ -82,24 +105,26 @@ export class EmbeddingsProcessor {
       });
 
       try {
-        if (!preflightAttempted) {
-          preflightAttempted = true;
-          await options.preflight?.();
-        }
-        if (this.cancelled) break;
         const markdown = await app.vault.read(file);
-        if (this.cancelled) break;
-        const indexed = await this.gateway.index({
-          prepare: () => ({ markdown }),
-          signal: this.operationController.signal,
-        });
-        if (this.cancelled) break;
-        await this.assertSourceCurrent(app, file, revision, markdown);
-        if (this.cancelled) break;
-
-        await this.publishResult(revision, markdown, indexed);
-        if (indexed.generation) generation = indexed.generation;
-        completedPaths.push(revision.path);
+        if (this.cancelled || fatalError) return;
+        const sourceSha256 = await sha256Hex(markdown);
+        if (this.cancelled || fatalError) return;
+        if (await this.reuseUnchangedSource(file, revision, sourceSha256, options.reuseNamespace)) {
+          completedPaths.push(revision.path);
+          reusedPaths.push(revision.path);
+        } else {
+          const indexed = await this.gateway.index({
+            prepare: () => ({ markdown }),
+            signal: this.operationController.signal,
+          });
+          if (this.cancelled) return;
+          this.assertSourceCurrent(file, revision);
+          await this.assertSourceBytesUnchanged(app, file, sourceSha256);
+          if (this.cancelled) return;
+          await this.publishResult(revision, markdown, indexed);
+          if (indexed.generation) generation = indexed.generation;
+          completedPaths.push(revision.path);
+        }
         onProgress?.({
           current: completedPaths.length,
           total: files.length,
@@ -113,32 +138,63 @@ export class EmbeddingsProcessor {
           || (error instanceof DOMException && error.name === "AbortError")
         ) {
           this.cancelled = true;
-          break;
+          return;
         }
+        if (fatalError) return;
+        recordFailure(revision.path, error);
+      }
+    };
 
-        const detail = this.failureDetail(error, managed);
-        failedPaths.push(revision.path);
-        failedDetails[revision.path] = detail;
-        errorLogger.warn("Failed to index note with managed embeddings", {
-          source: "EmbeddingsProcessor",
-          method: "processFiles",
-          metadata: {
-            path: revision.path,
-            code: detail.code,
-            status: detail.status ?? 0,
-            ...(detail.requestId ? { requestId: detail.requestId } : {}),
-          },
-        });
-        if (managed && FATAL_MANAGED_ERROR_CODES.has(managed.code)) {
-          fatalError = managed;
-          break;
+    const recordFailure = (path: string, error: unknown): void => {
+      const managed = error instanceof ManagedEmbeddingsError ? error : null;
+      const detail = this.failureDetail(error, managed);
+      failedPaths.push(path);
+      failedDetails[path] = detail;
+      errorLogger.warn("Failed to index note with managed embeddings", {
+        source: "EmbeddingsProcessor",
+        method: "processFiles",
+        metadata: {
+          path,
+          code: detail.code,
+          status: detail.status ?? 0,
+          ...(detail.requestId ? { requestId: detail.requestId } : {}),
+        },
+      });
+      if (managed && FATAL_MANAGED_ERROR_CODES.has(managed.code)) fatalError = managed;
+    };
+
+    // One credits check per run, before any note is read or uploaded.
+    if (files.length > 0 && options.preflight) {
+      try {
+        await options.preflight();
+      } catch (error) {
+        const managed = error instanceof ManagedEmbeddingsError ? error : null;
+        if (managed?.code === "request_cancelled") {
+          this.cancelled = true;
+        } else {
+          const first = options.sourceRevisions?.get(files[0]) ?? this.captureSourceRevision(files[0]);
+          recordFailure(first.path, error);
+          next = 1;
         }
       }
     }
 
+    const worker = async (): Promise<void> => {
+      while (!this.cancelled && !fatalError && next < files.length) {
+        await processOne(files[next++]);
+      }
+    };
+    const concurrency = Math.max(1, Math.min(
+      MAX_INDEX_CONCURRENCY,
+      Math.floor(options.concurrency ?? 1),
+      files.length,
+    ));
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
     return {
       completed: completedPaths.length,
       completedPaths,
+      ...(reusedPaths.length > 0 ? { reusedPaths } : {}),
       failed: failedPaths.length,
       failedPaths,
       cancelled: this.cancelled,
@@ -157,6 +213,46 @@ export class EmbeddingsProcessor {
     this.cancel();
   }
 
+  /**
+   * The same bytes under the same generation always produce the same vectors,
+   * so an unchanged note only needs its stored revision stamped current.
+   */
+  private async reuseUnchangedSource(
+    file: TFile,
+    revision: EmbeddingSourceRevision,
+    sourceSha256: string,
+    namespace: string | null | undefined,
+  ): Promise<boolean> {
+    if (typeof this.storage.getVectorSync !== "function" || typeof this.storage.touchPath !== "function") {
+      return false;
+    }
+    const marker = this.storage.getVectorSync(localEmptyEmbeddingMarkerId(revision.path));
+    const identity = parseManagedNamespace(namespace);
+    const root = namespace && identity
+      ? this.storage.getVectorSync(buildVectorId(namespace, revision.path, 0))
+      : null;
+    let reusable: string | null = null;
+    if (isLocalEmptyEmbeddingMarker(marker) && marker?.metadata.sourceSha256 === sourceSha256) {
+      reusable = LOCAL_EMPTY_EMBEDDING_NAMESPACE;
+    } else if (
+      namespace
+      && root
+      && root.metadata.namespace === namespace
+      && root.metadata.generation === identity?.generationId
+      && root.metadata.complete === true
+      && root.metadata.partial !== true
+      && root.metadata.sourceSha256 === sourceSha256
+    ) {
+      reusable = namespace;
+    }
+    if (!reusable) return false;
+    this.assertSourceCurrent(file, revision);
+    return this.storage.touchPath(revision.path, reusable, {
+      mtime: revision.mtime,
+      title: revision.basename,
+    });
+  }
+
   private async publishResult(
     revision: EmbeddingSourceRevision,
     markdown: string,
@@ -164,7 +260,7 @@ export class EmbeddingsProcessor {
   ): Promise<void> {
     if (indexed.empty) {
       await this.storage.replacePath(revision.path, [
-        createLocalEmptyEmbeddingMarkerForRevision(revision, markdown),
+        createLocalEmptyEmbeddingMarkerForRevision(revision, markdown, indexed.source.contentSha256),
       ]);
       return;
     }
@@ -204,6 +300,7 @@ export class EmbeddingsProcessor {
               partial: false,
               failedChunkCount: 0,
               chunkCount: indexed.chunks.length,
+              sourceSha256: indexed.source.contentSha256,
             }
           : {}),
       },
@@ -211,12 +308,19 @@ export class EmbeddingsProcessor {
     await this.storage.publishPath(revision.path, generation.indexNamespace, vectors);
   }
 
-  private async assertSourceCurrent(
-    app: App,
-    file: TFile,
-    revision: EmbeddingSourceRevision,
-    indexedMarkdown: string,
-  ): Promise<void> {
+  /**
+   * A note can change while its request is in flight without its reported
+   * mtime moving (coarse filesystem clocks, sync tools that preserve mtimes).
+   * Compare the bytes that are current now with the bytes that were sent,
+   * through Obsidian's in-memory cache, before publishing their vectors.
+   */
+  private async assertSourceBytesUnchanged(app: App, file: TFile, sentSha256: string): Promise<void> {
+    const current = await app.vault.cachedRead(file);
+    if (await sha256Hex(current) !== sentSha256) throw new StaleEmbeddingSourceError();
+  }
+
+  /** The note's path, name and mtime are still the revision that was read. */
+  private assertSourceCurrent(file: TFile, revision: EmbeddingSourceRevision): void {
     if (
       file.path !== revision.path
       || file.basename !== revision.basename
@@ -224,8 +328,6 @@ export class EmbeddingsProcessor {
     ) {
       throw new StaleEmbeddingSourceError();
     }
-    const current = await app.vault.read(file);
-    if (current !== indexedMarkdown) throw new StaleEmbeddingSourceError();
   }
 
   private failureDetail(

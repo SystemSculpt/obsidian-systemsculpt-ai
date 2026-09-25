@@ -161,7 +161,6 @@ function harness(initialContent: string) {
     embeddingsVectorFormatVersion: 5,
     embeddingsEnabled: false,
     embeddingsPortableIndex: false,
-    embeddingsRebuildPending: false,
     embeddingsExclusions: { folders: [], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
     chatsDirectory: "Chats",
     savedChatsDirectory: "Saved Chats",
@@ -173,6 +172,7 @@ function harness(initialContent: string) {
     getMarkdownFiles: jest.fn(() => [file]),
     getAbstractFileByPath: jest.fn(() => file),
     read: jest.fn(async () => content),
+    cachedRead: jest.fn(async () => content),
     on: jest.fn((event: string, callback: (...args: any[]) => void) => {
       watchers.set(event, callback);
       return {};
@@ -232,7 +232,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toEqual({ total: 1, processed: 1, present: 0, needsProcessing: 0, failed: 0 });
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
     expect(state.index).not.toHaveBeenCalled();
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(false);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({
       phase: "idle",
       total: 1,
@@ -270,7 +269,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const result = await state.manager.processVault();
 
     expect(result).toMatchObject({ status: "complete", processed: 0, partialSuccess: true });
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(true);
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
     expect(state.index).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -494,14 +492,12 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const state = harness("A note that is indexed once.");
     await state.manager.initialize();
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
-    expect(state.updateSettings).toHaveBeenCalledWith({ embeddingsRebuildPending: true });
     state.updateSettings.mockClear();
 
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
 
-    expect(state.updateSettings).not.toHaveBeenCalledWith(
-      expect.objectContaining({ embeddingsRebuildPending: expect.anything() }),
-    );
+    // Indexing runs never save settings: the write-only rebuild flag is gone (#341).
+    expect(state.updateSettings).not.toHaveBeenCalled();
   });
 
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
@@ -571,7 +567,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     });
 
     const processing = state.manager.processVault();
-    for (let attempt = 0; attempt < 20 && !releaseResponse; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 50 && !releaseResponse; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(releaseResponse).toBeDefined();
     const queue = (state.manager as any).workQueue;
     const claimed = queue.get(state.file.path);

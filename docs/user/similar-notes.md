@@ -31,6 +31,11 @@ Core controls:
 ## Notes
 
 - Processing is background/on-demand, not a single one-shot job.
+- While you edit a note, Similar Notes keeps showing its current results. They
+  refresh shortly after any indexing run finishes (so newly indexed notes can
+  appear), when you switch notes, or when a result is renamed or deleted.
+- Vault search shows text matches as you type and adds semantic matches once
+  you pause, for queries of three or more characters.
 - Exclusions can dramatically reduce indexed content.
 - The same exclusions hide notes from vault search and from the agent's
   `list_items`, `find`, and `search` tools. Those tools also hide an excluded
@@ -40,3 +45,14 @@ Core controls:
   A pattern without `/` matches file names. Obsidian exclusions follow
   Obsidian's own rules.
 - If SystemSculpt updates the embeddings setup, a rebuild may be required.
+  The index keeps the searchable generation and the one being built, and
+  removes older generations automatically.
+- A portable copy of the index lives in `.systemsculpt/embeddings/`: a small
+  `index.json` plus binary files in `shards/`. File-level sync and backups
+  (iCloud, Dropbox, Syncthing, git) carry it to other devices, so a new
+  device can restore the index instead of re-embedding every note. A restore
+  skips notes the vault no longer has or now excludes. Obsidian Sync skips
+  dot-folders and does not carry it. An edit rewrites only the
+  shard holding that note, and unchanged notes cause no writes. Releases
+  before this format write a single large `index.json`; this release still
+  restores from it and replaces it on its first update.

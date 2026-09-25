@@ -1,10 +1,13 @@
 /**
- * EmbeddingsIndexFile - reads/writes the portable embedding snapshot to a
- * vault-relative path through Obsidian's `DataAdapter`.
+ * EmbeddingsIndexFile - reads/writes the portable embedding snapshot files
+ * through Obsidian's `DataAdapter`: the `index.json` manifest (or an older
+ * release's single-file index) plus the binary shard files beside it.
  *
- * Living in the vault (default `.systemsculpt/embeddings/index.json`, alongside
- * `.systemsculpt/diagnostics`) is what lets Obsidian Sync/backup capture and
- * restore the index — unlike the per-device IndexedDB store.
+ * Living in the vault (default `.systemsculpt/embeddings/`, alongside
+ * `.systemsculpt/diagnostics`) is what lets file-level vault sync and backups
+ * (iCloud, Dropbox, Syncthing, git) carry the index to another device, unlike
+ * the per-device IndexedDB store. Obsidian Sync skips dot-folders, so it does
+ * not. Every rewrite is uploaded by those tools, which is why writes are rare.
  *
  * Uses only the Obsidian `DataAdapter` (read/write/exists/mkdir), including
  * adapters without a Node base path; no `node:fs`, so this stays within the
@@ -12,10 +15,11 @@
  */
 
 import type { DataAdapter } from "obsidian";
-import type { SerializedEmbeddingsIndex } from "./EmbeddingsIndexSerialization";
 
 const DEFAULT_DIR = ".systemsculpt/embeddings";
 const DEFAULT_FILE_NAME = "index.json";
+const SHARD_DIR_NAME = "shards";
+const SHARD_FILE = /^(\d{2,4})\.bin$/;
 
 export interface EmbeddingsIndexFileOptions {
   dir?: string;
@@ -27,6 +31,7 @@ export class EmbeddingsIndexFile {
   private readonly filePath: string;
   /** Last good snapshot parked here while a replace is in flight. */
   private readonly previousPath: string;
+  private readonly shardDir: string;
 
   constructor(
     private readonly adapter: DataAdapter,
@@ -36,6 +41,7 @@ export class EmbeddingsIndexFile {
     const fileName = options.fileName ?? DEFAULT_FILE_NAME;
     this.filePath = `${this.dir}/${fileName}`;
     this.previousPath = `${this.filePath}.previous`;
+    this.shardDir = `${this.dir}/${SHARD_DIR_NAME}`;
   }
 
   public getPath(): string {
@@ -56,14 +62,24 @@ export class EmbeddingsIndexFile {
    * present or parseable (a partially-synced or hand-edited file must never
    * crash startup).
    */
-  public async read(): Promise<SerializedEmbeddingsIndex | null> {
+  public async read(): Promise<Record<string, unknown> | null> {
     return (await this.readCandidate(this.filePath)) ?? this.readCandidate(this.previousPath);
+  }
+
+  /** Byte size of `index.json`, or null when it is missing or unreadable. */
+  public async size(): Promise<number | null> {
+    try {
+      const stat = await this.adapter.stat(this.filePath);
+      return stat && typeof stat.size === "number" ? stat.size : null;
+    } catch {
+      return null;
+    }
   }
 
   private async readCandidate(
     path: string,
     options?: { failOnReadError: boolean },
-  ): Promise<SerializedEmbeddingsIndex | null> {
+  ): Promise<Record<string, unknown> | null> {
     let text: string;
     try {
       if (!(await this.adapter.exists(path))) return null;
@@ -77,7 +93,7 @@ export class EmbeddingsIndexFile {
     try {
       const parsed = JSON.parse(text) as unknown;
       return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as SerializedEmbeddingsIndex
+        ? parsed as Record<string, unknown>
         : null;
     } catch {
       return null;
@@ -85,13 +101,13 @@ export class EmbeddingsIndexFile {
   }
 
   /**
-   * Write the snapshot, creating the directory if needed.
+   * Write `index.json`, creating the directory if needed.
    */
-  public async write(index: SerializedEmbeddingsIndex): Promise<void> {
+  public async write(value: object): Promise<void> {
     if (!(await this.adapter.exists(this.dir))) {
       await this.adapter.mkdir(this.dir);
     }
-    const serialized = JSON.stringify(index);
+    const serialized = JSON.stringify(value);
     const tempPath = `${this.filePath}.next`;
     if (typeof this.adapter.rename !== "function") {
       await this.adapter.write(this.filePath, serialized);
@@ -138,10 +154,98 @@ export class EmbeddingsIndexFile {
     }
   }
 
+  /**
+   * An older release could leave its whole index parked at `.previous`. Once
+   * the current manifest is in place that copy is only dead weight.
+   */
+  public async removeRecoveryCopy(): Promise<void> {
+    if (await this.adapter.exists(this.previousPath)) await this.adapter.remove(this.previousPath);
+  }
+
+  public shardPath(shard: number): string {
+    return `${this.shardDir}/${String(shard).padStart(2, "0")}.bin`;
+  }
+
+  /** Shard numbers present on disk. */
+  public async listShards(): Promise<Set<number>> {
+    const shards = new Set<number>();
+    try {
+      if (!(await this.adapter.exists(this.shardDir))) return shards;
+      const listed = await this.adapter.list(this.shardDir);
+      for (const path of listed.files) {
+        const match = SHARD_FILE.exec(path.slice(path.lastIndexOf("/") + 1));
+        if (match) shards.add(Number(match[1]));
+      }
+    } catch {
+      // An unreadable directory is treated as holding no shards.
+    }
+    return shards;
+  }
+
+  /** Size and modification time of one shard file, or null when it is missing. */
+  public async shardStat(shard: number): Promise<{ size: number; mtime: number | null } | null> {
+    try {
+      const stat = await this.adapter.stat(this.shardPath(shard));
+      if (!stat || typeof stat.size !== "number") return null;
+      return { size: stat.size, mtime: typeof stat.mtime === "number" ? stat.mtime : null };
+    } catch {
+      return null;
+    }
+  }
+
+  public async readShard(shard: number): Promise<ArrayBuffer | null> {
+    const path = this.shardPath(shard);
+    try {
+      if (!(await this.adapter.exists(path))) return null;
+      return await this.adapter.readBinary(path);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Replace one shard. The bytes land in a temporary file first, so a reader
+   * sees the previous shard or the next one, never a partial write.
+   */
+  public async writeShard(shard: number, bytes: ArrayBuffer): Promise<void> {
+    if (!(await this.adapter.exists(this.dir))) await this.adapter.mkdir(this.dir);
+    if (!(await this.adapter.exists(this.shardDir))) await this.adapter.mkdir(this.shardDir);
+    const path = this.shardPath(shard);
+    const tempPath = `${path}.next`;
+    await this.adapter.writeBinary(tempPath, bytes);
+    try {
+      try {
+        await this.adapter.rename(tempPath, path);
+      } catch (renameError) {
+        // Some adapters refuse to rename over an existing file.
+        if (!(await this.adapter.exists(path))) throw renameError;
+        await this.adapter.remove(path);
+        await this.adapter.rename(tempPath, path);
+      }
+    } catch (error) {
+      try {
+        if (await this.adapter.exists(tempPath)) await this.adapter.remove(tempPath);
+      } catch { /* temporary cleanup is best effort */ }
+      throw error;
+    }
+  }
+
+  public async removeShard(shard: number): Promise<void> {
+    const path = this.shardPath(shard);
+    for (const candidate of [`${path}.next`, path]) {
+      if (await this.adapter.exists(candidate)) await this.adapter.remove(candidate);
+    }
+  }
+
   public async remove(): Promise<void> {
     // Recovery candidates must not resurrect a deliberately removed snapshot.
     for (const path of [this.previousPath, `${this.filePath}.next`, this.filePath]) {
       if (await this.adapter.exists(path)) await this.adapter.remove(path);
+    }
+    if (!(await this.adapter.exists(this.shardDir))) return;
+    const listed = await this.adapter.list(this.shardDir);
+    for (const path of listed.files) {
+      if (path.endsWith(".bin") || path.endsWith(".bin.next")) await this.adapter.remove(path);
     }
   }
 }

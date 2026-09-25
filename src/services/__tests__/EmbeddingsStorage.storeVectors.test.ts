@@ -156,7 +156,9 @@ describe("EmbeddingsStorage.storeVectors", () => {
 
       transaction.oncomplete();
       await expect(publication).resolves.toBeUndefined();
-      expect((storage as any).cache.get(vectors[0].id)).toEqual(vectors[0]);
+      // The root cache keeps metadata only; vectors stay in IndexedDB.
+      const { vector: _vector, ...rootMetadata } = vectors[0];
+      expect((storage as any).cache.get(vectors[0].id)).toEqual(rootMetadata);
       expect((storage as any).pathsSet.has("Atomic.md")).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {
@@ -245,7 +247,8 @@ describe("EmbeddingsStorage.storeVectors", () => {
       await expect(publication).resolves.toBeUndefined();
       expect((storage as any).cache.has(current.id)).toBe(false);
       expect((storage as any).cache.has(replacement.id)).toBe(false);
-      expect((storage as any).cache.get(marker.id)).toBe(marker);
+      const { vector: _markerVector, ...markerMetadata } = marker;
+      expect((storage as any).cache.get(marker.id)).toEqual(markerMetadata);
       expect((storage as any).pathsSet.has(current.path)).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {
@@ -343,43 +346,6 @@ describe("EmbeddingsStorage.storeVectors", () => {
         configurable: true,
         value: previousKeyRange,
       });
-    }
-  });
-  it.each(["commit", "abort"])("streams namespace keys and preserves the active generation on %s", async (outcome) => {
-    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
-    const old = makeVector("Old.md", "managed:old");
-    const keep = makeVector("Keep.md", "managed:keep");
-    (storage as any).cache.set(old.id, old);
-    (storage as any).cache.set(keep.id, keep);
-    const request: any = {};
-    const store = { delete: jest.fn(), index: jest.fn(() => ({ openKeyCursor: jest.fn(() => request) })) };
-    const transaction: any = { objectStore: jest.fn(() => store) };
-    (storage as any).db = { transaction: jest.fn(() => transaction) };
-    const previousKeyRange = globalThis.IDBKeyRange;
-    Object.defineProperty(globalThis, "IDBKeyRange", {
-      configurable: true, value: { bound: jest.fn((lower, upper) => ({ lower, upper })) },
-    });
-    try {
-      const removal = storage.removeNamespacesExcept("managed:", "managed:keep");
-      for (const vector of [old, keep]) {
-        request.result = { primaryKey: vector.id, key: vector.metadata.namespace, continue: jest.fn() };
-        request.onsuccess();
-      }
-      expect(store.delete).toHaveBeenCalledTimes(1);
-      expect(store.delete).toHaveBeenCalledWith(old.id);
-      expect((storage as any).cache.has(old.id)).toBe(true);
-      if (outcome === "commit") {
-        transaction.oncomplete();
-        await expect(removal).resolves.toBe(1);
-        expect((storage as any).cache.has(old.id)).toBe(false);
-      } else {
-        transaction.onabort();
-        await expect(removal).rejects.toThrow("IndexedDB transaction aborted.");
-        expect((storage as any).cache.has(old.id)).toBe(true);
-      }
-      expect((storage as any).cache.has(keep.id)).toBe(true);
-    } finally {
-      Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: previousKeyRange });
     }
   });
 

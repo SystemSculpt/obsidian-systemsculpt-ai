@@ -21,5 +21,6 @@
  *  - 11: removed obsolete top-level transcription language overrides; transcription now auto-detects source language.
  *  - 12: removed retired user-configured workflow automations, backlog state, and automation skip records.
  *  - 13: added the persisted default output preset for Audio Processor.
+ *  - 14: removed the write-only embeddings rebuild flag (#341).
  */
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
