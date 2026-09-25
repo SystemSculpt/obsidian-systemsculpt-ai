@@ -1,11 +1,11 @@
 import { reconcileStudioProject } from "./StudioProjectReconciliation";
 import { projectToEntities } from "./document/StudioProjectEntities";
-import type { StudioDocumentEdit } from "./document/StudioProjectDocument";
+import type { StudioDocumentEdit, StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
 import { studioAgentExecution, readStudioCommandExecution } from './StudioCommandExecution';
 import { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
 import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettings';
 import type { StudioAgentRunView } from '../services/codex/StudioAgentRunStore';
-import { normalizePath } from "obsidian";
+import { Notice, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { replaceControlCharacters } from "../utils/characterValidation";
 import { StudioAssetStore } from "./StudioAssetStore";
@@ -112,6 +112,17 @@ function resolveImportedFileName(name: string, mimeType: string, hash: string): 
   return `${baseName}-${hash.slice(0, 12)}.${extension}`;
 }
 
+const LEGACY_ORIGINAL_NOTICE_NODE_LIMIT = 5;
+
+function formatLegacyOriginalNotice(copy: StudioLegacyOriginalCopy): string {
+  const listed = copy.retiredNodes.slice(0, LEGACY_ORIGINAL_NOTICE_NODE_LIMIT).map((node) => `${node.title} (${node.kind})`);
+  const more = copy.retiredNodes.length - listed.length;
+  const retired = listed.length
+    ? ` Converted retired nodes: ${listed.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`
+    : "";
+  return `Studio updated ${copy.projectPath} to the current project format.${retired} The original file is saved at ${copy.copyPath}.`;
+}
+
 export class StudioService {
   private readonly registry = new StudioNodeRegistry();
   private readonly compiler = new StudioGraphCompiler();
@@ -124,7 +135,12 @@ export class StudioService {
   private readonly agentReferenceFile: StudioAgentReferenceFile;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
-    this.projectStore = new StudioProjectStore(plugin.app);
+    this.projectStore = new StudioProjectStore(plugin.app, {
+      // The copy is made once per distinct original, so this notice appears once per upgraded file.
+      onLegacyOriginalCopied: (copy) => {
+        new Notice(formatLegacyOriginalNotice(copy), 15000);
+      },
+    });
     this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
     this.apiAdapter = new StudioApiExecutionAdapter(plugin);

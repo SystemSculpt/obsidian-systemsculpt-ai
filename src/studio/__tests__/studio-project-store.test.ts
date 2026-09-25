@@ -1,11 +1,18 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
+import type { StudioLegacyOriginalCopy } from "../document/StudioProjectDocument";
 import { StudioProjectSession } from "../StudioProjectSession";
 import { serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
+import { StudioService } from "../StudioService";
+import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 import { deriveStudioAssetsDir, deriveStudioPolicyPath, sanitizeStudioProjectName } from "../paths";
+
+// Spy on the CJS module object so `new Notice(...)` in the service is intercepted.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const obsidian = require("obsidian");
 
 type InMemoryApp = {
   vault: {
@@ -27,7 +34,7 @@ type InMemoryApp = {
   };
 };
 
-function createStore(options?: { existingFiles?: string[]; existingDirs?: string[] }) {
+function createStore(options?: { existingFiles?: string[]; existingDirs?: string[]; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void }) {
   const existingFiles = options?.existingFiles || [];
   const existingDirs = options?.existingDirs || [];
   const files = new Map<string, string>();
@@ -129,12 +136,14 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
     },
   };
 
+  const storeOptions = { onLegacyOriginalCopied: options?.onLegacyOriginalCopied };
   return {
     adapter,
+    app,
     dirs,
     files,
-    store: new StudioProjectStore(app as any),
-    reopen: () => new StudioProjectStore(app as any),
+    store: new StudioProjectStore(app as any, storeOptions),
+    reopen: () => new StudioProjectStore(app as any, storeOptions),
   };
 }
 
@@ -548,6 +557,129 @@ describe("v1 projects with retired node kinds", () => {
     expect(written).not.toMatch(/sentinel-header|sentinel-token|"label"|"http_request"/);
     const reopened = await reopen().loadProject(path);
     expect(reopened.graph.nodes.map((node) => node.kind)).toEqual(opened.graph.nodes.map((node) => node.kind));
+  });
+
+  const legacyFolder = "SystemSculpt/Studio/Legacy API digest.systemsculpt-assets/legacy";
+  const legacyCopies = (files: Map<string, string>) => [...files.keys()].filter((file) => file.startsWith(`${legacyFolder}/`));
+
+  it("keeps the original v1 bytes before the first rewrite replaces them", async () => {
+    const copied = jest.fn();
+    const { store, files, adapter } = createStore({ onLegacyOriginalCopied: copied });
+    files.set(path, v1Text);
+    const replace = adapter.process.getMockImplementation()!;
+    let copiesAtRewrite: string[] | null = null;
+    adapter.process.mockImplementation(async (target: string, update: (data: string) => string) => {
+      if (target === path && copiesAtRewrite === null) copiesAtRewrite = legacyCopies(files).map((copy) => files.get(copy)!);
+      return replace(target, update);
+    });
+
+    await store.loadProject(path);
+
+    expect(legacyCopies(files)).toHaveLength(1);
+    const [copyPath] = legacyCopies(files);
+    expect(copyPath).toMatch(/\/legacy\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-v1-original\.json$/);
+    // The copy is written from the file's own bytes, not from a re-serialized project.
+    const [, written] = adapter.writeBinary.mock.calls.find(([target]) => target === copyPath)!;
+    expect(new Uint8Array(written)).toEqual(new TextEncoder().encode(v1Text));
+    expect(copiesAtRewrite).toEqual([v1Text]);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    expect(copied).toHaveBeenCalledTimes(1);
+    expect(copied).toHaveBeenCalledWith({
+      projectPath: path,
+      copyPath,
+      retiredNodes: [
+        { title: "Text", kind: "studio.label" },
+        { title: "Fetch items", kind: "studio.http_request" },
+      ],
+    });
+  });
+
+  it("keeps the copy before a save that is the first writer", async () => {
+    const copied = jest.fn();
+    const { store, files } = createStore({ onLegacyOriginalCopied: copied });
+    files.set(path, v1Text);
+    const elsewhere = createStore();
+    elsewhere.files.set(path, v1Text);
+    const project = await elsewhere.store.loadProject(path);
+
+    const saved = await store.saveProject(path, { ...project, name: "Legacy API digest (edited)" });
+
+    expect(saved.conflicts).toEqual([]);
+    expect(JSON.parse(files.get(path)!).name).toBe("Legacy API digest (edited)");
+    expect(legacyCopies(files).map((copy) => files.get(copy))).toEqual([v1Text]);
+    expect(copied).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies each distinct original once, however often the project is opened", async () => {
+    const copied = jest.fn();
+    const { store, files, reopen } = createStore({ onLegacyOriginalCopied: copied });
+    files.set(path, v1Text);
+
+    await store.loadProject(path);
+    await store.loadProject(path);
+    await reopen().loadProject(path);
+    expect(legacyCopies(files)).toHaveLength(1);
+    expect(copied).toHaveBeenCalledTimes(1);
+
+    // A sync client restoring the same v1 bytes is upgraded again without a second copy.
+    files.set(path, v1Text);
+    await reopen().loadProject(path);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    expect(legacyCopies(files)).toHaveLength(1);
+    expect(copied).toHaveBeenCalledTimes(1);
+
+    // Different original bytes are a separate record.
+    const edited = v1Text.replace("Fetch items", "Fetch all items");
+    files.set(path, edited);
+    await reopen().loadProject(path);
+    expect(legacyCopies(files).map((copy) => files.get(copy)).sort()).toEqual([v1Text, edited].sort());
+    expect(copied).toHaveBeenCalledTimes(2);
+  });
+
+  it("never copies a v2 file", async () => {
+    const copied = jest.fn();
+    const { store, files, adapter } = createStore({ onLegacyOriginalCopied: copied });
+    const created = await store.createProject({ name: "Current", minPluginVersion: "9.9.9", maxRuns: 100, maxArtifactsMb: 1024 });
+    const loaded = await store.loadProject(created.path);
+    await store.saveProject(created.path, { ...loaded, name: "Current renamed" });
+    // A v2 file whose formatting differs is normalized on import, still without a copy.
+    files.set(created.path, JSON.stringify(JSON.parse(files.get(created.path)!)));
+    await store.refreshDocument(created.path);
+
+    expect(JSON.parse(files.get(created.path)!).name).toBe("Current renamed");
+    expect([...files.keys()].filter((file) => file.includes("/legacy/"))).toEqual([]);
+    expect(adapter.readBinary).not.toHaveBeenCalled();
+    expect(copied).not.toHaveBeenCalled();
+  });
+
+  it("names the copy and the converted nodes in one notice when Studio opens the project", async () => {
+    const notice = jest.spyOn(obsidian, "Notice").mockImplementation(() => ({}));
+    try {
+      const { app, files } = createStore();
+      files.set(path, v1Text);
+      const service = new StudioService({
+        app: { ...app, vault: { ...app.vault, getName: getManagedStudioTestVaultName, configDir: ".obsidian" } },
+        manifest: { id: "systemsculpt-ai", version: "9.9.9", dir: "/tmp/systemsculpt-ai" },
+        settings: { studioDefaultProjectsFolder: "SystemSculpt/Studio", studioRunRetentionMaxRuns: 100, studioRunRetentionMaxArtifactsMb: 1024 },
+        getLogger: () => ({ warn: jest.fn(), error: jest.fn() }),
+        getManagedCapabilityGraph: createManagedCapabilityGraphStub,
+      } as any);
+
+      await service.retainProjectSession(path);
+      await service.releaseProjectSession(path);
+      await service.retainProjectSession(path);
+      await service.releaseProjectSession(path);
+
+      expect(legacyCopies(files)).toHaveLength(1);
+      const [copyPath] = legacyCopies(files);
+      expect(notice).toHaveBeenCalledTimes(1);
+      expect(notice).toHaveBeenCalledWith(
+        `Studio updated ${path} to the current project format. Converted retired nodes: Text (studio.label), Fetch items (studio.http_request). The original file is saved at ${copyPath}.`,
+        15000,
+      );
+    } finally {
+      notice.mockRestore();
+    }
   });
 
   it("keeps rejecting v1 node kinds that no migration knows", async () => {

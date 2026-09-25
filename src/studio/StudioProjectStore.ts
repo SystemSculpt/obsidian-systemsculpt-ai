@@ -2,7 +2,7 @@ import type { App } from "obsidian";
 import type { StudioProjectV1, StudioPermissionPolicyV1 } from "./types";
 import { createEmptyStudioProject, createDefaultStudioPolicy, parseStudioPolicy, serializeStudioPolicy, serializeStudioProject, parseStudioProject } from "./schema";
 import { DEFAULT_STUDIO_PROJECTS_DIR, deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "./paths";
-import { StudioProjectDocument, type StudioDocumentEdit } from "./document/StudioProjectDocument";
+import { StudioProjectDocument, type StudioDocumentEdit, type StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
 import type { StudioProjectReconciliation } from "./StudioProjectReconciliation";
 import { resolveStudioEntry } from "./StudioEntry";
 import { reconcileStudioSupportDocument } from "./persistence/StudioSupportReconciliation";
@@ -30,7 +30,7 @@ const operations = new WeakMap<object, Map<string, Promise<unknown>>>();
 /** One authored file; media and execution records are stored separately. */
 export class StudioProjectStore {
   private readonly documents = new Map<string, StudioProjectDocument>();
-  constructor(private readonly app: App) {}
+  constructor(private readonly app: App, private readonly options: {onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void} = {}) {}
 
   private exclusive<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const adapter = this.app.vault.adapter;
@@ -49,7 +49,7 @@ export class StudioProjectStore {
     path = normalizeStudioProjectPath(path);
     let document = this.documents.get(path);
     if (!document) {
-      document = new StudioProjectDocument(this.app.vault.adapter, path);
+      document = new StudioProjectDocument(this.app.vault.adapter, path, this.options.onLegacyOriginalCopied);
       this.documents.set(path, document);
     }
     return document;
