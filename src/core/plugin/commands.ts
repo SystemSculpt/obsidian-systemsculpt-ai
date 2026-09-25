@@ -2,6 +2,7 @@ import { App, Notice, View, WorkspaceLeaf, TFile, normalizePath } from "obsidian
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { showConfirm } from "../ui/notifications";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
@@ -765,7 +766,7 @@ export class CommandManager {
   }
 
   private async renameTitleTargetFile(file: TFile, nextTitle: string): Promise<string> {
-    const safeTitle = String(nextTitle || "").trim();
+    const safeTitle = toSafeVaultFileName(String(nextTitle || "").trim(), { fallback: "" });
     if (!safeTitle) {
       throw new Error("Generated title is empty.");
     }
@@ -777,6 +778,7 @@ export class CommandManager {
     }
 
     const newPath = this.buildSiblingFilePath(file, safeTitle);
+    if (newPath === file.path) return newPath;
     await this.app.fileManager.renameFile(file, newPath);
     return newPath;
   }

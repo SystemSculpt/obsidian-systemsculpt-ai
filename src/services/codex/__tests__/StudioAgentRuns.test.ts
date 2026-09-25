@@ -1,4 +1,6 @@
-import { StudioAgentRuns } from '../StudioAgentRuns';
+import { MAX_LOADED_AGENT_RUNS, StudioAgentRuns } from '../StudioAgentRuns';
+import { createStudioWorkflow } from '../StudioWorkflow';
+import { agentRunFolder } from '../StudioAgentRunStore';
 import { runLocalCodex } from '../LocalCodexClient';
 import { codexActivity } from '../CodexActivity';
 import { answerCodexRequest } from '../CodexRequestModal';
@@ -104,6 +106,33 @@ it('does not admit a native turn when the initial run record cannot be saved', a
   const { runs, adapter } = fixture(); adapter.write.mockRejectedValue(new Error('Disk full'));
   await expect(runs.start(spec())).rejects.toThrow('Disk full'); expect(turn).not.toHaveBeenCalled(); await runs.dispose();
 });
+function savedRun(index: number, overrides: Record<string, unknown> = {}) {
+  const id = `agent_${1_700_000_000_000 + index}_${index.toString(16).padStart(8, '0')}`;
+  const at = new Date(1_700_000_000_000 + index).toISOString();
+  return { id, content: JSON.stringify({ schema: 'studio.agent-run.v1', id, projectId: 'project', projectPath: 'project.systemsculpt', nodeId: 'worker', title: 'Worker', owner: 'old', machine: 'test-machine', status: 'completed', createdAt: at, updatedAt: at, threadId: `thread-${index}`, turnId: '', request: { prompt: 'Task', workingDirectory: '/tmp' }, result: 'Done', error: '', currentActivity: 'Completed', activity: [], messages: [], ...overrides }) };
+}
+it('opens the board with one page of saved runs and shows every older page it loads', async () => {
+  const { runs, files } = fixture();
+  const folder = agentRunFolder('project.systemsculpt');
+  for (let index = 0; index < 260; index++) { const run = savedRun(index); files.set(`${folder}/${run.id}.json`, run.content); }
+  await runs.load('project.systemsculpt', 'project');
+  expect(runs.list('project')).toHaveLength(50);
+  expect(runs.hasOlder('project.systemsculpt')).toBe(true);
+
+  for (let page = 0; page < 4; page++) await runs.loadOlder('project.systemsculpt', 'project');
+  // More than 200 loaded runs all reach the board.
+  expect(runs.list('project')).toHaveLength(250);
+  await runs.loadOlder('project.systemsculpt', 'project');
+  expect(runs.list('project')).toHaveLength(260);
+  expect(runs.hasOlder('project.systemsculpt')).toBe(false);
+  await runs.dispose();
+
+  // The first session indexed every record; the next one reads a single page.
+  const next = fixture(); for (const [path, content] of files) next.files.set(path, content);
+  await next.runs.load('project.systemsculpt', 'project');
+  expect(next.adapter.read.mock.calls.filter(([path]) => !String(path).endsWith('index.json'))).toHaveLength(50);
+  await next.runs.dispose();
+});
 it('projects commands and public plans but excludes reasoning internals', () => {
   expect(codexActivity('item/started', { item: { id: 'c', type: 'commandExecution', command: 'pwd', status: 'inProgress' } })).toMatchObject({ kind: 'command', title: 'pwd' });
   expect(codexActivity('item/completed', { item: { id: 'r', type: 'reasoning', summary: 'private' } })).toBeNull();
@@ -155,6 +184,61 @@ it('recovers the same workflow and child thread after reload without a duplicate
   expect(sessions).toHaveLength(4); expect(sessions[2].threadId).toBe('thread-1'); expect(sessions[3].threadId).toBe('thread-0');
   expect((await call(3, 'studio_start_run', args)).contentItems).toEqual(original.contentItems);
   expect(reloaded.runs.list('project')).toHaveLength(2); expect(turn.mock.calls[2][0].recoverCompletedTurn).toBe(true);
+  await reloaded.runs.dispose();
+});
+it('recovers an open workflow after reload even when newer runs push it past the first page', async () => {
+  const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
+  await runs.dispose();
+  const folder = agentRunFolder('project.systemsculpt');
+  expect(JSON.parse(files.get(`${folder}/index.json`)!).runs[root.id]).toMatchObject({ workflowOpen: true });
+  for (let index = 0; index < 60; index++) {
+    const id = `agent_${Date.now() + 1_000 + index}_${index.toString(16).padStart(8, '0')}`, at = new Date().toISOString();
+    files.set(`${folder}/${id}.json`, JSON.stringify({ schema: 'studio.agent-run.v1', id, projectId: 'project', projectPath: 'project.systemsculpt', nodeId: 'worker', title: 'Worker', owner: 'old', machine: 'test-machine', status: 'completed', createdAt: at, updatedAt: at, threadId: `thread-x${index}`, turnId: '', request: { prompt: 'Task', workingDirectory: '/tmp' }, result: 'Done', error: '', currentActivity: 'Completed', activity: [], messages: [] }));
+  }
+  const reloaded = workflowFixture(files); await reloaded.runs.load('project.systemsculpt', 'project'); await tick();
+  expect(reloaded.runs.get(root.id)?.workflow?.status).toBe('active');
+  expect(sessions).toHaveLength(2); expect(sessions[1].threadId).toBe(root.threadId);
+  await reloaded.runs.dispose();
+});
+it('keeps the loaded runs bounded when the board pages past the cap, keeping live runs', async () => {
+  const { runs, files } = fixture();
+  const folder = agentRunFolder('project.systemsculpt');
+  const total = MAX_LOADED_AGENT_RUNS + 200;
+  for (let index = 1; index < total; index++) { const run = savedRun(index); files.set(`${folder}/${run.id}.json`, run.content); }
+  const open = savedRun(0, { machine: 'laptop', status: 'waiting', workflow: { ...createStudioWorkflow('Long-running'), status: 'waiting' } });
+  files.set(`${folder}/${open.id}.json`, open.content);
+  const newest = savedRun(total - 1).id;
+
+  await runs.load('project.systemsculpt', 'project');
+  for (let page = 0; page < 40 && runs.hasOlder('project.systemsculpt'); page++) await runs.loadOlder('project.systemsculpt', 'project');
+
+  const loaded = runs.list('project');
+  expect(loaded).toHaveLength(MAX_LOADED_AGENT_RUNS);
+  expect(runs.isCapped('project.systemsculpt')).toBe(true);
+  expect(runs.hasOlder('project.systemsculpt')).toBe(false);
+  expect(loaded.map(run => run.id)).toEqual(expect.arrayContaining([open.id, newest]));
+
+  // Paging again is refused rather than growing the cache.
+  await runs.loadOlder('project.systemsculpt', 'project');
+  expect(runs.list('project')).toHaveLength(MAX_LOADED_AGENT_RUNS);
+
+  await runs.refresh('project.systemsculpt', 'project');
+  expect(runs.isCapped('project.systemsculpt')).toBe(false);
+  expect(runs.list('project').length).toBeLessThanOrEqual(MAX_LOADED_AGENT_RUNS);
+  await runs.dispose();
+});
+it('recovers an old open workflow after reload when the run index is missing', async () => {
+  const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
+  await runs.dispose();
+  const folder = agentRunFolder('project.systemsculpt');
+  files.delete(`${folder}/index.json`);
+  for (let index = 0; index < 60; index++) {
+    const run = savedRun(index, { createdAt: new Date(Date.now() + 1_000 + index).toISOString() });
+    files.set(`${folder}/agent_${Date.now() + 1_000 + index}_${index.toString(16).padStart(8, '0')}.json`, run.content.replace(run.id, `agent_${Date.now() + 1_000 + index}_${index.toString(16).padStart(8, '0')}`));
+  }
+  const reloaded = workflowFixture(files); await reloaded.runs.load('project.systemsculpt', 'project'); await tick();
+  expect(reloaded.runs.get(root.id)?.workflow?.status).toBe('active');
+  expect(sessions).toHaveLength(2); expect(sessions[1].threadId).toBe(root.threadId);
   await reloaded.runs.dispose();
 });
 it('pauses ambiguous delivery after a crash and resumes only the new owner follow-up', async () => {

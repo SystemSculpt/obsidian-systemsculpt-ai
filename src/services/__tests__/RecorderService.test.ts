@@ -98,6 +98,7 @@ function createSessionHarness(): SessionHarness {
   let pendingSave: any | null = null;
   const session = {
     completion: completion.promise,
+    captureLimitBytes: 64 * 1024 * 1024,
     start: jest.fn(() => start.promise),
     stop: jest.fn((reason = "manual") => {
       recording = false;
@@ -1613,5 +1614,314 @@ describe("RecorderService", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(harness.session.stop).toHaveBeenCalledWith("interrupted");
     expect(mockUiInstances[0].close).toHaveBeenCalled();
+  });
+
+  describe("streamed capture recovery", () => {
+    const hiddenPath = ".systemsculpt/recordings-in-progress/streamed.webm";
+    const filePath = "SystemSculpt/Recordings/streamed.webm";
+
+    async function startStreamedCapture(service: RecorderService): Promise<void> {
+      const running = service.toggleRecording();
+      await flush();
+      harness.setRecording(true);
+      harness.start.resolve({ filePath, startedAt: 1_000, microphoneLabel: "Default microphone" });
+      await running;
+      mockSessionInstances[0].options.onCaptureFileCreated({ filePath: hiddenPath, startedAt: 1_000, sizeBytes: 12_000 });
+      await flush();
+    }
+
+    function finishCapture(sizeBytes = 36_000): void {
+      harness.setRecording(false);
+      harness.completion.resolve({
+        filePath,
+        startedAt: 1_000,
+        durationMs: 3_000,
+        sizeBytes,
+        stopReason: "manual",
+      });
+    }
+
+    function interruptedEntry(overrides: Record<string, unknown> = {}) {
+      return {
+        filePath: hiddenPath,
+        startedAt: 1_000,
+        durationMs: 0,
+        sizeBytes: 12_000,
+        stopReason: "interrupted",
+        destination: "note",
+        captureInProgress: true,
+        ...overrides,
+      };
+    }
+
+    /** A vault whose hidden folder holds `hidden` files and whose index sees moved files. */
+    function vaultWithHiddenFiles(hidden: Record<string, { size: number; ctime?: number; mtime?: number }>) {
+      const files = new Map(Object.entries(hidden));
+      const adapter = app.vault.adapter as unknown as Record<string, jest.Mock>;
+      adapter.copy = jest.fn(async (from: string, to: string) => { files.set(to, files.get(from)!); });
+      adapter.exists.mockImplementation(async (path: string) =>
+        path === ".systemsculpt/recordings-in-progress" ? files.size > 0 : files.has(path));
+      adapter.list.mockImplementation(async () => ({ files: [...files.keys()], folders: [] }));
+      adapter.stat.mockImplementation(async (path: string) => {
+        const file = files.get(path);
+        return file ? { type: "file", ctime: file.ctime ?? 1_000, mtime: file.mtime ?? 61_000, size: file.size } : null;
+      });
+      adapter.rename.mockImplementation(async (from: string, to: string) => {
+        const file = files.get(from);
+        if (!file) throw new Error("missing");
+        files.delete(from);
+        files.set(to, file);
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        files.has(path) && !path.startsWith(".") ? new TFile({ path, stat: { size: files.get(path)!.size } }) : null);
+      return { files, adapter };
+    }
+
+    it("registers the hidden in-progress file as soon as it exists and clears it after a normal stop", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const service = RecorderService.getInstance(app, plugin);
+      await startStreamedCapture(service);
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+
+      // A recovery pass during capture leaves the live recording alone.
+      service.recoverPendingCaptures();
+      await flush();
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+      expect(app.vault.adapter.rename).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([]);
+
+      finishCapture();
+      await flush();
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+    });
+
+    it("replaces the in-progress entry with the finished capture when transcription is automatic", async () => {
+      plugin.settings.autoTranscribeRecordings = true;
+      mockTranscriptionStart.mockReturnValue({
+        operationId: "op",
+        promise: new Promise(() => undefined),
+        cancel: jest.fn(),
+      });
+      const service = RecorderService.getInstance(app, plugin);
+      await startStreamedCapture(service);
+
+      finishCapture();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([
+        expect.objectContaining({ filePath, sizeBytes: 36_000, stopReason: "manual", transcriptionIntent: "automatic" }),
+      ]);
+      expect(plugin.settings.pendingRecorderCaptures[0]).not.toHaveProperty("captureInProgress");
+      expect(mockTranscriptionStart).toHaveBeenCalledWith(expect.objectContaining({ filePath }));
+    });
+
+    it("keeps the in-progress entry while the end of a streamed capture waits for Retry save", async () => {
+      const service = RecorderService.getInstance(app, plugin);
+      await startStreamedCapture(service);
+
+      harness.setPendingSave({ filePath, startedAt: 1_000, durationMs: 3_000, sizeBytes: 36_000, stopReason: "manual" });
+      harness.setRecording(false);
+      harness.completion.reject(new Error(
+        "The recording is saved in .systemsculpt/recordings-in-progress, but it could not be moved to your recordings folder: Locked",
+      ));
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+      expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: "The recording is saved in .systemsculpt/recordings-in-progress, but it could not be moved to your recordings folder: Locked Retry save to finish saving it.",
+        canRetrySave: true,
+      }));
+    });
+
+    it("moves audio from a capture that Obsidian quit during into the recordings folder and reports it", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const { files } = vaultWithHiddenFiles({ [hiddenPath]: { size: 480_000 } });
+      plugin.settings.pendingRecorderCaptures = [interruptedEntry()];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(app.vault.adapter.rename).toHaveBeenCalledWith(hiddenPath, filePath);
+      expect([...files.keys()]).toEqual([filePath]);
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+      expect(mockTranscriptionStart).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([
+        `Notice: Recovered an interrupted recording: ${filePath}.`,
+      ]);
+    });
+
+    it("queues moved audio for transcription when transcription is automatic", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      plugin.settings.autoTranscribeRecordings = true;
+      vaultWithHiddenFiles({ [hiddenPath]: { size: 480_000 } });
+      plugin.settings.pendingRecorderCaptures = [interruptedEntry()];
+      mockTranscriptionStart.mockReturnValue({
+        operationId: "recovered-op",
+        promise: new Promise(() => undefined),
+        cancel: jest.fn(),
+      });
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([{
+        filePath,
+        startedAt: 1_000,
+        durationMs: 60_000,
+        sizeBytes: 480_000,
+        stopReason: "interrupted",
+        destination: "note",
+        transcriptionIntent: "automatic",
+      }]);
+      expect(mockTranscriptionStart).toHaveBeenCalledWith(expect.objectContaining({
+        filePath,
+        sourceOwnership: "recorder-capture",
+      }));
+    });
+
+    it("recovers an in-progress file whose entry was lost, under a free name", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const { files } = vaultWithHiddenFiles({
+        [hiddenPath]: { size: 480_000, ctime: 5_000, mtime: 65_000 },
+        [filePath]: { size: 1 },
+      });
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(files.get("SystemSculpt/Recordings/streamed-1.webm")).toMatchObject({ size: 480_000 });
+      expect(files.has(hiddenPath)).toBe(false);
+    });
+
+    it("keeps the entry and says so when the recovered file cannot be moved", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const { adapter } = vaultWithHiddenFiles({ [hiddenPath]: { size: 480_000 } });
+      adapter.rename.mockRejectedValue(new Error("Locked"));
+      adapter.copy.mockRejectedValue(new Error("Locked"));
+      plugin.settings.pendingRecorderCaptures = [interruptedEntry()];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+      expect(noticeMessages(noticeLog)).toEqual([
+        `Notice: An interrupted recording is saved at ${hiddenPath}, but it could not be moved to SystemSculpt/Recordings. SystemSculpt will try again when Obsidian restarts.`,
+      ]);
+    });
+
+    it("recovers other in-progress files while a new recording streams, leaving only its file alone", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const older = ".systemsculpt/recordings-in-progress/older.webm";
+      const { files } = vaultWithHiddenFiles({
+        [older]: { size: 1_000 },
+        [hiddenPath]: { size: 12_000 },
+      });
+      const service = RecorderService.getInstance(app, plugin);
+      await startStreamedCapture(service);
+
+      service.recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(files.has("SystemSculpt/Recordings/older.webm")).toBe(true);
+      expect(files.has(hiddenPath)).toBe(true);
+      expect(app.vault.adapter.rename).not.toHaveBeenCalledWith(hiddenPath, expect.anything());
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([interruptedEntry()]);
+    });
+
+    it("keeps recovering after a recording starts in the middle of recovery", async () => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const first = ".systemsculpt/recordings-in-progress/first.webm";
+      const second = ".systemsculpt/recordings-in-progress/second.webm";
+      const { files, adapter } = vaultWithHiddenFiles({ [first]: { size: 1_000 }, [second]: { size: 1_000 } });
+      const firstMove = deferred<void>();
+      const rename = adapter.rename.getMockImplementation()!;
+      adapter.rename.mockImplementationOnce(async (from: string, to: string) => {
+        await firstMove.promise;
+        await rename(from, to);
+      });
+      const service = RecorderService.getInstance(app, plugin);
+
+      service.recoverPendingCaptures();
+      await flush();
+      await startStreamedCapture(service);
+      firstMove.resolve();
+      await flush();
+      await flush();
+
+      expect(files.has("SystemSculpt/Recordings/first.webm")).toBe(true);
+      expect(files.has("SystemSculpt/Recordings/second.webm")).toBe(true);
+    });
+
+    it("deletes abandoned fragments instead of recovering them", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const renamed = ".systemsculpt/recordings-in-progress/renamed.webm.discarded";
+      const recorded = ".systemsculpt/recordings-in-progress/recorded.webm";
+      const { files, adapter } = vaultWithHiddenFiles({ [renamed]: { size: 10 }, [recorded]: { size: 10 } });
+      adapter.remove.mockImplementation(async (path: string) => { files.delete(path); });
+      plugin.settings.pendingRecorderCaptures = [
+        interruptedEntry({ filePath: recorded, sizeBytes: 0, captureInProgress: undefined, discarded: true }),
+      ];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect([...files.keys()]).toEqual([]);
+      expect(adapter.rename).not.toHaveBeenCalled();
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+      expect(mockTranscriptionStart).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([]);
+    });
+
+    it("keeps skipping a recorded fragment it still cannot delete", async () => {
+      const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      plugin.settings.autoTranscribeRecordings = true;
+      const recorded = ".systemsculpt/recordings-in-progress/recorded.webm";
+      const { adapter } = vaultWithHiddenFiles({ [recorded]: { size: 10 } });
+      adapter.remove.mockRejectedValue(new Error("Locked"));
+      const entry = interruptedEntry({ filePath: recorded, sizeBytes: 0, captureInProgress: undefined, discarded: true });
+      plugin.settings.pendingRecorderCaptures = [entry];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([entry]);
+      expect(adapter.rename).not.toHaveBeenCalled();
+      expect(mockTranscriptionStart).not.toHaveBeenCalled();
+      expect(noticeMessages(noticeLog)).toEqual([]);
+    });
+
+    it("records a fragment the session could not remove", async () => {
+      const service = RecorderService.getInstance(app, plugin);
+      const running = service.toggleRecording();
+      await flush();
+      harness.setRecording(true);
+      harness.start.resolve({ filePath, startedAt: 1_000, microphoneLabel: "Default microphone" });
+      await running;
+
+      mockSessionInstances[0].options.onCaptureFileDiscarded(hiddenPath);
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([
+        expect.objectContaining({ filePath: hiddenPath, discarded: true }),
+      ]);
+    });
+
+    it("forgets an interrupted entry whose audio never reached the disk", async () => {
+      vaultWithHiddenFiles({});
+      plugin.settings.pendingRecorderCaptures = [interruptedEntry()];
+
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      await flush();
+
+      expect(plugin.settings.pendingRecorderCaptures).toEqual([]);
+    });
   });
 });

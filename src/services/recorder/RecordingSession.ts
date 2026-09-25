@@ -1,10 +1,18 @@
-import type { App } from "obsidian";
+import type { App, DataAdapter } from "obsidian";
 import { logError } from "../../utils/errorHandling";
 import {
   recorderFormatForMimeType,
   type RecorderFormat,
 } from "./RecorderFormats";
 import type { RecorderHostContext } from "./RecorderHostContext";
+import {
+  DISCARDED_RECORDING_SUFFIX,
+  RECORDINGS_IN_PROGRESS_DIRECTORY,
+  availableRecordingPath,
+  ensureAdapterDirectory,
+  inProgressRecordingPath,
+  moveRecordingIntoVault,
+} from "./RecordingInProgressFiles";
 
 export type RecorderStopReason =
   | "manual"
@@ -21,6 +29,13 @@ export interface RecordingResult {
   stopReason: RecorderStopReason;
 }
 
+/** The hidden in-progress file, reported once its first audio is on disk. */
+export interface RecordingCaptureFile {
+  filePath: string;
+  startedAt: number;
+  sizeBytes: number;
+}
+
 export interface RecordingStartInfo {
   filePath: string;
   startedAt: number;
@@ -35,8 +50,23 @@ export interface RecordingSessionOptions {
   preferredMicrophoneId?: string | null;
   hostContext: RecorderHostContext;
   onStatus?: (status: string) => void;
-  /** Test and host override. Production capture is bounded by MAX_ENCODED_CAPTURE_BYTES. */
+  /**
+   * Bounds the audio held in memory. Production uses MAX_ENCODED_CAPTURE_BYTES
+   * or the mobile bound; tests and hosts may override it.
+   */
   maxEncodedBytes?: number;
+  /** Test override for the bound on a capture streamed to disk. */
+  maxStreamedBytes?: number;
+  /**
+   * Called once, when a streamed capture first reaches its hidden in-progress
+   * file, so the caller can register that file for recovery after a crash.
+   */
+  onCaptureFileCreated?: (capture: RecordingCaptureFile) => void;
+  /**
+   * Called when a fragment of an abandoned in-progress file could be neither
+   * deleted nor renamed, so the caller can record that recovery must skip it.
+   */
+  onCaptureFileDiscarded?: (filePath: string) => void;
 }
 
 type CaptureState =
@@ -76,10 +106,41 @@ export const MAX_ENCODED_CAPTURE_BYTES = 64 * 1024 * 1024;
  * bound instead of risking an out-of-memory failure during background save.
  */
 export const MOBILE_MAX_ENCODED_CAPTURE_BYTES = 24 * 1024 * 1024;
+/**
+ * A capture streamed to disk holds only its unflushed tail in memory, so this
+ * bound only stops a forgotten recorder: about 12 hours at the speech bitrate.
+ */
+export const STREAMED_MAX_ENCODED_CAPTURE_BYTES = 512 * 1024 * 1024;
+/**
+ * Streamed audio is appended at most this often, or sooner once this much is
+ * buffered. That bounds the audio a crash can lose and the writes a long
+ * recording makes.
+ */
+const STREAM_FLUSH_INTERVAL_MS = 5_000;
+const STREAM_FLUSH_BYTES = 256 * 1024;
+
+type BinaryAppendAdapter = DataAdapter & {
+  appendBinary?: (normalizedPath: string, data: ArrayBuffer) => Promise<void>;
+};
+
+/**
+ * Obsidian 1.12.3 added binary appends. Older hosts keep the in-memory capture
+ * and its bounds. Capture streams into a hidden in-progress file through the
+ * adapter, because the vault API does not reach dot-folders.
+ */
+export function canStreamRecordingToDisk(app: App): boolean {
+  return typeof (app.vault.adapter as BinaryAppendAdapter).appendBinary === "function";
+}
 
 interface PreparedRecordingSave {
-  bytes: ArrayBuffer;
+  /** Audio not yet on disk, or null once it is. */
+  bytes: ArrayBuffer | null;
   result: RecordingResult;
+  /**
+   * The capture streamed into the hidden in-progress file: write any tail
+   * there, then move the file to the result's path.
+   */
+  streamed: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -129,13 +190,30 @@ export class RecordingSession {
   private readonly hostNavigator: RecorderWakeLockNavigator;
   private readonly mediaDevices: MediaDevices | null;
   private readonly maxEncodedBytes: number;
+  private readonly maxStreamedBytes: number;
+  private readonly streamToDisk: boolean;
 
   private state: CaptureState = "idle";
   private mediaStream: MediaStream | null = null;
   private mediaRecorder: MediaRecorder | null = null;
+  /** Captured audio not yet on disk: all of it unless streaming to disk. */
   private chunks: Blob[] = [];
+  private bufferedBytes = 0;
   private encodedBytes = 0;
+  private persistedBytes = 0;
   private captureLimitReached = false;
+  /** The hidden in-progress file, once its first audio is written. */
+  private streamPath: string | null = null;
+  /**
+   * An append failed, so the file may hold part of that buffer beyond
+   * `persistedBytes`, the length known to be good.
+   */
+  private streamUncertain = false;
+  private streamFailed = false;
+  private streamWrite: Promise<void> | null = null;
+  private lastStreamFlushAt = 0;
+  /** The container and path are fixed once audio is headed for disk. */
+  private outputLocked = false;
   private outputStem: string | null = null;
   private outputPath: string | null = null;
   private recordingMimeType: string;
@@ -172,6 +250,11 @@ export class RecordingSession {
       && (options.maxEncodedBytes ?? 0) > 0
       ? Math.floor(options.maxEncodedBytes as number)
       : MAX_ENCODED_CAPTURE_BYTES;
+    this.maxStreamedBytes = Number.isFinite(options.maxStreamedBytes)
+      && (options.maxStreamedBytes ?? 0) > 0
+      ? Math.floor(options.maxStreamedBytes as number)
+      : STREAMED_MAX_ENCODED_CAPTURE_BYTES;
+    this.streamToDisk = canStreamRecordingToDisk(this.app);
     this.recordingMimeType = options.format.mimeType;
 
     let resolve!: (result: RecordingResult) => void;
@@ -264,6 +347,16 @@ export class RecordingSession {
     return this.state === "recording";
   }
 
+  /** The hidden file this capture streams into, once it exists. */
+  public get inProgressPath(): string | null {
+    return this.streamPath;
+  }
+
+  /** The capture bound in force: disk-backed while streaming, memory otherwise. */
+  public get captureLimitBytes(): number {
+    return this.isStreaming() ? this.maxStreamedBytes : this.maxEncodedBytes;
+  }
+
   public hasPendingSave(): boolean {
     return this.state === "save-failed" && this.pendingSave !== null;
   }
@@ -301,6 +394,7 @@ export class RecordingSession {
     if (this.state === "save-failed") {
       this.pendingSave = null;
       this.chunks = [];
+      this.bufferedBytes = 0;
       this.encodedBytes = 0;
       this.releaseResources();
       this.state = "disposed";
@@ -326,6 +420,7 @@ export class RecordingSession {
 
     this.releaseResources();
     this.chunks = [];
+    this.bufferedBytes = 0;
     this.settleFailure(cancellation);
   }
 
@@ -377,23 +472,29 @@ export class RecordingSession {
   private async finalizeOnce(): Promise<void> {
     try {
       if (!this.outputPath) throw new Error("Recording output path was not prepared.");
-      if (this.chunks.length === 0) throw new Error("No audio was captured.");
+      await this.drainStreamWrites();
+      const streamed = this.streamPath !== null;
+      if (!streamed && this.chunks.length === 0) throw new Error("No audio was captured.");
 
-      const BlobConstructor = this.hostWindow.Blob ?? Blob;
-      const blob = new BlobConstructor(this.chunks, { type: this.recordingMimeType });
-      const bytes = await blob.arrayBuffer();
+      // Streaming leaves only a tail here, if an append failed, and then moves
+      // the in-progress file into place. Otherwise this is the whole
+      // recording, materialized once.
+      const bytes = this.chunks.length > 0 ? await this.encodeChunks(this.chunks) : null;
       const result: RecordingResult = {
         filePath: this.outputPath,
         startedAt: this.startedAt,
         durationMs: Math.max(0, this.stoppedAt - this.startedAt),
-        sizeBytes: bytes.byteLength,
+        sizeBytes: this.persistedBytes + (bytes?.byteLength ?? 0),
         stopReason: this.stopReason,
       };
 
       this.chunks = [];
+      this.bufferedBytes = 0;
       this.encodedBytes = 0;
-      this.pendingSave = { bytes, result };
-      await this.persistPendingSave();
+      if (bytes || streamed) {
+        this.pendingSave = { bytes, result, streamed };
+        await this.persistPendingSave();
+      }
       this.settleSuccess(result);
     } catch (error) {
       this.settleFailure(
@@ -403,6 +504,7 @@ export class RecordingSession {
       );
     } finally {
       this.chunks = [];
+      this.bufferedBytes = 0;
       this.encodedBytes = 0;
       this.releaseResources();
       this.finishDeferredDispose();
@@ -414,8 +516,150 @@ export class RecordingSession {
     if (!this.disposeRequested || this.state !== "save-failed") return;
     this.pendingSave = null;
     this.chunks = [];
+    this.bufferedBytes = 0;
     this.encodedBytes = 0;
     this.state = "disposed";
+  }
+
+  private isStreaming(): boolean {
+    return this.streamToDisk && !this.streamFailed;
+  }
+
+  private async encodeChunks(chunks: readonly Blob[]): Promise<ArrayBuffer> {
+    const BlobConstructor = this.hostWindow.Blob ?? Blob;
+    return new BlobConstructor([...chunks], { type: this.recordingMimeType }).arrayBuffer();
+  }
+
+  /**
+   * Start one append of everything buffered, unless one is already running.
+   * The first write creates the hidden in-progress file as soon as audio
+   * arrives; later writes wait for the flush interval so a long recording
+   * stays cheap.
+   */
+  private flushToDisk(force: boolean): void {
+    if (!this.isStreaming() || this.streamWrite || this.chunks.length === 0 || !this.outputPath) return;
+    if (
+      !force
+      && this.streamPath
+      && this.bufferedBytes < STREAM_FLUSH_BYTES
+      && Date.now() - this.lastStreamFlushAt < STREAM_FLUSH_INTERVAL_MS
+    ) return;
+
+    this.outputLocked = true;
+    const path = inProgressRecordingPath(this.outputPath);
+    const chunks = this.chunks;
+    const count = chunks.length;
+    this.streamWrite = this.writeStreamBatch(path, chunks.slice(0, count))
+      .then((written) => {
+        // Chunks stay buffered until they are on disk, so a failed append
+        // keeps them in order for the in-memory fallback.
+        if (this.chunks === chunks) chunks.splice(0, count);
+        this.bufferedBytes = Math.max(0, this.bufferedBytes - written);
+      })
+      .catch((error: unknown) => {
+        this.streamFailed = true;
+        logError("RecordingSession", "Streaming capture to disk failed; keeping the rest in memory", error);
+      })
+      .finally(() => {
+        this.streamWrite = null;
+        this.lastStreamFlushAt = Date.now();
+      });
+  }
+
+  private async writeStreamBatch(path: string, batch: readonly Blob[]): Promise<number> {
+    const bytes = await this.encodeChunks(batch);
+    if (this.streamPath) {
+      await this.appendToStream(bytes);
+      return bytes.byteLength;
+    }
+    const adapter = this.app.vault.adapter;
+    await ensureAdapterDirectory(adapter, RECORDINGS_IN_PROGRESS_DIRECTORY);
+    try {
+      await adapter.writeBinary(path, bytes);
+    } catch (error) {
+      // The capture falls back to memory, so a fragment must never be
+      // recovered later as a second, partial recording.
+      await this.discardFragment(path);
+      throw error;
+    }
+    this.streamPath = path;
+    this.persistedBytes = bytes.byteLength;
+    try {
+      this.options.onCaptureFileCreated?.({
+        filePath: path,
+        startedAt: this.startedAt,
+        sizeBytes: bytes.byteLength,
+      });
+    } catch (error) {
+      logError("RecordingSession", "Could not register the partial recording", error);
+    }
+    return bytes.byteLength;
+  }
+
+  /**
+   * Delete an abandoned fragment. If that fails, rename it so recovery skips
+   * it; if that fails too, ask the caller to record it as discarded.
+   */
+  private async discardFragment(path: string): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (!(await adapter.exists(path))) return;
+      await adapter.remove(path);
+      return;
+    } catch {
+      // Fall through to the rename.
+    }
+    try {
+      await adapter.rename(path, `${path}${DISCARDED_RECORDING_SUFFIX}`);
+      return;
+    } catch {
+      // Fall through to the caller's record.
+    }
+    try {
+      this.options.onCaptureFileDiscarded?.(path);
+    } catch (error) {
+      logError("RecordingSession", "Could not mark an abandoned recording fragment", error);
+    }
+  }
+
+  /**
+   * Append `bytes` after the audio known to be on disk. After a failed append
+   * the file may already hold a prefix of these bytes, so its size decides
+   * where to resume and no audio is written twice.
+   */
+  private async appendToStream(bytes: ArrayBuffer): Promise<void> {
+    const adapter = this.app.vault.adapter as BinaryAppendAdapter;
+    if (!this.streamPath || typeof adapter.appendBinary !== "function") {
+      throw new Error("The recording file is no longer available for appending.");
+    }
+    let written = 0;
+    if (this.streamUncertain) {
+      const stat = typeof adapter.stat === "function" ? await adapter.stat(this.streamPath) : null;
+      const onDisk = stat ? stat.size : this.persistedBytes;
+      if (onDisk < this.persistedBytes || onDisk > this.persistedBytes + bytes.byteLength) {
+        throw new Error("The in-progress recording changed unexpectedly, so nothing more was appended.");
+      }
+      written = onDisk - this.persistedBytes;
+    }
+    if (written < bytes.byteLength) {
+      this.streamUncertain = true;
+      await adapter.appendBinary(this.streamPath, written > 0 ? bytes.slice(written) : bytes);
+    }
+    this.streamUncertain = false;
+    this.persistedBytes += bytes.byteLength;
+  }
+
+  /** Wait for in-flight appends, then write whatever is still buffered. */
+  private async drainStreamWrites(): Promise<void> {
+    await this.settleStreamWrite();
+    if (this.isStreaming() && this.chunks.length > 0) {
+      this.flushToDisk(true);
+      await this.settleStreamWrite();
+    }
+  }
+
+  private async settleStreamWrite(): Promise<void> {
+    while (this.streamWrite) await this.streamWrite;
   }
 
   private async persistPendingSave(resolveCollision = false): Promise<RecordingResult> {
@@ -423,45 +667,44 @@ export class RecordingSession {
     if (!pending) throw new Error("There is no captured audio waiting to be saved.");
 
     try {
-      if (resolveCollision) await this.movePendingSaveToAvailablePath(pending);
-      await this.app.vault.createBinary(pending.result.filePath, pending.bytes);
+      if (pending.streamed) {
+        if (pending.bytes) {
+          await this.appendToStream(pending.bytes);
+          pending.bytes = null;
+        }
+        pending.result.filePath = await moveRecordingIntoVault(
+          this.app,
+          this.streamPath as string,
+          pending.result.filePath,
+          this.hostWindow,
+        );
+      } else {
+        if (resolveCollision) {
+          pending.result.filePath = await availableRecordingPath(
+            this.app.vault.adapter,
+            pending.result.filePath,
+          );
+        }
+        await this.app.vault.createBinary(pending.result.filePath, pending.bytes as ArrayBuffer);
+      }
+      this.outputPath = pending.result.filePath;
       this.pendingSave = null;
       this.state = "finished";
       return pending.result;
     } catch (error) {
       this.state = "save-failed";
       const detail = errorMessage(error).trim();
+      if (pending.streamed && !pending.bytes) {
+        throw new Error(
+          `The recording is saved in ${RECORDINGS_IN_PROGRESS_DIRECTORY}, but it could not be moved to your recordings folder${detail ? `: ${detail}` : "."}`,
+        );
+      }
       throw new Error(
         detail
           ? `Audio is still in memory, but it could not be saved: ${detail}`
           : "Audio is still in memory, but it could not be saved.",
       );
     }
-  }
-
-  private async movePendingSaveToAvailablePath(
-    pending: PreparedRecordingSave,
-  ): Promise<void> {
-    const currentPath = pending.result.filePath;
-    if (!(await this.app.vault.adapter.exists(currentPath))) return;
-
-    const slashIndex = currentPath.lastIndexOf("/");
-    const directory = slashIndex >= 0 ? currentPath.slice(0, slashIndex + 1) : "";
-    const filename = slashIndex >= 0 ? currentPath.slice(slashIndex + 1) : currentPath;
-    const dotIndex = filename.lastIndexOf(".");
-    const stem = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
-    const extension = dotIndex > 0 ? filename.slice(dotIndex) : "";
-
-    for (let suffix = 1; suffix <= 1_000; suffix += 1) {
-      const candidate = `${directory}${stem}-${suffix}${extension}`;
-      if (!(await this.app.vault.adapter.exists(candidate))) {
-        pending.result.filePath = candidate;
-        this.outputPath = candidate;
-        return;
-      }
-    }
-
-    throw new Error("Could not find an available filename for the captured audio.");
   }
 
   private async acquireMicrophoneStream(): Promise<MediaStream> {
@@ -549,11 +792,10 @@ export class RecordingSession {
   private handleDataAvailable(data: Blob | null | undefined): void {
     if (this.state !== "recording" && this.state !== "stopping") return;
     if (!data || data.size <= 0) return;
-    this.updateActualFormat(data.type);
+    if (!this.outputLocked) this.updateActualFormat(data.type);
     if (this.captureLimitReached) return;
 
-    const remainingBytes = this.maxEncodedBytes - this.encodedBytes;
-    if (data.size > remainingBytes) {
+    if (data.size > this.remainingCaptureBytes()) {
       this.captureLimitReached = true;
       if (this.state === "stopping" && this.stopReason === "manual") {
         this.stopReason = "size-limit";
@@ -563,11 +805,24 @@ export class RecordingSession {
     }
 
     this.chunks.push(data);
+    this.bufferedBytes += data.size;
     this.encodedBytes += data.size;
-    if (this.encodedBytes >= this.maxEncodedBytes) {
+    if (this.remainingCaptureBytes() <= 0) {
       this.captureLimitReached = true;
       if (this.state === "recording") this.requestStop("size-limit");
     }
+    this.flushToDisk(false);
+  }
+
+  /**
+   * Memory holds the buffered audio. Streaming adds a disk bound on the whole
+   * capture; without it the memory bound covers the whole capture.
+   */
+  private remainingCaptureBytes(): number {
+    const memory = this.maxEncodedBytes - this.bufferedBytes;
+    return this.isStreaming()
+      ? Math.min(memory, this.maxStreamedBytes - this.encodedBytes)
+      : memory;
   }
 
   private markCaptureStopped(): void {
@@ -590,9 +845,10 @@ export class RecordingSession {
   }
 
   private captureLimitLabel(): string {
-    const mebibytes = this.maxEncodedBytes / (1024 * 1024);
+    const limit = this.captureLimitBytes;
+    const mebibytes = limit / (1024 * 1024);
     if (Number.isInteger(mebibytes)) return `${mebibytes} MiB`;
-    return `${this.maxEncodedBytes} bytes`;
+    return `${limit} bytes`;
   }
 
   private attachTrackListener(): void {

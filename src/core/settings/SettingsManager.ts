@@ -621,7 +621,7 @@ export class SettingsManager {
             && Number.isFinite(entry.durationMs)
             && entry.durationMs >= 0
             && Number.isFinite(entry.sizeBytes)
-            && entry.sizeBytes > 0
+            && (entry.sizeBytes > 0 || entry.discarded === true)
             && ["manual", "background-hidden", "background-pagehide", "interrupted", "size-limit"].includes(entry.stopReason)
             && ["note", "chat"].includes(entry.destination)
             && (entry.transcriptionIntent === undefined
@@ -646,6 +646,8 @@ export class SettingsManager {
           ...(entry.recoveryBlocked === "conflicting-operation-ids"
             ? { recoveryBlocked: entry.recoveryBlocked }
             : {}),
+          ...(entry.captureInProgress === true ? { captureInProgress: true as const } : {}),
+          ...(entry.discarded === true ? { discarded: true as const } : {}),
         }));
       const pendingByPath = new Map<string, PendingRecorderCapture>();
       for (const entry of validPendingCaptures) {

@@ -20,6 +20,8 @@ import {
   listAdapterDirectory,
   renameAdapterPath,
   statAdapterPath,
+  resolvePortableVaultPath,
+  portableVaultPathNotice,
 } from "../utils";
 import SystemSculptPlugin from "../../../main";
 import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
@@ -40,9 +42,10 @@ export class DirectoryOperations {
   }
 
   /**
-   * Create multiple directories
+   * Create multiple directories. New folders whose requested names would not
+   * sync are created under portable names, reported as `path` plus a `notice`.
    */
-  async createDirectories(params: CreateDirectoriesParams): Promise<{ results: Array<{ path: string, success: boolean, error?: string }> }> {
+  async createDirectories(params: CreateDirectoriesParams): Promise<{ results: Array<{ path: string, success: boolean, error?: string, requestedPath?: string, notice?: string }> }> {
     const { paths } = params;
     
     // Limit operations to prevent resource exhaustion
@@ -55,7 +58,16 @@ export class DirectoryOperations {
         return { path, success: false, error: `Access denied: ${path}` };
       }
       
-      const normalizedPath = normalizePath(normalizeVaultPath(path));
+      const requestedPath = normalizePath(normalizeVaultPath(path));
+      const normalizedPath = this.shouldUseAdapter(requestedPath)
+        ? requestedPath
+        : resolvePortableVaultPath(this.app, requestedPath);
+      if (!validatePath(normalizedPath, this.allowedPaths)) {
+        return { path, success: false, error: `Access denied: ${normalizedPath}` };
+      }
+      const renamed = normalizedPath === requestedPath
+        ? {}
+        : { path: normalizedPath, requestedPath: path, notice: portableVaultPathNotice(requestedPath, normalizedPath) };
       
       try {
         if (this.shouldUseAdapter(normalizedPath)) {
@@ -64,11 +76,11 @@ export class DirectoryOperations {
         } else {
           await this.app.vault.createFolder(normalizedPath);
         }
-        return { path, success: true };
+        return { path, success: true, ...renamed };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (errorMessage.includes("already exists")) {
-          return { path, success: true }; // Directory already exists
+          return { path, success: true, ...renamed }; // Directory already exists
         }
         return { path, success: false, error: errorMessage };
       }
@@ -440,9 +452,11 @@ export class DirectoryOperations {
   }
 
   /**
-   * Move or rename multiple files/folders
+   * Move or rename multiple files/folders. A destination name that would not
+   * sync is replaced by a portable one, reported as `destination` plus a
+   * `notice`; the source may keep any name so unsyncable files can be fixed.
    */
-  async moveItems(params: MoveItemsParams): Promise<{ results: Array<{ source: string, destination: string, success: boolean, error?: string }> }> {
+  async moveItems(params: MoveItemsParams): Promise<{ results: Array<{ source: string, destination: string, success: boolean, error?: string, requestedDestination?: string, notice?: string }> }> {
     const { items } = params;
     
     // Enforce global safety cap
@@ -450,7 +464,7 @@ export class DirectoryOperations {
       throw new Error(`Cannot move more than ${FILESYSTEM_LIMITS.MAX_OPERATIONS} items at once.`);
     }
 
-    const results: Array<{ source: string, destination: string, success: boolean, error?: string }> = [];
+    const results: Array<{ source: string, destination: string, success: boolean, error?: string, requestedDestination?: string, notice?: string }> = [];
 
     // Process in small batches to keep UI responsive and avoid file-lock contention
     const CHUNK_SIZE = 5; // keep individual operations small; aligns with previous per-call limit
@@ -481,7 +495,18 @@ export class DirectoryOperations {
           }
 
           const normalizedSource = normalizePath(normalizeVaultPath(source));
-          const normalizedDestination = normalizePath(normalizeVaultPath(destination));
+          const requestedDestination = normalizePath(normalizeVaultPath(destination));
+          const normalizedDestination = resolvePortableVaultPath(this.app, requestedDestination);
+          if (!validatePath(normalizedDestination, this.allowedPaths)) {
+            throw new Error(`Access denied: ${normalizedDestination}`);
+          }
+          const renamed = normalizedDestination === requestedDestination
+            ? {}
+            : {
+              destination: normalizedDestination,
+              requestedDestination: destination,
+              notice: portableVaultPathNotice(requestedDestination, normalizedDestination),
+            };
 
           // Get the source file/folder, falling back to the Folder Notes
           // layout (X.md -> X/X.md) so moves work on folder notes too (#154).
@@ -503,7 +528,7 @@ export class DirectoryOperations {
 
           // Move/rename operation
           await this.app.fileManager.renameFile(sourceFile, normalizedDestination);
-          results.push({ source, destination, success: true });
+          results.push({ source, destination, success: true, ...renamed });
         } catch (error: unknown) {
           results.push({
             source,

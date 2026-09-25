@@ -44,6 +44,8 @@ jest.mock("../../utils", () => ({
   resolveAdapterPath: jest.fn(() => null),
   statAdapterPath: jest.fn(async () => null),
   renameAdapterPath: jest.fn(async () => {}),
+  resolvePortableVaultPath: jest.requireActual("../../utils").resolvePortableVaultPath,
+  portableVaultPathNotice: jest.requireActual("../../utils").portableVaultPathNotice,
 }));
 
 // Mock constants

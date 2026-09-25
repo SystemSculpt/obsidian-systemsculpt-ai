@@ -32,6 +32,16 @@ export interface PendingRecorderCapture {
   operationId?: string;
   /** Automatic recovery is disabled when synced state names incompatible jobs. */
   recoveryBlocked?: "conflicting-operation-ids";
+  /**
+   * The recording is still streaming to this file. An entry that outlives its
+   * session marks audio from a capture that Obsidian quit or crashed during.
+   */
+  captureInProgress?: true;
+  /**
+   * An abandoned fragment of a capture that fell back to memory. Recovery
+   * deletes the file and never treats it as a recording.
+   */
+  discarded?: true;
 }
 
 export interface PendingAudioProcessorUploadPart {

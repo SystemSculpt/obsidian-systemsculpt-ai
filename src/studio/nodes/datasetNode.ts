@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { isRecord } from "../utils";
 import { getText } from "./shared";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
 const DATASET_CACHE_SCHEMA = "studio.dataset-cache.v2" as const;
 const DATASET_QUERY_PLACEHOLDER = /\{\{\s*query\s*\}\}/gi;
@@ -55,7 +56,7 @@ function sanitizeFileSegment(value: string): string {
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return normalized || "value";
+  return toSafeVaultFileName(normalized, { fallback: "value" });
 }
 
 function readNumber(value: StudioJsonValue | undefined, fallback: number): number {

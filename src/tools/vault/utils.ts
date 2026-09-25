@@ -1,6 +1,7 @@
 import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
 import { joinFilesystemPath } from "../../utils/vaultPathUtils";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { FILESYSTEM_LIMITS } from "./constants";
 export { fuzzyMatchScore } from "./searchUtils";
 
@@ -326,6 +327,58 @@ export async function ensureVaultFolder(app: App, folderPath: string): Promise<v
       }
     }
   }
+}
+
+/**
+ * The path a create or move will actually produce. Segments that already
+ * exist are kept exactly, so an agent can still address, overwrite or rename
+ * a file whose name cannot sync. Every segment the call would create goes
+ * through the shared vault file-name sanitizer. A sanitized name never lands
+ * on an existing item the agent did not name: "a:b.md" beside an unrelated
+ * "a b.md" becomes "a b 1.md".
+ */
+export function resolvePortableVaultPath(app: App, path: string): string {
+  const resolved: string[] = [];
+  let creating = false;
+  for (const segment of path.split("/").filter(Boolean)) {
+    if (segment === "." || segment === "..") {
+      resolved.push(segment);
+      continue;
+    }
+    if (!creating && app.vault.getAbstractFileByPath([...resolved, segment].join("/"))) {
+      resolved.push(segment);
+      continue;
+    }
+    const safe = toSafeVaultFileName(segment);
+    // Only the first created segment can collide: everything after it lives
+    // under a folder that did not exist.
+    resolved.push(!creating && safe !== segment ? unusedSiblingName(app, resolved, safe) : safe);
+    creating = true;
+  }
+  return resolved.join("/");
+}
+
+function unusedSiblingName(app: App, parent: readonly string[], name: string): string {
+  const taken = (candidate: string) => app.vault.getAbstractFileByPath([...parent, candidate].join("/")) !== null;
+  if (!taken(name)) return name;
+  const match = /^(.+?)(\.[A-Za-z0-9]{1,16})?$/.exec(name);
+  const stem = match?.[1] ?? name;
+  const extension = match?.[2] ?? "";
+  for (let suffix = 1; suffix <= 1_000; suffix += 1) {
+    const candidate = `${stem} ${suffix}${extension}`;
+    if (!taken(candidate)) return candidate;
+  }
+  throw new Error(`Could not find an unused name for "${name}".`);
+}
+
+/**
+ * Tool results carry this under `notice`, which reaches the model intact;
+ * error text does not. The agent must learn the path it should use next.
+ */
+export function portableVaultPathNotice(requested: string, actual: string): string {
+  return `Used "${actual}" instead of "${requested}" because that name would not work on every device or in Obsidian Sync. `
+    + "Names cannot contain : ? * \" < > | \\ # ^ [ ] or control characters, start with a dot or space, end with a dot or space, or be a reserved Windows name such as CON. "
+    + `Use "${actual}" in later steps.`;
 }
 
 /**

@@ -136,6 +136,8 @@ A completed receipt returns its recorded result. A started receipt has an unknow
 
 If receipt persistence fails after a mutation returns, the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN`. It does not repeat the mutation.
 
+A receipt only matters while the server may still replay its tool call. The first time a conversation goes idle in a session, the journal removes receipts older than 30 days in the background, then the oldest completed receipts beyond 5,000, but never one from the last day. Each receipt is re-read immediately before removal, inside the same serialized step as claims and completions, so a receipt rewritten in the meantime is kept. A replayed call whose receipt was removed fails closed as unapproved.
+
 ## Diagnostics
 
 Client lifecycle records stay local. They contain safe identities and status fields. They do not contain prompts, paths, file content, arguments, results, credentials, access tokens, or stack traces.
@@ -151,7 +153,7 @@ Focused tests also cover:
 - approval and result acknowledgement;
 - repeated synchronization after request failure;
 - completed, started, conflicting, and write-failed receipts;
-- receipt retention beyond the removed 256-entry cap;
+- receipt retention beyond the removed 256-entry cap, and the 30-day idle cleanup;
 - concurrent journal instances without lost receipts;
 - independent overlapping conversations and historical forks;
 - descendant-fork cache affinity and full-input fallback after cache expiry.

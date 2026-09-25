@@ -10,6 +10,7 @@ import type {
 import { sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { ManagedJobClient } from "./managed/ManagedJobClient";
 import {
   ManagedDocumentProcessingAdapter,
@@ -550,7 +551,7 @@ export class DocumentProcessingService {
   }
 
   private sanitizeFilename(filename: string): string {
-    return filename.replace(/[^a-zA-Z0-9-_]/g, "-");
+    return toSafeVaultFileName(filename.replace(/[^a-zA-Z0-9-_]/g, "-"), { fallback: "" });
   }
 
   private normalizePath(value: string): string {
