@@ -169,6 +169,25 @@ describe("DirectoryManager", () => {
     await expect(manager.verifyDirectories()).resolves.toEqual({ valid: true, issues: [] });
   });
 
+  it("reports folders the adapter confirms on disk as healthy, and a file as an issue", async () => {
+    // Initialization accepts these folders, so Verify must not flag them (#416).
+    const onDisk = new Set(["SystemSculpt/Chats", "SystemSculpt/Saved Chats", "SystemSculpt/Recordings", "SystemSculpt/Attachments"]);
+    (app.vault.adapter.exists as jest.Mock).mockImplementation(async (path: string) =>
+      onDisk.has(path) || path === "SystemSculpt/Extractions");
+    (app.vault.adapter.stat as jest.Mock).mockImplementation(async (path: string) => ({
+      type: onDisk.has(path) ? "folder" : "file", ctime: 0, mtime: 0, size: 0,
+    }));
+
+    await expect(manager.verifyDirectories()).resolves.toEqual({
+      valid: false,
+      issues: ['Directory "SystemSculpt/Extractions" does not exist or is not accessible'],
+    });
+
+    onDisk.add("SystemSculpt/Extractions");
+    await expect(manager.verifyDirectories()).resolves.toEqual({ valid: true, issues: [] });
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
+  });
+
   it("repairs through the same direct initialization path and returns false on failure", async () => {
     await expect(manager.repair()).resolves.toBe(true);
     expect(manager.isInitialized()).toBe(true);

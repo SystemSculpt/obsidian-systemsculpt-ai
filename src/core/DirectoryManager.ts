@@ -1,7 +1,7 @@
 import { App, normalizePath, TFolder } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
-import { createVaultFolder } from "../utils/vaultFolders";
+import { createVaultFolder, isVaultFolder } from "../utils/vaultFolders";
 
 const DIRECTORY_SETTING_KEYS = [
   "chatsDirectory",
@@ -62,8 +62,12 @@ export class DirectoryManager {
   }
 
   public async verifyDirectories(): Promise<{ valid: boolean; issues: string[] }> {
-    const issues = this.configuredDirectories()
-      .filter((path) => !(this.app.vault.getAbstractFileByPath(path) instanceof TFolder))
+    // Same test initialization and repair accept, so a folder on disk that the
+    // vault tree has not indexed yet is healthy rather than a false failure.
+    const directories = this.configuredDirectories();
+    const present = await Promise.all(directories.map((path) => isVaultFolder(this.app, path)));
+    const issues = directories
+      .filter((_path, index) => !present[index])
       .map((path) => `Directory "${path}" does not exist or is not accessible`);
     return { valid: issues.length === 0, issues };
   }

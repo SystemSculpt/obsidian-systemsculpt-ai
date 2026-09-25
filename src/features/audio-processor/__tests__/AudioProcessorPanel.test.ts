@@ -133,6 +133,45 @@ describe("AudioProcessorPanel", () => {
     expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
   });
 
+  it("brings a hidden job back with Add credits when it later returns 402", () => {
+    const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
+    const plugin = {
+      register: jest.fn(),
+      openCreditsBalanceModal,
+    } as unknown as SystemSculptPlugin;
+    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+    panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
+    actionButton("Hide").click();
+    expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+    expect(notices).toHaveBeenCalledWith(expect.stringContaining("continuing on the server"));
+
+    panel.fail(Object.assign(new Error("Insufficient available credits to run this request."), {
+      status: 402,
+      code: "insufficient_credits",
+    }));
+
+    expect(document.querySelectorAll(".systemsculpt-progress-panel")).toHaveLength(1);
+    expect(document.body.textContent).toContain("Product sync");
+    expect(document.body.textContent).toContain("Not enough credits");
+    actionButton("Add credits").click();
+    expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+  });
+
+  it("does not bring a panel back after it was closed by unload", () => {
+    const register = jest.fn();
+    const plugin = { register, openCreditsBalanceModal: jest.fn() } as unknown as SystemSculptPlugin;
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+    const unload = register.mock.calls[0][0] as () => void;
+
+    unload();
+    panel.fail(Object.assign(new Error("Insufficient credits"), { status: 402, code: "insufficient_credits" }));
+
+    expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+    expect(plugin.openCreditsBalanceModal).not.toHaveBeenCalled();
+  });
+
   it("opens an independently paid transcript without stopping active processing", async () => {
     const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
     const onCancel = jest.fn();
