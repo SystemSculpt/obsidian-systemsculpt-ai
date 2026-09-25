@@ -6,6 +6,7 @@ import type {
   EmbeddingsManagerConfig,
   FailedProcessingDetail,
   ProcessingProgress,
+  ProcessingResult,
   SearchResult,
 } from "./types";
 import {
@@ -14,6 +15,7 @@ import {
   type ManagedEmbeddingsIndexAdapter,
 } from "./gateway/ManagedEmbeddingsIndexAdapter";
 import {
+  BULK_INDEX_CONCURRENCY,
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
@@ -94,6 +96,7 @@ interface CommittedNamespaceState {
 }
 
 const QUEUED_WORK_MUTEX_BACKOFF_MS = 75;
+const LIFECYCLE_REFRESH_COALESCE_MS = 1_000;
 const COMMITTED_NAMESPACE_STATE_KEY = "semantic-committed-namespace-v1";
 
 type FileState = {
@@ -179,6 +182,7 @@ export class EmbeddingsManager {
   private portableCheckpoint: PortableCheckpointCoordinator | null = null;
   private workTimer: number | null = null;
   private workTimerDueAt: number | null = null;
+  private lifecycleRefreshTimer: number | null = null;
 
   constructor(
     private readonly app: App,
@@ -311,16 +315,13 @@ export class EmbeddingsManager {
           current: progress.current,
           batch: progress.batchProgress,
         });
-        this.refreshLifecycle({
-          phase: "reconciling",
-          total: progress.total,
-          completed: progress.current,
-          currentPath: progress.currentFile ?? null,
-        });
+        this.refreshProgress(progress);
         onProgress?.(progress);
       }, {
         sourceRevisions,
         preflight: () => this.preflightCredits(),
+        reuseNamespace: this.getIndexingNamespace(),
+        concurrency: BULK_INDEX_CONCURRENCY,
       });
       await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
@@ -349,7 +350,7 @@ export class EmbeddingsManager {
       const destructive = emptyFiles.length > 0 || result.failed > 0 || pruned > 0;
       if (destructive) {
         await this.commitPortableDestructiveMutation();
-      } else if (completedPaths.size > 0) {
+      } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
         await this.flushPortableIndex();
       }
@@ -736,6 +737,7 @@ export class EmbeddingsManager {
     this.processingSuspended = true;
     this.processor.cleanup();
     this.clearWorkTimer();
+    this.clearLifecycleRefresh();
     for (const ref of this.fileWatchers) {
       try { this.app.vault.offref(ref); } catch { /* Obsidian may already have detached it. */ }
     }
@@ -823,10 +825,36 @@ export class EmbeddingsManager {
     if (!this.plugin.settings.embeddingsEnabled) return;
     void this.workQueue.enqueue(file.path, reason, this.sourceMtime(file))
       .then(() => {
-        this.refreshLifecycle();
+        // Show the queued edit at once; the full vault recount is coalesced.
+        if (this.initialized && this.workQueue.size > this.lifecycle.getSnapshot().pending) {
+          this.lifecycle.update({ pending: this.workQueue.size });
+        }
+        this.scheduleLifecycleRefresh();
         if (!this.processingSuspended) this.scheduleQueuedWork();
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * File events arrive with every autosave. Recounting the whole vault for
+   * each one is O(notes), so coalesce them into one trailing refresh.
+   */
+  private scheduleLifecycleRefresh(): void {
+    if (this.lifecycleRefreshTimer !== null) return;
+    this.lifecycleRefreshTimer = window.setTimeout(() => {
+      this.lifecycleRefreshTimer = null;
+      this.refreshLifecycle();
+    }, LIFECYCLE_REFRESH_COALESCE_MS);
+  }
+
+  private clearLifecycleRefresh(): void {
+    if (this.lifecycleRefreshTimer !== null) window.clearTimeout(this.lifecycleRefreshTimer);
+    this.lifecycleRefreshTimer = null;
+  }
+
+  /** Paths whose content was re-embedded, as opposed to reused unchanged. */
+  private countReembedded(result: ProcessingResult): number {
+    return result.completedPaths.length - (result.reusedPaths?.length ?? 0);
   }
 
   private scheduleQueuedWork(minimumDelayMs = 0): void {
@@ -920,15 +948,12 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-start", { scope: "queue", total: files.length, reason: "vault-change" });
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       const result = await this.processor.processFiles(files, this.app, (progress) => {
-        this.refreshLifecycle({
-          phase: "reconciling",
-          total: progress.total,
-          completed: progress.current,
-          currentPath: progress.currentFile ?? null,
-        });
+        this.refreshProgress(progress);
       }, {
         sourceRevisions,
         preflight: () => this.preflightCredits(),
+        reuseNamespace: this.getIndexingNamespace(),
+        concurrency: BULK_INDEX_CONCURRENCY,
       });
       await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
@@ -947,7 +972,7 @@ export class EmbeddingsManager {
       const pruned = await this.pruneSupersededNamespaces();
       if (destructive || result.failed > 0 || pruned > 0) {
         await this.commitPortableDestructiveMutation();
-      } else if (completedPaths.size > 0) {
+      } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
       }
       const firstFailure = result.failedDetails?.[result.failedPaths[0] ?? ""];
@@ -1842,9 +1867,26 @@ export class EmbeddingsManager {
     };
   }
 
+  /**
+   * Per-note progress during a run. The run's own counters are exact, so this
+   * skips the vault-wide stats walk that refreshLifecycle performs; the run's
+   * final refresh recomputes them.
+   */
+  private refreshProgress(progress: ProcessingProgress): void {
+    this.lifecycle.update({
+      phase: "reconciling",
+      total: progress.total,
+      completed: progress.current,
+      pending: Math.max(0, progress.total - progress.current),
+      failed: this.failedFiles.size,
+      currentPath: progress.currentFile ?? null,
+    });
+  }
+
   private refreshLifecycle(
     patch: Partial<Omit<SemanticIndexSnapshot, "updatedAt">> = {},
   ): void {
+    this.clearLifecycleRefresh();
     const searchNamespace = this.getSearchNamespace();
     let total = 0;
     let completed = 0;

@@ -47,6 +47,12 @@ export interface EmbeddingVector {
     failedChunkCount?: number;
     /** Total chunk count for the file at embedding time (set on chunk 0). */
     chunkCount?: number;
+    /**
+     * SHA-256 of the whole note's UTF-8 bytes that produced this record (set on
+     * chunk 0). Identical bytes under the same generation reuse the stored
+     * vectors without a network request.
+     */
+    sourceSha256?: string;
   };
 }
 
@@ -88,6 +94,8 @@ export interface FailedProcessingDetail {
 export interface ProcessingResult {
   completed: number;
   completedPaths: string[];
+  /** Completed paths whose unchanged source reused stored vectors locally. */
+  reusedPaths?: string[];
   failed: number;
   failedPaths: string[];
   cancelled: boolean;

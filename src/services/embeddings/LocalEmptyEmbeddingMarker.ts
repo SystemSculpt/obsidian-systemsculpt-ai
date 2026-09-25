@@ -51,6 +51,7 @@ export function createLocalEmptyEmbeddingMarker(file: TFile, source: string): Em
 export function createLocalEmptyEmbeddingMarkerForRevision(
   revision: LocalEmptyEmbeddingRevision,
   source: string,
+  sourceSha256?: string,
 ): EmbeddingVector {
   return {
     id: localEmptyEmbeddingMarkerId(revision.path),
@@ -71,6 +72,7 @@ export function createLocalEmptyEmbeddingMarkerForRevision(
       partial: false,
       failedChunkCount: 0,
       chunkCount: 0,
+      ...(sourceSha256 ? { sourceSha256 } : {}),
     },
   };
 }

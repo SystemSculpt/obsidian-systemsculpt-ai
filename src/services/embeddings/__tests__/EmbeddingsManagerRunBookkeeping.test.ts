@@ -269,4 +269,32 @@ describe("EmbeddingsManager run bookkeeping", () => {
       error: { code: "temporarily_unavailable", message: "Try again later." },
     }));
   });
+
+  it("does not rewrite the portable index for notes whose unchanged bytes were reused", async () => {
+    const { files, roots, queue, manager } = await harness(1);
+    roots.set(root(files[0]).id, root(files[0]));
+    files[0].stat.mtime = 2;
+    await queue.enqueueImmediate(files[0].path, "modify", files[0].stat.mtime, 1);
+    manager.processor = {
+      processFiles: jest.fn(async (_files: unknown, _app: unknown, _progress: unknown, options: any): Promise<ProcessingResult> => {
+        expect(options).toMatchObject({ reuseNamespace: namespace, concurrency: 3 });
+        roots.set(root(files[0]).id, root(files[0]));
+        return {
+          completed: 1,
+          completedPaths: [files[0].path],
+          reusedPaths: [files[0].path],
+          failed: 0,
+          failedPaths: [],
+          cancelled: false,
+          fatalError: null,
+        };
+      }),
+    };
+
+    await manager.processQueuedWork();
+
+    expect(manager.markPortableIndexChanged).not.toHaveBeenCalled();
+    expect(manager.commitPortableDestructiveMutation).not.toHaveBeenCalled();
+    expect(queue.size).toBe(0);
+  });
 });

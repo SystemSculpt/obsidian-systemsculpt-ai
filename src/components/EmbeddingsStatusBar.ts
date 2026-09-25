@@ -77,7 +77,7 @@ export class EmbeddingsStatusBar extends Component {
 
   private renderStarting(): void {
     this.setText("Starting", "Semantic index starting");
-    this.statusBarEl.title = "Semantic index is starting. Open similar notes.";
+    this.setTitle("Semantic index is starting. Open similar notes.");
   }
 
   private render(snapshot: Readonly<SemanticIndexSnapshot>): void {
@@ -88,16 +88,16 @@ export class EmbeddingsStatusBar extends Component {
 
     if (snapshot.phase === "paused") {
       this.setText("Paused", "Semantic index paused");
-      this.statusBarEl.title = "Semantic index is paused. Open similar notes.";
+      this.setTitle("Semantic index is paused. Open similar notes.");
       return;
     }
 
     if (snapshot.phase === "error" || snapshot.failed > 0) {
       const label = snapshot.failed > 0 ? `${snapshot.failed} failed` : "Error";
       this.setText(label, `Semantic index ${label}`);
-      this.statusBarEl.title = snapshot.lastError?.message
+      this.setTitle(snapshot.lastError?.message
         ? `${snapshot.lastError.message} Open Similar notes.`
-        : "Semantic index needs attention. Open similar notes.";
+        : "Semantic index needs attention. Open similar notes.");
       return;
     }
 
@@ -108,9 +108,9 @@ export class EmbeddingsStatusBar extends Component {
         : `${snapshot.pending} pending`;
       this.setText(label, `Semantic index ${label}`);
       const current = snapshot.currentPath?.split("/").pop();
-      this.statusBarEl.title = current
+      this.setTitle(current
         ? `Indexing ${current}. Open similar notes.`
-        : "Updating semantic index. Open similar notes.";
+        : "Updating semantic index. Open similar notes.");
       return;
     }
 
@@ -118,14 +118,21 @@ export class EmbeddingsStatusBar extends Component {
     this.setText(label, snapshot.total > 0
       ? `Semantic index ready, ${snapshot.completed} notes`
       : "Semantic index ready");
-    this.statusBarEl.title = snapshot.total > 0
+    this.setTitle(snapshot.total > 0
       ? `${snapshot.completed} notes indexed. Open similar notes.`
-      : "Semantic index is ready. Open similar notes.";
+      : "Semantic index is ready. Open similar notes.");
   }
 
+  /** Lifecycle snapshots arrive per indexed note; skip writes that change nothing. */
   private setText(value: string, accessibleName: string): void {
-    this.statusBarEl.setText(value);
-    this.statusBarEl.setAttr("aria-label", accessibleName);
+    if (this.statusBarEl.textContent !== value) this.statusBarEl.setText(value);
+    if (this.statusBarEl.getAttribute("aria-label") !== accessibleName) {
+      this.statusBarEl.setAttr("aria-label", accessibleName);
+    }
+  }
+
+  private setTitle(value: string): void {
+    if (this.statusBarEl.title !== value) this.statusBarEl.title = value;
   }
 
   private setVisibility(visible: boolean): void {

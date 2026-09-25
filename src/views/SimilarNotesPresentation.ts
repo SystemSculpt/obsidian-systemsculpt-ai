@@ -101,6 +101,8 @@ export class SimilarNotesPresentation extends Component {
   private sourceName: string | null = null;
   private dragReleaseTimer: number | null = null;
   private dragging = false;
+  /** What the index strip currently shows; null when it shows nothing. */
+  private indexStatusKey: string | null = null;
 
   constructor(parent: HTMLElement, private readonly actions: SimilarNotesPresentationActions) {
     super();
@@ -173,6 +175,7 @@ export class SimilarNotesPresentation extends Component {
    * enabled -> disabled settings transition.
    */
   public clearIndexSnapshot(): void {
+    this.indexStatusKey = null;
     this.indexStatusEl.empty();
     this.indexStatusEl.removeClass(
       "is-initializing",
@@ -184,15 +187,16 @@ export class SimilarNotesPresentation extends Component {
   }
 
   public setIndexSnapshot(snapshot: Readonly<SemanticIndexSnapshot>): void {
-    this.clearIndexSnapshot();
-
     const isSettled = snapshot.ready
       && snapshot.phase === "idle"
       && snapshot.pending === 0
       && snapshot.failed === 0
       && !snapshot.lastError;
-    this.indexStatusEl.hidden = isSettled;
-    if (isSettled) return;
+    if (isSettled) {
+      if (this.indexStatusKey !== "settled") this.clearIndexSnapshot();
+      this.indexStatusKey = "settled";
+      return;
+    }
 
     let iconName = "loader";
     let label = "Preparing semantic index";
@@ -251,6 +255,24 @@ export class SimilarNotesPresentation extends Component {
       showProgress = total > 0;
     }
 
+    const progressTotal = Math.max(1, snapshot.total, snapshot.completed + snapshot.pending);
+    const progressValue = Math.min(snapshot.completed, progressTotal);
+    // Lifecycle snapshots arrive for every indexed note; only repaint the
+    // strip when something it shows changed.
+    const key = JSON.stringify([
+      iconName,
+      label,
+      detail,
+      stateClass,
+      showProgress ? [progressTotal, progressValue] : null,
+      showPlanAction,
+      showCreditsAction,
+      showPendingAction,
+    ]);
+    if (key === this.indexStatusKey) return;
+    this.clearIndexSnapshot();
+    this.indexStatusKey = key;
+    this.indexStatusEl.hidden = false;
     this.indexStatusEl.addClass(stateClass);
     const icon = this.indexStatusEl.createSpan({
       cls: "ss-embeddings-view__index-icon",
@@ -265,17 +287,16 @@ export class SimilarNotesPresentation extends Component {
     }
 
     if (showProgress) {
-      const total = Math.max(1, snapshot.total, snapshot.completed + snapshot.pending);
       const progress = copy.createEl("progress", {
         cls: "ss-embeddings-view__index-progress",
         attr: {
-          max: String(total),
-          value: String(Math.min(snapshot.completed, total)),
+          max: String(progressTotal),
+          value: String(progressValue),
           "aria-label": label,
         },
       });
-      progress.max = total;
-      progress.value = Math.min(snapshot.completed, total);
+      progress.max = progressTotal;
+      progress.value = progressValue;
     }
 
     if (showPlanAction) {

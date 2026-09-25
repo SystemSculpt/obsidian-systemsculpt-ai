@@ -257,6 +257,43 @@ export class EmbeddingsStorage {
     });
   }
 
+  /**
+   * Stamp an unchanged note's records in one generation with its current
+   * revision, leaving vectors untouched. Resolves false when that generation
+   * no longer has a root for the path.
+   */
+  async touchPath(
+    path: string,
+    namespace: string,
+    revision: Readonly<{ mtime: number; title: string }>,
+  ): Promise<boolean> {
+    if (!this.db || !path || !namespace) return false;
+    return new Promise<boolean>((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_NAME], "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      let root: EmbeddingVector | null = null;
+      const request = store.index("by_path").getAll(IDBKeyRange.only(path));
+      request.onsuccess = () => {
+        for (const vector of (request.result || []) as EmbeddingVector[]) {
+          if (vector.metadata?.namespace !== namespace) continue;
+          const updated: EmbeddingVector = {
+            ...vector,
+            metadata: { ...vector.metadata, mtime: revision.mtime, title: revision.title },
+          };
+          store.put(updated);
+          if ((updated.chunkId ?? this.parseChunkIdFromId(updated.id)) === 0) root = updated;
+        }
+      };
+      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      tx.oncomplete = () => {
+        if (root) this.cache.set(root.id, root);
+        resolve(root !== null);
+      };
+      tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB path touch aborted."));
+    });
+  }
+
   /** Atomically replace all generations for one path, used for empty markers. */
   async replacePath(path: string, vectors: EmbeddingVector[]): Promise<void> {
     if (!this.db) return;

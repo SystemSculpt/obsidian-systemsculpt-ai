@@ -87,6 +87,20 @@ describe("EmbeddingsStatusBar", () => {
     expect(element.title).toContain("Try again later");
   });
 
+  it("skips DOM writes for snapshots that change nothing it shows", () => {
+    const indexing = snapshot({ phase: "reconciling", total: 20, completed: 7, pending: 13, currentPath: "A.md" });
+    listener?.(indexing);
+    const setText = jest.spyOn(element as any, "setText");
+    const setAttr = jest.spyOn(element as any, "setAttr");
+
+    listener?.({ ...indexing, updatedAt: indexing.updatedAt + 1 });
+    expect(setText).not.toHaveBeenCalled();
+    expect(setAttr).not.toHaveBeenCalled();
+
+    listener?.({ ...indexing, completed: 8, pending: 12 });
+    expect(setText).toHaveBeenCalledWith("8/20");
+  });
+
   it("opens the canonical Similar notes view with pointer or keyboard activation", () => {
     element.click();
     element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

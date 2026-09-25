@@ -8,6 +8,11 @@ import {
 } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { EmbeddingsProcessor } from "../../services/embeddings/processing/EmbeddingsProcessor";
 import { buildVectorId } from "../../services/embeddings/utils/vectorId";
+import { createHash } from "crypto";
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 const SOURCE_HASH = "a".repeat(64);
 const TEXT_HASH = "b".repeat(64);
@@ -283,7 +288,7 @@ describe("EmbeddingsProcessor server indexing", () => {
       [state.file] as never,
       state.app as never,
     );
-    for (let attempt = 0; attempt < 20 && !release; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     state.processor.cancel();
     release(indexedResult());
     const processed = await processing;
@@ -313,7 +318,7 @@ describe("EmbeddingsProcessor server indexing", () => {
         ]]),
       },
     );
-    for (let attempt = 0; attempt < 20 && !release; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     state.file.stat.mtime = 124;
     state.setContent("New content");
     release(indexedResult());
@@ -350,5 +355,133 @@ describe("EmbeddingsProcessor server indexing", () => {
     });
     expect(state.storage.publishPath).not.toHaveBeenCalled();
     expect(state.storage.replacePath).not.toHaveBeenCalled();
+  });
+
+  it("stores the whole-note source hash on the root and reads the note once", async () => {
+    const state = fixture(indexedResult({ chunks: 2 }));
+
+    await state.processor.processFiles([state.file] as never, state.app as never);
+
+    const [, , vectors] = state.storage.publishPath.mock.calls[0] as unknown as [string, string, Array<{ metadata: Record<string, unknown> }>];
+    expect(vectors[0].metadata.sourceSha256).toBe(SOURCE_HASH);
+    expect(vectors[1].metadata.sourceSha256).toBeUndefined();
+    expect(state.app.vault.read).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses stored vectors for unchanged bytes without any network request", async () => {
+    const namespace = "systemsculpt:managed:semantic-v1:v3:3";
+    const content = "# Heading\n\nPrivate note";
+    const root = {
+      id: buildVectorId(namespace, "Note.md", 0),
+      path: "Note.md",
+      chunkId: 0,
+      vector: new Float32Array([1, 0, 0]),
+      metadata: {
+        title: "Note",
+        mtime: 100,
+        contentHash: TEXT_HASH,
+        generation: "semantic-v1",
+        dimension: 3,
+        createdAt: 1,
+        namespace,
+        complete: true,
+        chunkCount: 1,
+        sourceSha256: sha256(content),
+      },
+    };
+    const index = jest.fn();
+    const storage = {
+      publishPath: jest.fn(),
+      replacePath: jest.fn(),
+      getVectorSync: jest.fn((id: string) => (id === root.id ? root : null)),
+      touchPath: jest.fn(async () => true),
+    };
+    const processor = new EmbeddingsProcessor({ index } as never, storage as never);
+    const file = { path: "Note.md", basename: "Note", stat: { mtime: 123, size: 20 } };
+    const app = { vault: { read: jest.fn(async () => content) } };
+
+    const unchanged = await processor.processFiles([file] as never, app as never, undefined, {
+      reuseNamespace: namespace,
+    });
+
+    expect(index).not.toHaveBeenCalled();
+    expect(storage.touchPath).toHaveBeenCalledWith("Note.md", namespace, { mtime: 123, title: "Note" });
+    expect(unchanged).toMatchObject({ completed: 1, completedPaths: ["Note.md"], reusedPaths: ["Note.md"] });
+
+    app.vault.read.mockResolvedValue(`${content} with an edit`);
+    index.mockResolvedValue(indexedResult({ chunks: 1 }) as never);
+    const changed = await processor.processFiles([file] as never, app as never, undefined, {
+      reuseNamespace: namespace,
+    });
+    expect(index).toHaveBeenCalledTimes(1);
+    expect(changed.reusedPaths).toBeUndefined();
+  });
+
+  it("never reuses a root from a generation the server no longer publishes", async () => {
+    const stale = "systemsculpt:managed:semantic-v1:v2:3";
+    const content = "Unchanged";
+    const storage = {
+      publishPath: jest.fn(async () => undefined),
+      replacePath: jest.fn(),
+      getVectorSync: jest.fn(() => ({
+        id: buildVectorId(stale, "Note.md", 0),
+        path: "Note.md",
+        chunkId: 0,
+        vector: new Float32Array([1, 0, 0]),
+        metadata: {
+          title: "Note", mtime: 1, contentHash: TEXT_HASH, generation: "semantic-v1", dimension: 3,
+          createdAt: 1, namespace: stale, complete: true, sourceSha256: sha256(content),
+        },
+      })),
+      touchPath: jest.fn(async () => true),
+    };
+    const index = jest.fn(async () => indexedResult({ chunks: 1 }));
+    const processor = new EmbeddingsProcessor({ index } as never, storage as never);
+
+    await processor.processFiles(
+      [{ path: "Note.md", basename: "Note", stat: { mtime: 2 } }] as never,
+      { vault: { read: jest.fn(async () => content) } } as never,
+      undefined,
+      { reuseNamespace: "systemsculpt:managed:semantic-v1:v3:3" },
+    );
+
+    expect(storage.touchPath).not.toHaveBeenCalled();
+    expect(index).toHaveBeenCalledTimes(1);
+  });
+
+  it("overlaps a bounded number of requests during a bulk run", async () => {
+    const state = fixture();
+    const files = Array.from({ length: 7 }, (_, index) => ({
+      path: `Note-${index}.md`,
+      basename: `Note-${index}`,
+      stat: { mtime: index + 1 },
+    }));
+    let inFlight = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    state.index.mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      inFlight -= 1;
+      return indexedResult({ chunks: 1 });
+    });
+
+    const processing = state.processor.processFiles(files as never, state.app as never, undefined, {
+      concurrency: 3,
+    });
+    while (true) {
+      for (let attempt = 0; attempt < 50 && releases.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const release = releases.shift();
+      if (!release) break;
+      release();
+    }
+    const processed = await processing;
+
+    expect(peak).toBe(3);
+    expect(state.index).toHaveBeenCalledTimes(7);
+    expect(processed.completedPaths).toHaveLength(7);
   });
 });

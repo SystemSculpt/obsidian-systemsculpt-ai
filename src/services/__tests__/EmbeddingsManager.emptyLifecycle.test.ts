@@ -571,7 +571,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     });
 
     const processing = state.manager.processVault();
-    for (let attempt = 0; attempt < 20 && !releaseResponse; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 50 && !releaseResponse; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(releaseResponse).toBeDefined();
     const queue = (state.manager as any).workQueue;
     const claimed = queue.get(state.file.path);
