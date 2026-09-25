@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Platform, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
 import {
   ChatStorageService,
   isPathInDirectory,
@@ -214,6 +214,8 @@ describe("ChatStorageService", () => {
       expect(createdContent).toContain('id: "test-chat"');
       expect(createdContent).toContain('title: "Untitled Chat"');
       expect(createdContent).toContain('approvalMode: "ask"');
+      // History lists chats from this count without reading transcripts.
+      expect(createdContent).toContain("messageCount: 2");
     });
 
     it("persists only the server conversation routing pointer", async () => {
@@ -379,15 +381,6 @@ Content here`);
       await withDirManager.saveChat("test-chat", testMessages);
 
       expect(mockDirManager.ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Chats");
-    });
-  });
-
-  describe("loadChats", () => {
-    it("returns chat summaries", async () => {
-      // The loadChats method should return chat summaries
-      const chats = await service.loadChats();
-
-      expect(Array.isArray(chats)).toBe(true);
     });
   });
 
@@ -713,141 +706,6 @@ ${buildBody(actualSerializer)}`, newline, bom));
 
       expect(mockVault.modify).not.toHaveBeenCalled();
       expect(mockVault.create).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("loadChats", () => {
-    it("returns empty array when no files", async () => {
-      mockVault.adapter.list.mockResolvedValue({ files: [], folders: [] });
-
-      const result = await service.loadChats();
-
-      expect(result).toEqual([]);
-    });
-
-    it("filters for markdown files only", async () => {
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/chat.md", "SystemSculpt/Chats/data.json"],
-        folders: [],
-      });
-      mockVault.adapter.read.mockResolvedValue("");
-
-      await service.loadChats();
-
-      // Should only try to process .md file
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(1);
-    });
-
-    it("uses Obsidian's cached reader for indexed chat files", async () => {
-      const chatFile = new TFile({ path: "SystemSculpt/Chats/indexed.md" });
-      mockVault.adapter.list.mockResolvedValue({
-        files: [chatFile.path],
-        folders: [],
-      });
-      mockVault.getAbstractFileByPath.mockReturnValue(chatFile);
-
-      await service.loadChats();
-
-      expect(mockVault.cachedRead).toHaveBeenCalledWith(chatFile);
-      expect(mockVault.adapter.read).not.toHaveBeenCalled();
-    });
-
-    it("handles errors in individual file reads gracefully", async () => {
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/chat1.md", "SystemSculpt/Chats/chat2.md"],
-        folders: [],
-      });
-      mockVault.adapter.read
-        .mockRejectedValueOnce(new Error("Read error"))
-        .mockResolvedValueOnce("");
-
-      const result = await service.loadChats();
-
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it("bounds parallel reads so mobile vault adapters are not saturated", async () => {
-      const files = Array.from(
-        { length: 24 },
-        (_value, index) => `SystemSculpt/Chats/chat-${index}.md`,
-      );
-      let activeReads = 0;
-      let maxActiveReads = 0;
-      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
-      mockVault.adapter.read.mockImplementation(async () => {
-        activeReads += 1;
-        maxActiveReads = Math.max(maxActiveReads, activeReads);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        activeReads -= 1;
-        return "";
-      });
-
-      await service.loadChats();
-
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
-      expect(maxActiveReads).toBeLessThanOrEqual(8);
-      expect(maxActiveReads).toBeGreaterThan(1);
-    });
-
-    it("serializes reads when the host has no local filesystem capability", async () => {
-      const originalDesktopApp = Platform.isDesktopApp;
-      const files = Array.from(
-        { length: 6 },
-        (_value, index) => `SystemSculpt/Chats/portable-${index}.md`,
-      );
-      let activeReads = 0;
-      let maxActiveReads = 0;
-      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
-      mockVault.adapter.read.mockImplementation(async () => {
-        activeReads += 1;
-        maxActiveReads = Math.max(maxActiveReads, activeReads);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        activeReads -= 1;
-        return "";
-      });
-
-      (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = false;
-      try {
-        await service.loadChats();
-      } finally {
-        (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = originalDesktopApp;
-      }
-
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
-      expect(maxActiveReads).toBe(1);
-    });
-
-    it("returns empty array on list error", async () => {
-      mockVault.adapter.list.mockRejectedValue(new Error("List error"));
-
-      const result = await service.loadChats();
-
-      expect(result).toEqual([]);
-    });
-
-    it("excludes a corrupt chat instead of indexing its surviving prefix", async () => {
-      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
-      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
-      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
-        actualSerializer.parseMarkdown(content)
-      ));
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/corrupt.md"],
-        folders: [],
-      });
-      mockVault.adapter.read.mockResolvedValue(`---
-id: corrupt
-title: Corrupt
----
-
-<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" -->
-Valid prefix
-<!-- SYSTEMSCULPT-MESSAGE-END -->
-
-<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->
-Truncated`);
-
-      await expect(service.loadChats()).resolves.toEqual([]);
     });
   });
 

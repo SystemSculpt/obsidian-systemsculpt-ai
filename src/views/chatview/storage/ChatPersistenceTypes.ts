@@ -18,6 +18,11 @@ export interface ChatMetadata {
   lastModified: string;
   title: string;
   version?: number;
+  /**
+   * Written with every save so chat history can list a chat from Obsidian's
+   * metadata cache without reading its transcript. Readers ignore it.
+   */
+  messageCount?: number;
   tags?: string[];
   context_files?: ChatContextFileMetadata[];
   chatFontSize?: "small" | "medium" | "large";

@@ -193,6 +193,8 @@ describe("ChatAttachmentVaultStore", () => {
   it("runs automatic maintenance once per vault adapter, not once per chat view", async () => {
     const first = harness();
     const second = harness();
+    await new ChatAttachmentVaultStore(first.adapter).externalizeAttachments([imageAttachment]);
+    await new ChatAttachmentVaultStore(second.adapter).externalizeAttachments([imageAttachment]);
     const firstDiscovery = jest.fn(async () => new Set<string>());
     const secondDiscovery = jest.fn(async () => new Set<string>());
     const firstViewStore = new ChatAttachmentVaultStore(first.adapter);
@@ -202,7 +204,36 @@ describe("ChatAttachmentVaultStore", () => {
     await siblingViewStore.pruneOncePerSession(firstDiscovery);
     await new ChatAttachmentVaultStore(second.adapter).pruneOncePerSession(secondDiscovery);
 
-    expect(firstDiscovery).toHaveBeenCalledTimes(1);
-    expect(secondDiscovery).toHaveBeenCalledTimes(1);
+    // Discovery, then its confirmation before an old unreferenced payload
+    // could be deleted; sibling views of the same adapter do not repeat it.
+    expect(firstDiscovery).toHaveBeenCalledTimes(2);
+    expect(secondDiscovery).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads no chat when the store is missing or holds nothing old enough to delete", async () => {
+    const missing = harness();
+    const missingDiscovery = jest.fn(async () => new Set<string>());
+    await new ChatAttachmentVaultStore(missing.adapter).pruneOncePerSession(missingDiscovery);
+    expect(missingDiscovery).not.toHaveBeenCalled();
+
+    const fresh = harness();
+    await new ChatAttachmentVaultStore(fresh.adapter).externalizeAttachments([imageAttachment]);
+    (fresh.adapter.stat as jest.Mock).mockResolvedValue({ mtime: Date.now(), ctime: Date.now() });
+    const freshDiscovery = jest.fn(async () => new Set<string>());
+    const freshStore = new ChatAttachmentVaultStore(fresh.adapter);
+    await freshStore.pruneOncePerSession(freshDiscovery);
+    await freshStore.pruneOncePerSession(freshDiscovery);
+    expect(freshDiscovery).not.toHaveBeenCalled();
+    expect(fresh.files.size).toBe(1);
+  });
+
+  it("skips confirmation when every old payload is still referenced", async () => {
+    const { adapter, files } = harness();
+    const [kept] = await new ChatAttachmentVaultStore(adapter).externalizeAttachments([imageAttachment]);
+    const discovery = jest.fn(async () => new Set([chatAttachmentRefKey(kept.contentRef)]));
+    await new ChatAttachmentVaultStore(adapter).pruneOncePerSession(discovery);
+    expect(discovery).toHaveBeenCalledTimes(1);
+    expect(files.size).toBe(1);
+    expect(adapter.remove).not.toHaveBeenCalled();
   });
 });

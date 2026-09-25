@@ -1,6 +1,5 @@
 import { App, TFile, stringifyYaml } from "obsidian";
 import { ChatMessage } from "../../types";
-import { hasHostCapability } from "../../platform/hostCapabilities";
 import {
   ChatAttachmentVaultStore,
   collectChatAttachmentRefKeys,
@@ -116,49 +115,6 @@ function recordedChatsDirectories(
 /** Folder containment on a path boundary: `Chats-old/x.md` is not in `Chats`. */
 export function isPathInDirectory(path: string, directory: string): boolean {
   return path === directory || path.startsWith(`${directory}/`);
-}
-
-const DESKTOP_CHAT_HISTORY_READ_CONCURRENCY = 8;
-const PORTABLE_CHAT_HISTORY_READ_CONCURRENCY = 1;
-const CHAT_HISTORY_READ_TIMEOUT_MS = 5_000;
-
-async function mapWithBoundedConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      results[index] = await worker(items[index]);
-    }
-  }));
-
-  return results;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  const timerWindow = window.activeWindow ?? window;
-  let timer: number | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timer = timerWindow.setTimeout(
-          () => reject(new Error("Chat history read timed out")),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) {
-      timerWindow.clearTimeout(timer);
-    }
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -399,6 +355,7 @@ export class ChatStorageService {
         lastModified: now,
         title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
+        messageCount: messages.length,
         chatFontSize: options.chatFontSize || "medium",
         approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
       };
@@ -484,65 +441,6 @@ export class ChatStorageService {
       version: Math.max(Number(cached?.version) || 0, written?.version ?? 0),
       title: typeof cached?.title === "string" ? cached.title : written?.title,
     };
-  }
-
-  async loadChats(): Promise<LoadedChatRecord[]> {
-    try {
-      const files = await this.app.vault.adapter.list(this.chatDirectory);
-      const chatFiles = files.files.filter((f) => f.endsWith(".md"));
-
-      // Mobile vault adapters are bridge-backed. Firing hundreds of reads at
-      // once can starve that bridge and leave Promise.allSettled unresolved.
-      // Keep the shared loader bounded and let one bad file fail independently.
-      const chats = await mapWithBoundedConcurrency(
-        chatFiles,
-        hasHostCapability("local-filesystem")
-          ? DESKTOP_CHAT_HISTORY_READ_CONCURRENCY
-          : PORTABLE_CHAT_HISTORY_READ_CONCURRENCY,
-        async (filePath) => {
-          try {
-            // NEW: Try to read file stats first to get a reliable last modified timestamp
-            let fileModifiedTime: number | null = null;
-            const abstractFile = this.app.vault.getAbstractFileByPath(filePath);
-            if (abstractFile instanceof TFile) {
-              fileModifiedTime = abstractFile.stat.mtime;
-            }
-
-            // Obsidian's cached vault reader is dramatically cheaper than a
-            // native adapter bridge round-trip on mobile. Fall back only for
-            // paths that have not entered the vault index yet.
-            const contentPromise = abstractFile instanceof TFile
-              ? this.app.vault.cachedRead(abstractFile)
-              : this.app.vault.adapter.read(filePath);
-            const content = await withTimeout(
-              contentPromise,
-              CHAT_HISTORY_READ_TIMEOUT_MS,
-            );
-            
-            const parsed = this.parseMarkdownContent(content, filePath);
-
-            if (!parsed) return null;
-
-            // If we managed to read a reliable mtime from the file, prefer that over whatever the parser returned.
-            if (fileModifiedTime && !isNaN(fileModifiedTime)) {
-              parsed.lastModified = fileModifiedTime;
-            }
-
-            return parsed;
-          } catch {
-            return null;
-          }
-        },
-      );
-
-      // Extract successful results and filter out nulls.
-      const successfulChats = chats
-        .filter((chat): chat is NonNullable<typeof chat> => chat !== null);
-
-      return successfulChats;
-    } catch {
-      return [];
-    }
   }
 
   /**
