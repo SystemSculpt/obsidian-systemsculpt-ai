@@ -1,6 +1,6 @@
 # One collaborative Studio document
 
-Superseded in part by [ADR-0004](0004-readable-studio-documents.md): the file no longer embeds Automerge state; edits merge by entity and field, and deletions are recorded in a small tombstone sidecar. The single file, shared edit service and atomic publication below still apply.
+Superseded in part by [ADR-0004](0004-readable-studio-documents.md): the file no longer embeds Automerge state; edits merge by entity and field, dated by hybrid-clock stamps kept with deletion tombstones in small per-device clock files. The single file, shared edit service and atomic publication below still apply.
 
 Studio previously saved whole snapshots and replaced the workspace DOM during refresh. Stale writers could restore deleted or edited content, while unrelated catalog and file events interrupted active gestures and editors.
 

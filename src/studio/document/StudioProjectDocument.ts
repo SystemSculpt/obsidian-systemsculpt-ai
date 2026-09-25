@@ -9,8 +9,12 @@ import { resolveStudioEntry, type StudioEntryResolution } from "../StudioEntry";
 import { deriveStudioAssetsDir, deriveStudioPolicyPath } from "../paths";
 import { RETIRED_STUDIO_NODE_KINDS } from "../StudioGraphMigrations";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
-import { entitiesToProject, projectToEntities, studioEntityKeys, type StudioProjectEntities } from "./StudioProjectEntities";
-import { mergeStudioTombstones, parseStudioTombstones, sameStudioTombstones, serializeStudioTombstones, updateStudioTombstones, type StudioTombstones } from "./StudioProjectTombstones";
+import { entitiesToProject, projectToEntities, type StudioProjectEntities } from "./StudioProjectEntities";
+import {
+  cloneStudioClock, emptyStudioClock, isStudioClockCurrent, mergeStudioExternalEntities, mergeStudioTombstones, newestStudioClockStamp,
+  parseStudioClock, pruneStudioClock, recordStudioChanges, serializeStudioClock, studioStamp,
+  type StudioDocumentClockState, type StudioHybridClock, type StudioIncomingWriter, type StudioPendingBase,
+} from "./StudioDocumentClock";
 import { writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
 
 type Accepted = {
@@ -19,15 +23,20 @@ type Accepted = {
   /** Canonical v2 text of `project`; its SHA-256 is the agent revision. */
   text: string;
   project: StudioProjectV1;
-  keys: ReadonlySet<string>;
-  tombstones: StudioTombstones;
-  /** The sidecar content last read or written; null before the first read. */
-  stored: StudioTombstones | null;
+  entities: StudioProjectEntities;
+  /** This device's stamps for the accepted values, all known tombstones, and its file watermarks. */
+  clock: StudioDocumentClockState;
+  /** This device's clock file as last read or written; null before it exists. */
+  stored: string | null;
+  /** Values this device changed since the last external merge, as they were before: the diff3 base. */
+  pending: Map<string, StudioPendingBase>;
   /** `source` is a pre-v2 dialect or embeds 6.10 merge state; its first rewrite keeps a backup. */
   legacy: boolean;
   documentState: boolean;
-  /** Stale copies of deleted entities this import left out; the file must be rewritten. */
-  dropped: number;
+  /** The import combined this device's content with the file's, so the file must be rewritten. */
+  rewrite: boolean;
+  /** Notices from the import that produced this state, reported once. */
+  warnings: string[];
 };
 const accepted = new WeakMap<object, Map<string, Accepted>>();
 const revisions = new WeakMap<object, Map<string, Map<string, string>>>();
@@ -48,20 +57,29 @@ export async function studioDocumentRevision(text: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(text).buffer);
 }
 
-export function studioTombstonesPath(projectPath: string): string {
-  return `${deriveStudioAssetsDir(projectPath)}/tombstones.json`;
+/** Each device writes only its own clock file, so synchronization never makes two devices overwrite one. */
+export function studioClockFolder(projectPath: string): string {
+  return `${deriveStudioAssetsDir(projectPath)}/clock`;
+}
+export function studioClockPath(projectPath: string, device: string): string {
+  return `${studioClockFolder(projectPath)}/${device}.json`;
 }
 
 /**
- * One readable file and one shared mutation service. UI saves, agent edits and
- * external replacements merge by entity and field against the state each was
- * based on; deletions leave only keys in a small sidecar so a stale copy of the
- * file cannot bring a deleted entity back.
+ * One readable file and one shared mutation service. UI saves and agent edits
+ * merge by entity and field against the state each was based on. A whole-file
+ * copy from another writer merges field by field by hybrid-clock stamps kept
+ * in small per-device clock files beside the project; deletions leave only
+ * keys there, so a stale copy cannot bring a deleted entity back.
  */
 export class StudioProjectDocument {
   private readonly cache: Map<string, Accepted>;
-  constructor(private readonly adapter: DataAdapter, private readonly path: string, private readonly onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void) {
+  private readonly clock: StudioHybridClock;
+  private readonly onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void;
+  constructor(private readonly adapter: DataAdapter, private readonly path: string, options: {clock: StudioHybridClock; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void}) {
     let cache = accepted.get(adapter); if (!cache) {cache = new Map(); accepted.set(adapter, cache);} this.cache = cache;
+    this.clock = options.clock;
+    this.onLegacyOriginalCopied = options.onLegacyOriginalCopied;
   }
   async forget(): Promise<void> {
     await this.exclusive(async () => { this.cache.delete(this.path); });
@@ -147,23 +165,55 @@ export class StudioProjectDocument {
     let current = "";
     for (const part of folder.split("/")) { current = current ? `${current}/${part}` : part; if (!await this.adapter.exists(current)) { try { await this.adapter.mkdir(current); } catch (error) { if (!await this.adapter.exists(current)) throw error; } } }
   }
-  private async readTombstones(): Promise<StudioTombstones> {
-    const path = studioTombstonesPath(this.path);
-    try { return await this.adapter.exists(path) ? parseStudioTombstones(await this.adapter.read(path)) : Object.create(null); }
-    catch { return Object.create(null); }
+  private async readOwnClock(): Promise<{clock: StudioDocumentClockState; stored: string | null}> {
+    try {
+      const path = studioClockPath(this.path, this.clock.device);
+      if (!await this.adapter.exists(path)) return {clock: emptyStudioClock(), stored: null};
+      const raw = await this.adapter.read(path), parsed = parseStudioClock(raw);
+      if (!parsed || parsed.device !== this.clock.device) return {clock: emptyStudioClock(), stored: null};
+      this.clock.observe(newestStudioClockStamp(parsed.clock));
+      return {clock: parsed.clock, stored: raw};
+    } catch { return {clock: emptyStudioClock(), stored: null}; }
   }
-  /** Written before the file it protects, so a published deletion or restore is never without its record. */
-  private async storeTombstones(value: Accepted): Promise<void> {
-    if (sameStudioTombstones(value.tombstones, value.stored || {})) return;
-    const path = studioTombstonesPath(this.path);
-    await this.ensureFolder(deriveStudioAssetsDir(this.path));
-    await this.adapter.write(path, serializeStudioTombstones(value.tombstones));
-    value.stored = value.tombstones;
+  /** Other devices' clocks; one that is unreadable or abandoned only removes merge information. */
+  private async readOtherClocks(): Promise<StudioDocumentClockState[]> {
+    const folder = studioClockFolder(this.path), clocks: StudioDocumentClockState[] = [];
+    try {
+      if (!await this.adapter.exists(folder)) return clocks;
+      for (const file of (await this.adapter.list(folder)).files) {
+        if (!file.startsWith(`${folder}/`) || !file.endsWith(".json") || file === studioClockPath(this.path, this.clock.device)) continue;
+        try {
+          const parsed = parseStudioClock(await this.adapter.read(file));
+          if (!parsed || file !== studioClockPath(this.path, parsed.device) || !isStudioClockCurrent(parsed.clock, this.clock.wallNow())) continue;
+          this.clock.observe(newestStudioClockStamp(parsed.clock));
+          clocks.push(parsed.clock);
+        } catch { /* A clock still arriving is read with the next change. */ }
+      }
+    } catch { /* No clocks: the file's modification time dates its values. */ }
+    return clocks;
   }
-  /** The accepted state that follows `from` once `project` is published as `text`. */
-  private successor(from: Accepted, project: StudioProjectV1, text: string): Accepted {
-    const keys = studioEntityKeys(project);
-    return {source: text, text, project, keys, tombstones: updateStudioTombstones(from.tombstones, from.keys, keys, Date.now()), stored: from.stored, legacy: false, documentState: false, dropped: 0};
+  private async modified(path: string): Promise<number | null> {
+    try { const stat = await this.adapter.stat(path); return stat && Number.isFinite(stat.mtime) && stat.mtime > 0 ? stat.mtime : null; }
+    catch { return null; }
+  }
+  /** Written before the file it describes: a published value, deletion or restore always has its record. */
+  private async storeClock(value: Accepted): Promise<void> {
+    const text = serializeStudioClock(this.clock.device, value.clock);
+    if (text === value.stored) return;
+    const {stamps, deleted, files} = value.clock;
+    if (value.stored === null && !Object.keys(stamps).length && !Object.keys(deleted).length && !Object.keys(files).length) return;
+    await this.ensureFolder(studioClockFolder(this.path));
+    await this.adapter.write(studioClockPath(this.path, this.clock.device), text);
+    value.stored = text;
+  }
+  /** The accepted state that follows `from` once `project` is published as `text`, with this device's changes stamped. */
+  private async successor(from: Accepted, project: StudioProjectV1, text: string): Promise<Accepted> {
+    const entities = projectToEntities(project), clock = cloneStudioClock(from.clock), now = () => this.clock.now();
+    recordStudioChanges(clock, from.entities, entities, now, from.pending);
+    clock.files[await studioDocumentRevision(text)] = now();
+    pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
+    // Notices from an import that a save or edit consumed are reported by the next refresh.
+    return {source: text, text, project, entities, clock, stored: from.stored, pending: from.pending, legacy: false, documentState: false, rewrite: false, warnings: from.warnings};
   }
   /** Adopt authored content onto the file's runtime fields in the canonical form a reopen yields. */
   private canonical(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
@@ -172,35 +222,74 @@ export class StudioProjectDocument {
     validateStudioProjectForAgentEdit(project);
     return {project, text};
   }
-  private async import(raw: string): Promise<Accepted> {
+  /**
+   * Accept file bytes this device did not just write. With the state this device accepted before,
+   * that state and the file merge field by field (mergeStudioExternalEntities); the file's values
+   * are dated by the clock of the device that wrote it, or else by its modification time.
+   */
+  private async import(raw: string, filePath: string): Promise<Accepted> {
     const previous = this.cache.get(this.path);
     if (previous && previous.source === raw) return previous;
     const parsed: unknown = JSON.parse(raw);
     assertValidStudioProjectAgentDocumentStructure(parsed);
     // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
-    let candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
+    const candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
     // Grants belong to the file's own location; an authored reference cannot select another project's policy.
     candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
     validateStudioProjectForAgentEdit(candidate);
     if (previous && previous.project.projectId !== candidate.projectId) throw new Error("The edited file belongs to another Studio project.");
-    const stored = await this.readTombstones();
-    const tombstones = mergeStudioTombstones(previous?.tombstones || Object.create(null), stored);
-    // Only Studio's own Undo or restore brings a deleted entity back; a stale copy of the file cannot.
-    const stale = [...studioEntityKeys(candidate)].filter(key => tombstones[key] !== undefined && !previous?.keys.has(key));
-    if (stale.length) {
-      const entities = projectToEntities(candidate);
-      for (const key of stale) delete entities[key];
-      candidate = entitiesToProject(entities, candidate);
+    const own = previous ? {clock: previous.clock, stored: previous.stored} : await this.readOwnClock();
+    let clock = cloneStudioClock(own.clock);
+    const others = await this.readOtherClocks();
+    for (const other of others) clock.deleted = mergeStudioTombstones(clock.deleted, other.deleted);
+    const hash = await studioDocumentRevision(raw);
+    const writerClock = own.clock.files[hash] ? own.clock : others.find(other => other.files[hash]);
+    const modified = writerClock ? null : await this.modified(filePath);
+    const writer: StudioIncomingWriter = writerClock ? {kind: "clock", stamps: writerClock.stamps, watermark: writerClock.files[hash]}
+      : modified !== null ? {kind: "time", watermark: studioStamp(modified)} : {kind: "unknown"};
+    const warnings: string[] = [];
+    // Without its content in memory, this device can only notice that a copy predates its own changes.
+    const ownNewest = newestStudioClockStamp(own.clock);
+    if (!previous && writer.kind !== "unknown" && ownNewest > writer.watermark) {
+      warnings.push("This copy of the project is older than changes made on this device while Studio was closed. Those changes may be missing.");
     }
-    const {project, text} = this.canonical(candidate, candidate);
-    const keys = studioEntityKeys(project);
+    const unmerged = cloneStudioClock(clock);
+    const merge = mergeStudioExternalEntities({
+      local: previous?.entities || Object.create(null), incoming: projectToEntities(candidate), clock, tombstones: clock.deleted,
+      writer, pending: previous?.pending || new Map(), now: () => this.clock.now(),
+    });
+    let result = {...candidate} as StudioProjectV1, rewrite = false;
+    if (merge.entities) {
+      try { result = this.canonical(candidate, entitiesToProject(merge.entities, candidate)).project; rewrite = true; }
+      catch {
+        clock = unmerged;
+        warnings.push("Studio could not combine this device's changes with a copy of this file from elsewhere and kept the file's version.");
+      }
+    }
+    if (rewrite && previous && writer.kind !== "clock" && merge.kept) {
+      warnings.push(`Studio kept ${merge.kept === 1 ? "1 newer change" : `${merge.kept} newer changes`} from this device that a copy of this file from elsewhere did not include.`);
+    }
+    if (rewrite && merge.dropped) warnings.push(`Studio left out ${merge.dropped === 1 ? "1 deleted item" : `${merge.dropped} deleted items`} that an older copy of this file still contained. Use Undo to bring back a deletion.`);
+    const {project, text} = this.canonical(candidate, result);
+    const entities = projectToEntities(project);
+    pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
     const record = parsed as Record<string, unknown>;
     const legacy = String(record.schema ?? "").trim() !== "studio.project.v2";
     const next: Accepted = {
-      source: raw, text, project, keys, stored,
-      tombstones: updateStudioTombstones(tombstones, previous ? previous.keys : null, keys, Date.now()),
-      legacy, documentState: !legacy && Object.prototype.hasOwnProperty.call(record, "document"), dropped: stale.length,
+      source: raw, text, project, entities, clock, stored: own.stored, pending: new Map(), rewrite, warnings,
+      legacy, documentState: !legacy && Object.prototype.hasOwnProperty.call(record, "document"),
     };
+    this.cache.set(this.path, next);
+    return next;
+  }
+  /** Publish `text` as the next accepted state of `value`: its watermark and clock first, then the file. */
+  private async republish(entry: StudioEntryResolution, value: Accepted, text: string): Promise<Accepted> {
+    const clock = cloneStudioClock(value.clock);
+    clock.files[await studioDocumentRevision(text)] = this.clock.now();
+    pruneStudioClock(clock, new Set(Object.keys(value.entities)), this.clock.wallNow());
+    const next: Accepted = {...value, source: text, clock, legacy: false, documentState: false, rewrite: false, warnings: []};
+    await this.storeClock(next);
+    if (!await this.publish(entry, value, text)) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
     this.cache.set(this.path, next);
     return next;
   }
@@ -208,23 +297,23 @@ export class StudioProjectDocument {
     // The file itself is imported, never an older watcher copy of it: a delayed event cannot roll back state.
     const entry = await resolveStudioEntry(this.adapter, this.path);
     let value: Accepted;
-    try { value = await this.import(entry.raw); }
+    try { value = await this.import(entry.raw, entry.path); }
     catch (error) {
       const previous = this.cache.get(this.path);
       if (!previous) throw new Error(`Studio couldn't read this project file: ${error instanceof Error ? error.message : String(error)}`);
       return {value: previous, conflicts: ["Studio is waiting for a complete valid file edit. Your open document remains intact."]};
     }
-    // Protection only: an unwritable sidecar must not keep the canvas from opening.
-    try { await this.storeTombstones(value); } catch { /* Retried by the next write. */ }
-    // Older dialects are upgraded at once. Formatting and 6.10 merge state are only rewritten by the
-    // next edit, so a device still running 6.10 cannot trade rewrites with this one.
-    const dropped = value.dropped;
-    if (value.text !== entry.raw && (value.legacy || dropped)) {
-      if (!await this.publish(entry, value, value.text)) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
-      value = {...value, source: value.text, legacy: false, documentState: false, dropped: 0};
-      this.cache.set(this.path, value);
+    const warnings = value.warnings;
+    value.warnings = [];
+    // Older dialects are upgraded at once, and a merge is published so the other writer receives it.
+    // Formatting and 6.10 merge state alone are only rewritten by the next edit, so a device still
+    // running 6.10 cannot trade rewrites with this one.
+    if (value.text !== entry.raw && (value.legacy || value.rewrite)) value = await this.republish(entry, value, value.text);
+    else {
+      // Merge information only: an unwritable clock must not keep the canvas from opening.
+      try { await this.storeClock(value); } catch { /* Retried by the next write. */ }
     }
-    return {value, conflicts: dropped ? [`Studio left out ${dropped === 1 ? "1 deleted item" : `${dropped} deleted items`} that an older copy of this file still contained. Use Undo to bring back a deletion.`] : []};
+    return {value, conflicts: warnings};
   }
   async refresh(): Promise<StudioProjectReconciliation> {
     return this.exclusive(async () => {
@@ -247,14 +336,14 @@ export class StudioProjectDocument {
   async save(project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1}): Promise<StudioProjectReconciliation> {
     return this.exclusive(async () => {
       const entry = await resolveStudioEntry(this.adapter, this.path);
-      const current = await this.import(entry.raw);
+      const current = await this.import(entry.raw, entry.path);
       const base = options?.baseProject;
       const merged = !base || serializeStudioProject(base) === current.text
         ? {project, conflicts: [] as string[]}
         : reconcileStudioProject(base, project, current.project);
       const {project: saved, text} = this.canonical(current.project, merged.project);
-      const next = this.successor(current, saved, text);
-      await this.storeTombstones(next);
+      const next = await this.successor(current, saved, text);
+      await this.storeClock(next);
       options?.onBeforeProjectWrite?.(text);
       if (!await this.publish(entry, current, text)) throw new StudioWriteRace("Another writer changed the Studio file; your edit is still pending and will be rebased on retry.");
       this.cache.set(this.path, next);
@@ -269,14 +358,14 @@ export class StudioProjectDocument {
   async edit(revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> {
     return this.exclusive(async () => {
       const entry = await resolveStudioEntry(this.adapter, this.path);
-      const current = await this.import(entry.raw);
+      const current = await this.import(entry.raw, entry.path);
       const latest = revision === await studioDocumentRevision(current.text);
       const basisText = latest ? current.text : this.revisionText(revision);
       if (basisText === undefined) throw new Error("This Studio revision is no longer available. Read the document again and retry.");
       const basis = latest ? current.project : parseStudioProject(basisText);
       if (!Array.isArray(edits) || edits.length > 1000) throw new Error("Provide at most 1,000 scoped edits.");
       const before = projectToEntities(basis);
-      const after = applyStudioDocumentEdits(before, edits, current.tombstones);
+      const after = applyStudioDocumentEdits(before, edits, current.clock.deleted);
       const candidate = entitiesToProject(after, current.project);
       let content = candidate;
       if (!latest) {
@@ -285,8 +374,8 @@ export class StudioProjectDocument {
         content = merged.project;
       }
       const {project, text} = this.canonical(current.project, content);
-      const next = this.successor(current, project, text);
-      await this.storeTombstones(next);
+      const next = await this.successor(current, project, text);
+      await this.storeClock(next);
       if (!await this.publish(entry, current, text)) throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits.");
       this.cache.set(this.path, next);
       return {project: cloneStudioProjectSnapshot(project), conflicts: [], revision: await this.handOut(text)};
@@ -294,7 +383,7 @@ export class StudioProjectDocument {
   }
 }
 
-function applyStudioDocumentEdits(before: StudioProjectEntities, edits: StudioDocumentEdit[], tombstones: StudioTombstones): StudioProjectEntities {
+function applyStudioDocumentEdits(before: StudioProjectEntities, edits: StudioDocumentEdit[], tombstones: Record<string, string>): StudioProjectEntities {
   const after = JSON.parse(JSON.stringify(before)) as StudioProjectEntities;
   for (const edit of edits) {
     if (!edit || typeof edit.entityId !== "string" || RESERVED_KEYS.includes(edit.entityId)) throw new Error("Invalid Studio entity ID.");

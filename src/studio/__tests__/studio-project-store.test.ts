@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
-import { studioTombstonesPath, type StudioLegacyOriginalCopy } from "../document/StudioProjectDocument";
+import type { StudioLegacyOriginalCopy } from "../document/StudioProjectDocument";
 import { StudioProjectSession } from "../StudioProjectSession";
 import { serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
@@ -33,6 +33,13 @@ type InMemoryApp = {
     getAbstractFileByPath?: (path: string) => unknown;
     getFiles: () => Array<{ path: string }>;
   };
+};
+
+/** Authored and copied files; the per-device merge clocks beside a project are bookkeeping. */
+const authoredFiles = (files: Map<string, string>) => [...files.keys()].filter(file => !file.includes(".systemsculpt-assets/clock/"));
+const clockFile = (files: Map<string, string>) => {
+  const [path] = [...files.keys()].filter(file => file.includes(".systemsculpt-assets/clock/"));
+  return JSON.parse(files.get(path)!) as { deleted: Record<string, string>; stamps: Record<string, unknown> };
 };
 
 function createStore(options?: { existingFiles?: string[]; existingDirs?: string[]; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void }) {
@@ -356,7 +363,7 @@ describe("Studio concurrent workspace writers", () => {
     expect(saved.conflicts).toEqual(["name"]);
     expect(saved.project.name).toBe("External title");
     expect(saved.project.graph.nodes[0].id).toBe("local");
-    expect([...files.keys()]).toEqual([path]);
+    expect(authoredFiles(files)).toEqual([path]);
     expect([...files.keys()].some(file => file.startsWith(".systemsculpt/studio/recovery/"))).toBe(false);
   });
 
@@ -408,11 +415,11 @@ describe("single authored file", () => {
   it("creates exactly one file and serializes twenty clients from one revision", async () => {
     const {store, files, reopen} = createStore();
     const {path} = await store.createProject(options);
-    expect([...files.keys()]).toEqual([path]);
+    expect(authoredFiles(files)).toEqual([path]);
     const {revision} = await store.readDocument(path);
     await Promise.all(Array.from({length: 20}, (_, index) => reopen().editDocument(path, revision, [{kind: "create", entityId: `node:n${index}`, value: text(`n${index}`, `agent ${index}`, index)}])));
     expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(20);
-    expect([...files.keys()]).toEqual([path]);
+    expect(authoredFiles(files)).toEqual([path]);
   });
 
   it("names a revision by the SHA-256 of the canonical file text", async () => {
@@ -461,12 +468,12 @@ describe("single authored file", () => {
     await expect(store.editDocument(path, latest, [{kind: "create", entityId: "node:a", value: text("a", "again")}])).rejects.toThrow("This entity ID is already used; choose a new ID or explicitly restore it.");
     expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(0);
     // Only the key and its deletion time are kept, beside the project.
-    const tombstones = JSON.parse(files.get(studioTombstonesPath(path))!);
-    expect(Object.keys(tombstones.deleted)).toEqual(["node:a"]);
-    expect(files.get(studioTombstonesPath(path))).not.toContain("hello");
+    expect(Object.keys(clockFile(files).deleted)).toEqual(["node:a"]);
+    expect(Object.keys(clockFile(files).stamps)).not.toContain("node:a");
+    expect(JSON.stringify(clockFile(files))).not.toContain("hello");
     await store.editDocument(path, latest, [{kind: "restore", entityId: "node:a", value: text("a", "restored")}]);
     expect((await reopen().loadProject(path)).graph.nodes[0].config.value).toBe("restored");
-    expect(JSON.parse(files.get(studioTombstonesPath(path))!).deleted).toEqual({});
+    expect(clockFile(files).deleted).toEqual({});
   });
 
   it("keeps the agent tool contract: one content revision in heads, older Automerge heads rejected", async () => {
@@ -534,7 +541,7 @@ describe("single authored file", () => {
     release(); await flush;
     expect(session.getProject().graph.nodes[0].config.value).toBe("hello world!");
     expect((await store.loadProject(created.path)).graph.nodes[0].config.value).toBe("hello world!");
-    expect([...files.keys()]).toEqual([created.path]);
+    expect(authoredFiles(files)).toEqual([created.path]);
     await session.close();
   });
 

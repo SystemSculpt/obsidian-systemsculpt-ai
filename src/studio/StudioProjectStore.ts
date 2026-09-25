@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { requireApiVersion, type App } from "obsidian";
 import type { StudioProjectV1, StudioPermissionPolicyV1 } from "./types";
 import { createEmptyStudioProject, createDefaultStudioPolicy, parseStudioPolicy, serializeStudioPolicy, serializeStudioProject, parseStudioProject } from "./schema";
 import { DEFAULT_STUDIO_PROJECTS_DIR, deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "./paths";
@@ -6,6 +6,7 @@ import { StudioProjectDocument, type StudioDocumentEdit, type StudioDocumentEdit
 import type { StudioProjectReconciliation } from "./StudioProjectReconciliation";
 import { resolveStudioEntry } from "./StudioEntry";
 import { reconcileStudioSupportDocument } from "./persistence/StudioSupportReconciliation";
+import { StudioHybridClock } from "./document/StudioDocumentClock";
 
 /** Immutable media bytes stored under the project's support tree by content hash. */
 export type StudioAssetFile = { contentAddressedPath: string; bytes: Uint8Array };
@@ -26,11 +27,44 @@ export type StudioRunPublication = {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const operations = new WeakMap<object, Map<string, Promise<unknown>>>();
+const devices = new WeakMap<object, string>();
+const clocks = new WeakMap<object, Map<string, StudioHybridClock>>();
+const DEVICE_KEY = "systemsculpt-studio-device";
+
+/**
+ * A stable, device-local identity for this vault: it names the device's clock
+ * file and breaks stamp ties. Vault-scoped local storage is not synchronized;
+ * hosts without it use one identity per session.
+ */
+function studioDeviceId(app: App): string {
+  const known = devices.get(app);
+  if (known) return known;
+  let device = "";
+  // Vault-scoped local storage exists from Obsidian 1.8.7.
+  try {
+    if (requireApiVersion("1.8.7")) {
+      const stored: unknown = app.loadLocalStorage(DEVICE_KEY);
+      if (typeof stored === "string" && /^[0-9a-f]{12}$/.test(stored)) device = stored;
+    }
+  } catch { /* Unreadable storage: a new identity. */ }
+  if (!device) {
+    device = Array.from({length: 12}, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    try { if (requireApiVersion("1.8.7")) app.saveLocalStorage(DEVICE_KEY, device); } catch { /* A per-session identity still orders its own stamps. */ }
+  }
+  devices.set(app, device);
+  return device;
+}
 
 /** One authored file; media and execution records are stored separately. */
 export class StudioProjectStore {
   private readonly documents = new Map<string, StudioProjectDocument>();
-  constructor(private readonly app: App, private readonly options: {onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void} = {}) {}
+  private readonly clock: StudioHybridClock;
+  constructor(private readonly app: App, private readonly options: {onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void; deviceId?: string; now?: () => number} = {}) {
+    const device = options.deviceId || studioDeviceId(app), adapter = app.vault.adapter;
+    let byDevice = clocks.get(adapter); if (!byDevice) {byDevice = new Map(); clocks.set(adapter, byDevice);}
+    let clock = byDevice.get(device); if (!clock) {clock = new StudioHybridClock(device, options.now); byDevice.set(device, clock);}
+    this.clock = clock;
+  }
 
   private exclusive<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const adapter = this.app.vault.adapter;
@@ -49,7 +83,7 @@ export class StudioProjectStore {
     path = normalizeStudioProjectPath(path);
     let document = this.documents.get(path);
     if (!document) {
-      document = new StudioProjectDocument(this.app.vault.adapter, path, this.options.onLegacyOriginalCopied);
+      document = new StudioProjectDocument(this.app.vault.adapter, path, {clock: this.clock, onLegacyOriginalCopied: this.options.onLegacyOriginalCopied});
       this.documents.set(path, document);
     }
     return document;
