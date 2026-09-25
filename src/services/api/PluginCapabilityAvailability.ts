@@ -1,5 +1,6 @@
 import type SystemSculptPlugin from "../../main";
-import { PlatformRequestClient } from "../PlatformRequestClient";
+import type { PlatformRequestClient } from "../PlatformRequestClient";
+import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 import { SystemSculptEnvironment } from "./SystemSculptEnvironment";
 
 type JsonRecord = Record<string, unknown>;
@@ -26,7 +27,29 @@ interface CacheEntry {
 const availabilityCache = new WeakMap<SystemSculptPlugin, CacheEntry>();
 const latestProbe = new WeakMap<SystemSculptPlugin, object>();
 const CACHE_TTL_MS = 5 * 60_000;
-const MAX_JSON_RESPONSE_CHARS = 1024 * 1024;
+
+/**
+ * /config has one client, the managed transport, which shares identical
+ * in-flight reads (#386). The plugin's own transport is used unless a test
+ * supplies an endpoint or request client.
+ */
+function configTransport(
+  plugin: SystemSculptPlugin,
+  options: PluginCapabilityAvailabilityOptions,
+  baseUrl: string,
+  licenseKey: string,
+  pluginVersion: string,
+): Pick<HostedTransportAdapter, "getPluginConfigCapabilities"> {
+  const graph = !options.requestClient && !options.baseUrl
+    ? (plugin as Partial<Pick<SystemSculptPlugin, "getManagedCapabilityGraph">>).getManagedCapabilityGraph?.()
+    : undefined;
+  return graph?.transport ?? new HostedTransportAdapter({
+    baseUrl: new URL(baseUrl).origin,
+    pluginVersion,
+    licenseKey: () => licenseKey,
+    requestClient: options.requestClient,
+  });
+}
 
 /** Read the server's additive capability catalogue; older/unavailable servers fail open. */
 export async function getPluginCapabilityAvailability(
@@ -52,27 +75,8 @@ export async function getPluginCapabilityAvailability(
     capabilities = null;
     if (licenseKey && pluginVersion && !signal?.aborted) {
       try {
-        const response = await (options.requestClient ?? new PlatformRequestClient()).request({
-          url: `${baseUrl}/config`,
-          method: "GET",
-          headers: {
-            ...SystemSculptEnvironment.buildHeaders(licenseKey),
-            "x-plugin-version": pluginVersion,
-          },
-          licenseKey,
-          preserveResponseHeaders: true,
-          signal,
-        });
-        if (response.ok) {
-          const text = await response.text();
-          if (text && text.length <= MAX_JSON_RESPONSE_CHARS) {
-            const payload: unknown = JSON.parse(text);
-            if (isRecord(payload) && payload.contract === "systemsculpt-plugin-config-v1"
-              && isRecord(payload.capabilities)) {
-              capabilities = payload.capabilities;
-            }
-          }
-        }
+        capabilities = await configTransport(plugin, options, baseUrl, licenseKey, pluginVersion)
+          .getPluginConfigCapabilities(signal);
       } catch {
         // Config is advisory; the execution endpoint remains authoritative.
       }
@@ -85,8 +89,4 @@ export async function getPluginCapabilityAvailability(
   return capabilities === null
     ? { canOpen: true, authoritative: false }
     : { canOpen: capabilities[capability] === true, authoritative: true };
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

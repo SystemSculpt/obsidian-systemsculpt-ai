@@ -1222,7 +1222,7 @@ describe("AudioProcessorService", () => {
     expect(app.vault.create).toHaveBeenCalledTimes(2);
   });
 
-  it("follows the server poll cadence while awaiting funds until the server requeues it", async () => {
+  it("pauses polling while awaiting funds and resumes the server cadence once requeued", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
     const awaitingFunds: AudioProcessorJob = {
@@ -1263,12 +1263,93 @@ describe("AudioProcessorService", () => {
       primaryNoteAvailable: true,
     }));
 
+    // A job short of credits is rechecked at doubling intervals from one
+    // minute instead of at the five-second server hint; once requeued it
+    // follows the normal cadence again.
     expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
-      5_000, 5_000, 5_000, 2_000,
+      60_000, 120_000, 240_000, 2_000,
     ]);
     expect(api.resumeJob).not.toHaveBeenCalled();
     expect(progress).toContain("awaiting_funds");
     nowSpy.mockRestore();
+  });
+
+  it("shows a still-waiting state through a long status outage and still delivers the note", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    api.createYouTubeJob.mockResolvedValue({ job: job("processing", "transcribing", 0.5), upload: null });
+    const outage = Object.assign(new Error("Audio service unavailable."), { status: 503 });
+    api.getJob.mockReset();
+    for (let attempt = 0; attempt < 20; attempt += 1) api.getJob.mockRejectedValueOnce(outage);
+    api.getJob.mockResolvedValueOnce(job("succeeded", "complete", 1));
+    const messages: string[] = [];
+    const service = new AudioProcessorService(plugin, {
+      apiClient: api as unknown as AudioProcessorApiClient,
+      pollIntervalMs: 2_000,
+      sleep: jest.fn(async () => undefined),
+    });
+
+    await expect(service.process({
+      type: "youtube",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }, {
+      signal: new AbortController().signal,
+      onProgress: (event) => messages.push(event.message),
+    })).resolves.toEqual(expect.objectContaining({ primaryNoteAvailable: true }));
+
+    expect(api.getJob).toHaveBeenCalledTimes(21);
+    expect(messages.filter((message) => message.startsWith("Still waiting"))).toHaveLength(20);
+  });
+
+  it("rechecks an awaiting-funds job at once when a balance read shows credits", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    const awaitingFunds: AudioProcessorJob = {
+      ...job("awaiting_funds", "awaiting_funds", 0.4),
+      resumeRequired: true,
+      pollAfterMs: 5_000,
+    };
+    api.createYouTubeJob.mockResolvedValue({ job: awaitingFunds, upload: null });
+    api.getJob.mockReset()
+      .mockResolvedValueOnce(job("queued", "queued", 0.4))
+      .mockResolvedValueOnce(job("succeeded", "complete", 1));
+    let balanceListener: ((balance: { totalRemaining: number; availableUnreserved?: number }) => void) | null = null;
+    const unsubscribe = jest.fn();
+    (plugin as unknown as { aiService: unknown }).aiService = {
+      onCreditsBalance: jest.fn((listener: typeof balanceListener) => {
+        balanceListener = listener;
+        return unsubscribe;
+      }),
+    };
+    const waits: number[] = [];
+    const sleep = jest.fn((milliseconds: number, signal: AbortSignal) => {
+      waits.push(milliseconds);
+      if (milliseconds < 60_000) return Promise.resolve();
+      return new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
+    const service = new AudioProcessorService(plugin, {
+      apiClient: api as unknown as AudioProcessorApiClient,
+      pollIntervalMs: 2_000,
+      sleep,
+    });
+
+    const processing = service.process({
+      type: "youtube",
+      url: "https://youtu.be/dQw4w9WgXcQ",
+    }, { signal: new AbortController().signal });
+    for (let turn = 0; turn < 20 && !balanceListener; turn += 1) await Promise.resolve();
+    expect(api.getJob).not.toHaveBeenCalled();
+
+    balanceListener!({ totalRemaining: 0, availableUnreserved: 0 });
+    await Promise.resolve();
+    expect(api.getJob).not.toHaveBeenCalled();
+
+    balanceListener!({ totalRemaining: 500, availableUnreserved: 500 });
+    await expect(processing).resolves.toEqual(expect.objectContaining({ primaryNoteAvailable: true }));
+    expect(waits).toEqual([60_000, 2_000]);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it("does not stop a valid audio job after the historical twelve-hour client limit", async () => {

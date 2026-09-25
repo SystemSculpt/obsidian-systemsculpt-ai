@@ -95,11 +95,99 @@ describe("HostedTransportAdapter", () => {
     await adapter.request({ path: "/op", method: "POST", body: {}, timeoutMs: 600_000 });
     await adapter.request({ path: "/op", method: "GET" });
 
-    expect(request.mock.calls[0][0].signal).toBe(controller.signal);
-    expect(request.mock.calls[1][0].signal).toBe(controller.signal);
+    // Discovery reads are shared, so each carries its own signal that aborts
+    // only when every waiting caller has aborted.
+    expect(request.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(request.mock.calls[1][0].signal).toBeInstanceOf(AbortSignal);
     expect(request.mock.calls[2][0].timeoutMs).toBe(600_000);
     // Without an override the request client applies its own default.
     expect(request.mock.calls[3][0]).not.toHaveProperty("timeoutMs");
+  });
+
+  it("shares concurrent discovery and admission reads, aborting only when every caller leaves", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const pending: Array<{ signal: AbortSignal; resolve: (value: Response) => void }> = [];
+    request.mockImplementation((input: { signal: AbortSignal }) => new Promise<Response>((resolve, reject) => {
+      pending.push({ signal: input.signal, resolve });
+      input.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+
+    const first = new AbortController();
+    const second = new AbortController();
+    const reads = [adapter.getAdmission(first.signal), adapter.getAdmission(second.signal), adapter.getAdmission()];
+    expect(request).toHaveBeenCalledTimes(1);
+    first.abort();
+    await expect(reads[0]).rejects.toMatchObject({ name: "AbortError" });
+    expect(pending[0].signal.aborted).toBe(false);
+    pending[0].resolve(response(200, admission("allowed")));
+    await expect(reads[1]).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(reads[2]).resolves.toMatchObject({ outcome: "allowed" });
+
+    const lone = new AbortController();
+    const catalog = adapter.getCatalog(lone.signal);
+    lone.abort();
+    await expect(catalog).rejects.toMatchObject({ name: "AbortError" });
+    expect(pending[1].signal.aborted).toBe(true);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("never lets an admission read of a new epoch join one that started before it", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const finish: Array<(value: Response) => void> = [];
+    request.mockImplementation(() => new Promise<Response>((resolve) => { finish.push(resolve); }));
+
+    const before = adapter.getAdmission(undefined, { epoch: 0 });
+    const sameEpoch = adapter.getAdmission(undefined, { epoch: 0 });
+    const after = adapter.getAdmission(undefined, { epoch: 1 });
+    expect(request).toHaveBeenCalledTimes(2);
+
+    finish[0](response(200, admission("allowed")));
+    finish[1](response(403, admission("license_rejected", { reason: "revoked" })));
+    await expect(before).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(sameEpoch).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(after).resolves.toMatchObject({ outcome: "license_rejected" });
+  });
+
+  it("reports 401 and 403 from managed endpoints, but not from admission itself", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const rejected = jest.fn();
+    const unsubscribe = adapter.onAuthorizationRejected(rejected);
+
+    request.mockResolvedValueOnce(response(403, admission("license_rejected", { reason: "expired" })));
+    await adapter.getAdmission();
+    expect(rejected).not.toHaveBeenCalled();
+
+    request.mockResolvedValueOnce(response(401, { error: "license_required" }));
+    await adapter.job({ path: "/api/plugin/transcriptions/jobs/job-1", method: "GET" });
+    request.mockResolvedValueOnce(response(403, { error: "forbidden" }));
+    await adapter.request({ path: "/api/plugin/images/models", method: "GET" });
+    request.mockResolvedValueOnce(response(500, { error: "server" }));
+    await adapter.request({ path: "/api/plugin/images/models", method: "GET" });
+    expect(rejected).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    request.mockResolvedValueOnce(response(401, { error: "license_required" }));
+    await adapter.request({ path: "/api/plugin/images/models", method: "GET" });
+    expect(rejected).toHaveBeenCalledTimes(2);
+  });
+
+  it("negotiates the plugin-config-v1 capability flags without the managed contract header", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6.1.0", licenseKey: () => " key " });
+    request.mockResolvedValueOnce(response(200, {
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_audio_processor: true },
+    }));
+
+    await expect(adapter.getPluginConfigCapabilities()).resolves.toEqual({ hosted_audio_processor: true });
+    const input = request.mock.calls[0][0];
+    expect(input).toMatchObject({ url: "https://api.test/api/plugin/config", method: "GET", licenseKey: "key" });
+    expect(input.headers["x-plugin-version"]).toBe("6.1.0");
+    expect(input.headers).not.toHaveProperty("x-systemsculpt-contract");
+
+    request.mockResolvedValueOnce(response(200, { contract: "other", capabilities: {} }));
+    await expect(adapter.getPluginConfigCapabilities()).resolves.toBeNull();
+    request.mockRejectedValueOnce(new Error("offline"));
+    await expect(adapter.getPluginConfigCapabilities()).resolves.toBeNull();
   });
 
   it("adds operation contract headers and only explicit idempotency keys", async () => {

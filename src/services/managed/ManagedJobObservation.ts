@@ -1,8 +1,22 @@
 const DEFAULT_POLL_AFTER_MS = 2_000;
+/** No server hint, however small, polls a job more than once a second. */
+const MIN_POLL_AFTER_MS = 1_000;
 const MAX_POLL_AFTER_MS = 60 * 60 * 1_000;
 const TRANSIENT_RETRY_BASE_MS = 1_000;
 const TRANSIENT_RETRY_MAX_MS = 30_000;
+/**
+ * Longest wait between status reads while they keep failing. A live job is
+ * never abandoned: a paid result must still reach the vault this session.
+ */
+const OBSERVATION_RETRY_MAX_MS = 5 * 60_000;
 const DISPATCH_MAX_ATTEMPTS = 4;
+
+/** A status read failed transiently; the observer waits and reads again. */
+export type ManagedJobObservationRetry = Readonly<{
+  consecutiveFailures: number;
+  retryInMs: number;
+  error: unknown;
+}>;
 
 export type ManagedJobPollHint = Readonly<{
   poll_after_ms?: number;
@@ -16,6 +30,10 @@ export type ManagedJobObservationOptions<T> = Readonly<{
   isRetryableError?: (error: unknown) => boolean;
   retryAfterMs?: (error: unknown) => number | undefined;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  /** Resolves once the host is online; reads never run while it is offline. */
+  waitForOnline?: (signal: AbortSignal) => Promise<void>;
+  /** Lets the surface show a "still waiting" state instead of a failure. */
+  onRetrying?: (retry: ManagedJobObservationRetry) => void;
 }>;
 
 function abortError(): DOMException {
@@ -52,9 +70,37 @@ export function normalizedPollAfterMs(
   value: unknown,
   fallback = DEFAULT_POLL_AFTER_MS,
 ): number {
-  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_POLL_AFTER_MS
+  const milliseconds = Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_POLL_AFTER_MS
     ? value as number
     : fallback;
+  return Math.max(MIN_POLL_AFTER_MS, milliseconds);
+}
+
+function isHostOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+/** Waits, abortably, for the host's `online` event when it reports being offline. */
+export async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  if (!isHostOffline() || typeof window === "undefined") return;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      window.removeEventListener("online", onOnline);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onOnline = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+    window.addEventListener("online", onOnline);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  throwIfAborted(signal);
 }
 
 export function retryAfterHeaderMs(
@@ -93,36 +139,47 @@ export function isRetryableManagedJobObservationError(error: unknown): boolean {
 /**
  * Observes one durable server job until the caller recognizes a terminal
  * status and returns from the loop. It never decides that a valid job took too
- * long. Server poll hints control normal cadence; transport failures retry
- * without an attempt cap and remain abortable.
+ * long, and transient read failures never end it: they back off exponentially
+ * up to five minutes between reads, reported through onRetrying, until the
+ * caller aborts (the user stops watching or the plugin unloads). Server poll
+ * hints control normal cadence, at most once a second. Nothing is read while
+ * the host is offline.
  */
 export async function* observeManagedJob<T>(
   options: ManagedJobObservationOptions<T>,
 ): AsyncGenerator<T, never, void> {
   const wait = options.wait ?? waitForManagedJob;
+  const waitForOnline = options.waitForOnline ?? waitForManagedJobHostOnline;
   let next = options.initial;
   let hasNext = options.initial !== undefined;
   let transientRetryMs = TRANSIENT_RETRY_BASE_MS;
+  let transientFailures = 0;
 
   while (true) {
     throwIfAborted(options.signal);
     if (!hasNext) {
+      await waitForOnline(options.signal);
       try {
         next = await options.read();
         throwIfAborted(options.signal);
         transientRetryMs = TRANSIENT_RETRY_BASE_MS;
+        transientFailures = 0;
       } catch (error) {
         throwIfAborted(options.signal);
         if (!options.isRetryableError?.(error)) throw error;
-        await wait(
-          normalizedPollAfterMs(
-            options.retryAfterMs?.(error),
-            transientRetryMs,
-          ),
-          options.signal,
-        );
+        // A read that failed because the host went offline waits for the
+        // network instead of backing off.
+        if (isHostOffline()) continue;
+        transientFailures += 1;
+        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error), transientRetryMs);
+        try {
+          options.onRetrying?.({ consecutiveFailures: transientFailures, retryInMs, error });
+        } catch {
+          // Progress display must never end the observation.
+        }
+        await wait(retryInMs, options.signal);
         transientRetryMs = Math.min(
-          TRANSIENT_RETRY_MAX_MS,
+          OBSERVATION_RETRY_MAX_MS,
           transientRetryMs * 2,
         );
         continue;

@@ -567,6 +567,7 @@ export class ManagedTranscriptionAdapter {
       poll_after_ms?: number;
     };
 
+    let lastProgress = 75;
     try {
       for await (const status of observeManagedJob<TranscriptionStatus>({
         read: async () => await this.dependencies.jobs.status(jobId, signal) as TranscriptionStatus,
@@ -574,6 +575,7 @@ export class ManagedTranscriptionAdapter {
         pollAfterMs: value => value.poll_after_ms,
         isRetryableError: isRetryableManagedJobObservationError,
         retryAfterMs: error => (error as Partial<ManagedJobError> | null)?.retryAfterMs,
+        onRetrying: () => context.onProgress?.(lastProgress, "Still waiting for the transcription service. Retrying…"),
         wait: this.wait,
       })) {
         if (status.job.id !== jobId) throw new Error("Managed transcription status returned a different job ID.");
@@ -584,7 +586,8 @@ export class ManagedTranscriptionAdapter {
             throw new Error("Managed transcription status could not be reconciled safely.");
           }
         }
-        context.onProgress?.(75 + Math.floor(Math.min(1, status.progress) * 23), "Transcribing audio…");
+        lastProgress = 75 + Math.floor(Math.min(1, status.progress) * 23);
+        context.onProgress?.(lastProgress, "Transcribing audio…");
         if (status.job.status === "succeeded") {
           if (!["result_ready", "local_commit_pending"].includes(record.phase) || typeof status.transcript !== "string" || !status.transcript.trim()) {
             throw new Error("Managed transcription completed without a transcript.");

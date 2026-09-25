@@ -41,7 +41,7 @@ import {
   openLocalFolder,
 } from "./platform/hostCapabilities";
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
-import { yieldToEventLoop } from "./utils/yieldToEventLoop";
+import { waitForIdle, yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
@@ -57,6 +57,8 @@ import { ManagedTextGenerationAdapter } from "./services/managed/ManagedTextGene
 import { ManagedEmbeddingsIndexAdapter } from "./services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { ManagedAdmission } from "./services/managed/ManagedAdmission";
 import { HostedTransportAdapter } from "./services/managed/adapters/HostedTransportAdapter";
+import { ManagedJobRecoveryStore } from "./services/managed/ManagedJobRecoveryStore";
+import { ObsidianManagedRecoveryAdapter } from "./services/managed/adapters/ObsidianManagedRecoveryAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
 import { AccountConnectModal } from "./modals/AccountConnectModal";
@@ -73,9 +75,13 @@ export type ManagedCapabilityGraph = Readonly<{
   admission: ManagedAdmission;
   textGeneration: ManagedTextGenerationAdapter;
   embeddingsIndex: ManagedEmbeddingsIndexAdapter;
+  /** The one recovery ledger for this plugin's managed jobs. */
+  recovery: ManagedJobRecoveryStore;
 }>;
 
 const INCIDENT_COORDINATOR_UNLOAD_DRAIN_DEADLINE_MS = 2_000;
+/** Deferred startup work runs when the host is idle, or after this at the latest. */
+const DEFERRED_STARTUP_IDLE_TIMEOUT_MS = 5_000;
 type PublicSupportResourceSample = Readonly<{
   captured_at?: string;
   heap_used_mb?: number;
@@ -181,6 +187,8 @@ export default class SystemSculptPlugin extends Plugin {
   private settingsFocusCleanupRegistered = false;
   // Removed complex settings callback system - embeddings are now completely on-demand
 
+  /** Aborted on unload so idle-deferred startup work never starts afterwards. */
+  private readonly deferredStartup = new AbortController();
   private criticalInitializationPromise: Promise<void> | null = null;
   private deferredInitializationPromise: Promise<void> | null = null;
   private managersInitialized = false;
@@ -204,7 +212,8 @@ export default class SystemSculptPlugin extends Plugin {
       const admission = new ManagedAdmission({ transport, licenseKey });
       const textGeneration = new ManagedTextGenerationAdapter({ admission, transport });
       const embeddingsIndex = new ManagedEmbeddingsIndexAdapter(transport);
-      this.managedCapabilityGraph = Object.freeze({ transport, admission, textGeneration, embeddingsIndex });
+      const recovery = new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app));
+      this.managedCapabilityGraph = Object.freeze({ transport, admission, textGeneration, embeddingsIndex, recovery });
     }
     return this.managedCapabilityGraph;
   }
@@ -499,8 +508,12 @@ export default class SystemSculptPlugin extends Plugin {
     coordinator.registerTask("bootstrap", {
       id: "storage.prepare",
       label: "storage manager",
-      run: async () => {
-        await this.getDiagnosticsSessionLifecycle().start();
+      run: () => {
+        // Archiving the previous diagnostics session is not on the load path
+        // (#343): a layout task runs it when idle. A diagnostics write that
+        // comes first starts it, so no -latest file is appended before it.
+        const diagnostics = this.getDiagnosticsSessionLifecycle();
+        this.storage.setDiagnosticsWriteGate(() => diagnostics.start());
       },
     });
 
@@ -645,14 +658,6 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
-    coordinator.registerTask("critical", {
-      id: "updates.start",
-      label: "update notifications",
-      optional: true,
-      run: () => {
-        this.pluginUpdateService?.start();
-      },
-    });
   }
 
   private registerDeferredTasks(coordinator: LifecycleCoordinator): void {
@@ -666,6 +671,29 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
+    // The launch update check waits for the workspace instead of competing
+    // with startup; the service then checks at most every six hours (#338).
+    coordinator.registerTask("layout", {
+      id: "updates.start",
+      label: "update notifications",
+      optional: true,
+      run: () => {
+        this.pluginUpdateService?.start();
+      },
+    });
+
+    coordinator.registerTask("layout", {
+      id: "diagnostics.archive",
+      label: "diagnostics archive",
+      optional: true,
+      run: () => {
+        void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then((idle) => {
+          if (!idle || this.isUnloading) return;
+          void this.getDiagnosticsSessionLifecycle().start().catch(() => undefined);
+        });
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
@@ -676,6 +704,12 @@ export default class SystemSculptPlugin extends Plugin {
       },
       run: async () => {
         if (!this.settings.embeddingsEnabled) {
+          return;
+        }
+        // Opening the semantic index walks the whole vector store. Start it
+        // once the workspace is idle, never in the critical phase (#343).
+        const idle = await waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal);
+        if (!idle || this.isUnloading || !this.settings.embeddingsEnabled) {
           return;
         }
 
@@ -799,9 +833,20 @@ export default class SystemSculptPlugin extends Plugin {
         return;
       }
 
-      lifecycle
-        .runPhase("layout")
-        .then(() => {
+      // Layout tasks read loaded settings. A plugin enabled after the
+      // workspace is ready reaches this callback before the critical phase
+      // has loaded them, so wait for it; a failed critical phase skips layout.
+      const critical = this.criticalInitializationPromise ?? Promise.resolve();
+      critical
+        .then(
+          () => this.isUnloading ? undefined : lifecycle.runPhase("layout"),
+          () => {
+            layoutPhase.complete({ skipped: true });
+            return "skipped" as const;
+          },
+        )
+        .then((result) => {
+          if (result === "skipped" || this.isUnloading) return;
           layoutPhase.complete({
             elapsedSinceLoadMs: Number((performance.now() - loadStart).toFixed(1)),
           });
@@ -1571,6 +1616,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private async unloadAsync(): Promise<void> {
+    this.deferredStartup.abort();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1775,9 +1821,24 @@ export default class SystemSculptPlugin extends Plugin {
     return this.resourceMonitor;
   }
 
+  /**
+   * Identity of the installed bundle, computed on first use (a chat bootstrap)
+   * rather than at launch (#343). Incident reports pick it up once known.
+   */
   public getLoadedPluginBuildId(): Promise<`sha256:${string}`> {
-    return this.loadedPluginBuildIdPromise
-      ??= getLoadedPluginBuildId(this.app, this.manifest);
+    if (!this.loadedPluginBuildIdPromise) {
+      const pending = getLoadedPluginBuildId(this.app, this.manifest);
+      this.loadedPluginBuildIdPromise = pending;
+      void pending.then(
+        (buildId) => {
+          this.agentIncidentLoadedBundleId = buildId;
+        },
+        () => {
+          this.agentIncidentLoadedBundleId = null;
+        },
+      );
+    }
+    return this.loadedPluginBuildIdPromise;
   }
 
   public getAgentIncidentCoordinator(): AgentIncidentCoordinator | null {
@@ -1837,14 +1898,7 @@ export default class SystemSculptPlugin extends Plugin {
       // The store is not initialized here: it creates its directory and
       // enforces retention on the first failed run that needs a report, so a
       // healthy launch neither creates directories nor scans reports (#337).
-      void this.getLoadedPluginBuildId().then(
-        (buildId) => {
-          this.agentIncidentLoadedBundleId = buildId;
-        },
-        () => {
-          this.agentIncidentLoadedBundleId = null;
-        },
-      );
+      // Nor is the bundle hashed here: the first chat bootstrap computes it.
     } catch {
       this.agentIncidentCoordinator = null;
       this.agentIncidentLoadedBundleId = null;
@@ -1980,7 +2034,8 @@ export default class SystemSculptPlugin extends Plugin {
         fallbackPurchaseUrl: LICENSE_URL,
         loadBalance: async () => {
           try {
-            const balance = await this.aiService.getCreditsBalance();
+            // The modal is an explicit look: read fresh and update every view.
+            const balance = await this.aiService.readCreditsBalance({ fresh: true });
             lastKnownBalance = balance;
             if (
               (

@@ -21,6 +21,7 @@ import {
   localToolOutcomeSchema,
 } from "../tools/LocalToolOutcome";
 import { parseBoundedServerTiming } from "../utils/serverTiming";
+import { CreditsBalanceCache, type CreditsBalanceReadOptions } from "./credits/CreditsBalanceCache";
 
 /**
  * First-party tools often return an honest structured result instead of throwing.
@@ -621,4 +622,27 @@ export class SystemSculptService {
     }
   }
 
+  // Declared here, beside its accessors, so the balance cache stays one unit.
+  private creditsBalanceCache: CreditsBalanceCache | null = null;
+
+  private creditsBalances(): CreditsBalanceCache {
+    return this.creditsBalanceCache ??= new CreditsBalanceCache({
+      fetch: (request) => this.getCreditsBalance(request),
+      licenseKey: () => this.plugin.settings?.licenseKey || "",
+    });
+  }
+
+  /**
+   * The credits balance for display and preflight surfaces: at most one read
+   * per minute per license key, shared across views and in-flight callers
+   * (#359). Pass `fresh` after a billed turn, a billing failure, or a purchase.
+   */
+  public readCreditsBalance(options: CreditsBalanceReadOptions = {}): Promise<CreditsBalanceSnapshot> {
+    return this.creditsBalances().read(options);
+  }
+
+  /** Hears every balance read from the server, e.g. to resume work after a top-up. */
+  public onCreditsBalance(listener: (balance: CreditsBalanceSnapshot) => void): () => void {
+    return this.creditsBalances().subscribe(listener);
+  }
 }

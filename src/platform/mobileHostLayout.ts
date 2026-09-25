@@ -9,9 +9,18 @@ const MOBILE_LAYOUT_CLASS = "ss-mobile-layout";
 const MOBILE_NAV_VISIBLE_CLASS = "ss-mobile-navbar-visible";
 const MOBILE_NAV_HIDDEN_CLASS = "ss-mobile-navbar-hidden";
 
+const NAVBAR_VISIBILITY_ATTRIBUTES = ["aria-hidden", "class", "hidden", "style"];
+
 type MobileHostLayoutController = {
   document: Document;
-  observer: MutationObserver | null;
+  /** Watches only body class changes, which toggle Obsidian's mobile emulation. */
+  bodyObserver: MutationObserver | null;
+  /** Installed only in a mobile layout: finds the navbar, then follows it. */
+  navbarObserver: MutationObserver | null;
+  trackedNavbar: HTMLElement | null;
+  /** The observed ancestor chain of the tracked navbar, navbar first. */
+  trackedChain: HTMLElement[];
+  mobileActive: boolean;
   scheduledFrame: number | null;
   update: () => void;
   schedule: () => void;
@@ -67,11 +76,24 @@ function updateOwnedClasses(document: Document): void {
 
 function createController(document: Document): MobileHostLayoutController {
   const ownerWindow = document.defaultView;
+  const MutationObserverCtor = ownerWindow?.MutationObserver
+    ?? (typeof MutationObserver !== "undefined" ? MutationObserver : null);
+  const ElementCtor = ownerWindow?.Element
+    ?? (typeof Element !== "undefined" ? Element : null);
+  const containsNavbar = (node: Node): boolean => ElementCtor !== null
+    && isOwnerElement(node, ElementCtor)
+    && (node.matches(HOST_MOBILE_NAV_SELECTOR) || node.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null);
+
   const controller: MobileHostLayoutController = {
     document,
-    observer: null,
+    bodyObserver: null,
+    navbarObserver: null,
+    trackedNavbar: null,
+    trackedChain: [],
+    mobileActive: false,
     scheduledFrame: null,
     update(): void {
+      syncMobileLayout();
       updateOwnedClasses(document);
     },
     schedule(): void {
@@ -93,9 +115,9 @@ function createController(document: Document): MobileHostLayoutController {
         ownerWindow.cancelAnimationFrame(controller.scheduledFrame);
       }
       controller.scheduledFrame = null;
-      controller.observer?.disconnect();
-      ownerWindow?.removeEventListener("resize", controller.schedule);
-      ownerWindow?.visualViewport?.removeEventListener("resize", controller.schedule);
+      controller.bodyObserver?.disconnect();
+      controller.bodyObserver = null;
+      leaveMobileLayout();
       document.body.classList.remove(
         MOBILE_LAYOUT_CLASS,
         MOBILE_NAV_VISIBLE_CLASS,
@@ -105,41 +127,109 @@ function createController(document: Document): MobileHostLayoutController {
     },
   };
 
-  const MutationObserverCtor = ownerWindow?.MutationObserver
-    ?? (typeof MutationObserver !== "undefined" ? MutationObserver : null);
-  if (MutationObserverCtor) {
-    const ElementCtor = ownerWindow?.Element
-      ?? (typeof Element !== "undefined" ? Element : null);
-    controller.observer = new MutationObserverCtor((records) => {
-      const hostChromeChanged = records.some((record) => {
-        if (record.type === "attributes") {
-          const target = record.target;
-          return target === document.body
-            || (ElementCtor !== null
-              && isOwnerElement(target, ElementCtor)
-              && (target.matches(HOST_MOBILE_NAV_SELECTOR)
-                || target.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null));
-        }
-        return [...record.addedNodes, ...record.removedNodes].some((node) =>
-          ElementCtor !== null
-          && isOwnerElement(node, ElementCtor)
-          && (node.matches(HOST_MOBILE_NAV_SELECTOR)
-            || node.querySelector(HOST_MOBILE_NAV_SELECTOR) !== null),
-        );
+  const ancestorChain = (navbar: HTMLElement): HTMLElement[] => {
+    const chain: HTMLElement[] = [];
+    for (let element: HTMLElement | null = navbar; element; element = element.parentElement) {
+      chain.push(element);
+      if (element === document.body) break;
+    }
+    return chain;
+  };
+
+  /** True when the tracked navbar left the document or moved under other ancestors. */
+  const trackedNavbarMoved = (): boolean => {
+    const navbar = controller.trackedNavbar;
+    if (!navbar) return false;
+    if (!navbar.isConnected) return true;
+    const chain = ancestorChain(navbar);
+    return chain.length !== controller.trackedChain.length
+      || chain.some((element, index) => element !== controller.trackedChain[index]);
+  };
+
+  /**
+   * Discovery watches body descendants for the navbar's insertion. Once found,
+   * only the navbar and its ancestors are observed, without subtree: their
+   * visibility attributes, and their child lists to notice the navbar leaving
+   * or being moved under other ancestors, which re-tracks the new chain.
+   */
+  function trackNavbar(): void {
+    const observer = controller.navbarObserver;
+    if (!observer) return;
+    const navbar = document.querySelector<HTMLElement>(HOST_MOBILE_NAV_SELECTOR);
+    const found = navbar?.isConnected ? navbar : null;
+    if (found && found === controller.trackedNavbar && !trackedNavbarMoved()) return;
+    observer.disconnect();
+    controller.trackedNavbar = found;
+    controller.trackedChain = found ? ancestorChain(found) : [];
+    if (!found) {
+      observer.observe(document.body, { childList: true, subtree: true });
+      return;
+    }
+    for (const element of controller.trackedChain) {
+      observer.observe(element, {
+        attributes: true,
+        attributeFilter: NAVBAR_VISIBILITY_ATTRIBUTES,
+        childList: element !== found,
       });
-      if (hostChromeChanged) {
-        controller.schedule();
-      }
-    });
-    controller.observer.observe(document.body, {
+    }
+  }
+
+  function enterMobileLayout(): void {
+    controller.mobileActive = true;
+    ownerWindow?.addEventListener("resize", controller.schedule);
+    ownerWindow?.visualViewport?.addEventListener("resize", controller.schedule);
+    if (MutationObserverCtor) {
+      controller.navbarObserver = new MutationObserverCtor((records) => {
+        const tracked = controller.trackedNavbar;
+        if (tracked) {
+          const moved = records.some((record) => record.type === "childList") && trackedNavbarMoved();
+          if (moved) {
+            trackNavbar();
+            controller.schedule();
+          } else if (records.some((record) => record.type === "attributes")) {
+            controller.schedule();
+          }
+          return;
+        }
+        const inserted = records.some((record) => [...record.addedNodes].some(containsNavbar));
+        if (inserted) {
+          trackNavbar();
+          controller.schedule();
+        }
+      });
+    }
+    trackNavbar();
+  }
+
+  function leaveMobileLayout(): void {
+    controller.mobileActive = false;
+    controller.navbarObserver?.disconnect();
+    controller.navbarObserver = null;
+    controller.trackedNavbar = null;
+    controller.trackedChain = [];
+    ownerWindow?.removeEventListener("resize", controller.schedule);
+    ownerWindow?.visualViewport?.removeEventListener("resize", controller.schedule);
+  }
+
+  function syncMobileLayout(): void {
+    const mobile = isMobileLayout(document);
+    if (mobile === controller.mobileActive) {
+      if (mobile) trackNavbar();
+      return;
+    }
+    if (mobile) enterMobileLayout();
+    else leaveMobileLayout();
+  }
+
+  if (MutationObserverCtor) {
+    // No subtree: desktop typing, scrolling, and pane resizing never reach
+    // this observer. Only body class changes (mobile emulation) do.
+    controller.bodyObserver = new MutationObserverCtor(() => controller.schedule());
+    controller.bodyObserver.observe(document.body, {
       attributes: true,
-      attributeFilter: ["aria-hidden", "class", "hidden", "style"],
-      childList: true,
-      subtree: true,
+      attributeFilter: ["class"],
     });
   }
-  ownerWindow?.addEventListener("resize", controller.schedule);
-  ownerWindow?.visualViewport?.addEventListener("resize", controller.schedule);
   controller.update();
   return controller;
 }

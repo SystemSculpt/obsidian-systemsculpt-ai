@@ -48,8 +48,8 @@ describe("VideoGenerationAvailability", () => {
       url: "https://systemsculpt.test/api/plugin/config",
       method: "GET",
       licenseKey: "license-123",
+      // The request client adds the license header from licenseKey.
       headers: expect.objectContaining({
-        "x-license-key": "license-123",
         "x-plugin-version": "6.1.0",
       }),
     }));

@@ -35,8 +35,19 @@ const BUILD_TARGETS = Object.freeze({
     buildStamp: null,
     testDriver: false,
   }),
+  // The persistent watcher deploys this route into the everyday vault, so it
+  // leaves the E2E driver out. Live QA opts in with production-watch-e2e.
   'production-watch': Object.freeze({
     name: 'production-watch',
+    production: true,
+    releaseBuild: false,
+    watch: true,
+    apiBaseUrl: CANONICAL_API_BASE_URL,
+    buildStamp: 'dev',
+    testDriver: false,
+  }),
+  'production-watch-e2e': Object.freeze({
+    name: 'production-watch-e2e',
     production: true,
     releaseBuild: false,
     watch: true,
@@ -124,6 +135,20 @@ export function resolvePluginBuildTarget(value) {
     );
   }
   return target;
+}
+
+/**
+ * Names the persistent watcher route. Only the production watcher, which
+ * usually targets the everyday vault, omits the E2E driver; e2eDriver opts in.
+ * Staging and local-agent watchers are QA routes and always include it.
+ */
+export function resolveWatcherBuildTargetName({ target = 'production', e2eDriver = false } = {}) {
+  const base = String(target || 'production');
+  if (e2eDriver === true && base !== 'production') {
+    throw new Error(`The ${base} watcher already includes the E2E test driver.`);
+  }
+  const name = e2eDriver === true ? `${base}-watch-e2e` : `${base}-watch`;
+  return resolvePluginBuildTarget(name).name;
 }
 
 export function resolvePluginBuildArguments(args) {

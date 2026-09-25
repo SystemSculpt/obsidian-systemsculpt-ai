@@ -453,7 +453,19 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
   hide(): void {
     this.disposeRender();
+    this.backgroundUnfinishedSignIn();
     super.hide();
+  }
+
+  /**
+   * Closing settings leaves a browser sign-in started here without its
+   * screen, so it polls at the slower background cadence (#359) until it
+   * completes or expires.
+   */
+  private backgroundUnfinishedSignIn(): void {
+    const plugin = this.plugin as Partial<Pick<SystemSculptPlugin, "getAccountConnectService">>;
+    if (typeof plugin.getAccountConnectService !== "function") return;
+    plugin.getAccountConnectService().pollInBackground();
   }
 
   private disposeRender(): void {

@@ -103,7 +103,9 @@ export function sanitizePublicDiagnosticsVersion(value: unknown): string {
  *
  * Every launch archives the previous session's files (rename only) and prunes
  * archives, so diagnostics stay bounded even while recording is off. Session
- * records are written only while diagnostics recording is on (#337).
+ * records are written only while diagnostics recording is on (#337). The
+ * session identity is fixed at construction; the archive itself runs off the
+ * load path, before the first diagnostics write at the latest (#343).
  */
 export class DiagnosticsSessionLifecycle {
   readonly logFileName = "systemsculpt-latest.log";
@@ -114,7 +116,15 @@ export class DiagnosticsSessionLifecycle {
   private sessionRecord: Promise<void> | null = null;
   private admissionOpen = true;
 
-  constructor(private readonly options: DiagnosticsSessionLifecycleOptions) {}
+  constructor(private readonly options: DiagnosticsSessionLifecycleOptions) {
+    const startedAt = new Date();
+    const pad = (value: number): string => value.toString().padStart(2, "0");
+    this.activeSessionId = [
+      startedAt.getFullYear(), pad(startedAt.getMonth() + 1), pad(startedAt.getDate()),
+      "-", pad(startedAt.getHours()), pad(startedAt.getMinutes()), pad(startedAt.getSeconds()),
+    ].join("");
+    this.startedAt = startedAt;
+  }
 
   get sessionId(): string | null {
     return this.activeSessionId;
@@ -139,14 +149,8 @@ export class DiagnosticsSessionLifecycle {
     }
     if (!this.admissionOpen) return;
 
-    const startedAt = new Date();
-    const pad = (value: number): string => value.toString().padStart(2, "0");
-    const sessionId = [
-      startedAt.getFullYear(), pad(startedAt.getMonth() + 1), pad(startedAt.getDate()),
-      "-", pad(startedAt.getHours()), pad(startedAt.getMinutes()), pad(startedAt.getSeconds()),
-    ].join("");
-    this.activeSessionId = sessionId;
-    this.startedAt = startedAt;
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
     await this.rotate(this.logFileName, `systemsculpt-${sessionId}.log`);
     await this.rotate(this.metricsFileName, `resource-metrics-${sessionId}.ndjson`);
 

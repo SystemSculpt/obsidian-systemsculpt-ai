@@ -6,8 +6,7 @@ import type SystemSculptPlugin from "../main";
 import { ManagedImageGenerationAdapter } from "../services/images/ManagedImageGenerationAdapter";
 import { ManagedJobClient } from "../services/managed/ManagedJobClient";
 import { ManagedMediaJobClient } from "../services/managed/ManagedMediaJobClient";
-import { ManagedJobRecoveryStore } from "../services/managed/ManagedJobRecoveryStore";
-import { ObsidianManagedRecoveryAdapter } from "../services/managed/adapters/ObsidianManagedRecoveryAdapter";
+import type { ManagedJobRecoveryStore } from "../services/managed/ManagedJobRecoveryStore";
 import { ManagedTranscriptionAdapter } from "../services/transcription/ManagedTranscriptionAdapter";
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import { ManagedVideoGenerationAdapter } from "../services/videos/ManagedVideoGenerationAdapter";
@@ -48,17 +47,18 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     const graph = plugin.getManagedCapabilityGraph();
     const jobs = new ManagedJobClient(graph.transport);
     const mediaJobs = new ManagedMediaJobClient(graph.transport);
-    this.recovery = new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(plugin.app));
+    this.recovery = graph.recovery;
     this.images = new ManagedImageGenerationAdapter({
       admission: graph.admission,
       jobs: jobs.images,
       recovery: this.recovery,
     });
     // Video rides the negotiated media contract: frame stills upload through
-    // the image input prepare endpoint, admission is the plain license check.
+    // the image input prepare endpoint, admission is the plain license check,
+    // through the shared admission cache.
     this.videos = new ManagedVideoGenerationAdapter({
       availability: signal => getVideoGenerationAvailability(plugin, {}, signal),
-      admission: signal => graph.transport.getAdmission(signal),
+      admission: signal => graph.admission.checkLicense(signal),
       jobs: mediaJobs.videos,
       prepareFrames: mediaJobs.images.prepareInputs,
       recovery: this.recovery,

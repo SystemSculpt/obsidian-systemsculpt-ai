@@ -146,10 +146,10 @@ describe("DiagnosticsSessionLifecycle", () => {
     (app.vault as any).configDir = ".private-config-canary";
     (app as any).plugins = { enabledPlugins: new Set(["private-plugin-canary"]) };
     const writeFile = jest.fn(async () => ({ success: true, path: "saved" }));
-    const lifecycle = makeLifecycle(app, makeStorage(writeFile), "6.6.0", () => "1.13.2/private-version-canary");
-    jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
+    const lifecycle = makeLifecycle(app, makeStorage(writeFile), "6.6.0", () => "1.13.2/private-version-canary");
+    jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
     const session = {
       sessionId: "20260813-160000",
       startedAt: new Date(2026, 7, 13, 16, 0, 0).toISOString(),
@@ -318,6 +318,8 @@ describe("DiagnosticsSessionLifecycle", () => {
     const write = jest.spyOn(app.vault.adapter, "write");
     const cleanup = jest.spyOn(lifecycle, "run");
 
+    const rename = jest.spyOn(app.vault.adapter, "rename");
+
     const startup = lifecycle.start();
     lifecycle.close();
     initialize();
@@ -325,7 +327,7 @@ describe("DiagnosticsSessionLifecycle", () => {
     await lifecycle.start();
     await lifecycle.recordSession();
 
-    expect(lifecycle.sessionId).toBeNull();
+    expect(rename).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expect(storage.writeFile).not.toHaveBeenCalled();
     expect(storage.appendToFile).not.toHaveBeenCalled();
@@ -878,4 +880,22 @@ describe("DiagnosticsSessionLifecycle", () => {
     expect(warning).not.toHaveBeenCalled();
   });
 
+});
+
+describe("DiagnosticsSessionLifecycle deferred archive", () => {
+  it("fixes the session identity at construction without touching storage", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
+    const app = new App();
+    const storage = makeStorage();
+    const exists = jest.spyOn(app.vault.adapter, "exists");
+
+    const lifecycle = makeLifecycle(app, storage);
+    jest.setSystemTime(new Date(2026, 7, 13, 17, 0, 0));
+
+    expect(lifecycle.sessionId).toBe("20260813-160000");
+    expect(storage.initialize).not.toHaveBeenCalled();
+    expect(exists).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
 });

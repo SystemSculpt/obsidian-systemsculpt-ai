@@ -111,6 +111,20 @@ const FATAL_MANAGED_ERROR_CODES = new Set<ManagedEmbeddingsErrorCode>([
   "capability_unavailable",
 ]);
 const FATAL_SUSPENSION_STATE_KEY = "semantic-fatal-suspension-v1";
+/**
+ * Stored vectors are validated once per vector format, not at every launch:
+ * the managed gateway validates what it writes. A restored portable index is
+ * revalidated because its bytes come from outside this store (#343).
+ */
+const VECTOR_VALIDATION_STATE_KEY = "semantic-vector-validation";
+const VECTOR_VALIDATION_VERSION = 1;
+type StoredVectorRepair = Awaited<ReturnType<EmbeddingsStorage["purgeCorruptedVectors"]>>;
+const NO_VECTOR_REPAIR: StoredVectorRepair = Object.freeze({
+  removedCount: 0,
+  correctedCount: 0,
+  removedPaths: [],
+  correctedPaths: [],
+});
 
 type PersistedFatalSuspension = Readonly<{
   version: 1;
@@ -199,10 +213,10 @@ export class EmbeddingsManager {
     await this.workQueue.restore();
     this.hydrateFailuresFromWorkQueue();
     await this.restoreFatalSuspension();
-    await this.restorePortableIndexIfEmpty();
+    const restored = await this.restorePortableIndexIfEmpty();
     await this.storage.loadEmbeddings();
     await this.migrateToManagedNamespaceContract();
-    const repair = await this.storage.purgeCorruptedVectors();
+    const repair = await this.validateStoredVectors(restored);
     await this.hydrateManagedIdentityFromStorage();
     if (repair.removedPaths.length > 0) {
       const failedAt = Date.now();
@@ -258,7 +272,6 @@ export class EmbeddingsManager {
       if (this.processingSuspended) {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
       }
-      await this.setRebuildPending(true);
       const exclusions = this.exclusions();
       const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !exclusions.isExcluded(file.path));
       this.refreshLifecycle({
@@ -285,6 +298,9 @@ export class EmbeddingsManager {
         return { status: "complete", processed: 0 };
       }
 
+      // Marked only when a reconcile has work: a launch that finds the vault
+      // current writes nothing to data.json (#343).
+      await this.setRebuildPending(true);
       const workClaims = await this.captureWorkClaims(files, "reconcile");
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       this.emit("embeddings:processing-start", { scope: "vault", total: files.length, reason: "managed" });
@@ -970,7 +986,7 @@ export class EmbeddingsManager {
   private async preflightCredits(): Promise<void> {
     let balance;
     try {
-      balance = await this.plugin.aiService.getCreditsBalance();
+      balance = await this.plugin.aiService.readCreditsBalance();
     } catch {
       // The managed route remains authoritative when balance lookup is unavailable.
       return;
@@ -1543,10 +1559,25 @@ export class EmbeddingsManager {
     return this.portableIndexFile;
   }
 
-  private async restorePortableIndexIfEmpty(): Promise<void> {
+  private async restorePortableIndexIfEmpty(): Promise<boolean> {
     const file = this.getPortableIndexFile();
-    if (!file) return;
-    try { await restoreEmbeddingsIndexIfEmpty({ store: this.storage, file }); } catch { /* best effort */ }
+    if (!file) return false;
+    try {
+      return (await restoreEmbeddingsIndexIfEmpty({ store: this.storage, file })).restored === true;
+    } catch {
+      return false; /* best effort */
+    }
+  }
+
+  private async validateStoredVectors(restoredPortableIndex: boolean): Promise<StoredVectorRepair> {
+    const marker = await this.storage.readState<{ version?: unknown }>(VECTOR_VALIDATION_STATE_KEY);
+    if (!restoredPortableIndex && marker?.version === VECTOR_VALIDATION_VERSION) return NO_VECTOR_REPAIR;
+    const repair = await this.storage.purgeCorruptedVectors();
+    await this.storage.writeState(VECTOR_VALIDATION_STATE_KEY, {
+      version: VECTOR_VALIDATION_VERSION,
+      validatedAt: Date.now(),
+    });
+    return repair;
   }
 
   private getPortableCheckpoint(): PortableCheckpointCoordinator | null {

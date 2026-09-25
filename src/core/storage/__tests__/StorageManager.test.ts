@@ -523,3 +523,48 @@ describe("StorageManager", () => {
     });
   });
 });
+
+describe("StorageManager diagnostics write gate", () => {
+  it("archives the diagnostics session before the first diagnostics write only", async () => {
+    const adapter = createMockAdapter();
+    const storage = new StorageManager(createMockApp(createMockVault(adapter)) as any, {} as any);
+    const order: string[] = [];
+    let release!: () => void;
+    const archived = new Promise<void>((resolve) => { release = resolve; });
+    const gate = jest.fn(async () => {
+      order.push("gate");
+      await archived;
+      order.push("archived");
+    });
+    adapter.write.mockImplementation(async (path: string) => {
+      order.push(`write:${path}`);
+    });
+    storage.setDiagnosticsWriteGate(gate);
+
+    await storage.writeFile("settings", "backups/latest.json", "{}");
+    expect(gate).not.toHaveBeenCalled();
+
+    const append = storage.appendToFile("diagnostics", "systemsculpt-latest.log", "line");
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(order.some((entry) => entry.includes("systemsculpt-latest.log"))).toBe(false);
+    expect(order.slice(-1)).toEqual(["gate"]);
+    release();
+    await expect(append).resolves.toMatchObject({ success: true });
+
+    const archivedAt = order.indexOf("archived");
+    const logWriteAt = order.findIndex((entry) => entry.endsWith("systemsculpt-latest.log"));
+    expect(archivedAt).toBeGreaterThan(-1);
+    expect(logWriteAt).toBeGreaterThan(archivedAt);
+  });
+
+  it("still writes diagnostics when the archive fails", async () => {
+    const adapter = createMockAdapter();
+    const storage = new StorageManager(createMockApp(createMockVault(adapter)) as any, {} as any);
+    storage.setDiagnosticsWriteGate(async () => {
+      throw new Error("archive failed");
+    });
+
+    await expect(storage.writeFile("diagnostics", "report.txt", "data")).resolves.toMatchObject({ success: true });
+    expect(adapter.write).toHaveBeenCalledWith(expect.stringMatching(/report\.txt$/u), "data");
+  });
+});

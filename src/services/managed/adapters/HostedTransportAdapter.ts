@@ -4,7 +4,14 @@ import {
   ManagedServerOutcome, ManagedTransportOperation, ManagedTransportResult,
 } from "../ManagedTypes";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
-import { decodeManagedAdmissionResponse } from "../ManagedAdmissionResponse";
+import {
+  decodeLegacyLicenseProfile,
+  decodeManagedAdmissionResponse,
+  type LegacyLicenseProfile,
+  type ManagedLicenseRejectReason,
+} from "../ManagedAdmissionResponse";
+import { SharedFlight } from "../SharedFlight";
+import { SystemSculptEnvironment } from "../../api/SystemSculptEnvironment";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
@@ -14,35 +21,113 @@ import {
 
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
 
+/** One license admission read: the admission-v1 outcome, plus what license validation needs. */
+export type HostedLicenseAdmission = Readonly<{
+  outcome: ManagedServerOutcome;
+  reason?: ManagedLicenseRejectReason;
+  /** Only from pre-admission-v1 servers; never makes the outcome `allowed`. */
+  legacyProfile?: LegacyLicenseProfile;
+  diagnostics: ManagedTransportResult["diagnostics"];
+}>;
+
+const ADMISSION_PATH = "/api/plugin/license/validate";
+const CONFIG_PATH = "/api/plugin/config";
+const MAX_PLUGIN_CONFIG_CHARS = 1024 * 1024;
+
 function isReplaySafeManagedRead(operation: ManagedTransportOperation): boolean {
   return (operation.method ?? "POST").toUpperCase() === "GET";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export class HostedTransportAdapter {
   private readonly client: PlatformRequestClient;
+  /** Identical concurrent discovery and admission reads share one request (#386). */
+  private readonly reads = new SharedFlight();
+  private readonly authorizationRejectedListeners = new Set<() => void>();
   constructor(private readonly options: HostedTransportOptions) { this.client = options.requestClient ?? new PlatformRequestClient(); }
+
+  /**
+   * Hears every 401 or 403 from a managed endpoint other than admission
+   * itself: the cached license admission is then stale.
+   */
+  onAuthorizationRejected(listener: () => void): () => void {
+    this.authorizationRejectedListeners.add(listener);
+    return () => {
+      this.authorizationRejectedListeners.delete(listener);
+    };
+  }
 
   get pluginVersion(): string { return this.options.pluginVersion; }
 
   private url(path: string): string { return `${this.options.baseUrl.replace(/\/$/, "")}${path}`; }
   private key(): string | undefined { const key = this.options.licenseKey().trim(); return key || undefined; }
 
-  async getCatalog(signal?: AbortSignal) {
-    const result = await this.send({ path: "/api/plugin/config", method: "GET", signal }, { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT });
-    if (!result.response.ok) throw new Error(`Catalog unavailable (${result.response.status})`);
-    return ManagedCapabilityCatalog.parse(await result.response.json());
+  /** The managed-capabilities-v2 catalog negotiated from /config. */
+  getCatalog(signal?: AbortSignal) {
+    return this.reads.run(`config:${MANAGED_CAPABILITY_CONTRACT}:${this.key() ?? ""}`, async (shared) => {
+      const result = await this.send({ path: CONFIG_PATH, method: "GET", signal: shared }, { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT });
+      if (!result.response.ok) throw new Error(`Catalog unavailable (${result.response.status})`);
+      return ManagedCapabilityCatalog.parse(await result.response.json());
+    }, signal);
   }
 
-  async getAdmission(signal?: AbortSignal): Promise<{ outcome: ManagedServerOutcome; diagnostics: ManagedTransportResult["diagnostics"] }> {
-    const result = await this.send({ path: "/api/plugin/license/validate", method: "GET", signal }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
-    let body: unknown;
-    try { body = await result.response.clone().json(); } catch {
-      // Admission decoding handles an absent response body.
-    }
-    return {
-      outcome: decodeManagedAdmissionResponse(result.response.status, body).outcome,
-      diagnostics: result.diagnostics,
-    };
+  /**
+   * The additive capability flags of the plugin-config-v1 document, the
+   * other negotiation of /config. Advisory: any failure is null.
+   */
+  getPluginConfigCapabilities(signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    const licenseKey = this.key();
+    if (!licenseKey) return Promise.resolve(null);
+    return this.reads.run(`config:plugin-config-v1:${licenseKey}`, async (shared) => {
+      try {
+        const response = await this.client.request({
+          url: this.url(CONFIG_PATH),
+          method: "GET",
+          headers: {
+            ...SystemSculptEnvironment.buildHeaders(),
+            "x-plugin-version": this.options.pluginVersion.trim(),
+          },
+          licenseKey,
+          preserveResponseHeaders: true,
+          signal: shared,
+        });
+        if (!response.ok) return null;
+        const text = await response.text();
+        if (!text || text.length > MAX_PLUGIN_CONFIG_CHARS) return null;
+        const payload: unknown = JSON.parse(text);
+        return isRecord(payload) && payload.contract === "systemsculpt-plugin-config-v1" && isRecord(payload.capabilities)
+          ? payload.capabilities
+          : null;
+      } catch {
+        return null;
+      }
+    }, signal);
+  }
+
+  /**
+   * One admission-v1 license read; concurrent callers of the same epoch share
+   * it. A caller that invalidated its admission passes a new epoch so it
+   * never joins a read that started before the invalidation.
+   */
+  getAdmission(signal?: AbortSignal, options: Readonly<{ epoch?: number }> = {}): Promise<HostedLicenseAdmission> {
+    return this.reads.run(`admission:${this.key() ?? ""}:${options.epoch ?? 0}`, async (shared) => {
+      const result = await this.send({ path: ADMISSION_PATH, method: "GET", signal: shared }, { "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT });
+      let body: unknown;
+      try { body = await result.response.clone().json(); } catch {
+        // Admission decoding handles an absent response body.
+      }
+      const decoded = decodeManagedAdmissionResponse(result.response.status, body);
+      const legacyProfile = decoded.outcome === "allowed" ? null : decodeLegacyLicenseProfile(result.response.status, body);
+      return {
+        outcome: decoded.outcome,
+        ...(decoded.reason ? { reason: decoded.reason } : {}),
+        ...(legacyProfile ? { legacyProfile } : {}),
+        diagnostics: result.diagnostics,
+      };
+    }, signal);
   }
 
   request(operation: ManagedTransportOperation) { return this.send(operation); }
@@ -215,6 +300,11 @@ export class HostedTransportAdapter {
       ...(operation.timeoutMs !== undefined ? { timeoutMs: operation.timeoutMs } : {}),
       ...requestOverrides,
     });
+    if ((response.status === 401 || response.status === 403) && !operation.path.startsWith(ADMISSION_PATH)) {
+      for (const listener of [...this.authorizationRejectedListeners]) {
+        try { listener(); } catch { /* A listener must not change the response. */ }
+      }
+    }
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);
     return { response, diagnostics: {
       status: response.status, requestId: response.headers.get("x-request-id"), contentType: response.headers.get("content-type"),

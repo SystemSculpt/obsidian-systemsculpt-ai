@@ -2,24 +2,50 @@ import {
   MANAGED_CAPABILITY_CONTRACT, ManagedCapabilityCatalogContract,
   ManagedLease, ManagedOperation,
 } from "./ManagedTypes";
-import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
+import { HostedTransportAdapter, type HostedLicenseAdmission } from "./adapters/HostedTransportAdapter";
 
 type Options = {
-  transport: Pick<HostedTransportAdapter, "getCatalog" | "getAdmission">;
+  transport: Pick<HostedTransportAdapter, "getCatalog" | "getAdmission"> & Partial<Pick<HostedTransportAdapter, "onAuthorizationRejected">>;
   licenseKey: () => string;
   now?: () => number;
 };
 type Cache = { catalog: ManagedCapabilityCatalogContract; licenseKey: string; fetchedAt: number };
+type AdmissionCache = { admission: HostedLicenseAdmission; licenseKey: string; checkedAt: number };
 const CATALOG_TTL_MS = 300_000;
+/** An allowed license admission is reused this long for the same license key. */
+const ADMISSION_TTL_MS = 60_000;
 
 /** A cancelled caller must see its own abort, not a temporarily_unavailable lease. */
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new DOMException("Managed admission was cancelled.", "AbortError");
 }
 
+/**
+ * The one source of license admission for managed work and license
+ * validation (#386). A server-allowed admission is cached for a minute per
+ * license key, so a run of managed operations makes one license round trip
+ * instead of one each. The cache is dropped when the key changes, when any
+ * managed endpoint answers 401 or 403, and whenever a read is not allowed.
+ * Concurrent reads share one request in the transport.
+ */
 export class ManagedAdmission {
   private cache: Cache | null = null;
-  constructor(private readonly options: Options) {}
+  private admissionCache: AdmissionCache | null = null;
+  /**
+   * Bumped by invalidate(). A read that started under an older generation
+   * may still resolve as allowed, but it never refills the cache.
+   */
+  private admissionGeneration = 0;
+
+  constructor(private readonly options: Options) {
+    options.transport.onAuthorizationRejected?.(() => this.invalidate());
+  }
+
+  /** Forgets the cached admission, e.g. after a 401 or 403 from a job endpoint. */
+  invalidate(): void {
+    this.admissionGeneration += 1;
+    this.admissionCache = null;
+  }
 
   private async catalog(signal?: AbortSignal): Promise<ManagedCapabilityCatalogContract> {
     const now = (this.options.now ?? Date.now)();
@@ -44,6 +70,34 @@ export class ManagedAdmission {
     throw new Error("Managed capability catalog unavailable");
   }
 
+  /**
+   * The license admission for the current key. `fresh` skips the cache (an
+   * explicit license validation) but still joins a read already in flight.
+   * Rejects when the read fails or the caller aborts.
+   */
+  async checkLicense(signal?: AbortSignal, options: Readonly<{ fresh?: boolean }> = {}): Promise<HostedLicenseAdmission> {
+    throwIfAborted(signal);
+    const licenseKey = this.options.licenseKey().trim();
+    const cached = this.admissionCache;
+    if (
+      !options.fresh
+      && cached
+      && cached.licenseKey === licenseKey
+      && (this.options.now ?? Date.now)() < cached.checkedAt + ADMISSION_TTL_MS
+    ) {
+      return cached.admission;
+    }
+    const generation = this.admissionGeneration;
+    const admission = await this.options.transport.getAdmission(signal, { epoch: generation });
+    throwIfAborted(signal);
+    if (generation === this.admissionGeneration && licenseKey === this.options.licenseKey().trim()) {
+      this.admissionCache = admission.outcome === "allowed"
+        ? { admission, licenseKey, checkedAt: (this.options.now ?? Date.now)() }
+        : null;
+    }
+    return admission;
+  }
+
   async acquireLease(operation: ManagedOperation, signal?: AbortSignal): Promise<ManagedLease> {
     throwIfAborted(signal);
     let catalog: ManagedCapabilityCatalogContract;
@@ -51,7 +105,7 @@ export class ManagedAdmission {
       throwIfAborted(signal);
       return { outcome: "temporarily_unavailable" };
     }
-    const server = await this.options.transport.getAdmission(signal).catch(() => {
+    const server = await this.checkLicense(signal).catch(() => {
       throwIfAborted(signal);
       return { outcome: "temporarily_unavailable" as const, diagnostics: undefined };
     });

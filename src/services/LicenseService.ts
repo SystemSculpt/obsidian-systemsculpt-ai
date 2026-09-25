@@ -1,12 +1,6 @@
-import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
-import { CACHE_BUSTER } from "../utils/urlHelpers";
-import SystemSculptPlugin from "../main";
-import { PlatformRequestClient } from "./PlatformRequestClient";
-import { MANAGED_ADMISSION_CONTRACT } from "./managed/ManagedTypes";
-import {
-  decodeManagedAdmissionResponse,
-  type ManagedLicenseRejectReason,
-} from "./managed/ManagedAdmissionResponse";
+import type SystemSculptPlugin from "../main";
+import type { ManagedAdmission } from "./managed/ManagedAdmission";
+import type { ManagedLicenseRejectReason } from "./managed/ManagedAdmissionResponse";
 
 export type LicenseRejectReason = ManagedLicenseRejectReason | "missing";
 export type LicenseValidationResult =
@@ -14,18 +8,19 @@ export type LicenseValidationResult =
   | Readonly<{ outcome: "rejected"; isValid: false; reason: LicenseRejectReason }>
   | Readonly<{ outcome: "unavailable"; isValid: boolean }>;
 
+type LicenseAdmission = Pick<ManagedAdmission, "checkLicense">;
+
 /**
- * Service responsible for license validation and entitlement handling
+ * Projects license validation into settings (licenseValid, lastValidated,
+ * and the legacy profile fields). The read itself goes through the plugin's
+ * managed admission, so explicit validation and managed operations share one
+ * license source of truth and one cache (#386).
  */
 export class LicenseService {
-  private readonly requestClient: Pick<PlatformRequestClient, "request">;
-
   constructor(
     private readonly plugin: SystemSculptPlugin,
-    requestClient: Pick<PlatformRequestClient, "request"> = new PlatformRequestClient(),
-  ) {
-    this.requestClient = requestClient;
-  }
+    private readonly admission: () => LicenseAdmission = () => plugin.getManagedCapabilityGraph().admission,
+  ) {}
 
   /**
    * Get current license key from settings
@@ -35,8 +30,9 @@ export class LicenseService {
   }
 
   /**
-   * Validate the current license key. An aborted or timed-out check is
-   * "unavailable": it never downgrades the cached validity.
+   * Validate the current license key with a fresh admission read. An aborted
+   * or timed-out check is "unavailable": it never downgrades the cached
+   * validity.
    */
   public async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
     if (!this.licenseKey?.trim()) {
@@ -46,27 +42,8 @@ export class LicenseService {
       return { outcome: "rejected", isValid: false, reason: "missing" };
     }
 
-    // Apply cache busting using centralized utility
-    // This permanently prevents redirect caching issues in Electron/Obsidian
-    const fullUrl = CACHE_BUSTER.apply(`${API_BASE_URL}/license/validate`);
-
-    const headersToSend = {
-      ...SYSTEMSCULPT_API_HEADERS.WITH_LICENSE(this.licenseKey),
-      "x-plugin-version": this.plugin.manifest.version,
-      "x-systemsculpt-admission-contract": MANAGED_ADMISSION_CONTRACT,
-    };
-
     try {
-      const response = await this.requestClient.request({
-        url: fullUrl,
-        method: "GET",
-        headers: headersToSend,
-        cache: "no-store",
-        signal,
-      });
-      const payload = await this.readJson(response);
-
-      const admission = decodeManagedAdmissionResponse(response.status, payload);
+      const admission = await this.admission().checkLicense(signal, { fresh: true });
       if (admission.outcome === "allowed") {
         await this.plugin.getSettingsManager().updateSettings({
           licenseValid: true,
@@ -86,7 +63,7 @@ export class LicenseService {
       // Compatibility for servers that predate admission-v1 but return the
       // established successful account envelope. Negotiated responses above
       // remain the only source of authoritative rejection state.
-      const legacyProfile = this.readLegacySuccessProfile(response.status, payload);
+      const legacyProfile = admission.legacyProfile;
       if (legacyProfile) {
         await this.plugin.getSettingsManager().updateSettings({
           licenseValid: true,
@@ -105,33 +82,7 @@ export class LicenseService {
     }
   }
 
-  private async readJson(response: Response): Promise<unknown> {
-    const text = await response.text();
-    if (!text.trim()) return undefined;
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return undefined;
-    }
-  }
-
   private unavailableResult(): LicenseValidationResult {
     return { outcome: "unavailable", isValid: !!this.plugin.settings.licenseValid };
   }
-
-  private readLegacySuccessProfile(status: number, value: unknown): {
-    email: string;
-    userName: string;
-    displayName: string;
-  } | null {
-    if (status !== 200 || !value || typeof value !== "object" || Array.isArray(value)) return null;
-    const envelope = value as Record<string, unknown>;
-    if (envelope.status !== "success" || !envelope.data || typeof envelope.data !== "object") return null;
-    const profile = envelope.data as Record<string, unknown>;
-    if (profile.subscription_status !== "active" || typeof profile.email !== "string") return null;
-    const userName = typeof profile.user_name === "string" ? profile.user_name : profile.email;
-    const displayName = typeof profile.display_name === "string" ? profile.display_name : userName;
-    return { email: profile.email, userName, displayName };
-  }
-
 }

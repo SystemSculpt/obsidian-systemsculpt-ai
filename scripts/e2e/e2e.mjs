@@ -22,7 +22,9 @@ import {
  * Drives the real Obsidian GUI through the in-plugin test driver: every verb
  * becomes a synthesized user interaction (click, type, key press, file
  * attach, scroll) on the live DOM. Requires Obsidian running with a
- * development, staging, or local-agent build of the plugin.
+ * development, staging, local-agent, or production-watch-e2e build of the
+ * plugin. The default persistent watcher (production-watch) omits the driver;
+ * install the QA watcher with `npm run dev:watch:install:e2e`.
  *
  *   npm run e2e -- status
  *   npm run e2e -- open-chat

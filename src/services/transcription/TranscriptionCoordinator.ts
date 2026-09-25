@@ -8,8 +8,6 @@ import { MAX_FILE_SIZE, formatFileSize } from "../../utils/FileValidator";
 import { logError } from "../../utils/errorHandling";
 import { PostProcessingService } from "../PostProcessingService";
 import { ManagedJobClient } from "../managed/ManagedJobClient";
-import { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
-import { ObsidianManagedRecoveryAdapter } from "../managed/adapters/ObsidianManagedRecoveryAdapter";
 import {
   ManagedTranscriptionAdapter,
   ManagedTranscriptionInterruptedError,
@@ -605,7 +603,7 @@ export class TranscriptionCoordinator {
     this.managedAdapter = new ManagedTranscriptionAdapter({
       admission: graph.admission,
       jobs: new ManagedJobClient(graph.transport).transcription,
-      recovery: new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app)),
+      recovery: graph.recovery,
     });
     return this.managedAdapter;
   }

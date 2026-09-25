@@ -1200,7 +1200,9 @@ export class AgentChatView extends ItemView {
     });
     this.creditsPromise = (async () => {
       try {
-        const balance = await this.aiService.getCreditsBalance({
+        // Views share one balance read per minute; billing events read fresh.
+        const balance = await this.aiService.readCreditsBalance({
+          fresh: options.requireFresh === true || refreshReason === "billing_failure",
           onObservation: (value) => { observation = value; },
         });
         if (!canPublish()) return;

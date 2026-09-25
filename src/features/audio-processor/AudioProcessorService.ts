@@ -28,6 +28,14 @@ import {
 } from "../../services/managed/ManagedJobObservation";
 
 const POLL_INTERVAL_MS = 2_000;
+/**
+ * A job waiting for credits cannot progress until the user adds some, so it
+ * is not polled on the server cadence. It is rechecked after a minute, then
+ * at doubling intervals up to fifteen minutes, and at once when the user
+ * returns to Obsidian, the host reconnects, or a balance read shows credits.
+ */
+const AWAITING_FUNDS_FIRST_RECHECK_MS = 60_000;
+const AWAITING_FUNDS_MAX_RECHECK_MS = 15 * 60_000;
 const MAX_UPLOAD_ATTEMPTS = 3;
 const UPLOAD_RETRY_DELAY_MS = 750;
 const MAX_UPLOAD_COMPLETION_ATTEMPTS = 3;
@@ -569,14 +577,29 @@ export class AudioProcessorService {
       );
     }
 
+    let awaitingFundsRechecks = 0;
     for await (const observed of observeManagedJob<AudioProcessorJob>({
       initial: job,
       read: () => this.api.getJob(job.id, options.signal),
       signal: options.signal,
-      pollAfterMs: value => value.pollAfterMs ?? this.pollIntervalMs,
+      pollAfterMs: (value) => {
+        if (value.status !== "awaiting_funds") {
+          awaitingFundsRechecks = 0;
+          return value.pollAfterMs ?? this.pollIntervalMs;
+        }
+        const recheckMs = Math.min(
+          AWAITING_FUNDS_MAX_RECHECK_MS,
+          AWAITING_FUNDS_FIRST_RECHECK_MS * 2 ** awaitingFundsRechecks,
+        );
+        awaitingFundsRechecks += 1;
+        return Math.max(recheckMs, value.pollAfterMs ?? 0);
+      },
       isRetryableError: isRetryableManagedJobObservationError,
       retryAfterMs: error => (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs,
-      wait: this.sleep,
+      onRetrying: () => this.reportServerProgress(job, options, true),
+      wait: (milliseconds, signal) => job.status === "awaiting_funds"
+        ? this.waitForFunding(milliseconds, signal)
+        : this.sleep(milliseconds, signal),
     })) {
       job = observed;
       if (job.status === "succeeded") {
@@ -610,9 +633,48 @@ export class AudioProcessorService {
     );
   }
 
+  /**
+   * Waits up to `milliseconds` for a job paused for credits, returning early
+   * when the user comes back to Obsidian, the host reconnects, or any balance
+   * read (the credits modal, settings, or a chat view) shows credits.
+   */
+  private async waitForFunding(milliseconds: number, signal: AbortSignal): Promise<void> {
+    const woken = new AbortController();
+    const wake = (): void => woken.abort();
+    const wakeWhenVisible = (): void => {
+      if (typeof document === "undefined" || !document.hidden) wake();
+    };
+    const hasWindow = typeof window !== "undefined";
+    if (hasWindow) {
+      window.addEventListener("focus", wake);
+      window.addEventListener("online", wake);
+    }
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", wakeWhenVisible);
+    signal.addEventListener("abort", wake, { once: true });
+    const aiService = (this.plugin as Partial<Pick<SystemSculptPlugin, "aiService">>).aiService;
+    const unsubscribe = aiService?.onCreditsBalance?.((balance) => {
+      if (balance.usageClass === "master_auth" || (balance.availableUnreserved ?? balance.totalRemaining) > 0) wake();
+    });
+    try {
+      await this.sleep(milliseconds, woken.signal);
+    } catch (error) {
+      if (signal.aborted || !woken.signal.aborted) throw error;
+    } finally {
+      if (hasWindow) {
+        window.removeEventListener("focus", wake);
+        window.removeEventListener("online", wake);
+      }
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", wakeWhenVisible);
+      signal.removeEventListener("abort", wake);
+      unsubscribe?.();
+    }
+    if (signal.aborted) throw abortError();
+  }
+
   private reportServerProgress(
     job: AudioProcessorJob,
     options: ProcessAudioOptions,
+    stillWaiting = false,
   ): void {
     const messages: Record<AudioProcessorJob["stage"], string> = {
       uploading: "Receiving audio…",
@@ -636,9 +698,11 @@ export class AudioProcessorService {
     options.onProgress?.({
       stage: job.stage,
       progress: Math.max(0.36, Math.min(0.98, job.progress)),
-      message: job.status === "failed" && job.transcriptArtifact
-        ? "Transcript ready; primary note unavailable"
-        : messages[job.stage],
+      message: stillWaiting
+        ? "Still waiting for the audio service. Retrying…"
+        : job.status === "failed" && job.transcriptArtifact
+          ? "Transcript ready; primary note unavailable"
+          : messages[job.stage],
       serverOwned: true,
       quotedCredits: job.quotedCredits,
       chargedCredits: job.chargedCredits,

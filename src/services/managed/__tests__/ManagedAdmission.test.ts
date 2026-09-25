@@ -133,7 +133,7 @@ describe("ManagedAdmission", () => {
     const controller = new AbortController();
     await create().acquireLease({ alias: "systemsculpt/chat" }, controller.signal);
     expect(getCatalog).toHaveBeenCalledWith(controller.signal);
-    expect(getAdmission).toHaveBeenCalledWith(controller.signal);
+    expect(getAdmission).toHaveBeenCalledWith(controller.signal, { epoch: 0 });
   });
 
   it("rejects with the caller's abort instead of a lease when cancelled mid-request", async () => {
@@ -177,4 +177,98 @@ describe("ManagedAdmission", () => {
     getAdmission.mockRejectedValue(new PlatformRequestTimeoutError(30_000));
     expect((await create().acquireLease({ alias: "systemsculpt/chat" })).outcome).toBe("temporarily_unavailable");
   });
+
+  it("reuses an allowed license admission for a minute per license key", async () => {
+    const admission = create();
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    now += 59_999;
+    await admission.acquireLease({ alias: "systemsculpt/transcription" });
+    await admission.acquireLease({ alias: "systemsculpt/images" });
+    expect(getAdmission).toHaveBeenCalledTimes(1);
+
+    now += 1;
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+
+    licenseKey.mockReturnValue("other");
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    expect(getAdmission).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["license_required", "license_rejected", "temporarily_unavailable", "rate_limited"] as const)(
+    "never caches a %s admission", async (outcome) => {
+      getAdmission.mockResolvedValue({ outcome, diagnostics: { status: 200 } });
+      const admission = create();
+      await admission.acquireLease({ alias: "systemsculpt/chat" });
+      await admission.acquireLease({ alias: "systemsculpt/chat" });
+      expect(getAdmission).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("drops the cached admission when a managed endpoint answers 401 or 403", async () => {
+    let rejected: (() => void) | null = null;
+    const admission = new ManagedAdmission({
+      transport: {
+        getCatalog,
+        getAdmission,
+        onAuthorizationRejected: (listener: () => void) => {
+          rejected = listener;
+          return () => undefined;
+        },
+      } as any,
+      licenseKey,
+      now: () => now,
+    });
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    expect(getAdmission).toHaveBeenCalledTimes(1);
+
+    rejected!();
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads fresh for an explicit license check and caches its allowed result", async () => {
+    const admission = create();
+    await admission.acquireLease({ alias: "systemsculpt/chat" });
+    await expect(admission.checkLicense(undefined, { fresh: true })).resolves.toMatchObject({ outcome: "allowed" });
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("never refills the cache from a read that was pending when a 401 or 403 invalidated it", async () => {
+    let rejected: (() => void) | null = null;
+    let finishStale!: (value: unknown) => void;
+    getAdmission
+      .mockReturnValueOnce(new Promise((resolve) => { finishStale = resolve; }))
+      .mockResolvedValue({ outcome: "allowed", diagnostics: { status: 200 } });
+    const admission = new ManagedAdmission({
+      transport: {
+        getCatalog,
+        getAdmission,
+        onAuthorizationRejected: (listener: () => void) => {
+          rejected = listener;
+          return () => undefined;
+        },
+      } as any,
+      licenseKey,
+      now: () => now,
+    });
+
+    const stale = admission.checkLicense();
+    expect(getAdmission).toHaveBeenLastCalledWith(undefined, { epoch: 0 });
+    rejected!();
+    finishStale({ outcome: "allowed", diagnostics: { status: 200 } });
+    await expect(stale).resolves.toMatchObject({ outcome: "allowed" });
+
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+    // The read after the rejection cannot join the stale in-flight one.
+    expect(getAdmission).toHaveBeenLastCalledWith(undefined, { epoch: 1 });
+    // A read started after the rejection is trusted again.
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
 });
+

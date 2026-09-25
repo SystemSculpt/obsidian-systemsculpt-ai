@@ -361,7 +361,8 @@ describe("ManagedImageGenerationAdapter", () => {
 
     await expect(harness.generate()).resolves.toMatchObject({ jobId });
     expect(status).toHaveBeenCalledTimes(5);
-    expect(harness.waits).toEqual([2_500, 2_000, 0, 2_500]);
+    // A server hint of zero still waits the one-second polling floor.
+    expect(harness.waits).toEqual([2_500, 2_000, 1_000, 2_500]);
   });
 
   it("does not retry protocol violations", async () => {

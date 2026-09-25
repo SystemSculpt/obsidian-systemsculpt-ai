@@ -49,8 +49,8 @@ describe("AudioProcessorAvailability", () => {
       url: "https://systemsculpt.test/api/plugin/config",
       method: "GET",
       licenseKey: "license-123",
+      // The request client adds the license header from licenseKey.
       headers: expect.objectContaining({
-        "x-license-key": "license-123",
         "x-plugin-version": "6.1.0",
       }),
     }));
@@ -140,6 +140,22 @@ describe("AudioProcessorAvailability", () => {
     })).resolves.toBe(true);
     expect(requestClient.inputs).toHaveLength(2);
   });
+  it("reads /config through the plugin's managed transport by default", async () => {
+    const getPluginConfigCapabilities = jest.fn(async () => ({ hosted_audio_processor: true, hosted_videos: false }));
+    const plugin = {
+      ...createPlugin(),
+      getManagedCapabilityGraph: () => ({ transport: { getPluginConfigCapabilities } }),
+    };
+    const controller = new AbortController();
+
+    await expect(getAudioProcessorAvailability(plugin, { now: () => 1_000 }, controller.signal))
+      .resolves.toEqual({ canOpen: true, authoritative: true });
+    await expect(getVideoGenerationAvailability(plugin, { now: () => 1_000 }))
+      .resolves.toEqual({ canOpen: false, authoritative: true });
+    expect(getPluginConfigCapabilities).toHaveBeenCalledTimes(1);
+    expect(getPluginConfigCapabilities).toHaveBeenCalledWith(controller.signal);
+  });
+
   it("shares the catalogue across public audio and video entry points", async () => {
     const plugin = createPlugin();
     const requestClient = new QueueClient();

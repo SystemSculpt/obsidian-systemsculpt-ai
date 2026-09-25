@@ -291,7 +291,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("This note would otherwise be uploaded for embeddings. ".repeat(4));
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => ({
+      readCreditsBalance: jest.fn(async () => ({
         usageClass: "customer",
         totalRemaining: 5,
         heldInFlight: 5,
@@ -320,7 +320,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const balanceStarted = new Promise<void>((resolve) => { signalBalanceStarted = resolve; });
     const balanceRelease = new Promise<void>((resolve) => { releaseBalance = resolve; });
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => {
+      readCreditsBalance: jest.fn(async () => {
         signalBalanceStarted();
         await balanceRelease;
         return {
@@ -477,6 +477,31 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     await restored.manager.resumeProcessing("explicit");
     expect(restored.manager.isSuspended()).toBe(false);
     warn.mockRestore();
+  });
+
+  it("validates stored vectors once per vector format instead of at every launch", async () => {
+    const first = harness("A note indexed in an earlier session.");
+    await first.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+    expect(mockState.get("semantic-vector-validation")).toMatchObject({ version: 1 });
+
+    const relaunched = harness("A note indexed in an earlier session.");
+    await relaunched.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes no settings when a launch reconcile finds the vault current", async () => {
+    const state = harness("A note that is indexed once.");
+    await state.manager.initialize();
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
+    expect(state.updateSettings).toHaveBeenCalledWith({ embeddingsRebuildPending: true });
+    state.updateSettings.mockClear();
+
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
+
+    expect(state.updateSettings).not.toHaveBeenCalledWith(
+      expect.objectContaining({ embeddingsRebuildPending: expect.anything() }),
+    );
   });
 
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
