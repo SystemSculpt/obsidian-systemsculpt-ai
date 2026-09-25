@@ -11,6 +11,7 @@ import {
 import {
   AgentIncidentRecorder,
   type AgentIncidentRenderingInput,
+  type AgentIncidentReport,
 } from "../../../core/diagnostics/AgentIncidentRecorder";
 import {
   AGENT_INCIDENT_STORE_PATH,
@@ -184,6 +185,13 @@ class FirstWriteGatedIncidentAdapter extends MemoryIncidentAdapter {
   public releaseFirstWrite(): void {
     this.releaseFirstWritePromise();
   }
+}
+
+function persistedIncidentBytes(
+  adapter: MemoryIncidentAdapter,
+  reportId: string,
+): string | undefined {
+  return adapter.files.get(`${AGENT_INCIDENT_STORE_PATH}/${reportId}.json`)?.data;
 }
 
 function captureFailureWithRenderedSurface(
@@ -503,8 +511,9 @@ class IncidentPipelineHarness {
   public readonly logger: PluginLogger;
   public readonly localLogWrites: string[];
   public readonly supportEvents: SupportDiagnosticEvent[] = [];
-  public readonly copiedBytes: string[] = [];
+  public readonly copiedReportIds: string[] = [];
   public readonly errorCallbacks: unknown[] = [];
+  public receipt: Readonly<{ reportId: string }> | null = null;
   public durableMarkdown = "";
   public failedResult: Readonly<Record<string, unknown>> | null = null;
   public retryCalls = 0;
@@ -650,26 +659,28 @@ class IncidentPipelineHarness {
       theme: PRIVATE.theme,
       snippet: PRIVATE.snippet,
     } as unknown as AgentRunFailureCaptureEvent;
-    captureFailureWithRenderedSurface(this.coordinator, event);
+    this.receipt = captureFailureWithRenderedSurface(this.coordinator, event);
   }
 
   public async drain(): Promise<void> {
-    await this.coordinator.drain();
+    await this.coordinator.closeAdmissionAndDrain();
     await this.logger.flushNow();
   }
 
+  public persistedReportBytes(): string | undefined {
+    return persistedIncidentBytes(this.adapter, REPORT_ID);
+  }
+
   public async copyReport(): Promise<boolean> {
-    try {
-      const serialized = await this.coordinator.loadSerializedByIncidentId(INCIDENT_ID);
-      if (!serialized) return false;
-      if (this.mode === "clipboard") {
-        throw new Error("CANARY_clipboard_error_a0e2d22f");
-      }
-      this.copiedBytes.push(serialized);
-      return true;
-    } catch {
-      return false;
+    const reportId = this.receipt?.reportId;
+    if (!reportId) return false;
+    const bridge = createAgentChatViewCopyBridge();
+    if (this.mode === "clipboard") {
+      bridge.writeText.mockRejectedValueOnce(new Error("CANARY_clipboard_error_a0e2d22f"));
     }
+    const copied = await bridge.copy(reportId);
+    if (copied) this.copiedReportIds.push(reportId);
+    return copied;
   }
 
   public dispose(): void {
@@ -963,7 +974,6 @@ describe("ChatView incident report regression integration", () => {
     const captures: AgentRunFailureCaptureEvent[] = [];
     const callbackOrder: string[] = [];
     const reportedErrors: unknown[] = [];
-    const copiedBytes: string[] = [];
     const unhandledRejections: unknown[] = [];
     const onUnhandledRejection = (reason: unknown) => { unhandledRejections.push(reason); };
     process.on("unhandledRejection", onUnhandledRejection);
@@ -1047,7 +1057,20 @@ describe("ChatView incident report regression integration", () => {
       expect(captures[0]).not.toHaveProperty("incidentId");
       expect(callbackOrder).toEqual(["capture", "lifecycle"]);
 
-      const report = recorder.getByReportId(localReportId);
+      const beforeSaveBridge = createAgentChatViewCopyBridge();
+      await expect(beforeSaveBridge.copy(localReportId))
+        .resolves.toBe(true);
+      expect(beforeSaveBridge.writeText).toHaveBeenCalledTimes(1);
+      expect(beforeSaveBridge.writeText).toHaveBeenCalledWith(localReportId);
+      const finalPath = `${AGENT_INCIDENT_STORE_PATH}/${localReportId}.json`;
+      expect(adapter.files.has(finalPath)).toBe(false);
+
+      adapter.releaseFirstWrite();
+      await coordinator.closeAdmissionAndDrain();
+      const persisted = persistedIncidentBytes(adapter, localReportId);
+      expect(persisted).toBeDefined();
+      expect(adapter.files.has(`${finalPath}.tmp`)).toBe(false);
+      const report = JSON.parse(persisted!) as AgentIncidentReport;
       expect(report).toMatchObject({
         report_id: localReportId,
         incident: {
@@ -1060,30 +1083,8 @@ describe("ChatView incident report regression integration", () => {
           retryable: true,
         },
       });
-      expect(report!.incident).not.toHaveProperty("incident_id");
-      const inMemoryCopy = await coordinator.loadReportForCopy(localReportId);
-      expect(inMemoryCopy).toEqual({
-        serialized: store.serialize(report!),
-        durability: "memory_fallback",
-      });
-      copiedBytes.push(inMemoryCopy!.serialized);
-      const beforeSaveBridge = createAgentChatViewCopyBridge();
-      await expect(beforeSaveBridge.copy(localReportId))
-        .resolves.toBe(true);
-      expect(beforeSaveBridge.writeText).toHaveBeenCalledTimes(1);
-      expect(beforeSaveBridge.writeText).toHaveBeenCalledWith(localReportId);
-      const finalPath = `${AGENT_INCIDENT_STORE_PATH}/${localReportId}.json`;
-      expect(adapter.files.has(finalPath)).toBe(false);
-
-      adapter.releaseFirstWrite();
-      await coordinator.drain();
-      expect(adapter.files.get(finalPath)?.data).toBe(inMemoryCopy!.serialized);
-      expect(adapter.files.has(`${finalPath}.tmp`)).toBe(false);
-      const persistedCopy = await coordinator.loadReportForCopy(localReportId);
-      expect(persistedCopy).toEqual({
-        serialized: inMemoryCopy!.serialized,
-        durability: "persisted",
-      });
+      expect(report.incident).not.toHaveProperty("incident_id");
+      expect(persisted).toBe(store.serialize(report));
 
       const chatId = "2026-08-13 15-00-00";
       let transcriptVersion = 1;
@@ -1234,19 +1235,10 @@ describe("ChatView incident report regression integration", () => {
       const restoredReportId = restoredReceipt?.terminalReportId;
       expect(restoredReportId).toBe(localReportId);
 
-      const restarted = new AgentIncidentCoordinator({
-        recorder: new AgentIncidentRecorder(),
-        store: new AgentIncidentStore(adapter, { now: () => CREATED_AT_MS }),
-      });
-      await restarted.initialize();
-      await expect(restarted.loadReportForCopy(restoredReportId!)).resolves.toEqual({
-        serialized: inMemoryCopy!.serialized,
-        durability: "persisted",
-      });
-      await expect(restarted.loadReportForCopy(`report_${"e".repeat(32)}`))
-        .resolves.toBeNull();
-      const restartedCopy = await restarted.loadReportForCopy(restoredReportId!);
-      copiedBytes.push(restartedCopy!.serialized);
+      await expect(new AgentIncidentStore(adapter, { now: () => CREATED_AT_MS }).initialize())
+        .resolves.toMatchObject({ retainedReports: 1, corruptReports: 0 });
+      expect(persistedIncidentBytes(adapter, restoredReportId!)).toBe(persisted);
+      expect(persistedIncidentBytes(adapter, `report_${"e".repeat(32)}`)).toBeUndefined();
       const restartedBridge = createAgentChatViewCopyBridge();
       await expect(restartedBridge.copy(restoredReportId!)).resolves.toBe(true);
       expect(restartedBridge.writeText).toHaveBeenCalledTimes(1);
@@ -1257,11 +1249,10 @@ describe("ChatView incident report regression integration", () => {
       const reportText = JSON.stringify(report);
       expect(reportText).not.toContain(CONVERSATION_ID);
       expect(reportText).not.toContain(REQUEST_ID);
-      expect(report!.incident).not.toHaveProperty("incident_id");
+      expect(report.incident).not.toHaveProperty("incident_id");
       expectNoPrivateDiagnostics([
         reportText,
-        inMemoryCopy!.serialized,
-        ...copiedBytes,
+        persisted!,
         JSON.stringify(captures),
         JSON.stringify(reportedErrors),
         JSON.stringify(logger.getSupportDiagnostics()),
@@ -1310,10 +1301,10 @@ describe("ChatView incident report regression integration", () => {
     const captures: AgentRunFailureCaptureEvent[] = [];
     const callbackOrder: string[] = [];
     const reportedErrors: unknown[] = [];
-    const copiedBytes: string[] = [];
     const unhandledRejections: unknown[] = [];
     const onUnhandledRejection = (reason: unknown) => { unhandledRejections.push(reason); };
     process.on("unhandledRejection", onUnhandledRejection);
+    let receiptId: string | undefined;
     const privateResponseBody = JSON.stringify({
       error: {
         code: "response_capacity_unavailable",
@@ -1354,7 +1345,7 @@ describe("ChatView incident report regression integration", () => {
       onIncidentCapture: (event) => {
         callbackOrder.push("capture");
         captures.push(event);
-        captureFailureWithRenderedSurface(coordinator, event);
+        receiptId = captureFailureWithRenderedSurface(coordinator, event)?.reportId;
       },
       requestClient: { request },
       now: () => CREATED_AT_MS,
@@ -1376,7 +1367,7 @@ describe("ChatView incident report regression integration", () => {
         },
         clientStartedAtMonotonicMs: 4_000,
       });
-      await coordinator.drain();
+      await coordinator.closeAdmissionAndDrain();
       await logger.flushNow();
       await Promise.resolve();
       await Promise.resolve();
@@ -1425,7 +1416,10 @@ describe("ChatView incident report regression integration", () => {
       })]);
       expect(callbackOrder).toEqual(["capture", "lifecycle"]);
 
-      const report = recorder.getByIncidentId(INCIDENT_ID);
+      expect(receiptId).toBe(`report_${"b".repeat(32)}`);
+      const storedBytes = persistedIncidentBytes(adapter, receiptId!);
+      expect(storedBytes).toBeDefined();
+      const report = JSON.parse(storedBytes!) as AgentIncidentReport;
       expect(report).toMatchObject({
         incident: {
           classification: "operation_failure",
@@ -1453,17 +1447,10 @@ describe("ChatView incident report regression integration", () => {
           run_phase: "submitted",
         },
       });
-      const storedBytes = await coordinator.loadSerializedByIncidentId(INCIDENT_ID);
-      expect(storedBytes).not.toBeNull();
-      expect(storedBytes).toBe(store.serialize(report!));
-      const copyReport = async (): Promise<boolean> => {
-        const serialized = await coordinator.loadSerializedByIncidentId(INCIDENT_ID);
-        if (!serialized) return false;
-        copiedBytes.push(serialized);
-        return true;
-      };
-      await expect(copyReport()).resolves.toBe(true);
-      expect(copiedBytes).toEqual([storedBytes]);
+      expect(storedBytes).toBe(store.serialize(report));
+      const bridge = createAgentChatViewCopyBridge();
+      await expect(bridge.copy(receiptId!)).resolves.toBe(true);
+      expect(bridge.writeText).toHaveBeenCalledWith(receiptId);
       expect(request).toHaveBeenCalledTimes(1);
       expect(unhandledRejections).toEqual([]);
       expectNoPrivateDiagnostics([
@@ -1475,13 +1462,12 @@ describe("ChatView incident report regression integration", () => {
         JSON.stringify(localLogWrites),
         JSON.stringify(reportedErrors),
         storedBytes!,
-        ...copiedBytes,
         ...[...adapter.files.values()].map((file) => file.data),
       ]);
     } finally {
       process.off("unhandledRejection", onUnhandledRejection);
       await session.detach();
-      await coordinator.drain();
+      await coordinator.closeAdmissionAndDrain();
       logger.dispose();
     }
   });
@@ -1579,7 +1565,7 @@ describe("ChatView incident report regression integration", () => {
         },
         clientStartedAtMonotonicMs: 1_000,
       });
-      await coordinator.drain();
+      await coordinator.closeAdmissionAndDrain();
       await logger.flushNow();
 
       expect(result).toMatchObject({
@@ -1630,7 +1616,9 @@ describe("ChatView incident report regression integration", () => {
         }),
       ]));
 
-      const report = recorder.getByIncidentId(INCIDENT_ID);
+      const serialized = persistedIncidentBytes(adapter, `report_${"a".repeat(32)}`);
+      expect(serialized).toBeDefined();
+      const report = JSON.parse(serialized!) as AgentIncidentReport;
       expect(report).toMatchObject({
         incident: {
           classification: "operation_failure",
@@ -1669,9 +1657,7 @@ describe("ChatView incident report regression integration", () => {
           metrics_truncated: false,
         })],
       });
-      const serialized = await coordinator.loadSerializedByIncidentId(INCIDENT_ID);
-      expect(serialized).not.toBeNull();
-      expect(serialized).toBe(store.serialize(report!));
+      expect(serialized).toBe(store.serialize(report));
       expectNoPrivateDiagnostics([
         serialized!,
         JSON.stringify(report),
@@ -1681,7 +1667,7 @@ describe("ChatView incident report regression integration", () => {
       expect(request).toHaveBeenCalledTimes(3);
     } finally {
       await session.detach();
-      await coordinator.drain();
+      await coordinator.closeAdmissionAndDrain();
       logger.dispose();
     }
   });
@@ -1701,19 +1687,21 @@ describe("ChatView incident report regression integration", () => {
     }
   });
 
-  it("persists and copies canonical evidence for the production partial-output failure", async () => {
+  it("persists canonical evidence and copies its report ID for the production partial-output failure", async () => {
     jest.useFakeTimers({ now: STARTED_AT_MS });
     const fetchSpy = jest.spyOn(globalThis, "fetch");
     const pipeline = new IncidentPipelineHarness("none");
     try {
       await pipeline.initialize();
       recordProductionChronology(pipeline);
-      expect(pipeline.copiedBytes).toHaveLength(0);
+      expect(pipeline.copiedReportIds).toHaveLength(0);
       await pipeline.drain();
 
       expectDurableFailedPartial(pipeline);
-      const report = pipeline.recorder.getByIncidentId(INCIDENT_ID);
-      expect(report).not.toBeNull();
+      const firstStoreBytes = pipeline.persistedReportBytes();
+      expect(firstStoreBytes).toBeDefined();
+      const report = JSON.parse(firstStoreBytes!) as AgentIncidentReport;
+      expect(firstStoreBytes).toBe(pipeline.store.serialize(report));
       expect(report).toMatchObject({
         schema_version: "systemsculpt.incident/2",
         report_id: REPORT_ID,
@@ -1832,49 +1820,40 @@ describe("ChatView incident report regression integration", () => {
           automatic_upload: false,
         },
       });
-      expect(report!.run_summary.failed_at < report!.run_summary.started_at!).toBe(true);
-      expect(report!.tools.map((tool) => tool.ordinal)).toEqual([1, 2, 3]);
-      expect(report!.tools.reduce((sum, tool) => sum + (tool.requested_item_count ?? 0), 0)).toBe(12);
-      expect(report!.tools.reduce((sum, tool) => sum + (tool.completed_item_count ?? 0), 0)).toBe(9);
-      expect(report!.tools.reduce((sum, tool) => sum + (tool.failed_item_count ?? 0), 0)).toBe(3);
-      expect(report!.tools).toEqual(report!.tools.map((tool) => expect.objectContaining({
+      expect(report.run_summary.failed_at < report.run_summary.started_at!).toBe(true);
+      expect(report.tools.map((tool) => tool.ordinal)).toEqual([1, 2, 3]);
+      expect(report.tools.reduce((sum, tool) => sum + (tool.requested_item_count ?? 0), 0)).toBe(12);
+      expect(report.tools.reduce((sum, tool) => sum + (tool.completed_item_count ?? 0), 0)).toBe(9);
+      expect(report.tools.reduce((sum, tool) => sum + (tool.failed_item_count ?? 0), 0)).toBe(3);
+      expect(report.tools).toEqual(report.tools.map((tool) => expect.objectContaining({
         tool_name: "read",
         outcome: "failed",
         failure_class: "partial_failure",
         result_delivery: "succeeded",
       })));
-      const terminalIndex = report!.timeline.findIndex((event) => event.code === "run_finished_failed");
-      const toolFailureIndexes = report!.timeline
+      const terminalIndex = report.timeline.findIndex((event) => event.code === "run_finished_failed");
+      const toolFailureIndexes = report.timeline
         .map((event, index) => event.code === "local_tool_completed_failed" ? index : -1)
         .filter((index) => index >= 0);
       expect(toolFailureIndexes).toHaveLength(3);
       expect(toolFailureIndexes.every((index) => index < terminalIndex)).toBe(true);
-      expect(report!.incident.failure_code).toBe("response_capacity_unavailable");
-      expect(report!.incident).not.toHaveProperty("cause");
-      expect(report!.timeline.every((event) => !("tool_call_id" in event))).toBe(true);
-      expect(JSON.stringify(report)).not.toContain(CONVERSATION_ID);
-      expect(JSON.stringify(report)).not.toContain(REQUEST_ID);
+      expect(report.incident.failure_code).toBe("response_capacity_unavailable");
+      expect(report.incident).not.toHaveProperty("cause");
+      expect(report.timeline.every((event) => !("tool_call_id" in event))).toBe(true);
+      expect(firstStoreBytes).not.toContain(CONVERSATION_ID);
+      expect(firstStoreBytes).not.toContain(REQUEST_ID);
 
-      const firstStoreBytes = await pipeline.coordinator.loadSerializedByIncidentId(INCIDENT_ID);
-      expect(firstStoreBytes).not.toBeNull();
-      const restarted = new AgentIncidentCoordinator({
-        recorder: new AgentIncidentRecorder(),
-        store: new AgentIncidentStore(pipeline.adapter, { now: () => CREATED_AT_MS }),
-      });
-      await restarted.initialize();
-      const copiedAfterRestart: string[] = [];
-      expect(copiedAfterRestart).toHaveLength(0);
-      const restartedBytes = await restarted.loadSerializedByIncidentId(INCIDENT_ID);
-      expect(restartedBytes).toBe(firstStoreBytes);
-      copiedAfterRestart.push(restartedBytes!);
-      expect(copiedAfterRestart[0]).toBe(firstStoreBytes);
+      await expect(pipeline.failedCard!.copyReport()).resolves.toBe(true);
+      expect(pipeline.copiedReportIds).toEqual([REPORT_ID]);
+      await expect(new AgentIncidentStore(pipeline.adapter, { now: () => CREATED_AT_MS }).initialize())
+        .resolves.toMatchObject({ retainedReports: 1, corruptReports: 0 });
+      expect(pipeline.persistedReportBytes()).toBe(firstStoreBytes);
 
       expectNoPrivateDiagnostics([
         JSON.stringify(report),
         JSON.stringify(pipeline.supportEvents),
         JSON.stringify(pipeline.logger.getSupportDiagnostics()),
         firstStoreBytes!,
-        copiedAfterRestart[0]!,
         JSON.stringify(pipeline.errorCallbacks),
       ]);
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -1887,12 +1866,17 @@ describe("ChatView incident report regression integration", () => {
   });
 
   it.each([
-    ["lifecycle projection", "lifecycle_projection", false],
-    ["resource capture", "resource_capture", true],
-    ["recorder finalization", "recorder_finalization", false],
-    ["store rejection", "store_rejection", true],
-    ["clipboard", "clipboard", false],
-  ] as const)("keeps the failed ChatView usable after %s failure", async (_label, mode, expectedCopy) => {
+    ["lifecycle projection", "lifecycle_projection", true, false],
+    ["resource capture", "resource_capture", true, true],
+    ["recorder finalization", "recorder_finalization", true, false],
+    ["store rejection", "store_rejection", true, false],
+    ["clipboard", "clipboard", false, true],
+  ] as const)("keeps the failed ChatView usable after %s failure", async (
+    _label,
+    mode,
+    expectedCopy,
+    expectedPersisted,
+  ) => {
     jest.useFakeTimers({ now: STARTED_AT_MS });
     const unhandledRejections: unknown[] = [];
     const onUnhandledRejection = (reason: unknown) => { unhandledRejections.push(reason); };
@@ -1909,25 +1893,18 @@ describe("ChatView incident report regression integration", () => {
       expect(pipeline.failedCard).not.toBeNull();
       expect(pipeline.failedCard!.retry()).toBe(true);
       expect(pipeline.retryCalls).toBe(1);
-      if (mode === "lifecycle_projection") {
-        await pipeline.coordinator.closeAdmissionAndDrain();
-        await expect(pipeline.failedCard!.copyReport()).resolves.toBe(expectedCopy);
-      } else {
-        const copyResult = pipeline.failedCard!.copyReport();
-        await jest.advanceTimersByTimeAsync(1_500);
-        await expect(copyResult).resolves.toBe(expectedCopy);
-      }
+      await expect(pipeline.failedCard!.copyReport()).resolves.toBe(expectedCopy);
+      expect(pipeline.copiedReportIds).toEqual(expectedCopy ? [REPORT_ID] : []);
+      expect(pipeline.persistedReportBytes() !== undefined).toBe(expectedPersisted);
       expect(pipeline.errorCallbacks).toEqual([]);
       expect(unhandledRejections).toEqual([]);
       expect(console.error).not.toHaveBeenCalled();
       expect(console.warn).not.toHaveBeenCalled();
 
-      const report = pipeline.recorder.getByIncidentId(INCIDENT_ID);
       const diagnosticSurfaces = [
-        JSON.stringify(report),
         JSON.stringify(pipeline.supportEvents),
         JSON.stringify(pipeline.logger.getSupportDiagnostics()),
-        ...pipeline.copiedBytes,
+        ...pipeline.copiedReportIds,
         ...[...pipeline.adapter.files.values()].map((file) => file.data),
         JSON.stringify(pipeline.errorCallbacks),
       ];

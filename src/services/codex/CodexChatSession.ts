@@ -2,7 +2,7 @@ import type { ChatMessage } from "../../types";
 import type { App } from 'obsidian';
 import type { ChatSession, AgentRunInput, AgentRunResult } from '../../chat/ChatSession';
 import type { AgentConversationSnapshot, AgentTextPart } from '../../chat/ChatConversation';
-import { THIN_AGENT_CONTRACT_VERSION, type ThinAgentContextSource, type ThinAgentContextResponse } from '../managed/ThinAgentV1Contract';
+import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAgentContextSource, type ThinAgentContextResponse } from '../managed/ThinAgentV1Contract';
 import { runLocalCodex } from './LocalCodexClient';
 import { answerCodexRequest } from './CodexRequestModal';
 import { CodexThreadLocator } from './CodexThreadLocator';
@@ -24,8 +24,8 @@ export class CodexChatSession implements ChatSession {
     for (const listener of this.localListeners) { try { listener(this.localSnapshot); } catch { /* Presentation must not interrupt Codex. */ } }
   }
   async hydrate(conversationId: string): Promise<void> { await this.locator.read(conversationId); }
-  async stageContext(_id: string, sources: readonly ThinAgentContextSource[]): Promise<ThinAgentContextResponse> {
-    this.sources = sources;
+  async stageContext(_id: string, context: MeasuredThinAgentContext): Promise<ThinAgentContextResponse> {
+    this.sources = context.sources;
     return { contract_version: THIN_AGENT_CONTRACT_VERSION, context_ref: 'local-codex-context', expires_at: new Date(Date.now() + 60_000).toISOString(), bytes: 0, sha256: '' };
   }
   start(input: AgentRunInput): Promise<AgentRunResult> {

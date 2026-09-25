@@ -128,7 +128,7 @@ export interface AgentIncidentStoreReport {
 
 export interface StoredAgentIncidentReport<TReport extends AgentIncidentStoreReport = AgentIncidentStoreReport> {
   readonly report: TReport;
-  /** Canonical JSON bytes used for both disk persistence and explicit copy. */
+  /** Canonical JSON bytes persisted to disk. */
   readonly serialized: string;
   readonly sizeBytes: number;
 }
@@ -159,7 +159,6 @@ export type AgentIncidentStoreErrorCode =
   | "invalid_report"
   | "report_too_large"
   | "duplicate_report_id"
-  | "lookup_incomplete"
   | "persistence_unavailable";
 
 export class AgentIncidentStoreError extends Error {
@@ -194,7 +193,6 @@ interface StoreLimits {
 interface ReportEntry extends StoredAgentIncidentReport {
   path: string;
   reportId: string;
-  incidentId?: string;
   createdAtMs: number;
   ctimeMs: number;
   mtimeMs: number;
@@ -283,38 +281,6 @@ export class AgentIncidentStore {
         throw new AgentIncidentStoreError("persistence_unavailable", "The incident report did not survive local retention.");
       }
       return Object.freeze({ ...stored, created, retention });
-    });
-  }
-
-  public async loadByReportId<TReport extends AgentIncidentStoreReport = AgentIncidentStoreReport>(
-    reportId: string,
-  ): Promise<StoredAgentIncidentReport<TReport> | null> {
-    validateReportId(reportId);
-    return await this.exclusive(async () => {
-      await this.ensureInitialized();
-      const candidate = await this.readCandidate(this.reportPath(reportId), reportId, true);
-      if (candidate.kind === "unavailable") {
-        throw new AgentIncidentStoreError("lookup_incomplete", "The local incident report could not be inspected.");
-      }
-      return candidate.kind === "valid" ? storedResult<TReport>(candidate.entry) : null;
-    });
-  }
-
-  public async loadByIncidentId<TReport extends AgentIncidentStoreReport = AgentIncidentStoreReport>(
-    incidentId: string,
-  ): Promise<StoredAgentIncidentReport<TReport> | null> {
-    validateIncidentId(incidentId);
-    return await this.exclusive(async () => {
-      await this.ensureInitialized();
-      const scan = await this.scanDirectory();
-      const matches = scan.reports
-        .filter((entry) => entry.incidentId === incidentId)
-        .sort(compareNewestFirst);
-      if (matches.length > 0) return storedResult<TReport>(matches[0]);
-      if (scan.scanFailed) {
-        throw new AgentIncidentStoreError("lookup_incomplete", "The local incident lookup reached its bounded scan limit.");
-      }
-      return null;
     });
   }
 
@@ -681,7 +647,6 @@ export class AgentIncidentStore {
           ...parsed,
           path,
           reportId: parsed.report.report_id,
-          incidentId: parsed.report.incident.incident_id,
           createdAtMs: Date.parse(parsed.report.created_at),
           ctimeMs: finiteTimestamp(stat.ctime),
           mtimeMs: finiteTimestamp(stat.mtime),
@@ -1869,10 +1834,8 @@ function artifactFromStat(path: string, stat: Stat | null, unknownSize: number, 
   };
 }
 
-function compareNewestFirst(left: ReportEntry, right: ReportEntry, nowMs?: number): number {
-  const leftTimestamp = nowMs === undefined ? left.createdAtMs : reportRetentionTime(left, nowMs);
-  const rightTimestamp = nowMs === undefined ? right.createdAtMs : reportRetentionTime(right, nowMs);
-  return rightTimestamp - leftTimestamp
+function compareNewestFirst(left: ReportEntry, right: ReportEntry, nowMs: number): number {
+  return reportRetentionTime(right, nowMs) - reportRetentionTime(left, nowMs)
     || compareText(left.reportId, right.reportId);
 }
 
@@ -1923,14 +1886,6 @@ function scanPathPriority(path: string): number {
 
 function sumDiskBytes(entries: ReadonlyArray<{ diskBytes: number }>): number {
   return entries.reduce((total, entry) => total + entry.diskBytes, 0);
-}
-
-function storedResult<TReport extends AgentIncidentStoreReport>(entry: ReportEntry): StoredAgentIncidentReport<TReport> {
-  return Object.freeze({
-    report: entry.report as TReport,
-    serialized: entry.serialized,
-    sizeBytes: entry.sizeBytes,
-  });
 }
 
 function emptyRetentionResult(): AgentIncidentRetentionResult {

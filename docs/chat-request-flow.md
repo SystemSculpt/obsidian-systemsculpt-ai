@@ -101,6 +101,8 @@ The plugin stages selected context after bootstrap:
 }
 ```
 
+The plugin measures each source once while reading it. After bootstrap, it checks those sizes against the negotiated `client_input_limits` before uploading. If the server negotiated lower limits and the context no longer fits, the turn fails with `context_too_large` and nothing is uploaded. The server validates the staged request again.
+
 The server returns one opaque, expiring `context_ref`. The turn command contains that reference, not raw vault context.
 
 Web search is server policy and a server-side tool. It is not a plugin capability.

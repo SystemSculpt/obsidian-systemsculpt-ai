@@ -21,47 +21,20 @@ import {
   type AgentIncidentResourceSampleInput,
   type AgentIncidentTransportSegmentInput,
 } from "./AgentIncidentRecorder";
-import {
-  AgentIncidentStore,
-  type StoredAgentIncidentReport,
-} from "./AgentIncidentStore";
+import { AgentIncidentStore } from "./AgentIncidentStore";
 
-const INCIDENT_ID = /^incident_(?!0{32}$)[a-f0-9]{32}$/u;
 const REPORT_ID = /^report_(?!0{32}$)[a-f0-9]{32}$/u;
 const MAX_PENDING_RUNS = 32;
-const MAX_MEMORY_REPORTS = 20;
 const MAX_PENDING_SAVES = 20;
 const MAX_SETTLED_CORRELATIONS = 64;
-const MAX_STATUS_COUNT = 100_000_000;
 const DEFAULT_DRAIN_TIMEOUT_MS = 1_500;
 const DEFAULT_TERMINAL_SEGMENT_WAIT_MS = 50;
 const MAX_TERMINAL_SEGMENT_WAIT_MS = 250;
 const DEFAULT_FAILURE_SURFACE_WAIT_MS = 1_000;
 const MAX_FAILURE_SURFACE_WAIT_MS = 2_000;
-const MAX_LOOKUP_SERIALIZATION_ATTEMPTS = 3;
 
 export type AgentIncidentCaptureReceipt = Readonly<{
   reportId: string;
-}>;
-
-export type AgentIncidentCopyReport = Readonly<{
-  serialized: string;
-  durability: "persisted" | "memory_fallback";
-}>;
-
-export type AgentIncidentCoordinatorStatus = Readonly<{
-  admissionState: "open" | "closed";
-  initializationState: "not_started" | "pending" | "settled";
-  pendingRunCount: number;
-  memoryReportCount: number;
-  pendingSaveCount: number;
-  pendingRunEvictionCount: number;
-  droppedSaveCount: number;
-  saveFailureCount: number;
-  serializationFailureCount: number;
-  finalizationFailureCount: number;
-  initializationFailureCount: number;
-  reportReservationFailureCount: number;
 }>;
 
 export type AgentIncidentCoordinatorOptions = Readonly<{
@@ -95,7 +68,6 @@ type PendingCapture = {
   failureSurfacePaintOpportunityObserved: boolean;
   readonly environment?: AgentIncidentEnvironmentInput;
   readonly resourceSamples?: readonly AgentIncidentResourceSampleInput[];
-  readonly incidentId?: string;
   reportId?: string;
   readonly collectionFailures: AgentIncidentCaptureFailureCode[];
   evidenceAttached: boolean;
@@ -107,7 +79,6 @@ type PendingRun = {
   readonly transportSegments: AgentIncidentTransportSegmentInput[];
   readonly observedTransportSegmentOrdinals: Set<number>;
   terminalAccepted: boolean;
-  terminalObservationSettled: boolean;
   expectedTerminalSegmentOrdinal?: number;
   terminalSegmentWaitExpired: boolean;
   terminalSegmentTimer?: number;
@@ -118,18 +89,9 @@ type PendingRun = {
   processing?: Promise<void>;
 };
 
-type MemoryReport = {
-  readonly reportId: string;
-  readonly incidentId?: string;
-  readonly serialized: string;
-  durability: "persisted" | "memory_fallback";
-};
-
 type PendingSave = Readonly<{
   report: AgentIncidentReport;
 }>;
-
-type LookupKind = "incident" | "report";
 
 type ProjectedFailureCapture = Readonly<{
   correlation: AgentIncidentCorrelationInput;
@@ -155,9 +117,6 @@ export class AgentIncidentCoordinator {
   private readonly failureSurfaceWaitMs: number;
   private readonly pendingRuns = new Map<string, PendingRun>();
   private readonly settledCorrelations = new Map<string, true>();
-  private readonly memoryByIncidentId = new Map<string, MemoryReport>();
-  private readonly memoryByReportId = new Map<string, MemoryReport>();
-  private readonly lookupWaiters = new Map<string, Set<() => void>>();
   private readonly processingTasks = new Set<Promise<void>>();
   private readonly saveQueue: PendingSave[] = [];
   private readonly drainWaiters = new Set<() => void>();
@@ -165,13 +124,6 @@ export class AgentIncidentCoordinator {
   private initializationSettled = false;
   private admissionOpen = true;
   private activeSave: PendingSave | null = null;
-  private pendingRunEvictionCount = 0;
-  private droppedSaveCount = 0;
-  private saveFailureCount = 0;
-  private serializationFailureCount = 0;
-  private finalizationFailureCount = 0;
-  private initializationFailureCount = 0;
-  private reportReservationFailureCount = 0;
 
   public constructor(options: AgentIncidentCoordinatorOptions) {
     this.recorder = options.recorder;
@@ -204,13 +156,11 @@ export class AgentIncidentCoordinator {
           this.notifyDrainWaiters();
         },
         () => {
-          this.initializationFailureCount = incrementCount(this.initializationFailureCount);
           this.initializationSettled = true;
           this.notifyDrainWaiters();
         },
       );
     } catch {
-      this.initializationFailureCount = incrementCount(this.initializationFailureCount);
       this.initializationSettled = true;
       this.initialization = Promise.resolve();
       this.notifyDrainWaiters();
@@ -245,7 +195,6 @@ export class AgentIncidentCoordinator {
         safeEvent.command_segment_ordinal,
       );
       this.armTerminalSegmentWait(state);
-      this.notifyLookupStateChanged(state);
       void this.scheduleFinalize(state);
     } catch {
       // Diagnostics are observational and cannot affect the product lifecycle.
@@ -287,13 +236,9 @@ export class AgentIncidentCoordinator {
       try {
         const candidate = this.recorder.reserveReportId(projected.correlation);
         if (isReportId(candidate)) reservedReportId = candidate;
-        else this.reportReservationFailureCount = incrementCount(this.reportReservationFailureCount);
       } catch {
-        this.reportReservationFailureCount = incrementCount(this.reportReservationFailureCount);
+        // A report ID is reserved again during finalization.
       }
-      const incidentId = isIncidentId(projected.event.incidentId)
-        ? projected.event.incidentId
-        : undefined;
       state.capture = {
         context,
         ...(safeRendering
@@ -303,14 +248,11 @@ export class AgentIncidentCoordinator {
         failureSurfacePaintOpportunityObserved: false,
         ...(environment ? { environment } : {}),
         ...(resourceSamples ? { resourceSamples } : {}),
-        ...(incidentId ? { incidentId } : {}),
         ...(reservedReportId ? { reportId: reservedReportId } : {}),
         collectionFailures,
         evidenceAttached: false,
       };
       this.armFailureSurfaceWait(state);
-      this.settleTerminalObservationAfterTurn(state);
-      this.notifyLookupStateChanged(state);
       void this.scheduleFinalize(state);
       return receiptFor(reservedReportId);
     } catch {
@@ -343,7 +285,6 @@ export class AgentIncidentCoordinator {
         this.clearFailureSurfaceTimer(state);
       }
       void this.scheduleFinalize(state);
-      this.notifyLookupStateChanged(state);
     } catch {
       // Failure-surface evidence is observational.
     }
@@ -384,54 +325,6 @@ export class AgentIncidentCoordinator {
     }
   }
 
-  public loadSerializedByIncidentId(incidentId: string): Promise<string | null> {
-    return isIncidentId(incidentId)
-      ? this.loadSerialized("incident", incidentId)
-      : Promise.resolve(null);
-  }
-
-  public loadSerializedByReportId(reportId: string): Promise<string | null> {
-    return isReportId(reportId)
-      ? this.loadSerialized("report", reportId)
-      : Promise.resolve(null);
-  }
-
-  public async loadReportForCopy(reportId: string): Promise<AgentIncidentCopyReport | null> {
-    if (!isReportId(reportId)) return null;
-    const memory = await this.loadMemoryReport("report", reportId);
-    return memory ? copyResult(memory) : null;
-  }
-
-  public getStatus(): AgentIncidentCoordinatorStatus {
-    return Object.freeze({
-      admissionState: this.admissionOpen ? "open" : "closed",
-      initializationState: this.initialization === null
-        ? "not_started"
-        : this.initializationSettled ? "settled" : "pending",
-      pendingRunCount: this.pendingRuns.size,
-      memoryReportCount: this.memoryByReportId.size,
-      pendingSaveCount: this.saveQueue.length + (this.activeSave ? 1 : 0),
-      pendingRunEvictionCount: this.pendingRunEvictionCount,
-      droppedSaveCount: this.droppedSaveCount,
-      saveFailureCount: this.saveFailureCount,
-      serializationFailureCount: this.serializationFailureCount,
-      finalizationFailureCount: this.finalizationFailureCount,
-      initializationFailureCount: this.initializationFailureCount,
-      reportReservationFailureCount: this.reportReservationFailureCount,
-    });
-  }
-
-  public async drain(): Promise<void> {
-    try {
-      for (const state of [...this.pendingRuns.values()]) {
-        void this.scheduleFinalize(state);
-      }
-      await this.waitForStableWork();
-    } catch {
-      // Local diagnostics cannot block plugin teardown.
-    }
-  }
-
   public async closeAdmissionAndDrain(): Promise<void> {
     this.admissionOpen = false;
     try {
@@ -453,7 +346,6 @@ export class AgentIncidentCoordinator {
         this.pendingRuns.delete(key);
         this.clearTerminalSegmentTimer(state);
         this.clearFailureSurfaceTimer(state);
-        this.notifyLookupStateChanged(state);
       }
     }
   }
@@ -499,11 +391,9 @@ export class AgentIncidentCoordinator {
       if (!oldestKey) break;
       const oldest = this.pendingRuns.get(oldestKey);
       this.pendingRuns.delete(oldestKey);
-      this.pendingRunEvictionCount = incrementCount(this.pendingRunEvictionCount);
       if (oldest) {
         this.clearTerminalSegmentTimer(oldest);
         this.clearFailureSurfaceTimer(oldest);
-        this.notifyLookupStateChanged(oldest);
       }
     }
     const state: PendingRun = {
@@ -511,7 +401,6 @@ export class AgentIncidentCoordinator {
       transportSegments: [],
       observedTransportSegmentOrdinals: new Set<number>(),
       terminalAccepted: false,
-      terminalObservationSettled: false,
       terminalSegmentWaitExpired: false,
       failureSurfaceWaitExpired: false,
     };
@@ -530,11 +419,10 @@ export class AgentIncidentCoordinator {
     task = Promise.resolve().then(() => {
       this.processPendingRun(state);
     }).catch(() => {
-      this.finalizationFailureCount = incrementCount(this.finalizationFailureCount);
+      // Finalization is best-effort diagnostics.
     }).then(() => {
       if (state.processing === task) state.processing = undefined;
       this.processingTasks.delete(task);
-      this.notifyLookupStateChanged(state);
       this.notifyDrainWaiters();
     });
     state.processing = task;
@@ -555,9 +443,8 @@ export class AgentIncidentCoordinator {
       try {
         const reserved = this.recorder.reserveReportId(state.correlation);
         if (isReportId(reserved)) capture.reportId = reserved;
-        else this.reportReservationFailureCount = incrementCount(this.reportReservationFailureCount);
       } catch {
-        this.reportReservationFailureCount = incrementCount(this.reportReservationFailureCount);
+        // The recorder allocates a report ID when it finalizes.
       }
     }
     if (!capture.evidenceAttached) {
@@ -583,31 +470,23 @@ export class AgentIncidentCoordinator {
           state.correlation,
           capture.finalContext ?? capture.context,
         );
-        if (!report) {
-          this.finalizationFailureCount = incrementCount(this.finalizationFailureCount);
-          return;
-        }
+        if (!report) return;
         state.report = report;
         if (!capture.reportId && isReportId(report.report_id)) {
           capture.reportId = report.report_id;
         }
       } catch {
-        this.finalizationFailureCount = incrementCount(this.finalizationFailureCount);
         return;
       }
     }
-    let serialized: string;
     try {
-      serialized = this.store.serialize(state.report);
+      const serialized = this.store.serialize(state.report);
       if (typeof serialized !== "string") throw new Error("invalid serialization");
     } catch {
-      this.serializationFailureCount = incrementCount(this.serializationFailureCount);
       return;
     }
-    this.rememberSerialized(state.report, serialized);
     this.pendingRuns.delete(key);
     this.rememberSettledCorrelation(key);
-    this.notifyLookupStateChanged(state);
     this.enqueueSave(state.report);
   }
 
@@ -653,7 +532,6 @@ export class AgentIncidentCoordinator {
     while (this.saveQueue.length + 1 >= MAX_PENDING_SAVES) {
       if (this.saveQueue.length === 0) break;
       this.saveQueue.shift();
-      this.droppedSaveCount = incrementCount(this.droppedSaveCount);
     }
     this.saveQueue.push(pending);
     this.notifyDrainWaiters();
@@ -667,19 +545,13 @@ export class AgentIncidentCoordinator {
       save = Promise.reject(new Error("incident save unavailable"));
     }
     void save.then(
-      () => this.completeActiveSave(pending, false),
-      () => this.completeActiveSave(pending, true),
+      () => this.completeActiveSave(pending),
+      () => this.completeActiveSave(pending),
     );
   }
 
-  private completeActiveSave(pending: PendingSave, failed: boolean): void {
+  private completeActiveSave(pending: PendingSave): void {
     if (this.activeSave !== pending) return;
-    if (failed) {
-      this.saveFailureCount = incrementCount(this.saveFailureCount);
-    } else {
-      const memory = this.memoryByReportId.get(pending.report.report_id);
-      if (memory) memory.durability = "persisted";
-    }
     this.activeSave = null;
     const next = this.saveQueue.shift();
     if (next) {
@@ -689,157 +561,6 @@ export class AgentIncidentCoordinator {
       return;
     }
     this.notifyDrainWaiters();
-  }
-
-  private rememberSerialized(
-    report: AgentIncidentReport,
-    serialized: string,
-    durability: MemoryReport["durability"] = "memory_fallback",
-  ): void {
-    try {
-      const reportId = report.report_id;
-      if (!isReportId(reportId) || typeof serialized !== "string") return;
-      const existing = this.memoryByReportId.get(reportId);
-      if (existing !== undefined) return;
-      const rawIncidentId = report.incident.incident_id;
-      const incidentId = isIncidentId(rawIncidentId) ? rawIncidentId : undefined;
-      const memory: MemoryReport = {
-        reportId,
-        ...(incidentId ? { incidentId } : {}),
-        serialized,
-        durability,
-      };
-      this.memoryByReportId.set(reportId, memory);
-      if (incidentId) this.memoryByIncidentId.set(incidentId, memory);
-      while (this.memoryByReportId.size > MAX_MEMORY_REPORTS) {
-        const oldest = this.memoryByReportId.values().next().value;
-        if (!oldest) break;
-        if (this.memoryByReportId.get(oldest.reportId) === oldest) {
-          this.memoryByReportId.delete(oldest.reportId);
-        }
-        if (
-          oldest.incidentId
-          && this.memoryByIncidentId.get(oldest.incidentId) === oldest
-        ) {
-          this.memoryByIncidentId.delete(oldest.incidentId);
-        }
-      }
-      this.notifyLookup("report", reportId);
-      if (incidentId) this.notifyLookup("incident", incidentId);
-    } catch {
-      // A malformed restored report cannot escape the coordinator.
-    }
-  }
-
-  private async loadSerialized(kind: LookupKind, id: string): Promise<string | null> {
-    const memory = await this.loadMemoryReport(kind, id);
-    return memory?.serialized ?? null;
-  }
-
-  private async loadMemoryReport(kind: LookupKind, id: string): Promise<MemoryReport | null> {
-    try {
-      const immediate = this.memoryReport(kind, id);
-      if (immediate !== undefined) return immediate;
-      for (let attempt = 0; attempt < MAX_LOOKUP_SERIALIZATION_ATTEMPTS; attempt += 1) {
-        const pending = this.pendingForLookup(kind, id);
-        if (!pending) break;
-        if (!pending.terminalAccepted && pending.terminalObservationSettled) break;
-        const task = this.scheduleFinalize(pending);
-        if (task) {
-          await task;
-        } else {
-          const signal = this.waitForLookup(kind, id);
-          const afterRegistration = this.pendingForLookup(kind, id);
-          if (afterRegistration) void this.scheduleFinalize(afterRegistration);
-          await signal;
-        }
-        const ready = this.memoryReport(kind, id);
-        if (ready !== undefined) return ready;
-      }
-      const stored = await this.loadStored(kind, id);
-      const afterStore = this.memoryReport(kind, id);
-      if (afterStore !== undefined) return afterStore;
-      if (!stored) return null;
-      this.rememberSerialized(stored.report, stored.serialized, "persisted");
-      return this.memoryReport(kind, id) ?? restoredMemory(stored);
-    } catch {
-      return null;
-    }
-  }
-
-  private loadStored(
-    kind: LookupKind,
-    id: string,
-  ): Promise<StoredAgentIncidentReport<AgentIncidentReport> | null> {
-    try {
-      const loaded = kind === "incident"
-        ? this.store.loadByIncidentId<AgentIncidentReport>(id)
-        : this.store.loadByReportId<AgentIncidentReport>(id);
-      return Promise.resolve(loaded).then(
-        (value) => value,
-        () => null,
-      );
-    } catch {
-      return Promise.resolve(null);
-    }
-  }
-
-  private pendingForLookup(kind: LookupKind, id: string): PendingRun | null {
-    for (const state of this.pendingRuns.values()) {
-      const capture = state.capture;
-      if (!capture) continue;
-      if (kind === "incident" && capture.incidentId === id) return state;
-      if (
-        kind === "report"
-        && (capture.reportId === id || state.report?.report_id === id)
-      ) return state;
-    }
-    return null;
-  }
-
-  private memoryReport(kind: LookupKind, id: string): MemoryReport | undefined {
-    return kind === "incident"
-      ? this.memoryByIncidentId.get(id)
-      : this.memoryByReportId.get(id);
-  }
-
-  private memoryValue(kind: LookupKind, id: string): string | undefined {
-    return this.memoryReport(kind, id)?.serialized;
-  }
-
-  private waitForLookup(kind: LookupKind, id: string): Promise<void> {
-    const key = lookupKey(kind, id);
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        const waiters = this.lookupWaiters.get(key);
-        waiters?.delete(finish);
-        if (waiters?.size === 0) this.lookupWaiters.delete(key);
-        resolve();
-      };
-      const waiters = this.lookupWaiters.get(key) ?? new Set<() => void>();
-      waiters.add(finish);
-      this.lookupWaiters.set(key, waiters);
-      if (this.memoryValue(kind, id) !== undefined) finish();
-    });
-  }
-
-  private notifyLookup(kind: LookupKind, id: string): void {
-    const waiters = this.lookupWaiters.get(lookupKey(kind, id));
-    if (!waiters) return;
-    for (const finish of [...waiters]) finish();
-  }
-
-  private notifyLookupStateChanged(state: PendingRun): void {
-    const capture = state.capture;
-    if (!capture) return;
-    if (capture.incidentId) this.notifyLookup("incident", capture.incidentId);
-    if (capture.reportId) this.notifyLookup("report", capture.reportId);
-    if (state.report && isReportId(state.report.report_id)) {
-      this.notifyLookup("report", state.report.report_id);
-    }
   }
 
   private waitForStableWork(): Promise<void> {
@@ -887,7 +608,6 @@ export class AgentIncidentCoordinator {
     if (state) {
       this.clearTerminalSegmentTimer(state);
       this.clearFailureSurfaceTimer(state);
-      this.notifyLookupStateChanged(state);
     }
   }
 
@@ -901,15 +621,6 @@ export class AgentIncidentCoordinator {
     }
   }
 
-  private settleTerminalObservationAfterTurn(state: PendingRun): void {
-    void Promise.resolve().then(() => {
-      const key = correlationKey(state.correlation);
-      if (this.pendingRuns.get(key) !== state) return;
-      state.terminalObservationSettled = true;
-      this.notifyLookupStateChanged(state);
-    });
-  }
-
   private armFailureSurfaceWait(state: PendingRun): void {
     if (this.failureSurfaceReady(state) || state.failureSurfaceTimer !== undefined) {
       return;
@@ -918,7 +629,6 @@ export class AgentIncidentCoordinator {
       state.failureSurfaceTimer = undefined;
       state.failureSurfaceWaitExpired = true;
       void this.scheduleFinalize(state);
-      this.notifyLookupStateChanged(state);
       this.notifyDrainWaiters();
     }, this.failureSurfaceWaitMs);
     this.notifyDrainWaiters();
@@ -1076,39 +786,12 @@ function correlationKey(correlation: AgentIncidentCorrelationInput): string {
   return `${correlation.conversationId}\n${correlation.requestId}`;
 }
 
-function lookupKey(kind: LookupKind, id: string): string {
-  return `${kind}:${id}`;
-}
-
-function isIncidentId(value: unknown): value is string {
-  return typeof value === "string" && INCIDENT_ID.test(value);
-}
-
 function isReportId(value: unknown): value is string {
   return typeof value === "string" && REPORT_ID.test(value);
 }
 
 function receiptFor(reportId: string | undefined): AgentIncidentCaptureReceipt | null {
   return reportId ? Object.freeze({ reportId }) : null;
-}
-
-function copyResult(memory: MemoryReport): AgentIncidentCopyReport {
-  return Object.freeze({
-    serialized: memory.serialized,
-    durability: memory.durability,
-  });
-}
-
-function restoredMemory(
-  stored: StoredAgentIncidentReport<AgentIncidentReport>,
-): MemoryReport {
-  const rawIncidentId = stored.report.incident.incident_id;
-  return {
-    reportId: stored.report.report_id,
-    ...(isIncidentId(rawIncidentId) ? { incidentId: rawIncidentId } : {}),
-    serialized: stored.serialized,
-    durability: "persisted",
-  };
 }
 
 function safeChatViewState(
@@ -1234,10 +917,6 @@ function boundedTimeout(value: unknown, fallback: number, maximum: number): numb
   return Number.isSafeInteger(value) && (value as number) > 0
     ? Math.min(value as number, maximum)
     : fallback;
-}
-
-function incrementCount(value: number): number {
-  return Math.min(MAX_STATUS_COUNT, value + 1);
 }
 
 function positiveOrdinal(value: unknown): number | undefined {

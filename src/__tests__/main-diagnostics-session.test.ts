@@ -2,6 +2,8 @@
 
 import { App, Platform } from "obsidian";
 import SystemSculptPlugin from "../main";
+import { AgentIncidentCoordinator } from "../core/diagnostics/AgentIncidentCoordinator";
+import { AgentIncidentStore } from "../core/diagnostics/AgentIncidentStore";
 import { DiagnosticsSessionLifecycle } from "../core/diagnostics/DiagnosticsSessionLifecycle";
 import { ResourceMonitorService } from "../services/ResourceMonitorService";
 import { DEFAULT_SETTINGS } from "../types";
@@ -187,12 +189,16 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     const app = new App();
     const adapter = app.vault.adapter as any;
     const plugin = makePlugin(app);
+    const initializeCoordinator = jest.spyOn(AgentIncidentCoordinator.prototype, "initialize");
+    const initializeStore = jest.spyOn(AgentIncidentStore.prototype, "initialize");
 
     (plugin as any).initializeAgentIncidentCoordinator();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(plugin.getAgentIncidentCoordinator()?.getStatus().initializationState).toBe("not_started");
+    expect(plugin.getAgentIncidentCoordinator()).toBeInstanceOf(AgentIncidentCoordinator);
+    expect(initializeCoordinator).not.toHaveBeenCalled();
+    expect(initializeStore).not.toHaveBeenCalled();
     expect(adapter.exists).not.toHaveBeenCalled();
     expect(adapter.mkdir).not.toHaveBeenCalled();
     expect(adapter.list).not.toHaveBeenCalled();

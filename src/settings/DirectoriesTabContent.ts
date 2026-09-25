@@ -99,7 +99,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         "Chats directory",
-        "Where chat history is stored.",
+        "Where new chats are saved. Existing chats stay in the folder they were saved in.",
         "chatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Chats)"
     );

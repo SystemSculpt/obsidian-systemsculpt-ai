@@ -5,7 +5,9 @@ import {
 } from "../../../services/PlatformRequestClient";
 import {
   parseThinAgentDataPart,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
+  type ThinAgentContextSource,
 } from "../../../services/managed/ThinAgentV1Contract";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall, ToolCallResult } from "../../../types/toolCalls";
@@ -224,6 +226,31 @@ function bootstrapRequest(
     capability_manifest: {
       contract_version: "thin-agent-capabilities-v1",
       capabilities: [{ id: "obsidian.vault", version: 1 }],
+    },
+  };
+}
+
+/** Measures sources the way the chat view does while reading them. */
+function measuredContext(
+  sources: readonly ThinAgentContextSource[],
+): MeasuredThinAgentContext {
+  const textBlocks = sources.filter((source) => source.kind === "text");
+  const images = sources.flatMap((source) => source.kind === "image"
+    ? [{
+        mimeType: source.data_url.slice("data:".length, source.data_url.indexOf(";")),
+        bytes: Buffer.from(source.data_url.split(",")[1] ?? "", "base64").byteLength,
+      }]
+    : []);
+  return {
+    sources,
+    measurement: {
+      largestTextBlockBytes: Math.max(0, ...textBlocks.map((block) => Buffer.byteLength(block.content))),
+      totalTextBytes: textBlocks.reduce((total, block) =>
+        total + Buffer.byteLength(block.path) + Buffer.byteLength(block.content), 0),
+      imageCount: images.length,
+      largestImageBytes: Math.max(0, ...images.map((image) => image.bytes)),
+      totalImageBytes: images.reduce((total, image) => total + image.bytes, 0),
+      imageMimeTypes: [...new Set(images.map((image) => image.mimeType))],
     },
   };
 }
@@ -801,7 +828,7 @@ describe("AgentChatSession", () => {
     const harness = createHarness();
     const rootMessageId = "user_context_before_hydration";
 
-    await expect(harness.agent.stageContext(rootMessageId, []))
+    await expect(harness.agent.stageContext(rootMessageId, measuredContext([])))
       .resolves.toMatchObject({
         contract_version: "thin-agent-v1",
         context_ref: expect.stringMatching(/^ctx1_/u),
@@ -839,6 +866,156 @@ describe("AgentChatSession", () => {
       conversationId: CONVERSATION_ID,
       requestId: rootMessageId,
     }));
+  });
+
+  it("stages view-measured pinned images above 4 MiB and at the 6 MiB limit without re-parsing them", async () => {
+    const harness = createHarness();
+    const rootMessageId = "user_context_large_images";
+    const image = (byteLength: number) => ({
+      kind: "image" as const,
+      path: `Photos/${byteLength}.jpg`,
+      data_url: `data:image/jpeg;base64,${Buffer.alloc(byteLength, 0x33).toString("base64")}`,
+    });
+    const contextSources = [
+      image(4 * 1024 * 1024 + 99_999),
+      image(6 * 1024 * 1024),
+    ];
+
+    await expect(harness.agent.stageContext(rootMessageId, measuredContext(contextSources)))
+      .resolves.toMatchObject({ context_ref: expect.stringMatching(/^ctx1_/u) });
+
+    const contextRequest = harness.request.mock.calls[1]?.[0] as PlatformRequestInput;
+    expect(contextRequest.url).toBe("https://systemsculpt.test/api/plugin/agent/context");
+    expect(contextRequest.body).toEqual({
+      contract_version: "thin-agent-v1",
+      root_message_id: rootMessageId,
+      context_sources: contextSources,
+    });
+    // The sources travel as built; nothing re-encodes or copies the payload.
+    expect((contextRequest.body as { context_sources: unknown }).context_sources)
+      .toBe(contextSources);
+  });
+
+  describe("when bootstrap negotiates limits lower than the view read against", () => {
+    const MIB = 1024 * 1024;
+    const image = (name: string, byteLength: number, mimeType = "image/jpeg") => ({
+      kind: "image" as const,
+      path: `Photos/${name}`,
+      data_url: `data:${mimeType};base64,${Buffer.alloc(byteLength, 0x33).toString("base64")}`,
+    });
+    const text = (name: string, byteLength: number) => ({
+      kind: "text" as const,
+      path: `Notes/${name}`,
+      content: "t".repeat(byteLength),
+    });
+
+    function lowerLimitHarness() {
+      const suffix = CONVERSATION_ID.slice("conversation_".length);
+      const server = new FakeAgentServer(CONVERSATION_ID, `session_${suffix}`, `access_token_${suffix}`);
+      const request = jest.fn(async (input: PlatformRequestInput): Promise<Response> => {
+        const response = await server.request(input);
+        if (!String(input.url).includes("/agent/bootstrap")) return response;
+        const bootstrap = await response.json() as ReturnType<typeof bootstrapResponse>;
+        return jsonResponse({
+          ...bootstrap,
+          client_input_limits: {
+            ...bootstrap.client_input_limits,
+            image_mime_types: ["image/png", "image/jpeg"],
+            max_content_blocks_per_message: 4,
+            max_images_per_turn: 2,
+            max_image_bytes: 1 * MIB,
+            max_total_image_bytes: 1.5 * MIB,
+            max_text_bytes_per_block: 4_096,
+            max_total_text_bytes: 8_192,
+          },
+        });
+      });
+      return createHarness({ request });
+    }
+
+    it.each([
+      {
+        label: "an image under the default but over the negotiated per-image limit",
+        sources: [image("large.jpg", 4 * MIB)],
+      },
+      {
+        label: "images over the negotiated total",
+        sources: [image("a.jpg", 1 * MIB), image("b.jpg", 1 * MIB)],
+      },
+      {
+        label: "more images than the negotiated count",
+        sources: [image("a.png", 16, "image/png"), image("b.png", 16, "image/png"), image("c.png", 16, "image/png")],
+      },
+      {
+        label: "an image type the server no longer accepts",
+        sources: [image("photo.webp", 16, "image/webp")],
+      },
+      {
+        label: "a text block over the negotiated per-block limit",
+        sources: [text("long.md", 5_000)],
+      },
+      {
+        label: "text blocks over the negotiated total",
+        sources: [text("a.md", 4_000), text("b.md", 4_000), text("c.md", 4_000)],
+      },
+      {
+        label: "more sources than the negotiated block count",
+        sources: [1, 2, 3, 4, 5].map((index) => text(`${index}.md`, 8)),
+      },
+    ])("refuses $label before uploading it", async ({ sources }) => {
+      const harness = lowerLimitHarness();
+      const rootMessageId = "user_context_lower_limits";
+
+      const result = harness.agent.stageContext(rootMessageId, measuredContext(sources));
+
+      await expect(result).rejects.toMatchObject({
+        message: "Selected vault context is too large.",
+        code: "context_too_large",
+        retryable: false,
+      });
+      // Bootstrap only: the context was never sent.
+      expect(harness.request).toHaveBeenCalledTimes(1);
+      expect(String(harness.request.mock.calls[0]?.[0].url)).toContain("/agent/bootstrap");
+      expect(harness.onLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+        code: "context_prepare_failed",
+        requestId: rootMessageId,
+      }));
+    });
+
+    it("stages context that fits the negotiated limits", async () => {
+      const harness = lowerLimitHarness();
+
+      await expect(harness.agent.stageContext("user_context_fits", measuredContext([
+        image("small.png", 1 * MIB, "image/png"),
+        text("brief.md", 4_000),
+      ]))).resolves.toMatchObject({ context_ref: expect.stringMatching(/^ctx1_/u) });
+      expect(harness.request).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails the turn with the server path's code when staging refuses the context", async () => {
+      const harness = lowerLimitHarness();
+
+      const run = await harness.agent.start({
+        conversationId: CONVERSATION_ID,
+        turnId: "user_context_turn_refused",
+        message: userMessage("user_context_turn_refused", "Summarize the photo."),
+        buildBody: async (signal) => {
+          const staged = await harness.agent.stageContext(
+            "user_context_turn_refused",
+            measuredContext([image("large.jpg", 4 * MIB)]),
+            signal,
+          );
+          return { context_ref: staged.context_ref };
+        },
+      });
+
+      expect(run).toMatchObject({
+        kind: "failed",
+        error: { code: "context_too_large", retryable: false },
+      });
+      expect(harness.request.mock.calls.map(([input]) => String(input.url)))
+        .not.toContainEqual(expect.stringContaining("/agent/context"));
+    });
   });
 
   it.each([
@@ -915,7 +1092,7 @@ describe("AgentChatSession", () => {
     const harness = createHarness({ request });
     const rootMessageId = `user_context_error_${status}_${body.length}`;
 
-    const result = harness.agent.stageContext(rootMessageId, []);
+    const result = harness.agent.stageContext(rootMessageId, measuredContext([]));
 
     await expect(result).rejects.toMatchObject({
       code: expectedCode,

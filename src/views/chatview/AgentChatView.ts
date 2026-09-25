@@ -24,7 +24,11 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
-import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
+import {
+  ChatStorageService,
+  resolveChatsDirectory,
+  SavedChatCorruptedError,
+} from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -78,6 +82,7 @@ import {
   THIN_AGENT_CAPABILITIES,
   THIN_AGENT_CAPABILITY_CONTRACT_VERSION,
   THIN_AGENT_CONTRACT_VERSION,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
   type ThinAgentContextSource,
 } from "../../services/managed/ThinAgentV1Contract";
@@ -505,7 +510,13 @@ export class AgentChatView extends ItemView {
       ? plugin.settings.thinAgentClientId!
       : protocolId("client");
     this.aiService = SystemSculptService.getInstance(plugin);
-    this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory, plugin);
+    // Resolved on each use: SettingsManager replaces plugin.settings on every
+    // save, and the chats folder may change while this view stays open.
+    this.chatStorage = new ChatStorageService(
+      plugin.app,
+      () => resolveChatsDirectory(this.plugin.settings),
+      plugin,
+    );
     this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter);
     this.queueRepository = new AgentQueueStateRepository(plugin.app.vault.adapter, this.attachmentStore);
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
@@ -1082,7 +1093,12 @@ export class AgentChatView extends ItemView {
   }
 
   public getExpectedChatHistoryFilePath(): string | null {
-    return this.chatId ? `${this.plugin.settings.chatsDirectory}/${this.chatId}.md` : null;
+    if (!this.chatId) return null;
+    // A loaded or created chat keeps its file after the chats folder setting
+    // changes. A chat id from restored leaf state that has not loaded yet
+    // resolves against the configured folder.
+    return this.transcript.chatPath(this.chatId)
+      ?? `${resolveChatsDirectory(this.plugin.settings)}/${this.chatId}.md`;
   }
 
   public getChatHistoryFilePath(): string | null {
@@ -1821,11 +1837,19 @@ export class AgentChatView extends ItemView {
     return Object.freeze({ ...submission, attachments });
   }
 
+  /**
+   * Reads pinned context and measures every source once, against the limits
+   * known now. Staging re-checks these measurements against the limits the
+   * server negotiates at bootstrap.
+   */
   private async readThinAgentContextSources(
     pinnedEntries: ReadonlySet<string>,
-  ): Promise<ThinAgentContextSource[]> {
+  ): Promise<MeasuredThinAgentContext> {
     const sources: ThinAgentContextSource[] = [];
+    const imageMimeTypes = new Set<string>();
+    let largestTextBlockBytes = 0;
     let textBytes = 0;
+    let largestImageBytes = 0;
     let imageBytes = 0;
     let imageCount = 0;
     for (const entry of pinnedEntries) {
@@ -1865,10 +1889,25 @@ export class AgentChatView extends ItemView {
         if (imageCount > this.chatInputLimits.maxImagesPerTurn) {
           throw new Error("Pinned files exceed the per-message image count limit.");
         }
+        const mimeType = imageMimeType(resolved.extension);
+        if (!this.chatInputLimits.imageMimeTypes.includes(mimeType)) {
+          throw new Error(`${resolved.name} is not a supported pinned image type.`);
+        }
         if (resolved.stat.size > this.chatInputLimits.maxImageBytes) {
           throw new Error(`${resolved.name} exceeds the pinned image limit.`);
         }
         const bytes = new Uint8Array(await this.app.vault.readBinary(resolved));
+        // These sources are sent without being parsed again, so this is the
+        // one place their sizes are measured. Check the bytes actually read,
+        // not only the possibly stale stat.
+        if (bytes.byteLength === 0) {
+          throw new Error(`${resolved.name} is an empty image.`);
+        }
+        if (bytes.byteLength > this.chatInputLimits.maxImageBytes) {
+          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
+        }
+        imageMimeTypes.add(mimeType);
+        largestImageBytes = Math.max(largestImageBytes, bytes.byteLength);
         imageBytes += bytes.byteLength;
         if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
           throw new Error("Pinned images exceed the total per-message image limit.");
@@ -1876,7 +1915,7 @@ export class AgentChatView extends ItemView {
         sources.push({
           kind: "image",
           path: resolved.path,
-          data_url: thinAgentDataUrl(imageMimeType(resolved.extension), bytes),
+          data_url: thinAgentDataUrl(mimeType, bytes),
         });
       } else {
         const content = await this.app.vault.read(resolved);
@@ -1884,6 +1923,7 @@ export class AgentChatView extends ItemView {
         if (byteLength > this.chatInputLimits.maxTextBytesPerBlock) {
           throw new Error(`${resolved.name} exceeds the pinned text file limit.`);
         }
+        largestTextBlockBytes = Math.max(largestTextBlockBytes, byteLength);
         textBytes += new TextEncoder().encode(resolved.path).byteLength + byteLength;
         if (textBytes > this.chatInputLimits.maxTotalTextBytes) {
           throw new Error("Pinned files exceed the total per-message text limit.");
@@ -1891,7 +1931,17 @@ export class AgentChatView extends ItemView {
         sources.push({ kind: "text", path: resolved.path, content });
       }
     }
-    return sources;
+    return {
+      sources,
+      measurement: {
+        largestTextBlockBytes,
+        totalTextBytes: textBytes,
+        imageCount,
+        largestImageBytes,
+        totalImageBytes: imageBytes,
+        imageMimeTypes: [...imageMimeTypes],
+      },
+    };
   }
 
   /**
@@ -2078,7 +2128,7 @@ export class AgentChatView extends ItemView {
       await this.workspace?.setHistory(optimisticHistory);
       if (!this.isCurrentSubmissionOperation(operation)) return;
 
-      const [hydratedUserMessage, contextSources, pluginBuildId] = await Promise.all([
+      const [hydratedUserMessage, context, pluginBuildId] = await Promise.all([
         this.attachmentStore.hydrateMessage(admittedUserMessage),
         this.readThinAgentContextSources(
           options.includeContextFiles === false
@@ -2118,10 +2168,10 @@ export class AgentChatView extends ItemView {
           }
           // No sources means there is nothing to stage; context_ref is
           // optional on the wire, so skip the staging round trip entirely.
-          if (contextSources.length === 0) return undefined;
+          if (context.sources.length === 0) return undefined;
           const staged = await this.agent.stageContext(
             admittedUserMessage.message_id,
-            contextSources,
+            context,
             signal,
           );
           if (!this.isCurrentSubmissionOperation(operation)) {

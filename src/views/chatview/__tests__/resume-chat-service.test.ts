@@ -184,6 +184,50 @@ describe("ResumeChatService", () => {
       expect(service.isChatHistoryFile(file)).toBe(true);
     });
 
+    it("requires a path boundary after the chats directory", () => {
+      const { app, plugin } = createPluginStub();
+      const service = new ResumeChatService(plugin);
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-1", created: "2025-01-01" },
+      });
+
+      expect(service.isChatHistoryFile(new TFile({ path: "SystemSculpt/Chats-old/chat-1.md" })))
+        .toBe(false);
+      expect(service.isChatHistoryFile(new TFile({ path: "SystemSculpt/Chatsx.md" })))
+        .toBe(false);
+      expect(service.isChatHistoryFile(new TFile({ path: "SystemSculpt/Chats/Archive/chat-1.md" })))
+        .toBe(true);
+    });
+
+    it("follows the chats directory after a settings save replaces the settings object", async () => {
+      const { app, plugin } = createPluginStub();
+      app.vault.getAbstractFileByPath = jest.fn(() => null);
+      const service = new ResumeChatService(plugin);
+      app.metadataCache.getCache.mockReturnValue({
+        frontmatter: { id: "chat-1", created: "2025-01-01" },
+      });
+      const oldFile = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
+      const movedFile = new TFile({ path: "Archive/Chats/chat-1.md" });
+      expect(service.isChatHistoryFile(oldFile)).toBe(true);
+      expect(service.isChatHistoryFile(movedFile)).toBe(false);
+
+      // SettingsManager installs a new object on every save; a trailing
+      // slash in the setting still names the same folder.
+      plugin.settings = { ...plugin.settings, chatsDirectory: "Archive/Chats/" };
+
+      expect(service.isChatHistoryFile(oldFile)).toBe(false);
+      expect(service.isChatHistoryFile(movedFile)).toBe(true);
+      app.vault.getAbstractFileByPath.mockClear();
+      await expect((service as any).chatStorage.getChatResumeDescriptor("chat-1"))
+        .resolves.toBeNull();
+      // The live folder is searched first, then the folders chats may have
+      // stayed in after the setting changed.
+      expect(app.vault.getAbstractFileByPath.mock.calls).toEqual([
+        ["Archive/Chats/chat-1.md"],
+        ["SystemSculpt/Chats/chat-1.md"],
+      ]);
+    });
+
     it("handles cache returning null", () => {
       const { app, plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);

@@ -568,6 +568,12 @@ export class SettingsManager {
       validatedSettings.chatsDirectory = defaultSettings.chatsDirectory;
     }
 
+    // Chats saved before this list existed are in the folder configured now.
+    validatedSettings.knownChatsDirectories = Array.isArray(validatedSettings.knownChatsDirectories)
+      ? [...new Set(validatedSettings.knownChatsDirectories
+        .filter((directory): directory is string => typeof directory === "string"))]
+      : [validatedSettings.chatsDirectory];
+
     if (typeof validatedSettings.recordingsDirectory !== 'string') {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
@@ -900,6 +906,15 @@ export class SettingsManager {
     }
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
+    // The chats-folder list only grows. Chats stay in the folder they were
+    // created in and attachment cleanup scans every listed folder, so neither
+    // a concurrent append nor a restored backup may drop an entry.
+    if (Array.isArray(newSettings.knownChatsDirectories)) {
+      updatedSettings.knownChatsDirectories = [
+        ...(this.settings.knownChatsDirectories ?? []),
+        ...newSettings.knownChatsDirectories,
+      ];
+    }
     
     // Validate the merged settings before persistence.
     this.settings = this.validateSettings(updatedSettings);

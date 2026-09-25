@@ -24,6 +24,26 @@ import {
 import type { ToolCall } from "../../../types/toolCalls";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
+/**
+ * Only these literal markers can change how a stored message is parsed, so
+ * only they force a message into the opaque framed payload.
+ */
+const RESERVED_MARKERS = [
+  "<!-- SYSTEMSCULPT-",
+  "<!-- REASONING",
+  "<!-- TOOL-CALLS",
+] as const;
+/**
+ * Reasoning is stored inside an HTML comment, and `-->` or `--!>` would close
+ * it early. The writer inserts one backslash after the `--` of every
+ * `--`, backslashes, optional `!`, `>` run, and this attribute tells the
+ * reader to remove it. Messages without the attribute store reasoning
+ * verbatim, so older notes read exactly as before.
+ */
+const REASONING_ESCAPE_ATTRIBUTE = "reasoning-escape";
+const REASONING_ESCAPE_VERSION = "v1";
+const REASONING_CLOSER_RUN = /--(\\*)(!?)>/gu;
+const ESCAPED_REASONING_CLOSER_RUN = /--\\(\\*)(!?)>/gu;
 const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 type FramedMessagePayload =
@@ -145,6 +165,8 @@ export class ChatMarkdownSerializer {
       const storedMultipart = this.extractStoredMultipart(match[2]);
       if (storedMultipart.state === "invalid") return { success: false, messages: [] };
       const body = storedMultipart.body;
+      const reasoningEscape = this.reasoningEscape(attrs);
+      if (reasoningEscape === "invalid") return { success: false, messages: [] };
 
       const parts: MessagePart[] = [];
       let ts = Date.now();
@@ -161,7 +183,9 @@ export class ChatMarkdownSerializer {
         if (reasoningText) {
           extractedBlocks.push({
             type: "reasoning",
-            data: reasoningText,
+            data: reasoningEscape === "escaped"
+              ? this.unescapeReasoning(reasoningText)
+              : reasoningText,
             start: reasoningMatch.index,
             end: reasoningMatch.index + reasoningMatch[0].length,
           });
@@ -233,8 +257,11 @@ export class ChatMarkdownSerializer {
       }
 
       if (cursor < body.length) {
+        // With no blocks the chunk still begins with the newline the writer
+        // puts after the START marker. Keeping it prepended one newline to
+        // the message on every load and save.
         pushContentChunk(body.slice(cursor), {
-          trimLeadingBoundary: cursor > 0,
+          trimLeadingBoundary: true,
           trimTrailingBoundary: true,
         });
       } else if (parts.length === 0) {
@@ -640,6 +667,7 @@ export class ChatMarkdownSerializer {
 
   private static messageToMarkdown(msg: ChatMessage): string {
     let messageBody = "";
+    let escapesReasoning = false;
 
     if (msg.messageParts && msg.messageParts.length > 0) {
       // New format – iterate through parts in order.
@@ -650,13 +678,19 @@ export class ChatMarkdownSerializer {
             break;
           case "reasoning":
             if (typeof part.data === "string") {
-              // Preserve reasoning verbatim without trimming or normalization
-              messageBody += `\n<!-- REASONING\n${part.data}\n-->\n`;
+              // Preserve reasoning without trimming or normalization. The
+              // only change is the reversible comment-closer escape.
+              const escaped = this.escapeReasoning(part.data);
+              if (escaped !== part.data) escapesReasoning = true;
+              messageBody += `\n<!-- REASONING\n${escaped}\n-->\n`;
             }
             break;
           case "tool_call": {
             const toolCallArray = [part.data];
-            messageBody += `\n<!-- TOOL-CALLS\n${JSON.stringify(toolCallArray, null, 2)}\n-->\n`;
+            // `>` only occurs inside JSON strings, where \u003e is the same
+            // character, so the comment can never be closed early.
+            const toolCallJson = JSON.stringify(toolCallArray, null, 2).replace(/>/gu, "\\u003e");
+            messageBody += `\n<!-- TOOL-CALLS\n${toolCallJson}\n-->\n`;
             break;
           }
         }
@@ -718,6 +752,8 @@ export class ChatMarkdownSerializer {
     if (this.needsFramedPayload(msg)) {
       attributes += ` payload-format="${FRAMED_PAYLOAD_FORMAT}"`;
       messageBody = this.encodeBase64Json(this.createFramedMessagePayload(msg));
+    } else if (escapesReasoning) {
+      attributes += ` ${REASONING_ESCAPE_ATTRIBUTE}="${REASONING_ESCAPE_VERSION}"`;
     }
 
     const messageStart = `<!-- SYSTEMSCULPT-MESSAGE-START ${attributes} -->`;
@@ -734,10 +770,7 @@ export class ChatMarkdownSerializer {
 
   private static containsReservedFraming(value: unknown, seen = new Set<object>()): boolean {
     if (typeof value === "string") {
-      return value.includes("<!-- SYSTEMSCULPT-")
-        || value.includes("<!-- REASONING")
-        || value.includes("<!-- TOOL-CALLS")
-        || /--!?>/u.test(value);
+      return RESERVED_MARKERS.some((marker) => value.includes(marker));
     }
     if (!value || typeof value !== "object") return false;
     if (seen.has(value)) return false;
@@ -745,6 +778,31 @@ export class ChatMarkdownSerializer {
     return Array.isArray(value)
       ? value.some((item) => this.containsReservedFraming(item, seen))
       : Object.values(value).some((item) => this.containsReservedFraming(item, seen));
+  }
+
+  private static escapeReasoning(text: string): string {
+    return text.replace(
+      REASONING_CLOSER_RUN,
+      (_run, backslashes: string, bang: string) => `--${backslashes}\\${bang}>`,
+    );
+  }
+
+  private static unescapeReasoning(text: string): string {
+    return text.replace(
+      ESCAPED_REASONING_CLOSER_RUN,
+      (_run, backslashes: string, bang: string) => `--${backslashes}${bang}>`,
+    );
+  }
+
+  /** Unknown or repeated escape declarations fail closed. */
+  private static reasoningEscape(attributes: string): "verbatim" | "escaped" | "invalid" {
+    const declarations = [...attributes.matchAll(
+      new RegExp(`(?:^|\\s)${REASONING_ESCAPE_ATTRIBUTE}="([^"]*)"(?=\\s|$)`, "gu"),
+    )];
+    if (declarations.length === 0) return "verbatim";
+    return declarations.length === 1 && declarations[0][1] === REASONING_ESCAPE_VERSION
+      ? "escaped"
+      : "invalid";
   }
 
   private static createFramedMessagePayload(message: ChatMessage): FramedMessagePayload {

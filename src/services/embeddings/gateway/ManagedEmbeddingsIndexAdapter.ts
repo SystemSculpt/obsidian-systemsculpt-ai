@@ -1,6 +1,6 @@
 import { sha256HexFromArrayBuffer } from "../../../utils/sha256";
 import { containsControlCharacters } from "../../../utils/characterValidation";
-import { base64ToBytes, bytesToBase64 } from "../../../utils/base64";
+import { base64ToBytes, bytesToBase64, isBase64 } from "../../../utils/base64";
 import type { ManagedTransportResult } from "../../managed/ManagedTypes";
 import type { HostedTransportAdapter } from "../../managed/adapters/HostedTransportAdapter";
 
@@ -47,7 +47,6 @@ export const MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS = 8_000;
 const GENERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_POSITIVE_DECIMAL = /^[1-9]\d*$/;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MAX_GENERATION_SCHEMA_VERSION = 1_000_000;
 const MAX_VECTOR_DIMENSIONS = 8_192;
 const MAX_CHUNKS = 100_000;
@@ -175,7 +174,7 @@ function decodeFloat32Vector(value: unknown, dimensions: number): Float32Array |
     typeof value !== "string"
     || value.length === 0
     || value.length > Math.ceil(dimensions * 4 / 3) * 4
-    || !BASE64.test(value)
+    || !isBase64(value)
   ) {
     return null;
   }

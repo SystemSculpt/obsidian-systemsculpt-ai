@@ -149,6 +149,47 @@ describe("thin-agent-v1 application contract", () => {
     })).toMatchObject({ bytes: 2 });
   });
 
+  it("validates pinned images above 4 MiB and at the 6 MiB limit without overflowing the stack", () => {
+    const maxImageBytes = DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes;
+    expect(maxImageBytes).toBe(6 * 1024 * 1024);
+    const image = (byteLength: number, mimeType = "image/jpeg") => ({
+      kind: "image" as const,
+      path: `photo-${byteLength}.jpg`,
+      data_url: `data:${mimeType};base64,${Buffer.alloc(byteLength, 0x5a).toString("base64")}`,
+    });
+    const request = (...contextSources: unknown[]) => ({
+      contract_version: "thin-agent-v1",
+      root_message_id: "message_large_image",
+      context_sources: contextSources,
+    });
+
+    const aboveFourMebibytes = image(4 * 1024 * 1024 + 123_457);
+    const atLimit = image(maxImageBytes, "image/png");
+    expect(parseThinAgentContextRequest(
+      request(aboveFourMebibytes, atLimit),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    ).context_sources).toEqual([aboveFourMebibytes, atLimit]);
+
+    expect(() => parseThinAgentContextRequest(
+      request(image(maxImageBytes + 1)),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow(ThinAgentContractError);
+    const corrupt = image(maxImageBytes);
+    const midpoint = corrupt.data_url.length >> 1;
+    expect(() => parseThinAgentContextRequest(
+      request({
+        ...corrupt,
+        data_url: `${corrupt.data_url.slice(0, midpoint)}*${corrupt.data_url.slice(midpoint + 1)}`,
+      }),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow(ThinAgentContractError);
+    // Three 6 MiB images exceed the 16 MiB per-message total.
+    expect(() => parseThinAgentContextRequest(
+      request(atLimit, image(maxImageBytes), image(maxImageBytes, "image/webp")),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow("Selected vault context is too large.");
+  });
+
   it("validates staged context with the server's UTF-8, path, and document semantics", () => {
     const maxBlock = DEFAULT_THIN_AGENT_INPUT_LIMITS.maxTextBytesPerBlock;
     const first = {

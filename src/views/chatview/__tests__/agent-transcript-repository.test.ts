@@ -103,6 +103,32 @@ function createHarness() {
 describe("AgentTranscriptRepository", () => {
   const conversationId = "conversation_0123456789abcdef0123456789abcdef";
 
+  it("saves back to the folder a chat was created in or loaded from", async () => {
+    const { repository, records, storage } = createHarness();
+    storage.createChatExclusive.mockImplementationOnce(async (id: string, messages: ChatMessage[]) => {
+      records.set(id, { id, version: 1, messages, context_files: [], chatDirectory: "Old/Chats" });
+      return { version: 1, chatDirectory: "Old/Chats" } as any;
+    });
+    const created = await repository.commitUser({ kind: "append", message: user("u1") });
+    await repository.persistAssistant(assistant("a1"));
+    await repository.saveMetadata();
+
+    expect(storage.saveChat.mock.calls.map(([, , options]) => options.chatDirectory))
+      .toEqual(["Old/Chats", "Old/Chats"]);
+    expect(repository.chatPath(created.chatId)).toBe(`Old/Chats/${created.chatId}.md`);
+    expect(repository.chatPath("another-chat")).toBeNull();
+
+    records.set("loaded", {
+      id: "loaded", version: 4, messages: [], context_files: [], chatDirectory: "Archive/Chats",
+    });
+    await repository.load("loaded");
+    await repository.persistAssistant(assistant("a2"));
+    expect(storage.saveChat.mock.calls.at(-1)?.[2]).toMatchObject({ chatDirectory: "Archive/Chats" });
+
+    repository.reset();
+    expect(repository.chatPath("loaded")).toBeNull();
+  });
+
   it("allocates on the first user turn and durably upserts assistant output", async () => {
     const { repository, storage } = createHarness();
     const commits: Array<{ role: string; messageId: string; version: number }> = [];

@@ -28,18 +28,15 @@ import {
   THIN_AGENT_CONTRACT_VERSION,
   parseThinAgentBootstrapRequest,
   parseThinAgentBootstrapResponse,
-  parseThinAgentContextRequest,
+  isThinAgentContextWithinLimits,
   parseThinAgentContextResponse,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
   type ThinAgentBootstrapResponse,
   type ThinAgentContextResponse,
-  type ThinAgentContextSource,
   type ThinAgentRunTerminalData,
 } from "../../services/managed/ThinAgentV1Contract";
-import {
-  DEFAULT_THIN_AGENT_INPUT_LIMITS,
-  type ThinAgentInputLimits,
-} from "../../services/managed/ThinAgentInputLimits";
+import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import type { ChatMessage } from "../../types";
 import type { ToolCallResult } from "../../types/toolCalls";
 import {
@@ -594,7 +591,6 @@ export class AgentChatSession implements ChatSession {
   private pendingCancelInFlight = false;
   private readonly pendingDeliveries = new Map<string, PendingToolDelivery>();
   private readonly pendingApprovalDeliveries = new Map<string, PendingApprovalDelivery>();
-  private inputLimits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS;
   private readonly lifecycle: AgentLifecycle;
   private renderTimer: number | null = null;
   private pendingSnapshot: AgentConversationSnapshot | null = null;
@@ -1040,7 +1036,7 @@ export class AgentChatSession implements ChatSession {
 
   public async stageContext(
     rootMessageId: string,
-    contextSources: readonly ThinAgentContextSource[],
+    measuredContext: MeasuredThinAgentContext,
     signal?: AbortSignal,
   ): Promise<ThinAgentContextResponse> {
     const conversationId = this.conversationId ?? undefined;
@@ -1053,12 +1049,24 @@ export class AgentChatSession implements ChatSession {
     });
     try {
       const bootstrap = await this.issueBootstrap();
+      // The view measured every source while reading it, against the limits
+      // it knew then. Bootstrap may have just negotiated lower ones, so the
+      // measured sizes are checked again here, before any upload. Re-running
+      // the untrusted contract parser instead would re-encode every text
+      // block and rescan every image. The server still validates the staged
+      // request.
+      if (!isThinAgentContextWithinLimits(measuredContext, bootstrap.client_input_limits)) {
+        throw Object.assign(new Error("Selected vault context is too large."), {
+          code: "context_too_large",
+          retryable: false,
+        });
+      }
       const url = new URL(THIN_AGENT_CONTEXT_PATH, this.options.baseUrl);
-      const request = parseThinAgentContextRequest({
+      const request = {
         contract_version: THIN_AGENT_CONTRACT_VERSION,
         root_message_id: rootMessageId,
-        context_sources: contextSources,
-      }, this.inputLimits);
+        context_sources: measuredContext.sources,
+      };
       const response = await this.requestClient.request({
         url: url.toString(),
         method: "POST",
@@ -3751,8 +3759,7 @@ export class AgentChatSession implements ChatSession {
   private async issueBootstrap(): Promise<ThinAgentBootstrapResponse> {
     if (this.transport) {
       const bootstrap = await this.transport.bootstrap();
-      this.inputLimits = bootstrap.client_input_limits;
-      this.options.updateInputLimits?.(this.inputLimits);
+      this.options.updateInputLimits?.(bootstrap.client_input_limits);
       return bootstrap;
     }
 
@@ -3785,8 +3792,7 @@ export class AgentChatSession implements ChatSession {
     const bootstrap = parseThinAgentBootstrapResponse(value, {
       conversation_id: request.conversation_id,
     });
-    this.inputLimits = bootstrap.client_input_limits;
-    this.options.updateInputLimits?.(this.inputLimits);
+    this.options.updateInputLimits?.(bootstrap.client_input_limits);
     return bootstrap;
   }
 
