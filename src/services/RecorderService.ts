@@ -17,9 +17,17 @@ import {
   MAX_ENCODED_CAPTURE_BYTES,
   MOBILE_MAX_ENCODED_CAPTURE_BYTES,
   RecordingSession,
+  type RecordingCaptureFile,
   type RecordingResult,
 } from "./recorder/RecordingSession";
 import { getCurrentHostPreferredMicrophoneId } from "./recorder/RecorderPreferenceStore";
+import {
+  RECORDINGS_IN_PROGRESS_DIRECTORY,
+  ensureAdapterDirectory,
+  isInProgressRecordingPath,
+  moveRecordingIntoVault,
+  recordingPathIn,
+} from "./recorder/RecordingInProgressFiles";
 import { getHostDeviceType } from "../platform/hostCapabilities";
 import {
   RecorderUIManager,
@@ -64,14 +72,15 @@ interface QueuedTranscription {
 
 type TranscriptionIntent = "automatic" | "manual";
 
-function captureLimitBytes(): number {
+/** Bounds the audio a capture holds in memory; streaming to disk adds its own bound. */
+function memoryCaptureLimitBytes(): number {
   return getHostDeviceType() === "Mobile"
     ? MOBILE_MAX_ENCODED_CAPTURE_BYTES
     : MAX_ENCODED_CAPTURE_BYTES;
 }
 
-function captureLimitLabel(): string {
-  return `${captureLimitBytes() / (1024 * 1024)} MiB`;
+function captureLimitLabel(bytes: number): string {
+  return `${bytes / (1024 * 1024)} MiB`;
 }
 
 export type RecorderTranscriptionListener = (
@@ -117,6 +126,9 @@ export class RecorderService {
   private pendingRecoveryVisibilityDocument: Document | null = null;
   private pendingRecoveryVisibilityListener: (() => void) | null = null;
   private readonly activePendingPaths = new Set<string>();
+  /** The hidden file the current capture is streaming into, if any. */
+  private captureInProgressPath: string | null = null;
+  private interruptedCapturesRecovered = false;
 
   private origin: RecordingOrigin | null = null;
   private microphoneLabel = "";
@@ -160,10 +172,24 @@ export class RecorderService {
    */
   public recoverPendingCaptures(): void {
     if (this.unloaded || this.pendingRecoveryRunning) return;
+    if (!this.interruptedCapturesRecovered && !this.session) {
+      // Once per session, before any capture starts: bring audio from a
+      // capture that Obsidian quit or crashed during out of hiding.
+      this.interruptedCapturesRecovered = true;
+      this.pendingRecoveryRunning = true;
+      void this.recoverInterruptedCaptures()
+        .catch((error) => logError("RecorderService", "Could not recover an interrupted recording", error))
+        .finally(() => {
+          this.pendingRecoveryRunning = false;
+          this.recoverPendingCaptures();
+        });
+      return;
+    }
     if (this.plugin.settings.autoTranscribeRecordings) {
       void this.drainQueuedTranscriptions();
     }
-    const pending = this.plugin.settings.pendingRecorderCaptures ?? [];
+    const pending = (this.plugin.settings.pendingRecorderCaptures ?? [])
+      .filter((capture) => capture.filePath !== this.captureInProgressPath);
     if (!pending.length) return;
 
     const hostDocument = this.app.workspace.containerEl?.ownerDocument;
@@ -173,7 +199,9 @@ export class RecorderService {
     }
     this.clearPendingRecoveryVisibilityResume();
 
-    const recoverable = pending.filter((capture) => this.shouldRecoverPendingCapture(capture));
+    const settled = pending.filter((capture) => !capture.captureInProgress);
+    if (!settled.length) return;
+    const recoverable = settled.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
       new Notice("A saved recording is waiting for transcription. Turn on automatic transcription in settings, or run \"transcribe an audio file\".", 7000);
       return;
@@ -249,6 +277,7 @@ export class RecorderService {
     this.pendingRecoveryRunning = false;
     this.clearPendingRecoveryVisibilityResume();
     this.activePendingPaths.clear();
+    this.captureInProgressPath = null;
     this.startQueued = false;
     this.clearVisibilityResume();
 
@@ -322,10 +351,7 @@ export class RecorderService {
       status: "Waiting for microphone access…",
     });
     if (this.origin) this.origin.hostDocument = hostContext.hostDocument;
-    const configuredDirectory = this.plugin.settings.recordingsDirectory?.trim()
-      || "SystemSculpt/Recordings";
-    const directoryPath = normalizePath(configuredDirectory).replace(/\/+$/, "")
-      || "SystemSculpt/Recordings";
+    const directoryPath = this.recordingsDirectory();
     const directoryManager = this.plugin.directoryManager;
     if (!directoryManager) {
       this.handleCaptureFailure(new Error("Recording folders are still loading. Try again in a moment."));
@@ -342,7 +368,8 @@ export class RecorderService {
         this.plugin.settings.vaultInstanceId || this.app.vault.getName(),
       ) || null,
       hostContext,
-      maxEncodedBytes: captureLimitBytes(),
+      maxEncodedBytes: memoryCaptureLimitBytes(),
+      onCaptureFileCreated: (capture) => this.rememberCaptureInProgress(session, capture),
       onStatus: (status) => {
         if (this.session !== session) return;
         if (this.state === "recording" && !session.isRecording()) {
@@ -430,14 +457,21 @@ export class RecorderService {
       microphoneLabel: this.microphoneLabel,
     };
     this.notifyRecordingListeners();
+    // A streamed capture was moved out of its hidden in-progress file.
+    const streamedPath = this.captureInProgressPath;
+    this.captureInProgressPath = null;
     if (this.plugin.settings.autoTranscribeRecordings) {
-      await this.rememberPendingCapture(this.completedCapture, "automatic").catch((error) => {
+      await this.rememberPendingCapture(this.completedCapture, "automatic", streamedPath).catch((error) => {
         logError("RecorderService", "Could not persist pending recorder transcription", error);
+      });
+    } else if (streamedPath) {
+      await this.forgetPendingCapture(streamedPath).catch((error) => {
+        logError("RecorderService", "Could not clear the finished recording's recovery entry", error);
       });
     }
 
     const status = result.stopReason === "size-limit"
-      ? `Recording reached the ${captureLimitLabel()} safety limit. The captured audio is saved.`
+      ? `Recording reached the ${captureLimitLabel(session.captureLimitBytes)} safety limit. The captured audio is saved.`
       : result.stopReason === "background-hidden" || result.stopReason === "background-pagehide"
         ? "Obsidian moved to the background, so recording stopped and the captured audio was saved."
         : result.stopReason === "interrupted"
@@ -493,6 +527,8 @@ export class RecorderService {
       logError("RecorderService", "Recording save failed; audio retained in memory", normalized);
       return;
     }
+    // Audio already streamed stays registered; the next launch moves it into place.
+    this.captureInProgressPath = null;
     this.session = null;
     this.captureTask = null;
     this.state = "error";
@@ -895,9 +931,121 @@ export class RecorderService {
     return next;
   }
 
+  /**
+   * Register a streamed capture's partial file as soon as its first audio is
+   * on disk. If Obsidian quits or crashes before Stop, the next launch finds
+   * this entry and recovers the audio instead of losing the whole recording.
+   */
+  private rememberCaptureInProgress(
+    session: RecordingSession,
+    capture: RecordingCaptureFile,
+  ): void {
+    if (this.unloaded || this.session !== session) return;
+    this.captureInProgressPath = capture.filePath;
+    const entry: PendingRecorderCapture = {
+      filePath: capture.filePath,
+      startedAt: capture.startedAt,
+      durationMs: 0,
+      sizeBytes: capture.sizeBytes,
+      stopReason: "interrupted",
+      destination: this.origin?.destination ?? "note",
+      captureInProgress: true,
+    };
+    void this.mutatePendingCaptures((current) => [
+      ...current.filter((existing) => existing.filePath !== entry.filePath),
+      entry,
+    ]).catch((error) => {
+      logError("RecorderService", "Could not register the recording for crash recovery", error);
+    });
+  }
+
+  /**
+   * A capture that was streaming when Obsidian quit or crashed left its audio
+   * in the hidden in-progress folder, usually with an in-progress entry.
+   * Move each such file into the recordings folder and report it. It is
+   * transcribed only when automatic transcription is on, as for any
+   * recording that stops. A file whose entry was lost is still recovered.
+   */
+  private async recoverInterruptedCaptures(): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    const entries = (this.plugin.settings.pendingRecorderCaptures ?? [])
+      .filter((capture) => capture.captureInProgress);
+    const known = new Set(entries.map((capture) => capture.filePath));
+    const orphans: PendingRecorderCapture[] = [];
+    if (await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) {
+      for (const filePath of (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files) {
+        if (known.has(filePath)) continue;
+        orphans.push({
+          filePath,
+          startedAt: 0,
+          durationMs: 0,
+          sizeBytes: 0,
+          stopReason: "interrupted",
+          destination: "note",
+          captureInProgress: true,
+        });
+      }
+    }
+    for (const capture of [...entries, ...orphans]) {
+      if (this.unloaded || this.session) return;
+      await this.recoverInterruptedCapture(capture);
+    }
+  }
+
+  private async recoverInterruptedCapture(capture: PendingRecorderCapture): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    const stat = await adapter.stat(capture.filePath).catch(() => null);
+    if (!stat || stat.type !== "file" || !(stat.size > 0)) {
+      if (stat?.type === "file") await adapter.remove(capture.filePath).catch(() => undefined);
+      await this.forgetPendingCapture(capture.filePath);
+      return;
+    }
+    let filePath = capture.filePath;
+    if (isInProgressRecordingPath(filePath)) {
+      const directory = this.recordingsDirectory();
+      try {
+        if (this.plugin.directoryManager) await this.plugin.directoryManager.ensureDirectoryByPath(directory);
+        else await ensureAdapterDirectory(adapter, directory);
+        filePath = await moveRecordingIntoVault(this.app, capture.filePath, recordingPathIn(directory, capture.filePath));
+      } catch (error) {
+        logError("RecorderService", "Could not move an interrupted recording into place", error);
+        new Notice(
+          `An interrupted recording is saved at ${capture.filePath}, but it could not be moved to ${directory}. SystemSculpt will try again when Obsidian restarts.`,
+          9000,
+        );
+        return;
+      }
+    }
+    const startedAt = capture.startedAt > 0 ? capture.startedAt : Number(stat.ctime) || 0;
+    const lastWrite = Number(stat.mtime);
+    const recovered: PendingRecorderCapture = {
+      filePath,
+      startedAt,
+      durationMs: Number.isFinite(lastWrite) ? Math.max(0, lastWrite - startedAt) : 0,
+      sizeBytes: stat.size,
+      stopReason: "interrupted",
+      destination: capture.destination,
+      transcriptionIntent: "automatic",
+    };
+    const transcribe = this.plugin.settings.autoTranscribeRecordings;
+    await this.mutatePendingCaptures((current) => [
+      ...current.filter((entry) => entry.filePath !== capture.filePath && entry.filePath !== filePath),
+      ...(transcribe ? [recovered] : []),
+    ]);
+    new Notice(`Recovered an interrupted recording: ${filePath}.`, 7000);
+  }
+
+  private recordingsDirectory(): string {
+    const configuredDirectory = this.plugin.settings.recordingsDirectory?.trim()
+      || "SystemSculpt/Recordings";
+    return normalizePath(configuredDirectory).replace(/\/+$/, "")
+      || "SystemSculpt/Recordings";
+  }
+
   private rememberPendingCapture(
     capture: CompletedCapture,
     transcriptionIntent: TranscriptionIntent,
+    replacedPath: string | null = null,
   ): Promise<void> {
     const pending: PendingRecorderCapture = {
       filePath: capture.result.filePath,
@@ -911,7 +1059,7 @@ export class RecorderService {
     return this.mutatePendingCaptures((current) => {
       const existing = current.find((entry) => entry.filePath === pending.filePath);
       return [
-        ...current.filter((entry) => entry.filePath !== pending.filePath),
+        ...current.filter((entry) => entry.filePath !== pending.filePath && entry.filePath !== replacedPath),
         {
           ...pending,
           ...(existing?.transcriptionIntent === "manual"
@@ -1215,6 +1363,9 @@ export class RecorderService {
   }
 
   private buildPendingSaveStatus(error: Error): string {
+    if (!/^Audio is still in memory/i.test(error.message)) {
+      return `${error.message} Retry save to finish saving it.`;
+    }
     const detail = error.message
       .replace(/^Audio is still in memory, but it could not be saved:?\s*/i, "")
       .trim();

@@ -416,6 +416,38 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.pendingRecorderCaptures[1]).not.toHaveProperty("operationId");
   });
 
+  it("keeps the in-progress marker of a recording that was streaming to disk", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      pendingRecorderCaptures: [
+        {
+          filePath: "SystemSculpt/Recordings/streaming.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 12_000,
+          stopReason: "interrupted",
+          destination: "chat",
+          captureInProgress: true,
+        },
+        {
+          filePath: "SystemSculpt/Recordings/finished.webm",
+          startedAt: 1,
+          durationMs: 2_000,
+          sizeBytes: 24_000,
+          stopReason: "manual",
+          destination: "note",
+          captureInProgress: "yes",
+        },
+      ],
+    });
+    const manager = new SettingsManager(plugin);
+
+    await manager.loadSettings();
+
+    expect(manager.settings.pendingRecorderCaptures[0]).toMatchObject({ captureInProgress: true });
+    expect(manager.settings.pendingRecorderCaptures[1]).not.toHaveProperty("captureInProgress");
+  });
+
   it("logs primary save and backup failures without breaking updates", async () => {
     const plugin = createPlugin();
     const manager = new SettingsManager(plugin);

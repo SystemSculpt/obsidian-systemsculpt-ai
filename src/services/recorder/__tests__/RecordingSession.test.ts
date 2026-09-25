@@ -7,6 +7,8 @@ import {
   MAX_ENCODED_CAPTURE_BYTES,
   RECORDER_STOP_WATCHDOG_MS,
   RecordingSession,
+  STREAMED_MAX_ENCODED_CAPTURE_BYTES,
+  canStreamRecordingToDisk,
   type RecordingSessionOptions,
 } from "../RecordingSession";
 
@@ -141,7 +143,11 @@ function createWakeLockHarness(): WakeLockHarness {
   };
 }
 
-function createHarness(overrides: Partial<RecordingSessionOptions> = {}): SessionHarness {
+function createHarness(
+  overrides: Partial<RecordingSessionOptions> = {},
+  adapterExtras: Record<string, unknown> = {},
+  vaultExtras: Record<string, unknown> = {},
+): SessionHarness {
   const hostDocument = new FakeHostDocument();
   const stream = new FakeMediaStream();
   const getUserMedia = jest.fn().mockResolvedValue(stream as unknown as MediaStream);
@@ -162,8 +168,9 @@ function createHarness(overrides: Partial<RecordingSessionOptions> = {}): Sessio
   const exists = jest.fn(async (path: string) => path === "SystemSculpt/Recordings");
   const app = {
     vault: {
-      adapter: { exists },
+      adapter: { exists, ...adapterExtras },
       createBinary,
+      ...vaultExtras,
     },
   } as unknown as App;
   const ensureDirectory = jest.fn().mockResolvedValue(undefined);
@@ -740,5 +747,305 @@ describe("RecordingSession mobile lifecycle", () => {
 
     await expect(harness.session.stop()).rejects.toThrow("No audio was captured.");
     expect(harness.createBinary).not.toHaveBeenCalled();
+  });
+});
+
+describe("RecordingSession streaming to disk", () => {
+  const HIDDEN = ".systemsculpt/recordings-in-progress";
+  const bytesOf = (buffer: ArrayBuffer): number[] => [...new Uint8Array(buffer)];
+  const nameOf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+  function emitBytes(values: number[], type = FakeMediaRecorder.chunkMimeType): void {
+    recorder().ondataavailable?.({
+      data: new Blob([new Uint8Array(values)], { type }),
+    } as BlobEvent);
+  }
+
+  async function settleWrites(): Promise<void> {
+    for (let turn = 0; turn < 10; turn += 1) await flushMicrotasks();
+  }
+
+  /** An adapter that keeps files in memory and supports binary appends. */
+  function streamingHarness(overrides: Partial<RecordingSessionOptions> = {}, vaultExtras: Record<string, unknown> = {}) {
+    const files = new Map<string, number[]>();
+    const folders = new Set<string>(["SystemSculpt", "SystemSculpt/Recordings"]);
+    const adapter = {
+      mkdir: jest.fn(async (path: string) => { folders.add(path); }),
+      writeBinary: jest.fn(async (path: string, data: ArrayBuffer) => { files.set(path, bytesOf(data)); }),
+      appendBinary: jest.fn(async (path: string, data: ArrayBuffer) => {
+        const current = files.get(path);
+        if (!current) throw new Error("missing");
+        files.set(path, [...current, ...bytesOf(data)]);
+      }),
+      rename: jest.fn(async (from: string, to: string) => {
+        const current = files.get(from);
+        if (!current) throw new Error("missing");
+        files.delete(from);
+        files.set(to, current);
+      }),
+      copy: jest.fn(async (from: string, to: string) => { files.set(to, [...(files.get(from) ?? [])]); }),
+      remove: jest.fn(async (path: string) => { files.delete(path); }),
+    };
+    const onCaptureFileCreated = jest.fn();
+    const harness = createHarness({ onCaptureFileCreated, ...overrides }, adapter, vaultExtras);
+    harness.exists.mockImplementation(async (path: string) => folders.has(path) || files.has(path));
+    harness.createBinary.mockImplementation(async (path: string, data: ArrayBuffer) => {
+      files.set(path, bytesOf(data));
+      return { path };
+    });
+    return { ...harness, adapter, files, folders, onCaptureFileCreated };
+  }
+
+  let now: jest.SpyInstance<number, []>;
+
+  beforeEach(() => {
+    jest.useRealTimers();
+    FakeMediaRecorder.reset();
+    FakeMediaRecorder.emitAudioOnStop = false;
+    TrackingBlob.createdTypes = [];
+    now = jest.spyOn(Date, "now").mockReturnValue(10_000);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("detects binary append support on the vault adapter", () => {
+    expect(canStreamRecordingToDisk({ vault: { adapter: {} } } as unknown as App)).toBe(false);
+    expect(canStreamRecordingToDisk({ vault: { adapter: { appendBinary: jest.fn() } } } as unknown as App)).toBe(true);
+  });
+
+  it("streams into a hidden in-progress file and moves it into the recordings folder at Stop", async () => {
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    const hidden = `${HIDDEN}/${nameOf(started.filePath)}`;
+
+    emitBytes([1, 2]);
+    await settleWrites();
+    expect(harness.folders.has(HIDDEN)).toBe(true);
+    expect(harness.adapter.writeBinary).toHaveBeenCalledWith(hidden, expect.any(ArrayBuffer));
+    expect(harness.onCaptureFileCreated).toHaveBeenCalledWith({
+      filePath: hidden,
+      startedAt: started.startedAt,
+      sizeBytes: 2,
+    });
+
+    // Within the flush interval, later audio waits in a small buffer.
+    emitBytes([3]);
+    emitBytes([4]);
+    await settleWrites();
+    expect(harness.adapter.appendBinary).not.toHaveBeenCalled();
+
+    now.mockReturnValue(16_000);
+    emitBytes([5]);
+    await settleWrites();
+    expect(harness.adapter.appendBinary).toHaveBeenCalledWith(hidden, expect.any(ArrayBuffer));
+    expect(harness.files.get(hidden)).toEqual([1, 2, 3, 4, 5]);
+
+    // Nothing visible to the vault or Obsidian Sync changes while recording.
+    expect(harness.createBinary).not.toHaveBeenCalled();
+    expect(harness.files.has(started.filePath)).toBe(false);
+    for (const [path] of [...harness.adapter.writeBinary.mock.calls, ...harness.adapter.appendBinary.mock.calls]) {
+      expect(path.startsWith(`${HIDDEN}/`)).toBe(true);
+    }
+
+    emitBytes([6]);
+    const result = await harness.session.stop();
+
+    expect(harness.adapter.rename).toHaveBeenCalledWith(hidden, started.filePath);
+    expect(result).toMatchObject({ filePath: started.filePath, sizeBytes: 6, stopReason: "manual" });
+    expect(harness.files.get(started.filePath)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(harness.files.has(hidden)).toBe(false);
+    expect(harness.createBinary).not.toHaveBeenCalled();
+    expect(harness.onCaptureFileCreated).toHaveBeenCalledTimes(1);
+    expect(harness.stream.track.stop).toHaveBeenCalledTimes(1);
+    expect(harness.wakeLock.sentinel.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the moved recording a numbered name when the final name is taken", async () => {
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    harness.files.set(started.filePath, [9]);
+    emitBytes([1]);
+
+    const result = await harness.session.stop();
+
+    expect(result.filePath).toBe(started.filePath.replace(/\.webm$/, "-1.webm"));
+    expect(harness.files.get(result.filePath)).toEqual([1]);
+    expect(harness.files.get(started.filePath)).toEqual([9]);
+  });
+
+  it("copies then removes the hidden file when the rename fails", async () => {
+    const harness = streamingHarness();
+    harness.adapter.rename.mockRejectedValueOnce(new Error("Cross-device link"));
+    const started = await harness.session.start();
+    emitBytes([1, 2]);
+
+    const result = await harness.session.stop();
+
+    expect(result.filePath).toBe(started.filePath);
+    expect(harness.adapter.copy).toHaveBeenCalledWith(`${HIDDEN}/${nameOf(started.filePath)}`, started.filePath);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+    expect(harness.files.has(`${HIDDEN}/${nameOf(started.filePath)}`)).toBe(false);
+  });
+
+  it("keeps a recording it cannot move in the hidden folder and moves it on Retry save", async () => {
+    const harness = streamingHarness();
+    harness.adapter.rename.mockRejectedValueOnce(new Error("Locked"));
+    harness.adapter.copy.mockRejectedValueOnce(new Error("Locked"));
+    const started = await harness.session.start();
+    const hidden = `${HIDDEN}/${nameOf(started.filePath)}`;
+    emitBytes([1]);
+
+    await expect(harness.session.stop()).rejects.toThrow(
+      "The recording is saved in .systemsculpt/recordings-in-progress, but it could not be moved to your recordings folder: Locked",
+    );
+    expect(harness.files.get(hidden)).toEqual([1]);
+    expect(harness.session.hasPendingSave()).toBe(true);
+
+    await expect(harness.session.retrySave()).resolves.toMatchObject({ filePath: started.filePath, sizeBytes: 1 });
+    expect(harness.files.get(started.filePath)).toEqual([1]);
+    expect(harness.files.has(hidden)).toBe(false);
+  });
+
+  it("waits for the vault to index the moved recording before finishing", async () => {
+    let created: ((file: { path: string }) => void) | null = null;
+    const offref = jest.fn();
+    const harness = streamingHarness({}, {
+      getAbstractFileByPath: jest.fn(() => null),
+      on: jest.fn((_name: string, callback: (file: { path: string }) => void) => { created = callback; return { id: 1 }; }),
+      offref,
+    });
+    const started = await harness.session.start();
+    emitBytes([1]);
+    let finished = false;
+    const stopping = harness.session.stop().then((result) => { finished = true; return result; });
+    await settleWrites();
+    expect(finished).toBe(false);
+
+    created!({ path: started.filePath });
+    await expect(stopping).resolves.toMatchObject({ filePath: started.filePath });
+    expect(offref).toHaveBeenCalledWith({ id: 1 });
+  });
+
+  it("keeps capturing in memory and saves once at Stop when the adapter cannot append", async () => {
+    const onCaptureFileCreated = jest.fn();
+    const harness = createHarness({ onCaptureFileCreated });
+    await harness.session.start();
+
+    emitBytes([1, 2]);
+    emitBytes([3]);
+    await settleWrites();
+    expect(harness.createBinary).not.toHaveBeenCalled();
+
+    const result = await harness.session.stop();
+    expect(harness.createBinary).toHaveBeenCalledTimes(1);
+    expect(bytesOf(harness.createBinary.mock.calls[0][1])).toEqual([1, 2, 3]);
+    expect(result.sizeBytes).toBe(3);
+    expect(onCaptureFileCreated).not.toHaveBeenCalled();
+    expect(harness.session.captureLimitBytes).toBe(MAX_ENCODED_CAPTURE_BYTES);
+  });
+
+  it("replaces the in-memory bound with a much larger disk bound", async () => {
+    const harness = streamingHarness({ maxEncodedBytes: 4, maxStreamedBytes: 12 });
+    await harness.session.start();
+    expect(harness.session.captureLimitBytes).toBe(12);
+    expect(STREAMED_MAX_ENCODED_CAPTURE_BYTES).toBe(512 * 1024 * 1024);
+
+    for (let second = 0; second < 3; second += 1) {
+      now.mockReturnValue(10_000 + second * 6_000);
+      emitBytes([1, 2, 3]);
+      await settleWrites();
+    }
+    expect(harness.session.isRecording()).toBe(true);
+
+    emitBytes([4, 5, 6]);
+    const result = await harness.session.completion;
+    expect(result).toMatchObject({ stopReason: "size-limit", sizeBytes: 12 });
+    expect(harness.onStatus).toHaveBeenCalledWith(
+      "Recording reached the 12 bytes safety limit. Saving captured audio…",
+    );
+  });
+
+  it("keeps later audio in order in memory after an append fails, then appends it before the move", async () => {
+    const logged = jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+
+    harness.adapter.appendBinary.mockRejectedValueOnce(new Error("Sync lock"));
+    now.mockReturnValue(20_000);
+    emitBytes([2]);
+    await settleWrites();
+    emitBytes([3]);
+    await settleWrites();
+    expect(harness.adapter.appendBinary).toHaveBeenCalledTimes(1);
+    expect(harness.session.captureLimitBytes).toBe(MAX_ENCODED_CAPTURE_BYTES);
+    expect(logged).toHaveBeenCalled();
+
+    const result = await harness.session.stop();
+    expect(harness.adapter.appendBinary).toHaveBeenCalledTimes(2);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2, 3]);
+    expect(result.sizeBytes).toBe(3);
+  });
+
+  it("retries a failed final append without creating a second file or appending twice", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+
+    harness.adapter.appendBinary
+      .mockRejectedValueOnce(new Error("Storage is full"))
+      .mockRejectedValueOnce(new Error("Storage is full"));
+    harness.adapter.rename.mockRejectedValueOnce(new Error("Locked"));
+    harness.adapter.copy.mockRejectedValueOnce(new Error("Locked"));
+    now.mockReturnValue(20_000);
+    emitBytes([2]);
+    await settleWrites();
+
+    await expect(harness.session.stop()).rejects.toThrow("Audio is still in memory, but it could not be saved: Storage is full");
+    expect(harness.session.getPendingSaveResult()).toMatchObject({ sizeBytes: 2 });
+
+    // The tail lands, then the move fails: the next retry only moves.
+    await expect(harness.session.retrySave()).rejects.toThrow("could not be moved");
+    await expect(harness.session.retrySave()).resolves.toMatchObject({ sizeBytes: 2 });
+    expect(harness.createBinary).not.toHaveBeenCalled();
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+  });
+
+  it("falls back to the in-memory capture when the in-progress file cannot be created", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const harness = streamingHarness();
+    harness.adapter.writeBinary.mockRejectedValueOnce(new Error("Folder is read-only"));
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+    emitBytes([2]);
+
+    const result = await harness.session.stop();
+    expect(harness.createBinary).toHaveBeenCalledTimes(1);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
+    expect(harness.adapter.appendBinary).not.toHaveBeenCalled();
+    expect(harness.adapter.rename).not.toHaveBeenCalled();
+    expect(harness.onCaptureFileCreated).not.toHaveBeenCalled();
+    expect(result.sizeBytes).toBe(2);
+  });
+
+  it("keeps the name it already chose when a later chunk reports another container", async () => {
+    const harness = streamingHarness();
+    const started = await harness.session.start();
+    emitBytes([1]);
+    await settleWrites();
+
+    now.mockReturnValue(20_000);
+    emitBytes([2], "audio/mp4");
+    const result = await harness.session.stop();
+
+    expect(result.filePath).toBe(started.filePath);
+    expect(result.filePath).toMatch(/\.webm$/);
+    expect(harness.files.get(started.filePath)).toEqual([1, 2]);
   });
 });

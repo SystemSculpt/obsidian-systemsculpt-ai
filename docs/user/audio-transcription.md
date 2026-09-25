@@ -40,7 +40,10 @@ Audio and transcription settings now live inside the `Workflow` tab.
 - A newly saved background capture is not intentionally sent for transcription while Obsidian reports itself hidden. A managed job that already started may continue on the SystemSculpt service; Obsidian resumes or reconciles the local workflow when it returns.
 - Keep Obsidian in the foreground for uninterrupted recording. SystemSculpt requests a screen wake lock when the host supports it, but the operating system remains in control.
 - For important audio, press **Stop recording** and wait for **Recording saved** before leaving or closing Obsidian. An app switch, screen lock, or force-quit is not a guaranteed save boundary.
-- To keep mobile memory predictable, one recording is capped at 24 MiB and one imported transcription source at 32 MiB. At the requested speech bitrate, the recording cap is roughly half an hour; the actual duration varies by device encoder.
+- On Obsidian 1.12.3 or later, the recorder writes audio every few seconds to a hidden in-progress file in `.systemsculpt/recordings-in-progress`. Obsidian Sync skips that folder, so it does not upload the growing file while you record. When you stop, the finished recording moves to your recordings folder, with a numbered name if that name is taken.
+- If Obsidian quits, reloads, or crashes before you stop, the audio up to the last few seconds stays in the in-progress folder. The next launch moves it to your recordings folder, reports it as an interrupted recording, and transcribes it when **Transcribe automatically** is on.
+- On Obsidian 1.12.3 or later, one recording can reach 512 MiB, about 12 hours at the requested speech bitrate. Earlier versions keep the whole recording in memory until you stop, so one recording is capped at 64 MiB on desktop and 24 MiB on mobile, roughly 90 and 35 minutes. The actual duration varies by device encoder.
+- Transcription has its own size limit: 128 MiB on desktop and 32 MiB on mobile for one source. A longer recording is still saved, but it must be split or processed elsewhere before it can be transcribed.
 
 ## Commands
 

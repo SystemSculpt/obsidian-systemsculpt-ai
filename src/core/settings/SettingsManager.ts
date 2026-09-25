@@ -646,6 +646,7 @@ export class SettingsManager {
           ...(entry.recoveryBlocked === "conflicting-operation-ids"
             ? { recoveryBlocked: entry.recoveryBlocked }
             : {}),
+          ...(entry.captureInProgress === true ? { captureInProgress: true as const } : {}),
         }));
       const pendingByPath = new Map<string, PendingRecorderCapture>();
       for (const entry of validPendingCaptures) {
