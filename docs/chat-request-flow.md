@@ -67,7 +67,7 @@ A blank new chat creates only local state. The first user submission starts serv
 9. The plugin sends the approval or tool result with the same request and tool-call IDs.
 10. The server continues from durable state and streams authoritative updates.
 11. One `data-systemsculpt-run-terminal` part identifies success, cancellation, or correlated failure.
-12. On success, the plugin persists the assistant presentation and refreshes credits.
+12. On success, the plugin writes the reconciled turn to the saved chat once and refreshes credits. The saved chat keeps a bounded summary of each tool result; the server holds the full result.
 
 The transport reuses a valid bootstrap for identity, context staging, synchronization, and turns. Token expiry causes a new bootstrap. Durable history remains the recovery source. Concurrent server commands keep separate response streams, and each stream receives events for only its request.
 
