@@ -7,6 +7,7 @@ import {
   type AgentIncidentReport,
 } from "../AgentIncidentRecorder";
 import {
+  AGENT_INCIDENT_STORE_PATH,
   AgentIncidentStore,
   type AgentIncidentStoreAdapter,
 } from "../AgentIncidentStore";
@@ -370,6 +371,24 @@ function finish(coordinator: AgentIncidentCoordinator, ids: Correlation): void {
   recordFailureSurface(coordinator, ids);
 }
 
+function persistedBytes(adapter: MemoryAdapter, id: string): string | undefined {
+  return adapter.files.get(`${AGENT_INCIDENT_STORE_PATH}/${id}.json`)?.data;
+}
+
+function persistedReports(adapter: MemoryAdapter): AgentIncidentReport[] {
+  return [...adapter.files.entries()]
+    .filter(([path]) => path.startsWith(`${AGENT_INCIDENT_STORE_PATH}/`) && path.endsWith(".json"))
+    .map(([, file]) => JSON.parse(file.data) as AgentIncidentReport);
+}
+
+function persistedReport(adapter: MemoryAdapter, incidentId: string): AgentIncidentReport | null {
+  return persistedReports(adapter).find((report) => report.incident.incident_id === incidentId) ?? null;
+}
+
+function waitForTimers(ms = 10): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function fakeReport(value: number): AgentIncidentReport {
   return {
     report_id: reportId(value),
@@ -391,7 +410,6 @@ function fakeDependencies(options: {
   finalize?: (ids: Readonly<{ conversationId: string; requestId: string }>) => AgentIncidentReport | null;
   initialize?: () => Promise<unknown>;
   save?: (report: AgentIncidentReport) => Promise<unknown>;
-  load?: (incidentId: string) => Promise<unknown>;
 } = {}) {
   const recorder = {
     record: jest.fn(() => true),
@@ -410,8 +428,6 @@ function fakeDependencies(options: {
     initialize: jest.fn(options.initialize ?? (async () => undefined)),
     serialize: jest.fn((report: AgentIncidentReport) => `canonical:${report.report_id}`),
     save: jest.fn(options.save ?? (async () => undefined)),
-    loadByIncidentId: jest.fn(options.load ?? (async () => null)),
-    loadByReportId: jest.fn(options.load ?? (async () => null)),
   };
   const coordinator = new AgentIncidentCoordinator({
     recorder: recorder as unknown as AgentIncidentRecorder,
@@ -443,16 +459,16 @@ describe("AgentIncidentCoordinator", () => {
 
   it("finalizes capture-before-terminal with complete run, rendering, resource, and transport evidence", async () => {
     const ids = correlation(1);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     await coordinator.initialize();
     begin(coordinator, ids);
 
     coordinator.captureFailure(failure(ids), rendering(), { chatViewState: "mounted" });
-    expect(recorder.getByIncidentId(ids.incidentId)).toBeNull();
+    expect(persistedReports(adapter)).toEqual([]);
     finish(coordinator, ids);
-    await coordinator.drain();
+    await coordinator.closeAdmissionAndDrain();
 
-    const report = recorder.getByIncidentId(ids.incidentId);
+    const report = persistedReport(adapter, ids.incidentId);
     expect(report).not.toBeNull();
     expect(report).toMatchObject({
       incident: {
@@ -531,31 +547,31 @@ describe("AgentIncidentCoordinator", () => {
       }],
       resource_samples: [expect.objectContaining({ heap_used_mb: 218, event_loop_lag_ms: 9 })],
     });
-    expect(JSON.stringify(report)).not.toContain(ids.conversationId);
-    expect(JSON.stringify(report)).not.toContain(ids.requestId);
-    const copied = await coordinator.loadSerializedByReportId(report!.report_id);
-    const copiedReport = JSON.parse(copied!) as AgentIncidentReport;
-    expect(copiedReport.rendering).toEqual(report!.rendering);
-    expect(copiedReport.capture_quality.missing_fields).not.toContain("rendering");
-    expect(copiedReport.capture_quality.missing_fields).not.toContain(
+    const persisted = persistedBytes(adapter, report!.report_id);
+    expect(persisted).not.toContain(ids.conversationId);
+    expect(persisted).not.toContain(ids.requestId);
+    expect(report!.capture_quality.missing_fields).not.toContain("rendering");
+    expect(report!.capture_quality.missing_fields).not.toContain(
       "rendering_after_terminal_commit",
     );
-    expect(copiedReport.capture_quality.collection_failures).not.toContainEqual(
+    expect(report!.capture_quality.collection_failures).not.toContainEqual(
       expect.objectContaining({ code: "rendering_snapshot_invalid" }),
     );
   });
 
   it("finalizes terminal-before-capture only after capture arrives", async () => {
     const ids = correlation(2);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     begin(coordinator, ids);
     finish(coordinator, ids);
-    expect(recorder.getByIncidentId(ids.incidentId)).toBeNull();
+    await waitForTimers();
+    expect(persistedReports(adapter)).toEqual([]);
 
     coordinator.captureFailure(failure(ids), rendering());
-    await coordinator.drain();
+    await waitForTimers();
+    await coordinator.closeAdmissionAndDrain();
 
-    expect(recorder.getByIncidentId(ids.incidentId)).toMatchObject({
+    expect(persistedReport(adapter, ids.incidentId)).toMatchObject({
       incident: { incident_id: ids.incidentId },
       run_state: { run_phase: "working" },
     });
@@ -564,7 +580,7 @@ describe("AgentIncidentCoordinator", () => {
   it("keeps two interleaved correlation pairs isolated", async () => {
     const first = correlation(3);
     const second = correlation(4);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     begin(coordinator, first);
     begin(coordinator, second);
     coordinator.captureFailure(failure(first, {
@@ -578,13 +594,13 @@ describe("AgentIncidentCoordinator", () => {
 
     finish(coordinator, second);
     finish(coordinator, first);
-    await coordinator.drain();
+    await coordinator.closeAdmissionAndDrain();
 
-    expect(recorder.getByIncidentId(first.incidentId)).toMatchObject({
+    expect(persistedReport(adapter, first.incidentId)).toMatchObject({
       run_summary: { partial_output: { assistant_text_character_count: 111 } },
       run_state: { pending_tool_task_count: 7 },
     });
-    expect(recorder.getByIncidentId(second.incidentId)).toMatchObject({
+    expect(persistedReport(adapter, second.incidentId)).toMatchObject({
       run_summary: { partial_output: { assistant_text_character_count: 222 } },
       run_state: { pending_tool_task_count: 8 },
     });
@@ -594,15 +610,14 @@ describe("AgentIncidentCoordinator", () => {
     "clears pending failure state after %s",
     async (terminalCode) => {
       const ids = correlation(terminalCode === "run_finished_completed" ? 5 : 6);
-      const { coordinator, recorder } = realHarness();
+      const { adapter, coordinator } = realHarness();
       begin(coordinator, ids);
       coordinator.captureFailure(failure(ids), rendering());
       coordinator.recordLifecycle(lifecycle(ids, terminalCode, 8));
       finish(coordinator, ids);
-      await coordinator.drain();
+      await coordinator.closeAdmissionAndDrain();
 
-      expect(recorder.getByIncidentId(ids.incidentId)).toBeNull();
-      await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBeNull();
+      expect(persistedReports(adapter)).toEqual([]);
     },
   );
 
@@ -624,9 +639,9 @@ describe("AgentIncidentCoordinator", () => {
 
     expect(() => coordinator.captureFailure(failure(ids), rendering())).not.toThrow();
     expect(() => finish(coordinator, ids)).not.toThrow();
-    await expect(coordinator.drain()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
 
-    const failures = recorder.getByIncidentId(ids.incidentId)?.capture_quality.collection_failures;
+    const failures = persistedReport(adapter, ids.incidentId)?.capture_quality.collection_failures;
     expect(failures).toEqual(expect.arrayContaining([
       { code: "environment_unavailable", count: 1 },
       { code: "resource_sample_unavailable", count: 1 },
@@ -645,7 +660,6 @@ describe("AgentIncidentCoordinator", () => {
         initialize: async () => undefined,
         serialize: () => "unused",
         save: async () => undefined,
-        loadByIncidentId: async () => null,
       }) as unknown as AgentIncidentStore,
       environmentProvider,
       resourceSamplesProvider,
@@ -654,123 +668,59 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => withProviders.recordLifecycle(lifecycle(ids, "run_started", 1))).not.toThrow();
     expect(() => withProviders.captureFailure(failure(ids), rendering())).not.toThrow();
     expect(() => withProviders.recordLifecycle(lifecycle(ids, "run_finished_failed", 2))).not.toThrow();
-    await expect(withProviders.drain()).resolves.toBeUndefined();
+    await expect(withProviders.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps exact canonical memory bytes available before and after a delayed save, then after restart", async () => {
+  it("persists canonical bytes under the receipt report ID after a delayed save", async () => {
     const ids = correlation(9);
     const adapter = new MemoryAdapter();
-    const { coordinator, recorder, store } = realHarness(adapter);
+    const { coordinator, store } = realHarness(adapter);
     await coordinator.initialize();
     adapter.blockWrites();
     begin(coordinator, ids);
     const receipt = coordinator.captureFailure(failure(ids), rendering());
     finish(coordinator, ids);
+    await waitForTimers();
 
     expect(receipt).toEqual({ reportId: reportId(1) });
-    const readyBytes = coordinator.loadSerializedByReportId(receipt!.reportId);
-    await Promise.resolve();
-    const report = recorder.getByIncidentId(ids.incidentId);
-    expect(report).not.toBeNull();
-    const expected = store.serialize(report!);
-    await expect(readyBytes).resolves.toBe(expected);
-    await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    await expect(coordinator.loadReportForCopy(receipt!.reportId)).resolves.toEqual({
-      serialized: expected,
-      durability: "memory_fallback",
-    });
+    expect(adapter.writeCalls).toBe(1);
     expect(adapter.files.size).toBe(0);
 
     adapter.releaseWrites();
-    await coordinator.drain();
-    await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    await expect(coordinator.loadReportForCopy(receipt!.reportId)).resolves.toEqual({
-      serialized: expected,
-      durability: "persisted",
-    });
+    await coordinator.closeAdmissionAndDrain();
 
-    const restarted = new AgentIncidentCoordinator({
-      recorder: new AgentIncidentRecorder(),
-      store: new AgentIncidentStore(adapter, { now: () => BASE_TIME + 60_000 }),
+    const persisted = persistedBytes(adapter, receipt!.reportId);
+    expect(persisted).toBeDefined();
+    const report = JSON.parse(persisted!) as AgentIncidentReport;
+    expect(report).toMatchObject({
+      report_id: receipt!.reportId,
+      incident: { incident_id: ids.incidentId },
     });
-    await restarted.initialize();
-    await expect(restarted.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    await expect(restarted.loadReportForCopy(receipt!.reportId)).resolves.toEqual({
-      serialized: expected,
-      durability: "persisted",
-    });
+    expect(store.serialize(report)).toBe(persisted);
+    expect(adapter.files.has(`${AGENT_INCIDENT_STORE_PATH}/${receipt!.reportId}.json.tmp`)).toBe(false);
   });
 
-  it("keeps memory fallback after save rejection without an unhandled rejection", async () => {
+  it("contains save rejection without persisting partial files", async () => {
     const ids = correlation(10);
     const adapter = new MemoryAdapter();
     adapter.writeFailures = 20;
     const { coordinator } = realHarness(adapter);
     begin(coordinator, ids);
-    const receipt = coordinator.captureFailure(failure(ids), rendering());
+    coordinator.captureFailure(failure(ids), rendering());
     finish(coordinator, ids);
-    const expected = await coordinator.loadSerializedByIncidentId(ids.incidentId);
 
-    await expect(coordinator.drain()).resolves.toBeUndefined();
-    expect(expected).not.toBeNull();
-    await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    await expect(coordinator.loadReportForCopy(receipt!.reportId)).resolves.toEqual({
-      serialized: expected,
-      durability: "memory_fallback",
-    });
-    const restarted = new AgentIncidentCoordinator({
-      recorder: new AgentIncidentRecorder(),
-      store: new AgentIncidentStore(adapter),
-    });
-    await expect(restarted.loadReportForCopy(receipt!.reportId)).resolves.toBeNull();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    expect(adapter.writeCalls).toBeGreaterThan(0);
+    expect(adapter.files.size).toBe(0);
   });
 
-  it("returns null when store initialization or restart lookup rejects", async () => {
-    const ids = correlation(11);
+  it("contains store initialization rejection", async () => {
     const initialization = createDeferred<void>();
     initialization.reject(new Error("initialize-rejected"));
-    const first = fakeDependencies({ initialize: () => initialization.promise });
-    await expect(first.coordinator.initialize()).resolves.toBeUndefined();
-    await expect(first.coordinator.drain()).resolves.toBeUndefined();
-
-    const second = fakeDependencies({ load: async () => { throw new Error("load-rejected"); } });
-    await expect(second.coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBeNull();
-  });
-
-  it("caches exact restart bytes so later store failure cannot remove copy readiness", async () => {
-    const ids = correlation(13);
-    const expected = `stored-canonical:${reportId(13)}`;
-    let loadCount = 0;
-    const { coordinator, store } = fakeDependencies({
-      load: async () => {
-        loadCount += 1;
-        if (loadCount > 1) throw new Error("store-became-unavailable");
-        return {
-          report: fakeReport(13),
-          serialized: expected,
-          sizeBytes: expected.length,
-        };
-      },
-    });
-
-    await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    await expect(coordinator.loadSerializedByIncidentId(ids.incidentId)).resolves.toBe(expected);
-    expect(store.loadByIncidentId).toHaveBeenCalledTimes(1);
-  });
-
-  it("lets an early copy lookup wait for a pending report", async () => {
-    const ids = correlation(12);
-    const { coordinator, recorder, store } = realHarness();
-    await coordinator.initialize();
-    begin(coordinator, ids);
-    coordinator.captureFailure(failure(ids), rendering());
-
-    const copy = coordinator.loadSerializedByIncidentId(ids.incidentId);
-    await Promise.resolve();
-    finish(coordinator, ids);
-    const copied = await copy;
-    expect(copied).not.toBeNull();
-    expect(copied).toBe(store.serialize(recorder.getByIncidentId(ids.incidentId)!));
+    const { coordinator } = fakeDependencies({ initialize: () => initialization.promise });
+    await expect(coordinator.initialize()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
   });
 
   it("evicts the oldest pending capture after 32 correlations", async () => {
@@ -795,26 +745,7 @@ describe("AgentIncidentCoordinator", () => {
     await coordinator.closeAdmissionAndDrain();
   });
 
-  it("retains only the newest 20 canonical reports in memory", async () => {
-    const { coordinator } = fakeDependencies({
-      finalize: (ids) => {
-        const match = /([a-f0-9]{32})$/u.exec(ids.conversationId);
-        return match ? fakeReport(Number.parseInt(match[1]!.slice(-4), 16)) : null;
-      },
-    });
-    for (let value = 100; value <= 120; value += 1) {
-      const ids = correlation(value);
-      coordinator.captureFailure(failure(ids));
-      coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", value));
-      recordFailureSurface(coordinator, ids);
-    }
-
-    await expect(coordinator.loadSerializedByIncidentId(correlation(100).incidentId)).resolves.toBeNull();
-    await expect(coordinator.loadSerializedByIncidentId(correlation(101).incidentId)).resolves.toBe(`canonical:${reportId(101)}`);
-    await expect(coordinator.loadSerializedByIncidentId(correlation(120).incidentId)).resolves.toBe(`canonical:${reportId(120)}`);
-  });
-
-  it("drain waits for tracked initialization and save work and never rejects", async () => {
+  it("drains tracked initialization and save work without rejecting", async () => {
     const ids = correlation(121);
     const initialization = createDeferred<void>();
     const save = createDeferred<void>();
@@ -829,7 +760,7 @@ describe("AgentIncidentCoordinator", () => {
     recordFailureSurface(coordinator, ids);
 
     let drained = false;
-    const draining = coordinator.drain().then(() => { drained = true; });
+    const draining = coordinator.closeAdmissionAndDrain().then(() => { drained = true; });
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -842,7 +773,7 @@ describe("AgentIncidentCoordinator", () => {
     expect(drained).toBe(true);
   });
 
-  it("drain waits for initialization when no report save exists", async () => {
+  it("drains pending initialization when no report save exists", async () => {
     const initialization = createDeferred<void>();
     const { coordinator } = fakeDependencies({
       initialize: () => initialization.promise,
@@ -850,7 +781,7 @@ describe("AgentIncidentCoordinator", () => {
     void coordinator.initialize();
 
     let drained = false;
-    const draining = coordinator.drain().then(() => { drained = true; });
+    const draining = coordinator.closeAdmissionAndDrain().then(() => { drained = true; });
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
@@ -867,7 +798,7 @@ describe("AgentIncidentCoordinator", () => {
     });
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1));
 
-    await expect(coordinator.drain()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
 
     expect(recorder.finalize).not.toHaveBeenCalled();
     expect(store.serialize).not.toHaveBeenCalled();
@@ -883,7 +814,7 @@ describe("AgentIncidentCoordinator", () => {
     coordinator.captureFailure(failure(ids));
 
     expect(() => coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1))).not.toThrow();
-    await expect(coordinator.drain()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
     expect(store.save).not.toHaveBeenCalled();
   });
 
@@ -898,25 +829,24 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1))).not.toThrow();
     expect(() => coordinator.recordTransport(transport(ids))).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids))).not.toThrow();
-    await expect(coordinator.drain()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 
-  it("settles report readiness as unavailable when failed lifecycle projection is not accepted", async () => {
+  it("does not finalize when the failed lifecycle projection is not accepted", async () => {
     const ids = correlation(128);
-    const { coordinator, recorder } = fakeDependencies();
+    const { coordinator, recorder, store } = fakeDependencies();
     recorder.record.mockReturnValue(false);
     const receipt = coordinator.captureFailure(failure(ids));
-
-    const copy = coordinator.loadReportForCopy(receipt!.reportId);
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1));
 
-    await expect(copy).resolves.toBeNull();
-    expect(recorder.finalize).not.toHaveBeenCalled();
     await coordinator.closeAdmissionAndDrain();
+    expect(receipt).toEqual({ reportId: `report_${ids.conversationId.slice(-32)}` });
+    expect(recorder.finalize).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid and all-zero correlation and incident IDs without throwing", async () => {
+  it("rejects invalid and all-zero correlation IDs without throwing", () => {
     const ids = correlation(127);
     const { coordinator, recorder } = fakeDependencies();
     const invalidConversation = failure(ids, { conversationId: "conversation_private" });
@@ -929,8 +859,6 @@ describe("AgentIncidentCoordinator", () => {
       conversation_id: `conversation_${"0".repeat(31)}`,
     })).not.toThrow();
     expect(recorder.finalize).not.toHaveBeenCalled();
-    await expect(coordinator.loadSerializedByIncidentId("incident-private")).resolves.toBeNull();
-    await expect(coordinator.loadSerializedByIncidentId(`incident_${"0".repeat(32)}`)).resolves.toBeNull();
   });
 
   it("does not throw or retain hostile lifecycle, capture, transport, rendering, or provider getters", async () => {
@@ -946,8 +874,7 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.captureFailure(hostileFailure as AgentRunFailureCaptureEvent)).not.toThrow();
     expect(() => coordinator.recordTransport(hostileTransport as AgentChatTransportSegmentSummaryEvent)).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids), hostileRendering as ReturnType<typeof rendering>)).not.toThrow();
-    await expect(coordinator.loadSerializedByIncidentId(Object.defineProperty({}, "toString", { get: throwing }) as unknown as string)).resolves.toBeNull();
-    await expect(coordinator.drain()).resolves.toBeUndefined();
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 
@@ -1037,9 +964,9 @@ describe("AgentIncidentCoordinator", () => {
     );
   });
 
-  it("reserves one stable report ID and copies a client-only failure by report ID", async () => {
+  it("reserves one stable report ID and persists a client-only failure under it", async () => {
     const ids = correlation(130);
-    const { coordinator, recorder, store } = realHarness();
+    const { adapter, coordinator, store } = realHarness();
     coordinator.recordLifecycle(lifecycle(ids, "run_started", 1));
     const receipt = coordinator.captureFailure(failure(ids, {
       incidentId: undefined,
@@ -1060,8 +987,9 @@ describe("AgentIncidentCoordinator", () => {
       incident_id: undefined,
       failure_code: "response_display_failed",
     }));
-    const copied = await coordinator.loadSerializedByReportId(receipt!.reportId);
-    const report = recorder.getByReportId(receipt!.reportId);
+    await coordinator.closeAdmissionAndDrain();
+    const persisted = persistedBytes(adapter, receipt!.reportId);
+    const report = JSON.parse(persisted!) as AgentIncidentReport;
 
     expect(report).toMatchObject({
       report_id: receipt!.reportId,
@@ -1071,13 +999,13 @@ describe("AgentIncidentCoordinator", () => {
         terminal_evidence: "client_observed",
       },
     });
-    expect(report!.incident).not.toHaveProperty("incident_id");
-    expect(copied).toBe(store.serialize(report!));
+    expect(report.incident).not.toHaveProperty("incident_id");
+    expect(persisted).toBe(store.serialize(report));
   });
 
-  it("retries canonical serialization only during explicit report copy", async () => {
+  it("retries canonical serialization of a finalized report before teardown", async () => {
     const ids = correlation(131);
-    const { coordinator, store } = fakeDependencies({
+    const { coordinator, recorder, store } = fakeDependencies({
       finalize: () => fakeReport(131),
     });
     store.serialize
@@ -1087,34 +1015,37 @@ describe("AgentIncidentCoordinator", () => {
     const receipt = coordinator.captureFailure(failure(ids));
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 2));
     recordFailureSurface(coordinator, ids);
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForTimers();
     expect(store.serialize).toHaveBeenCalledTimes(1);
+    expect(store.save).not.toHaveBeenCalled();
 
-    await expect(coordinator.loadSerializedByReportId(receipt!.reportId)).resolves.toBe(
-      `canonical:${reportId(131)}`,
-    );
+    await coordinator.closeAdmissionAndDrain();
+    expect(receipt).toEqual({ reportId: `report_${ids.conversationId.slice(-32)}` });
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
     expect(store.serialize).toHaveBeenCalledTimes(2);
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(store.save).toHaveBeenCalledWith(fakeReport(131));
   });
 
   it("includes a terminal transport summary observed before the failed terminal", async () => {
     const ids = correlation(132);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     begin(coordinator, ids);
     coordinator.captureFailure(failure(ids), rendering());
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 2, {
       command_segment_ordinal: 1,
     }));
-    await coordinator.drain();
+    await waitForTimers();
+    await coordinator.closeAdmissionAndDrain();
 
-    expect(recorder.getByIncidentId(ids.incidentId)?.transport_segments).toEqual([
+    expect(persistedReport(adapter, ids.incidentId)?.transport_segments).toEqual([
       expect.objectContaining({ segment_ordinal: 1, close_reason: "response_rejected" }),
     ]);
   });
 
   it("waits off the settlement stack for a terminal transport summary observed after the terminal", async () => {
     const ids = correlation(133);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     coordinator.recordLifecycle(lifecycle(ids, "run_started", 1));
     coordinator.captureFailure(failure(ids), rendering());
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 2, {
@@ -1122,12 +1053,12 @@ describe("AgentIncidentCoordinator", () => {
     }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(recorder.getByIncidentId(ids.incidentId)).toBeNull();
+    expect(persistedReports(adapter)).toEqual([]);
 
     coordinator.recordTransport(transport(ids));
-    await coordinator.drain();
+    await coordinator.closeAdmissionAndDrain();
 
-    expect(recorder.getByIncidentId(ids.incidentId)?.transport_segments).toEqual([
+    expect(persistedReport(adapter, ids.incidentId)?.transport_segments).toEqual([
       expect.objectContaining({ segment_ordinal: 1 }),
     ]);
   });
@@ -1150,9 +1081,10 @@ describe("AgentIncidentCoordinator", () => {
       command_segment_ordinal: 1,
     }));
 
-    await coordinator.drain();
+    await waitForTimers();
+    await coordinator.closeAdmissionAndDrain();
 
-    const report = recorder.getByIncidentId(ids.incidentId);
+    const report = persistedReport(adapter, ids.incidentId);
     expect(report).not.toBeNull();
     expect(report!.transport_segments).toEqual([]);
     expect(report!.capture_quality.missing_fields).toContain("terminal_transport_segment");
@@ -1161,25 +1093,24 @@ describe("AgentIncidentCoordinator", () => {
   it("closes admission before draining already accepted terminal and capture work", async () => {
     const accepted = correlation(135);
     const rejected = correlation(136);
-    const { coordinator, recorder } = realHarness();
+    const { adapter, coordinator } = realHarness();
     coordinator.recordLifecycle(lifecycle(accepted, "run_started", 1));
     const receipt = coordinator.captureFailure(failure(accepted), rendering());
     coordinator.recordLifecycle(lifecycle(accepted, "run_finished_failed", 2));
 
     const closing = coordinator.closeAdmissionAndDrain();
-    expect(coordinator.getStatus().admissionState).toBe("closed");
     expect(coordinator.captureFailure(failure(rejected), rendering())).toBeNull();
     coordinator.recordLifecycle(lifecycle(rejected, "run_started", 3));
     coordinator.recordLifecycle(lifecycle(rejected, "run_finished_failed", 4));
     coordinator.recordTransport(transport(rejected));
     await closing;
 
-    expect(recorder.getByReportId(receipt!.reportId)).not.toBeNull();
-    expect(recorder.getByIncidentId(rejected.incidentId)).toBeNull();
-    expect(coordinator.getStatus().pendingRunCount).toBe(0);
+    expect(persistedBytes(adapter, receipt!.reportId)).toBeDefined();
+    expect(persistedReports(adapter).map((report) => report.report_id)).toEqual([receipt!.reportId]);
+    expect(persistedReport(adapter, rejected.incidentId)).toBeNull();
   });
 
-  it("bounds hundreds of saves behind a blocked adapter and preserves newest memory copies", async () => {
+  it("bounds hundreds of saves behind a blocked adapter and keeps the newest queued reports", async () => {
     const adapter = new MemoryAdapter();
     adapter.blockWrites();
     let nextReport = 200;
@@ -1189,7 +1120,7 @@ describe("AgentIncidentCoordinator", () => {
     });
     const coordinator = new AgentIncidentCoordinator({
       recorder,
-      store: new AgentIncidentStore(adapter),
+      store: new AgentIncidentStore(adapter, { now: () => BASE_TIME }),
       drainTimeoutMs: 5,
     });
     let newestReceipt: Readonly<{ reportId: string }> | null = null;
@@ -1203,28 +1134,24 @@ describe("AgentIncidentCoordinator", () => {
       await Promise.resolve();
     }
 
-    const blocked = coordinator.getStatus();
-    expect(blocked.pendingRunCount).toBe(0);
-    expect(blocked.memoryReportCount).toBe(20);
-    expect(blocked.pendingSaveCount).toBeLessThanOrEqual(20);
-    expect(blocked.droppedSaveCount).toBeGreaterThan(200);
-    await expect(coordinator.loadReportForCopy(newestReceipt!.reportId)).resolves.toMatchObject({
-      durability: "memory_fallback",
-    });
-
-    await expect(coordinator.drain()).resolves.toBeUndefined();
-    expect(coordinator.getStatus().pendingSaveCount).toBeLessThanOrEqual(20);
+    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    expect(adapter.writeCalls).toBe(1);
+    expect(adapter.files.size).toBe(0);
     adapter.releaseWrites();
     for (
       let attempt = 0;
-      attempt < 100 && coordinator.getStatus().pendingSaveCount > 0;
+      attempt < 500 && persistedReports(adapter).length < 20;
       attempt += 1
     ) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
-    expect(coordinator.getStatus().pendingSaveCount).toBe(0);
-    await expect(coordinator.loadReportForCopy(newestReceipt!.reportId)).resolves.toMatchObject({
-      durability: "persisted",
-    });
+
+    const persistedIds = persistedReports(adapter).map((report) => report.report_id).sort();
+    expect(persistedIds).toHaveLength(20);
+    expect(persistedIds[0]).toBe(reportId(200));
+    expect(persistedIds).toContain(newestReceipt!.reportId);
+    expect(persistedIds.slice(1)).toEqual(
+      Array.from({ length: 19 }, (_, index) => reportId(431 + index)),
+    );
   });
 });

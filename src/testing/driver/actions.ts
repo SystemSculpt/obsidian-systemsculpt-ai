@@ -140,6 +140,7 @@ const developmentChatOwners = new WeakMap<App, DevelopmentChatOwnership>();
 const INCIDENT_REPORT_ID_PATTERN = /^report_(?!0{32}$)[a-f0-9]{32}$/u;
 const INCIDENT_REPORT_DIRECTORY = ".systemsculpt/diagnostics/incidents";
 const INCIDENT_REPORT_MAX_BYTES = 256 * 1024;
+const INCIDENT_REPORT_PERSIST_TIMEOUT_MS = 5000;
 
 /**
  * Diagnostics-export attribution state. The harness may only trash a
@@ -4401,6 +4402,10 @@ async function importDevelopmentOwnershipReceipt(
   };
 }
 
+/**
+ * The failure card copies only the report ID. Resolve it to the report the
+ * plugin persisted under that ID, allowing a bounded wait for the local save.
+ */
 async function readCopiedIncidentReport(
   ctx: ActionContext,
 ): Promise<Readonly<{ reportId: string; serialized: string }>> {
@@ -4409,43 +4414,40 @@ async function readCopiedIncidentReport(
   if (typeof clipboard?.readText !== "function") {
     throw new DriverActionError("Clipboard reading is unavailable in this development build.");
   }
-  let serialized: string;
+  let reportId: string;
   try {
-    serialized = await clipboard.readText();
+    reportId = await clipboard.readText();
   } catch {
-    throw new DriverActionError("The copied incident report could not be read.");
+    throw new DriverActionError("The copied incident report ID could not be read.");
   }
+  if (!INCIDENT_REPORT_ID_PATTERN.test(reportId)) {
+    throw new DriverActionError("The clipboard does not hold exactly one incident report ID.");
+  }
+  const serialized = await waitForPersistedIncidentReport(ctx, reportId);
   const bytes = new TextEncoder().encode(serialized).byteLength;
   if (bytes === 0 || bytes > INCIDENT_REPORT_MAX_BYTES) {
-    throw new DriverActionError("The copied incident report has an invalid size.");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(serialized);
-  } catch {
-    throw new DriverActionError("The copied incident report is not valid JSON.");
-  }
-  const reportId = typeof parsed === "object"
-    && parsed !== null
-    && !Array.isArray(parsed)
-    && typeof (parsed as { report_id?: unknown }).report_id === "string"
-    ? (parsed as { report_id: string }).report_id
-    : "";
-  if (!INCIDENT_REPORT_ID_PATTERN.test(reportId)) {
-    throw new DriverActionError("The copied incident report has an invalid identity.");
-  }
-  let persisted: string;
-  try {
-    persisted = await ctx.app.vault.adapter.read(
-      `${INCIDENT_REPORT_DIRECTORY}/${reportId}.json`,
-    );
-  } catch {
-    throw new DriverActionError("The copied incident report is not durably stored.");
-  }
-  if (persisted !== serialized) {
-    throw new DriverActionError("The copied incident report differs from its stored bytes.");
+    throw new DriverActionError("The stored incident report has an invalid size.");
   }
   return { reportId, serialized };
+}
+
+async function waitForPersistedIncidentReport(
+  ctx: ActionContext,
+  reportId: string,
+): Promise<string> {
+  const path = `${INCIDENT_REPORT_DIRECTORY}/${reportId}.json`;
+  const startedAt = Date.now();
+  for (;;) {
+    throwIfActionCancelled(ctx);
+    try {
+      return await ctx.app.vault.adapter.read(path);
+    } catch {
+      if (Date.now() - startedAt >= INCIDENT_REPORT_PERSIST_TIMEOUT_MS) {
+        throw new DriverActionError("The copied incident report is not durably stored.");
+      }
+    }
+    await sleep(50);
+  }
 }
 
 function developmentCleanupProgress(

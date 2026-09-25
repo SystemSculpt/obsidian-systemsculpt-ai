@@ -611,10 +611,8 @@ type ActiveIncident = {
  */
 export class AgentIncidentRecorder {
   private readonly active = new Map<string, ActiveIncident>();
-  private readonly frozenByReportId = new Map<string, AgentIncidentReport>();
-  private readonly frozenByIncidentId = new Map<string, AgentIncidentReport>();
-  private readonly frozenByCorrelation = new Map<string, AgentIncidentReport>();
-  private readonly frozenCorrelationByReportId = new Map<string, string>();
+  /** Report IDs of recently frozen reports, keyed by their closed correlation. */
+  private readonly frozenReportIds = new Map<string, string>();
   private readonly settledNonFailure = new Set<string>();
   private readonly now: () => number;
   private readonly createReportId: () => string;
@@ -631,7 +629,7 @@ export class AgentIncidentRecorder {
       const projected = projectLifecycleEvent(event);
       if (!projected) return false;
       const key = correlationKey(projected.correlation);
-      if (this.frozenByCorrelation.has(key) || this.settledNonFailure.has(key)) return false;
+      if (this.frozenReportIds.has(key) || this.settledNonFailure.has(key)) return false;
       const state = this.active.get(key) ?? this.createActive(projected.correlation);
       state.observedEventCount = addBoundedCount(state.observedEventCount, 1);
       if (state.terminal) {
@@ -755,7 +753,7 @@ export class AgentIncidentRecorder {
       if (!safeCorrelation) return null;
       const key = correlationKey(safeCorrelation);
       const state = this.active.get(key);
-      if (!state || this.frozenByCorrelation.has(key) || this.settledNonFailure.has(key)) return null;
+      if (!state || this.frozenReportIds.has(key) || this.settledNonFailure.has(key)) return null;
       if (state.reservedReportId) return state.reservedReportId;
       const reportId = this.allocateReportId();
       state.reservedReportId = reportId;
@@ -773,8 +771,7 @@ export class AgentIncidentRecorder {
       const safeCorrelation = sanitizeCorrelation(correlation);
       if (!safeCorrelation) return null;
       const key = correlationKey(safeCorrelation);
-      const existing = this.frozenByCorrelation.get(key);
-      if (existing) return existing;
+      if (this.frozenReportIds.has(key)) return null;
       const state = this.active.get(key);
       if (!state?.terminal || state.terminal.code !== "run_finished_failed") return null;
 
@@ -789,18 +786,6 @@ export class AgentIncidentRecorder {
     } catch {
       return null;
     }
-  }
-
-  public getByReportId(reportId: string): AgentIncidentReport | null {
-    return typeof reportId === "string" && REPORT_ID.test(reportId)
-      ? this.frozenByReportId.get(reportId) ?? null
-      : null;
-  }
-
-  public getByIncidentId(incidentId: string): AgentIncidentReport | null {
-    return isNonzeroIncidentId(incidentId)
-      ? this.frozenByIncidentId.get(incidentId) ?? null
-      : null;
   }
 
   private createActive(correlation: SafeCorrelation): ActiveIncident {
@@ -1118,7 +1103,9 @@ export class AgentIncidentRecorder {
   }
 
   private isReportIdAllocated(reportId: string): boolean {
-    if (this.frozenByReportId.has(reportId)) return true;
+    for (const frozenReportId of this.frozenReportIds.values()) {
+      if (frozenReportId === reportId) return true;
+    }
     for (const state of this.active.values()) {
       if (state.reservedReportId === reportId) return true;
     }
@@ -1126,25 +1113,11 @@ export class AgentIncidentRecorder {
   }
 
   private rememberReport(key: string, report: AgentIncidentReport): void {
-    this.frozenByReportId.set(report.report_id, report);
-    this.frozenByCorrelation.set(key, report);
-    this.frozenCorrelationByReportId.set(report.report_id, key);
-    if (report.incident.incident_id) {
-      this.frozenByIncidentId.set(report.incident.incident_id, report);
-    }
-    while (this.frozenByReportId.size > this.maximumFrozenReports) {
-      const oldestId = this.frozenByReportId.keys().next().value;
-      if (!oldestId) break;
-      const oldest = this.frozenByReportId.get(oldestId);
-      if (!oldest) continue;
-      this.frozenByReportId.delete(oldestId);
-      const oldestKey = this.frozenCorrelationByReportId.get(oldestId);
-      this.frozenCorrelationByReportId.delete(oldestId);
-      if (oldestKey && this.frozenByCorrelation.get(oldestKey) === oldest) this.frozenByCorrelation.delete(oldestKey);
-      const incidentId = oldest.incident.incident_id;
-      if (incidentId && this.frozenByIncidentId.get(incidentId) === oldest) {
-        this.frozenByIncidentId.delete(incidentId);
-      }
+    this.frozenReportIds.set(key, report.report_id);
+    while (this.frozenReportIds.size > this.maximumFrozenReports) {
+      const oldestKey = this.frozenReportIds.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.frozenReportIds.delete(oldestKey);
     }
   }
 

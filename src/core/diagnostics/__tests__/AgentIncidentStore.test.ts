@@ -688,17 +688,19 @@ describe("AgentIncidentStore", () => {
     expect(report?.privacy.excluded_data_categories).toContain("conversation_and_request_ids");
     const firstStore = new AgentIncidentStore(adapter);
     const saved = await firstStore.save(report!);
-    const restartedStore = new AgentIncidentStore(adapter);
-    const restored = await restartedStore.loadByIncidentId(serverIncidentId);
+    const restart = await new AgentIncidentStore(adapter).initialize();
+    const restored = adapter.files.get(`${AGENT_INCIDENT_STORE_PATH}/${report!.report_id}.json`)?.data;
 
-    expect(restored?.serialized).toBe(saved.serialized);
-    expect(restored?.serialized).toBe(firstStore.serialize(report!));
-    expect(restored?.report).toEqual(report);
-    expect(restored?.serialized).not.toContain(conversationId);
-    expect(restored?.serialized).not.toContain(requestId);
+    expect(restart).toMatchObject({ retainedReports: 1, corruptReports: 0 });
+    expect(restored).toBe(saved.serialized);
+    expect(restored).toBe(firstStore.serialize(report!));
+    expect(JSON.parse(restored!)).toEqual(report);
+    expect(JSON.parse(restored!).incident.incident_id).toBe(serverIncidentId);
+    expect(restored).not.toContain(conversationId);
+    expect(restored).not.toContain(requestId);
   });
 
-  it("atomically saves canonical bytes and restores them by either ID after restart", async () => {
+  it("atomically saves canonical bytes that survive a restart scan", async () => {
     const adapter = new MemoryAdapter();
     const firstStore = new AgentIncidentStore(adapter);
     const source = incidentReport(1);
@@ -715,15 +717,14 @@ describe("AgentIncidentStore", () => {
     expect(adapter.files.has(`${reportPath(1)}.tmp`)).toBe(false);
     expect(adapter.files.get(reportPath(1))?.data).toBe(saved.serialized);
 
-    const restartedStore = new AgentIncidentStore(adapter);
-    const byReport = await restartedStore.loadByReportId(reportId(1));
-    const byIncident = await restartedStore.loadByIncidentId(incidentId(1));
+    expect(saved.report.report_id).toBe(reportId(1));
+    expect(Object.isFrozen(saved.report)).toBe(true);
+    expect(Object.isFrozen((saved.report as unknown as { timeline: unknown[] }).timeline)).toBe(true);
 
-    expect(byReport?.serialized).toBe(saved.serialized);
-    expect(byIncident?.serialized).toBe(saved.serialized);
-    expect(byReport?.report.report_id).toBe(reportId(1));
-    expect(Object.isFrozen(byReport?.report)).toBe(true);
-    expect(Object.isFrozen((byReport?.report as unknown as { timeline: unknown[] }).timeline)).toBe(true);
+    const restart = await new AgentIncidentStore(adapter).initialize();
+
+    expect(restart).toMatchObject({ retainedReports: 1, corruptReports: 0, removedReports: 0 });
+    expect(adapter.files.get(reportPath(1))?.data).toBe(saved.serialized);
   });
 
   it("fails closed before writing when atomic rename is unavailable", async () => {
@@ -770,7 +771,7 @@ describe("AgentIncidentStore", () => {
       ((report.timeline as Array<Record<string, unknown>>)[1]).retryable = false;
     });
     await expect(store.save(conflict)).rejects.toMatchObject({ code: "duplicate_report_id" });
-    expect((await store.loadByReportId(reportId(5)))?.serialized).toBe(first.serialized);
+    expect(adapter.files.get(reportPath(5))?.data).toBe(first.serialized);
   });
 
   it("rejects unsafe identifiers before any adapter path access", async () => {
@@ -778,8 +779,12 @@ describe("AgentIncidentStore", () => {
     const store = new AgentIncidentStore(adapter);
     const existsSpy = jest.spyOn(adapter, "exists");
 
-    await expect(store.loadByReportId("../../data")).rejects.toMatchObject({ code: "invalid_identifier" });
-    await expect(store.loadByIncidentId("incident/../../data")).rejects.toMatchObject({ code: "invalid_identifier" });
+    await expect(store.save(incidentReport(9, undefined, (report) => {
+      report.report_id = "../../data";
+    }))).rejects.toMatchObject({ code: "invalid_identifier" });
+    await expect(store.save(incidentReport(9, undefined, (report) => {
+      (report.incident as Record<string, unknown>).incident_id = "incident/../../data";
+    }))).rejects.toMatchObject({ code: "invalid_identifier" });
     expect(existsSpy).not.toHaveBeenCalled();
   });
 
@@ -793,13 +798,12 @@ describe("AgentIncidentStore", () => {
     const valid = seed.serialize(incidentReport(7));
     adapter.put(reportPath(7), valid);
 
-    const restarted = new AgentIncidentStore(adapter);
-    const loaded = await restarted.loadByIncidentId(incidentId(7));
+    const result = await new AgentIncidentStore(adapter).initialize();
 
-    expect(loaded?.report.report_id).toBe(reportId(7));
+    expect(result).toMatchObject({ corruptReports: 1, retainedReports: 1 });
+    expect(adapter.files.get(reportPath(7))?.data).toBe(valid);
     expect(adapter.files.has(reportPath(6))).toBe(false);
     expect(adapter.files.has(`${reportPath(6)}.corrupt`)).toBe(true);
-    await expect(restarted.loadByReportId(reportId(6))).resolves.toBeNull();
   });
 
   it("removes a corrupt source when every bounded isolation name already exists", async () => {
@@ -851,9 +855,9 @@ describe("AgentIncidentStore", () => {
       await store.save(incidentReport(sequence, createdAt));
     }
 
-    await expect(store.loadByReportId(reportId(1))).resolves.toBeNull();
-    await expect(store.loadByReportId(reportId(2))).resolves.toBeNull();
-    await expect(store.loadByReportId(reportId(3))).resolves.not.toBeNull();
+    expect(adapter.files.has(reportPath(1))).toBe(false);
+    expect(adapter.files.has(reportPath(2))).toBe(false);
+    expect(adapter.files.has(reportPath(3))).toBe(true);
     expect([...adapter.files.keys()].filter((path) => path.endsWith(".json"))).toHaveLength(20);
   });
 
@@ -869,10 +873,8 @@ describe("AgentIncidentStore", () => {
 
     expect(saved.created).toBe(true);
     expect(saved.report.report_id).toBe(reportId(241));
-    await expect(store.loadByReportId(reportId(241))).resolves.toMatchObject({
-      report: { report_id: reportId(241) },
-    });
-    await expect(store.loadByReportId(reportId(240))).resolves.toBeNull();
+    expect(adapter.files.get(reportPath(241))?.data).toBe(saved.serialized);
+    expect(adapter.files.has(reportPath(240))).toBe(false);
   });
 
   it("removes reports and artifacts after 14 days", async () => {
@@ -1012,7 +1014,7 @@ describe("AgentIncidentStore", () => {
   });
 
   it.each(["stat", "read"] as const)(
-    "marks a report %s failure as an incomplete retention scan and incident lookup",
+    "marks a report %s failure as an incomplete retention scan and refuses to overwrite it",
     async (operation) => {
       const adapter = new MemoryAdapter();
       adapter.directories.add(".systemsculpt");
@@ -1039,10 +1041,9 @@ describe("AgentIncidentStore", () => {
       expect(result.limitsSatisfied).toBe(false);
       expect(result.cleanupFailures).toBe(1);
       expect(adapter.files.has(reportPath(260))).toBe(true);
-      await expect(store.loadByReportId(reportId(260)))
-        .rejects.toMatchObject({ code: "lookup_incomplete" });
-      await expect(store.loadByIncidentId(incidentId(260)))
-        .rejects.toMatchObject({ code: "lookup_incomplete" });
+      await expect(store.save(incidentReport(260)))
+        .rejects.toMatchObject({ code: "persistence_unavailable" });
+      expect(adapter.writeCalls).toBe(0);
     },
   );
 
@@ -1101,11 +1102,16 @@ describe("AgentIncidentStore", () => {
     }
     adapter.put(reportPath(2_100), new AgentIncidentStore(adapter).serialize(incidentReport(2_100)));
 
-    await expect(new AgentIncidentStore(adapter).loadByIncidentId(incidentId(2_100)))
-      .resolves.toMatchObject({ report: { report_id: reportId(2_100) } });
+    await expect(new AgentIncidentStore(adapter).initialize()).resolves.toMatchObject({
+      scanComplete: false,
+      scannedReports: 1,
+      retainedReports: 1,
+      skippedCandidates: 1,
+    });
+    expect(adapter.files.has(reportPath(2_100))).toBe(true);
   });
 
-  it("does not report an exhaustive incident miss when owned reports exceed the scan bound", async () => {
+  it("does not claim a complete scan when owned reports exceed the scan bound", async () => {
     const adapter = new MemoryAdapter();
     adapter.directories.add(".systemsculpt");
     adapter.directories.add(".systemsculpt/diagnostics");
@@ -1114,9 +1120,15 @@ describe("AgentIncidentStore", () => {
     adapter.put(reportPath(2_101), serializer.serialize(incidentReport(2_101)));
     adapter.put(reportPath(2_102), serializer.serialize(incidentReport(2_102)));
 
-    await expect(new AgentIncidentStore(adapter, { maxScanCandidates: 1 })
-      .loadByIncidentId(incidentId(2_102)))
-      .rejects.toMatchObject({ code: "lookup_incomplete" });
+    await expect(new AgentIncidentStore(adapter, { maxScanCandidates: 1 }).initialize())
+      .resolves.toMatchObject({
+        scanComplete: false,
+        scannedReports: 1,
+        skippedCandidates: 1,
+        limitsSatisfied: false,
+      });
+    expect(adapter.files.has(reportPath(2_101))).toBe(true);
+    expect(adapter.files.has(reportPath(2_102))).toBe(true);
   });
 
   it("yields to the host between scan batches", async () => {
@@ -1152,9 +1164,9 @@ describe("AgentIncidentStore", () => {
     const result = await store.save(third);
 
     expect(result.retention.limitsSatisfied).toBe(true);
-    await expect(store.loadByReportId(reportId(24))).resolves.toBeNull();
-    await expect(store.loadByReportId(reportId(25))).resolves.not.toBeNull();
-    await expect(store.loadByReportId(reportId(26))).resolves.not.toBeNull();
+    expect(adapter.files.has(reportPath(24))).toBe(false);
+    expect(adapter.files.has(reportPath(25))).toBe(true);
+    expect(adapter.files.has(reportPath(26))).toBe(true);
     expect(result.retention.retainedBytes).toBeLessThanOrEqual(limit);
   });
 
@@ -1663,8 +1675,8 @@ describe("AgentIncidentStore", () => {
     });
 
     await expect(store.save(report)).resolves.toMatchObject({ created: true });
-    await expect(store.loadByReportId(reportId(142))).resolves.toMatchObject({
-      report: { tools: [{ completed_at: "2026-08-13T11:59:55.000Z" }] },
+    expect(JSON.parse(adapter.files.get(reportPath(142))!.data)).toMatchObject({
+      tools: [{ completed_at: "2026-08-13T11:59:55.000Z" }],
     });
   });
 
@@ -1757,7 +1769,7 @@ describe("AgentIncidentStore", () => {
     await expect(secondStore.save(conflict)).rejects.toMatchObject({ code: "duplicate_report_id" });
   });
 
-  it("isolates valid but noncanonical disk JSON instead of copying different bytes", async () => {
+  it("isolates valid but noncanonical disk JSON instead of retaining different bytes", async () => {
     const adapter = new MemoryAdapter();
     adapter.directories.add(".systemsculpt");
     adapter.directories.add(".systemsculpt/diagnostics");
@@ -1768,7 +1780,8 @@ describe("AgentIncidentStore", () => {
     expect(noncanonical).not.toBe(canonical);
     adapter.put(reportPath(160), noncanonical);
 
-    await expect(new AgentIncidentStore(adapter).loadByReportId(reportId(160))).resolves.toBeNull();
+    await expect(new AgentIncidentStore(adapter).initialize())
+      .resolves.toMatchObject({ corruptReports: 1, retainedReports: 0 });
     expect(adapter.files.has(reportPath(160))).toBe(false);
     expect(adapter.files.has(`${reportPath(160)}.corrupt`)).toBe(true);
   });
