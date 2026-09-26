@@ -11,6 +11,7 @@ import { getFilesFromFolder, normalizeVaultPath } from "../utils";
 import { openFileInMainWorkspace } from '../../../utils/workspaceUtils';
 import { resolveFolderNotePath } from "../folderNotes";
 import type { FirstPartyToolChatTarget } from "../../types";
+import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
 
 /**
  * Management operations for first-party vault tools (workspace, context).
@@ -72,7 +73,7 @@ export class ManagementOperations {
     }
 
     const MAX_FILES_PER_REQUEST = FILESYSTEM_LIMITS.MAX_FILES_PER_REQUEST;
-    const results: Array<{path: string; success: boolean; reason?: string}> = [];
+    const results: ContextManagementResult["results"] = [];
     let totalFilesProcessed = 0;
     
     // Context is scoped to the chat whose agent emitted the tool call. Looking
@@ -86,6 +87,8 @@ export class ManagementOperations {
     if (action === "add") {
       // Handle pinning files
       let filesInCurrentRequest = 0;
+      // A folder pins only what find, search and list_items would show from it.
+      const exclusions = searchVaultExclusions(this.plugin);
       
       for (const path of paths) {
         try {
@@ -106,8 +109,16 @@ export class ManagementOperations {
           }
 
           if (abstractFile instanceof TFolder) {
-            // Get all files in the directory recursively
-            const folderFiles = getFilesFromFolder(abstractFile);
+            if (exclusions.isFolderExcluded(abstractFile.path)) {
+              results.push({ path, success: false, reason: "This folder is excluded from search in SystemSculpt settings, so none of its files were pinned." });
+              continue;
+            }
+            // Get the directory's files recursively, without excluded files
+            const folderFiles = getFilesFromFolder(abstractFile).filter((file) => !exclusions.isExcluded(file.path));
+            if (folderFiles.length === 0) {
+              results.push({ path, success: false, reason: "This folder has no files that aren't excluded from search, so none were pinned." });
+              continue;
+            }
             
             if (folderFiles.length > MAX_FILES_PER_REQUEST) {
               results.push({ 
@@ -176,7 +187,10 @@ export class ManagementOperations {
             );
 
             if (success) {
-              results.push({ path, success: true });
+              // Exclusions hide files from discovery; a file named explicitly is still pinned.
+              results.push(exclusions.isExcluded(abstractFile.path)
+                ? { path, success: true, note: "Pinned because it was named explicitly; this file is excluded from search in SystemSculpt settings." }
+                : { path, success: true });
               filesInCurrentRequest++;
               totalFilesProcessed++;
             } else {

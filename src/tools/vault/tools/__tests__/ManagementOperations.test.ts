@@ -302,6 +302,44 @@ describe("ManagementOperations", () => {
         expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalled();
       });
 
+      it("pins only the files in a folder that search would show (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["dir/private"], patterns: ["*.draft.md"] } };
+        const visible = new TFile({ path: "dir/notes.md" });
+        const folderFiles = [visible, new TFile({ path: "dir/plan.draft.md" }), new TFile({ path: "dir/private/key.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["dir"] });
+
+        expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalledWith([visible], mockContextManager, expect.anything());
+        expect(result.results[0]).toEqual({ path: "dir", success: true });
+      });
+
+      it("pins nothing from an excluded folder and says why (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["Private"] } };
+        const folderFiles = [new TFile({ path: "Private/key.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "Private", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["Private"] });
+
+        expect(mockDocumentContextManager.pinVaultFiles).not.toHaveBeenCalled();
+        expect(result.results[0]).toMatchObject({ path: "Private", success: false, reason: expect.stringContaining("excluded from search") });
+        expect(result.processed).toBe(0);
+      });
+
+      it("pins an excluded file named by path and notes the exclusion (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["Private"] } };
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFile({ path: "Private/key.md" }));
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["Private/key.md"] });
+
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalled();
+        expect(result.results[0]).toMatchObject({ path: "Private/key.md", success: true, note: expect.stringContaining("named explicitly") });
+      });
+
       it("rejects directory with too many files", async () => {
         const mockFiles = Array(15).fill(null).map((_, i) => new TFile({ path: `dir/file${i}.md` }));
         const mockFolder = new TFolder({ path: "dir", children: mockFiles });
