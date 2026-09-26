@@ -24,6 +24,7 @@ const later = (left: string, right: string): string => left > right ? left : rig
 /** The stamp of a field entry, without the stamp of the value it replaced. */
 const stampOf = (entry: string | undefined): string => entry ? entry.split("/", 1)[0] : "";
 const stampWriter = (entry: string): string => stampOf(entry).slice(WALL_DIGITS + COUNTER_DIGITS);
+const fieldStamp = (stamp: string, replaced: string): string => replaced ? `${stamp}/${replaced}` : stamp;
 
 export class StudioHybridClock {
   private wall = 0;
@@ -246,7 +247,7 @@ export function recordStudioChanges(
       if (!pending.has(slot)) pending.set(slot, {value: copy(previous.get(id)?.value), stamp: leafStamp(clock.stamps, key, leaf)});
       // All autosaves in this edit retain the same common base as the saved text.
       const replaced = pending.get(slot)!.stamp;
-      setLeafStamp(clock.stamps, key, leaf, replaced ? `${now()}/${replaced}` : now());
+      setLeafStamp(clock.stamps, key, leaf, fieldStamp(now(), replaced));
     }
   }
 }
@@ -318,7 +319,7 @@ export function mergeStudioExternalEntities(options: {
           if (revertedHere || revertedThere) {
             if (revertedThere) { setLeaf(merged[key], leaf, ours); kept++; }
             // This resolution supersedes both histories; an old echo cannot undo it later.
-            setLeafStamp(clock.stamps, key, leaf, `${now()}/${stampOf(theirEntry)}`);
+            setLeafStamp(clock.stamps, key, leaf, fieldStamp(now(), stampOf(theirEntry)));
             continue;
           }
         }
@@ -326,7 +327,7 @@ export function mergeStudioExternalEntities(options: {
         if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && ours !== base.value && other !== base.value
           && replacedStamp(writer.stamps, key, leaf) === base.stamp && isStudioProseFieldPath(leaf.sub ?? leaf.top)) {
           const text = mergeStudioText(base.value, ours, other);
-          if (text !== null) { setLeaf(merged[key], leaf, text); setLeafStamp(clock.stamps, key, leaf, `${now()}/${stampOf(theirEntry)}`); kept++; continue; }
+          if (text !== null) { setLeaf(merged[key], leaf, text); setLeafStamp(clock.stamps, key, leaf, fieldStamp(now(), stampOf(theirEntry))); kept++; continue; }
         }
         if (leafStamp(clock.stamps, key, leaf) > stampOf(theirEntry)) { setLeaf(merged[key], leaf, ours); kept++; }
         else if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry);

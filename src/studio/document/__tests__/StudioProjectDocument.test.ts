@@ -453,6 +453,33 @@ describe("copies from another device", () => {
     expect(find(afterEcho, "a")!.title).toBe("Unrelated peer title");
   });
 
+  it.each(["position", "prose"])("preserves a newer %s edit after expired stamps, reopening and a stale delivery", async field => {
+    const { a, b } = await pair();
+    const c = vault("cccccccccccc"); deliver(a, c); await c.store.loadProject(path);
+    const put = (draft: StudioProjectV1, older: boolean) => {
+      if (field === "position") find(draft, "a")!.position.x = older ? 10 : 7;
+      else find(draft, "a")!.config.value = older ? "Older peer value" : "Newer local value";
+    };
+    const read = (value: StudioProjectV1) => field === "position" ? find(value, "a")!.position.x : find(value, "a")!.config.value;
+    const expected = field === "position" ? 7 : "Newer local value";
+    tick(STUDIO_MERGE_RETENTION_MS + 1000);
+    await edit(a, draft => { draft.name = "Current project title"; });
+    tick(); await edit(c, draft => put(draft, true));
+    tick(); await edit(b, draft => { find(draft, "a")!.title = "Unrelated peer title"; });
+    tick(); await edit(a, draft => put(draft, false));
+    deliver(b, a);
+    expect(read((await receive(a)).project)).toBe(expected);
+    const published = JSON.parse(a.files.get(path)!).merge;
+    // Valid published entries must survive the actual file parser unchanged.
+    expect(readStudioMergeBlock(published)!.stamps).toEqual(published.stamps);
+    const reopened = { ...a, store: a.restart() };
+    await reopened.store.loadProject(path);
+    deliver(c, reopened);
+    const replay = (await receive(reopened)).project;
+    expect(read(replay)).toBe(expected);
+    expect(find(replay, "a")!.title).toBe("Unrelated peer title");
+  });
+
   it.each(["position", "prose"])("keeps local %s Undo when a peer republishes the superseded value with an unrelated edit", async field => {
     const { a, b } = await pair();
     const change = (draft: StudioProjectV1, changed: boolean) => {
