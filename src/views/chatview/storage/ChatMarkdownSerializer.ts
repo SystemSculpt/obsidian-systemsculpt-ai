@@ -92,7 +92,7 @@ export class ChatMarkdownSerializer {
    * Convert an array of chat messages into the markdown body that lives below
    * the YAML front-matter.  (Front-matter itself is *not* produced here.)
    */
-  public static serializeMessages(messages: ChatMessage[]): string {
+  public static serializeMessages(messages: readonly ChatMessage[]): string {
     const unsupported = messages.find((message) => message.role !== "user" && message.role !== "assistant");
     if (unsupported) {
       throw new Error(`Managed chat persistence does not support ${unsupported.role} messages.`);
@@ -653,7 +653,7 @@ export class ChatMarkdownSerializer {
     };
   }
 
-  private static normalizeTags(value: unknown): string[] {
+  public static normalizeTags(value: unknown): string[] {
     const candidates = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
     return [...new Set(candidates
       .filter((tag): tag is string => typeof tag === "string")
@@ -688,8 +688,9 @@ export class ChatMarkdownSerializer {
           case "tool_call": {
             const toolCallArray = [part.data];
             // `>` only occurs inside JSON strings, where \u003e is the same
-            // character, so the comment can never be closed early.
-            const toolCallJson = JSON.stringify(toolCallArray, null, 2).replace(/>/gu, "\\u003e");
+            // character, so the comment can never be closed early. Compact
+            // JSON: readers parse it the same, and it is a third smaller.
+            const toolCallJson = JSON.stringify(toolCallArray).replace(/>/gu, "\\u003e");
             messageBody += `\n<!-- TOOL-CALLS\n${toolCallJson}\n-->\n`;
             break;
           }

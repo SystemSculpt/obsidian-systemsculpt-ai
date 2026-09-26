@@ -13,6 +13,7 @@ import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import type { ChatMessage } from "../../../types";
+import { deepFreeze } from "../../../utils/immutableJson";
 
 function reloadSavedMessages(messages: ChatMessage[]): ChatMessage[] {
   const parsed = (ChatMarkdownSerializer as unknown as {
@@ -1062,6 +1063,51 @@ describe("AgentWorkspace", () => {
     expect(host.textContent).not.toContain("Old answer");
     expect(host.textContent).toContain("New answer");
     render.mockRestore();
+  });
+
+  it("reuses rows of frozen transcript messages by identity without serializing history", async () => {
+    const parent = document.body.createDiv();
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "",
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    const history = deepFreeze<ChatMessage[]>([
+      { role: "user", message_id: "frozen-user-1", content: "First request" },
+      { role: "assistant", message_id: "frozen-assistant-1", content: "First answer" },
+    ]);
+    await workspace.setHistory(history);
+    const row = parent.querySelector('[data-message-id="frozen-assistant-1"]');
+    const renderHistory = jest.spyOn(workspace.renderer, "renderHistory");
+    const stringify = jest.spyOn(JSON, "stringify");
+    try {
+      await workspace.setHistory([...history]);
+      expect(renderHistory).not.toHaveBeenCalled();
+
+      await workspace.setHistory(deepFreeze<ChatMessage[]>([
+        ...history,
+        { role: "user", message_id: "frozen-user-2", content: "Second request" },
+      ]));
+      expect(renderHistory).toHaveBeenCalledTimes(1);
+      expect(parent.querySelector('[data-message-id="frozen-assistant-1"]')).toBe(row);
+      expect(stringify.mock.calls.some(([value]) => history.includes(value as ChatMessage)
+        || (Array.isArray(value) && value.some((entry) => history.includes(entry as ChatMessage)))))
+        .toBe(false);
+    } finally {
+      stringify.mockRestore();
+      renderHistory.mockRestore();
+      workspace.unload();
+    }
   });
 
   it("appends history without rebuilding earlier turns, controls, focus, or selection", async () => {
@@ -3728,7 +3774,9 @@ describe("AgentWorkspace", () => {
       currentSnapshot = snapshot(formattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
       await settleLiveMarkdown();
-      expectedMarkdownCalls += 1;
+      // The completed leading blocks are parsed once on their own; the open
+      // code fence is the only part later frames parse again.
+      expectedMarkdownCalls += 2;
       expect(textPart.firstChild).toBe(streamedTextNode);
       streamedTextNode = textPart.firstChild;
       expect(textPart.textContent).toBe(formattedStream);
@@ -4574,7 +4622,8 @@ describe("AgentWorkspace", () => {
     expect(selection.toString()).toBe("Reading");
     expect(selection.anchorNode).toBe(bodyText);
     expect(selection.focusNode).toBe(bodyText);
-    expect(markdownRender).toHaveBeenCalledTimes(2);
+    // Completed blocks and the open code fence are parsed separately.
+    expect(markdownRender).toHaveBeenCalledTimes(3);
 
     header.focus();
     details.open = false;
@@ -4589,12 +4638,12 @@ describe("AgentWorkspace", () => {
     bodyText = body.firstChild!;
     expect(document.activeElement).toBe(header);
     expect(iconCalls()).toBe(initialIconCalls);
-    expect(markdownRender).toHaveBeenCalledTimes(2);
+    expect(markdownRender).toHaveBeenCalledTimes(3);
 
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(markdownRender).toHaveBeenCalledTimes(3);
+    expect(markdownRender).toHaveBeenCalledTimes(5);
 
     await workspace.setAgentSnapshot(
       snapshot(finalSummary, "complete"),
@@ -4608,7 +4657,7 @@ describe("AgentWorkspace", () => {
     expect(details.open).toBe(true);
     expect(document.activeElement).toBe(header);
     expect(iconCalls()).toBe(initialIconCalls + 1);
-    expect(markdownRender).toHaveBeenCalledTimes(4);
+    expect(markdownRender).toHaveBeenCalledTimes(6);
     markdownRender.mockRestore();
     workspace.unload();
   });

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Platform, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
 import {
   ChatStorageService,
   isPathInDirectory,
@@ -39,6 +39,9 @@ jest.mock("obsidian", () => {
 jest.mock("../storage/ChatMarkdownSerializer", () => ({
   ChatMarkdownSerializer: {
     serializeMessages: jest.fn().mockReturnValue("## Messages\n\nSerialized content here"),
+    normalizeTags: jest.fn((value: unknown) => (Array.isArray(value) ? value : [value])
+      .filter((tag): tag is string => typeof tag === "string")
+      .map((tag) => tag.replace(/^#+/, ""))),
     parseMetadata: jest.fn().mockReturnValue({
       id: "test-chat",
       title: "Test Chat",
@@ -211,6 +214,8 @@ describe("ChatStorageService", () => {
       expect(createdContent).toContain('id: "test-chat"');
       expect(createdContent).toContain('title: "Untitled Chat"');
       expect(createdContent).toContain('approvalMode: "ask"');
+      // History lists chats from this count without reading transcripts.
+      expect(createdContent).toContain("messageCount: 2");
     });
 
     it("persists only the server conversation routing pointer", async () => {
@@ -278,6 +283,75 @@ Content here`);
       expect(modifiedContent).toContain('tags: ["existing","keep","new"]');
     });
 
+    it("carries frontmatter forward from the metadata cache without reading the chat", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/cached-chat.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      const getFileCache = jest.fn(() => ({
+        frontmatter: {
+          id: "cached-chat",
+          title: "Cached title",
+          created: "2024-01-01T00:00:00.000Z",
+          version: 4,
+          tags: ["existing", "#keep"],
+        },
+      }));
+      (mockApp as any).metadataCache = { getFileCache };
+      const cached = new ChatStorageService(
+        mockApp,
+        "SystemSculpt/Chats",
+        { settings: { defaultChatTag: "new" } } as any,
+      );
+
+      const result = await cached.saveChat("cached-chat", testMessages);
+
+      expect(getFileCache).toHaveBeenCalledWith(mockFile);
+      expect(mockVault.read).not.toHaveBeenCalled();
+      expect(result.version).toBe(5);
+      const content = mockVault.modify.mock.calls[0][1] as string;
+      expect(content).toContain('created: "2024-01-01T00:00:00.000Z"');
+      expect(content).toContain("version: 5");
+      expect(content).toContain('tags: ["existing","keep","new"]');
+      expect(content).toContain('title: "Cached title"');
+    });
+
+    it("uses its own last write until the metadata cache indexes the chat", async () => {
+      (mockApp as any).metadataCache = { getFileCache: jest.fn(() => null) };
+      const first = await service.saveChat("fresh-chat", testMessages);
+      const created = /created: "([^"]+)"/.exec(mockVault.create.mock.calls[0][1])?.[1];
+      mockVault.getAbstractFileByPath.mockReturnValue(
+        new TFile({ path: "SystemSculpt/Chats/fresh-chat.md" }),
+      );
+
+      const second = await service.saveChat("fresh-chat", testMessages);
+      const third = await service.saveChat("fresh-chat", testMessages);
+
+      expect(mockVault.read).not.toHaveBeenCalled();
+      expect([first.version, second.version, third.version]).toEqual([1, 2, 3]);
+      expect(mockVault.modify.mock.calls[1][1]).toContain(`created: "${created}"`);
+    });
+
+    it("prefers the newer version when the metadata cache still shows an older write", async () => {
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/stale-chat.md" });
+      (mockApp as any).metadataCache = {
+        getFileCache: jest.fn(() => ({ frontmatter: { id: "stale-chat", version: 1 } })),
+      };
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      await service.saveChat("stale-chat", testMessages);
+      const again = await service.saveChat("stale-chat", testMessages);
+      expect(again.version).toBe(3);
+      expect(mockVault.read).not.toHaveBeenCalled();
+    });
+
+    it("reads an existing chat only when neither the cache nor a previous write knows it", async () => {
+      (mockApp as any).metadataCache = { getFileCache: jest.fn(() => null) };
+      mockVault.getAbstractFileByPath.mockReturnValue(
+        new TFile({ path: "SystemSculpt/Chats/test-chat.md" }),
+      );
+      const result = await service.saveChat("test-chat", testMessages);
+      expect(mockVault.read).toHaveBeenCalledTimes(1);
+      expect(result.version).toBe(2);
+    });
+
     it("throws error on save failure", async () => {
       mockVault.create.mockRejectedValue(new Error("Write failed"));
 
@@ -307,15 +381,6 @@ Content here`);
       await withDirManager.saveChat("test-chat", testMessages);
 
       expect(mockDirManager.ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Chats");
-    });
-  });
-
-  describe("loadChats", () => {
-    it("returns chat summaries", async () => {
-      // The loadChats method should return chat summaries
-      const chats = await service.loadChats();
-
-      expect(Array.isArray(chats)).toBe(true);
     });
   });
 
@@ -641,141 +706,6 @@ ${buildBody(actualSerializer)}`, newline, bom));
 
       expect(mockVault.modify).not.toHaveBeenCalled();
       expect(mockVault.create).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("loadChats", () => {
-    it("returns empty array when no files", async () => {
-      mockVault.adapter.list.mockResolvedValue({ files: [], folders: [] });
-
-      const result = await service.loadChats();
-
-      expect(result).toEqual([]);
-    });
-
-    it("filters for markdown files only", async () => {
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/chat.md", "SystemSculpt/Chats/data.json"],
-        folders: [],
-      });
-      mockVault.adapter.read.mockResolvedValue("");
-
-      await service.loadChats();
-
-      // Should only try to process .md file
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(1);
-    });
-
-    it("uses Obsidian's cached reader for indexed chat files", async () => {
-      const chatFile = new TFile({ path: "SystemSculpt/Chats/indexed.md" });
-      mockVault.adapter.list.mockResolvedValue({
-        files: [chatFile.path],
-        folders: [],
-      });
-      mockVault.getAbstractFileByPath.mockReturnValue(chatFile);
-
-      await service.loadChats();
-
-      expect(mockVault.cachedRead).toHaveBeenCalledWith(chatFile);
-      expect(mockVault.adapter.read).not.toHaveBeenCalled();
-    });
-
-    it("handles errors in individual file reads gracefully", async () => {
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/chat1.md", "SystemSculpt/Chats/chat2.md"],
-        folders: [],
-      });
-      mockVault.adapter.read
-        .mockRejectedValueOnce(new Error("Read error"))
-        .mockResolvedValueOnce("");
-
-      const result = await service.loadChats();
-
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it("bounds parallel reads so mobile vault adapters are not saturated", async () => {
-      const files = Array.from(
-        { length: 24 },
-        (_value, index) => `SystemSculpt/Chats/chat-${index}.md`,
-      );
-      let activeReads = 0;
-      let maxActiveReads = 0;
-      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
-      mockVault.adapter.read.mockImplementation(async () => {
-        activeReads += 1;
-        maxActiveReads = Math.max(maxActiveReads, activeReads);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        activeReads -= 1;
-        return "";
-      });
-
-      await service.loadChats();
-
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
-      expect(maxActiveReads).toBeLessThanOrEqual(8);
-      expect(maxActiveReads).toBeGreaterThan(1);
-    });
-
-    it("serializes reads when the host has no local filesystem capability", async () => {
-      const originalDesktopApp = Platform.isDesktopApp;
-      const files = Array.from(
-        { length: 6 },
-        (_value, index) => `SystemSculpt/Chats/portable-${index}.md`,
-      );
-      let activeReads = 0;
-      let maxActiveReads = 0;
-      mockVault.adapter.list.mockResolvedValue({ files, folders: [] });
-      mockVault.adapter.read.mockImplementation(async () => {
-        activeReads += 1;
-        maxActiveReads = Math.max(maxActiveReads, activeReads);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-        activeReads -= 1;
-        return "";
-      });
-
-      (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = false;
-      try {
-        await service.loadChats();
-      } finally {
-        (Platform as typeof Platform & { isDesktopApp: boolean }).isDesktopApp = originalDesktopApp;
-      }
-
-      expect(mockVault.adapter.read).toHaveBeenCalledTimes(files.length);
-      expect(maxActiveReads).toBe(1);
-    });
-
-    it("returns empty array on list error", async () => {
-      mockVault.adapter.list.mockRejectedValue(new Error("List error"));
-
-      const result = await service.loadChats();
-
-      expect(result).toEqual([]);
-    });
-
-    it("excludes a corrupt chat instead of indexing its surviving prefix", async () => {
-      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
-      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
-      mockedSerializer.parseMarkdown.mockImplementationOnce((content: string) => (
-        actualSerializer.parseMarkdown(content)
-      ));
-      mockVault.adapter.list.mockResolvedValue({
-        files: ["SystemSculpt/Chats/corrupt.md"],
-        folders: [],
-      });
-      mockVault.adapter.read.mockResolvedValue(`---
-id: corrupt
-title: Corrupt
----
-
-<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-1" -->
-Valid prefix
-<!-- SYSTEMSCULPT-MESSAGE-END -->
-
-<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->
-Truncated`);
-
-      await expect(service.loadChats()).resolves.toEqual([]);
     });
   });
 

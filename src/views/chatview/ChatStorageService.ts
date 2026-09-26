@@ -1,6 +1,5 @@
 import { App, TFile, stringifyYaml } from "obsidian";
 import { ChatMessage } from "../../types";
-import { hasHostCapability } from "../../platform/hostCapabilities";
 import {
   ChatAttachmentVaultStore,
   collectChatAttachmentRefKeys,
@@ -47,6 +46,21 @@ type SaveChatOptions = {
    */
   authoritativeServerHistoryReconciliation?: boolean;
 };
+
+/** The frontmatter a save must carry forward from the file it replaces. */
+type ExistingChatMetadata = Readonly<{
+  created?: string;
+  tags: readonly string[];
+  version: number;
+  title?: string;
+}>;
+
+function frontmatterTimestamp(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return value instanceof Date && Number.isFinite(value.getTime())
+    ? value.toISOString()
+    : undefined;
+}
 
 export class SavedChatCorruptedError extends Error {
   constructor(public readonly filePath: string) {
@@ -101,49 +115,6 @@ function recordedChatsDirectories(
 /** Folder containment on a path boundary: `Chats-old/x.md` is not in `Chats`. */
 export function isPathInDirectory(path: string, directory: string): boolean {
   return path === directory || path.startsWith(`${directory}/`);
-}
-
-const DESKTOP_CHAT_HISTORY_READ_CONCURRENCY = 8;
-const PORTABLE_CHAT_HISTORY_READ_CONCURRENCY = 1;
-const CHAT_HISTORY_READ_TIMEOUT_MS = 5_000;
-
-async function mapWithBoundedConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      results[index] = await worker(items[index]);
-    }
-  }));
-
-  return results;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  const timerWindow = window.activeWindow ?? window;
-  let timer: number | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timer = timerWindow.setTimeout(
-          () => reject(new Error("Chat history read timed out")),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) {
-      timerWindow.clearTimeout(timer);
-    }
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -213,6 +184,12 @@ export class ChatStorageService {
   private readonly resolveChatDirectory: () => string;
   private readonly attachmentStore: ChatAttachmentVaultStore | null;
   private readonly plugin: SystemSculptPlugin | null;
+  /**
+   * What this service last wrote per file. Saves read the carried-forward
+   * frontmatter from here and from Obsidian's metadata cache, which may not
+   * have indexed the previous write yet, instead of rereading the file.
+   */
+  private readonly writtenMetadata = new Map<string, ExistingChatMetadata>();
 
   /**
    * `plugin` is optional only because tests construct this service against a
@@ -280,7 +257,7 @@ export class ChatStorageService {
   // Master save method - always saves in the new, simple format
   async saveChat(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: SaveChatOptions = {},
   ): Promise<{ version: number }> {
     try {
@@ -305,7 +282,7 @@ export class ChatStorageService {
   /** Creates a new chat in the configured folder and returns that folder. */
   async createChatExclusive(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: Omit<SaveChatOptions, "chatDirectory"> = {},
   ): Promise<{ version: number; chatDirectory: string } | null> {
     const chatDirectory = this.chatDirectory;
@@ -327,7 +304,7 @@ export class ChatStorageService {
 
   private async saveChatSimple(
     chatId: string,
-    messages: ChatMessage[],
+    messages: readonly ChatMessage[],
     options: SaveChatOptions = {},
     exclusiveCreate: boolean,
     chatDirectory: string,
@@ -336,22 +313,21 @@ export class ChatStorageService {
       const now = new Date().toISOString();
       const vault = this.app.vault;
       let fileExists = false;
-      let existingMetadata: ChatMetadata | null = null;
+      let existingMetadata: ExistingChatMetadata | null = null;
 
       const file = exclusiveCreate ? null : vault.getAbstractFileByPath(filePath);
       if (file instanceof TFile) {
         fileExists = true;
-        const content = await vault.read(file);
-        existingMetadata = ChatMarkdownSerializer.parseMetadata(content);
+        existingMetadata = await this.existingChatMetadata(file, filePath);
       }
 
       const creationDate = existingMetadata?.created || now;
       const existingTags = existingMetadata?.tags ?? [];
       const defaultChatTag = this.resolveDefaultChatTag();
-      const mergedTags = this.mergeTags(existingTags, defaultChatTag);
+      const mergedTags = this.mergeTags([...existingTags], defaultChatTag);
       // CRITICAL: Only increment version if we're actually changing content
       // If messages are empty and file exists with content, preserve the version
-      const currentVersion = Number(existingMetadata?.version) || 0;
+      const currentVersion = existingMetadata?.version ?? 0;
       let newVersion = currentVersion + 1;
       const agentConversationId = parseAgentConversationId(options.agentConversationId);
       
@@ -379,6 +355,7 @@ export class ChatStorageService {
         lastModified: now,
         title: options.title || existingMetadata?.title || "Untitled Chat",
         version: newVersion,
+        messageCount: messages.length,
         chatFontSize: options.chatFontSize || "medium",
         approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
       };
@@ -422,67 +399,48 @@ export class ChatStorageService {
       } else {
         await vault.create(filePath, fullContent);
       }
+      this.writtenMetadata.set(filePath, {
+        created: creationDate,
+        tags: mergedTags,
+        version: newVersion,
+        title: metadata.title,
+      });
       
       return { filePath, version: newVersion };
   }
 
-  async loadChats(): Promise<LoadedChatRecord[]> {
-    try {
-      const files = await this.app.vault.adapter.list(this.chatDirectory);
-      const chatFiles = files.files.filter((f) => f.endsWith(".md"));
-
-      // Mobile vault adapters are bridge-backed. Firing hundreds of reads at
-      // once can starve that bridge and leave Promise.allSettled unresolved.
-      // Keep the shared loader bounded and let one bad file fail independently.
-      const chats = await mapWithBoundedConcurrency(
-        chatFiles,
-        hasHostCapability("local-filesystem")
-          ? DESKTOP_CHAT_HISTORY_READ_CONCURRENCY
-          : PORTABLE_CHAT_HISTORY_READ_CONCURRENCY,
-        async (filePath) => {
-          try {
-            // NEW: Try to read file stats first to get a reliable last modified timestamp
-            let fileModifiedTime: number | null = null;
-            const abstractFile = this.app.vault.getAbstractFileByPath(filePath);
-            if (abstractFile instanceof TFile) {
-              fileModifiedTime = abstractFile.stat.mtime;
-            }
-
-            // Obsidian's cached vault reader is dramatically cheaper than a
-            // native adapter bridge round-trip on mobile. Fall back only for
-            // paths that have not entered the vault index yet.
-            const contentPromise = abstractFile instanceof TFile
-              ? this.app.vault.cachedRead(abstractFile)
-              : this.app.vault.adapter.read(filePath);
-            const content = await withTimeout(
-              contentPromise,
-              CHAT_HISTORY_READ_TIMEOUT_MS,
-            );
-            
-            const parsed = this.parseMarkdownContent(content, filePath);
-
-            if (!parsed) return null;
-
-            // If we managed to read a reliable mtime from the file, prefer that over whatever the parser returned.
-            if (fileModifiedTime && !isNaN(fileModifiedTime)) {
-              parsed.lastModified = fileModifiedTime;
-            }
-
-            return parsed;
-          } catch {
-            return null;
+  /**
+   * The existing file's created date, tags, version and title without
+   * reading its transcript. Obsidian's metadata cache reflects the user's own
+   * frontmatter edits; this service's last write covers the window before the
+   * cache indexes it. Only a file neither source knows yet is read.
+   */
+  private async existingChatMetadata(
+    file: TFile,
+    filePath: string,
+  ): Promise<ExistingChatMetadata | null> {
+    const cache = this.app.metadataCache?.getFileCache(file);
+    const written = this.writtenMetadata.get(filePath);
+    if (!cache && !written) {
+      const parsed = ChatMarkdownSerializer.parseMetadata(await this.app.vault.read(file));
+      return parsed
+        ? {
+            created: parsed.created,
+            tags: parsed.tags ?? [],
+            version: Number(parsed.version) || 0,
+            title: parsed.title,
           }
-        },
-      );
-
-      // Extract successful results and filter out nulls.
-      const successfulChats = chats
-        .filter((chat): chat is NonNullable<typeof chat> => chat !== null);
-
-      return successfulChats;
-    } catch {
-      return [];
+        : null;
     }
+    const frontmatter: Readonly<Record<string, unknown>> | undefined = cache?.frontmatter;
+    const cached = typeof frontmatter?.id === "string" ? frontmatter : null;
+    if (!cached && !written) return null;
+    return {
+      created: frontmatterTimestamp(cached?.created) ?? written?.created,
+      tags: cached ? ChatMarkdownSerializer.normalizeTags(cached.tags) : written?.tags ?? [],
+      version: Math.max(Number(cached?.version) || 0, written?.version ?? 0),
+      title: typeof cached?.title === "string" ? cached.title : written?.title,
+    };
   }
 
   /**

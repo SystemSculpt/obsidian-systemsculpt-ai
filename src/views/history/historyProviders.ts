@@ -23,12 +23,15 @@ export function sortHistoryEntriesNewestFirst(entries: SystemSculptHistoryEntry[
   });
 }
 
-export async function loadSystemSculptHistoryEntries(plugin: SystemSculptPlugin): Promise<SystemSculptHistoryEntry[]> {
+export async function loadSystemSculptHistoryEntries(
+  plugin: SystemSculptPlugin,
+  signal?: AbortSignal,
+): Promise<SystemSculptHistoryEntry[]> {
   const providers = createSystemSculptHistoryProviders(plugin);
   const groups = await Promise.all(
     providers.map(async (provider) => {
       try {
-        return await provider.loadEntries();
+        return await provider.loadEntries(signal);
       } catch {
         return [] as SystemSculptHistoryEntry[];
       }

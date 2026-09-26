@@ -21,6 +21,7 @@ import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy"
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
@@ -105,7 +106,6 @@ export type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 type ChatLeafState = Readonly<{
   chatId?: string;
   chatTitle?: string;
-  version?: number;
   chatFontSize?: "small" | "medium" | "large";
   approvalMode?: ChatApprovalMode;
   draftKey?: string;
@@ -147,6 +147,8 @@ const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
 const AGENT_SESSION_RESTORE_ERROR =
   "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
+/** Longest wait for an idle moment before attachment cleanup runs anyway. */
+const ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS = 30_000;
 const LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS = 3;
 const LOCAL_FAILED_RECEIPT_RETRY_DELAY_MS = 250;
 const CHAT_VIEW_CLOSE_PERSISTENCE_DEADLINE_MS = 750;
@@ -442,6 +444,8 @@ export class AgentChatView extends ItemView {
   public chatId = "";
   public chatTitle: string;
   public chatVersion = 0;
+  /** The leaf state this view last pushed; unchanged state is not pushed again. */
+  private appliedViewState: string | null = null;
   public chatFontSize: "small" | "medium" | "large";
   public approvalMode: ChatApprovalMode;
   public isFullyLoaded = false;
@@ -522,7 +526,6 @@ export class AgentChatView extends ItemView {
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
     this.chatId = initial.chatId?.trim() || "";
     this.chatTitle = initial.chatTitle?.trim() || generateDefaultChatTitle();
-    this.chatVersion = initial.version ?? 0;
     this.chatFontSize = initial.chatFontSize || plugin.settings.chatFontSize || "medium";
     this.approvalMode = initial.approvalMode === "full-access" ? "full-access" : "ask";
     this.draftKey = initial.draftKey?.trim() || messageId("draft");
@@ -712,6 +715,10 @@ export class AgentChatView extends ItemView {
     return this.transcript.snapshot().messages.map((message) => ({ ...message }));
   }
 
+  public get messageCount(): number {
+    return this.transcript.snapshot().messages.length;
+  }
+
   public getViewType(): string { return CHAT_VIEW_TYPE; }
   public getDisplayText(): string { return this.chatTitle || "SystemSculpt"; }
 
@@ -772,15 +779,19 @@ export class AgentChatView extends ItemView {
     if (this.chatId) await this.loadChatById(this.chatId);
     else await this.startNewChat(false, undefined, this.draftKey);
     void this.refreshCreditsBalance({ reason: "view_open" });
-    void this.pruneAttachmentStore().catch(() => {});
+    this.scheduleAttachmentPrune();
     this.workspace.focus();
   }
 
+  /*
+   * The leaf state names which chat is open and how it is shown. The
+   * transcript version changes every turn and stays out of it, so Obsidian's
+   * workspace layout is not rewritten after each response.
+   */
   public getState(): Record<string, unknown> {
     return {
       chatId: this.chatId,
       chatTitle: this.chatTitle,
-      version: this.chatVersion,
       chatFontSize: this.chatFontSize,
       approvalMode: this.approvalMode,
       draftKey: this.draftKey,
@@ -789,6 +800,8 @@ export class AgentChatView extends ItemView {
   }
 
   public async setState(state: ChatLeafState): Promise<void> {
+    // Obsidian calls back here with the state this view just pushed; only another state invalidates that push.
+    if (JSON.stringify(state) !== this.appliedViewState) this.appliedViewState = null;
     if (!state?.chatId) {
       const incomingDraftKey = state?.draftKey?.trim();
       const preservesCurrentDraft = this.isFullyLoaded
@@ -805,11 +818,11 @@ export class AgentChatView extends ItemView {
         }
       }
       if (state?.chatFontSize) await this.setChatFontSize(state.chatFontSize, false);
-      if (state?.approvalMode) this.applyApprovalMode(state.approvalMode);
+      if (state?.approvalMode && state.approvalMode !== this.approvalMode) this.applyApprovalMode(state.approvalMode);
       return;
     }
     if (state.chatId === this.chatId && this.isFullyLoaded && this.transcript.snapshot().chatId === state.chatId) {
-      if (state.approvalMode) this.applyApprovalMode(state.approvalMode);
+      if (state.approvalMode && state.approvalMode !== this.approvalMode) this.applyApprovalMode(state.approvalMode);
       return;
     }
     if (state.chatFontSize) this.chatFontSize = state.chatFontSize;
@@ -3131,6 +3144,19 @@ export class AgentChatView extends ItemView {
     void this.persistQueueState().catch((error) => this.reportQueuePersistenceError(error));
   }
 
+  /**
+   * Attachment cleanup is background maintenance: it waits until the host is
+   * idle instead of competing with startup and the first chat render, and a
+   * view closed before then never starts it.
+   */
+  private scheduleAttachmentPrune(): void {
+    const controller = new AbortController();
+    this.register(() => controller.abort());
+    void waitForIdle(ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS, controller.signal).then((idle) => {
+      if (idle) return this.pruneAttachmentStore();
+    }).catch(() => {});
+  }
+
   private pruneAttachmentStore(): Promise<void> {
     return this.attachmentStore.pruneOncePerSession(async () => {
       const [chatReferences, queueReferences] = await Promise.all([
@@ -3171,7 +3197,11 @@ export class AgentChatView extends ItemView {
 
   private updateViewState(): void {
     if (!this.leaf) return;
-    void this.leaf.setViewState({ type: CHAT_VIEW_TYPE, state: this.getState() }, { focus: false });
+    const state = this.getState();
+    const applied = JSON.stringify(state);
+    if (applied === this.appliedViewState) return;
+    this.appliedViewState = applied;
+    void this.leaf.setViewState({ type: CHAT_VIEW_TYPE, state }, { focus: false });
   }
 
   private installWorkspaceBindings(): void {

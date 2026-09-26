@@ -6,6 +6,7 @@ import {
   MUTATION_RECEIPT_RETENTION_MS,
   canonicalAgentToolInput,
 } from "../MutationJournal";
+import { deepFreeze } from "../../../utils/immutableJson";
 
 const JOURNAL_PATH = ".systemsculpt/mutations.json";
 const RECORDS_PATH = `${JOURNAL_PATH}.records`;
@@ -113,6 +114,29 @@ describe("AgentMutationJournal", () => {
   it("canonicalizes nested tool input independently of object key order", () => {
     expect(canonicalAgentToolInput({ b: [undefined, 2], a: null }))
       .toBe('{"a":null,"b":[undefined,2]}');
+  });
+
+  it("reuses canonical text only for inputs that can no longer change", () => {
+    const mutable: { b: number; a: number[] } = { b: 1, a: [1] };
+    expect(canonicalAgentToolInput(mutable)).toBe('{"a":[1],"b":1}');
+    mutable.b = 2;
+    expect(canonicalAgentToolInput(mutable)).toBe('{"a":[1],"b":2}');
+
+    const shallow = Object.freeze({ nested: { value: 1 } });
+    expect(canonicalAgentToolInput(shallow)).toBe('{"nested":{"value":1}}');
+    shallow.nested.value = 2;
+    expect(canonicalAgentToolInput(shallow)).toBe('{"nested":{"value":2}}');
+
+    const frozen = deepFreeze({ z: "x", a: { b: true } });
+    const stringify = jest.spyOn(JSON, "stringify");
+    try {
+      expect(canonicalAgentToolInput(frozen)).toBe('{"a":{"b":true},"z":"x"}');
+      stringify.mockClear();
+      expect(canonicalAgentToolInput(frozen)).toBe('{"a":{"b":true},"z":"x"}');
+      expect(stringify).not.toHaveBeenCalled();
+    } finally {
+      stringify.mockRestore();
+    }
   });
 
   it("records started actions as outcome unknown and completed actions as replayable", async () => {

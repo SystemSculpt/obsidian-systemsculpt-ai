@@ -593,7 +593,8 @@ export class AgentChatSession implements ChatSession {
   private readonly pendingApprovalDeliveries = new Map<string, PendingApprovalDelivery>();
   private readonly lifecycle: AgentLifecycle;
   private renderTimer: number | null = null;
-  private pendingSnapshot: AgentConversationSnapshot | null = null;
+  /** A live run whose presentation is due at the end of the render window. */
+  private pendingActivePresentation: ActiveRun | null = null;
   private pendingReconcile: Promise<void> = Promise.resolve();
   private pendingFinalization: Promise<void> = Promise.resolve();
   private reconciledKey: string | null = null;
@@ -3371,8 +3372,12 @@ export class AgentChatSession implements ChatSession {
       kind: "terminal", turn: active.projection, terminal,
       elapsedMs: active.elapsedMs, tools: this.presentationFacts(active).tools, now: this.now(),
     });
-    const assistantMessage = history?.assistant
-      ? structuredClone(history.assistant) as ChatMessage : undefined;
+    // The projection's durable graph is deeply frozen; persistence shares it.
+    const assistantMessage = history?.assistant as ChatMessage | undefined;
+    // One durable write per turn: terminal reconciliation writes the whole
+    // authoritative turn first, so the assistant save below is a no-op unless
+    // reconciliation was unavailable, deferred, or failed.
+    await this.reconcileMessages(history, "terminal").catch(() => undefined);
     if (assistantMessage) {
       const durable = assistantMessage;
       this.recordLifecycle({
@@ -3405,7 +3410,6 @@ export class AgentChatSession implements ChatSession {
         this.reportLocalIssue(error);
       }
     }
-    await this.reconcileMessages(history, "terminal").catch(() => undefined);
     const snapshot = active.projectionOwner.present(active.projection, this.presentationFacts(active));
     this.commitSnapshot(snapshot);
     const result: AgentRunResult = terminal.outcome === "succeeded"
@@ -3596,8 +3600,36 @@ export class AgentChatSession implements ChatSession {
     return { kind: "failed", snapshot, error };
   }
 
+  /*
+   * Streamed frames arrive far faster than the 16 ms render window. The first
+   * frame of a burst is presented at once; later frames only mark the run due,
+   * and the projection is computed once when the window closes. A frame that
+   * a first-projection latency milestone is waiting on is presented at once,
+   * because that milestone must be measured while its frame is delivered.
+   */
   private publishActive(active: ActiveRun, immediate = false): void {
     if (this.active?.token !== active.token) return;
+    if (immediate) {
+      this.commitSnapshot(this.presentActive(active));
+    } else if (this.renderTimer === null) {
+      this.scheduleSnapshot(this.presentActive(active));
+    } else if (this.awaitsProjectionMilestone(active)) {
+      this.pendingActivePresentation = null;
+      this.dispatchSnapshot(this.presentActive(active));
+    } else {
+      this.pendingActivePresentation = active;
+    }
+  }
+
+  private awaitsProjectionMilestone(active: ActiveRun): boolean {
+    const latency = this.clientLatency.get(active.requestId);
+    return latency !== undefined && (
+      latency.pendingAssistantProjectionOrdinal !== null
+      || !latency.milestones.has("response_first_content_projected")
+    );
+  }
+
+  private presentActive(active: ActiveRun): AgentConversationSnapshot {
     this.updateActiveElapsed(active);
     const snapshot = active.projectionOwner.present(active.projection, this.presentationFacts(active));
     const latency = this.clientLatency.get(active.requestId);
@@ -3622,8 +3654,7 @@ export class AgentChatSession implements ChatSession {
       );
     }
     this.syncRunStallWatchdog(snapshot);
-    if (immediate) this.commitSnapshot(snapshot);
-    else this.scheduleSnapshot(snapshot);
+    return snapshot;
   }
 
   private presentationFacts(active: ActiveRun): RunPresentation {
@@ -3650,25 +3681,23 @@ export class AgentChatSession implements ChatSession {
   }
 
   private scheduleSnapshot(snapshot: AgentConversationSnapshot): void {
-    if (this.renderTimer !== null) {
-      this.pendingSnapshot = snapshot;
-      return;
-    }
     // Leading-edge throttle: the first snapshot of a burst paints with no
     // added latency and the timer stays armed purely as the coalescing
     // window for followers. A trailing debounce here would hold every first
     // streamed token for a frame before anything reached the renderer.
     this.renderTimer = window.setTimeout(() => {
       this.renderTimer = null;
-      const next = this.pendingSnapshot;
-      this.pendingSnapshot = null;
-      if (next) this.dispatchSnapshot(next);
+      const due = this.pendingActivePresentation;
+      this.pendingActivePresentation = null;
+      if (due && this.active?.token === due.token) {
+        this.dispatchSnapshot(this.presentActive(due));
+      }
     }, 16);
     this.dispatchSnapshot(snapshot);
   }
 
   private commitSnapshot(snapshot: AgentConversationSnapshot): void {
-    this.pendingSnapshot = null;
+    this.pendingActivePresentation = null;
     if (this.renderTimer !== null) {
       window.clearTimeout(this.renderTimer);
       this.renderTimer = null;
@@ -3702,9 +3731,8 @@ export class AgentChatSession implements ChatSession {
     if (!history || !this.options.reconcileHistory) return Promise.resolve();
     const { key } = history;
     if (key === this.reconciledKey) return this.pendingReconcile;
-    // Persistence consumers own mutable transcript records. Copy only for an
-    // actual write; the projection's cached graph remains private and frozen.
-    const durable = structuredClone(history.messages) as ChatMessage[];
+    // The cached graph is deeply frozen, so persistence shares it by reference.
+    const durable = history.messages as readonly ChatMessage[];
     this.reconciledKey = key;
     const correlation = this.createHistorySyncCorrelation(historySyncKind);
     const task = this.pendingReconcile.then(() => {

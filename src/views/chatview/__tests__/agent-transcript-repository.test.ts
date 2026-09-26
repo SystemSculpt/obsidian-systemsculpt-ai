@@ -427,6 +427,31 @@ describe("AgentTranscriptRepository", () => {
     expect(records.get(accepted.chatId).version).toBe(2);
   });
 
+  it("announces an already reconciled response without writing the chat again", async () => {
+    const { repository, storage } = createHarness();
+    const commits: string[] = [];
+    repository.subscribeToCommits(({ role, messageId }) => commits.push(`${role}:${messageId}`));
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const reconciled = await repository.reconcileServerHistory(projectedServerHistory(100));
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+
+    // The terminal assistant save carries its own synthesized timestamps.
+    const saved = await repository.persistAssistant(projectedServerHistory(20_000)[1]);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(saved.version).toBe(reconciled.version);
+    expect(saved.messages).toBe(reconciled.messages);
+    expect(commits).toEqual(["user:user-1", "assistant:assistant-1"]);
+
+    const changed = await repository.persistAssistant(
+      projectedServerHistory(20_000, "A revised plan.")[1],
+    );
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(changed.messages[1].content).toBe("A revised plan.");
+  });
+
   it("preserves local response duration when authoritative history omits it", async () => {
     const { repository, storage } = createHarness();
     await repository.commitUser({
@@ -1294,10 +1319,30 @@ describe("AgentTranscriptRepository", () => {
       .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
   });
 
-  it("returns copies so UI code cannot mutate durable state", async () => {
+  it("shares deeply frozen messages so UI code cannot mutate durable state", async () => {
     const { repository } = createHarness();
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
-    (accepted.messages[0] as ChatMessage).content = "tampered";
+    const input = user("u1");
+    const accepted = await repository.commitUser({ kind: "append", message: input });
+    input.content = "caller edit";
+    expect(() => {
+      (accepted.messages[0] as ChatMessage).content = "tampered";
+    }).toThrow(TypeError);
+    expect(Object.isFrozen(accepted.messages)).toBe(true);
     expect(repository.snapshot().messages[0].content).toBe("u1");
+    // Snapshots and accessors share the stored graph instead of cloning it.
+    expect(repository.snapshot().messages).toBe(accepted.messages);
+    expect(repository.currentMessages).toBe(accepted.messages);
+    expect(repository.has("u1")).toBe(true);
+    expect(repository.has("u2")).toBe(false);
+  });
+
+  it("keeps unchanged messages by reference across mutations", async () => {
+    const { repository } = createHarness();
+    const first = await repository.commitUser({ kind: "append", message: user("u1") });
+    const second = await repository.persistAssistant(assistant("a1"));
+    const third = await repository.commitUser({ kind: "append", message: user("u2") });
+    expect(second.messages[0]).toBe(first.messages[0]);
+    expect(third.messages[1]).toBe(second.messages[1]);
+    expect(repository.conversationId).toBeUndefined();
   });
 });

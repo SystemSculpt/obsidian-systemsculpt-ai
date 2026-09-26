@@ -1,5 +1,10 @@
 import type { ChatMessage } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
+import {
+  deepFreeze,
+  isDeeplyFrozen,
+  sameJsonValue,
+} from "../../utils/immutableJson";
 import { isThinAgentFailureCode } from "../../utils/ThinAgentLifecycleSchema";
 import { ChatStorageService } from "./ChatStorageService";
 import {
@@ -62,12 +67,17 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function cloneMessage<T extends ChatMessage>(message: T): T {
-  return cloneJson(message);
+/** A private, deeply frozen copy of one message a caller may still mutate. */
+function ownedMessage(message: ChatMessage): ChatMessage {
+  return deepFreeze(cloneJson(message));
 }
 
-function cloneMessages(messages: readonly ChatMessage[]): ChatMessage[] {
-  return messages.map(cloneMessage);
+/**
+ * Deeply frozen input can never change, so it is shared as-is; anything else
+ * is copied once. Stored messages are then handed out without cloning.
+ */
+function ownedMessages(messages: readonly ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => isDeeplyFrozen(message) ? message : ownedMessage(message));
 }
 
 function normalizeProjectedServerTimestamps(message: ChatMessage): ChatMessage {
@@ -88,28 +98,26 @@ function normalizeProjectedServerTimestamps(message: ChatMessage): ChatMessage {
 
 // Key order is serialization noise, not identity: the locally committed user
 // message and its server-projected echo carry the same fields in different
-// insertion order, and a raw JSON.stringify comparison would bump the
+// insertion order, and an order-sensitive comparison would bump the
 // transcript version — and rebuild history rows — for every turn's echo.
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJson).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => typeof entryValue !== "undefined")
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJson(entryValue)}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
+// Messages are compared one by one, by identity first, so shared unchanged
+// messages cost nothing and no whole-transcript string is ever built.
+function isSameProjectedMessage(left: ChatMessage, right: ChatMessage): boolean {
+  return left === right || (
+    left.message_id === right.message_id
+    && sameJsonValue(
+      normalizeProjectedServerTimestamps(left),
+      normalizeProjectedServerTimestamps(right),
+    )
+  );
 }
 
 function isSameProjectedServerHistory(
   left: readonly ChatMessage[],
   right: readonly ChatMessage[],
 ): boolean {
-  return stableJson(left.map(normalizeProjectedServerTimestamps))
-    === stableJson(right.map(normalizeProjectedServerTimestamps));
+  return left.length === right.length
+    && left.every((message, index) => isSameProjectedMessage(message, right[index]));
 }
 
 function hasUniqueIds(values: readonly string[]): boolean {
@@ -305,12 +313,13 @@ function preserveContentFreeLocalFailedReceipts(
 
 function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly ToolCall[] = []): ToolCall[] | undefined {
   const calls = new Map<string, ToolCall>();
-  for (const call of previous) calls.set(call.id, cloneJson(call));
+  for (const call of previous) calls.set(call.id, call);
   for (const call of incoming) {
     const prior = calls.get(call.id);
-    const next = cloneJson(call);
-    if (prior?.result && !next.result) next.result = prior.result;
-    calls.set(call.id, next);
+    calls.set(
+      call.id,
+      prior?.result && !call.result ? { ...call, result: prior.result } : call,
+    );
   }
   return calls.size > 0 ? [...calls.values()] : undefined;
 }
@@ -319,6 +328,10 @@ function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly T
  * Sole owner of durable chat messages. Every accepted mutation completes its
  * vault write before exposing the next snapshot, eliminating DOM/state/rollback
  * ownership races from the former monolithic workspace stack.
+ *
+ * Stored messages are deeply frozen and shared by reference: snapshots and
+ * accessors never clone, and each mutation replaces only the messages it
+ * changes.
  */
 export class AgentTranscriptRepository {
   private chatId = "";
@@ -331,7 +344,7 @@ export class AgentTranscriptRepository {
   private title = "New chat";
   private version = 0;
   private agentConversationId: string | undefined;
-  private messages: ChatMessage[] = [];
+  private messages: readonly ChatMessage[] = Object.freeze([]);
   private queue: Promise<unknown> = Promise.resolve();
   private generation = 0;
   private loadGeneration = 0;
@@ -348,8 +361,22 @@ export class AgentTranscriptRepository {
       title: this.title,
       version: this.version,
       ...(this.agentConversationId ? { agentConversationId: this.agentConversationId } : {}),
-      messages: Object.freeze(cloneMessages(this.messages)),
+      messages: this.messages,
     });
+  }
+
+  /** The routing pointer to the server conversation, when one is recorded. */
+  public get conversationId(): string | undefined {
+    return this.agentConversationId;
+  }
+
+  /** The current durable messages, deeply frozen. */
+  public get currentMessages(): readonly Readonly<ChatMessage>[] {
+    return this.messages;
+  }
+
+  public has(messageId: string): boolean {
+    return this.messages.some((message) => message.message_id === messageId);
   }
 
   /** The vault path of `chatId`'s transcript when it is the one held here. */
@@ -384,7 +411,8 @@ export class AgentTranscriptRepository {
       // Saved messages are a presentation cache until the server session has
       // hydrated. Never invent a terminal tool outcome from cached execution
       // state because the authoritative session may already have completed it.
-      this.messages = cloneMessages(loaded.messages || []);
+      // A freshly parsed transcript belongs to this repository alone.
+      this.messages = deepFreeze(loaded.messages || []);
       this.agentConversationId = parseAgentConversationId(loaded.agentConversationId);
       this.generation += 1;
       return Object.freeze({
@@ -402,7 +430,7 @@ export class AgentTranscriptRepository {
     this.title = input.title?.trim() || "New chat";
     this.version = 0;
     this.agentConversationId = undefined;
-    this.messages = [];
+    this.messages = Object.freeze([]);
     this.generation += 1;
     return this.snapshot();
   }
@@ -417,7 +445,7 @@ export class AgentTranscriptRepository {
   ): Promise<AgentTranscriptSnapshot> {
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
-      const message = cloneMessage(input.message);
+      const message = ownedMessage(input.message);
       if (message.role !== "user") throw new Error("Agent transcript accepts only user messages through commitUser().");
       const existingIndex = this.messages.findIndex((candidate) => candidate.message_id === message.message_id);
       if (existingIndex >= 0) return this.snapshot();
@@ -450,9 +478,11 @@ export class AgentTranscriptRepository {
   public persistAssistant(message: ChatMessage): Promise<AgentTranscriptSnapshot> {
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
-      const incoming = cloneMessage(message);
+      const incoming = ownedMessage(message);
       const next = this.nextAssistantMessages(incoming);
-      await this.persist(next, false, generation);
+      // Terminal reconciliation normally stored this response already; the
+      // commit is still announced because the response is durable.
+      if (next) await this.persist(next, false, generation);
       const snapshot = this.snapshot();
       this.emitCommit({ snapshot, role: "assistant", messageId: incoming.message_id });
       return snapshot;
@@ -481,7 +511,7 @@ export class AgentTranscriptRepository {
       while (turnEnd < this.messages.length && this.messages[turnEnd].role === "assistant") {
         turnEnd += 1;
       }
-      const next = cloneMessages(this.messages);
+      const next = [...this.messages];
       let failedIndex = -1;
       for (let index = turnEnd - 1; index > userIndex; index -= 1) {
         if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
@@ -497,16 +527,16 @@ export class AgentTranscriptRepository {
       };
       let messageId: string;
       if (failedIndex >= 0) {
-        next[failedIndex] = { ...next[failedIndex], ...receipt };
+        next[failedIndex] = deepFreeze({ ...next[failedIndex], ...receipt });
         messageId = next[failedIndex].message_id;
       } else {
         messageId = `failure-${input.reportId}`;
-        next.splice(turnEnd, 0, {
+        next.splice(turnEnd, 0, deepFreeze({
           role: "assistant",
           message_id: messageId,
           content: "",
           ...receipt,
-        });
+        }));
       }
       await this.persist(next, false, generation);
       const snapshot = this.snapshot();
@@ -520,7 +550,7 @@ export class AgentTranscriptRepository {
   ): Promise<AgentTranscriptSnapshot> {
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
-      const incoming = cloneMessages(messages);
+      const incoming = ownedMessages(messages);
       const ids = incoming.map((message) => message.message_id);
       if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
         throw new Error("The server returned invalid or duplicate chat message identifiers.");
@@ -534,12 +564,15 @@ export class AgentTranscriptRepository {
         if (local?.role === "user" && local.attachmentMetadata?.length) {
           return {
             ...message,
-            attachmentMetadata: cloneJson(local.attachmentMetadata),
+            attachmentMetadata: local.attachmentMetadata,
           };
         }
         return message;
       });
-      const next = preserveContentFreeLocalFailedReceipts(projected, this.messages);
+      // Only the wrappers built above are new; everything they reference is
+      // already frozen, so this freezes just those layers.
+      const next = preserveContentFreeLocalFailedReceipts(projected, this.messages)
+        .map(deepFreeze);
       // The agent session derives assistant part/tool timestamps from the
       // local observation clock. They preserve ordering but are not a server
       // history revision, so a reconnect must not rewrite an otherwise
@@ -562,7 +595,7 @@ export class AgentTranscriptRepository {
       if (!this.chatId) return this.snapshot();
       const saved = await this.storage.saveChat(
         this.chatId,
-        cloneMessages(this.messages),
+        this.messages,
         { ...this.options(), ...this.location() },
       );
       this.assertGeneration(
@@ -578,7 +611,10 @@ export class AgentTranscriptRepository {
     return this.queue.then(() => undefined, () => undefined);
   }
 
-  private resendMessages(input: Extract<AgentUserCommitInput, { kind: "resend" }>, message: ChatMessage): ChatMessage[] {
+  private resendMessages(
+    input: Extract<AgentUserCommitInput, { kind: "resend" }>,
+    message: ChatMessage,
+  ): ChatMessage[] {
     if (input.expectedVersion !== this.version) {
       throw new AgentTranscriptConflictError("The chat changed before retrying this message.");
     }
@@ -592,7 +628,8 @@ export class AgentTranscriptRepository {
     return [...this.messages.slice(0, actualIndex), message];
   }
 
-  private nextAssistantMessages(incoming: ChatMessage): ChatMessage[] {
+  /** The transcript with `incoming` merged in, or null when nothing would change. */
+  private nextAssistantMessages(incoming: ChatMessage): ChatMessage[] | null {
     if (incoming.role !== "assistant") {
       throw new Error("Agent transcript accepts only assistant messages through assistant persistence.");
     }
@@ -602,11 +639,13 @@ export class AgentTranscriptRepository {
       next.push(incoming);
     } else {
       const previous = next[index];
-      next[index] = {
+      const merged = {
         ...previous,
         ...incoming,
         tool_calls: mergeToolCalls(previous.tool_calls, incoming.tool_calls),
       };
+      if (isSameProjectedMessage(merged, previous)) return null;
+      next[index] = deepFreeze(merged);
     }
     return next;
   }
@@ -622,7 +661,7 @@ export class AgentTranscriptRepository {
       const allocator = new ChatIdAllocator(async (candidateId) => {
         const created = await this.storage.createChatExclusive(
           candidateId,
-          cloneMessages(next),
+          next,
           this.options(),
         );
         return created;
@@ -635,12 +674,12 @@ export class AgentTranscriptRepository {
       this.chatId = allocated.chatId;
       this.chatDirectory = allocated.value.chatDirectory;
       this.version = allocated.value.version;
-      this.messages = next;
+      this.messages = Object.freeze(next);
       return;
     }
     const saved = await this.storage.saveChat(
       this.chatId,
-      cloneMessages(next),
+      next,
       {
         ...this.options(),
         ...this.location(),
@@ -654,7 +693,7 @@ export class AgentTranscriptRepository {
       "The active chat changed while saving the transcript.",
     );
     this.version = saved.version;
-    this.messages = next;
+    this.messages = Object.freeze(next);
   }
 
   private options(): AgentTranscriptSaveOptions {

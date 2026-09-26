@@ -12,6 +12,7 @@ import {
 } from "../../utils/ThinAgentLifecycleSchema";
 import { requiresUserApproval, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { replaceControlCharacters } from "../../utils/characterValidation";
+import { deepFreeze, sameJsonValue } from "../../utils/immutableJson";
 import type {
   AgentConversationSnapshot,
   AgentPart,
@@ -26,6 +27,7 @@ import {
   parseAttachedTextContent,
 } from "../ChatAttachmentContent";
 import type { AgentConnectionState, AgentSessionSnapshot } from "./AuthoritativeSession";
+import { durableToolResult } from "./DurableToolResult";
 import { canonicalAgentToolInput } from "./MutationJournal";
 import type { VaultActionDecision } from "./VaultActionAuthorization";
 import {
@@ -518,10 +520,12 @@ function durableTool(
   const state = tool.part.state;
   if (!isAuthoritativeTerminalToolPart(tool.part)) return null;
   if (state === "output-available") {
-    const result = safeToolResult(
+    // The saved chat keeps a bounded copy; the server holds the full result.
+    // Being a new graph, it can be frozen without touching the live output.
+    const result = durableToolResult(safeToolResult(
       outputAsToolResult(toolOutput(tool.part)),
       tool,
-    );
+    ));
     return {
       id: tool.callId,
       messageId: "",
@@ -546,7 +550,7 @@ function durableTool(
     },
     state: "failed",
     timestamp,
-    result: {
+    result: durableToolResult({
       success: false,
       error: state === "output-denied"
         ? { code: "USER_DENIED", message: "The user denied this vault action." }
@@ -558,7 +562,7 @@ function durableTool(
                 ? tool.part.errorText
                 : "The vault action failed.",
           },
-    },
+    }),
     ...(tool.location === "server" ? { executedOn: "server" as const } : {}),
   };
 }
@@ -952,17 +956,22 @@ export type HistoryProjection = Readonly<{
   assistant?: Immutable<ChatMessage>;
 }>;
 
-/** Own the cached graph without freezing borrowed authoritative input. */
+/**
+ * Freeze a freshly built durable graph in place. It borrows no objects from
+ * the wire or from local results (tool results are bounded copies), so no
+ * whole-graph copy is needed.
+ */
 function immutableHistory<T>(value: T): Immutable<T> {
-  const copy = structuredClone(value);
-  const pending: unknown[] = [copy];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === null || typeof current !== "object" || Object.isFrozen(current)) continue;
-    pending.push(...Object.values(current));
-    Object.freeze(current);
-  }
-  return copy as Immutable<T>;
+  return deepFreeze(value) as Immutable<T>;
+}
+
+/** Wire messages are deeply frozen, so equal references need no walk. */
+function sameWireMessages(
+  left: readonly WireMessage[],
+  right: readonly WireMessage[],
+): boolean {
+  return left.length === right.length && left.every((message, index) =>
+    message === right[index] || sameJsonValue(message, right[index]));
 }
 
 type StoredActionFact = Omit<ToolPresentationFact, "call">;
@@ -1003,8 +1012,26 @@ type ProjectionRun = Omit<RunPresentation, "executingToolIds"> & {
   readonly localResults: TurnState["localResults"];
 };
 
+/*
+ * Tool inputs arrive deeply frozen from the wire and keep their identity while
+ * other parts stream, so a key is built once per input and call instead of
+ * canonicalizing every input again on each presented frame.
+ */
+const actionKeys = new WeakMap<object, Map<string, string>>();
+
 function actionKey(call: LocalToolCall): string {
-  return JSON.stringify([call.callId, call.name, canonicalAgentToolInput(call.input)]);
+  const input = call.input;
+  const cacheable = input !== null && typeof input === "object" && Object.isFrozen(input);
+  const identity = `${call.callId}\u0000${call.name}`;
+  const cached = cacheable ? actionKeys.get(input)?.get(identity) : undefined;
+  if (cached !== undefined) return cached;
+  const key = JSON.stringify([call.callId, call.name, canonicalAgentToolInput(input)]);
+  if (cacheable) {
+    let keys = actionKeys.get(input);
+    if (!keys) actionKeys.set(input, keys = new Map());
+    keys.set(identity, key);
+  }
+  return key;
 }
 
 function actionFact(
@@ -1031,6 +1058,12 @@ function localResultMatches(run: Pick<ProjectionRun, "localResults">, tool: Loca
  * belong only to presentation. Execution, delivery and persistence remain in
  * the session; callers cannot mutate this owner's retained turn state.
  */
+/**
+ * History keys name a durable history value. One counter for the module, so a run that
+ * finishes on a projection replaced by a reconnect can never repeat the new projection's key.
+ */
+let historyRevision = 0;
+
 export class ConversationProjection {
   private authority: readonly WireMessage[] = Object.freeze([]);
   private presentation: readonly WireMessage[] = Object.freeze([]);
@@ -1040,6 +1073,7 @@ export class ConversationProjection {
     durationKey: string;
     value: HistoryProjection;
   }> | null = null;
+
 
   public beginTurn(turn: ProjectionTurn, approvalPolicy: ToolApprovalPolicy): ProjectionTurn {
     const handle = Object.freeze({ ...turn });
@@ -1092,6 +1126,11 @@ export class ConversationProjection {
     }));
   }
 
+  /**
+   * Turn evidence for one message source. The tool analysis is computed only
+   * when a caller reads a tool field, so per-frame terminal and assistant
+   * checks never canonicalize the turn's tools.
+   */
   public inspect(
     turn: ProjectionTurn,
     source: "presentation" | "authoritative" = "presentation",
@@ -1099,15 +1138,23 @@ export class ConversationProjection {
   ) {
     const state = this.state(turn);
     const messages = source === "authoritative" ? this.authority : this.presentation;
-    const analysis = this.analyze(state, messages);
+    let analysis: TurnAnalysis | undefined;
+    const analyzed = (): TurnAnalysis => analysis ??= this.analyze(state, messages);
+    const terminal = runId === undefined ? null : terminalFromMessages(
+      runId ? this.authority : this.authority.filter((message) =>
+        !state.baseMessageIds.has(message.id)), turn.turnId, runId,
+    );
     return Object.freeze({
-      tools: analysis.tools, clientTools: analysis.clientTools,
-      requests: analysis.requests, bindings: analysis.bindings,
-      hasAssistant: analysis.hasAssistant,
-      terminal: runId === undefined ? null : terminalFromMessages(
-        runId ? this.authority : this.authority.filter((message) =>
-          !state.baseMessageIds.has(message.id)), turn.turnId, runId,
-      ),
+      get tools() { return analyzed().tools; },
+      get clientTools() { return analyzed().clientTools; },
+      get requests() { return analyzed().requests; },
+      get bindings() { return analyzed().bindings; },
+      get hasAssistant() {
+        return analysis?.hasAssistant
+          ?? currentTurnMessages(messages, turn.turnId)
+            .some((message) => message.role === "assistant");
+      },
+      terminal,
     });
   }
 
@@ -1170,17 +1217,24 @@ export class ConversationProjection {
     const duration = state && input.elapsedMs !== null && input.elapsedMs !== undefined
       ? { rootMessageId: state.turn.turnId, responseDurationMs: input.elapsedMs }
       : undefined;
-    const durationKey = duration ? JSON.stringify(duration) : "";
+    const durationKey = duration
+      ? `${duration.rootMessageId}\n${duration.responseDurationMs}`
+      : "";
     const previous = this.lastHistory;
     let value: HistoryProjection;
+    // The key is a revision, not a serialization: equal wire content reuses
+    // the previous value and its key, so the session skips a redundant write
+    // without holding a whole-transcript string.
     if (previous && previous.durationKey === durationKey
-      && previous.source.length === messages.length
-      && messages.every((message, index) => message === previous.source[index])) {
+      && sameWireMessages(previous.source, messages)) {
       value = previous.value;
+      if (previous.source !== messages) {
+        this.lastHistory = { source: messages, durationKey, value };
+      }
     } else {
-      const key = `${JSON.stringify(messages)}${duration ? `\n${durationKey}` : ""}`;
-      value = previous?.value.key === key ? previous.value : Object.freeze({
-        key, messages: immutableHistory(durableServerHistory(messages, input.now, duration)),
+      value = Object.freeze({
+        key: `history:${++historyRevision}`,
+        messages: immutableHistory(durableServerHistory(messages, input.now, duration)),
       });
       this.lastHistory = { source: messages, durationKey, value };
     }
