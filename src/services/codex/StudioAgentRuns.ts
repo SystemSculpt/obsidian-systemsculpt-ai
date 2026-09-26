@@ -46,6 +46,8 @@ export class StudioAgentRuns {
   private readonly controls = new Map<string, Control>();
   private readonly listeners = new Set<(projectId: string) => void>();
   private readonly loaded = new Map<string, Promise<void>>();
+  /** Refresh makes older in-flight page reads obsolete before they can publish. */
+  private readonly pageGeneration = new Map<string, number>();
   /** Per project: the oldest loaded run ID and how many older records remain on disk. */
   private readonly older = new Map<string, { before: string; remaining: number }>();
   /** Projects whose older loaded runs were evicted to keep the cache bounded. */
@@ -68,7 +70,7 @@ export class StudioAgentRuns {
   subscribe(listener: (projectId: string) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   list(projectId: string, nodeIds?: readonly string[]): readonly StudioAgentRunView[] {
     const allowed = nodeIds?.length ? new Set(nodeIds) : null;
-    // Every loaded run, including older pages; prune() keeps the cache at MAX_LOADED_AGENT_RUNS.
+    // Every loaded run, including older pages; pruneAndNotify() keeps the cache at MAX_LOADED_AGENT_RUNS.
     return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
@@ -78,7 +80,10 @@ export class StudioAgentRuns {
     if (!this.machine && hasHostCapability('local-cli')) this.machine = (await desktopHost.os()).hostname();
   }
   async refresh(projectPath: string, projectId: string): Promise<void> {
-    await this.loaded.get(projectPath); this.loaded.delete(projectPath); this.capped.delete(projectPath); await this.load(projectPath, projectId);
+    await this.loaded.get(projectPath);
+    this.pageGeneration.set(projectPath, (this.pageGeneration.get(projectPath) ?? 0) + 1);
+    this.loaded.delete(projectPath); this.older.delete(projectPath); this.capped.delete(projectPath);
+    await this.load(projectPath, projectId);
   }
   /** True once paging this project evicted older runs; older pages are then no longer offered. */
   isCapped(projectPath: string): boolean { return this.capped.has(projectPath); }
@@ -87,8 +92,9 @@ export class StudioAgentRuns {
    * changed runs. Live runs stay: controlled runs and their ancestors, active
    * runs, open workflows and their assignments.
    */
-  private prune(): void {
-    if (this.records.size <= MAX_LOADED_AGENT_RUNS) return;
+  private pruneAndNotify(projectId: string): void {
+    const affectedProjects = new Set([projectId]);
+    if (this.records.size <= MAX_LOADED_AGENT_RUNS) { this.emit(projectId); return; }
     const protectedIds = new Set(this.controls.keys());
     for (const id of this.controls.keys()) {
       let parent = this.records.get(id)?.parentRunId;
@@ -97,33 +103,42 @@ export class StudioAgentRuns {
     for (const run of [...this.records.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))) {
       if (this.records.size <= MAX_LOADED_AGENT_RUNS) break;
       if (protectedIds.has(run.id) || isActiveAgentRun(run.status) || workflowOpen(run.workflow) || (run.workflowId && workflowOpen(this.records.get(run.workflowId)?.workflow))) continue;
-      this.records.delete(run.id); this.capped.add(run.projectPath);
+      this.records.delete(run.id); this.capped.add(run.projectPath); affectedProjects.add(run.projectId);
     }
+    for (const affectedProjectId of affectedProjects) this.emit(affectedProjectId);
   }
   async load(projectPath: string, projectId: string): Promise<void> {
+    const generation = this.pageGeneration.get(projectPath) ?? 0;
     if (!this.loaded.has(projectPath)) this.loaded.set(projectPath, (async () => {
       await this.identifyMachine();
       const page = await this.store.list(projectPath, projectId);
+      if (this.disposed || generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
       this.adopt(page);
-      // A refresh keeps the cursor of older pages already loaded.
+      // Repeated loads keep their cursor; an explicit Refresh clears it before loading.
       const cursor = this.older.get(projectPath);
       if (!cursor || !page.before || page.before <= cursor.before) this.older.set(projectPath, { before: page.before ?? '', remaining: page.olderRemaining });
-      this.prune(); this.emit(projectId);
+      this.pruneAndNotify(projectId);
       await this.recoverWorkflows(projectId);
       this.retainOnDisk(projectPath, projectId);
-    })().catch(error => { this.loaded.delete(projectPath); throw error; }));
+    })().catch(error => {
+      if (generation === (this.pageGeneration.get(projectPath) ?? 0)) this.loaded.delete(projectPath);
+      throw error;
+    }));
     await this.loaded.get(projectPath);
   }
   hasOlder(projectPath: string): boolean { return !this.capped.has(projectPath) && (this.older.get(projectPath)?.remaining ?? 0) > 0; }
   /** Read the next page of older records for the run board. */
   async loadOlder(projectPath: string, projectId: string): Promise<void> {
+    const generation = this.pageGeneration.get(projectPath) ?? 0;
     await this.load(projectPath, projectId);
+    if (generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
     const cursor = this.older.get(projectPath);
     if (!cursor || cursor.remaining <= 0 || this.capped.has(projectPath) || this.disposed) return;
     const page = await this.store.list(projectPath, projectId, { before: cursor.before });
+    if (this.disposed || generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
     this.adopt(page);
     this.older.set(projectPath, page.before ? { before: page.before, remaining: page.olderRemaining } : { ...cursor, remaining: 0 });
-    this.prune(); this.emit(projectId);
+    this.pruneAndNotify(projectId);
   }
   private adopt(page: AgentRunPage): void {
     for (const run of page.records) {
@@ -225,7 +240,7 @@ export class StudioAgentRuns {
         record.error = control.controller.signal.aborted ? '' : error.message; record.currentActivity = record.error || (this.disposed ? 'Obsidian session ended' : 'Stopped'); record.finishedAt = new Date().toISOString();
         await this.persist(record).catch(() => {}); control.reject(error);
       } finally {
-        this.controls.delete(record.id); this.prune(); this.emit(record.projectId);
+        this.controls.delete(record.id); this.pruneAndNotify(record.projectId);
         for (const pending of record.messages.filter(item => item.to === record.id && item.status === 'pending')) { pending.status = 'failed'; pending.error = 'The run ended before Codex accepted this message.'; this.messageChanged(pending); }
         this.changed(record);
         this.workflowTurnEnded(record);
