@@ -311,10 +311,16 @@ export function mergeStudioExternalEntities(options: {
         }
         const theirEntry = fieldEntry(writer.stamps, key, leaf) || presence(writer.stamps, key);
         const base = pending.get(pendingKey(key, leaf));
-        // Undo yields to an independent edit of the same base, never an echo of this device's superseded edit.
-        if (base && canonical(ours) === canonical(base.value) && replacedStamp(writer.stamps, key, leaf) === base.stamp
+        // Undo on either side yields to an independent edit of the same base, never a superseded echo.
+        if (base && replacedStamp(writer.stamps, key, leaf) === base.stamp
           && stampWriter(theirEntry) !== stampWriter(leafStamp(clock.stamps, key, leaf))) {
-          if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry); continue;
+          const revertedHere = canonical(ours) === canonical(base.value), revertedThere = canonical(other) === canonical(base.value);
+          if (revertedHere || revertedThere) {
+            if (revertedThere) { setLeaf(merged[key], leaf, ours); kept++; }
+            // This resolution supersedes both histories; an old echo cannot undo it later.
+            setLeafStamp(clock.stamps, key, leaf, `${now()}/${stampOf(theirEntry)}`);
+            continue;
+          }
         }
         // Both sides changed the same earlier value of prose: combine separate changes.
         if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && ours !== base.value && other !== base.value

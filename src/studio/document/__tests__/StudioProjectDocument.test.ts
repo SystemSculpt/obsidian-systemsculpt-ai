@@ -429,6 +429,30 @@ describe("copies from another device", () => {
     expect(values((await receive(a)).project).a).toBe("Alpha from B");
   });
 
+  it.each([["position", false], ["position", true], ["prose", false], ["prose", true]])("resolves %s Undo in either delivery order and rejects later echoes (Undo first: %s)", async (field, undoFirst) => {
+    const { a, b } = await pair();
+    const write = (draft: StudioProjectV1, value: "base" | "local" | "peer") => {
+      if (field === "position") find(draft, "a")!.position.x = { base: 0, local: 10, peer: 7 }[value];
+      else find(draft, "a")!.config.value = { base: "Alpha", local: "Local", peer: "Peer" }[value];
+    };
+    const read = (value: StudioProjectV1) => field === "position" ? find(value, "a")!.position.x : find(value, "a")!.config.value;
+    const expected = field === "position" ? 7 : "Peer";
+    await edit(b, draft => write(draft, "peer")); tick();
+    await edit(a, draft => write(draft, "local"));
+    const c = vault("cccccccccccc"); deliver(a, c); await c.store.loadProject(path); tick();
+    await edit(a, draft => write(draft, "base")); tick();
+    await edit(c, draft => { find(draft, "a")!.title = "Unrelated peer title"; });
+    const first = undoFirst ? b : a, second = undoFirst ? a : b;
+    deliver(second, first); await receive(first);
+    deliver(first, second); await receive(second);
+    expect(read(await a.store.loadProject(path))).toBe(expected);
+    expect(read(await b.store.loadProject(path))).toBe(expected);
+    deliver(c, a);
+    const afterEcho = (await receive(a)).project;
+    expect(read(afterEcho)).toBe(expected);
+    expect(find(afterEcho, "a")!.title).toBe("Unrelated peer title");
+  });
+
   it.each(["position", "prose"])("keeps local %s Undo when a peer republishes the superseded value with an unrelated edit", async field => {
     const { a, b } = await pair();
     const change = (draft: StudioProjectV1, changed: boolean) => {
