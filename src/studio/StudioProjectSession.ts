@@ -1,8 +1,8 @@
-import { materializeStudioProject } from "./document/StudioProjectCollaboration";
 import { updateStudioProjectIdentity } from "./document/StudioProjectIdentity";
 import {
   cloneStudioProjectSnapshot,
   readonlyStudioProjectSnapshot,
+  serializeStudioProjectSnapshot,
   type ReadonlyStudioProjectSnapshot,
 } from "./StudioProjectSnapshots";
 import {
@@ -80,8 +80,7 @@ type StudioProjectSessionOptions = {
     projectPath: string,
     project: StudioProjectV1,
     onBeforeProjectWrite?: (rawText: string) => void,
-    baseProject?: StudioProjectV1,
-    intent?: {restoreDeletedEntities?: boolean}
+    baseProject?: StudioProjectV1
   ) => Promise<void | StudioProjectReconciliation>;
   readProjectRawText?: (projectPath: string) => Promise<string | null>;
   saveBlockedProjectRecovery?: (
@@ -110,7 +109,6 @@ export class StudioProjectSession {
   private saveQueued = false;
   private saveQueuedMode: StudioProjectSessionAutosaveMode | null = null;
   private saveFailurePaused = false;
-  private restoreDeletedEntities = false;
   private dirtyRevision = 0;
   private persistedRevision = 0;
   private projectFileWriteBlocked = false;
@@ -168,9 +166,7 @@ export class StudioProjectSession {
     if (this.disposed) return;
     let reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     if (reconciled.conflicts.length > 0) {
-      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve edits from before the reload.");
-      await this.options.saveBlockedProjectRecovery(this.projectPath, snapshot.project);
-      if (this.disposed) return;
+      if (!await this.preserveConflict(snapshot.project, reconciled.conflicts)) return;
       reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     }
     if (serializeStudioProject(reconciled.project) === serializeStudioProject(this.project)) return;
@@ -234,7 +230,6 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutateAsync:${reason}`);
       return false;
     }
-    this.project.document = materializeStudioProject(this.project).document;
     const before = this.getProjectSnapshot();
     const draft = cloneStudioProjectSnapshot(before);
     const changed = (await mutator(draft)) !== false;
@@ -244,9 +239,7 @@ export class StudioProjectSession {
     }
     let reconciled = reconcileStudioProject(before, draft, this.project);
     if (reconciled.conflicts.length > 0) {
-      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve conflicting generated edits.");
-      await this.options.saveBlockedProjectRecovery(this.projectPath, draft);
-      if (this.disposed) return false;
+      if (!await this.preserveConflict(draft, reconciled.conflicts)) return false;
       // Recovery is asynchronous too: rebase against edits made during its I/O.
       reconciled = reconcileStudioProject(before, draft, this.project);
     }
@@ -300,11 +293,11 @@ export class StudioProjectSession {
     }
   }
 
-  /** History is a new local edit against the accepted disk version, not a reload. */
+  /** History is a new local edit against the accepted disk version, not a reload.
+   * Restoring a deleted entity this way is an explicit Undo, which clears its tombstone. */
   applyHistorySnapshot(project: StudioProjectV1): boolean {
     if (this.disposed) return false;
-    this.restoreDeletedEntities = true;
-    updateStudioProjectIdentity(this.project, materializeStudioProject({...project, document: this.project.document}, true));
+    updateStudioProjectIdentity(this.project, project);
     this.schedulePersist({ mode: "discrete", reason: "history.apply" });
     this.notifyListeners();
     return true;
@@ -317,13 +310,12 @@ export class StudioProjectSession {
   async reconcileExternalProject(project: StudioProjectV1, rawText: string | null): Promise<void> {
     if (this.disposed) return;
     const beforeRecovery = this.getProjectSnapshot();
+    // Three-way: what this session last accepted, its own edits, and the file.
     let reconciled = reconcileStudioProject(this.baseProject, beforeRecovery, project);
     if (reconciled.conflicts.length > 0) {
-      if (!this.options.saveBlockedProjectRecovery) throw new Error("Studio could not preserve conflicting canvas edits.");
-      await this.options.saveBlockedProjectRecovery(this.projectPath, beforeRecovery);
-      if (this.disposed) return;
+      if (!await this.preserveConflict(beforeRecovery, reconciled.conflicts)) return;
       // Only the intent that arrived after reconciliation takes precedence;
-      // the already-conflicting edit remains preserved in the recovery file.
+      // the already-conflicting edit remains preserved in the recovery copy.
       reconciled = reconcileStudioProject(beforeRecovery, this.project, reconciled.project, { preferLocalConflicts: true });
     }
     this.baseProject = cloneStudioProjectSnapshot(project);
@@ -522,6 +514,20 @@ export class StudioProjectSession {
     this.listeners.clear();
   }
 
+  /**
+   * Keep the losing side of a same-field conflict before another value is
+   * adopted: a configured recovery store, otherwise this session's recovery
+   * copy, which the view offers as an Undo step. False once disposed.
+   */
+  private async preserveConflict(project: StudioProjectV1, fields: string[]): Promise<boolean> {
+    if (this.options.saveBlockedProjectRecovery) {
+      await this.options.saveBlockedProjectRecovery(this.projectPath, project);
+      return !this.disposed;
+    }
+    this.conflictRecovery = { revision: (this.conflictRecovery?.revision || 0) + 1, project: cloneStudioProjectSnapshot(project), fields: [...fields] };
+    return true;
+  }
+
   private notifyListeners(change: StudioProjectSessionChange = { kind: "project" }): void {
     for (const listener of this.listeners) {
       try {
@@ -581,13 +587,10 @@ export class StudioProjectSession {
       return;
     }
 
-    this.project.document = materializeStudioProject(this.project, this.restoreDeletedEntities).document;
     this.saveInFlight = true;
     const revisionToPersist = this.dirtyRevision;
     const snapshotToPersist = this.getProjectSnapshot();
     const baseToPersist = cloneStudioProjectSnapshot(this.baseProject);
-    const restoreDeletedEntities = this.restoreDeletedEntities;
-    this.restoreDeletedEntities = false;
     let expectedWriteSignature: string | null = null;
     const savePromise = (async () => {
       try {
@@ -597,13 +600,15 @@ export class StudioProjectSession {
             this.expectedProjectWriteSignatures,
             expectedWriteSignature
           );
-        }, baseToPersist, {restoreDeletedEntities});
+        }, baseToPersist);
         const persistedProject = result?.project || snapshotToPersist;
         if (result?.conflicts.length) this.conflictRecovery = { revision: (this.conflictRecovery?.revision || 0) + 1, project: snapshotToPersist, fields: result.conflicts };
         // An edit made while I/O was pending belongs to the next save. Rebase
         // only that new intent onto the committed result; never replace it with
         // the earlier snapshot or replay already accepted edits.
-        const rebased = reconcileStudioProject(snapshotToPersist, this.project, persistedProject, { preferLocalConflicts: true }).project;
+        const rebased = serializeStudioProjectSnapshot(this.project) === serializeStudioProjectSnapshot(snapshotToPersist)
+          ? persistedProject
+          : reconcileStudioProject(snapshotToPersist, this.project, persistedProject, { preferLocalConflicts: true }).project;
         if (serializeStudioProject(rebased) !== serializeStudioProject(this.project)) {
           updateStudioProjectIdentity(this.project, rebased);
           this.notifyListeners({ kind: "project" });
@@ -622,7 +627,6 @@ export class StudioProjectSession {
         }
         this.persistedRevision = Math.max(this.persistedRevision, revisionToPersist);
       } catch (error) {
-        this.restoreDeletedEntities ||= restoreDeletedEntities;
         if (expectedWriteSignature) {
           this.expectedProjectWriteSignatures.delete(expectedWriteSignature);
         }

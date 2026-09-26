@@ -9,6 +9,8 @@ export class StudioProjectSessionManager {
   private readonly operations = new Map<string, Promise<unknown>>();
   private disposed = false;
 
+  constructor(private readonly onSessionClosed?: (path: string) => Promise<void>) {}
+
   getSession(projectPath: string): StudioProjectSession | null {
     const path = this.normalizeProjectPath(projectPath);
     return this.entriesByPath.get(path)?.session || null;
@@ -81,6 +83,8 @@ export class StudioProjectSessionManager {
   private async closeEntry(path: string, entry: SessionEntry): Promise<void> {
     // Keep the only remaining copy owned when recovery persistence fails.
     await entry.session.close();
+    // Run within the path's lifetime queue so a new owner cannot race eviction.
+    await this.onSessionClosed?.(path);
     this.entriesByPath.delete(path);
   }
 

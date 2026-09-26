@@ -1,5 +1,7 @@
 # One collaborative Studio document
 
+Superseded in part by [ADR-0004](0004-readable-studio-documents.md): the file no longer embeds Automerge state; edits merge by entity and field, dated by hybrid-clock stamps and deletion tombstones in a small merge record inside the file. The single file, shared edit service and atomic publication below still apply.
+
 Studio previously saved whole snapshots and replaced the workspace DOM during refresh. Stale writers could restore deleted or edited content, while unrelated catalog and file events interrupted active gestures and editors.
 
 A new canvas is one readable `.systemsculpt` JSON document containing its Automerge state in `document`. The readable canvas remains searchable and editable. Stable entity maps merge separate fields and memberships, collaborative text merges within one value, and deletion tombstones prevent stale edits from restoring a removed entity. Explicit Undo or restore can bring it back. There are no authored-state sidecars or conflict copies.

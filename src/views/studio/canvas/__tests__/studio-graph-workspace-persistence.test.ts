@@ -1,7 +1,23 @@
 /** @jest-environment jsdom */
 
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
+import { cloneStudioProjectSnapshot } from "../../../../studio/StudioProjectSnapshots";
+import { reconcileStudioProject } from "../../../../studio/StudioProjectReconciliation";
+import { mergeStudioText } from "../../../../studio/document/StudioTextMerge";
 import { renderStudioGraphWorkspace, type StudioGraphWorkspaceRendererOptions } from "../StudioGraphWorkspaceRenderer";
+
+jest.mock("../../../../studio/StudioProjectSnapshots", () => {
+  const actual = jest.requireActual("../../../../studio/StudioProjectSnapshots");
+  return { ...actual, cloneStudioProjectSnapshot: jest.fn(actual.cloneStudioProjectSnapshot) };
+});
+jest.mock("../../../../studio/StudioProjectReconciliation", () => {
+  const actual = jest.requireActual("../../../../studio/StudioProjectReconciliation");
+  return { ...actual, reconcileStudioProject: jest.fn(actual.reconcileStudioProject) };
+});
+jest.mock("../../../../studio/document/StudioTextMerge", () => {
+  const actual = jest.requireActual("../../../../studio/document/StudioTextMerge");
+  return { ...actual, mergeStudioText: jest.fn(actual.mergeStudioText) };
+});
 
 function node(id: string, x = 0, title = id): StudioNodeInstance {
   return { id, kind: "missing.kind", version: "1.0.0", title, position: { x, y: 0 }, config: {}, continueOnError: false, disabled: false };
@@ -101,6 +117,45 @@ describe("persistent Studio graph workspace", () => {
     expect(restored).not.toBe(editingCard);
     expect(restored.querySelector(".ss-studio-text-node-editor")).toBeNull();
     expect(initial.root.querySelectorAll('[data-node-id="note"]')).toHaveLength(1);
+  });
+
+  it("commits 30 keystrokes into a 40-node canvas as plain values without cloning or merging the project", () => {
+    const nodes = Array.from({ length: 40 }, (_, index) => ({ ...node(`n${index}`, index * 320, `Card ${index}`), config: { note: "x".repeat(2400) } }));
+    const current = project(nodes);
+    const typed: string[] = [];
+    const initial = options(current);
+    initial.onNodeTitleInput = (target, title) => { typed.push(title); current.graph.nodes.find(item => item.id === target.id)!.title = title; };
+    document.body.appendChild(initial.root);
+    renderStudioGraphWorkspace(initial);
+    const input = initial.root.querySelector<HTMLElement>('[data-node-id="n7"]')!.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    jest.mocked(cloneStudioProjectSnapshot).mockClear();
+    jest.mocked(reconcileStudioProject).mockClear();
+    jest.mocked(mergeStudioText).mockClear();
+
+    for (let index = 1; index <= 30; index++) {
+      input.value = `Card 7${"!".repeat(index)}`;
+      input.dispatchEvent(new Event("input"));
+    }
+
+    expect(typed).toHaveLength(30);
+    expect(current.graph.nodes[7].title).toBe(`Card 7${"!".repeat(30)}`);
+    expect(cloneStudioProjectSnapshot).not.toHaveBeenCalled();
+    expect(reconcileStudioProject).not.toHaveBeenCalled();
+    expect(mergeStudioText).not.toHaveBeenCalled();
+  });
+
+  it("merges a keystroke into a title another writer changed after the card displayed it", () => {
+    const current = project([node("card", 0, "Weekly")]);
+    const typed: string[] = [];
+    const initial = options(current);
+    initial.onNodeTitleInput = (_target, title) => { typed.push(title); };
+    document.body.appendChild(initial.root);
+    renderStudioGraphWorkspace(initial);
+    const input = initial.root.querySelector<HTMLElement>('[data-node-id="card"]')!.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    current.graph.nodes[0].title = "Draft Weekly";
+    input.value = "Weekly review";
+    input.dispatchEvent(new Event("input"));
+    expect(typed).toEqual(["Draft Weekly review"]);
   });
 
   it("does not overwrite gesture-owned geometry during an incoming refresh", () => {

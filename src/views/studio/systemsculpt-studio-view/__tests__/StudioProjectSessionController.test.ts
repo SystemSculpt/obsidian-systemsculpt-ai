@@ -299,7 +299,7 @@ describe("StudioProjectSessionController", () => {
     finishReconciliation();
     await Promise.all([modified, closed]);
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(service.reconcileProjectFile.mock.invocationCallOrder[0]).toBeLessThan(
       service.releaseProjectSession.mock.invocationCallOrder[0]
     );
@@ -318,7 +318,7 @@ describe("StudioProjectSessionController", () => {
 
     await (controller as any).processCurrentProjectFileMutation('{"schema":"studio.project.v1"}');
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", '{"schema":"studio.project.v1"}');
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(load).not.toHaveBeenCalled();
     expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
     expect(controller.getProject()).toBe(fileProject);
@@ -361,7 +361,7 @@ describe("StudioProjectSessionController", () => {
 
     expect(controller.getProject()).toBe(fileProject);
     expect(controller.getProjectFileWarning()).toBeNull();
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
     expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
     expect(service.preserveProjectRecovery).not.toHaveBeenCalled();
@@ -502,7 +502,7 @@ describe("StudioProjectSessionController", () => {
 
     await (controller as any).processCurrentProjectFileMutation("{");
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", "{");
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
     expect(controller.getProjectFileWarning()).toContain("Unexpected token");
     expect(controller.getProjectFileWarning()).toContain("Studio couldn't read this project file");

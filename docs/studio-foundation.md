@@ -26,9 +26,9 @@ Platform checks through node renderers or runtime implementations.
 ## Deep modules
 
 - types.ts and schema.ts own project contracts and strict parsing.
-- paths.ts, StudioProjectStore.ts, and document/ own the single collaborative
-  project file, migrations, scoped edits, and atomic publication; persistence/
-  reconciles independent support files.
+- paths.ts, StudioProjectStore.ts, and document/ own the single project file,
+  migrations, merged edits, its merge record, and atomic publication;
+  persistence/ reconciles independent support files.
 - StudioAssetStore.ts owns content-addressed project assets.
 - StudioPermissionManager.ts and StudioHostCapabilities.ts own execution gates.
 - StudioGraphCompiler.ts owns typed DAG validation, scoped run plans, and
@@ -85,6 +85,10 @@ directly from the file:
   Before the first v2 rewrite, Studio copies the original file byte for byte
   to legacy/<timestamp>-v1-original.json in the assets directory, once per
   distinct original, and names that copy in a notice.
+- Files written by 6.10 also embed merge state in a document field. Studio
+  reads their readable canvas and drops that state on the next edit, after
+  copying the first such original once to
+  legacy/<timestamp>-document-state-original.json.
 
 ## Persistence
 
@@ -106,8 +110,14 @@ Names remain human-readable and collisions receive numeric suffixes.
 The canvas is a living document. Each session keeps the last accepted document
 and rebases its edits onto the current file before saving. Independent node and
 field edits merge, including changes arriving while a save or asynchronous
-producer is running. Concurrent text edits merge within the same value, and
-deleted cards stay deleted until an explicit Undo or restore. Removing generated outputs also removes their pins and parent
+producer is running. Separate changes to the same text merge; overlapping ones
+keep the file's value, and the session offers its own version as an Undo step.
+A whole-file copy from another device merges field by field by the
+hybrid-clock stamps in the `merge` record each published file carries: the
+newer change wins, entities the other device never saw are kept, and deleted
+cards stay deleted until an explicit Undo or restore (see ADR-0004). An edit
+made to the file outside Studio, such as by an agent's file tools, applies as
+this device's own edit. Removing generated outputs also removes their pins and parent
 references; concurrent deletion removes references added by another writer.
 Every publication validates the project before atomically replacing its single
 visible file. Invalid documents remain untouched until corrected.

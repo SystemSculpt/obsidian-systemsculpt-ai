@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
@@ -33,6 +34,23 @@ type InMemoryApp = {
     getFiles: () => Array<{ path: string }>;
   };
 };
+
+/** Authored and copied files. */
+const authoredFiles = (files: Map<string, string>) => [...files.keys()];
+/** The merge record a published project file carries. */
+const mergeRecord = (raw: string) => JSON.parse(raw).merge as { deleted: Record<string, string>; stamps: Record<string, unknown> };
+/** The canonical canvas text of a published file, without its merge record: what an agent revision names. */
+const canonicalText = (raw: string) => { const { merge: _merge, ...content } = JSON.parse(raw); return `${JSON.stringify(content, null, 2)}\n`; };
+
+function createService(app: InMemoryApp) {
+  return new StudioService({
+    app: {...app, vault: {...app.vault, getName: getManagedStudioTestVaultName, configDir: ".obsidian"}},
+    manifest: {id: "systemsculpt-ai", version: "9.9.9", dir: "/tmp/systemsculpt-ai"},
+    settings: {studioDefaultProjectsFolder: "SystemSculpt/Studio", studioRunRetentionMaxRuns: 100, studioRunRetentionMaxArtifactsMb: 1024},
+    getLogger: () => ({warn: jest.fn(), error: jest.fn()}),
+    getManagedCapabilityGraph: createManagedCapabilityGraphStub,
+  } as any);
+}
 
 function createStore(options?: { existingFiles?: string[]; existingDirs?: string[]; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void }) {
   const existingFiles = options?.existingFiles || [];
@@ -244,7 +262,7 @@ describe("StudioProjectStore", () => {
     });
     files.set(created.path, "{");
 
-    const result = await store.importProjectText(created.path, "{");
+    const result = await store.refreshDocument(created.path);
     const message = result.conflicts.join("\n");
 
     expect(message).toMatch(/waiting for a complete valid file edit/i);
@@ -300,29 +318,23 @@ describe("Studio concurrent workspace writers", () => {
     return { ...state, ...created };
   }
 
-  it("opens a released-format file without merge state and embeds it into the same file", async () => {
+  it("keeps a released-format file plain readable JSON through open and save", async () => {
     const { store, files, path } = await workspace();
-    const legacy = JSON.parse(files.get(path)!) as Record<string, unknown>;
-    delete legacy.document;
-    legacy.canvas = { ...(legacy.canvas as object), nodes: [{ id: "note", kind: "studio.text", x: 10, y: 20, config: { value: "Released before merge state" } }] };
-    files.set(path, `${JSON.stringify(legacy, null, 2)}\n`);
+    const released = JSON.parse(files.get(path)!) as Record<string, unknown>;
+    released.canvas = { ...(released.canvas as object), nodes: [{ id: "note", kind: "studio.text", x: 10, y: 20, config: { value: "Released text" } }] };
+    files.set(path, `${JSON.stringify(released, null, 2)}\n`);
 
     const opened = await store.loadProject(path, { forceReload: true });
     expect(opened.graph.nodes.map(node => node.id)).toEqual(["note"]);
-    expect(opened.document?.engine).toBe("automerge");
-    // Import publishes the readable canvas and its merge state together; no sidecar appears.
-    expect(JSON.parse(files.get(path)!).document?.engine).toBe("automerge");
     expect([...files.keys()].filter(file => file.endsWith(".systemsculpt"))).toEqual([path]);
 
     opened.name = "Adopted";
     const saved = await store.saveProject(path, opened);
     expect(saved.conflicts).toEqual([]);
-    const written = JSON.parse(files.get(path)!) as { name: string; document?: { engine: string; heads: string[] }; canvas: { nodes: Array<{ id: string; config: { value: string } }> } };
+    const written = JSON.parse(files.get(path)!) as { name: string; canvas: { nodes: Array<{ id: string; config: { value: string } }> } };
     expect(written.name).toBe("Adopted");
-    expect(written.document?.engine).toBe("automerge");
-    expect(written.document?.heads).toHaveLength(1);
-    expect(written.canvas.nodes[0].config.value).toBe("Released before merge state");
-    expect(Object.keys(files.get(path) ? JSON.parse(files.get(path)!) : {})).toEqual(["schema", "id", "name", "docs", "canvas", "document"]);
+    expect(written.canvas.nodes[0].config.value).toBe("Released text");
+    expect(Object.keys(written)).toEqual(["schema", "id", "name", "docs", "canvas", "merge"]);
   });
 
   it("saves a canvas edit while an asset arrives without deleting or rewriting the asset", async () => {
@@ -349,7 +361,7 @@ describe("Studio concurrent workspace writers", () => {
     expect((await store.loadProject(path, { forceReload: true })).graph.nodes[0].id).toBe("remote");
   });
 
-  it("converges to one value and saves independent local changes without copies", async () => {
+  it("keeps the file's value for a field changed on both sides, reports it, and saves independent local changes without copies", async () => {
     const { store, files, path, project } = await workspace();
     const base = cloneStudioProjectSnapshot(project), external = cloneStudioProjectSnapshot(project);
     external.name = "External title";
@@ -357,10 +369,11 @@ describe("Studio concurrent workspace writers", () => {
     project.name = "Local title";
     project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
     const saved = await store.saveProject(path, project, { baseProject: base });
-    expect(saved.conflicts).toEqual([]);
-    expect(typeof saved.project.name).toBe("string");
+    // The session preserves its own version of a reported field as an Undo step.
+    expect(saved.conflicts).toEqual(["name"]);
+    expect(saved.project.name).toBe("External title");
     expect(saved.project.graph.nodes[0].id).toBe("local");
-    expect([...files.keys()]).toEqual([path]);
+    expect(authoredFiles(files)).toEqual([path]);
     expect([...files.keys()].some(file => file.startsWith(".systemsculpt/studio/recovery/"))).toBe(false);
   });
 
@@ -402,29 +415,127 @@ describe("Studio concurrent workspace writers", () => {
 
 describe("single authored file", () => {
   const options = {name: "Concurrent", minPluginVersion: "6.9.0", maxRuns: 100, maxArtifactsMb: 512};
+  const text = (id: string, value: string, x = 0) => ({id, kind: "studio.text", x, y: 0, config: {value}});
+  const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+  async function withNode(store: StudioProjectStore, path: string, value = "hello") {
+    const {revision} = await store.readDocument(path);
+    return store.editDocument(path, revision, [{kind: "create", entityId: "node:a", value: text("a", value)}]);
+  }
+
   it("creates exactly one file and serializes twenty clients from one revision", async () => {
     const {store, files, reopen} = createStore();
-    const {path, project} = await store.createProject(options);
-    expect([...files.keys()]).toEqual([path]);
-    await Promise.all(Array.from({length: 20}, (_, index) => reopen().editDocument(path, project.document!.heads, [{kind: "create", entityId: `node:n${index}`, value: {id: `n${index}`, kind: "studio.text", x: index, y: 0, config: {value: `agent ${index}`}}}])));
+    const {path} = await store.createProject(options);
+    expect(authoredFiles(files)).toEqual([path]);
+    const {revision} = await store.readDocument(path);
+    await Promise.all(Array.from({length: 20}, (_, index) => reopen().editDocument(path, revision, [{kind: "create", entityId: `node:n${index}`, value: text(`n${index}`, `agent ${index}`, index)}])));
     expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(20);
-    expect([...files.keys()]).toEqual([path]);
+    expect(authoredFiles(files)).toEqual([path]);
   });
-  it("keeps concurrent text in one node and never resurrects a stale deletion", async () => {
+
+  it("names a revision by the SHA-256 of the canonical file text", async () => {
+    const {store, files} = createStore();
+    const {path} = await store.createProject(options);
+    const {revision} = await store.readDocument(path);
+    expect(revision).toBe(sha256(canonicalText(files.get(path)!)));
+    const edited = await withNode(store, path);
+    expect(edited.revision).toBe(sha256(canonicalText(files.get(path)!)));
+    expect(edited.revision).not.toBe(revision);
+  });
+
+  it("merges separate fields and separate edits of one text from the same revision", async () => {
+    const {store} = createStore();
+    const {path} = await store.createProject(options);
+    const {revision} = await withNode(store, path, "hello world");
+    await store.editDocument(path, revision, [{entityId: "node:a", path: ["config", "value"], value: "hello wonderful world"}]);
+    await store.editDocument(path, revision, [{entityId: "node:a", path: ["x"], value: 400}]);
+    await store.editDocument(path, revision, [{entityId: "node:a", path: ["config", "value"], value: "hello world!"}]);
+    const node = (await store.loadProject(path)).graph.nodes[0];
+    expect(node.position.x).toBe(400);
+    expect(node.config.value).toBe("hello wonderful world!");
+  });
+
+  it("rejects a whole batch that touches a field changed after its revision", async () => {
+    const {store, files} = createStore();
+    const {path} = await store.createProject(options);
+    const {revision} = await withNode(store, path);
+    await store.editDocument(path, revision, [{entityId: "node:a", path: ["config", "value"], value: "hello there"}]);
+    const before = files.get(path);
+    await expect(store.editDocument(path, revision, [
+      {kind: "create", entityId: "node:b", value: text("b", "unrelated")},
+      {entityId: "node:a", path: ["config", "value"], value: "goodbye"},
+    ])).rejects.toThrow("Studio changed canvas.nodes[a].config.value after this revision. Read the document again and retry.");
+    expect(files.get(path)).toBe(before);
+    await expect(store.editDocument(path, "0".repeat(64), [])).rejects.toThrow("This Studio revision is no longer available. Read the document again and retry.");
+  });
+
+  it("never lets a stale edit or a create bring back a deleted entity; restore is explicit", async () => {
     const {store, files, reopen} = createStore();
-    const {path, project} = await store.createProject(options);
-    const created = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello world"}}}]);
-    const heads = created.project.document!.heads;
-    await Promise.all([
-      store.editDocument(path, heads, [{entityId: "node:a", path: ["config", "value"], value: "hello wonderful world"}]),
-      reopen().editDocument(path, heads, [{entityId: "node:a", path: ["config", "value"], value: "hello world!"}]),
-    ]);
-    expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello wonderful world!");
-    await store.editDocument(path, heads, [{kind: "delete", entityId: "node:a"}]);
-    await store.editDocument(path, heads, [{entityId: "node:a", path: ["x"], value: 900}]);
+    const {path} = await store.createProject(options);
+    const {revision} = await withNode(store, path);
+    await store.editDocument(path, revision, [{kind: "delete", entityId: "node:a"}]);
+    await expect(store.editDocument(path, revision, [{entityId: "node:a", path: ["x"], value: 900}])).rejects.toThrow("Studio changed canvas.nodes[a] after this revision.");
+    const {revision: latest} = await store.readDocument(path);
+    await expect(store.editDocument(path, latest, [{kind: "create", entityId: "node:a", value: text("a", "again")}])).rejects.toThrow("This entity ID is already used; choose a new ID or explicitly restore it.");
     expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(0);
-    expect([...files.keys()]).toEqual([path]);
+    // Only the key and its deletion time are kept, in the file's merge record.
+    expect(Object.keys(mergeRecord(files.get(path)!).deleted)).toEqual(["node:a"]);
+    expect(Object.keys(mergeRecord(files.get(path)!).stamps)).not.toContain("node:a");
+    expect(JSON.stringify(mergeRecord(files.get(path)!))).not.toContain("hello");
+    await store.editDocument(path, latest, [{kind: "restore", entityId: "node:a", value: text("a", "restored")}]);
+    expect((await reopen().loadProject(path)).graph.nodes[0].config.value).toBe("restored");
+    expect(mergeRecord(files.get(path)!).deleted).toEqual({});
   });
+
+  it("keeps the agent tool contract: one content revision in heads, older Automerge heads rejected", async () => {
+    const {app, files} = createStore();
+    const service = createService(app);
+    const {path} = await service.createProjectFile({name: "Agents"});
+    const read = await service.readAgentDocument(path) as {heads: string[]; canvas: Record<string, unknown>};
+    expect(read.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
+    expect(Object.keys(read.canvas)).toEqual(["schema", "id", "name", "docs", "canvas"]);
+    await expect(service.editAgentDocument(path, [...read.heads, "a".repeat(64)], [])).rejects.toThrow("Read the Studio revision before editing.");
+    const edited = await service.editAgentDocument(path, read.heads, [{kind: "create", entityId: "node:a", value: text("a", "one")}]) as {heads: string[]; entities: Record<string, unknown>};
+    expect(edited.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
+    expect(edited.entities["node:a"]).toMatchObject({id: "a"});
+  });
+
+  it.each(["watcher", "agent"])("accepts the exact published bytes after a %s edit", async route => {
+    const {app, files, store} = createStore();
+    const service = createService(app);
+    const {path} = await service.createProjectFile({name: "Published"});
+    const live = await service.retainProjectSession(path);
+    const {revision} = await store.readDocument(path);
+    const edits = [{kind: "create" as const, entityId: "node:a", value: text("a", "one")}];
+    if (route === "agent") await service.editAgentDocument(path, [revision], edits);
+    else {
+      await store.editDocument(path, revision, edits);
+      await service.reconcileProjectFile(path);
+    }
+    expect(live.matchesLastAcceptedProjectText(files.get(path)!)).toBe(true);
+    expect(live.matchesLastAcceptedProjectText(canonicalText(files.get(path)!))).toBe(false);
+    await service.releaseProjectSession(path);
+  });
+
+  it.each(["revision", "snapshot"])("releases the %s cache only after the final session owner closes", async cache => {
+    const {app, files} = createStore();
+    const service = createService(app);
+    const {path} = await service.createProjectFile({name: "Lifetime"});
+    await service.retainProjectSession(path);
+    await service.retainProjectSession(path);
+    const read = await service.readAgentDocument(path) as {heads: string[]};
+    await service.editAgentDocument(path, read.heads, [{kind: "create", entityId: "node:a", value: text("a", "one")}]);
+    await service.releaseProjectSession(path);
+    await expect(service.editAgentDocument(path, read.heads, [])).resolves.toBeDefined();
+    await service.releaseProjectSession(path);
+    if (cache === "revision") {
+      await expect(service.editAgentDocument(path, read.heads, [])).rejects.toThrow("This Studio revision is no longer available.");
+    } else {
+      // A closed project's last good snapshot must not hide an invalid file on reopen.
+      files.set(path, "{incomplete");
+      await expect(service.retainProjectSession(path)).rejects.toThrow("Studio couldn't read this project file");
+    }
+  });
+
   it("can reuse a renamed path for a new identity", async () => {
     const {store} = createStore();
     const {path} = await store.createProject(options);
@@ -453,15 +564,15 @@ describe("single authored file", () => {
   it("retains typing made during a save without duplicating already committed text", async () => {
     const {store, files} = createStore();
     const created = await store.createProject(options);
-    const {project} = await store.editDocument(created.path, created.project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
+    const {project} = await withNode(store, created.path);
     let saving!: () => void, release!: () => void;
     const started = new Promise<void>(resolve => {saving = resolve;});
     const hold = new Promise<void>(resolve => {release = resolve;});
     let calls = 0;
     const session = new StudioProjectSession({projectPath: created.path, project, discreteDelayMs: 60000,
-      saveProject: async (path, value, onBeforeProjectWrite, baseProject, intent) => {
+      saveProject: async (path, value, onBeforeProjectWrite, baseProject) => {
         if (++calls === 1) {saving(); await hold;}
-        return store.saveProject(path, value, {baseProject, onBeforeProjectWrite, ...intent});
+        return store.saveProject(path, value, {baseProject, onBeforeProjectWrite});
       },
     });
     session.mutate("node.config", p => {p.graph.nodes[0].config.value = "hello world";});
@@ -471,36 +582,49 @@ describe("single authored file", () => {
     release(); await flush;
     expect(session.getProject().graph.nodes[0].config.value).toBe("hello world!");
     expect((await store.loadProject(created.path)).graph.nodes[0].config.value).toBe("hello world!");
-    expect([...files.keys()]).toEqual([created.path]);
+    expect(authoredFiles(files)).toEqual([created.path]);
     await session.close();
   });
 
   it("imports duplicate and delayed watcher events exactly once", async () => {
     const {store, files} = createStore();
-    const {path, project} = await store.createProject(options);
-    const {project: base} = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
+    const {path} = await store.createProject(options);
+    const {project: base} = await withNode(store, path);
     const draft = cloneStudioProjectSnapshot(base); draft.graph.nodes[0].config.value = "hello world";
     const raw = serializeStudioProject(draft); files.set(path, raw);
-    await store.importProjectText(path, raw);
-    await store.importProjectText(path, raw);
-    await store.importProjectText(path, raw);
+    await store.refreshDocument(path);
+    await store.refreshDocument(path);
+    // A delayed watcher event only refreshes from the current file, so it cannot roll the document back.
+    await store.refreshDocument(path);
     expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello world");
+    expect(files.get(path)).toBe(raw);
   });
 
-  it("preserves agent text while a mounted editor continues from its displayed revision", async () => {
+  it("merges agent text into what a mounted editor displayed and commits plain values otherwise", async () => {
     const {store} = createStore();
-    const {path, project} = await store.createProject(options);
-    const {project: base} = await store.editDocument(path, project.document!.heads, [{kind: "create", entityId: "node:a", value: {id: "a", kind: "studio.text", x: 0, y: 0, config: {value: "hello"}}}]);
-    const editor = new StudioEditorRevision(cloneStudioProjectSnapshot(base));
-    const remote = await store.editDocument(path, base.document!.heads, [{entityId: "node:a", path: ["config", "value"], value: "hello remote"}]);
-    let merged = editor.edit("a", {config: "value"}, "hello!", remote.project);
-    merged = (await store.saveProject(path, merged)).project;
-    merged = editor.edit("a", {config: "value"}, "hello!!", merged);
-    const result = (await store.saveProject(path, merged)).project.graph.nodes[0].config.value as string;
-    expect(result).toContain("remote");
-    expect(result.match(/hello/g)).toHaveLength(1);
-    expect(result.match(/!/g)).toHaveLength(2);
-    expect(result.match(/remote/g)).toHaveLength(1);
+    const {path} = await store.createProject(options);
+    const {project: base, revision} = await withNode(store, path);
+    const editor = new StudioEditorRevision();
+    editor.display("config:value", base.graph.nodes[0].config.value);
+    const remote = await store.editDocument(path, revision, [{entityId: "node:a", path: ["config", "value"], value: "hello remote"}]);
+    // The card still shows "hello": the typed character lands in the agent's text.
+    const first = editor.commit("config:value", "hello!", remote.project.graph.nodes[0].config.value);
+    expect(first).toBe("hello! remote");
+    const draft = cloneStudioProjectSnapshot(remote.project); draft.graph.nodes[0].config.value = first;
+    const saved = (await store.saveProject(path, draft, {baseProject: remote.project})).project;
+    expect(editor.commit("config:value", "hello!!", saved.graph.nodes[0].config.value)).toBe("hello!! remote");
+    // A change that overlaps the typed range cannot be merged without guessing: the typed value wins.
+    expect(editor.commit("config:value", "bye", "hello!! remote")).toBe("bye");
+    // Without another writer, a keystroke is its plain value.
+    editor.display("title", "Title");
+    expect(editor.commit("title", "Title!", "Title")).toBe("Title!");
+    expect(editor.commit("title", "Title!!", "Title!")).toBe("Title!!");
+  });
+
+  it("keeps the exact typed configuration path when another writer changes it", () => {
+    const editor = new StudioEditorRevision();
+    editor.display("config:outputPath", "Reports/2026.wav");
+    expect(editor.commit("config:outputPath", "Reports/2027.wav", "Archive/2026.wav")).toBe("Reports/2027.wav");
   });
 
   it("round-trips labeled and unlabeled arrows and shape group membership", async () => {
@@ -642,7 +766,7 @@ describe("v1 projects with retired node kinds", () => {
     const created = await store.createProject({ name: "Current", minPluginVersion: "9.9.9", maxRuns: 100, maxArtifactsMb: 1024 });
     const loaded = await store.loadProject(created.path);
     await store.saveProject(created.path, { ...loaded, name: "Current renamed" });
-    // A v2 file whose formatting differs is normalized on import, still without a copy.
+    // A v2 file whose formatting differs is read as it is, still without a copy.
     files.set(created.path, JSON.stringify(JSON.parse(files.get(created.path)!)));
     await store.refreshDocument(created.path);
 

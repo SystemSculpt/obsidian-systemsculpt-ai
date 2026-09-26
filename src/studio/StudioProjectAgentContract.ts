@@ -172,16 +172,19 @@ A \`.systemsculpt\` file describes a visual workflow canvas, or is a small \`stu
 
 ## Concurrent editing
 
-Each canvas is one readable JSON file. Its \`document\` field contains the
-compressed collaborative state and \`heads\` identifies its revision. Keep that
-field intact. Text insertions merge within the same value, independent fields
-merge, and deleting an entity prevents stale edits from bringing it back.
+Each canvas is one readable JSON file. Its revision is the SHA-256 of the
+canonical canvas text, without the \`merge\` record, returned as the single
+entry of \`heads\`. Changes made
+since a revision merge by entity and field; separate edits to the same text
+field merge, and deleting an entity prevents stale edits from bringing it back.
 
 Concurrent agents MUST use \`studio_read_document\` and \`studio_edit_document\`.
 Read returns the readable canvas, entity map and revision heads. Edit accepts
-those heads and a batch of scoped edits. All clients share the same live Studio
-service, which serializes publication into the one file. For agents outside
-Studio, the official Obsidian CLI eval can call
+those heads and a batch of scoped edits. If an edit in the batch conflicts with
+a change made to the same field after that revision, the whole batch is
+rejected: read again and retry. All clients share the same live Studio service, which serializes
+publication into the one file. For agents outside Studio, the official Obsidian
+CLI eval can call
 \`app.plugins.plugins["systemsculpt-ai"].getStudioService().readAgentDocument(path)\`
 and \`editAgentDocument(path, heads, edits)\` in the active vault.
 
@@ -203,9 +206,9 @@ Config arrays are atomic: set the entire array. Do not use array offsets.
 Raw JSON edits are supported for a single writer. Simultaneous whole-file
 replacement cannot be made lossless: a write overwritten before Studio reads
 it is unavailable to merge. Use the shared edit service for concurrent work.
-Never modify the encoded state or invent heads. There are no transaction
-folders, conflict copies or alternate cards. Media and execution records are
-separate from authored canvas state.
+Never invent heads. There are no transaction folders, conflict copies or
+alternate cards. Media and execution records are separate from authored canvas
+state.
 
 ## Source cards
 
@@ -249,7 +252,7 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 
 ## Rules
 
-- \`schema\`, \`id\`, \`docs\`, and \`document.heads\` are Studio-owned: keep them exactly as they are. Everything under \`canvas\` plus \`name\` is yours to edit.
+- \`schema\`, \`id\`, \`docs\` and \`merge\` are Studio-owned: keep them exactly as they are. \`merge\` records when each recent change was made, so other devices can merge this file. Everything under \`canvas\` plus \`name\` is yours to edit. Older files may still carry a \`document\` field; leave it alone, Studio removes it on its next save.
 - Every id must be non-empty and unique within its list. Keep existing ids stable; use short descriptive ids for additions.
 - A node is \`{id, kind, title?, parent?, x, y, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
 - \`config\` holds the node's authored content and settings; the node kind reference below lists allowed keys, defaults, and value constraints. Paths are vault-relative unless the field says otherwise.
