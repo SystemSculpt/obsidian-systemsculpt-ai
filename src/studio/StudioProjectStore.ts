@@ -2,7 +2,7 @@ import { requireApiVersion, type App } from "obsidian";
 import type { StudioProjectV1, StudioPermissionPolicyV1 } from "./types";
 import { createEmptyStudioProject, createDefaultStudioPolicy, parseStudioPolicy, serializeStudioPolicy, serializeStudioProject, parseStudioProject } from "./schema";
 import { DEFAULT_STUDIO_PROJECTS_DIR, deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "./paths";
-import { StudioProjectDocument, type StudioDocumentEdit, type StudioDocumentEditResult, type StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
+import { StudioProjectDocument, type StudioDocumentEdit, type StudioDocumentEditResult, type StudioDocumentReconciliation, type StudioLegacyOriginalCopy } from "./document/StudioProjectDocument";
 import type { StudioProjectReconciliation } from "./StudioProjectReconciliation";
 import { resolveStudioEntry } from "./StudioEntry";
 import { reconcileStudioSupportDocument } from "./persistence/StudioSupportReconciliation";
@@ -85,6 +85,14 @@ export class StudioProjectStore {
     this.documents.clear();
   }
 
+  async releaseDocument(path: string): Promise<void> {
+    path = normalizeStudioProjectPath(path);
+    const document = this.documents.get(path);
+    if (!document) return;
+    await document.forget();
+    if (this.documents.get(path) === document) this.documents.delete(path);
+  }
+
   private document(path: string): StudioProjectDocument {
     path = normalizeStudioProjectPath(path);
     let document = this.documents.get(path);
@@ -116,7 +124,7 @@ export class StudioProjectStore {
   }
   async readDocument(path: string): Promise<StudioProjectReconciliation & {revision: string}> { return this.document(path).read(); }
   async editDocument(path: string, revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> { return this.document(path).edit(revision, edits); }
-  async refreshDocument(path: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
+  async refreshDocument(path: string): Promise<StudioDocumentReconciliation> { return this.document(path).refresh(); }
 
   async renameProject(path: string, name: string, options?: {project?: StudioProjectV1}): Promise<{oldPath: string; newPath: string; project: StudioProjectV1}> {
     const oldPath = normalizeStudioProjectPath(path);

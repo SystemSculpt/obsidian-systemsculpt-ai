@@ -319,6 +319,22 @@ describe("copies from another device", () => {
     expect(find((await receive(a)).project, "a")!.position.x).toBe(400);
   });
 
+  it("combines separate prose changes after repeated autosaves on both devices", async () => {
+    const { a, b } = await pair();
+    await edit(a, draft => { find(draft, "b")!.config.value = "Beta. Include"; });
+    tick();
+    await edit(a, draft => { find(draft, "b")!.config.value = "Beta. Include risks."; });
+    tick();
+    await edit(b, draft => { find(draft, "b")!.config.value = "Review: Beta"; });
+    tick();
+    await edit(b, draft => { find(draft, "b")!.config.value = "Please review: Beta"; });
+    deliver(b, a);
+    expect(find((await receive(a)).project, "b")!.config.value).toBe("Please review: Beta. Include risks.");
+    deliver(a, b);
+    expect(find((await receive(b)).project, "b")!.config.value).toBe("Please review: Beta. Include risks.");
+    expect(b.files.get(path)).toBe(a.files.get(path));
+  });
+
   it("does not combine prose with a change made from text the other device never had", async () => {
     const { a, b } = await pair();
     await edit(a, draft => { find(draft, "a")!.config.value = "one two three four"; });

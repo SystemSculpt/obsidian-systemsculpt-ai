@@ -42,6 +42,16 @@ const mergeRecord = (raw: string) => JSON.parse(raw).merge as { deleted: Record<
 /** The canonical canvas text of a published file, without its merge record: what an agent revision names. */
 const canonicalText = (raw: string) => { const { merge: _merge, ...content } = JSON.parse(raw); return `${JSON.stringify(content, null, 2)}\n`; };
 
+function createService(app: InMemoryApp) {
+  return new StudioService({
+    app: {...app, vault: {...app.vault, getName: getManagedStudioTestVaultName, configDir: ".obsidian"}},
+    manifest: {id: "systemsculpt-ai", version: "9.9.9", dir: "/tmp/systemsculpt-ai"},
+    settings: {studioDefaultProjectsFolder: "SystemSculpt/Studio", studioRunRetentionMaxRuns: 100, studioRunRetentionMaxArtifactsMb: 1024},
+    getLogger: () => ({warn: jest.fn(), error: jest.fn()}),
+    getManagedCapabilityGraph: createManagedCapabilityGraphStub,
+  } as any);
+}
+
 function createStore(options?: { existingFiles?: string[]; existingDirs?: string[]; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void }) {
   const existingFiles = options?.existingFiles || [];
   const existingDirs = options?.existingDirs || [];
@@ -478,13 +488,7 @@ describe("single authored file", () => {
 
   it("keeps the agent tool contract: one content revision in heads, older Automerge heads rejected", async () => {
     const {app, files} = createStore();
-    const service = new StudioService({
-      app: {...app, vault: {...app.vault, getName: getManagedStudioTestVaultName, configDir: ".obsidian"}},
-      manifest: {id: "systemsculpt-ai", version: "9.9.9", dir: "/tmp/systemsculpt-ai"},
-      settings: {studioDefaultProjectsFolder: "SystemSculpt/Studio", studioRunRetentionMaxRuns: 100, studioRunRetentionMaxArtifactsMb: 1024},
-      getLogger: () => ({warn: jest.fn(), error: jest.fn()}),
-      getManagedCapabilityGraph: createManagedCapabilityGraphStub,
-    } as any);
+    const service = createService(app);
     const {path} = await service.createProjectFile({name: "Agents"});
     const read = await service.readAgentDocument(path) as {heads: string[]; canvas: Record<string, unknown>};
     expect(read.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
@@ -493,6 +497,43 @@ describe("single authored file", () => {
     const edited = await service.editAgentDocument(path, read.heads, [{kind: "create", entityId: "node:a", value: text("a", "one")}]) as {heads: string[]; entities: Record<string, unknown>};
     expect(edited.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
     expect(edited.entities["node:a"]).toMatchObject({id: "a"});
+  });
+
+  it.each(["watcher", "agent"])("accepts the exact published bytes after a %s edit", async route => {
+    const {app, files, store} = createStore();
+    const service = createService(app);
+    const {path} = await service.createProjectFile({name: "Published"});
+    const live = await service.retainProjectSession(path);
+    const {revision} = await store.readDocument(path);
+    const edits = [{kind: "create" as const, entityId: "node:a", value: text("a", "one")}];
+    if (route === "agent") await service.editAgentDocument(path, [revision], edits);
+    else {
+      await store.editDocument(path, revision, edits);
+      await service.reconcileProjectFile(path);
+    }
+    expect(live.matchesLastAcceptedProjectText(files.get(path)!)).toBe(true);
+    expect(live.matchesLastAcceptedProjectText(canonicalText(files.get(path)!))).toBe(false);
+    await service.releaseProjectSession(path);
+  });
+
+  it.each(["revision", "snapshot"])("releases the %s cache only after the final session owner closes", async cache => {
+    const {app, files} = createStore();
+    const service = createService(app);
+    const {path} = await service.createProjectFile({name: "Lifetime"});
+    await service.retainProjectSession(path);
+    await service.retainProjectSession(path);
+    const read = await service.readAgentDocument(path) as {heads: string[]};
+    await service.editAgentDocument(path, read.heads, [{kind: "create", entityId: "node:a", value: text("a", "one")}]);
+    await service.releaseProjectSession(path);
+    await expect(service.editAgentDocument(path, read.heads, [])).resolves.toBeDefined();
+    await service.releaseProjectSession(path);
+    if (cache === "revision") {
+      await expect(service.editAgentDocument(path, read.heads, [])).rejects.toThrow("This Studio revision is no longer available.");
+    } else {
+      // A closed project's last good snapshot must not hide an invalid file on reopen.
+      files.set(path, "{incomplete");
+      await expect(service.retainProjectSession(path)).rejects.toThrow("Studio couldn't read this project file");
+    }
   });
 
   it("can reuse a renamed path for a new identity", async () => {

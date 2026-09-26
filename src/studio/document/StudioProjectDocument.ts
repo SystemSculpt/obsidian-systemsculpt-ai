@@ -42,7 +42,9 @@ const tails = new WeakMap<object, Map<string, Promise<unknown>>>();
 /** Recent agent revisions stay resolvable; the newest is always kept. */
 const MAX_REVISIONS = 16, MAX_REVISION_CHARS = 4_000_000;
 export type StudioDocumentEdit = {entityId: string; kind?: "set" | "create" | "delete" | "restore"; path?: string[]; value?: unknown; remove?: boolean};
-export type StudioDocumentEditResult = StudioProjectReconciliation & {revision: string};
+/** Accepted content and its exact published bytes belong to the same file version. */
+export type StudioDocumentReconciliation = StudioProjectReconciliation & {source: string};
+export type StudioDocumentEditResult = StudioDocumentReconciliation & {revision: string};
 /** The untouched bytes of an older file, kept before Studio first republishes it as plain v2. */
 export type StudioLegacyOriginalCopy = Readonly<{projectPath: string; copyPath: string; retiredNodes: readonly Readonly<{title: string; kind: string}>[]}>;
 const LEGACY_ORIGINAL_SUFFIX = "-v1-original.json";
@@ -80,7 +82,10 @@ export class StudioProjectDocument {
     this.onMergeNotice = options.onMergeNotice;
   }
   async forget(): Promise<void> {
-    await this.exclusive(async () => { this.cache.delete(this.path); });
+    await this.exclusive(async () => {
+      this.cache.delete(this.path);
+      revisions.get(this.adapter)?.delete(this.path);
+    });
   }
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     let paths = tails.get(this.adapter); if (!paths) {paths = new Map(); tails.set(this.adapter, paths);}
@@ -277,10 +282,10 @@ export class StudioProjectDocument {
     if (value.legacy || value.rewrite) value = await this.republish(entry, value);
     return {value, conflicts: []};
   }
-  async refresh(): Promise<StudioProjectReconciliation> {
+  async refresh(): Promise<StudioDocumentReconciliation> {
     return this.exclusive(async () => {
       const {value, conflicts} = await this.refreshLocked();
-      return {project: cloneStudioProjectSnapshot(value.project), conflicts};
+      return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source};
     });
   }
   /** The file bytes of the current document, as a watcher reports them. */
@@ -342,7 +347,7 @@ export class StudioProjectDocument {
       const next = await this.successor(current, project, text);
       if (!await this.publish(entry, current, next.source)) throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits.");
       this.cache.set(this.path, next);
-      return {project: cloneStudioProjectSnapshot(project), conflicts: [], revision: await this.handOut(text)};
+      return {project: cloneStudioProjectSnapshot(project), conflicts: [], source: next.source, revision: await this.handOut(text)};
     });
   }
 }

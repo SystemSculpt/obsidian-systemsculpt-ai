@@ -231,9 +231,10 @@ export function recordStudioChanges(
     for (const id of new Set([...previous.keys(), ...next.keys()])) {
       const leaf = (next.get(id) || previous.get(id))!.leaf;
       if (canonical(previous.get(id)?.value) === canonical(next.get(id)?.value)) continue;
-      const replaced = stampOf(fieldEntry(clock.stamps, key, leaf));
       const slot = pendingKey(key, leaf);
-      if (!pending.has(slot)) pending.set(slot, {value: copy(previous.get(id)?.value), stamp: replaced});
+      if (!pending.has(slot)) pending.set(slot, {value: copy(previous.get(id)?.value), stamp: leafStamp(clock.stamps, key, leaf)});
+      // All autosaves in this edit retain the same common base as the saved text.
+      const replaced = pending.get(slot)!.stamp;
       setLeafStamp(clock.stamps, key, leaf, replaced ? `${now()}/${replaced}` : now());
     }
   }

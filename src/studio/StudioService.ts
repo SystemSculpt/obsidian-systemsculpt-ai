@@ -128,7 +128,7 @@ export class StudioService {
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
   readonly agentRuns: StudioAgentRuns;
-  private readonly projectSessionManager = new StudioProjectSessionManager();
+  private readonly projectSessionManager = new StudioProjectSessionManager(path => this.projectStore.releaseDocument(path));
   private readonly agentReferenceFile: StudioAgentReferenceFile;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
@@ -293,7 +293,7 @@ export class StudioService {
     // A watcher's bytes only announce a change: the current file is what gets imported.
     const result = await this.projectStore.refreshDocument(path);
     if (session && !session.isDisposed()) {
-      await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+      await session.reconcileExternalProject(result.project, result.source);
     }
     return {conflicts: result.conflicts};
   }
@@ -312,7 +312,7 @@ export class StudioService {
     const session = this.getProjectSession(path);
     await session?.flushPendingSaveWork({force: true});
     const result = await this.projectStore.editDocument(path, heads[0], edits);
-    await session?.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+    await session?.reconcileExternalProject(result.project, result.source);
     return {heads: [result.revision], entities: projectToEntities(result.project)};
   }
 
