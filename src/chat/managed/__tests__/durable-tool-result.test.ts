@@ -50,6 +50,16 @@ describe("durableToolResult", () => {
     expect(JSON.stringify(bounded.error?.details).length).toBeLessThan(700);
   });
 
+  it("keeps every item outcome of the largest batch, so history counts a partial failure correctly", () => {
+    const results = Array.from({ length: 100 }, (_, index) => index < 95
+      ? { path: `Inbox/${index}.md`, success: true }
+      : { path: `Inbox/${index}.md`, success: false, error: "Target exists" });
+    const bounded = durableToolResult({ success: false, data: { results } });
+    const kept = (bounded.data as { results: Array<{ success: boolean }> }).results;
+    expect(kept).toHaveLength(100);
+    expect(kept.filter((entry) => !entry.success)).toHaveLength(5);
+  });
+
   it("never splits a surrogate pair and leaves short values untouched", () => {
     const emoji = "\u{1F600}";
     const text = `${"b".repeat(DURABLE_TOOL_TEXT_LIMIT - 1)}${emoji}tail`;

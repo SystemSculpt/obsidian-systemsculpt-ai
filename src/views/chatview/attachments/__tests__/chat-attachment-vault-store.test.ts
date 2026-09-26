@@ -150,11 +150,10 @@ describe("ChatAttachmentVaultStore", () => {
     files.set(`.systemsculpt/chat-attachments/03/${orphanHash}.txt`, new Uint8Array([1]));
     files.set(`.systemsculpt/chat-attachments/03/${"e".repeat(64)}.txt`, new Uint8Array([2]));
 
-    const removed = await store.pruneUnreferenced(new Set([
+    await store.pruneOncePerSession(async () => new Set([
       chatAttachmentRefKey(kept.contentRef),
     ]));
 
-    expect(removed).toBe(1);
     // The reachable payload and the malformed-layout file are both preserved.
     expect(files.size).toBe(2);
     expect(adapter.remove).toHaveBeenCalledTimes(1);
@@ -170,7 +169,7 @@ describe("ChatAttachmentVaultStore", () => {
     files.set(`.systemsculpt/chat-attachments/aa/${hash}.bin`, new Uint8Array([1]));
     (adapter.stat as jest.Mock).mockResolvedValue({ mtime: Date.now(), ctime: Date.now() });
 
-    await expect(store.pruneUnreferenced(new Set())).resolves.toBe(0);
+    await store.pruneOncePerSession(async () => new Set());
     expect(files.size).toBe(1);
     expect(adapter.remove).not.toHaveBeenCalled();
   });
@@ -185,7 +184,12 @@ describe("ChatAttachmentVaultStore", () => {
     await adapter.mkdir(".systemsculpt/chat-attachments/bb");
     files.set(`.systemsculpt/chat-attachments/bb/${hash}.txt`, new Uint8Array([1]));
 
-    await expect(store.pruneUnreferenced(new Set(), async () => new Set([key]))).resolves.toBe(0);
+    // The payload looks unreferenced at discovery, but the confirmation finds a chat that refers to it.
+    const discovery = jest.fn()
+      .mockResolvedValueOnce(new Set<string>())
+      .mockResolvedValueOnce(new Set([key]));
+    await store.pruneOncePerSession(discovery);
+    expect(discovery).toHaveBeenCalledTimes(2);
     expect(files.size).toBe(1);
     expect(adapter.remove).not.toHaveBeenCalled();
   });
@@ -225,6 +229,18 @@ describe("ChatAttachmentVaultStore", () => {
     await freshStore.pruneOncePerSession(freshDiscovery);
     expect(freshDiscovery).not.toHaveBeenCalled();
     expect(fresh.files.size).toBe(1);
+  });
+
+  it("deletes old unreferenced payloads through an adapter whose remove is a method, as Obsidian's is", async () => {
+    const { adapter, files } = harness();
+    await new ChatAttachmentVaultStore(adapter).externalizeAttachments([imageAttachment]);
+    const methodAdapter: ChatAttachmentStoreAdapter & { files: Map<string, Uint8Array> } = {
+      exists: adapter.exists, mkdir: adapter.mkdir, readBinary: adapter.readBinary, writeBinary: adapter.writeBinary, list: adapter.list, stat: adapter.stat,
+      files,
+      async remove(this: { files: Map<string, Uint8Array> }, path: string) { this.files.delete(path); },
+    };
+    await new ChatAttachmentVaultStore(methodAdapter).pruneOncePerSession(async () => new Set<string>());
+    expect(files.size).toBe(0);
   });
 
   it("skips confirmation when every old payload is still referenced", async () => {

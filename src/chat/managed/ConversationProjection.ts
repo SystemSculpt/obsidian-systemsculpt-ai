@@ -1058,6 +1058,12 @@ function localResultMatches(run: Pick<ProjectionRun, "localResults">, tool: Loca
  * belong only to presentation. Execution, delivery and persistence remain in
  * the session; callers cannot mutate this owner's retained turn state.
  */
+/**
+ * History keys name a durable history value. One counter for the module, so a run that
+ * finishes on a projection replaced by a reconnect can never repeat the new projection's key.
+ */
+let historyRevision = 0;
+
 export class ConversationProjection {
   private authority: readonly WireMessage[] = Object.freeze([]);
   private presentation: readonly WireMessage[] = Object.freeze([]);
@@ -1067,7 +1073,7 @@ export class ConversationProjection {
     durationKey: string;
     value: HistoryProjection;
   }> | null = null;
-  private historyRevision = 0;
+
 
   public beginTurn(turn: ProjectionTurn, approvalPolicy: ToolApprovalPolicy): ProjectionTurn {
     const handle = Object.freeze({ ...turn });
@@ -1227,7 +1233,7 @@ export class ConversationProjection {
       }
     } else {
       value = Object.freeze({
-        key: `history:${++this.historyRevision}`,
+        key: `history:${++historyRevision}`,
         messages: immutableHistory(durableServerHistory(messages, input.now, duration)),
       });
       this.lastHistory = { source: messages, durationKey, value };

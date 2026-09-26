@@ -343,16 +343,6 @@ export class ChatAttachmentVaultStore {
     };
   }
 
-  /** Deletes only well-formed CAS files that no durable chat or queue refers to. */
-  public async pruneUnreferenced(
-    referencedKeys: ReadonlySet<string>,
-    confirmReferences?: () => Promise<ReadonlySet<string> | null>,
-  ): Promise<number> {
-    const candidates = await this.pruneCandidates();
-    if (!candidates || candidates.length === 0) return 0;
-    return this.removeUnreferenced(candidates, referencedKeys, confirmReferences);
-  }
-
   /**
    * Runs one conservative background mark/sweep per vault adapter and plugin
    * session. A failed-closed scan may retry later, but opening additional chat
@@ -437,8 +427,9 @@ export class ChatAttachmentVaultStore {
     referencedKeys: ReadonlySet<string>,
     confirmReferences?: () => Promise<ReadonlySet<string> | null>,
   ): Promise<number> {
-    const remove = this.adapter.remove;
-    if (!remove) return 0;
+    // Called on the adapter: Obsidian's DataAdapter.remove is a method that needs its `this`.
+    const adapter = this.adapter;
+    if (!adapter.remove) return 0;
     const confirmedReferences = confirmReferences ? await confirmReferences() : referencedKeys;
     if (!confirmedReferences) return 0;
     const reachable = new Set([...referencedKeys, ...confirmedReferences]);
@@ -450,7 +441,7 @@ export class ChatAttachmentVaultStore {
         || this.state.pendingRemovals.has(path)
         || this.state.sessionClaims.has(key)
         || reachable.has(key)) continue;
-      const removal = remove(path);
+      const removal = adapter.remove(path);
       this.state.pendingRemovals.set(path, removal);
       try {
         await removal;

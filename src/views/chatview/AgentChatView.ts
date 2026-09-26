@@ -800,7 +800,8 @@ export class AgentChatView extends ItemView {
   }
 
   public async setState(state: ChatLeafState): Promise<void> {
-    this.appliedViewState = null;
+    // Obsidian calls back here with the state this view just pushed; only another state invalidates that push.
+    if (JSON.stringify(state) !== this.appliedViewState) this.appliedViewState = null;
     if (!state?.chatId) {
       const incomingDraftKey = state?.draftKey?.trim();
       const preservesCurrentDraft = this.isFullyLoaded
@@ -817,11 +818,11 @@ export class AgentChatView extends ItemView {
         }
       }
       if (state?.chatFontSize) await this.setChatFontSize(state.chatFontSize, false);
-      if (state?.approvalMode) this.applyApprovalMode(state.approvalMode);
+      if (state?.approvalMode && state.approvalMode !== this.approvalMode) this.applyApprovalMode(state.approvalMode);
       return;
     }
     if (state.chatId === this.chatId && this.isFullyLoaded && this.transcript.snapshot().chatId === state.chatId) {
-      if (state.approvalMode) this.applyApprovalMode(state.approvalMode);
+      if (state.approvalMode && state.approvalMode !== this.approvalMode) this.applyApprovalMode(state.approvalMode);
       return;
     }
     if (state.chatFontSize) this.chatFontSize = state.chatFontSize;

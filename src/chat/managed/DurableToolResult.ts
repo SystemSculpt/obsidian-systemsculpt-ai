@@ -5,10 +5,12 @@ import type { ToolCallResult } from "../../types/toolCalls";
  * the full result. History only presents a result's outcome, its error, item
  * outcomes and the paths behind artifact links, so structure and short values
  * are kept while long text (a read note's whole content, search snippets) is
- * cut and very long lists keep their head.
+ * cut. Lists keep every entry a batch can produce, so history still counts
+ * each item's outcome; only longer lists keep their head.
  */
 export const DURABLE_TOOL_TEXT_LIMIT = 512;
-export const DURABLE_TOOL_LIST_LIMIT = 50;
+/** Twice the most operations a vault batch tool accepts (100). */
+export const DURABLE_TOOL_LIST_LIMIT = 200;
 const DURABLE_TOOL_DEPTH_LIMIT = 6;
 const OMITTED_VALUE = "[omitted]";
 

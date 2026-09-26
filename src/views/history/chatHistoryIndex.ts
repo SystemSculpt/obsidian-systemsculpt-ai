@@ -1,6 +1,5 @@
 import { TFile, TFolder, type App, type EventRef, type TAbstractFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { hasHostCapability } from "../../platform/hostCapabilities";
 import {
   isPathInDirectory,
   resolveKnownChatsDirectories,
@@ -26,8 +25,6 @@ type SearchTextEntry = Readonly<{
 /** Upper bound on cached search text, in characters, across all chats. */
 const SEARCH_TEXT_CACHE_CHARACTERS = 8_000_000;
 const SEARCH_TEXT_READ_TIMEOUT_MS = 5_000;
-const DESKTOP_SEARCH_READ_CONCURRENCY = 8;
-const PORTABLE_SEARCH_READ_CONCURRENCY = 1;
 
 type HistoryHost = Pick<SystemSculptPlugin, "app" | "settings">
   & Partial<Pick<SystemSculptPlugin, "registerEvent">>;
@@ -116,7 +113,8 @@ export class ChatHistoryIndex {
 
   /**
    * The lowercased message text of one chat for full-text search. Read once
-   * per file version; unreadable or corrupt chats search as empty text.
+   * per file version. A corrupt chat searches as empty text; a read that fails
+   * or times out also searches as empty now and is tried again next time.
    */
   public async searchText(chatPath: string): Promise<string> {
     const file = this.app.vault.getAbstractFileByPath(chatPath);
@@ -127,10 +125,16 @@ export class ChatHistoryIndex {
       this.searchTexts.set(chatPath, cached);
       return cached.text;
     }
+    let content: string | null;
+    try {
+      content = await withTimeout(this.app.vault.cachedRead(file), null);
+    } catch {
+      content = null;
+    }
+    if (content === null) return "";
     let text = "";
     try {
-      const content = await withTimeout(this.app.vault.cachedRead(file), null);
-      const parsed = content === null ? null : ChatMarkdownSerializer.parseMarkdown(content);
+      const parsed = ChatMarkdownSerializer.parseMarkdown(content);
       text = parsed
         ? parsed.messages.map((message) => messageText(message.content))
           .filter((value) => value.length > 0)
@@ -142,13 +146,6 @@ export class ChatHistoryIndex {
     }
     this.remember(chatPath, { mtime: file.stat.mtime, size: file.stat.size, text });
     return text;
-  }
-
-  /** How many chats full-text search reads at once on this host. */
-  public get searchConcurrency(): number {
-    return hasHostCapability("local-filesystem")
-      ? DESKTOP_SEARCH_READ_CONCURRENCY
-      : PORTABLE_SEARCH_READ_CONCURRENCY;
   }
 
   private record(file: TFile): ChatHistoryRecord | null {

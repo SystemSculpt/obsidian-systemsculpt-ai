@@ -9,8 +9,9 @@ type LeafStateView = {
 };
 
 function view() {
-  const setViewState = jest.fn(async () => undefined);
   const chat = Object.create(AgentChatView.prototype) as AgentChatView & LeafStateView;
+  // As Obsidian does, applying a view state calls back into the view's setState.
+  const setViewState = jest.fn(async (viewState: { state: Record<string, unknown> }) => { await chat.setState(viewState.state); });
   Object.assign(chat, {
     leaf: { setViewState },
     chatId: "chat-1",
@@ -45,7 +46,12 @@ describe("AgentChatView leaf state", () => {
       { focus: false },
     );
 
-    // Obsidian restoring a state makes the next push authoritative again.
+    // Obsidian echoing the pushed state back does not force another push.
+    await setViewState.mock.results[1].value;
+    chat.updateViewState();
+    expect(setViewState).toHaveBeenCalledTimes(2);
+
+    // Obsidian restoring a different state makes the next push authoritative again.
     await chat.setState({ chatId: "chat-1" });
     chat.updateViewState();
     expect(setViewState).toHaveBeenCalledTimes(3);

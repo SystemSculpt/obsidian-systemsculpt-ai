@@ -158,4 +158,37 @@ describe("chatHistoryProvider", () => {
     await provider.loadEntries();
     expect(metadataCache.getFileCache).toHaveBeenCalledTimes(12);
   });
+
+  it("lists a chat created or deleted in a chats folder on the next load", async () => {
+    const { plugin, handlers, current } = vaultHarness();
+    const provider = createChatHistoryProvider(plugin);
+    expect((await provider.loadEntries()).map((entry) => entry.id)).toEqual(["chat:chat-new", "chat:chat-old"]);
+
+    const folder = plugin.app.vault.getAbstractFileByPath("New/Chats") as TFolder;
+    folder.children.splice(folder.children.indexOf(current), 1);
+    handlers.get("vault:delete")!(current);
+    expect((await provider.loadEntries()).map((entry) => entry.id)).toEqual(["chat:chat-old"]);
+
+    folder.children.push(current);
+    handlers.get("vault:create")!(current);
+    expect((await provider.loadEntries()).map((entry) => entry.id)).toEqual(["chat:chat-new", "chat:chat-old"]);
+  });
+
+  it("reads a chat again for search when a read failed, and keeps a corrupt chat's empty text", async () => {
+    const { plugin, vault, older } = vaultHarness();
+    const { ChatMarkdownSerializer } = jest.requireMock("../../chatview/storage/ChatMarkdownSerializer");
+    const [current] = await createChatHistoryProvider(plugin).loadEntries();
+
+    vault.cachedRead.mockRejectedValueOnce(new Error("busy"));
+    expect(await current.loadSearchText!()).toBe("");
+    expect(await current.loadSearchText!()).toBe("hello\nthe quarterly plan");
+    expect(vault.cachedRead).toHaveBeenCalledTimes(2);
+
+    const entries = await createChatHistoryProvider(plugin).loadEntries();
+    const archived = entries.find((entry) => entry.id === "chat:chat-old")!;
+    ChatMarkdownSerializer.parseMarkdown.mockReturnValueOnce(null);
+    expect(await archived.loadSearchText!()).toBe("");
+    expect(await archived.loadSearchText!()).toBe("");
+    expect(vault.cachedRead.mock.calls.filter(([file]: [TFile]) => file === older)).toHaveLength(1);
+  });
 });

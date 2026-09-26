@@ -2,6 +2,16 @@
 
 import { App } from "obsidian";
 import { SystemSculptHistoryModal } from "../SystemSculptHistoryModal";
+
+const mockHost = { localFilesystem: true };
+jest.mock("../../../platform/hostCapabilities", () => {
+  const actual = jest.requireActual("../../../platform/hostCapabilities");
+  return {
+    ...actual,
+    hasHostCapability: (capability: string, owner?: unknown) =>
+      capability === "local-filesystem" ? mockHost.localFilesystem : actual.hasHostCapability(capability, owner),
+  };
+});
 import type { SystemSculptHistoryEntry } from "../types";
 
 const entry = (id: string, title: string): SystemSculptHistoryEntry => ({
@@ -158,6 +168,44 @@ describe("SystemSculptHistoryModal lifecycle", () => {
       expect(listbox.textContent).toContain("Studio board");
       modal.close();
     } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("reads one chat at a time for text search on a host without local file access, and skips a chat that fails", async () => {
+    jest.useFakeTimers();
+    mockHost.localFilesystem = false;
+    try {
+      let reading = 0, mostAtOnce = 0;
+      const read = (text: string, fail = false) => jest.fn(async () => {
+        reading += 1;
+        mostAtOnce = Math.max(mostAtOnce, reading);
+        await Promise.resolve();
+        reading -= 1;
+        if (fail) throw new Error("unreadable");
+        return text;
+      });
+      const entries = [
+        { ...entry("a", "First"), loadSearchText: read("the quarterly plan") },
+        { ...entry("b", "Broken"), loadSearchText: read("", true) },
+        { ...entry("c", "Third"), loadSearchText: read("quarterly review") },
+      ];
+      const modal = new SystemSculptHistoryModal({ app: new App() } as any, { loadEntries: jest.fn().mockResolvedValue(entries) });
+      modal.open();
+      await flush();
+      const input = modal.modalEl.querySelector<HTMLInputElement>("input[type=search]")!;
+      input.value = "quarterly";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await jest.advanceTimersByTimeAsync(300);
+      for (let turn = 0; turn < 10; turn++) await flush();
+
+      expect(entries.every((item) => item.loadSearchText.mock.calls.length === 1)).toBe(true);
+      expect(mostAtOnce).toBe(1);
+      const options = modal.modalEl.querySelectorAll(".systemsculpt-history-list [role=option]");
+      expect([...options].map((option) => option.textContent)).toEqual([expect.stringContaining("First"), expect.stringContaining("Third")]);
+      modal.close();
+    } finally {
+      mockHost.localFilesystem = true;
       jest.useRealTimers();
     }
   });
