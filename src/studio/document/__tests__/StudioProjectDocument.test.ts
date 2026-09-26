@@ -6,7 +6,7 @@ import { StudioProjectSession } from "../../StudioProjectSession";
 import { serializeStudioProject } from "../../schema";
 import { cloneStudioProjectSnapshot } from "../../StudioProjectSnapshots";
 import type { StudioProjectV1 } from "../../types";
-import { studioClockPath, type StudioLegacyOriginalCopy } from "../StudioProjectDocument";
+import { studioClockPath, studioDocumentRevision, type StudioLegacyOriginalCopy } from "../StudioProjectDocument";
 import { mergeStudioText } from "../StudioTextMerge";
 import { STUDIO_CLOCK_MAX_AGE_MS, StudioHybridClock, emptyStudioClock, parseStudioClock, pruneStudioClock, studioStamp } from "../StudioDocumentClock";
 
@@ -21,12 +21,14 @@ function vault(device = "aaaaaaaaaaaa", options: { stat?: boolean } = {}) {
   const files = new Map<string, string>();
   const mtimes = new Map<string, number>();
   const dirs = new Set<string>();
+  /** Paths whose writes fail, as a blocked or read-only folder does. */
+  const blocked = new Set<string>();
   const put = (path: string, data: string) => { files.set(path, data); mtimes.set(path, now); };
   const adapter = () => ({
     exists: async (path: string) => files.has(path) || dirs.has(path),
     mkdir: async (path: string) => { dirs.add(path); },
     read: async (path: string) => { if (!files.has(path)) throw new Error(`File not found: ${path}`); return files.get(path)!; },
-    write: async (path: string, data: string) => { put(path, data); },
+    write: async (path: string, data: string) => { if (blocked.has(path)) throw new Error(`Cannot write ${path}`); put(path, data); },
     readBinary: async (path: string) => { if (!files.has(path)) throw new Error(`File not found: ${path}`); return new TextEncoder().encode(files.get(path)!).buffer; },
     writeBinary: async (path: string, data: ArrayBuffer) => { put(path, new TextDecoder().decode(data)); },
     process: async (path: string, update: (data: string) => string) => { const next = update(files.get(path)!); put(path, next); return next; },
@@ -37,7 +39,7 @@ function vault(device = "aaaaaaaaaaaa", options: { stat?: boolean } = {}) {
   });
   const copies: StudioLegacyOriginalCopy[] = [];
   const open = () => new StudioProjectStore({ vault: { adapter: adapter(), getFiles: () => [...files.keys()].map(path => ({ path })) } } as never, { deviceId: device, now: () => now, onLegacyOriginalCopied: copy => copies.push(copy) });
-  return { device, files, mtimes, copies, store: open(), restart: open };
+  return { device, files, mtimes, blocked, copies, store: open(), restart: open };
 }
 type Vault = ReturnType<typeof vault>;
 
@@ -260,6 +262,76 @@ describe("stamped merge of a copy from another device", () => {
     expect(values(late.project)).toEqual({ a: "Alpha from A", b: "Beta from B", c: "Created on A, edited on B" });
   });
 
+  /** A edits and creates a card; B, offline, never sees them and edits another card afterwards. */
+  async function offlineAfterLocalWork() {
+    const { a, b } = await pair();
+    await edit(a, draft => { find(draft, "a")!.config.value = "Alpha from A"; draft.graph.nodes.push(node("c", "Created on A")); });
+    tick();
+    await edit(b, draft => { find(draft, "b")!.config.value = "Beta from B"; });
+    tick();
+    return { a, b };
+  }
+
+  it("redoes a merge dated by modification time once the other device's clock names the copy", async () => {
+    const { a, b } = await offlineAfterLocalWork();
+    // B reconnects and its project file arrives before its clock. Dated by B's modification time
+    // alone, A's earlier edit and card look replaced and deleted.
+    deliver(b, a, { project: true });
+    expect(values((await receive(a)).project)).toEqual({ a: "Alpha", b: "Beta from B" });
+
+    deliver(b, a, { clock: true });
+    tick();
+    const settled = await a.store.settleDocument(path);
+    expect(values(settled!.project)).toEqual({ a: "Alpha from A", b: "Beta from B", c: "Created on A" });
+    expect(settled!.conflicts).toEqual(["Studio restored changes from this device that an older copy of this file from another device had replaced."]);
+    expect(values(await a.store.loadProject(path))).toEqual({ a: "Alpha from A", b: "Beta from B", c: "Created on A" });
+    // Nothing waits any more.
+    expect(await a.store.settleDocument(path)).toBeNull();
+
+    // The correction is published and stamped, so B converges on it.
+    tick();
+    deliver(a, b, { project: true, clock: true });
+    expect(values((await receive(b)).project)).toEqual({ a: "Alpha from A", b: "Beta from B", c: "Created on A" });
+    expect(b.files.get(path)).toBe(a.files.get(path));
+  });
+
+  it("keeps a change made here after the dated merge when the clock corrects that merge", async () => {
+    const { a, b } = await offlineAfterLocalWork();
+    deliver(b, a, { project: true });
+    await receive(a);
+    tick();
+    await edit(a, draft => { find(draft, "a")!.config.value = "Alpha rewritten on A"; });
+    tick();
+    deliver(b, a, { clock: true });
+    const settled = await a.store.settleDocument(path);
+    expect(values(settled!.project)).toEqual({ a: "Alpha rewritten on A", b: "Beta from B", c: "Created on A" });
+  });
+
+  it("applies the correction when the other device's next copy arrives with its clock", async () => {
+    const { a, b } = await offlineAfterLocalWork();
+    deliver(b, a, { project: true });
+    await receive(a);
+    // B keeps editing; its next copy and its clock arrive together.
+    tick();
+    await edit(b, draft => { find(draft, "b")!.title = "B renamed"; });
+    deliver(b, a, { project: true, clock: true });
+    const merged = await receive(a);
+    expect(values(merged.project)).toEqual({ a: "Alpha from A", b: "Beta from B", c: "Created on A" });
+    expect(find(merged.project, "b")!.title).toBe("B renamed");
+  });
+
+  it("does not wait for a clock that a 6.10 copy never writes", async () => {
+    const { a } = await offlineAfterLocalWork();
+    const legacy = JSON.parse(a.files.get(path)!);
+    legacy.canvas.nodes[0].config.value = "From 6.10";
+    legacy.document = JSON.parse(readFileSync(join(__dirname, "../../__tests__/fixtures/v610-document-state.systemsculpt"), "utf8")).document;
+    tick();
+    a.files.set(path, `${JSON.stringify(legacy, null, 2)}\n`);
+    a.mtimes.set(path, now);
+    await receive(a);
+    expect(await a.store.settleDocument(path)).toBeNull();
+  });
+
   it("keeps this device's entities and warns when nothing dates the copy", async () => {
     const a = vault("aaaaaaaaaaaa", { stat: false }), b = vault("bbbbbbbbbbbb");
     await project(a.store, [node("a", "Alpha")]);
@@ -282,6 +354,41 @@ describe("stamped merge of a copy from another device", () => {
     const restarted = a.restart();
     deliver(b, a, { project: true, clock: true });
     expect((await restarted.refreshDocument(path)).conflicts).toEqual(["This copy of the project is older than changes made on this device while Studio was closed. Those changes may be missing."]);
+  });
+});
+
+describe("clock files never block the canvas", () => {
+  it("saves the project when its clock file cannot be written, and records the clock with a later write", async () => {
+    const device = vault(), { files, store, blocked } = device;
+    await project(store, [node("a", "Alpha")]);
+    blocked.add(studioClockPath(path, device.device));
+    tick();
+    await edit(device, draft => { find(draft, "a")!.config.value = "Saved without a clock"; });
+    expect(values(await store.loadProject(path))).toEqual({ a: "Saved without a clock" });
+
+    blocked.clear();
+    tick();
+    await edit(device, draft => { find(draft, "a")!.config.value = "And a clock again"; });
+    expect(Object.keys(ownClock(device).files)).toContain(await studioDocumentRevision(files.get(path)!));
+  });
+
+  it("removes another device's clock once it has been silent past the retention period", async () => {
+    const a = vault("aaaaaaaaaaaa"), b = vault("bbbbbbbbbbbb");
+    await project(a.store, [node("a", "Alpha")]);
+    deliver(a, b, { project: true, clock: true });
+    await b.store.loadProject(path);
+    tick();
+    await edit(b, draft => { find(draft, "a")!.config.value = "From B"; });
+    deliver(b, a, { project: true, clock: true });
+    await receive(a);
+    expect(a.files.has(studioClockPath(path, b.device))).toBe(true);
+
+    now += STUDIO_CLOCK_MAX_AGE_MS + 60_000;
+    await edit(a, draft => { find(draft, "a")!.config.value = "Much later on A"; });
+    a.files.set(path, a.files.get(path)!.replace("Much later on A", "Edited by hand"));
+    a.mtimes.set(path, now);
+    await receive(a);
+    expect(a.files.has(studioClockPath(path, b.device))).toBe(false);
   });
 });
 

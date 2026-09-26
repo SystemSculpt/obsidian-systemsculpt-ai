@@ -1,4 +1,5 @@
 import { resolveStudioEntry } from '../../../studio/StudioEntry';
+import { studioClockFolder } from '../../../studio/document/StudioProjectDocument';
 import {
   Notice,
   TAbstractFile,
@@ -549,12 +550,23 @@ export class StudioProjectSessionController {
     }
   }
 
+  /** A new file beside the project may be another device's first merge clock. */
+  async handleVaultItemCreated(file: TAbstractFile): Promise<void> {
+    if (this.currentProject && this.currentProjectPath && this.isCurrentProjectClockPath(file.path)) {
+      await this.settleProjectClock(this.currentProjectPath);
+    }
+  }
+
   async handleVaultItemModified(file: TAbstractFile): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
     }
     let modifiedPath = normalizePath(String(file.path || "").trim());
     if (!modifiedPath) {
+      return;
+    }
+    if (this.isCurrentProjectClockPath(modifiedPath)) {
+      await this.settleProjectClock(this.currentProjectPath);
       return;
     }
     if (modifiedPath !== this.currentProjectPath && modifiedPath.endsWith('.systemsculpt')) {
@@ -760,6 +772,31 @@ export class StudioProjectSessionController {
       }
       void this.handleVaultItemModified({ path: projectPath } as TAbstractFile);
     });
+  }
+
+  private isCurrentProjectClockPath(path: string): boolean {
+    return !!this.currentProjectPath && normalizePath(String(path || "").trim()).startsWith(`${studioClockFolder(this.currentProjectPath)}/`);
+  }
+
+  /** Another device's clock arrived: merges that waited for it are redone with its stamps. */
+  private async settleProjectClock(projectPath: string): Promise<void> {
+    const bindingEpoch = this.projectBindingEpoch;
+    const operation = this.projectFileMutationTail.then(async () => {
+      if (bindingEpoch !== this.projectBindingEpoch || projectPath !== this.currentProjectPath) return;
+      const session = this.currentProjectSession;
+      const result = await this.host.plugin.getStudioService().reconcileProjectClock(projectPath);
+      if (!result || !session || this.currentProjectSession !== session) return;
+      this.currentProject = session.getProject();
+      if (result.conflicts.length) this.projectFileWarning = result.conflicts.join(" ");
+      this.host.render();
+    });
+    this.projectFileMutationTail = operation.catch((error) => {
+      console.warn("[SystemSculpt Studio] Unable to apply another device's merge clock", {
+        projectPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    await this.projectFileMutationTail;
   }
 
   private async processCurrentProjectFileMutation(rawText: string): Promise<void> {

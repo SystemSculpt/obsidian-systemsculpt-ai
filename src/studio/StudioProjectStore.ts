@@ -112,6 +112,8 @@ export class StudioProjectStore {
   async readDocument(path: string): Promise<StudioProjectReconciliation & {revision: string}> { return this.document(path).read(); }
   async editDocument(path: string, revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> { return this.document(path).edit(revision, edits); }
   async refreshDocument(path: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
+  /** Merges dated by a copy's modification time are redone once a clock names the copy. */
+  async settleDocument(path: string): Promise<StudioProjectReconciliation | null> { return this.document(path).settleDatedMerges(); }
 
   async renameProject(path: string, name: string, options?: {project?: StudioProjectV1}): Promise<{oldPath: string; newPath: string; project: StudioProjectV1}> {
     const oldPath = normalizeStudioProjectPath(path);

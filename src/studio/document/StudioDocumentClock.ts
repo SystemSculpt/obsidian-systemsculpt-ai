@@ -306,4 +306,34 @@ export function mergeStudioExternalEntities(options: {
   return {entities: canonical(merged) === canonical(incoming) ? null : merged, kept, dropped};
 }
 
+/**
+ * Apply a corrected merge onto the current state. Where the current state still
+ * holds what `result` accepted (an entity or field untouched since), the
+ * correction replaces it; anything changed since keeps its current value.
+ * Null when nothing changes.
+ */
+export function correctStudioEntities(result: StudioProjectEntities, corrected: StudioProjectEntities, current: StudioProjectEntities): StudioProjectEntities | null {
+  const next = copy(current);
+  let changed = false;
+  for (const key of new Set([...Object.keys(result), ...Object.keys(corrected)])) {
+    const accepted = result[key], fixed = corrected[key], present = current[key];
+    if (canonical(accepted) === canonical(fixed)) continue;
+    if (canonical(present) === canonical(accepted)) {
+      if (fixed === undefined) delete next[key]; else next[key] = copy(fixed);
+      changed = true;
+      continue;
+    }
+    // Created or deleted since on one side: the later change stands.
+    if (!accepted || !fixed || !present) continue;
+    const before = leaves(accepted), after = leaves(fixed), now = leaves(present);
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      const old = before.get(id)?.value, value = after.get(id)?.value;
+      if (canonical(old) === canonical(value) || canonical(now.get(id)?.value) !== canonical(old)) continue;
+      setLeaf(next[key], (after.get(id) || before.get(id))!.leaf, value);
+      changed = true;
+    }
+  }
+  return changed ? next : null;
+}
+
 export { canonical as canonicalStudioEntities };

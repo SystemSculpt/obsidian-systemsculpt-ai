@@ -11,8 +11,8 @@ import { RETIRED_STUDIO_NODE_KINDS } from "../StudioGraphMigrations";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 import { entitiesToProject, projectToEntities, type StudioProjectEntities } from "./StudioProjectEntities";
 import {
-  cloneStudioClock, emptyStudioClock, isStudioClockCurrent, mergeStudioExternalEntities, mergeStudioTombstones, newestStudioClockStamp,
-  parseStudioClock, pruneStudioClock, recordStudioChanges, serializeStudioClock, studioStamp,
+  canonicalStudioEntities, cloneStudioClock, correctStudioEntities, emptyStudioClock, isStudioClockCurrent, mergeStudioExternalEntities, mergeStudioTombstones,
+  newestStudioClockStamp, parseStudioClock, pruneStudioClock, recordStudioChanges, serializeStudioClock, studioStamp,
   type StudioDocumentClockState, type StudioHybridClock, type StudioIncomingWriter, type StudioPendingBase,
 } from "./StudioDocumentClock";
 import { writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
@@ -37,7 +37,26 @@ type Accepted = {
   rewrite: boolean;
   /** Notices from the import that produced this state, reported once. */
   warnings: string[];
+  /** Copies merged by modification time because no clock named them yet. */
+  provisional: Provisional[];
 };
+/**
+ * A copy from another device can arrive before that device's clock. Its modification time then also
+ * dates values that device never saw, so the merge is redone by stamps once a clock names the copy.
+ */
+type Provisional = {
+  /** SHA-256 of the copy's bytes, as its writer's clock names it. */
+  hash: string;
+  /** This device's accepted entities, clock and diff3 bases before the copy. */
+  local: StudioProjectEntities;
+  clock: StudioDocumentClockState;
+  pending: Map<string, StudioPendingBase>;
+  incoming: StudioProjectEntities;
+  /** The entities the time-dated merge accepted. */
+  result: StudioProjectEntities;
+  wall: number;
+};
+const MAX_PROVISIONAL = 4, PROVISIONAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const accepted = new WeakMap<object, Map<string, Accepted>>();
 const revisions = new WeakMap<object, Map<string, Map<string, string>>>();
 const tails = new WeakMap<object, Map<string, Promise<unknown>>>();
@@ -184,7 +203,9 @@ export class StudioProjectDocument {
         if (!file.startsWith(`${folder}/`) || !file.endsWith(".json") || file === studioClockPath(this.path, this.clock.device)) continue;
         try {
           const parsed = parseStudioClock(await this.adapter.read(file));
-          if (!parsed || file !== studioClockPath(this.path, parsed.device) || !isStudioClockCurrent(parsed.clock, this.clock.wallNow())) continue;
+          if (!parsed || file !== studioClockPath(this.path, parsed.device)) continue;
+          // An abandoned device's clock no longer informs merges and is removed.
+          if (!isStudioClockCurrent(parsed.clock, this.clock.wallNow())) { await this.adapter.remove(file); continue; }
           this.clock.observe(newestStudioClockStamp(parsed.clock));
           clocks.push(parsed.clock);
         } catch { /* A clock still arriving is read with the next change. */ }
@@ -196,8 +217,14 @@ export class StudioProjectDocument {
     try { const stat = await this.adapter.stat(path); return stat && Number.isFinite(stat.mtime) && stat.mtime > 0 ? stat.mtime : null; }
     catch { return null; }
   }
-  /** Written before the file it describes: a published value, deletion or restore always has its record. */
+  /**
+   * Written before the file it describes, so a published value, deletion or restore has its record.
+   * It is merge information only: a failed write never blocks saving the canvas and is retried by the next write.
+   */
   private async storeClock(value: Accepted): Promise<void> {
+    try { await this.writeClock(value); } catch { /* Retried by the next write. */ }
+  }
+  private async writeClock(value: Accepted): Promise<void> {
     const text = serializeStudioClock(this.clock.device, value.clock);
     if (text === value.stored) return;
     const {stamps, deleted, files} = value.clock;
@@ -213,7 +240,7 @@ export class StudioProjectDocument {
     clock.files[await studioDocumentRevision(text)] = now();
     pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
     // Notices from an import that a save or edit consumed are reported by the next refresh.
-    return {source: text, text, project, entities, clock, stored: from.stored, pending: from.pending, legacy: false, documentState: false, rewrite: false, warnings: from.warnings};
+    return {source: text, text, project, entities, clock, stored: from.stored, pending: from.pending, legacy: false, documentState: false, rewrite: false, warnings: from.warnings, provisional: from.provisional};
   }
   /** Adopt authored content onto the file's runtime fields in the canonical form a reopen yields. */
   private canonical(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
@@ -253,9 +280,9 @@ export class StudioProjectDocument {
     if (!previous && writer.kind !== "unknown" && ownNewest > writer.watermark) {
       warnings.push("This copy of the project is older than changes made on this device while Studio was closed. Those changes may be missing.");
     }
-    const unmerged = cloneStudioClock(clock);
+    const unmerged = cloneStudioClock(clock), incoming = projectToEntities(candidate);
     const merge = mergeStudioExternalEntities({
-      local: previous?.entities || Object.create(null), incoming: projectToEntities(candidate), clock, tombstones: clock.deleted,
+      local: previous?.entities || Object.create(null), incoming, clock, tombstones: clock.deleted,
       writer, pending: previous?.pending || new Map(), now: () => this.clock.now(),
     });
     let result = {...candidate} as StudioProjectV1, rewrite = false;
@@ -275,12 +302,72 @@ export class StudioProjectDocument {
     pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
     const record = parsed as Record<string, unknown>;
     const legacy = String(record.schema ?? "").trim() !== "studio.project.v2";
+    const documentState = !legacy && Object.prototype.hasOwnProperty.call(record, "document");
+    const provisional = (previous?.provisional || []).slice(1 - MAX_PROVISIONAL);
+    // 6.10 writes no clock, so only a copy that a clock may still name is remembered.
+    if (previous && writer.kind !== "clock" && !legacy && !documentState && canonicalStudioEntities(previous.entities) !== canonicalStudioEntities(incoming)) {
+      provisional.push({hash, local: previous.entities, clock: cloneStudioClock(previous.clock), pending: new Map(previous.pending), incoming, result: entities, wall: this.clock.wallNow()});
+    }
     const next: Accepted = {
       source: raw, text, project, entities, clock, stored: own.stored, pending: new Map(), rewrite, warnings,
-      legacy, documentState: !legacy && Object.prototype.hasOwnProperty.call(record, "document"),
+      legacy, documentState, provisional,
     };
     this.cache.set(this.path, next);
     return next;
+  }
+  /**
+   * Redo each time-dated merge whose copy a clock now names: the stamped merge of that copy against
+   * the same local state corrects what is still as the dated merge left it. Values changed since
+   * keep their current value, and the correction is stamped so other devices receive it.
+   */
+  private async settle(value: Accepted): Promise<Accepted> {
+    if (!value.provisional.length) return value;
+    const wall = this.clock.wallNow(), others = await this.readOtherClocks();
+    let entities = value.entities;
+    const remaining: Provisional[] = [];
+    for (const item of value.provisional) {
+      const writer = others.find(other => other.files[item.hash]);
+      if (!writer) { if (wall - item.wall <= PROVISIONAL_MAX_AGE_MS) remaining.push(item); continue; }
+      // This device's clock before the copy, not since: the dated merge's own tombstones are what is corrected.
+      const clock = cloneStudioClock(item.clock);
+      for (const other of others) clock.deleted = mergeStudioTombstones(clock.deleted, other.deleted);
+      const merge = mergeStudioExternalEntities({
+        local: item.local, incoming: item.incoming, clock, tombstones: clock.deleted,
+        writer: {kind: "clock", stamps: writer.stamps, watermark: writer.files[item.hash]}, pending: item.pending, now: () => this.clock.now(),
+      });
+      try {
+        const corrected = projectToEntities(this.canonical(value.project, entitiesToProject(merge.entities ?? item.incoming, value.project)).project);
+        entities = correctStudioEntities(item.result, corrected, entities) ?? entities;
+      } catch { /* A correction that no longer forms a valid canvas is dropped with its record. */ }
+    }
+    let corrected: {project: StudioProjectV1; text: string} | null = null;
+    if (entities !== value.entities) {
+      try { corrected = this.canonical(value.project, entitiesToProject(entities, value.project)); } catch { /* Kept as the dated merge left it. */ }
+    }
+    if (!corrected || corrected.text === value.text) {
+      if (remaining.length === value.provisional.length) return value;
+      const next = {...value, provisional: remaining};
+      this.cache.set(this.path, next);
+      return next;
+    }
+    const {project, text} = corrected;
+    const accepted = projectToEntities(project), clock = cloneStudioClock(value.clock), pending = new Map(value.pending);
+    recordStudioChanges(clock, value.entities, accepted, () => this.clock.now(), pending);
+    pruneStudioClock(clock, new Set(Object.keys(accepted)), wall);
+    const next: Accepted = {
+      ...value, text, project, entities: accepted, clock, pending, provisional: remaining, rewrite: true,
+      warnings: [...value.warnings, "Studio restored changes from this device that an older copy of this file from another device had replaced."],
+    };
+    this.cache.set(this.path, next);
+    return next;
+  }
+  /** A clock file changed: settle waiting time-dated merges, if any. Null when none waited. */
+  async settleDatedMerges(): Promise<StudioProjectReconciliation | null> {
+    return this.exclusive(async () => {
+      if (!this.cache.get(this.path)?.provisional.length) return null;
+      const {value, conflicts} = await this.refreshLocked();
+      return {project: cloneStudioProjectSnapshot(value.project), conflicts};
+    });
   }
   /** Publish `text` as the next accepted state of `value`: its watermark and clock first, then the file. */
   private async republish(entry: StudioEntryResolution, value: Accepted, text: string): Promise<Accepted> {
@@ -297,7 +384,7 @@ export class StudioProjectDocument {
     // The file itself is imported, never an older watcher copy of it: a delayed event cannot roll back state.
     const entry = await resolveStudioEntry(this.adapter, this.path);
     let value: Accepted;
-    try { value = await this.import(entry.raw, entry.path); }
+    try { value = await this.settle(await this.import(entry.raw, entry.path)); }
     catch (error) {
       const previous = this.cache.get(this.path);
       if (!previous) throw new Error(`Studio couldn't read this project file: ${error instanceof Error ? error.message : String(error)}`);
@@ -310,8 +397,8 @@ export class StudioProjectDocument {
     // running 6.10 cannot trade rewrites with this one.
     if (value.text !== entry.raw && (value.legacy || value.rewrite)) value = await this.republish(entry, value, value.text);
     else {
-      // Merge information only: an unwritable clock must not keep the canvas from opening.
-      try { await this.storeClock(value); } catch { /* Retried by the next write. */ }
+      // Stamps adopted from the file are recorded even when the file itself stays as it is.
+      await this.storeClock(value);
     }
     return {value, conflicts: warnings};
   }

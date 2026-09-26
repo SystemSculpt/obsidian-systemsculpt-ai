@@ -296,6 +296,18 @@ export class StudioService {
     return {conflicts: result.conflicts};
   }
 
+  /** A merge clock beside the project changed: redo merges that waited for it. Null when none did. */
+  async reconcileProjectClock(path: string): Promise<{conflicts: string[]} | null> {
+    const session = this.getProjectSession(path);
+    await session?.waitForInFlightSave();
+    const result = await this.projectStore.settleDocument(path);
+    if (!result) return null;
+    if (session && !session.isDisposed()) {
+      await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+    }
+    return {conflicts: result.conflicts};
+  }
+
   /** `heads` holds one revision: the SHA-256 of the canonical document text. */
   async readAgentDocument(path: string): Promise<unknown> {
     path = this.requireProjectPath(path);

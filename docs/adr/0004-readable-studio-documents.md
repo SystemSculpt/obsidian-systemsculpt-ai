@@ -36,9 +36,12 @@ If the merge changed anything, the result is published so the other device recei
 
 Edits made on the same device, such as agent file tools, are therefore applied in full. When the host reports no modification time, the copy's values win and this device's entities are kept. Either fallback shows a notice when it kept local changes.
 
+Synchronization may deliver a project file before its writer's clock. Its modification time then also dates values the writer never saw, so a dated merge over this device's accepted state is provisional. Studio remembers the copy's hash, this device's state before it, and what the dated merge accepted. When a clock names that copy (a clock file arriving next to the project, or any later refresh), Studio redoes the merge by stamps and corrects every entity and field that is still as the dated merge left it. Anything changed since keeps its current value. The correction is stamped like any other change, so other devices receive it. Files still carrying 6.10 merge state are not remembered, because 6.10 writes no clock.
+
 ## Limits
 
 - The fallback relies on synchronization preserving modification times and on device clocks being roughly right. Where it does not, it degrades to taking the copy's values.
+- A provisional merge is corrected only while Studio keeps this device's earlier state in memory, for up to a day. A clock that arrives after a restart, or later than that, no longer corrects it.
 - Concurrent changes to the same non-prose field keep the newer one, and an overlapping prose change does too; Studio does not keep the older value.
 - A deletion wins over a concurrent edit to the deleted entity.
 - The stamped merge needs this device's accepted content in memory. If a stale copy replaces the file while Studio is not running on this device, the copy is taken as it is, apart from deletions, and Studio shows a notice that changes from this device may be missing.

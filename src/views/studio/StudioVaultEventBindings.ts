@@ -4,12 +4,13 @@ export function bindStudioVaultEvents(app: App, surface: HTMLElement, handlers: 
   assetChanged: (path: string) => void;
   assetFailed: (path: string) => void;
   modified: (file: TAbstractFile) => void;
+  created: (file: TAbstractFile) => void;
   renamed: (file: TAbstractFile, oldPath: string) => void;
   deleted: (file: TAbstractFile) => void;
 }): () => void {
   const refs = [
     app.vault.on("modify", file => { handlers.assetChanged(file.path); handlers.modified(file); }),
-    app.vault.on("create", file => { handlers.assetChanged(file.path); }),
+    app.vault.on("create", file => { handlers.assetChanged(file.path); handlers.created(file); }),
     app.vault.on("rename", (file, oldPath) => { handlers.assetChanged(oldPath); handlers.assetChanged(file.path); handlers.renamed(file, oldPath); }),
     app.vault.on("delete", file => { handlers.assetChanged(file.path); handlers.deleted(file); }),
   ];
