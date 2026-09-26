@@ -46,6 +46,8 @@ export class StudioAgentRuns {
   private readonly controls = new Map<string, Control>();
   private readonly listeners = new Set<(projectId: string) => void>();
   private readonly loaded = new Map<string, Promise<void>>();
+  /** Refresh makes older in-flight page reads obsolete before they can publish. */
+  private readonly pageGeneration = new Map<string, number>();
   /** Per project: the oldest loaded run ID and how many older records remain on disk. */
   private readonly older = new Map<string, { before: string; remaining: number }>();
   /** Projects whose older loaded runs were evicted to keep the cache bounded. */
@@ -78,7 +80,10 @@ export class StudioAgentRuns {
     if (!this.machine && hasHostCapability('local-cli')) this.machine = (await desktopHost.os()).hostname();
   }
   async refresh(projectPath: string, projectId: string): Promise<void> {
-    await this.loaded.get(projectPath); this.loaded.delete(projectPath); this.older.delete(projectPath); this.capped.delete(projectPath); await this.load(projectPath, projectId);
+    await this.loaded.get(projectPath);
+    this.pageGeneration.set(projectPath, (this.pageGeneration.get(projectPath) ?? 0) + 1);
+    this.loaded.delete(projectPath); this.older.delete(projectPath); this.capped.delete(projectPath);
+    await this.load(projectPath, projectId);
   }
   /** True once paging this project evicted older runs; older pages are then no longer offered. */
   isCapped(projectPath: string): boolean { return this.capped.has(projectPath); }
@@ -103,9 +108,11 @@ export class StudioAgentRuns {
     for (const affectedProjectId of affectedProjects) this.emit(affectedProjectId);
   }
   async load(projectPath: string, projectId: string): Promise<void> {
+    const generation = this.pageGeneration.get(projectPath) ?? 0;
     if (!this.loaded.has(projectPath)) this.loaded.set(projectPath, (async () => {
       await this.identifyMachine();
       const page = await this.store.list(projectPath, projectId);
+      if (this.disposed || generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
       this.adopt(page);
       // Repeated loads keep their cursor; an explicit Refresh clears it before loading.
       const cursor = this.older.get(projectPath);
@@ -113,16 +120,22 @@ export class StudioAgentRuns {
       this.pruneAndNotify(projectId);
       await this.recoverWorkflows(projectId);
       this.retainOnDisk(projectPath, projectId);
-    })().catch(error => { this.loaded.delete(projectPath); throw error; }));
+    })().catch(error => {
+      if (generation === (this.pageGeneration.get(projectPath) ?? 0)) this.loaded.delete(projectPath);
+      throw error;
+    }));
     await this.loaded.get(projectPath);
   }
   hasOlder(projectPath: string): boolean { return !this.capped.has(projectPath) && (this.older.get(projectPath)?.remaining ?? 0) > 0; }
   /** Read the next page of older records for the run board. */
   async loadOlder(projectPath: string, projectId: string): Promise<void> {
+    const generation = this.pageGeneration.get(projectPath) ?? 0;
     await this.load(projectPath, projectId);
+    if (generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
     const cursor = this.older.get(projectPath);
     if (!cursor || cursor.remaining <= 0 || this.capped.has(projectPath) || this.disposed) return;
     const page = await this.store.list(projectPath, projectId, { before: cursor.before });
+    if (this.disposed || generation !== (this.pageGeneration.get(projectPath) ?? 0)) return;
     this.adopt(page);
     this.older.set(projectPath, page.before ? { before: page.before, remaining: page.olderRemaining } : { ...cursor, remaining: 0 });
     this.pruneAndNotify(projectId);
