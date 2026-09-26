@@ -128,6 +128,43 @@ describe("DocumentProcessingService managed local effects", () => {
     expect(managed.completeLocalCommit).not.toHaveBeenCalled();
   });
 
+  it("reuses identical image and Markdown effects after cancellation on the same service", async () => {
+    const { app, dependencies, managed, plugin, staging } = harness({ images: true });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+    const controller = new AbortController();
+    const images = new Map<string, ArrayBuffer>();
+    const notes = new Map<string, string>();
+    (app.vault.adapter.exists as jest.Mock).mockImplementation(async (path: string) => images.has(path) || notes.has(path));
+    (app.vault.adapter.readBinary as jest.Mock).mockImplementation(async (path: string) => images.get(path));
+    (app.vault.adapter.read as jest.Mock).mockImplementation(async (path: string) => notes.get(path));
+    (app.vault.createBinary as jest.Mock).mockImplementation(async (path: string, bytes: ArrayBuffer) => {
+      images.set(path, bytes);
+      return file(path);
+    });
+    (app.vault.create as jest.Mock).mockImplementation(async (path: string, text: string) => {
+      notes.set(path, text);
+      return file(path);
+    });
+
+    await expect(service.processDocumentWithReceipt(file(), {
+      signal: controller.signal,
+      showNotices: false,
+      commitContextEffect: async () => { controller.abort(); },
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(managed.completeLocalCommit).not.toHaveBeenCalled();
+    const originalNotes = [...notes.entries()];
+
+    const receipt = await service.processDocumentWithReceipt(file(), { showNotices: false });
+    expect(receipt.imagePaths).toHaveLength(1);
+    expect(managed.completeLocalCommit).toHaveBeenCalledTimes(1);
+    expect(app.vault.createBinary).toHaveBeenCalledTimes(1);
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
+    expect([...notes.entries()]).toEqual(originalNotes);
+    const firstMarkdown = staging.stage.mock.calls[0][1].at(-1)!.bytes;
+    const retriedMarkdown = staging.stage.mock.calls[1][1].at(-1)!.bytes;
+    expect(new Uint8Array(retriedMarkdown)).toEqual(new Uint8Array(firstMarkdown));
+  });
+
   it("fails closed when an existing Markdown target has a different effect identity", async () => {
     const { app, dependencies, plugin } = harness({ exists: true, existingMarkdown: "different" });
     const service = new DocumentProcessingService(app, plugin, dependencies);

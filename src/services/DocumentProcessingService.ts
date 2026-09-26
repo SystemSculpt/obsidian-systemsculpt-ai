@@ -469,13 +469,9 @@ export class DocumentProcessingService {
     const rootImages = record.images;
     if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
       const imageCount = Object.keys(rootImages).length;
-      let folderInfo = "the images folder";
-      if (this.imageMetadataLog.length > 0) {
-        const firstImage = this.imageMetadataLog[Math.max(0, this.imageMetadataLog.length - imageCount)];
-        const parts = firstImage?.path?.split("/") ?? [];
-        if (parts.length >= 2) folderInfo = `the '${parts[parts.length - 2]}' folder`;
-      }
-      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in ${folderInfo}.\n`;
+      // Keep the first-delivery text stable across retries and prior conversions.
+      // Session metadata is diagnostic state, never an input to durable bytes.
+      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the images folder.\n`;
     }
     return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }
