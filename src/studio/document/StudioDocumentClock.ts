@@ -13,7 +13,7 @@ const NESTED_FIELDS = new Set(["config", "nodes", "shapes"]);
 const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const STAMP = "[0-9a-z]{13}[0-9a-z_-]{0,32}";
 const STAMP_PATTERN = new RegExp(`^${STAMP}$`);
-/** A field's stamp and, after "/", the stamp of the value it replaced. */
+/** A field's stamp and, after "/", the common-base stamp before its local edit sequence. */
 const FIELD_STAMP_PATTERN = new RegExp(`^${STAMP}(/${STAMP})?$`);
 
 export function studioStamp(wall: number, counter = 0, device = ""): string {
@@ -23,6 +23,7 @@ const stampWall = (stamp: string): number => stamp ? parseInt(stamp.slice(0, WAL
 const later = (left: string, right: string): string => left > right ? left : right;
 /** The stamp of a field entry, without the stamp of the value it replaced. */
 const stampOf = (entry: string | undefined): string => entry ? entry.split("/", 1)[0] : "";
+const stampWriter = (entry: string): string => stampOf(entry).slice(WALL_DIGITS + COUNTER_DIGITS);
 
 export class StudioHybridClock {
   private wall = 0;
@@ -151,11 +152,21 @@ const copy = <T>(value: T): T => value === undefined ? value : JSON.parse(JSON.s
 function record(value: unknown): value is Record<string, Json> { return !!value && typeof value === "object" && !Array.isArray(value); }
 
 /** Entity fields at merge granularity: config keys and group members individually, everything else whole. */
-function leaves(entity: Entity | undefined): Map<string, {leaf: Leaf; value: Json}> {
-  const result = new Map<string, {leaf: Leaf; value: Json}>();
+function leaves(entity: Entity | undefined, stamps?: StudioEntityStamps): Map<string, {leaf: Leaf; value: Json | undefined}> {
+  const result = new Map<string, {leaf: Leaf; value: Json | undefined}>();
   for (const [top, value] of Object.entries(entity || {})) {
     if (NESTED_FIELDS.has(top) && record(value)) for (const [sub, item] of Object.entries(value)) result.set(`${top}\u0000${sub}`, {leaf: {top, sub}, value: item});
     else result.set(top, {leaf: {top}, value});
+  }
+  // A missing field still has history: its removal can be newer than a stale value.
+  for (const [top, stamp] of Object.entries(stamps || {})) {
+    if (!top) continue; // Entity presence is merged separately.
+    if (typeof stamp === "string") {
+      if (!result.has(top)) result.set(top, {leaf: {top}, value: entity?.[top]});
+    } else for (const sub of Object.keys(stamp)) {
+      const id = `${top}\u0000${sub}`;
+      if (!result.has(id)) result.set(id, {leaf: {top, sub}, value: undefined});
+    }
   }
   return result;
 }
@@ -283,7 +294,7 @@ export function mergeStudioExternalEntities(options: {
   for (const key of new Set([...Object.keys(local), ...Object.keys(incoming)])) {
     const mine = local[key], theirs = incoming[key];
     if (mine && theirs) {
-      const a = leaves(mine), b = leaves(theirs);
+      const a = leaves(mine, clock.stamps[key]), b = leaves(theirs, writer.kind === "stamped" ? writer.stamps[key] : undefined);
       for (const id of new Set([...a.keys(), ...b.keys()])) {
         const leaf = (a.get(id) || b.get(id))!.leaf, ours = a.get(id)?.value, other = b.get(id)?.value;
         if (canonical(ours) === canonical(other)) {
@@ -300,10 +311,13 @@ export function mergeStudioExternalEntities(options: {
         }
         const theirEntry = fieldEntry(writer.stamps, key, leaf) || presence(writer.stamps, key);
         const base = pending.get(pendingKey(key, leaf));
-        // Changed and changed back here: the other side's change stands.
-        if (base && canonical(ours) === canonical(base.value)) { if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry); continue; }
+        // Undo yields to an independent edit of the same base, never an echo of this device's superseded edit.
+        if (base && canonical(ours) === canonical(base.value) && replacedStamp(writer.stamps, key, leaf) === base.stamp
+          && stampWriter(theirEntry) !== stampWriter(leafStamp(clock.stamps, key, leaf))) {
+          if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry); continue;
+        }
         // Both sides changed the same earlier value of prose: combine separate changes.
-        if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && other !== base.value
+        if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && ours !== base.value && other !== base.value
           && replacedStamp(writer.stamps, key, leaf) === base.stamp && isStudioProseFieldPath(leaf.sub ?? leaf.top)) {
           const text = mergeStudioText(base.value, ours, other);
           if (text !== null) { setLeaf(merged[key], leaf, text); setLeafStamp(clock.stamps, key, leaf, `${now()}/${stampOf(theirEntry)}`); kept++; continue; }

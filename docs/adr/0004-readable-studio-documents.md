@@ -28,7 +28,7 @@ When a file arrives, Studio compares it with the state this device accepted:
 
 - **Another device's publication** merges field by field, by the stamps in its record:
   - The newer stamp wins.
-  - If this device changed a field and then changed it back, the other device's change stands.
+  - If this device changed a field and then changed it back, an independent edit from the same earlier value on another device stands. A peer republishing this device's superseded value does not reverse Undo.
   - If both devices changed the same earlier text of a prose field (value, prompt, systemPrompt, source, text, title, label, description, instructions), and the changes are separate, they combine with diff3. The replaced-value stamps show that both started from the same text; otherwise the newer change wins.
   - An entity the copy lacks is deleted only when a tombstone is newer than its creation. Every deletion leaves a tombstone, so without one the copy was written before its writer knew the entity.
   - An entity only the copy has is dropped when a tombstone is newer than its writer's creation or restore stamp. Undo on any device therefore restores a deletion everywhere.

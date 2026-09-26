@@ -621,6 +621,12 @@ describe("single authored file", () => {
     expect(editor.commit("title", "Title!!", "Title!")).toBe("Title!!");
   });
 
+  it("keeps the exact typed configuration path when another writer changes it", () => {
+    const editor = new StudioEditorRevision();
+    editor.display("config:outputPath", "Reports/2026.wav");
+    expect(editor.commit("config:outputPath", "Reports/2027.wav", "Archive/2026.wav")).toBe("Reports/2027.wav");
+  });
+
   it("round-trips labeled and unlabeled arrows and shape group membership", async () => {
     const {store} = createStore();
     const {path, project} = await store.createProject(options);

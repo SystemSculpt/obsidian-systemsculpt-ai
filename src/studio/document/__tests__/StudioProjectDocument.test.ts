@@ -23,6 +23,7 @@ function vault(device = "aaaaaaaaaaaa") {
   const dirs = new Set<string>();
   /** Paths whose writes fail, as a blocked or read-only folder does. */
   const blocked = new Set<string>();
+  let beforeProcess: (() => void) | undefined;
   const put = (path: string, data: string) => { files.set(path, data); mtimes.set(path, now); };
   const adapter = () => ({
     exists: async (path: string) => files.has(path) || dirs.has(path),
@@ -31,7 +32,11 @@ function vault(device = "aaaaaaaaaaaa") {
     write: async (path: string, data: string) => { if (blocked.has(path)) throw new Error(`Cannot write ${path}`); put(path, data); },
     readBinary: async (path: string) => { if (!files.has(path)) throw new Error(`File not found: ${path}`); return new TextEncoder().encode(files.get(path)!).buffer; },
     writeBinary: async (path: string, data: ArrayBuffer) => { put(path, new TextDecoder().decode(data)); },
-    process: async (path: string, update: (data: string) => string) => { if (blocked.has(path)) throw new Error(`Cannot write ${path}`); const next = update(files.get(path)!); put(path, next); return next; },
+    process: async (path: string, update: (data: string) => string) => {
+      if (blocked.has(path)) throw new Error(`Cannot write ${path}`);
+      const interleave = beforeProcess; beforeProcess = undefined; interleave?.();
+      const next = update(files.get(path)!); put(path, next); return next;
+    },
     list: async (path: string) => ({ files: [...files.keys()].filter(file => file.startsWith(`${path}/`) && !file.slice(path.length + 1).includes("/")), folders: [] }),
     remove: async (path: string) => { files.delete(path); },
     rename: async (from: string, to: string) => { put(to, files.get(from)!); files.delete(from); },
@@ -43,7 +48,7 @@ function vault(device = "aaaaaaaaaaaa") {
   const open = () => new StudioProjectStore({ vault: { adapter: adapter(), getFiles: () => [...files.keys()].map(path => ({ path })) } } as never, {
     deviceId: device, now: () => now, onLegacyOriginalCopied: copy => copies.push(copy), onMergeNotice: (_path, message) => notices.push(message),
   });
-  return { device, files, mtimes, blocked, copies, notices, store: open(), restart: open };
+  return { device, files, mtimes, blocked, copies, notices, store: open(), restart: open, beforeNextProcess: (callback: () => void) => { beforeProcess = callback; } };
 }
 type Vault = ReturnType<typeof vault>;
 
@@ -201,6 +206,67 @@ describe("edits made on this device outside Studio's merge", () => {
 });
 
 describe("copies from another device", () => {
+  it("keeps a failed publication's tentative edit out of the accepted merge baseline", async () => {
+    const { a, b } = await pair();
+    await edit(b, draft => { find(draft, "a")!.position.x = 5; });
+    const older = b.files.get(path)!;
+    tick();
+    await edit(b, draft => { find(draft, "a")!.position.x = 10; });
+    deliver(b, a);
+    const before = (await receive(a)).project;
+    const wanted = cloneStudioProjectSnapshot(before);
+    find(wanted, "a")!.position.x = 11;
+    a.beforeNextProcess(() => deliver(b, a, older));
+    const saved = await a.store.saveProject(path, wanted, { baseProject: before });
+    expect(saved.conflicts).toEqual([]);
+    expect(find(saved.project, "a")!.position.x).toBe(11);
+    expect(find(await a.restart().loadProject(path), "a")!.position.x).toBe(11);
+  });
+
+  it.each(["disabled", "config", "membership"])("keeps an absent %s field's removal stamp through restart and stale replay", async field => {
+    const { a, b } = await pair();
+    if (field === "membership") {
+      await edit(a, draft => { draft.graph.groups = [{ id: "g", name: "Group", nodeIds: ["b"] }]; });
+      deliver(a, b); await receive(b); tick();
+    }
+    const change = (draft: StudioProjectV1, present: boolean) => {
+      if (field === "disabled") find(draft, "a")!.disabled = present;
+      else if (field === "config") {
+        if (present) find(draft, "a")!.config.description = "Old description";
+        else delete find(draft, "a")!.config.description;
+      } else draft.graph.groups![0].nodeIds = present ? ["a", "b"] : ["b"];
+    };
+    await edit(b, draft => change(draft, true));
+    const intermediate = b.files.get(path)!;
+    tick();
+    await edit(b, draft => change(draft, false));
+    deliver(b, a); await receive(a);
+    const restarted = { ...a, store: a.restart() };
+    await restarted.store.loadProject(path);
+    deliver(b, restarted, intermediate);
+    const after = (await receive(restarted)).project;
+    if (field === "disabled") expect(find(after, "a")!.disabled).not.toBe(true);
+    else if (field === "config") expect(find(after, "a")!.config.description).toBeUndefined();
+    else expect(after.graph.groups![0].nodeIds).toEqual(["b"]);
+  });
+
+  it("settles after both devices remove the same optional field", async () => {
+    const { a, b } = await pair();
+    await edit(a, draft => { find(draft, "a")!.disabled = true; });
+    deliver(a, b); await receive(b); tick();
+    await edit(a, draft => { find(draft, "a")!.disabled = false; });
+    tick();
+    await edit(b, draft => { find(draft, "a")!.disabled = false; });
+    deliver(b, a); await receive(a);
+    const settled = a.files.get(path);
+    for (let delivery = 0; delivery < 3; delivery++) {
+      tick(); deliver(a, b); await receive(b);
+      tick(); deliver(b, a); await receive(a);
+      expect(a.files.get(path)).toBe(settled);
+      expect(b.files.get(path)).toBe(settled);
+    }
+  });
+
   it("publishes a retained deletion even when merging leaves the incoming canvas unchanged", async () => {
     const { a, b } = await pair();
     await edit(a, draft => { draft.graph.nodes.push(node("c", "Created on A")); });
@@ -361,6 +427,21 @@ describe("copies from another device", () => {
     tick();
     deliver(b, a);
     expect(values((await receive(a)).project).a).toBe("Alpha from B");
+  });
+
+  it.each(["position", "prose"])("keeps local %s Undo when a peer republishes the superseded value with an unrelated edit", async field => {
+    const { a, b } = await pair();
+    const change = (draft: StudioProjectV1, changed: boolean) => {
+      if (field === "position") find(draft, "a")!.position.x = changed ? 10 : 0;
+      else find(draft, "a")!.config.value = changed ? "Alpha changed" : "Alpha";
+    };
+    await edit(a, draft => change(draft, true));
+    deliver(a, b); await receive(b); tick();
+    await edit(a, draft => change(draft, false));
+    tick();
+    await edit(b, draft => { find(draft, "a")!.title = "Peer title"; });
+    deliver(b, a);
+    expect(find((await receive(a)).project, "a")).toMatchObject({ title: "Peer title", position: { x: 0 }, config: { value: "Alpha" } });
   });
 
   it("applies a deletion made on the other device, even over an older edit here", async () => {

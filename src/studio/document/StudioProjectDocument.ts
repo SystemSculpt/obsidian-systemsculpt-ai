@@ -175,10 +175,12 @@ export class StudioProjectDocument {
   /** The accepted state that follows `from` once `project` is published, with this device's changes stamped. */
   private async successor(from: Accepted, project: StudioProjectV1, text: string): Promise<Accepted> {
     const entities = projectToEntities(project), clock = cloneStudioClock(from.clock), now = () => this.clock.now();
-    recordStudioChanges(clock, from.entities, entities, now, from.pending);
+    // A compare-and-swap retry must start from accepted history, not this tentative edit.
+    const pending = new Map(from.pending);
+    recordStudioChanges(clock, from.entities, entities, now, pending);
     pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
     const at = now();
-    return {source: await this.bytes(project, text, clock, at), text, project, entities, clock, at, pending: from.pending, legacy: false, documentState: false, rewrite: false};
+    return {source: await this.bytes(project, text, clock, at), text, project, entities, clock, at, pending, legacy: false, documentState: false, rewrite: false};
   }
   /** Adopt authored content onto the file's runtime fields in the canonical form a reopen yields. */
   private canonical(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {

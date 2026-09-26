@@ -1,4 +1,4 @@
-import { mergeStudioText } from './StudioTextMerge';
+import { isStudioProseFieldPath, mergeStudioText } from './StudioTextMerge';
 
 /**
  * A mounted editor submits changes against the text it actually displayed.
@@ -18,6 +18,7 @@ export class StudioEditorRevision {
   commit(field: string, typed: string, current: unknown): string {
     const shown = this.shown.get(field);
     this.shown.set(field, typed);
+    if (!isStudioProseFieldPath(field.startsWith('config:') ? field.slice(7) : field)) return typed;
     if (shown === undefined || typeof current !== 'string' || current === shown || current === typed) return typed;
     return mergeStudioText(shown, typed, current) ?? typed;
   }
