@@ -137,6 +137,9 @@ export class StudioService {
       onLegacyOriginalCopied: (copy) => {
         new Notice(formatLegacyOriginalNotice(copy), 15000);
       },
+      onMergeNotice: (projectPath, message) => {
+        new Notice(`${projectPath.split("/").pop() ?? projectPath}: ${message}`, 15000);
+      },
     });
     this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
     this.assetStore = new StudioAssetStore(this.projectStore);
@@ -284,24 +287,11 @@ export class StudioService {
   }
 
   /** Files are imported into document authority; views and editor lifetimes stay intact. */
-  async reconcileProjectFile(path: string, rawText?: string): Promise<{conflicts: string[]}> {
+  async reconcileProjectFile(path: string): Promise<{conflicts: string[]}> {
     const session = this.getProjectSession(path);
     await session?.waitForInFlightSave();
-    const result = rawText === undefined
-      ? await this.projectStore.refreshDocument(path)
-      : await this.projectStore.importProjectText(path, rawText);
-    if (session && !session.isDisposed()) {
-      await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
-    }
-    return {conflicts: result.conflicts};
-  }
-
-  /** A merge clock beside the project changed: redo merges that waited for it. Null when none did. */
-  async reconcileProjectClock(path: string): Promise<{conflicts: string[]} | null> {
-    const session = this.getProjectSession(path);
-    await session?.waitForInFlightSave();
-    const result = await this.projectStore.settleDocument(path);
-    if (!result) return null;
+    // A watcher's bytes only announce a change: the current file is what gets imported.
+    const result = await this.projectStore.refreshDocument(path);
     if (session && !session.isDisposed()) {
       await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
     }

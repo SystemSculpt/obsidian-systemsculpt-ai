@@ -59,7 +59,13 @@ function studioDeviceId(app: App): string {
 export class StudioProjectStore {
   private readonly documents = new Map<string, StudioProjectDocument>();
   private readonly clock: StudioHybridClock;
-  constructor(private readonly app: App, private readonly options: {onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void; deviceId?: string; now?: () => number} = {}) {
+  constructor(private readonly app: App, private readonly options: {
+    onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void;
+    /** A merge of another writer's file kept or left out work the user should know about. */
+    onMergeNotice?: (projectPath: string, message: string) => void;
+    deviceId?: string;
+    now?: () => number;
+  } = {}) {
     const device = options.deviceId || studioDeviceId(app), adapter = app.vault.adapter;
     let byDevice = clocks.get(adapter); if (!byDevice) {byDevice = new Map(); clocks.set(adapter, byDevice);}
     let clock = byDevice.get(device); if (!clock) {clock = new StudioHybridClock(device, options.now); byDevice.set(device, clock);}
@@ -83,7 +89,7 @@ export class StudioProjectStore {
     path = normalizeStudioProjectPath(path);
     let document = this.documents.get(path);
     if (!document) {
-      document = new StudioProjectDocument(this.app.vault.adapter, path, {clock: this.clock, onLegacyOriginalCopied: this.options.onLegacyOriginalCopied});
+      document = new StudioProjectDocument(this.app.vault.adapter, path, {clock: this.clock, onLegacyOriginalCopied: this.options.onLegacyOriginalCopied, onMergeNotice: this.options.onMergeNotice});
       this.documents.set(path, document);
     }
     return document;
@@ -102,18 +108,15 @@ export class StudioProjectStore {
     });
   }
   async loadProject(path: string, _options?: {forceReload?: boolean}): Promise<StudioProjectV1> { return (await this.document(path).refresh()).project; }
-  async readProjectRawText(path: string): Promise<string | null> { try { return serializeStudioProject(await this.loadProject(path)); } catch { return null; } }
+  /** The file bytes as published, merge record included, so a watcher's event for them is recognized. */
+  async readProjectRawText(path: string): Promise<string | null> { try { return await this.document(path).source(); } catch { return null; } }
   async readVisibleProjectRawText(path: string): Promise<string> { return (await resolveStudioEntry(this.app.vault.adapter, path)).raw; }
   async saveProject(path: string, project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1}): Promise<StudioProjectReconciliation> {
     return this.document(path).save(project, options);
   }
-  /** A watcher's bytes only announce a change: the current file is what gets imported. */
-  async importProjectText(path: string, _raw: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
   async readDocument(path: string): Promise<StudioProjectReconciliation & {revision: string}> { return this.document(path).read(); }
   async editDocument(path: string, revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> { return this.document(path).edit(revision, edits); }
   async refreshDocument(path: string): Promise<StudioProjectReconciliation> { return this.document(path).refresh(); }
-  /** Merges dated by a copy's modification time are redone once a clock names the copy. */
-  async settleDocument(path: string): Promise<StudioProjectReconciliation | null> { return this.document(path).settleDatedMerges(); }
 
   async renameProject(path: string, name: string, options?: {project?: StudioProjectV1}): Promise<{oldPath: string; newPath: string; project: StudioProjectV1}> {
     const oldPath = normalizeStudioProjectPath(path);

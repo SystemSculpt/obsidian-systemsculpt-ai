@@ -27,7 +27,7 @@ Platform checks through node renderers or runtime implementations.
 
 - types.ts and schema.ts own project contracts and strict parsing.
 - paths.ts, StudioProjectStore.ts, and document/ own the single project file,
-  migrations, merged edits, per-device merge clocks, and atomic publication;
+  migrations, merged edits, its merge record, and atomic publication;
   persistence/ reconciles independent support files.
 - StudioAssetStore.ts owns content-addressed project assets.
 - StudioPermissionManager.ts and StudioHostCapabilities.ts own execution gates.
@@ -102,7 +102,6 @@ My Project.systemsculpt-assets/
   runs/
   cache/node-results.json
   legacy/
-  clock/<device>.json
 ~~~
 
 Project creation never overwrites an existing project or asset directory.
@@ -113,12 +112,12 @@ and rebases its edits onto the current file before saving. Independent node and
 field edits merge, including changes arriving while a save or asynchronous
 producer is running. Separate changes to the same text merge; overlapping ones
 keep the file's value, and the session offers its own version as an Undo step.
-A whole-file copy from another device merges field by field by hybrid-clock
-stamps: the newer change wins, entities the other device never saw are kept,
-and deleted cards stay deleted until an explicit Undo or restore. Each device
-writes its stamps, deletion keys and file watermarks for 30 days to its own
-clock file (see ADR-0004); without one, the copy's modification time dates
-its values. Removing generated outputs also removes their pins and parent
+A whole-file copy from another device merges field by field by the
+hybrid-clock stamps in the `merge` record each published file carries: the
+newer change wins, entities the other device never saw are kept, and deleted
+cards stay deleted until an explicit Undo or restore (see ADR-0004). An edit
+made to the file outside Studio, such as by an agent's file tools, applies as
+this device's own edit. Removing generated outputs also removes their pins and parent
 references; concurrent deletion removes references added by another writer.
 Every publication validates the project before atomically replacing its single
 visible file. Invalid documents remain untouched until corrected.

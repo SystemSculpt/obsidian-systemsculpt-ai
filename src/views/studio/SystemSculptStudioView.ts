@@ -504,7 +504,6 @@ export class SystemSculptStudioView extends ItemView {
       assetChanged: path => this.assetPreviews.invalidate(path),
       assetFailed: path => this.assetPreviews.reject(path),
       modified: file => { void this.projectSessionController.handleVaultItemModified(file); },
-      created: file => { void this.projectSessionController.handleVaultItemCreated(file); },
       renamed: (file, oldPath) => { void this.projectSessionController.handleVaultItemRenamed(file, oldPath); },
       deleted: file => { void this.projectSessionController.handleVaultItemDeleted(file); },
     });

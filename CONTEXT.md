@@ -121,9 +121,9 @@ A generated Studio result placed on the canvas with its producing node and run i
 _Avoid_: Source node, input attachment
 
 **Studio document**:
-One authored Studio file of readable canvas JSON. Stable entity IDs let the shared edit service merge each writer's changes by entity and field onto the current file.
+One authored Studio file of readable canvas JSON, followed by a merge record of recent hybrid-clock stamps and deletion tombstones. Stable entity IDs let the shared edit service merge each writer's changes by entity and field onto the current file.
 _Avoid_: Sidecar transaction folder, conflict copy, collaborative document
 
 **Document revision**:
-The SHA-256 of a document's canonical text, used as the basis for a scoped agent edit. Changes since the revision merge by field; a batch that conflicts with a later change to the same field is rejected. Deletion requires explicit restoration.
+The SHA-256 of a document's canonical canvas text, without its merge record, used as the basis for a scoped agent edit. Changes since the revision merge by field; a batch that conflicts with a later change to the same field is rejected. Deletion requires explicit restoration.
 _Avoid_: File modification time, heads

@@ -97,7 +97,6 @@ function createControllerHarness(project: StudioProjectV1) {
     consumeBlockedProjectRecovery: jest.fn(async () => null),
     lintProjectText: jest.fn(() => ({ ok: true })),
     reconcileProjectFile: jest.fn(async () => ({ conflicts: [] })),
-    reconcileProjectClock: jest.fn(async (): Promise<{ conflicts: string[] } | null> => null),
     adoptVisibleProjectRename: jest.fn(async (oldPath: string, newPath: string) => ({
       oldPath,
       newPath,
@@ -300,7 +299,7 @@ describe("StudioProjectSessionController", () => {
     finishReconciliation();
     await Promise.all([modified, closed]);
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(service.reconcileProjectFile.mock.invocationCallOrder[0]).toBeLessThan(
       service.releaseProjectSession.mock.invocationCallOrder[0]
     );
@@ -319,7 +318,7 @@ describe("StudioProjectSessionController", () => {
 
     await (controller as any).processCurrentProjectFileMutation('{"schema":"studio.project.v1"}');
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", '{"schema":"studio.project.v1"}');
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(load).not.toHaveBeenCalled();
     expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
     expect(controller.getProject()).toBe(fileProject);
@@ -327,32 +326,6 @@ describe("StudioProjectSessionController", () => {
     expect(service.preserveProjectRecovery).not.toHaveBeenCalled();
     expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
     expect(host.render).toHaveBeenCalledTimes(1);
-  });
-
-  it("settles merges that waited for another device's clock when a clock file beside the project appears or changes", async () => {
-    const project = projectFixture(noteNodeFixture("Notes/Before.md"));
-    const { controller, host, service, session } = createControllerHarness(project);
-    const settled = projectFixture(noteNodeFixture("Notes/After.md"));
-    session.getProject.mockReturnValue(settled);
-    const restored = "Studio restored changes from this device that an older copy of this file from another device had replaced.";
-    service.reconcileProjectClock.mockResolvedValueOnce({ conflicts: [restored] });
-    const clock = "Studio/Test.systemsculpt-assets/clock/bbbbbbbbbbbb.json";
-
-    await controller.handleVaultItemCreated({ path: clock } as any);
-    expect(service.reconcileProjectClock).toHaveBeenCalledWith("Studio/Test.systemsculpt");
-    expect(controller.getProject()).toBe(settled);
-    expect(controller.getProjectFileWarning()).toBe(restored);
-    expect(host.render).toHaveBeenCalledTimes(1);
-
-    // A clock change that finds nothing waiting leaves the view alone.
-    await controller.handleVaultItemModified({ path: clock } as any);
-    expect(service.reconcileProjectClock).toHaveBeenCalledTimes(2);
-    expect(host.render).toHaveBeenCalledTimes(1);
-    expect(service.reconcileProjectFile).not.toHaveBeenCalled();
-
-    // Other support files are not clocks.
-    await controller.handleVaultItemCreated({ path: "Studio/Test.systemsculpt-assets/runs/run.json" } as any);
-    expect(service.reconcileProjectClock).toHaveBeenCalledTimes(2);
   });
 
   it("ignores a duplicate file event already accepted by the shared session", async () => {
@@ -388,7 +361,7 @@ describe("StudioProjectSessionController", () => {
 
     expect(controller.getProject()).toBe(fileProject);
     expect(controller.getProjectFileWarning()).toBeNull();
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", rawText);
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(host.disposeTextNodeEditors).not.toHaveBeenCalled();
     expect(host.preserveProjectAsUndo).not.toHaveBeenCalled();
     expect(service.preserveProjectRecovery).not.toHaveBeenCalled();
@@ -529,7 +502,7 @@ describe("StudioProjectSessionController", () => {
 
     await (controller as any).processCurrentProjectFileMutation("{");
 
-    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt", "{");
+    expect(service.reconcileProjectFile).toHaveBeenCalledWith("Studio/Test.systemsculpt");
     expect(session.blockProjectFileWrites).not.toHaveBeenCalled();
     expect(controller.getProjectFileWarning()).toContain("Unexpected token");
     expect(controller.getProjectFileWarning()).toContain("Studio couldn't read this project file");

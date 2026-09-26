@@ -6,18 +6,23 @@ import { isStudioProseFieldPath, mergeStudioText } from "./StudioTextMerge";
  * ID, each fixed width, so plain string order is causal-then-wall order. The
  * empty string is older than every stamp and marks an unknown or pruned time.
  */
-const WALL_DIGITS = 9, COUNTER_DIGITS = 4;
-export const STUDIO_CLOCK_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_TOMBSTONES = 1000, MAX_FILES = 16, MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
-const CLOCK_SCHEMA = "studio.document-clock.v1";
+const WALL_DIGITS = 9, COUNTER_DIGITS = 4, MAX_COUNTER = 36 ** COUNTER_DIGITS - 1;
+export const STUDIO_MERGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_TOMBSTONES = 1000, MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
 const NESTED_FIELDS = new Set(["config", "nodes", "shapes"]);
 const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const STAMP = "[0-9a-z]{13}[0-9a-z_-]{0,32}";
+const STAMP_PATTERN = new RegExp(`^${STAMP}$`);
+/** A field's stamp and, after "/", the stamp of the value it replaced. */
+const FIELD_STAMP_PATTERN = new RegExp(`^${STAMP}(/${STAMP})?$`);
 
 export function studioStamp(wall: number, counter = 0, device = ""): string {
   return `${Math.max(0, Math.floor(wall)).toString(36).padStart(WALL_DIGITS, "0")}${counter.toString(36).padStart(COUNTER_DIGITS, "0")}${device}`;
 }
 const stampWall = (stamp: string): number => stamp ? parseInt(stamp.slice(0, WALL_DIGITS), 36) : 0;
 const later = (left: string, right: string): string => left > right ? left : right;
+/** The stamp of a field entry, without the stamp of the value it replaced. */
+const stampOf = (entry: string | undefined): string => entry ? entry.split("/", 1)[0] : "";
 
 export class StudioHybridClock {
   private wall = 0;
@@ -27,6 +32,8 @@ export class StudioHybridClock {
   now(): string {
     const time = this.time();
     if (time > this.wall) { this.wall = time; this.counter = 0; } else this.counter++;
+    // The counter has a fixed width so string order stays clock order: past it, the clock moves on a millisecond.
+    if (this.counter > MAX_COUNTER) { this.wall++; this.counter = 0; }
     return studioStamp(this.wall, this.counter, this.device);
   }
   /** Stamps seen from other devices order this device's later stamps after them. */
@@ -37,80 +44,77 @@ export class StudioHybridClock {
   }
 }
 
-/** Per entity key: "" is when it was created or restored; other keys stamp its fields. */
+/**
+ * Per entity key: "" is when it was created or restored; other keys stamp its
+ * fields, each as "stamp" or "stamp/replaced", where `replaced` stamps the
+ * value that change replaced.
+ */
 export type StudioEntityStamps = Record<string, string | Record<string, string>>;
 export type StudioDocumentClockState = {
   stamps: Record<string, StudioEntityStamps>;
   /** Entity key to deletion stamp. */
   deleted: Record<string, string>;
-  /** SHA-256 of a file text this device wrote to its stamp at that time. */
-  files: Record<string, string>;
 };
+/**
+ * The merge record a published file carries: when it was written, the agent
+ * revision of its canvas, and the stamps and tombstones its writer knew then.
+ */
+export type StudioMergeBlock = StudioDocumentClockState & {at: string; canvas: string};
 
 export function emptyStudioClock(): StudioDocumentClockState {
-  return {stamps: Object.create(null), deleted: Object.create(null), files: Object.create(null)};
+  return {stamps: Object.create(null), deleted: Object.create(null)};
 }
 
-const isStamp = (value: unknown): value is string => typeof value === "string" && /^[0-9a-z]{13}[0-9a-z_-]{0,32}$/.test(value);
-function stringMap(value: unknown, accept: (key: string, item: unknown) => boolean): Record<string, string> {
+const isStamp = (value: unknown): value is string => typeof value === "string" && STAMP_PATTERN.test(value);
+function stampMap(value: unknown, pattern: RegExp, accept: (key: string) => boolean = () => true): Record<string, string> {
   const map: Record<string, string> = Object.create(null);
-  if (!value || typeof value !== "object" || Array.isArray(value)) return map;
-  for (const [key, item] of Object.entries(value)) if (!RESERVED_KEYS.has(key) && isStamp(item) && accept(key, item)) map[key] = item;
+  if (!record(value)) return map;
+  for (const [key, item] of Object.entries(value)) if (!RESERVED_KEYS.has(key) && typeof item === "string" && pattern.test(item) && accept(key)) map[key] = item;
   return map;
 }
 
-/** A damaged or foreign clock file only removes merge information; it never blocks opening the canvas. */
-export function parseStudioClock(raw: string): {device: string; clock: StudioDocumentClockState} | null {
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return null; }
-  if (!parsed || typeof parsed !== "object") return null;
-  const value = parsed as {schema?: unknown; device?: unknown; stamps?: unknown; deleted?: unknown; files?: unknown};
-  if (value.schema !== CLOCK_SCHEMA || typeof value.device !== "string" || !/^[0-9a-z_-]{1,32}$/.test(value.device)) return null;
-  const clock = emptyStudioClock();
-  clock.deleted = stringMap(value.deleted, key => key.includes(":"));
-  clock.files = stringMap(value.files, key => /^[0-9a-f]{64}$/.test(key));
-  if (value.stamps && typeof value.stamps === "object" && !Array.isArray(value.stamps)) {
-    for (const [key, fields] of Object.entries(value.stamps as Record<string, unknown>)) {
-      if (RESERVED_KEYS.has(key) || !key.includes(":") || !fields || typeof fields !== "object" || Array.isArray(fields)) continue;
+/** A damaged or foreign merge record only removes merge information; it never blocks opening the canvas. */
+export function readStudioMergeBlock(value: unknown): StudioMergeBlock | null {
+  if (!record(value) || !isStamp(value.at) || typeof value.canvas !== "string" || !/^[0-9a-f]{64}$/.test(value.canvas)) return null;
+  const block: StudioMergeBlock = {...emptyStudioClock(), at: value.at, canvas: value.canvas};
+  block.deleted = stampMap(value.deleted, STAMP_PATTERN, key => key.includes(":"));
+  if (record(value.stamps)) {
+    for (const [key, fields] of Object.entries(value.stamps)) {
+      if (RESERVED_KEYS.has(key) || !key.includes(":") && key !== "project" || !record(fields)) continue;
       const entity: StudioEntityStamps = Object.create(null);
-      for (const [field, stamp] of Object.entries(fields)) {
+      for (const [field, entry] of Object.entries(fields)) {
         if (RESERVED_KEYS.has(field)) continue;
-        if (isStamp(stamp)) entity[field] = stamp;
-        else if (NESTED_FIELDS.has(field)) entity[field] = stringMap(stamp, () => true);
+        if (field === "" ? isStamp(entry) : typeof entry === "string" && FIELD_STAMP_PATTERN.test(entry)) entity[field] = entry as string;
+        else if (NESTED_FIELDS.has(field)) entity[field] = stampMap(entry, FIELD_STAMP_PATTERN);
       }
-      clock.stamps[key] = entity;
+      block.stamps[key] = entity;
     }
   }
-  return {device: value.device, clock};
+  return block;
 }
 
-export function serializeStudioClock(device: string, clock: StudioDocumentClockState): string {
-  const sorted = (value: unknown): unknown => value && typeof value === "object" && !Array.isArray(value)
-    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted((value as Record<string, unknown>)[key])]))
-    : value;
-  return `${JSON.stringify({schema: CLOCK_SCHEMA, device, stamps: sorted(clock.stamps), deleted: sorted(clock.deleted), files: sorted(clock.files)})}\n`;
+/** The merge record for a file this device publishes, with keys sorted so equal state writes equal bytes. */
+export function studioMergeBlock(clock: StudioDocumentClockState, at: string, canvas: string): StudioMergeBlock {
+  const sorted = <T>(value: T): T => (record(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])]))
+    : value) as T;
+  return {at, canvas, stamps: sorted(clock.stamps), deleted: sorted(clock.deleted)};
 }
 
 export function cloneStudioClock(clock: StudioDocumentClockState): StudioDocumentClockState {
-  return JSON.parse(JSON.stringify(clock), (_key, value) => value && typeof value === "object" && !Array.isArray(value) ? Object.assign(Object.create(null), value) : value) as StudioDocumentClockState;
+  const revive = (_key: string, value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? Object.assign(Object.create(null), value) : value;
+  return {stamps: JSON.parse(JSON.stringify(clock.stamps), revive), deleted: JSON.parse(JSON.stringify(clock.deleted), revive)};
 }
 
-/** The newest stamp a clock file carries; an abandoned device's file ages out. */
+/** The newest stamp a clock carries. */
 export function newestStudioClockStamp(clock: StudioDocumentClockState): string {
   let newest = "";
-  for (const stamp of [...Object.values(clock.deleted), ...Object.values(clock.files)]) newest = later(newest, stamp);
-  for (const fields of Object.values(clock.stamps)) for (const value of Object.values(fields)) {
-    if (typeof value === "string") newest = later(newest, value); else for (const stamp of Object.values(value)) newest = later(newest, stamp);
-  }
+  for (const stamp of Object.values(clock.deleted)) newest = later(newest, stamp);
+  for (const key of Object.keys(clock.stamps)) newest = later(newest, newestOf(clock.stamps, key));
   return newest;
 }
 
-/** A device that has not written for the retention period no longer informs merges. */
-export function isStudioClockCurrent(clock: StudioDocumentClockState, nowWall: number): boolean {
-  return nowWall - stampWall(newestStudioClockStamp(clock)) <= STUDIO_CLOCK_MAX_AGE_MS;
-}
-
-/** Tombstones from every device; the later deletion time wins. */
+/** Tombstones from both sides; the later deletion time wins. */
 export function mergeStudioTombstones(left: Record<string, string>, right: Record<string, string>): Record<string, string> {
   const merged: Record<string, string> = Object.assign(Object.create(null), left);
   for (const [key, stamp] of Object.entries(right)) merged[key] = later(merged[key] || "", stamp);
@@ -118,17 +122,16 @@ export function mergeStudioTombstones(left: Record<string, string>, right: Recor
 }
 
 /**
- * Keep the clock small: stamps and tombstones expire by age, stamps of
- * entities no longer present go with them, tombstones keep the newest 1,000,
- * and file watermarks keep this device's newest 16 writes.
+ * Keep the record small: stamps and tombstones expire by age, stamps of
+ * entities no longer present go with them, and tombstones keep the newest 1,000.
  */
 export function pruneStudioClock(clock: StudioDocumentClockState, present: ReadonlySet<string>, nowWall: number): void {
-  const expired = (stamp: string) => nowWall - stampWall(stamp) > STUDIO_CLOCK_MAX_AGE_MS;
+  const expired = (entry: string) => nowWall - stampWall(stampOf(entry)) > STUDIO_MERGE_RETENTION_MS;
   for (const [key, fields] of Object.entries(clock.stamps)) {
     if (!present.has(key)) { delete clock.stamps[key]; continue; }
     for (const [field, value] of Object.entries(fields)) {
       if (typeof value === "string") { if (expired(value)) delete fields[field]; continue; }
-      for (const [sub, stamp] of Object.entries(value)) if (expired(stamp)) delete value[sub];
+      for (const [sub, entry] of Object.entries(value)) if (expired(entry)) delete value[sub];
       if (!Object.keys(value).length) delete fields[field];
     }
     if (!Object.keys(fields).length) delete clock.stamps[key];
@@ -136,8 +139,6 @@ export function pruneStudioClock(clock: StudioDocumentClockState, present: Reado
   for (const [key, stamp] of Object.entries(clock.deleted)) if (present.has(key) || expired(stamp)) delete clock.deleted[key];
   const tombstones = Object.keys(clock.deleted).sort((a, b) => clock.deleted[b].localeCompare(clock.deleted[a]));
   for (const key of tombstones.slice(MAX_TOMBSTONES)) delete clock.deleted[key];
-  const files = Object.keys(clock.files).sort((a, b) => clock.files[b].localeCompare(clock.files[a]));
-  for (const hash of files.slice(MAX_FILES)) delete clock.files[hash];
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -147,7 +148,7 @@ type Leaf = {top: string; sub?: string};
 const canonical = (value: unknown): string => value === undefined ? "\u0000" : JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, (item as Record<string, unknown>)[key]])) : item);
 const copy = <T>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T;
-const record = (value: unknown): value is Record<string, Json> => !!value && typeof value === "object" && !Array.isArray(value);
+function record(value: unknown): value is Record<string, Json> { return !!value && typeof value === "object" && !Array.isArray(value); }
 
 /** Entity fields at merge granularity: config keys and group members individually, everything else whole. */
 function leaves(entity: Entity | undefined): Map<string, {leaf: Leaf; value: Json}> {
@@ -168,33 +169,46 @@ const presence = (stamps: StudioDocumentClockState["stamps"], key: string): stri
   const value = stamps[key]?.[""];
   return typeof value === "string" ? value : "";
 };
-function leafStamp(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf): string {
+/** A field's own entry ("stamp" or "stamp/replaced"), if it has one. */
+function fieldEntry(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf): string | undefined {
   const value = stamps[key]?.[leaf.top];
-  const own = leaf.sub === undefined ? (typeof value === "string" ? value : undefined) : (value && typeof value === "object" ? value[leaf.sub] : undefined);
-  return own || presence(stamps, key);
+  return leaf.sub === undefined ? (typeof value === "string" ? value : undefined) : (value && typeof value === "object" ? value[leaf.sub] : undefined);
 }
-function setLeafStamp(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf, stamp: string): void {
+/** When a field's value was set: its own stamp, or else when its entity was created. */
+function leafStamp(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf): string {
+  return stampOf(fieldEntry(stamps, key, leaf)) || presence(stamps, key);
+}
+/** The stamp of the value a field's latest change replaced; "" when it replaced an undated value. */
+function replacedStamp(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf): string {
+  const entry = fieldEntry(stamps, key, leaf) || "", slash = entry.indexOf("/");
+  return slash < 0 ? "" : entry.slice(slash + 1);
+}
+function setLeafStamp(stamps: StudioDocumentClockState["stamps"], key: string, leaf: Leaf, entry: string): void {
   const fields = stamps[key] ||= Object.create(null) as StudioEntityStamps;
-  if (leaf.sub === undefined) { fields[leaf.top] = stamp; return; }
+  if (leaf.sub === undefined) { fields[leaf.top] = entry; return; }
   const nested = fields[leaf.top];
-  (nested && typeof nested === "object" ? nested : (fields[leaf.top] = Object.create(null) as Record<string, string>))[leaf.sub] = stamp;
+  (nested && typeof nested === "object" ? nested : (fields[leaf.top] = Object.create(null) as Record<string, string>))[leaf.sub] = entry;
 }
 function newestOf(stamps: StudioDocumentClockState["stamps"], key: string): string {
   let newest = "";
   for (const value of Object.values(stamps[key] || {})) {
-    if (typeof value === "string") newest = later(newest, value); else for (const stamp of Object.values(value)) newest = later(newest, stamp);
+    if (typeof value === "string") newest = later(newest, stampOf(value)); else for (const entry of Object.values(value)) newest = later(newest, stampOf(entry));
   }
   return newest;
 }
 
-/** A local value's pre-change state since the last external merge: the common base for diff3. */
+/**
+ * A field this device changed since the last merge of another device's file,
+ * as it was before: the common base for diff3, with the stamp of that value.
+ */
 export type StudioPendingBase = {value: Json | undefined; stamp: string};
 const pendingKey = (key: string, leaf: Leaf) => `${key}\u0000${leaf.top}\u0000${leaf.sub ?? ""}`;
 
 /**
  * Stamp what this device changed between two accepted states: new or restored
- * entities, changed fields, and deletions. The first local change of a field
- * since the last external merge remembers the prior value for diff3.
+ * entities, changed fields, and deletions. Each changed field also records the
+ * stamp of the value it replaced, and its first change since the last merge
+ * remembers the prior value for diff3.
  */
 export function recordStudioChanges(
   clock: StudioDocumentClockState,
@@ -217,21 +231,20 @@ export function recordStudioChanges(
     for (const id of new Set([...previous.keys(), ...next.keys()])) {
       const leaf = (next.get(id) || previous.get(id))!.leaf;
       if (canonical(previous.get(id)?.value) === canonical(next.get(id)?.value)) continue;
+      const replaced = stampOf(fieldEntry(clock.stamps, key, leaf));
       const slot = pendingKey(key, leaf);
-      if (!pending.has(slot)) pending.set(slot, {value: copy(previous.get(id)?.value), stamp: leafStamp(clock.stamps, key, leaf)});
-      setLeafStamp(clock.stamps, key, leaf, now());
+      if (!pending.has(slot)) pending.set(slot, {value: copy(previous.get(id)?.value), stamp: replaced});
+      setLeafStamp(clock.stamps, key, leaf, replaced ? `${now()}/${replaced}` : now());
     }
   }
 }
 
-/** Who wrote an incoming file and how its values are dated. */
+/** Who wrote an incoming file, and so how its values are dated. */
 export type StudioIncomingWriter =
-  /** The writer's clock file names this file: its stamps date each value, up to the file's watermark. */
-  | {kind: "clock"; stamps: StudioDocumentClockState["stamps"]; watermark: string}
-  /** No clock names this file: its modification time bounds every value in it. */
-  | {kind: "time"; watermark: string}
-  /** Nothing dates the file: its values win, and entities it lacks are kept. */
-  | {kind: "unknown"};
+  /** A published file's merge record: its stamps date each value as its writer knew it. */
+  | {kind: "stamped"; stamps: StudioDocumentClockState["stamps"]; at: string}
+  /** A file from SystemSculpt 6.10, which dates nothing: whatever this device dated stays. */
+  | {kind: "undated"};
 
 export type StudioExternalMerge = {
   /** Null when the incoming entities are the result unchanged. */
@@ -243,12 +256,16 @@ export type StudioExternalMerge = {
 };
 
 /**
- * Merge a whole-file copy from another writer into this device's accepted
- * state, field by field. The newer stamp wins; prose both sides changed since
- * their common base combines with diff3. An entity the file lacks is deleted
- * when a tombstone says so, kept when this device created it after the file
- * was written or the writer never knew it, and otherwise deleted by the file.
- * Updates `clock` with the stamps of adopted values and new tombstones.
+ * Merge another writer's file into this device's accepted state, field by
+ * field. The newer stamp wins. When this device changed a field back to its
+ * earlier value, the other change stands; when both sides changed the same
+ * earlier value of a prose field, separate changes combine with diff3.
+ *
+ * Every deletion leaves a tombstone, so an entity the file lacks is deleted
+ * only when a tombstone newer than its creation says so; otherwise the file was
+ * written before its writer knew the entity. An entity only the file has is
+ * dropped when a tombstone is newer than its writer's creation or restore stamp.
+ * Updates `clock` with the stamps of adopted values and the tombstones applied.
  */
 export function mergeStudioExternalEntities(options: {
   local: StudioProjectEntities;
@@ -262,13 +279,6 @@ export function mergeStudioExternalEntities(options: {
   const {local, incoming, clock, tombstones, writer, pending, now} = options;
   const merged = copy(incoming);
   let kept = 0, dropped = 0;
-  // The stamp an incoming value carries. A writer stamp newer than its file belongs to a later file.
-  const incomingStamp = (key: string, leaf?: Leaf): string => {
-    if (writer.kind === "unknown") return "\uffff";
-    if (writer.kind === "time") return writer.watermark;
-    const stamp = leaf ? leafStamp(writer.stamps, key, leaf) : presence(writer.stamps, key);
-    return stamp > writer.watermark ? writer.watermark : stamp;
-  };
   for (const key of new Set([...Object.keys(local), ...Object.keys(incoming)])) {
     const mine = local[key], theirs = incoming[key];
     if (mine && theirs) {
@@ -276,64 +286,39 @@ export function mergeStudioExternalEntities(options: {
       for (const id of new Set([...a.keys(), ...b.keys()])) {
         const leaf = (a.get(id) || b.get(id))!.leaf, ours = a.get(id)?.value, other = b.get(id)?.value;
         if (canonical(ours) === canonical(other)) continue;
-        const ourStamp = leafStamp(clock.stamps, key, leaf), theirStamp = incomingStamp(key, leaf);
-        const base = pending.get(pendingKey(key, leaf));
-        // Both sides changed prose since their common value: combine separate changes.
-        if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && ours !== base.value && other !== base.value
-          && theirStamp > base.stamp && isStudioProseFieldPath(leaf.sub ?? leaf.top)) {
-          const text = mergeStudioText(base.value, ours, other);
-          if (text !== null) { setLeaf(merged[key], leaf, text); setLeafStamp(clock.stamps, key, leaf, now()); kept++; continue; }
+        if (writer.kind === "undated") {
+          if (fieldEntry(clock.stamps, key, leaf)) { setLeaf(merged[key], leaf, ours); kept++; }
+          continue;
         }
-        if (ourStamp > theirStamp) { setLeaf(merged[key], leaf, ours); kept++; }
-        else if (writer.kind !== "unknown") setLeafStamp(clock.stamps, key, leaf, theirStamp);
+        const theirEntry = fieldEntry(writer.stamps, key, leaf) || presence(writer.stamps, key);
+        const base = pending.get(pendingKey(key, leaf));
+        // Changed and changed back here: the other side's change stands.
+        if (base && canonical(ours) === canonical(base.value)) { if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry); continue; }
+        // Both sides changed the same earlier value of prose: combine separate changes.
+        if (base && typeof base.value === "string" && typeof ours === "string" && typeof other === "string" && other !== base.value
+          && replacedStamp(writer.stamps, key, leaf) === base.stamp && isStudioProseFieldPath(leaf.sub ?? leaf.top)) {
+          const text = mergeStudioText(base.value, ours, other);
+          if (text !== null) { setLeaf(merged[key], leaf, text); setLeafStamp(clock.stamps, key, leaf, `${now()}/${stampOf(theirEntry)}`); kept++; continue; }
+        }
+        if (leafStamp(clock.stamps, key, leaf) > stampOf(theirEntry)) { setLeaf(merged[key], leaf, ours); kept++; }
+        else if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry);
       }
     } else if (mine) {
-      const created = presence(clock.stamps, key), tombstone = tombstones[key];
-      const keep = tombstone && tombstone > created ? false
-        : writer.kind === "unknown" ? true
-        : writer.kind === "time" ? newestOf(clock.stamps, key) > writer.watermark
-        : created > writer.watermark || (!!created && !writer.stamps[key]);
-      if (keep) { merged[key] = copy(mine); kept++; }
-      else { clock.deleted[key] = now(); delete clock.stamps[key]; }
+      if (writer.kind === "undated") { merged[key] = copy(mine); kept++; continue; }
+      const tombstone = tombstones[key];
+      if (!tombstone || tombstone <= presence(clock.stamps, key)) { merged[key] = copy(mine); kept++; continue; }
+      // The deletion keeps its own time, so a later restore on any device still wins.
+      clock.deleted[key] = later(clock.deleted[key] || "", tombstone);
+      delete clock.stamps[key];
     } else if (theirs) {
       const tombstone = tombstones[key];
-      if (tombstone && !(incomingStamp(key) > tombstone && writer.kind === "clock")) { delete merged[key]; dropped++; continue; }
-      if (writer.kind === "clock" && writer.stamps[key]) clock.stamps[key] = copy(writer.stamps[key]);
-      else if (writer.kind === "time") clock.stamps[key] = Object.assign(Object.create(null), {"": writer.watermark});
+      if (writer.kind === "undated") { if (tombstone) { delete merged[key]; dropped++; } continue; }
+      if (tombstone && !(presence(writer.stamps, key) > tombstone)) { delete merged[key]; dropped++; continue; }
+      if (writer.stamps[key]) clock.stamps[key] = copy(writer.stamps[key]);
       delete clock.deleted[key];
     }
   }
   return {entities: canonical(merged) === canonical(incoming) ? null : merged, kept, dropped};
-}
-
-/**
- * Apply a corrected merge onto the current state. Where the current state still
- * holds what `result` accepted (an entity or field untouched since), the
- * correction replaces it; anything changed since keeps its current value.
- * Null when nothing changes.
- */
-export function correctStudioEntities(result: StudioProjectEntities, corrected: StudioProjectEntities, current: StudioProjectEntities): StudioProjectEntities | null {
-  const next = copy(current);
-  let changed = false;
-  for (const key of new Set([...Object.keys(result), ...Object.keys(corrected)])) {
-    const accepted = result[key], fixed = corrected[key], present = current[key];
-    if (canonical(accepted) === canonical(fixed)) continue;
-    if (canonical(present) === canonical(accepted)) {
-      if (fixed === undefined) delete next[key]; else next[key] = copy(fixed);
-      changed = true;
-      continue;
-    }
-    // Created or deleted since on one side: the later change stands.
-    if (!accepted || !fixed || !present) continue;
-    const before = leaves(accepted), after = leaves(fixed), now = leaves(present);
-    for (const id of new Set([...before.keys(), ...after.keys()])) {
-      const old = before.get(id)?.value, value = after.get(id)?.value;
-      if (canonical(old) === canonical(value) || canonical(now.get(id)?.value) !== canonical(old)) continue;
-      setLeaf(next[key], (after.get(id) || before.get(id))!.leaf, value);
-      changed = true;
-    }
-  }
-  return changed ? next : null;
 }
 
 export { canonical as canonicalStudioEntities };

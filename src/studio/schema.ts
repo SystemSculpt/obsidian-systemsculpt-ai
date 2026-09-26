@@ -760,9 +760,11 @@ function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Recor
 /**
  * Serialization always writes the v2 dialect: pure canvas content plus the
  * project identity and a pointer to the generated agent reference document.
- * Opening any older file and saving it upgrades it in place.
+ * Opening any older file and saving it upgrades it in place. A published file
+ * also carries Studio's `merge` record last; without it, the text is the
+ * canonical canvas whose SHA-256 is the agent revision.
  */
-export function serializeStudioProject(project: StudioProjectV1): string {
+export function serializeStudioProject(project: StudioProjectV1, merge?: object): string {
   const document = {
     schema: STUDIO_PROJECT_SCHEMA_V2,
     id: project.projectId,
@@ -799,6 +801,7 @@ export function serializeStudioProject(project: StudioProjectV1): string {
           : `${arrow.fromShapeId} -> ${arrow.toShapeId}`
       ),
     },
+    ...(merge ? { merge } : {}),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }

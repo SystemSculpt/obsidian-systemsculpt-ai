@@ -35,12 +35,12 @@ type InMemoryApp = {
   };
 };
 
-/** Authored and copied files; the per-device merge clocks beside a project are bookkeeping. */
-const authoredFiles = (files: Map<string, string>) => [...files.keys()].filter(file => !file.includes(".systemsculpt-assets/clock/"));
-const clockFile = (files: Map<string, string>) => {
-  const [path] = [...files.keys()].filter(file => file.includes(".systemsculpt-assets/clock/"));
-  return JSON.parse(files.get(path)!) as { deleted: Record<string, string>; stamps: Record<string, unknown> };
-};
+/** Authored and copied files. */
+const authoredFiles = (files: Map<string, string>) => [...files.keys()];
+/** The merge record a published project file carries. */
+const mergeRecord = (raw: string) => JSON.parse(raw).merge as { deleted: Record<string, string>; stamps: Record<string, unknown> };
+/** The canonical canvas text of a published file, without its merge record: what an agent revision names. */
+const canonicalText = (raw: string) => { const { merge: _merge, ...content } = JSON.parse(raw); return `${JSON.stringify(content, null, 2)}\n`; };
 
 function createStore(options?: { existingFiles?: string[]; existingDirs?: string[]; onLegacyOriginalCopied?: (copy: StudioLegacyOriginalCopy) => void }) {
   const existingFiles = options?.existingFiles || [];
@@ -252,7 +252,7 @@ describe("StudioProjectStore", () => {
     });
     files.set(created.path, "{");
 
-    const result = await store.importProjectText(created.path, "{");
+    const result = await store.refreshDocument(created.path);
     const message = result.conflicts.join("\n");
 
     expect(message).toMatch(/waiting for a complete valid file edit/i);
@@ -324,7 +324,7 @@ describe("Studio concurrent workspace writers", () => {
     const written = JSON.parse(files.get(path)!) as { name: string; canvas: { nodes: Array<{ id: string; config: { value: string } }> } };
     expect(written.name).toBe("Adopted");
     expect(written.canvas.nodes[0].config.value).toBe("Released text");
-    expect(Object.keys(written)).toEqual(["schema", "id", "name", "docs", "canvas"]);
+    expect(Object.keys(written)).toEqual(["schema", "id", "name", "docs", "canvas", "merge"]);
   });
 
   it("saves a canvas edit while an asset arrives without deleting or rewriting the asset", async () => {
@@ -426,9 +426,9 @@ describe("single authored file", () => {
     const {store, files} = createStore();
     const {path} = await store.createProject(options);
     const {revision} = await store.readDocument(path);
-    expect(revision).toBe(sha256(files.get(path)!));
+    expect(revision).toBe(sha256(canonicalText(files.get(path)!)));
     const edited = await withNode(store, path);
-    expect(edited.revision).toBe(sha256(files.get(path)!));
+    expect(edited.revision).toBe(sha256(canonicalText(files.get(path)!)));
     expect(edited.revision).not.toBe(revision);
   });
 
@@ -467,13 +467,13 @@ describe("single authored file", () => {
     const {revision: latest} = await store.readDocument(path);
     await expect(store.editDocument(path, latest, [{kind: "create", entityId: "node:a", value: text("a", "again")}])).rejects.toThrow("This entity ID is already used; choose a new ID or explicitly restore it.");
     expect((await reopen().loadProject(path)).graph.nodes).toHaveLength(0);
-    // Only the key and its deletion time are kept, beside the project.
-    expect(Object.keys(clockFile(files).deleted)).toEqual(["node:a"]);
-    expect(Object.keys(clockFile(files).stamps)).not.toContain("node:a");
-    expect(JSON.stringify(clockFile(files))).not.toContain("hello");
+    // Only the key and its deletion time are kept, in the file's merge record.
+    expect(Object.keys(mergeRecord(files.get(path)!).deleted)).toEqual(["node:a"]);
+    expect(Object.keys(mergeRecord(files.get(path)!).stamps)).not.toContain("node:a");
+    expect(JSON.stringify(mergeRecord(files.get(path)!))).not.toContain("hello");
     await store.editDocument(path, latest, [{kind: "restore", entityId: "node:a", value: text("a", "restored")}]);
     expect((await reopen().loadProject(path)).graph.nodes[0].config.value).toBe("restored");
-    expect(clockFile(files).deleted).toEqual({});
+    expect(mergeRecord(files.get(path)!).deleted).toEqual({});
   });
 
   it("keeps the agent tool contract: one content revision in heads, older Automerge heads rejected", async () => {
@@ -487,11 +487,11 @@ describe("single authored file", () => {
     } as any);
     const {path} = await service.createProjectFile({name: "Agents"});
     const read = await service.readAgentDocument(path) as {heads: string[]; canvas: Record<string, unknown>};
-    expect(read.heads).toEqual([sha256(files.get(path)!)]);
+    expect(read.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
     expect(Object.keys(read.canvas)).toEqual(["schema", "id", "name", "docs", "canvas"]);
     await expect(service.editAgentDocument(path, [...read.heads, "a".repeat(64)], [])).rejects.toThrow("Read the Studio revision before editing.");
     const edited = await service.editAgentDocument(path, read.heads, [{kind: "create", entityId: "node:a", value: text("a", "one")}]) as {heads: string[]; entities: Record<string, unknown>};
-    expect(edited.heads).toEqual([sha256(files.get(path)!)]);
+    expect(edited.heads).toEqual([sha256(canonicalText(files.get(path)!))]);
     expect(edited.entities["node:a"]).toMatchObject({id: "a"});
   });
 
@@ -551,10 +551,10 @@ describe("single authored file", () => {
     const {project: base} = await withNode(store, path);
     const draft = cloneStudioProjectSnapshot(base); draft.graph.nodes[0].config.value = "hello world";
     const raw = serializeStudioProject(draft); files.set(path, raw);
-    await store.importProjectText(path, raw);
-    await store.importProjectText(path, raw);
-    // A delayed event carrying older bytes cannot roll the document back.
-    await store.importProjectText(path, serializeStudioProject(base));
+    await store.refreshDocument(path);
+    await store.refreshDocument(path);
+    // A delayed watcher event only refreshes from the current file, so it cannot roll the document back.
+    await store.refreshDocument(path);
     expect((await store.loadProject(path)).graph.nodes[0].config.value).toBe("hello world");
     expect(files.get(path)).toBe(raw);
   });
