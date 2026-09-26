@@ -23,6 +23,8 @@ interface FileItem {
 }
 
 export interface ContextSelectionModalOptions {
+  /** Closing the owning view closes this picker and cancels its selection work. */
+  signal?: AbortSignal;
   isFileAlreadyPinned?: (file: TFile) => boolean;
   initialFilter?: ContextFilter;
   initialSearchQuery?: string;
@@ -37,7 +39,9 @@ export class ContextSelectionModal extends StandardModal {
   private readonly selectedFiles = new Set<TFile>();
   private currentFilter: ContextFilter;
   private searchQuery: string;
-  private readonly onSelect: (files: TFile[]) => void | Promise<void>;
+  private readonly onSelect: (files: TFile[], signal: AbortSignal) => void | Promise<void>;
+  private readonly ownerSignal?: AbortSignal;
+  private readonly closeFromOwner = () => this.close();
   private readonly isFileAlreadyPinned?: (file: TFile) => boolean;
   private readonly initialSearchQuery: string;
   private readonly autoFocusSearch: boolean;
@@ -46,7 +50,6 @@ export class ContextSelectionModal extends StandardModal {
   private listContainer: HTMLUListElement | null = null;
   private searchInput: HTMLInputElement | null = null;
   private addButton: HTMLButtonElement | null = null;
-  private cancelButton: HTMLButtonElement | null = null;
   private loadMoreButton: HTMLButtonElement | null = null;
   private readonly filterButtons = new Map<ContextFilter, HTMLButtonElement>();
   private readonly fileItemControlsByPath = new Map<string, { el: HTMLLIElement; checkbox: HTMLInputElement }>();
@@ -54,12 +57,13 @@ export class ContextSelectionModal extends StandardModal {
 
   constructor(
     app: App,
-    onSelect: (files: TFile[]) => void | Promise<void>,
+    onSelect: (files: TFile[], signal: AbortSignal) => void | Promise<void>,
     _plugin: unknown,
     options: ContextSelectionModalOptions = {},
   ) {
     super(app);
     this.onSelect = onSelect;
+    this.ownerSignal = options.signal;
     this.isFileAlreadyPinned = options.isFileAlreadyPinned;
     this.initialSearchQuery = options.initialSearchQuery?.trim() ?? "";
     this.searchQuery = this.initialSearchQuery.toLowerCase();
@@ -74,6 +78,12 @@ export class ContextSelectionModal extends StandardModal {
 
   onOpen(): void {
     super.onOpen();
+    this.processing = false;
+    this.ownerSignal?.addEventListener("abort", this.closeFromOwner, { once: true });
+    if (this.ownerSignal?.aborted) {
+      this.close();
+      return;
+    }
     this.addTitle("Pin files for every message");
     this.contentEl.createEl("p", {
       cls: "ss-context-description",
@@ -101,7 +111,7 @@ export class ContextSelectionModal extends StandardModal {
     });
     this.renderFileList();
 
-    this.cancelButton = this.addActionButton("modal.context.cancel", "Cancel", () => this.close());
+    this.addActionButton("modal.context.cancel", "Cancel", () => this.close());
     this.addButton = this.addActionButton("modal.context.pin", "Pin files", () => void this.handleSelection(), true);
     this.updateAddButton();
 
@@ -111,13 +121,13 @@ export class ContextSelectionModal extends StandardModal {
   }
 
   onClose(): void {
+    this.ownerSignal?.removeEventListener("abort", this.closeFromOwner);
     this.selectedFiles.clear();
     this.fileItemControlsByPath.clear();
     this.filterButtons.clear();
     this.listContainer = null;
     this.searchInput = null;
     this.addButton = null;
-    this.cancelButton = null;
     this.loadMoreButton = null;
     this.contentEl.empty();
     super.onClose();
@@ -320,7 +330,6 @@ export class ContextSelectionModal extends StandardModal {
   private setLoadingState(loading: boolean): void {
     this.processing = loading;
     if (this.searchInput) this.searchInput.disabled = loading;
-    if (this.cancelButton) this.cancelButton.disabled = loading;
     for (const button of this.filterButtons.values()) button.disabled = loading;
     for (const { checkbox } of this.fileItemControlsByPath.values()) {
       checkbox.disabled = loading || checkbox.dataset.pinned === "true";
@@ -336,11 +345,13 @@ export class ContextSelectionModal extends StandardModal {
 
   private async handleSelection(): Promise<void> {
     if (this.processing || this.selectedFiles.size === 0) return;
+    const task = this.beginAsyncTask("pin-files");
     this.setLoadingState(true);
     try {
-      await this.onSelect([...this.selectedFiles]);
-      this.close();
+      await this.onSelect([...this.selectedFiles], task.signal);
+      if (task.isCurrent()) this.close();
     } catch (error) {
+      if (!task.isCurrent()) return;
       const detail = error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : "";
       new Notice(`Couldn't pin files for every message.${detail}`, 5000);
       this.setLoadingState(false);

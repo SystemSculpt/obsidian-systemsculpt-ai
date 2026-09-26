@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../../main";
 import { ManagedDocumentProcessingAdapter } from "../../../services/managed/ManagedDocumentProcessingAdapter";
 import { ManagedJobClient } from "../../../services/managed/ManagedJobClient";
 import type { ManagedJobRecoveryStore } from "../../../services/managed/ManagedJobRecoveryStore";
+import { isRetryableManagedJobObservationError } from "../../../services/managed/ManagedJobObservation";
 import { getRuntimeCrypto } from "../../../utils/runtimeWindow";
 import type { ChatDocumentAttachmentProcessor } from "./ChatMessageAttachments";
 
@@ -20,6 +21,7 @@ function createChatDocumentOperationId(): string {
 export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttachmentProcessor {
   private readonly recovery: ManagedJobRecoveryStore;
   private readonly managed: ManagedDocumentProcessingAdapter;
+  private readonly retries = new Map<string, Readonly<{ operationId: string; release: () => void }>>();
 
   public constructor(_app: App, plugin: SystemSculptPlugin) {
     const graph = plugin.getManagedCapabilityGraph();
@@ -37,24 +39,44 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
     mimeType: "application/pdf";
     bytes: ArrayBuffer;
     fingerprint: `sha256:${string}`;
-  }>): Promise<Readonly<{ operationId: string; markdown: string }>> {
-    const operationId = createChatDocumentOperationId();
+  }>, options: Readonly<{ signal: AbortSignal }>): Promise<Readonly<{ operationId: string; markdown: string }>> {
+    const retry = this.retries.get(input.fingerprint);
+    retry?.release();
+    this.retries.delete(input.fingerprint);
+    const operationId = retry?.operationId ?? createChatDocumentOperationId();
+    const source = {
+      identity: `chat-pdf:${input.fingerprint.slice("sha256:".length)}`,
+      fingerprint: () => input.fingerprint,
+      load: async () => ({ filename: input.name, contentType: input.mimeType, bytes: input.bytes }),
+    };
     try {
-      const result = await this.managed.process({
-        identity: `chat-pdf:${input.fingerprint.slice("sha256:".length)}`,
-        fingerprint: () => input.fingerprint,
-        load: async () => ({ filename: input.name, contentType: input.mimeType, bytes: input.bytes }),
-      }, { operationId });
+      const result = retry
+        ? await this.managed.resume(operationId, { signal: options.signal, source })
+        : await this.managed.process(source, { operationId, signal: options.signal });
       const markdown = typeof result.result.markdown === "string" && result.result.markdown.trim()
         ? result.result.markdown
         : result.result.text;
       if (typeof markdown !== "string" || !markdown.trim()) {
         throw new Error("Document processing returned no readable text.");
       }
-      await this.managed.beginLocalCommit(operationId);
+      await this.managed.beginLocalCommit(operationId, options.signal);
       return Object.freeze({ operationId, markdown });
     } catch (error) {
-      await this.discard(operationId).catch(() => undefined);
+      if (!options.signal.aborted && (retry || isRetryableManagedJobObservationError(error))) {
+        // Retry observes the same admitted operation. A timeout never means
+        // the server cancelled its job, and must not silently create another.
+        const discard = () => {
+          this.retries.delete(input.fingerprint);
+          void this.discard(operationId).catch(() => undefined);
+        };
+        options.signal.addEventListener("abort", discard, { once: true });
+        this.retries.set(input.fingerprint, {
+          operationId,
+          release: () => options.signal.removeEventListener("abort", discard),
+        });
+      } else {
+        await this.discard(operationId).catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -64,6 +86,11 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
   }
 
   public async discard(operationId: string): Promise<void> {
+    for (const [fingerprint, retry] of this.retries) {
+      if (retry.operationId !== operationId) continue;
+      retry.release();
+      this.retries.delete(fingerprint);
+    }
     let record;
     try {
       record = await this.recovery.read("document_processing", operationId);

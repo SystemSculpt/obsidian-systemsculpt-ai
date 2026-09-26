@@ -150,19 +150,23 @@ export class DocumentProcessingService {
 
     try {
       const identity = `vault:${file.path}`;
+      // Hash and upload the same snapshot. An unchanged path alone cannot
+      // establish that bytes retained by a prior operation are still selected.
+      let loaded: Promise<Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>> | undefined;
+      const load = () => loaded ??= (async () => {
+        throwIfAborted(signal);
+        const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
+        if (!contentType) {
+          throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
+        }
+        const bytes = await this.app.vault.readBinary(file);
+        throwIfAborted(signal);
+        return { filename: file.name, contentType, bytes };
+      })();
       const remote = await this.adapter().process({
         identity,
-        fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
-        load: async () => {
-          throwIfAborted(signal);
-          const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
-          if (!contentType) {
-            throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
-          }
-          const bytes = await this.app.vault.readBinary(file);
-          throwIfAborted(signal);
-          return { filename: file.name, contentType, bytes };
-        },
+        fingerprint: async () => `sha256:${sha256HexFromBytesPortable(new Uint8Array((await load()).bytes))}`,
+        load,
       }, {
         signal,
         onProgress: (progress, status) => {
@@ -465,13 +469,9 @@ export class DocumentProcessingService {
     const rootImages = record.images;
     if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
       const imageCount = Object.keys(rootImages).length;
-      let folderInfo = "the images folder";
-      if (this.imageMetadataLog.length > 0) {
-        const firstImage = this.imageMetadataLog[Math.max(0, this.imageMetadataLog.length - imageCount)];
-        const parts = firstImage?.path?.split("/") ?? [];
-        if (parts.length >= 2) folderInfo = `the '${parts[parts.length - 2]}' folder`;
-      }
-      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in ${folderInfo}.\n`;
+      // Keep the first-delivery text stable across retries and prior conversions.
+      // Session metadata is diagnostic state, never an input to durable bytes.
+      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the images folder.\n`;
     }
     return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }

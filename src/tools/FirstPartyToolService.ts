@@ -59,7 +59,7 @@ export class FirstPartyToolService {
       throw new Error(`Unknown first-party tool: ${requestedName}`);
     }
     const mappedArgs = this.mapVaultArgs(requestedName, args);
-    const execution = this.dispatch(requestedName, mappedArgs, options?.chatView);
+    const execution = this.dispatch(requestedName, mappedArgs, options?.chatView, options?.signal);
     return await this.awaitStartedExecution(execution, options);
   }
 
@@ -81,6 +81,7 @@ export class FirstPartyToolService {
     toolName: FirstPartyToolName,
     args: unknown,
     chatView?: FirstPartyToolChatTarget,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     switch (toolName) {
       case "read":
@@ -119,7 +120,7 @@ export class FirstPartyToolService {
       case "open":
         return await this.managementOps.manageWorkspace(args as ManageWorkspaceParams);
       case "context":
-        return await this.managementOps.manageContext(args as ManageContextParams, chatView);
+        return await this.managementOps.manageContext(args as ManageContextParams, chatView, signal);
     }
   }
 
