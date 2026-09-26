@@ -61,6 +61,7 @@ export class ManagementOperations {
   async manageContext(
     params: ManageContextParams,
     originatingChatView: FirstPartyToolChatTarget | undefined = this.defaultChatView,
+    signal?: AbortSignal,
   ): Promise<ContextManagementResult> {
     const { action, paths } = params;
     
@@ -150,7 +151,8 @@ export class ManagementOperations {
               {
                 showNotices: false,
                 saveChanges: false, // We'll save once at the end
-                maxFiles: 100 // Use the global context limit
+                maxFiles: 100, // Use the global context limit
+                signal,
               }
             );
 
@@ -182,7 +184,8 @@ export class ManagementOperations {
               currentChatView.contextManager, 
               {
                 showNotices: false,
-                saveChanges: false // We'll save once at the end
+                saveChanges: false, // We'll save once at the end
+                signal,
               }
             );
 

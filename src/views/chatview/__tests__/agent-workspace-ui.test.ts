@@ -390,6 +390,49 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it("offers a stop control while documents process, and stops them when clicked or when the chat closes (#420)", async () => {
+    const parent = document.body.createDiv();
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const signals: AbortSignal[] = [];
+    const composer = new AgentComposer(parent, {
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      documentAttachmentProcessor: {
+        prepare: jest.fn((_input, { signal }) => new Promise<never>((_resolve, reject) => {
+          signals.push(signal);
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        })),
+        complete: jest.fn(async () => undefined),
+        discard: jest.fn(async () => undefined),
+      },
+    });
+    composer.load();
+    const pdf = new File(["%PDF"], "slow.pdf", { type: "application/pdf" });
+    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
+    const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!;
+    expect(stop.hidden).toBe(true);
+
+    const ingesting = (composer as any).ingestFiles([pdf]);
+    for (let turn = 0; signals.length === 0 && turn < 100; turn++) await Promise.resolve();
+    expect(stop.hidden).toBe(false);
+    stop.click();
+    await ingesting;
+
+    expect(signals[0].aborted).toBe(true);
+    expect(stop.hidden).toBe(true);
+    expect(noticeLog).toHaveBeenCalledWith("Notice: slow.pdf could not be processed: processing was stopped. Retry to process it.");
+    expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("slow.pdf");
+
+    // Closing the chat stops a retry that is still processing.
+    const failedId = (composer as any).messageAttachments.displaySnapshot()[0].id;
+    void (composer as any).retryMessageAttachment(failedId);
+    for (let turn = 0; signals.length === 1 && turn < 100; turn++) await Promise.resolve();
+    composer.unload();
+    expect(signals[1].aborted).toBe(true);
+  });
+
   it("turns a Similar Notes drag payload into a pinned file instead of a message attachment", () => {
     const parent = document.body.createDiv();
     const onVaultContextDrop = jest.fn();

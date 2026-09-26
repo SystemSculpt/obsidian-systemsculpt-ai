@@ -273,9 +273,11 @@ export class DocumentContextManager {
     options: {
       showNotices?: boolean;
       saveChanges?: boolean;
+      /** Stops document processing, e.g. when the tool call that pins is cancelled. */
+      signal?: AbortSignal;
     } = {}
   ): Promise<boolean> {
-    const { showNotices = true, saveChanges = true } = options;
+    const { showNotices = true, saveChanges = true, signal } = options;
     
     
     try {
@@ -292,6 +294,7 @@ export class DocumentContextManager {
         try {
           await this.documentProcessingService.processDocumentWithReceipt(file, {
             showNotices: false,
+            signal,
             commitContextEffect: async (effect, signal) => {
               for (const imagePath of effect.imagePaths) {
                 throwIfAborted(signal);
@@ -381,15 +384,17 @@ export class DocumentContextManager {
       showNotices?: boolean;
       saveChanges?: boolean;
       maxFiles?: number;
+      signal?: AbortSignal;
     } = {}
   ): Promise<number> {
-    const { showNotices = true, saveChanges = true, maxFiles = 100 } = options;
+    const { showNotices = true, saveChanges = true, maxFiles = 100, signal } = options;
     
     
     let successCount = 0;
     let currentContextSize = contextManager.getPinnedFiles().size;
     
     for (const file of files) {
+      if (signal?.aborted) break;
       // Check if we've reached the maximum number of files
       if (currentContextSize >= maxFiles) {
         if (showNotices) {
@@ -402,6 +407,7 @@ export class DocumentContextManager {
       const success = await this.pinVaultFile(file, contextManager, {
         showNotices: false, // We'll handle notices ourselves
         saveChanges: false, // We'll save changes after all files are added
+        signal,
       });
       
       if (success) {

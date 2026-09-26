@@ -37,14 +37,14 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
     mimeType: "application/pdf";
     bytes: ArrayBuffer;
     fingerprint: `sha256:${string}`;
-  }>): Promise<Readonly<{ operationId: string; markdown: string }>> {
+  }>, options: Readonly<{ signal: AbortSignal }>): Promise<Readonly<{ operationId: string; markdown: string }>> {
     const operationId = createChatDocumentOperationId();
     try {
       const result = await this.managed.process({
         identity: `chat-pdf:${input.fingerprint.slice("sha256:".length)}`,
         fingerprint: () => input.fingerprint,
         load: async () => ({ filename: input.name, contentType: input.mimeType, bytes: input.bytes }),
-      }, { operationId });
+      }, { operationId, signal: options.signal });
       const markdown = typeof result.result.markdown === "string" && result.result.markdown.trim()
         ? result.result.markdown
         : result.result.text;

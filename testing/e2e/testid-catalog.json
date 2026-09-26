@@ -38,6 +38,7 @@
     "chat.composer",
     "chat.composer.approval-mode",
     "chat.composer.attach",
+    "chat.composer.attachment.cancel",
     "chat.composer.attachment.remove",
     "chat.composer.attachment.retry",
     "chat.composer.attachment.unpin",

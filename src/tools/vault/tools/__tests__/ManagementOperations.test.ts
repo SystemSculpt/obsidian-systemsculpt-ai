@@ -340,6 +340,20 @@ describe("ManagementOperations", () => {
         expect(result.results[0]).toMatchObject({ path: "Private/key.md", success: true, note: expect.stringContaining("named explicitly") });
       });
 
+      it("forwards the tool call's cancel signal to document pinning (#420)", async () => {
+        const signal = new AbortController().signal;
+        const folderFiles = [new TFile({ path: "dir/report.pdf" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+        await mgmtOps.manageContext({ action: "add", paths: ["dir"] }, mockChatView, signal);
+        expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalledWith(folderFiles, mockContextManager, expect.objectContaining({ signal }));
+
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(new TFile({ path: "report.pdf" }));
+        await mgmtOps.manageContext({ action: "add", paths: ["report.pdf"] }, mockChatView, signal);
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledWith(expect.anything(), mockContextManager, expect.objectContaining({ signal }));
+      });
+
       it("rejects directory with too many files", async () => {
         const mockFiles = Array(15).fill(null).map((_, i) => new TFile({ path: `dir/file${i}.md` }));
         const mockFolder = new TFolder({ path: "dir", children: mockFiles });

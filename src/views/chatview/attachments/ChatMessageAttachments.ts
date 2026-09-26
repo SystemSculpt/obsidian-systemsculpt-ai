@@ -16,6 +16,7 @@ import {
   parseAttachedTextContent,
   parseImageDataUrl,
 } from "../../../chat/ChatAttachmentContent";
+import { platformTransferTimeoutMs } from "../../../services/PlatformRequestClient";
 
 const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, "image/png" | "image/jpeg" | "image/webp">> = Object.freeze({
   png: "image/png",
@@ -79,12 +80,13 @@ export type FailedChatMessageAttachment = Readonly<{
 export type ChatAttachmentDisplay = ChatMessageAttachment | FailedChatMessageAttachment;
 
 export type ChatDocumentAttachmentProcessor = Readonly<{
+  /** Stops and discards its managed operation when `signal` aborts. */
   prepare: (input: Readonly<{
     name: string;
     mimeType: "application/pdf";
     bytes: ArrayBuffer;
     fingerprint: `sha256:${string}`;
-  }>) => Promise<Readonly<{ operationId: string; markdown: string }>>;
+  }>, options: Readonly<{ signal: AbortSignal }>) => Promise<Readonly<{ operationId: string; markdown: string }>>;
   complete: (operationId: string) => Promise<void>;
   discard: (operationId: string) => Promise<void>;
 }>;
@@ -114,6 +116,39 @@ export type ChatAttachmentIngestionResult = Readonly<{
 }>;
 
 export type BrowserFileReader = (file: File) => Promise<ArrayBuffer>;
+
+/**
+ * Chat waits this long for document processing beyond moving the file, so a
+ * stalled download ends as a failed attachment that can be retried.
+ */
+const DOCUMENT_PROCESSING_ALLOWANCE_MS = 10 * 60_000;
+
+/** The document operation's own signal: the draft's, until the deadline passes. */
+async function withDocumentDeadline<T>(
+  draft: AbortSignal,
+  byteLength: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  draft.addEventListener("abort", abort, { once: true });
+  if (draft.aborted) controller.abort();
+  let expired = false;
+  const timer = window.setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, DOCUMENT_PROCESSING_ALLOWANCE_MS + platformTransferTimeoutMs(byteLength));
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (expired) throw new Error("it took too long. Retry to try again.");
+    if (draft.aborted) throw new Error("processing was stopped. Retry to process it.");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    draft.removeEventListener("abort", abort);
+  }
+}
 
 function extensionOf(name: string): string {
   const leaf = name.split(/[\\/]/).pop() || name;
@@ -175,6 +210,8 @@ export class ChatMessageAttachmentCollection {
   private readonly entries = new Map<string, ChatAttachmentDisplay>();
   private readonly retryDocuments = new Map<string, Readonly<{ file: File; bytes: ArrayBuffer; fingerprint: `sha256:${string}` }>>();
   private limits: ThinAgentInputLimits;
+  /** Aborts document processing this draft started; replaced after a cancel. */
+  private processing = new AbortController();
 
   public constructor(
     private readonly read: BrowserFileReader = readBrowserFile,
@@ -213,6 +250,17 @@ export class ChatMessageAttachmentCollection {
   public clear(): void {
     this.entries.clear();
     this.retryDocuments.clear();
+  }
+
+  /** Stop document processing still running. Each unfinished document stays listed and can be retried. */
+  public cancelProcessing(): void {
+    this.processing.abort();
+    this.processing = new AbortController();
+  }
+
+  /** The draft is discarded: document processing it started stops. */
+  public dispose(): void {
+    this.processing.abort();
   }
 
   public replace(attachments: readonly ChatMessageAttachment[]): void {
@@ -260,8 +308,9 @@ export class ChatMessageAttachmentCollection {
     if (!retry || failed?.status !== "failed" || !this.documentProcessor) {
       return Object.freeze({ accepted: Object.freeze([]), issues: Object.freeze([]) });
     }
+    const signal = this.processing.signal;
     try {
-      const attachment = await this.preparePdfAttachment(retry.file, retry.bytes, retry.fingerprint);
+      const attachment = await this.preparePdfAttachment(retry.file, retry.bytes, retry.fingerprint, signal);
       const validation = this.validateSubmission(userText, [...this.snapshot(), attachment]);
       if (validation.length > 0) throw new Error(validation[0].message);
       this.entries.set(id, attachment);
@@ -339,6 +388,8 @@ export class ChatMessageAttachmentCollection {
   public async addFiles(files: readonly File[], userText = ""): Promise<ChatAttachmentIngestionResult> {
     const accepted: ChatMessageAttachment[] = [];
     const issues: ChatAttachmentIssue[] = [];
+    // One cancel stops every document this call has yet to finish.
+    const signal = this.processing.signal;
 
     for (const file of files) {
       const name = safeFileName(file.name);
@@ -413,7 +464,7 @@ export class ChatMessageAttachmentCollection {
           continue;
         }
         try {
-          attachment = await this.preparePdfAttachment(file, buffer, fingerprint);
+          attachment = await this.preparePdfAttachment(file, buffer, fingerprint, signal);
         } catch (error) {
           const message = this.documentFailureMessage(name, error);
           const failed = Object.freeze({ status: "failed" as const, id, name, mimeType: "application/pdf", byteLength: bytes.byteLength, kind: "document" as const, error: message });
@@ -452,20 +503,22 @@ export class ChatMessageAttachmentCollection {
     file: File,
     bytes: ArrayBuffer,
     fingerprint: `sha256:${string}`,
+    signal: AbortSignal,
   ): Promise<ChatMessageAttachment> {
-    if (!this.documentProcessor) throw new Error("Document processing is unavailable.");
+    const processor = this.documentProcessor;
+    if (!processor) throw new Error("Document processing is unavailable.");
     const name = safeFileName(file.name);
-    const prepared = await this.documentProcessor.prepare({
+    const prepared = await withDocumentDeadline(signal, bytes.byteLength, (bounded) => processor.prepare({
       name,
       mimeType: "application/pdf",
       bytes,
       fingerprint,
-    });
+    }, { signal: bounded }));
     const markdownBytes = new TextEncoder().encode(prepared.markdown);
     const contentPart = createTextAttachmentPart(name, "text/markdown", markdownBytes);
     const contentBytes = contentPart.type === "text" ? utf8Bytes(contentPart.text) : 0;
     if (markdownBytes.byteLength < 1 || contentBytes > this.limits.maxTextBytesPerBlock) {
-      await this.documentProcessor.discard(prepared.operationId);
+      await processor.discard(prepared.operationId);
       throw new Error(`The extracted document text is empty or exceeds ${formatMebibytes(this.limits.maxTextBytesPerBlock)}.`);
     }
     const attachment = Object.freeze({
@@ -481,9 +534,9 @@ export class ChatMessageAttachmentCollection {
       // The extracted text is the entire local effect of this managed job.
       // Once the immutable ready attachment exists there is no later vault or
       // transcript commit to recover, so settle the operation immediately.
-      await this.documentProcessor.complete(prepared.operationId);
+      await processor.complete(prepared.operationId);
     } catch (error) {
-      await this.documentProcessor.discard(prepared.operationId).catch(() => undefined);
+      await processor.discard(prepared.operationId).catch(() => undefined);
       throw error;
     }
     return attachment;

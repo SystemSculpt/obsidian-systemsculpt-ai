@@ -165,7 +165,7 @@ describe("ChatMessageAttachmentCollection", () => {
       mimeType: "application/pdf",
       bytes: expect.any(ArrayBuffer),
       fingerprint: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-    }));
+    }), { signal: expect.objectContaining({ aborted: false }) });
     expect(processor.complete).toHaveBeenCalledWith("document-op-1");
     expect(processor.discard).not.toHaveBeenCalled();
     expect(result.accepted[0]).not.toHaveProperty("documentOperationId");
@@ -177,6 +177,86 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(result.accepted[0].contentPart.type === "text"
       ? parseAttachedTextContent(result.accepted[0].contentPart.text)?.mimeType
       : null).toBe("text/markdown");
+  });
+
+  /** A document job that only ends when its signal aborts, as a stalled download does. */
+  function stalledProcessor() {
+    const signals: AbortSignal[] = [];
+    const processor: ChatDocumentAttachmentProcessor = {
+      prepare: jest.fn((_input, { signal }) => new Promise<never>((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(new Error("The operation was aborted.")), { once: true });
+      })),
+      complete: jest.fn(async () => undefined),
+      discard: jest.fn(async () => undefined),
+    };
+    return { processor, signals };
+  }
+
+  async function started(signals: AbortSignal[], count = 1): Promise<void> {
+    for (let turn = 0; signals.length < count && turn < 100; turn++) await Promise.resolve();
+    expect(signals).toHaveLength(count);
+  }
+
+  it("stops a document still processing when the user cancels, and keeps it for a retry (#420)", async () => {
+    const { processor, signals } = stalledProcessor();
+    const collection = new ChatMessageAttachmentCollection(reader({ "stalled.pdf": "%PDF" }), processor);
+
+    const pending = collection.addFiles([file("stalled.pdf", "application/pdf", "%PDF")]);
+    await started(signals);
+    collection.cancelProcessing();
+    const result = await pending;
+
+    expect(signals[0].aborted).toBe(true);
+    expect(result.accepted).toEqual([]);
+    expect(result.issues).toEqual([expect.objectContaining({
+      code: "processing_failed",
+      message: "stalled.pdf could not be processed: processing was stopped. Retry to process it.",
+    })]);
+    const failed = collection.displaySnapshot();
+    expect(failed).toEqual([expect.objectContaining({ status: "failed", name: "stalled.pdf" })]);
+
+    // A retry starts with a fresh signal.
+    (processor.prepare as jest.Mock).mockImplementationOnce(async (_input, { signal }) => {
+      expect(signal.aborted).toBe(false);
+      return { operationId: "document-op", markdown: "Extracted" };
+    });
+    const retried = await collection.retry(failed[0].id);
+    expect(retried.accepted.map((attachment) => attachment.name)).toEqual(["stalled.pdf"]);
+  });
+
+  it("ends a stalled document download at the deadline as a failure that can be retried (#420)", async () => {
+    jest.useFakeTimers();
+    try {
+      const { processor, signals } = stalledProcessor();
+      const collection = new ChatMessageAttachmentCollection(reader({ "stalled.pdf": "%PDF" }), processor);
+      const pending = collection.addFiles([file("stalled.pdf", "application/pdf", "%PDF")]);
+      await started(signals);
+
+      jest.advanceTimersByTime(9 * 60_000);
+      expect(signals[0].aborted).toBe(false);
+      jest.advanceTimersByTime(2 * 60_000);
+      const result = await pending;
+
+      expect(signals[0].aborted).toBe(true);
+      expect(result.issues).toEqual([expect.objectContaining({
+        code: "processing_failed",
+        message: "stalled.pdf could not be processed: it took too long. Retry to try again.",
+      })]);
+      expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "failed" })]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("stops document processing when its draft is discarded (#420)", async () => {
+    const { processor, signals } = stalledProcessor();
+    const collection = new ChatMessageAttachmentCollection(reader({ "stalled.pdf": "%PDF" }), processor);
+    const pending = collection.addFiles([file("stalled.pdf", "application/pdf", "%PDF")]);
+    await started(signals);
+    collection.dispose();
+    await pending;
+    expect(signals[0].aborted).toBe(true);
   });
 
   it("restores exact image, text, and PDF identities from a durable multipart message", async () => {

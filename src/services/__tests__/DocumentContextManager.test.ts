@@ -427,6 +427,23 @@ describe("DocumentContextManager", () => {
         expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
       });
 
+      it("passes a pin's cancel signal to document processing, and stops a batch once cancelled (#420)", async () => {
+        const controller = new AbortController();
+        const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
+        resolveDocument("Extractions/doc/doc.md");
+        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
+
+        await manager.pinVaultFile(file, mockContextManager, { signal: controller.signal });
+        expect(mockProcessDocument).toHaveBeenCalledWith(file, expect.objectContaining({ signal: controller.signal }));
+
+        mockProcessDocument.mockClear();
+        controller.abort();
+        const pinned = await manager.pinVaultFiles([file, createMockFile({ path: "test/other.pdf", extension: "pdf", basename: "other" })], mockContextManager, { signal: controller.signal });
+        expect(pinned).toBe(0);
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+      });
+
       it("rejects unsupported Office files without managed processing or context routing", async () => {
         const file = createMockFile({ path: "test/doc.docx", extension: "docx", basename: "doc" });
 

@@ -323,8 +323,19 @@ describe("FirstPartyToolService", () => {
 
         const result = await server.executeTool("context", params, { chatView });
 
-        expect(mockManageContext).toHaveBeenCalledWith(params, chatView);
+        expect(mockManageContext).toHaveBeenCalledWith(params, chatView, undefined);
         expect(result).toEqual({ context: {} });
+      });
+
+      it("hands the tool call's cancel signal to manageContext (#420)", async () => {
+        const params = { action: "add", paths: ["report.pdf"] };
+        const chatView = { contextManager: {} } as any;
+        const signal = new AbortController().signal;
+        mockManageContext.mockResolvedValue({ context: {} });
+
+        await server.executeTool("context", params, { chatView, signal });
+
+        expect(mockManageContext).toHaveBeenCalledWith(params, chatView, signal);
       });
     });
 

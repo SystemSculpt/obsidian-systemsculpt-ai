@@ -80,6 +80,7 @@ export class AgentComposer extends Component {
   private readonly micButton: HTMLButtonElement | null;
   private readonly sendButton: HTMLButtonElement;
   private readonly stopButton: HTMLButtonElement;
+  private readonly cancelAttachmentsButton: HTMLButtonElement;
   private readonly hint: HTMLElement;
   private running = false;
   private historyEditing = false;
@@ -155,6 +156,13 @@ export class AgentComposer extends Component {
     this.hint = toolbar.createSpan({ cls: "systemsculpt-agent-prompt-hint", text: "Enter to send" });
 
     const actions = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-actions" });
+    this.cancelAttachmentsButton = createButton(
+      actions,
+      "systemsculpt-agent-attachment-cancel",
+      "chat.composer.attachment.cancel",
+      "Stop processing attachments",
+      "x",
+    );
     this.stopButton = createButton(actions, "systemsculpt-agent-stop", "chat.composer.stop", "Stop response", "square", "danger");
     this.sendButton = createButton(actions, "systemsculpt-agent-send", "chat.composer.send", "Send message", "arrow-up", "primary");
 
@@ -212,6 +220,7 @@ export class AgentComposer extends Component {
     });
     this.registerDomEvent(this.sendButton, "click", () => void this.submit());
     this.registerDomEvent(this.stopButton, "click", () => void this.options.onStop());
+    this.registerDomEvent(this.cancelAttachmentsButton, "click", () => this.messageAttachments.cancelProcessing());
     this.syncControls();
   }
 
@@ -221,6 +230,11 @@ export class AgentComposer extends Component {
 
   public getValue(): string {
     return this.input.value;
+  }
+
+  onunload(): void {
+    // Closing the chat stops document processing its draft started.
+    this.messageAttachments.dispose();
   }
 
   public hasDraft(): boolean {
@@ -242,6 +256,7 @@ export class AgentComposer extends Component {
   public resetDraft(): void {
     this.attachmentGeneration += 1;
     this.attachmentBusy = false;
+    this.messageAttachments.dispose();
     this.input.value = "";
     this.filePicker.value = "";
     this.messageAttachments = this.createMessageAttachmentCollection();
@@ -473,6 +488,7 @@ export class AgentComposer extends Component {
     this.sendButton.disabled = this.historyEditing || readOnly || this.submitting || this.attachmentBusy
       || this.messageAttachments.hasBlockingFailures() || !hasMessage;
     this.stopButton.toggleAttribute("hidden", !this.running);
+    this.cancelAttachmentsButton.toggleAttribute("hidden", !this.attachmentBusy);
     this.attachButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.vaultContextButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.filePicker.disabled = this.historyEditing || readOnly || this.attachmentBusy;
