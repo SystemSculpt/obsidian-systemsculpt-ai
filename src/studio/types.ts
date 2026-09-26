@@ -300,8 +300,6 @@ export type StudioPermissionPolicyV1 = {
 };
 
 export type StudioProjectV1 = {
-  /** Collaborative state embedded in the same file as the readable canvas. */
-  document?: { engine: "automerge"; state: string; heads: string[] };
   schema: typeof STUDIO_PROJECT_SCHEMA_V1;
   projectId: string;
   name: string;

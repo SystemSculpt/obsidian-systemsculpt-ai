@@ -7,7 +7,7 @@ export type StudioProjectEntities = Record<string, Record<string, Value>>;
 
 /** Stable entity keys, never array offsets, are the unit of authored intent. */
 export function projectToEntities(project: StudioProjectV1): StudioProjectEntities {
-  const raw = JSON.parse(serializeStudioProject({ ...project, document: undefined }));
+  const raw = JSON.parse(serializeStudioProject(project));
   const entities: StudioProjectEntities = Object.create(null);
   entities.project = { name: raw.name };
   for (const [collection, kind] of [["nodes", "node"], ["groups", "group"], ["shapes", "shape"]] as const) {
@@ -29,7 +29,7 @@ export function projectToEntities(project: StudioProjectV1): StudioProjectEntiti
 }
 
 /** Runtime settings remain outside authored entities; parsing validates references. */
-export function entitiesToProject(entities: StudioProjectEntities, template: StudioProjectV1, document?: StudioProjectV1["document"]): StudioProjectV1 {
+export function entitiesToProject(entities: StudioProjectEntities, template: StudioProjectV1): StudioProjectV1 {
   const select = (prefix: string) => Object.entries(entities).filter(([key]) => key.startsWith(prefix)).sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
   if (!entities.project || typeof entities.project.name !== "string") throw new Error("A Studio document requires its project name.");
   for (const [key, value] of Object.entries(entities)) {
@@ -73,5 +73,5 @@ export function entitiesToProject(entities: StudioProjectEntities, template: Stu
   };
   assertValidStudioProjectAgentDocumentStructure(readable);
   const parsed = parseStudioProject(JSON.stringify(readable));
-  return { ...template, name: parsed.name, graph: parsed.graph, diagram: parsed.diagram, document };
+  return { ...template, name: parsed.name, graph: parsed.graph, diagram: parsed.diagram };
 }

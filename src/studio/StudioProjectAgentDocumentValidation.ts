@@ -1,6 +1,6 @@
 const PROJECT_SCHEMA_V1 = "studio.project.v1";
 const PROJECT_SCHEMA_V2 = "studio.project.v2";
-const ROOT_V2_FIELDS = new Set(["schema", "id", "name", "docs", "canvas", "document"]);
+const ROOT_V2_FIELDS = new Set(["schema", "id", "name", "docs", "canvas", "document", "merge"]);
 const ROOT_V2_REQUIRED_FIELDS = ["schema", "id", "name", "canvas"] as const;
 const CANVAS_FIELDS = new Set(["nodes", "edges", "groups", "shapes", "arrows", "layout"]);
 const NODE_V2_FIELDS = new Set([
@@ -666,10 +666,14 @@ function assertLayoutAndParents(container: Record<string, unknown>, nodes: unkno
 }
 
 function assertStrictProjectV2(document: Record<string, unknown>): void {
+  // Former 6.10 merge state: still accepted so those files open and edit, then
+  // dropped by the next save. Studio never writes it.
   if (hasOwn(document, "document")) {
     const basis = assertClosedObject(document.document, new Set(["engine", "state", "heads"]), ["engine", "state", "heads"], "document");
     if (basis.engine !== "automerge" || typeof basis.state !== "string" || !basis.state || !Array.isArray(basis.heads) || !basis.heads.every(head => typeof head === "string" && /^[a-f0-9]{64}$/.test(head))) throw new Error("Invalid Studio merge state.");
   }
+  // Studio's merge record for other devices. Its content is read defensively and never blocks a file.
+  if (hasOwn(document, "merge") && !isRecord(document.merge)) throw new Error("merge must be an object when present.");
   assertOnlyFields(document, ROOT_V2_FIELDS, "Studio project root");
   assertRequiredFields(document, ROOT_V2_REQUIRED_FIELDS, "Studio project root");
   for (const field of ["id", "name"] as const) {

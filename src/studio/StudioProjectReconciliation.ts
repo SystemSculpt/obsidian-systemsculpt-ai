@@ -1,4 +1,4 @@
-import { mergeStudioProjects } from "./document/StudioProjectCollaboration";
+import { isStudioProseFieldPath, mergeStudioText } from "./document/StudioTextMerge";
 import { cleanupOrphanedManagedMediaOutputs } from "./StudioManagedOutputNodes";
 import { parseStudioProject, serializeStudioProject } from "./schema";
 import type { StudioProjectV1 } from "./types";
@@ -19,9 +19,11 @@ function equal(left: Value, right: Value): boolean {
 }
 
 /** Rebase editing intent, by entity ID and field, onto the latest document.
- * A same-field conflict keeps the external value by default; callers preserve
- * the local snapshot before accepting that result. Positional array merging is
- * never used: arbitrary config arrays remain indivisible user values. */
+ * Prose text changed on both sides merges when the two changes are separate
+ * (see mergeStudioText). Any other same-field conflict keeps the external value
+ * by default; callers preserve the local snapshot before accepting that result.
+ * Positional array merging is never used: arbitrary config arrays remain
+ * indivisible user values. */
 export function reconcileStudioProject(
   base: StudioProjectV1,
   local: StudioProjectV1,
@@ -29,7 +31,6 @@ export function reconcileStudioProject(
   options?: { preferLocalConflicts?: boolean }
 ): StudioProjectReconciliation {
   if (base.projectId !== local.projectId || base.projectId !== external.projectId) throw new Error("Cannot reconcile different Studio projects.");
-  if (local.document && external.document) return {project: mergeStudioProjects(local, external), conflicts: []};
   const conflicts: string[] = [];
   const merge = (before: Value, ours: Value, theirs: Value, path: string): Value => {
     if (equal(ours, before)) return theirs;
@@ -61,12 +62,16 @@ export function reconcileStudioProject(
       }
       return result;
     }
+    if (typeof before === "string" && typeof ours === "string" && typeof theirs === "string" && isStudioProseFieldPath(path)) {
+      const text = mergeStudioText(before, ours, theirs);
+      if (text !== null) return text;
+    }
     conflicts.push(path);
     return options?.preferLocalConflicts ? ours : theirs;
   };
   // The public dialect omits generated timestamps, migrations and runtime
   // metadata, which must never turn an unrelated edit into a user conflict.
-  const document = (project: StudioProjectV1) => JSON.parse(serializeStudioProject({ ...project, document: undefined })) as Json;
+  const document = (project: StudioProjectV1) => JSON.parse(serializeStudioProject(project)) as Json;
   const merged = merge(document(base), document(local), document(external), "");
   if (record(merged) && record(merged.canvas) && Array.isArray(merged.canvas.nodes) && Array.isArray(merged.canvas.edges)) {
     const ids = new Set(merged.canvas.nodes.filter(record).map(node => node.id));

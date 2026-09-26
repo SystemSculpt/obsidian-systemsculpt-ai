@@ -1,7 +1,6 @@
 {
   "author": "SystemSculpt",
   "dependencies": {
-    "@automerge/automerge": "^3.4.1",
     "@codemirror/commands": "6.11.0",
     "@codemirror/lang-javascript": "6.2.5",
     "@codemirror/lang-json": "6.0.2",

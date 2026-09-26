@@ -128,7 +128,7 @@ export class StudioService {
   private readonly apiAdapter: StudioApiExecutionAdapter;
   private readonly runtime: StudioRuntime;
   readonly agentRuns: StudioAgentRuns;
-  private readonly projectSessionManager = new StudioProjectSessionManager();
+  private readonly projectSessionManager = new StudioProjectSessionManager(path => this.projectStore.releaseDocument(path));
   private readonly agentReferenceFile: StudioAgentReferenceFile;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
@@ -136,6 +136,9 @@ export class StudioService {
       // The copy is made once per distinct original, so this notice appears once per upgraded file.
       onLegacyOriginalCopied: (copy) => {
         new Notice(formatLegacyOriginalNotice(copy), 15000);
+      },
+      onMergeNotice: (projectPath, message) => {
+        new Notice(`${projectPath.split("/").pop() ?? projectPath}: ${message}`, 15000);
       },
     });
     this.agentReferenceFile = new StudioAgentReferenceFile(plugin.app);
@@ -224,10 +227,8 @@ export class StudioService {
     const session = new StudioProjectSession({
       projectPath,
       project,
-      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject, intent) => {
-        return this.projectStore.saveProject(nextProjectPath, nextProject, {
-          onBeforeProjectWrite, baseProject, restoreDeletedEntities: intent?.restoreDeletedEntities,
-        });
+      saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject) => {
+        return this.projectStore.saveProject(nextProjectPath, nextProject, { onBeforeProjectWrite, baseProject });
       },
       readProjectRawText: async (nextProjectPath) => {
         return this.projectStore.readProjectRawText(nextProjectPath);
@@ -286,35 +287,33 @@ export class StudioService {
   }
 
   /** Files are imported into document authority; views and editor lifetimes stay intact. */
-  async reconcileProjectFile(path: string, rawText?: string): Promise<{conflicts: string[]}> {
+  async reconcileProjectFile(path: string): Promise<{conflicts: string[]}> {
     const session = this.getProjectSession(path);
     await session?.waitForInFlightSave();
-    const result = rawText === undefined
-      ? await this.projectStore.refreshDocument(path)
-      : await this.projectStore.importProjectText(path, rawText);
+    // A watcher's bytes only announce a change: the current file is what gets imported.
+    const result = await this.projectStore.refreshDocument(path);
     if (session && !session.isDisposed()) {
-      await session.reconcileExternalProject(result.project, serializeStudioProject(result.project));
+      await session.reconcileExternalProject(result.project, result.source);
     }
     return {conflicts: result.conflicts};
   }
 
+  /** `heads` holds one revision: the SHA-256 of the canonical document text. */
   async readAgentDocument(path: string): Promise<unknown> {
     path = this.requireProjectPath(path);
     await this.getProjectSession(path)?.flushPendingSaveWork({force: true});
-    const project = await this.projectStore.loadProject(path);
-    const readable = JSON.parse(serializeStudioProject(project));
-    delete readable.document;
-    return {heads: project.document?.heads, canvas: readable, entities: projectToEntities(project)};
+    const {project, revision} = await this.projectStore.readDocument(path);
+    return {heads: [revision], canvas: JSON.parse(serializeStudioProject(project)), entities: projectToEntities(project)};
   }
 
   async editAgentDocument(path: string, heads: string[], edits: StudioDocumentEdit[]): Promise<unknown> {
     path = this.requireProjectPath(path);
-    if (!Array.isArray(heads) || !heads.length || !heads.every(head => typeof head === "string" && /^[0-9a-f]{64}$/.test(head))) throw new Error("Read the Studio revision before editing.");
+    if (!Array.isArray(heads) || heads.length !== 1 || typeof heads[0] !== "string" || !/^[0-9a-f]{64}$/.test(heads[0])) throw new Error("Read the Studio revision before editing.");
     const session = this.getProjectSession(path);
     await session?.flushPendingSaveWork({force: true});
-    const result = await this.projectStore.editDocument(path, heads, edits);
-    await session?.reconcileExternalProject(result.project, serializeStudioProject(result.project));
-    return {heads: result.project.document?.heads, entities: projectToEntities(result.project)};
+    const result = await this.projectStore.editDocument(path, heads[0], edits);
+    await session?.reconcileExternalProject(result.project, result.source);
+    return {heads: [result.revision], entities: projectToEntities(result.project)};
   }
 
   async releaseProjectSession(path: string): Promise<void> {

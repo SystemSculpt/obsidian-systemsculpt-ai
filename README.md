@@ -42,10 +42,6 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 - To start Codex, the plugin reads the optional launch settings file `~/.config/systemsculpt/codex.json`, which can set the `binary` to run and the Codex `home` directory. It checks that the Codex home (`~/.codex` by default) exists and passes it to Codex as `CODEX_HOME`. The plugin does not read, copy, or upload files inside the Codex home, including Codex credentials.
 - Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. License keys are removed from exported diagnostics and settings backups.
 
-## Bundled components
-
-- [Automerge](https://github.com/automerge/automerge) (`@automerge/automerge` 3.4.1, MIT license, copyright Ink & Switch LLC) merges concurrent edits to a Studio project document, for example edits from two synced devices, without discarding either side. Its WebAssembly core ships inside `main.js` as base64 and is compiled on the device the first time a Studio project document loads. It runs locally, makes no network requests, and is never downloaded at runtime.
-
 ## Documentation
 
 - [Getting started](docs/user/getting-started.md)
