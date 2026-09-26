@@ -244,6 +244,11 @@ export class StudioProjectDocument {
     const {project, text} = this.canonical(candidate, result);
     const entities = projectToEntities(project);
     pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
+    if (previous && block && block.at !== previous.at) {
+      // A merge can retain a deletion or a newer stamp without changing the incoming canvas.
+      // Publish that knowledge in the same file so it survives restart and reaches other devices.
+      rewrite ||= JSON.stringify(studioMergeBlock(clock, block.at, block.canvas)) !== JSON.stringify(studioMergeBlock(block, block.at, block.canvas));
+    }
     const next: Accepted = {source: raw, text, project, entities, clock, at: block?.at ?? "", pending, rewrite, legacy, documentState};
     this.cache.set(this.path, next);
     for (const notice of notices) this.onMergeNotice?.(this.path, notice);

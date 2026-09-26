@@ -285,7 +285,14 @@ export function mergeStudioExternalEntities(options: {
       const a = leaves(mine), b = leaves(theirs);
       for (const id of new Set([...a.keys(), ...b.keys()])) {
         const leaf = (a.get(id) || b.get(id))!.leaf, ours = a.get(id)?.value, other = b.get(id)?.value;
-        if (canonical(ours) === canonical(other)) continue;
+        if (canonical(ours) === canonical(other)) {
+          // Equal values can arrive with newer history (for example, an edit followed by Undo).
+          // Adopt that history too, or an intermediate stale copy can replace the accepted value.
+          if (writer.kind === "stamped" && leafStamp(writer.stamps, key, leaf) > leafStamp(clock.stamps, key, leaf)) {
+            setLeafStamp(clock.stamps, key, leaf, fieldEntry(writer.stamps, key, leaf) || presence(writer.stamps, key));
+          }
+          continue;
+        }
         if (writer.kind === "undated") {
           if (fieldEntry(clock.stamps, key, leaf)) { setLeaf(merged[key], leaf, ours); kept++; }
           continue;
@@ -302,6 +309,9 @@ export function mergeStudioExternalEntities(options: {
         }
         if (leafStamp(clock.stamps, key, leaf) > stampOf(theirEntry)) { setLeaf(merged[key], leaf, ours); kept++; }
         else if (theirEntry) setLeafStamp(clock.stamps, key, leaf, theirEntry);
+      }
+      if (writer.kind === "stamped" && presence(writer.stamps, key) > presence(clock.stamps, key)) {
+        (clock.stamps[key] ||= Object.create(null) as StudioEntityStamps)[""] = presence(writer.stamps, key);
       }
     } else if (mine) {
       if (writer.kind === "undated") { merged[key] = copy(mine); kept++; continue; }

@@ -201,6 +201,76 @@ describe("edits made on this device outside Studio's merge", () => {
 });
 
 describe("copies from another device", () => {
+  it("publishes a retained deletion even when merging leaves the incoming canvas unchanged", async () => {
+    const { a, b } = await pair();
+    await edit(a, draft => { draft.graph.nodes.push(node("c", "Created on A")); });
+    const staleCopy = a.files.get(path)!;
+    tick();
+    await edit(a, draft => { draft.graph.nodes = draft.graph.nodes.filter(item => item.id !== "c"); });
+    const deletion = block(a).deleted["node:c"];
+    tick();
+    await edit(b, draft => { find(draft, "a")!.title = "Renamed on B"; });
+    deliver(b, a);
+    await receive(a);
+    expect(block(a).deleted["node:c"]).toBe(deletion);
+
+    const restarted = { ...a, store: a.restart() };
+    await restarted.store.loadProject(path);
+    deliver(b, restarted, staleCopy);
+    expect(values((await receive(restarted)).project)).toEqual({ a: "Alpha", b: "Beta" });
+    // The merged publication reaches the other device and settles without a write loop.
+    deliver(a, b);
+    await receive(b);
+    expect(b.files.get(path)).toBe(a.files.get(path));
+  });
+
+  it("adopts newer stamps for equal values before an intermediate stale edit arrives", async () => {
+    const { a, b } = await pair();
+    await edit(a, draft => { find(draft, "a")!.title = "Shared title"; });
+    tick();
+    await edit(b, draft => { find(draft, "a")!.title = "Stale title"; });
+    const staleCopy = b.files.get(path)!;
+    tick();
+    await edit(b, draft => { find(draft, "a")!.title = "Shared title"; });
+    deliver(b, a);
+    await receive(a);
+    expect(a.files.get(path)).toBe(b.files.get(path));
+
+    deliver(b, a, staleCopy);
+    expect(find((await receive(a)).project, "a")!.title).toBe("Shared title");
+  });
+
+  it("fingerprints the published merge record when accepting a project in the live session", async () => {
+    const { a, b } = await pair();
+    const live = session(a.store, await a.store.loadProject(path));
+    const before = a.files.get(path)!;
+    live.markAcceptedProjectText(before);
+    tick();
+    // Same canvas, new publication: the session must still evaluate its merge information.
+    await edit(b, () => {});
+    deliver(b, a);
+    expect(live.resolveProjectFileTextUpdate(a.files.get(path)!).decision).toEqual({ kind: "evaluate" });
+    const result = await receive(a);
+    const published = await a.store.readProjectRawText(path);
+    await live.reconcileExternalProject(result.project, published);
+    expect(live.matchesLastAcceptedProjectText(published!)).toBe(true);
+    expect(live.matchesLastAcceptedProjectText(before)).toBe(false);
+    expect(live.matchesLastAcceptedProjectText(serializeStudioProject(result.project))).toBe(false);
+    await live.close();
+  });
+
+  it("remembers a restore even when this device never saw the deletion", async () => {
+    const { a, b } = await pair();
+    await edit(b, draft => { draft.graph.nodes = draft.graph.nodes.filter(item => item.id !== "b"); });
+    const deletion = b.files.get(path)!;
+    tick();
+    await edit(b, draft => { draft.graph.nodes.push(node("b", "Beta")); });
+    deliver(b, a);
+    await receive(a);
+    deliver(b, a, deletion);
+    expect(values((await receive(a)).project)).toEqual({ a: "Alpha", b: "Beta" });
+  });
+
   it.each([["before", false], ["after", true]])("keep this device's newer edits and cards from an offline device and apply that device's edit (its edit %s this device's)", async (_order, otherEditsLast) => {
     const { a, b } = await pair();
     const onB = async () => { await edit(b, draft => { find(draft, "b")!.config.value = "Beta from B"; }); tick(); };
