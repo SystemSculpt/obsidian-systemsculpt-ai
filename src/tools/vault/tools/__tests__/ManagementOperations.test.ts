@@ -3,6 +3,8 @@
  */
 import { App, TFile, TFolder, Notice } from "obsidian";
 import { ManagementOperations } from "../ManagementOperations";
+import { normalizeLocalToolOutcome } from "../../../../services/SystemSculptService";
+import { safeOutboundVaultToolResult } from "../../../../chat/managed/WireConversation";
 
 // Mock utils
 jest.mock("../../utils", () => ({
@@ -326,7 +328,8 @@ describe("ManagementOperations", () => {
         const result = await mgmtOps.manageContext({ action: "add", paths: ["Private"] });
 
         expect(mockDocumentContextManager.pinVaultFiles).not.toHaveBeenCalled();
-        expect(result.results[0]).toMatchObject({ path: "Private", success: false, reason: expect.stringContaining("excluded from search") });
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "Private", success: false, notice: expect.stringContaining("excluded by the exclusion settings") }] });
         expect(result.processed).toBe(0);
       });
 
@@ -337,7 +340,47 @@ describe("ManagementOperations", () => {
         const result = await mgmtOps.manageContext({ action: "add", paths: ["Private/key.md"] });
 
         expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalled();
-        expect(result.results[0]).toMatchObject({ path: "Private/key.md", success: true, note: expect.stringContaining("named explicitly") });
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "Private/key.md", success: true, notice: expect.stringContaining("named explicitly") }] });
+      });
+
+      it.each([false, true])("keeps empty and entirely filtered folder notices distinct on the wire (filtered=%s)", async (filtered) => {
+        mockPlugin.settings = { embeddingsExclusions: { patterns: ["*.draft.md"] } };
+        const children = filtered ? [new TFile({ path: "folder/a.draft.md" })] : [];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "folder", children }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(children);
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["folder"] });
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "folder", success: false,
+          notice: filtered ? "All files in this folder are excluded by the exclusion settings, so none were pinned."
+            : "This folder is empty, so no files were pinned.",
+        }] });
+        expect(mockDocumentContextManager.pinVaultFiles).not.toHaveBeenCalled();
+      });
+
+      it("stops the add path loop after PDF cancellation and persists already applied pins", async () => {
+        const controller = new AbortController();
+        (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path) => new TFile({ path }));
+        mockDocumentContextManager.pinVaultFile.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
+          controller.abort();
+          return false;
+        });
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["before.md", "stop.pdf", "after.md"] }, mockChatView, controller.signal);
+        expect(result.processed).toBe(1);
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledTimes(2);
+        expect(app.vault.getAbstractFileByPath).not.toHaveBeenCalledWith("after.md");
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      });
+
+      it("stops the remove path loop after cancellation", async () => {
+        const controller = new AbortController();
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockImplementationOnce(async () => { controller.abort(); return true; });
+        const result = await mgmtOps.manageContext({ action: "remove", paths: ["before.md", "after.md"] }, mockChatView, controller.signal);
+        expect(result.processed).toBe(1);
+        expect(mockContextManager.unpinFile).toHaveBeenCalledTimes(1);
+        expect(mockContextManager.unpinFile).toHaveBeenCalledWith("before.md");
       });
 
       it("forwards the tool call's cancel signal to document pinning (#420)", async () => {

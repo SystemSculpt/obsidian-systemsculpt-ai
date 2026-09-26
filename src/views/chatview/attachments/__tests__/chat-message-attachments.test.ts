@@ -10,6 +10,12 @@ import {
   type ThinAgentInputLimits,
 } from "../../../../services/managed/ThinAgentInputLimits";
 import { parseAttachedTextContent } from "../../../../chat/ChatAttachmentContent";
+import * as hashing from "../../../../utils/sha256";
+
+jest.mock("../../../../utils/sha256", () => {
+  const actual = jest.requireActual("../../../../utils/sha256");
+  return { ...actual, sha256HexFromBytesPortable: jest.fn(actual.sha256HexFromBytesPortable) };
+});
 
 function limits(overrides: Partial<ThinAgentInputLimits>): ThinAgentInputLimits {
   return Object.freeze({ ...DEFAULT_THIN_AGENT_INPUT_LIMITS, ...overrides });
@@ -225,28 +231,66 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(retried.accepted.map((attachment) => attachment.name)).toEqual(["stalled.pdf"]);
   });
 
-  it("ends a stalled document download at the deadline as a failure that can be retried (#420)", async () => {
-    jest.useFakeTimers();
+  it("does not read or hash later files after cancelling a PDF batch", async () => {
+    const { processor, signals } = stalledProcessor();
+    const read = jest.fn(reader({ "stalled.pdf": "%PDF", "later.md": "Later" }));
+    const hash = jest.mocked(hashing.sha256HexFromBytesPortable);
+    hash.mockClear();
     try {
-      const { processor, signals } = stalledProcessor();
-      const collection = new ChatMessageAttachmentCollection(reader({ "stalled.pdf": "%PDF" }), processor);
-      const pending = collection.addFiles([file("stalled.pdf", "application/pdf", "%PDF")]);
+      const collection = new ChatMessageAttachmentCollection(read, processor);
+      const pending = collection.addFiles([
+        file("stalled.pdf", "application/pdf", "%PDF"), file("later.md", "text/markdown", "Later"),
+      ]);
       await started(signals);
+      const hashedBeforeCancel = hash.mock.calls.length;
+      collection.cancelProcessing();
+      await pending;
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(hash).toHaveBeenCalledTimes(hashedBeforeCancel);
+      expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "failed", name: "stalled.pdf" })]);
+    } finally { hash.mockClear(); }
+  });
 
-      jest.advanceTimersByTime(9 * 60_000);
-      expect(signals[0].aborted).toBe(false);
-      jest.advanceTimersByTime(2 * 60_000);
-      const result = await pending;
+  it.each(["clear", "dispose"] as const)("%s invalidates an in-flight read before hashing or restoring the old draft", async (action) => {
+    let finishRead!: (bytes: ArrayBuffer) => void;
+    const read = jest.fn(() => new Promise<ArrayBuffer>((resolve) => { finishRead = resolve; }));
+    const hash = jest.mocked(hashing.sha256HexFromBytesPortable);
+    hash.mockClear();
+    try {
+      const collection = new ChatMessageAttachmentCollection(read);
+      const pending = collection.addFiles([file("old.md", "text/markdown", "Old")]);
+      collection[action]();
+      finishRead(new TextEncoder().encode("Old").buffer);
+      expect(await pending).toEqual({ accepted: [], issues: [] });
+      expect(hash).not.toHaveBeenCalled();
+      expect(collection.displaySnapshot()).toEqual([]);
+    } finally { hash.mockClear(); }
+  });
 
-      expect(signals[0].aborted).toBe(true);
-      expect(result.issues).toEqual([expect.objectContaining({
-        code: "processing_failed",
-        message: "stalled.pdf could not be processed: it took too long. Retry to try again.",
-      })]);
-      expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "failed" })]);
-    } finally {
-      jest.useRealTimers();
-    }
+  it.each(["resolve", "reject"] as const)("Remove aborts Retry and ignores a late %s even if the processor ignores cancellation", async (outcome) => {
+    let finish!: () => void;
+    let retrySignal!: AbortSignal;
+    const processor: ChatDocumentAttachmentProcessor = {
+      prepare: jest.fn().mockRejectedValueOnce(new Error("Retry me")).mockImplementationOnce((_input, { signal }) => {
+        retrySignal = signal;
+        return new Promise((resolve, reject) => { finish = () => outcome === "resolve"
+          ? resolve({ operationId: "late", markdown: "Late" }) : reject(new Error("Late failure")); });
+      }),
+      complete: jest.fn(async () => undefined), discard: jest.fn(async () => undefined),
+    };
+    const collection = new ChatMessageAttachmentCollection(reader({ "retry.pdf": "%PDF" }), processor);
+    await collection.addFiles([file("retry.pdf", "application/pdf", "%PDF")]);
+    const id = collection.displaySnapshot()[0].id;
+    const pending = collection.retry(id);
+    expect(collection.remove(id)).toBe(true);
+    const abortedOnRemove = retrySignal.aborted;
+    finish();
+    const result = await pending;
+    expect(abortedOnRemove).toBe(true);
+    expect(result).toEqual({ accepted: [], issues: [] });
+    expect(collection.displaySnapshot()).toEqual([]);
+    expect(processor.complete).not.toHaveBeenCalled();
+    if (outcome === "resolve") expect(processor.discard).toHaveBeenCalledWith("late");
   });
 
   it("stops document processing when its draft is discarded (#420)", async () => {
@@ -257,6 +301,7 @@ describe("ChatMessageAttachmentCollection", () => {
     collection.dispose();
     await pending;
     expect(signals[0].aborted).toBe(true);
+    expect(collection.displaySnapshot()).toEqual([]);
   });
 
   it("restores exact image, text, and PDF identities from a durable multipart message", async () => {

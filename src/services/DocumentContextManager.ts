@@ -278,16 +278,18 @@ export class DocumentContextManager {
     } = {}
   ): Promise<boolean> {
     const { showNotices = true, saveChanges = true, signal } = options;
+    const changes = this.trackPinMutations(contextManager);
+    const context = changes.context;
     
     
     try {
+      throwIfAborted(signal);
       const extension = normalizeFileExtension(file.extension);
       if (isUnsupportedOfficeFileExtension(extension)) {
-        if (showNotices) new Notice("This office file type cannot be pinned in chat.", 4000);
+        if (showNotices && !signal?.aborted) new Notice("This office file type cannot be pinned in chat.", 4000);
         return false;
       }
       
-      let contextEffectCommitted = false;
       
       if (isAutoDocumentConversionFileExtension(extension)) {
         // Process document file
@@ -295,26 +297,29 @@ export class DocumentContextManager {
           await this.documentProcessingService.processDocumentWithReceipt(file, {
             showNotices: false,
             signal,
-            commitContextEffect: async (effect, signal) => {
+            commitContextEffect: async (effect, commitSignal) => {
+              throwIfAborted(signal);
               for (const imagePath of effect.imagePaths) {
                 throwIfAborted(signal);
+                throwIfAborted(commitSignal);
                 const imageWikiLink = `[[${imagePath}]]`;
-                if (!contextManager.hasPinnedFile(imageWikiLink)) contextManager.pinFile(imageWikiLink);
+                if (!context.hasPinnedFile(imageWikiLink)) context.pinFile(imageWikiLink);
               }
+              throwIfAborted(signal);
               await this.applyDocumentConversionContextEffect({
                 effectId: effect.contextEffectId,
                 operationId: effect.operationId,
                 outputIdentity: effect.outputIdentity,
                 outputPath: effect.extractionPath,
                 markdownSha256: effect.markdownSha256,
-                signal,
-              }, contextManager);
-              contextEffectCommitted = true;
+                signal: commitSignal,
+              }, context);
             },
           });
         } catch (error) {
+          if (saveChanges) await changes.savePending();
           const message = error instanceof Error ? error.message : String(error);
-          if (showNotices) {
+          if (showNotices && !signal?.aborted) {
             new Notice(`Error processing ${file.basename}: ${message}`, 5000);
           }
           return false;
@@ -322,14 +327,16 @@ export class DocumentContextManager {
       } else if (isAudioFileExtension(extension)) {
         // Process audio file
         try {
-          const transcriptionPath = await this.processAudioFile(file);
+          const transcriptionPath = await this.processAudioFile(file, signal);
           
           // Add the transcription file to context
+          throwIfAborted(signal);
           const transcriptionWikiLink = `[[${transcriptionPath}]]`;
-          contextManager.pinFile(transcriptionWikiLink);
+          context.pinFile(transcriptionWikiLink);
         } catch (error) {
+          if (saveChanges) await changes.savePending();
           const message = error instanceof Error ? error.message : String(error);
-          if (showNotices) {
+          if (showNotices && !signal?.aborted) {
             new Notice(`Error processing ${file.basename}: ${message}`, 5000);
           }
           return false;
@@ -339,30 +346,30 @@ export class DocumentContextManager {
         const wikiLink = `[[${file.path}]]`;
         
         // Check if file is already in context
-        if (contextManager.hasPinnedFile(wikiLink)) {
-          if (showNotices) {
+        if (context.hasPinnedFile(wikiLink)) {
+          if (showNotices && !signal?.aborted) {
             new Notice(`${file.basename} is already pinned for every message`, 3000);
           }
           return false;
         }
         
         // Add to context
-        contextManager.pinFile(wikiLink);
+        throwIfAborted(signal);
+        context.pinFile(wikiLink);
       }
       
       // Save changes if requested
-      if (saveChanges && !contextEffectCommitted) {
-        await contextManager.triggerContextChange();
-      }
+      if (saveChanges) await changes.savePending();
       
       // Show success notice if requested
-      if (showNotices) {
+      if (showNotices && !signal?.aborted) {
         new Notice(`Pinned ${file.basename} for every message`, 3000);
       }
       
       return true;
     } catch (error) {
-      if (showNotices) {
+      if (saveChanges) await changes.savePending();
+      if (showNotices && !signal?.aborted) {
         const message = error instanceof Error ? error.message : String(error);
         new Notice(`Couldn't pin ${file.basename}: ${message}`, 5000);
       }
@@ -388,6 +395,7 @@ export class DocumentContextManager {
     } = {}
   ): Promise<number> {
     const { showNotices = true, saveChanges = true, maxFiles = 100, signal } = options;
+    const changes = this.trackPinMutations(contextManager);
     
     
     let successCount = 0;
@@ -397,14 +405,14 @@ export class DocumentContextManager {
       if (signal?.aborted) break;
       // Check if we've reached the maximum number of files
       if (currentContextSize >= maxFiles) {
-        if (showNotices) {
+        if (showNotices && !signal?.aborted) {
           new Notice(`File limit reached (${maxFiles} total)`, 3000);
         }
         break;
       }
       
       // Pin the file
-      const success = await this.pinVaultFile(file, contextManager, {
+      const success = await this.pinVaultFile(file, changes.context, {
         showNotices: false, // We'll handle notices ourselves
         saveChanges: false, // We'll save changes after all files are added
         signal,
@@ -414,27 +422,54 @@ export class DocumentContextManager {
         successCount++;
         currentContextSize++;
         
-        if (showNotices) {
+        if (showNotices && !signal?.aborted) {
           new Notice(`Pinned ${file.name} for every message (${currentContextSize}/${maxFiles})`, 3000);
         }
       }
     }
     
     // Save changes if requested
-    if (saveChanges) {
-      await contextManager.triggerContextChange();
-    }
+    if (saveChanges) await changes.savePending();
     
     return successCount;
   }
 
-  private async processAudioFile(file: TFile): Promise<string> {
+  /** Track applied pins separately from successful conversions and ledger acknowledgements. */
+  private trackPinMutations(contextManager: ChatContextManager): {
+    context: ChatContextManager;
+    savePending: () => Promise<void>;
+  } {
+    let mutations = 0;
+    let persisted = 0;
+    const context: ChatContextManager = {
+      getPinnedFiles: () => contextManager.getPinnedFiles(),
+      hasPinnedFile: (link) => contextManager.hasPinnedFile(link),
+      pinFile: (link) => {
+        const changed = contextManager.pinFile(link);
+        if (changed) mutations++;
+        return changed;
+      },
+      triggerContextChange: async () => {
+        const saving = mutations;
+        await contextManager.triggerContextChange();
+        persisted = Math.max(persisted, saving);
+      },
+    };
+    return {
+      context,
+      // Cancellation prevents new effects, but does not undo pins already made.
+      savePending: async () => { if (persisted < mutations) await context.triggerContextChange(); },
+    };
+  }
+
+  private async processAudioFile(file: TFile, signal?: AbortSignal): Promise<string> {
     const transcriptionService = TranscriptionService.getInstance(this.plugin);
     const finalPath = await transcriptionService.transcribeFile<string>(
       file,
       {
         type: "note",
         callerScope: "document-context/audio-extraction",
+        signal,
         timestamped: false,
         recoveryVariant: JSON.stringify({
           schema: "document-context-audio-v2",

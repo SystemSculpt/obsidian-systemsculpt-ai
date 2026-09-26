@@ -1,4 +1,6 @@
-import { requestUrl } from "obsidian";
+import { App, TFile, requestUrl } from "obsidian";
+import { DocumentProcessingService } from "../DocumentProcessingService";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import fixture from "../../../testing/fixtures/managed/managed-job-protocol-v1.json";
 import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed/ManagedJobRecoveryStore";
@@ -60,6 +62,140 @@ function managedHarness() {
 }
 
 describe("managed document processing adapter contract", () => {
+  it("replays only the interrupted multipart part with the retained bytes and acknowledged ETags", async () => {
+    const h = managedHarness();
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({
+      phase: "part_dispatching", completedParts: [{ partNumber: 1, etag }],
+    });
+    await expect(h.adapter.resume("document-op-1", { source })).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber, partBytes]) => [partNumber, [...new Uint8Array(partBytes)]]))
+      .toEqual([[1, [1, 2, 3, 4]], [2, [5, 6]], [2, [5, 6]]]);
+    expect(h.jobs.complete).toHaveBeenCalledWith(documentId, [{ partNumber: 1, etag }, { partNumber: 2, etag }], "document-op-1", expect.any(AbortSignal));
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects changed vault bytes before any new admission or dispatch on pin retry", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Result transfer interrupted"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Result transfer interrupted");
+    await expect(h.adapter.process({ ...source, fingerprint: () => `sha256:${"b".repeat(64)}` })).rejects.toThrow(/changed/);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+  });
+
+  it("fails closed for a legacy path-only fingerprint instead of admitting a replacement", async () => {
+    const h = managedHarness();
+    const identity = "vault:report.pdf";
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    const source = { identity,
+      fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Legacy transfer interrupted"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Legacy transfer interrupted");
+    await expect(h.adapter.process({ ...source,
+      fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}`,
+    })).rejects.toThrow(/cannot be verified/);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+  });
+
+  it("fails closed when an acknowledged upload has no persisted multipart descriptor", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let record = await h.recovery.createAdmitted({ capability: "document_processing", operationId: "legacy-upload",
+      source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    record = await h.recovery.markContentReady("document_processing", record.operationId, record.revision);
+    record = await h.recovery.beginDispatch("document_processing", record.operationId, record.revision, {
+      operation: "create", requestId: "legacy-create", idempotencyKey: "legacy-upload:create",
+      createRequest, dispatchedAt: "2026-07-12T12:00:00.000Z",
+    });
+    await h.recovery.acknowledgeCreated("document_processing", record.operationId, record.revision, documentId);
+    await expect(h.adapter.resume(record.operationId, { source })).rejects.toThrow(/multipart metadata/);
+    expect(h.admission.acquireLease).not.toHaveBeenCalled();
+    expect(h.jobs.create).not.toHaveBeenCalled();
+    expect(h.jobs.uploadPart).not.toHaveBeenCalled();
+  });
+
+  it.each(["fingerprint", "filename", "length"] as const)("rejects mismatched %s before replaying an interrupted create", async (mismatch) => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.create.mockRejectedValueOnce(new Error("Create response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Create response was lost");
+    const changed = { ...source,
+      fingerprint: () => `sha256:${(mismatch === "fingerprint" ? "b" : "a").repeat(64)}`,
+      load: async () => ({ filename: mismatch === "filename" ? "different.pdf" : "report.pdf", contentType: "application/pdf",
+        bytes: new Uint8Array(mismatch === "length" ? 7 : 6).buffer }),
+    };
+    await expect(h.adapter.resume("document-op-1", { source: changed })).rejects.toThrow(/changed|metadata/);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.uploadPart).not.toHaveBeenCalled();
+  });
+
+  it("pin retry resumes the original operation after the result transfer deadline", async () => {
+    jest.useFakeTimers();
+    const h = managedHarness();
+    const app = new App();
+    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const requestClient = new PlatformRequestClient();
+    const request = jest.spyOn(requestClient, "request");
+    const documents = new ManagedJobClient(new HostedTransportAdapter({
+      baseUrl: "https://api.test", pluginVersion: "6.10.0", licenseKey: () => "test-license", requestClient,
+    })).documents;
+    let operationCount = 0;
+    let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
+    const makeService = () => new DocumentProcessingService(app, plugin, {
+      managed: new ManagedDocumentProcessingAdapter({ ...h, createOperationId: () => `pin-retry-${++operationCount}` }),
+      staging: {
+        stage: async (_id, artifacts) => {
+          staged = [...artifacts];
+          return artifacts.map((artifact, index) => ({
+            id: String(index), kind: artifact.kind, byteLength: artifact.bytes.byteLength,
+            sha256: sha256HexFromBytesPortable(new Uint8Array(artifact.bytes)),
+          }));
+        },
+        readVerified: async () => staged.map((artifact) => artifact.bytes),
+        cleanup: async () => undefined,
+      },
+    });
+    const committed: string[] = [];
+    const options = { showNotices: false, commitContextEffect: async (receipt: { operationId: string }) => { committed.push(receipt.operationId); } };
+    try {
+      (requestUrl as jest.Mock).mockImplementation(() => new Promise(() => undefined));
+      h.jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
+      const failed = makeService().processDocumentWithReceipt(file, options).catch((error: unknown) => error);
+      await jest.advanceTimersByTimeAsync(600_000);
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600_000 }));
+      await expect(failed).resolves.toMatchObject({ code: "request_timeout" });
+      await expect(h.recovery.read("document_processing", "pin-retry-1")).resolves.toMatchObject({ phase: "result_ready" });
+      // A fresh service uses the plugin's retained ledger, not a private retry cache.
+      const receipt = await makeService().processDocumentWithReceipt(file, options);
+      expect(receipt.operationId).toBe("pin-retry-1");
+      expect(committed).toEqual(["pin-retry-1"]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      expect(h.jobs.create).toHaveBeenCalledTimes(1);
+      expect(h.jobs.start).toHaveBeenCalledTimes(1);
+      expect(h.jobs.download).toHaveBeenCalledTimes(2);
+      await expect(h.recovery.read("document_processing", "pin-retry-1")).resolves.toMatchObject({ phase: "completed" });
+    } finally { jest.useRealTimers(); jest.restoreAllMocks(); }
+  });
+
   it("matches the immutable Plan 019 document descriptor without an expired status", () => {
     const expected = fixture.descriptors.find((item) => item.capability === "document_processing")!;
     const actual = MANAGED_JOB_DESCRIPTORS.document_processing;
@@ -167,6 +303,7 @@ describe("managed document processing adapter contract", () => {
       { identity: "vault:documents/report.pdf", fingerprint: jest.fn(), load: jest.fn() },
       { signal: controller.signal },
     );
+    for (let index = 0; index < 100 && !admission.acquireLease.mock.calls.length; index++) await Promise.resolve();
     expect(admission.acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/documents" }, controller.signal);
     controller.abort();
 
@@ -363,7 +500,7 @@ describe("managed document processing adapter contract", () => {
     expect(resumedRecord.pendingDispatch).toBeUndefined();
   });
 
-  it("never cuts a slow result download off with a client deadline, and cancel still stops it", async () => {
+  it.each(["cancel", "timeout"] as const)("bounds only the result transfer and retains recovery after %s", async (outcomeKind) => {
     jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
     const nativeRequest = requestUrl as jest.Mock;
     try {
@@ -376,7 +513,7 @@ describe("managed document processing adapter contract", () => {
         licenseKey: () => "license",
         requestClient: new PlatformRequestClient(),
       })).documents;
-      const { adapter, jobs } = managedHarness();
+      const { adapter, jobs, recovery } = managedHarness();
       jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
       const controller = new AbortController();
       let settled = false;
@@ -387,15 +524,25 @@ describe("managed document processing adapter contract", () => {
       }, { signal: controller.signal }).finally(() => { settled = true; });
       const outcome = running.catch((error: unknown) => error);
 
-      await jest.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      await jest.advanceTimersByTimeAsync(9 * 60_000);
       expect(nativeRequest).toHaveBeenCalledWith(expect.objectContaining({
         url: `https://api.test/api/plugin/documents/${documentId}/download`,
       }));
       expect(settled).toBe(false);
-      expect(jest.getTimerCount()).toBe(0);
+      expect(jest.getTimerCount()).toBe(1);
 
-      controller.abort();
-      await expect(outcome).resolves.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+      if (outcomeKind === "cancel") {
+        controller.abort();
+        await expect(outcome).resolves.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+      } else {
+        await jest.advanceTimersByTimeAsync(60_000);
+        await expect(outcome).resolves.toMatchObject({ code: "request_timeout", retryable: true });
+        expect(controller.signal.aborted).toBe(false);
+      }
+      expect(jest.getTimerCount()).toBe(0);
+      await expect(recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready", jobId: documentId });
+      await expect(adapter.resume("document-op-1", { signal: new AbortController().signal })).resolves.toMatchObject({ operationId: "document-op-1", documentId });
+      expect(jobs.create).toHaveBeenCalledTimes(1);
     } finally {
       nativeRequest.mockReset();
       jest.useRealTimers();

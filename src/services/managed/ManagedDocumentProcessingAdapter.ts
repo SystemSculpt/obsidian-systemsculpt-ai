@@ -48,7 +48,7 @@ export type ManagedDocumentProcessingResult = Readonly<{
 
 type DocumentJobs = Pick<ManagedJobClient["documents"], "create" | "uploadPart" | "complete" | "start" | "status" | "download">;
 type DocumentRecovery = Pick<ManagedJobRecoveryStore,
-  "createAdmitted" | "read" | "markContentReady" | "markLocalCommitPending" | "completeLocalCommit" |
+  "createAdmitted" | "read" | "findSourceIdentityMatches" | "markContentReady" | "markLocalCommitPending" | "completeLocalCommit" |
   "beginDispatch" | "acknowledgeCreated" | "acknowledgePart" | "acknowledgeComplete" | "acknowledgeStarted" |
   "applyReconciliation"
 >;
@@ -114,6 +114,18 @@ export class ManagedDocumentProcessingAdapter {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
 
+    // Vault callers retry by selecting the file again. Recovery selection and
+    // phase transitions stay with the managed owner, before another admission.
+    if (!context.operationId) {
+      const matches = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
+        .filter((record) => !["completed", "abandoned", "upload_aborted"].includes(record.phase));
+      throwIfAborted(signal);
+      if (matches.length > 1) {
+        throw new Error("Multiple preserved document operations match this file; automatic resume is unavailable.");
+      }
+      if (matches.length === 1) return this.resume(matches[0].operationId, { ...context, source });
+    }
+
     const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/documents" }, signal)
       .catch((error: unknown) => {
         throwIfAborted(signal);
@@ -131,98 +143,120 @@ export class ManagedDocumentProcessingAdapter {
     if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) throw new Error("Managed document source fingerprint must be SHA-256.");
     const operationId = context.operationId ?? this.createOperationId();
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)) throw new Error("Managed document operation ID is invalid.");
-    let record = await this.dependencies.recovery.createAdmitted({
+    const record = await this.dependencies.recovery.createAdmitted({
       capability: CAPABILITY,
       operationId,
       source: { identity: source.identity, fingerprint },
     });
     throwIfAborted(signal);
 
-    const loaded = await source.load();
-    throwIfAborted(signal);
-    if (!(loaded.bytes instanceof ArrayBuffer) || loaded.bytes.byteLength < 1 || loaded.bytes.byteLength > MAX_DOCUMENT_BYTES) {
-      throw new Error("Document must contain between 1 byte and 25 MB.");
-    }
-    if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
-      throw new Error("Document filename or content type is invalid.");
-    }
-    record = await this.dependencies.recovery.markContentReady(CAPABILITY, operationId, record.revision);
-    throwIfAborted(signal);
-
-    context.onProgress?.(5, "Preparing document upload…");
-    const createRequest: ManagedMultipartCreateRequest = {
-      filename: loaded.filename,
-      contentType: loaded.contentType,
-      contentLengthBytes: loaded.bytes.byteLength,
-    };
-    record = await this.beginDispatch(record, "create", undefined, createRequest);
-    throwIfAborted(signal);
-    const created = await this.dependencies.jobs.create(createRequest, operationId, signal);
-    throwIfAborted(signal);
-    const documentId = readDocumentId(created);
-    const upload = readUpload(created);
-    if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSize)) {
-      throw new Error("Managed document multipart layout does not match the document size.");
-    }
-    record = await this.dependencies.recovery.acknowledgeCreated(
-      CAPABILITY,
-      operationId,
-      record.revision,
-      documentId,
-      {
-        createRequest,
-        partSizeBytes: upload.partSize,
-        totalParts: upload.totalParts,
-      },
-    );
-    throwIfAborted(signal);
-
-    const completedParts: Array<{ partNumber: number; etag: string }> = [];
-    for (let partNumber = 1; partNumber <= upload.totalParts; partNumber += 1) {
-      throwIfAborted(signal);
-      const offset = (partNumber - 1) * upload.partSize;
-      const length = Math.min(upload.partSize, loaded.bytes.byteLength - offset);
-      const bytes = loaded.bytes.slice(offset, offset + length);
-      record = await this.beginDispatch(record, "part", partNumber);
-      throwIfAborted(signal);
-      const part = await this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal);
-      throwIfAborted(signal);
-      record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, operationId, record.revision, part);
-      throwIfAborted(signal);
-      completedParts.push(part);
-      context.onProgress?.(10 + Math.floor((partNumber / upload.totalParts) * 55), `Uploading document (${partNumber}/${upload.totalParts})…`);
-    }
-
-    record = await this.beginDispatch(record, "complete");
-    throwIfAborted(signal);
-    await this.dependencies.jobs.complete(documentId, completedParts, operationId, signal);
-    throwIfAborted(signal);
-    record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, operationId, record.revision);
-    throwIfAborted(signal);
-
-    context.onProgress?.(70, "Starting document processing…");
-    record = await this.beginDispatch(record, "start");
-    throwIfAborted(signal);
-    await this.dependencies.jobs.start(documentId, operationId, signal);
-    throwIfAborted(signal);
-    record = await this.dependencies.recovery.acknowledgeStarted(CAPABILITY, operationId, record.revision);
-    throwIfAborted(signal);
-
-    return this.pollAndDownload(record, context, signal);
+    return this.continueRecord(record, source, context, signal);
   }
 
-  async resume(operationId: string, context: ManagedDocumentProcessingContext = {}): Promise<ManagedDocumentProcessingResult> {
+  async resume(
+    operationId: string,
+    context: ManagedDocumentProcessingContext & Readonly<{ source?: ManagedDocumentSource }> = {},
+  ): Promise<ManagedDocumentProcessingResult> {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
-    let record = await this.dependencies.recovery.read(CAPABILITY, operationId);
+    const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
     throwIfAborted(signal);
-    if (!record.jobId || ["create_dispatching", "part_dispatching"].includes(record.phase)) {
-      throw new Error("Managed document dispatch is ambiguous; retry or abandon it explicitly.");
+    if (context.source) {
+      const fingerprint = await context.source.fingerprint();
+      throwIfAborted(signal);
+      if (context.source.identity !== record.source.identity || fingerprint !== record.source.fingerprint) {
+        throw new Error("The document changed or its preserved source cannot be verified; automatic retry is unavailable.");
+      }
     }
-    const documentId = record.jobId;
-    if (!["complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending"].includes(record.phase)) {
+    return this.continueRecord(record, context.source, context, signal);
+  }
+
+  private async continueRecord(
+    record: ManagedJobRecoveryRecord,
+    source: ManagedDocumentSource | undefined,
+    context: ManagedDocumentProcessingContext,
+    signal: AbortSignal,
+  ): Promise<ManagedDocumentProcessingResult> {
+    const operationId = record.operationId;
+    if (["admitted", "content_ready", "create_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
+      if (!source) throw new Error("Managed document dispatch is ambiguous without the original source bytes. Retry with the original document.");
+      const loaded = await source.load();
+      throwIfAborted(signal);
+      if (!(loaded.bytes instanceof ArrayBuffer) || loaded.bytes.byteLength < 1 || loaded.bytes.byteLength > MAX_DOCUMENT_BYTES) {
+        throw new Error("Document must contain between 1 byte and 25 MB.");
+      }
+      if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
+        throw new Error("Document filename or content type is invalid.");
+      }
+      if (record.phase === "admitted") {
+        record = await this.dependencies.recovery.markContentReady(CAPABILITY, operationId, record.revision);
+        throwIfAborted(signal);
+      }
+      const createRequest = record.pendingDispatch?.createRequest ?? record.multipartUpload?.createRequest ?? {
+        filename: loaded.filename,
+        contentType: loaded.contentType,
+        contentLengthBytes: loaded.bytes.byteLength,
+      };
+      if (createRequest.filename !== loaded.filename || createRequest.contentType !== loaded.contentType
+        || createRequest.contentLengthBytes !== loaded.bytes.byteLength) {
+        throw new Error("The original document upload metadata does not match the retained source.");
+      }
+      if (record.phase === "content_ready" || record.phase === "create_dispatching") {
+        context.onProgress?.(5, "Preparing document upload…");
+        if (record.phase === "content_ready") {
+          record = await this.beginDispatch(record, "create", undefined, createRequest);
+          throwIfAborted(signal);
+        }
+        // Replay the recorded request with the original supported create key.
+        const created = await this.dependencies.jobs.create(createRequest, operationId, signal);
+        throwIfAborted(signal);
+        const documentId = readDocumentId(created);
+        const upload = readUpload(created);
+        if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSize)) {
+          throw new Error("Managed document multipart layout does not match the document size.");
+        }
+        record = await this.dependencies.recovery.acknowledgeCreated(CAPABILITY, operationId, record.revision, documentId, {
+          createRequest, partSizeBytes: upload.partSize, totalParts: upload.totalParts,
+        });
+        throwIfAborted(signal);
+      }
+      const upload = record.multipartUpload;
+      const documentId = record.jobId;
+      if (!upload || !documentId) {
+        throw new Error("Managed document cannot resume this upload without its acknowledged multipart metadata.");
+      }
+      if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSizeBytes)) {
+        throw new Error("Managed document multipart layout does not match the document size.");
+      }
+      const completedParts = new Map((record.completedParts ?? []).map((part) => [part.partNumber, part]));
+      for (let partNumber = 1; partNumber <= upload.totalParts; partNumber += 1) {
+        if (completedParts.has(partNumber)) continue;
+        throwIfAborted(signal);
+        const offset = (partNumber - 1) * upload.partSizeBytes;
+        const bytes = loaded.bytes.slice(offset, Math.min(offset + upload.partSizeBytes, loaded.bytes.byteLength));
+        if (record.phase === "part_dispatching") {
+          if (record.pendingDispatch?.partNumber !== partNumber) {
+            throw new Error("Managed document pending part does not match the next unacknowledged part.");
+          }
+        } else {
+          record = await this.beginDispatch(record, "part", partNumber);
+          throwIfAborted(signal);
+        }
+        // A fresh signed URL targets the same document/part with the same bytes.
+        const part = await this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal);
+        throwIfAborted(signal);
+        record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, operationId, record.revision, part);
+        throwIfAborted(signal);
+        completedParts.set(part.partNumber, part);
+        context.onProgress?.(10 + Math.floor((partNumber / upload.totalParts) * 55), `Uploading document (${partNumber}/${upload.totalParts})…`);
+      }
+      record = await this.beginDispatch(record, "complete");
+      throwIfAborted(signal);
+    }
+    if (!record.jobId || !["complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending"].includes(record.phase)) {
       throw new Error(`Managed document cannot resume from ${record.phase}; acknowledged processing is required.`);
     }
+    const documentId = record.jobId;
     if (record.phase === "complete_dispatching") {
       if (!record.completedParts?.length) {
         throw new Error("Managed document upload completion cannot resume without acknowledged parts.");

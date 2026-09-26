@@ -70,8 +70,8 @@ export interface MoveOperationResult extends ToolResult {
 export interface ContextManagementResult {
   action: string;
   processed: number;
-  /** `note` explains a success the caller should know about, such as pinning an excluded file by path. */
-  results: Array<{ path: string; success: boolean; reason?: string; note?: string }>;
+  /** Safe, user-facing explanations that survive the outbound tool boundary. */
+  results: Array<{ path: string; success: boolean; reason?: string; notice?: string }>;
   summary: string;
 }
 

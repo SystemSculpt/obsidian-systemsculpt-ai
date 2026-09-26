@@ -234,6 +234,7 @@ export class AgentComposer extends Component {
 
   onunload(): void {
     // Closing the chat stops document processing its draft started.
+    this.attachmentGeneration += 1;
     this.messageAttachments.dispose();
   }
 

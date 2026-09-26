@@ -150,19 +150,23 @@ export class DocumentProcessingService {
 
     try {
       const identity = `vault:${file.path}`;
+      // Hash and upload the same snapshot. An unchanged path alone cannot
+      // establish that bytes retained by a prior operation are still selected.
+      let loaded: Promise<Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>> | undefined;
+      const load = () => loaded ??= (async () => {
+        throwIfAborted(signal);
+        const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
+        if (!contentType) {
+          throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
+        }
+        const bytes = await this.app.vault.readBinary(file);
+        throwIfAborted(signal);
+        return { filename: file.name, contentType, bytes };
+      })();
       const remote = await this.adapter().process({
         identity,
-        fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
-        load: async () => {
-          throwIfAborted(signal);
-          const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
-          if (!contentType) {
-            throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
-          }
-          const bytes = await this.app.vault.readBinary(file);
-          throwIfAborted(signal);
-          return { filename: file.name, contentType, bytes };
-        },
+        fingerprint: async () => `sha256:${sha256HexFromBytesPortable(new Uint8Array((await load()).bytes))}`,
+        load,
       }, {
         signal,
         onProgress: (progress, status) => {

@@ -92,6 +92,7 @@ export class ManagementOperations {
       const exclusions = searchVaultExclusions(this.plugin);
       
       for (const path of paths) {
+        if (signal?.aborted) break;
         try {
           const normalized = normalizePath(normalizeVaultPath(path));
           // Fall back to the Folder Notes layout (X.md -> X/X.md) so folder
@@ -111,13 +112,16 @@ export class ManagementOperations {
 
           if (abstractFile instanceof TFolder) {
             if (exclusions.isFolderExcluded(abstractFile.path)) {
-              results.push({ path, success: false, reason: "This folder is excluded from search in SystemSculpt settings, so none of its files were pinned." });
+              results.push({ path, success: false, notice: "This folder is excluded by the exclusion settings, so none of its files were pinned." });
               continue;
             }
             // Get the directory's files recursively, without excluded files
-            const folderFiles = getFilesFromFolder(abstractFile).filter((file) => !exclusions.isExcluded(file.path));
+            const allFolderFiles = getFilesFromFolder(abstractFile);
+            const folderFiles = allFolderFiles.filter((file) => !exclusions.isExcluded(file.path));
             if (folderFiles.length === 0) {
-              results.push({ path, success: false, reason: "This folder has no files that aren't excluded from search, so none were pinned." });
+              results.push({ path, success: false, notice: allFolderFiles.length === 0
+                ? "This folder is empty, so no files were pinned."
+                : "All files in this folder are excluded by the exclusion settings, so none were pinned." });
               continue;
             }
             
@@ -143,6 +147,7 @@ export class ManagementOperations {
 
             // Pin files from the directory through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
+            if (signal?.aborted) break;
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
             const addedCount = await documentContextManager.pinVaultFiles(
@@ -177,6 +182,7 @@ export class ManagementOperations {
 
             // Pin an individual file through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
+            if (signal?.aborted) break;
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
             const success = await documentContextManager.pinVaultFile(
@@ -192,7 +198,7 @@ export class ManagementOperations {
             if (success) {
               // Exclusions hide files from discovery; a file named explicitly is still pinned.
               results.push(exclusions.isExcluded(abstractFile.path)
-                ? { path, success: true, note: "Pinned because it was named explicitly; this file is excluded from search in SystemSculpt settings." }
+                ? { path, success: true, notice: "Pinned because it was named explicitly; this file is hidden from search by the exclusion settings." }
                 : { path, success: true });
               filesInCurrentRequest++;
               totalFilesProcessed++;
@@ -218,6 +224,7 @@ export class ManagementOperations {
     } else if (action === "remove") {
       // Handle removing files from context
       for (const path of paths) {
+        if (signal?.aborted) break;
         try {
           // Normalize the path to match how files are stored in context
           const normalized = normalizePath(normalizeVaultPath(path));

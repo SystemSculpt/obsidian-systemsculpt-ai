@@ -363,7 +363,10 @@ describe("AgentComposer", () => {
     Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
     Object.defineProperty(image, "arrayBuffer", { value: async () => new TextEncoder().encode("image").buffer });
 
-    await (composer as any).ingestFiles([text, pdf, image]);
+    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, "files", { configurable: true, value: [text, pdf, image] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(noticeLog).toHaveBeenCalledWith(
       "Notice: broken.pdf could not be processed: conversion failed",
@@ -375,9 +378,8 @@ describe("AgentComposer", () => {
     send.click();
     expect(submissions).toEqual([]);
 
-    const failedId = (composer as any).messageAttachments.displaySnapshot()
-      .find((attachment: any) => attachment.status === "failed").id;
-    await (composer as any).retryMessageAttachment(failedId);
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(send.disabled).toBe(false);
     send.click();
@@ -414,11 +416,13 @@ describe("AgentComposer", () => {
     const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!;
     expect(stop.hidden).toBe(true);
 
-    const ingesting = (composer as any).ingestFiles([pdf]);
+    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
     for (let turn = 0; signals.length === 0 && turn < 100; turn++) await Promise.resolve();
     expect(stop.hidden).toBe(false);
     stop.click();
-    await ingesting;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(signals[0].aborted).toBe(true);
     expect(stop.hidden).toBe(true);
@@ -426,11 +430,54 @@ describe("AgentComposer", () => {
     expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("slow.pdf");
 
     // Closing the chat stops a retry that is still processing.
-    const failedId = (composer as any).messageAttachments.displaySnapshot()[0].id;
-    void (composer as any).retryMessageAttachment(failedId);
+    noticeLog.mockClear();
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
     for (let turn = 0; signals.length === 1 && turn < 100; turn++) await Promise.resolve();
     composer.unload();
     expect(signals[1].aborted).toBe(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(noticeLog).not.toHaveBeenCalled();
+    noticeLog.mockRestore();
+  });
+
+  it.each(["resolve", "reject"] as const)("Remove during Retry keeps the PDF removed after a late %s", async (outcome) => {
+    const parent = document.body.createDiv();
+    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    let finish!: () => void;
+    let signal!: AbortSignal;
+    const composer = new AgentComposer(parent, {
+      onSubmit: jest.fn(), onStop: jest.fn(), onAttach: jest.fn(), onRemoveAttachment: jest.fn(),
+      documentAttachmentProcessor: {
+        prepare: jest.fn().mockRejectedValueOnce(new Error("First failure"))
+          .mockImplementationOnce((_input, options) => {
+            signal = options.signal;
+            return new Promise((resolve, reject) => { finish = () => outcome === "resolve"
+              ? resolve({ operationId: "late", markdown: "Late result" }) : reject(new Error("Late failure")); });
+          }),
+        complete: jest.fn(async () => undefined), discard: jest.fn(async () => undefined),
+      },
+    });
+    composer.load();
+    const pdf = new File(["%PDF"], "remove.pdf", { type: "application/pdf" });
+    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
+    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    notices.mockClear();
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.remove"]')!.click();
+    const abortedOnRemove = signal.aborted;
+    finish();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(abortedOnRemove).toBe(true);
+    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
+    expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!.hidden).toBe(true);
+    expect(notices).not.toHaveBeenCalled();
+    composer.setValue("Send without the removed PDF");
+    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
+    composer.unload();
+    notices.mockRestore();
   });
 
   it("turns a Similar Notes drag payload into a pinned file instead of a message attachment", () => {

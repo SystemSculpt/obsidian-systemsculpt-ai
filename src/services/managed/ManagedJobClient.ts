@@ -5,6 +5,8 @@ import { retryAfterHeaderMs } from "./ManagedJobObservation";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
+// Bounds only the transfer of a completed document, never server processing.
+const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const MANAGED_IMAGE_OUTPUT_PROTOCOL = "managed-image-output-v1" as const;
 export const MANAGED_IMAGE_OUTPUT_DESCRIPTOR = Object.freeze({
   contract_version: MANAGED_IMAGE_OUTPUT_PROTOCOL,
@@ -226,12 +228,10 @@ export class ManagedJobClient {
     if (options.imageOutputContract) Object.assign(headers, { "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": this.requestId() });
     if (descriptor.version.includes(operation)) headers["x-plugin-version"] = this.transport.pluginVersion;
     if (descriptor.idempotent.includes(operation)) { if (!options.operationId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.operationId)) this.invalid("A durable operation ID is required."); const idempotencyOperation = operation === "upload_complete" ? "complete" : operation === "generation_create" ? "create" : operation; const idempotencyKey = `${options.operationId}:${idempotencyOperation}`; if (idempotencyKey.length > 128) this.invalid("The durable operation ID is too long for the idempotency contract."); headers["idempotency-key"] = idempotencyKey; }
-    // A converted document returns its markdown and extracted images inline in
-    // one JSON body with no size limit, and requestUrl exposes neither its
-    // length nor its progress before all of it has arrived. No fixed deadline
-    // admits every legitimate result on a slow link, so the download has none
-    // and the caller's signal bounds it.
-    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal, ...(operation === "download" ? { timeoutMs: null } : {}) }, !options.imageOutputContract);
+    // Inline Markdown and images have no declared transfer size. Give the
+    // response body a generous backstop; timeout is a retriable transport
+    // failure, so callers retain the admitted operation for recovery.
+    const result = await this.transport.job({ path, method: route[0], body: options.body, headers, signal: options.signal, ...(operation === "download" ? { timeoutMs: DOCUMENT_DOWNLOAD_TIMEOUT_MS } : {}) }, !options.imageOutputContract);
     const parsed = await this.parse(capability, operation, result, options.imageOutputContract ? headers["x-request-id"] : undefined) as T;
     if (
       (operation === "status" || operation === "generation_status")

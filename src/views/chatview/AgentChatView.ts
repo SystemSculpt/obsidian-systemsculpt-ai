@@ -1395,6 +1395,7 @@ export class AgentChatView extends ItemView {
 
   private async performClose(): Promise<void> {
     this.closing = true;
+    this.contextManager.dispose();
     this.expediteLocalFailedReceiptRetryTimers();
     this.beginQueueDrainSuppression();
     const closingSubmission = this.activeSubmissionOperation?.kind === "submission"
