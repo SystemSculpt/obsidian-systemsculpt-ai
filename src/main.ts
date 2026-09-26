@@ -23,6 +23,7 @@ import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { StorageManager } from "./core/storage";
+import { protectLegacyPiCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
@@ -1016,6 +1017,7 @@ export default class SystemSculptPlugin extends Plugin {
 
       const parallelTasks = [
         this.initializeDirectories(),
+        this.initializeLegacyCredentialProtection(),
         this.initializeVaultFileCache(),
         this.initializeBasicServices(),
       ];
@@ -1036,6 +1038,34 @@ export default class SystemSculptPlugin extends Plugin {
       });
 
       throw error;
+    }
+  }
+
+  private async initializeLegacyCredentialProtection(): Promise<void> {
+    try {
+      const result = await protectLegacyPiCredentials(this.app.vault.adapter);
+      if (result.legacyCredentialsPresent) {
+        const protectionStatus = result.ignoreRulePresent
+          ? "A Git ignore rule now blocks new untracked copies, but cannot clean up existing copies."
+          : "The Git ignore rule could not be installed, so this file is still at risk of being committed.";
+        new Notice(
+          "SystemSculpt found a retired provider credential file in .systemsculpt/pi-agent. " +
+            "Rotate any keys it contains and remove it from Git history, sync history, and backups. " +
+            protectionStatus,
+          0,
+        );
+      }
+      if (result.protectionError) {
+        this.getLogger().warn("Legacy credential protection could not be applied", {
+          source: "SystemSculptPlugin",
+          metadata: { message: result.protectionError },
+        });
+      }
+    } catch (error) {
+      this.getLogger().warn("Legacy credential protection could not be applied", {
+        source: "SystemSculptPlugin",
+        metadata: { message: error instanceof Error ? error.message : String(error) },
+      });
     }
   }
 
@@ -2203,4 +2233,4 @@ export default class SystemSculptPlugin extends Plugin {
     });
   }
 
-}
+        }
