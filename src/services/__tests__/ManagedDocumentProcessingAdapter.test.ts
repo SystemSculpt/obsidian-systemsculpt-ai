@@ -81,16 +81,57 @@ describe("managed document processing adapter contract", () => {
     expect(h.jobs.create).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects changed vault bytes before any new admission or dispatch on pin retry", async () => {
+  it("rejects changed vault bytes before any new admission or dispatch on explicit operation retry", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
     h.jobs.download.mockRejectedValueOnce(new Error("Result transfer interrupted"));
     await expect(h.adapter.process(source)).rejects.toThrow("Result transfer interrupted");
-    await expect(h.adapter.process({ ...source, fingerprint: () => `sha256:${"b".repeat(64)}` })).rejects.toThrow(/changed/);
+    await expect(h.adapter.resume("document-op-1", { source: { ...source, fingerprint: () => `sha256:${"b".repeat(64)}` } })).rejects.toThrow(/changed/);
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
     expect(h.jobs.create).toHaveBeenCalledTimes(1);
     await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+  });
+
+  it("newly selecting an edited PDF preserves the old operation and converts the new bytes", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Old result transfer interrupted"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Old result transfer interrupted");
+    const retained = await h.recovery.read("document_processing", "document-op-1");
+    const edited = { ...source, fingerprint: jest.fn(() => `sha256:${"b".repeat(64)}`),
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([9, 8, 7, 6, 5, 4]).buffer }) };
+    const adapter = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery,
+      createOperationId: () => "edited-document-op", wait: async () => undefined,
+    });
+    await expect(adapter.process(edited)).resolves.toMatchObject({ operationId: "edited-document-op" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+    expect(edited.fingerprint).toHaveBeenCalledTimes(1);
+    expect(h.jobs.uploadPart.mock.calls.slice(2).map(([, , bytes]) => [...new Uint8Array(bytes)]))
+      .toEqual([[9, 8, 7, 6], [5, 4]]);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toEqual(retained);
+
+    // Two versions at one path are unambiguous when their bytes identify one.
+    await expect(adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(adapter.process(edited)).resolves.toMatchObject({ operationId: "edited-document-op" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed before admission when several preserved operations hold the selected bytes", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    for (const operationId of ["duplicate-op-1", "duplicate-op-2"]) {
+      await h.recovery.createAdmitted({ capability: "document_processing", operationId,
+        source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    }
+    await expect(h.adapter.process(source)).rejects.toThrow(/Multiple preserved document operations/);
+    expect(h.admission.acquireLease).not.toHaveBeenCalled();
+    expect(h.jobs.create).not.toHaveBeenCalled();
   });
 
   it("fails closed for a legacy path-only fingerprint instead of admitting a replacement", async () => {

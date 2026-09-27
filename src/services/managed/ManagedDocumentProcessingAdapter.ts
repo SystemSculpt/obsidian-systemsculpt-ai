@@ -1,3 +1,4 @@
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ManagedAdmission } from "./ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "./ManagedJobClient";
 import { ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
@@ -15,6 +16,7 @@ import {
 
 const CAPABILITY = "document_processing" as const;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+const UNVERIFIABLE_SOURCE_MESSAGE = "The document changed or its preserved source cannot be verified; automatic retry is unavailable.";
 
 export type ManagedDocumentProcessingContext = Readonly<{
   operationId?: string;
@@ -81,6 +83,12 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw abortError();
 }
 
+// Records written before byte fingerprints hashed only their path identity,
+// so they cannot show which bytes their operation uploaded.
+function hasPathOnlyFingerprint(record: ManagedJobRecoveryRecord): boolean {
+  return record.source.fingerprint === `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(record.source.identity))}`;
+}
+
 function readDocumentId(value: unknown): string {
   const documentId = (value as { document?: { id?: unknown } })?.document?.id;
   if (typeof documentId !== "string" || !documentId) throw new Error("Managed document create response did not include a document ID.");
@@ -116,14 +124,22 @@ export class ManagedDocumentProcessingAdapter {
 
     // Vault callers retry by selecting the file again. Recovery selection and
     // phase transitions stay with the managed owner, before another admission.
+    // The selected bytes choose among operations at one path: an edited file
+    // starts its own operation and leaves earlier ones for their own bytes.
+    let fingerprint: string | undefined;
     if (!context.operationId) {
       const matches = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
         .filter((record) => !["completed", "abandoned", "upload_aborted"].includes(record.phase));
       throwIfAborted(signal);
-      if (matches.length > 1) {
-        throw new Error("Multiple preserved document operations match this file; automatic resume is unavailable.");
+      if (matches.length) {
+        fingerprint = await this.readFingerprint(source, signal);
+        const exact = matches.filter((record) => record.source.fingerprint === fingerprint);
+        if (exact.length > 1) {
+          throw new Error("Multiple preserved document operations match this file; automatic resume is unavailable.");
+        }
+        if (exact.length === 1) return this.continueRecord(exact[0], source, context, signal);
+        if (matches.some(hasPathOnlyFingerprint)) throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
       }
-      if (matches.length === 1) return this.resume(matches[0].operationId, { ...context, source });
     }
 
     const lease = await this.dependencies.admission.acquireLease({ alias: "systemsculpt/documents" }, signal)
@@ -138,9 +154,7 @@ export class ManagedDocumentProcessingAdapter {
       throw error;
     }
 
-    const fingerprint = await source.fingerprint();
-    throwIfAborted(signal);
-    if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) throw new Error("Managed document source fingerprint must be SHA-256.");
+    fingerprint ??= await this.readFingerprint(source, signal);
     const operationId = context.operationId ?? this.createOperationId();
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)) throw new Error("Managed document operation ID is invalid.");
     const record = await this.dependencies.recovery.createAdmitted({
@@ -165,10 +179,17 @@ export class ManagedDocumentProcessingAdapter {
       const fingerprint = await context.source.fingerprint();
       throwIfAborted(signal);
       if (context.source.identity !== record.source.identity || fingerprint !== record.source.fingerprint) {
-        throw new Error("The document changed or its preserved source cannot be verified; automatic retry is unavailable.");
+        throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
       }
     }
     return this.continueRecord(record, context.source, context, signal);
+  }
+
+  private async readFingerprint(source: ManagedDocumentSource, signal: AbortSignal): Promise<string> {
+    const fingerprint = await source.fingerprint();
+    throwIfAborted(signal);
+    if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) throw new Error("Managed document source fingerprint must be SHA-256.");
+    return fingerprint;
   }
 
   private async continueRecord(
