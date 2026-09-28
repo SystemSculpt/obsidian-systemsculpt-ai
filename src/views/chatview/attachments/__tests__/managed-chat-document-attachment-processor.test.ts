@@ -94,7 +94,9 @@ function harness(transportKind: "requestUrl" | "fetch" = "requestUrl") {
   });
   const download = () => request.mock.calls.find(([value]) => value.url.endsWith("/download"))?.[0];
   const operationId = () => state.creates[0].replace(/:create$/, "");
-  return { processor, collection, recovery, reload, state, admission, download, operationId, restore: () => { window.fetch = oldFetch; } };
+  /** Another chat view in the same session. */
+  const otherChat = () => attach(recovery);
+  return { processor, collection, recovery, reload, otherChat, state, admission, download, operationId, restore: () => { window.fetch = oldFetch; } };
 }
 
 describe("ManagedChatDocumentAttachmentProcessor through the plugin capability graph", () => {
@@ -161,6 +163,57 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
       await expect(reloaded.recovery.read("document_processing", operationId)).resolves.toMatchObject({ phase: "completed" });
       reloaded.collection.dispose();
     } finally { h.restore(); }
+  });
+
+  it("attaches the same PDF in two chats at once with one conversion", async () => {
+    const h = harness();
+    const other = h.otherChat();
+    try {
+      h.state.downloadReady = true;
+      const attached = await Promise.all([h.collection.addFiles([pdf]), other.collection.addFiles([pdf])]);
+
+      for (const chat of attached) {
+        expect(chat.issues).toEqual([]);
+        expect(chat.accepted[0].contentPart).toMatchObject({ type: "text", text: expect.stringContaining("# Converted") });
+      }
+      expect(h.state.creates).toHaveLength(1);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      await expect(h.recovery.read("document_processing", h.operationId())).resolves.toMatchObject({ phase: "completed" });
+    } finally { h.collection.dispose(); other.collection.dispose(); h.restore(); }
+  });
+
+  it("keeps a conversion another chat is using when one chat removes the same PDF", async () => {
+    const h = harness();
+    const other = h.otherChat();
+    try {
+      const first = h.collection.addFiles([pdf]);
+      await until(() => Boolean(h.download()));
+      await jest.advanceTimersByTimeAsync(h.download()!.timeoutMs as number);
+      expect((await first).issues).toHaveLength(1);
+      const nativeRequest = requestUrl as jest.Mock;
+      const route = nativeRequest.getMockImplementation()!;
+      let deliver: (() => void) | undefined;
+      nativeRequest.mockImplementation(async (request) => {
+        if (!request.url.endsWith("/download")) return route(request);
+        await new Promise<void>((resolve) => { deliver = resolve; });
+        h.state.downloadReady = true;
+        return route(request);
+      });
+      const second = other.collection.addFiles([pdf]);
+      await until(() => Boolean(deliver));
+
+      // The first chat gives up its failed copy while the other downloads the result.
+      h.collection.remove(h.collection.displaySnapshot()[0].id);
+      for (let index = 0; index < 20; index++) await h.recovery.readOptional("document_processing", h.operationId());
+      deliver!();
+
+      const attached = await second;
+      expect(attached.issues).toEqual([]);
+      expect(attached.accepted).toHaveLength(1);
+      expect(h.state.creates).toHaveLength(1);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      await expect(h.recovery.read("document_processing", h.operationId())).resolves.toMatchObject({ phase: "completed" });
+    } finally { h.collection.dispose(); other.collection.dispose(); h.restore(); }
   });
 
   it("continues an interrupted upload when the same PDF is attached under another name", async () => {

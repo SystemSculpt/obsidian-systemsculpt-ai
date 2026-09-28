@@ -126,11 +126,11 @@ describe("managed document processing adapter contract", () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
-    // Two chats converted these bytes at once. One upload stopped after its first part...
+    // One upload of these bytes stopped after its first part...
     h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
       .mockRejectedValueOnce(new Error("Part response was lost"));
     await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
-    // ...and the other right after admission. It lists first.
+    // ...and another device's, synced here, right after admission. It lists first.
     await h.recovery.createAdmitted({ capability: "document_processing", operationId: "concurrent-op",
       source: { identity: source.identity, fingerprint: source.fingerprint() } });
     const onNotice = jest.fn();
@@ -151,12 +151,74 @@ describe("managed document processing adapter contract", () => {
       await h.recovery.createAdmitted({ capability: "document_processing", operationId,
         source: { identity: source.identity, fingerprint: source.fingerprint() } });
     }
-    // Another chat advanced the second operation since it was listed.
+    // Another device advanced the second operation since it was listed.
     jest.spyOn(h.recovery, "abandon").mockRejectedValueOnce(new Error("Recovery record revision changed."));
 
     await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "concurrent-op-1", result: downloaded });
     await expect(h.recovery.read("document_processing", "concurrent-op-2")).resolves.toMatchObject({ phase: "admitted" });
     expect(h.admission.acquireLease).not.toHaveBeenCalled();
+  });
+
+  it("lets two chats that select the same PDF at once share one operation", async () => {
+    const h = managedHarness();
+    // Each chat view makes its own adapter over the plugin's one ledger.
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery,
+      createOperationId: () => "other-chat-op", wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    const progress = jest.fn();
+
+    const results = await Promise.all([h.adapter.process(source), otherChat.process(source, { onProgress: progress })]);
+
+    expect(results.map((result) => result.operationId)).toEqual(["document-op-1", "document-op-1"]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith(0, "This document is already being converted. Waiting…");
+  });
+
+  it("lets two chats that retry one retained operation at once both finish it", async () => {
+    const h = managedHarness();
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+
+    const results = await Promise.all([h.adapter.process(source), otherChat.process(source)]);
+
+    expect(results.map((result) => result.operationId)).toEqual(["document-op-1", "document-op-1"]);
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber]) => partNumber)).toEqual([1, 2, 2]);
+    expect(h.jobs.start).toHaveBeenCalledTimes(1);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a selection waiting for its turn at once, without holding up the next", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    const next = h.adapter.process(source);
+
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(next).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
   });
 
   it.each(["create", "part"] as const)("continues an interrupted %s upload when the same bytes come back under another name", async (interrupted) => {

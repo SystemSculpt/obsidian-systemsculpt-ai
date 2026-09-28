@@ -97,6 +97,27 @@ function hasPathOnlyFingerprint(record: ManagedJobRecoveryRecord): boolean {
   return record.source.fingerprint === `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(record.source.identity))}`;
 }
 
+/**
+ * The selection of each source that runs now, per recovery ledger. Adapters
+ * are made per chat view, but they share the plugin's one ledger.
+ */
+const sourceTurns = new WeakMap<object, Map<string, Promise<void>>>();
+
+function waitForTurn(previous: Promise<void>, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortError());
+      return;
+    }
+    const onAbort = (): void => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    void previous.then(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+  });
+}
+
 function furthestFirst(a: ManagedJobRecoveryRecord, b: ManagedJobRecoveryRecord): number {
   return (PHASE_PROGRESS[b.phase] ?? -1) - (PHASE_PROGRESS[a.phase] ?? -1)
     || (b.completedParts?.length ?? 0) - (a.completedParts?.length ?? 0);
@@ -134,11 +155,83 @@ export class ManagedDocumentProcessingAdapter {
   async process(source: ManagedDocumentSource, context: ManagedDocumentProcessingContext = {}): Promise<ManagedDocumentProcessingResult> {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
+    return this.inSourceTurn(source.identity, context, signal, () => this.select(source, context, signal));
+  }
 
-    // Selecting a document again is how every caller retries, so recovery
-    // selection stays with this owner, before another admission. The selected
-    // bytes choose among the operations retained for one source: an edited
-    // file starts its own operation and leaves earlier ones for their bytes.
+  async resume(
+    operationId: string,
+    context: ManagedDocumentProcessingContext & Readonly<{ source?: ManagedDocumentSource }> = {},
+  ): Promise<ManagedDocumentProcessingResult> {
+    const signal = context.signal ?? new AbortController().signal;
+    throwIfAborted(signal);
+    const { identity } = (await this.dependencies.recovery.read(CAPABILITY, operationId)).source;
+    throwIfAborted(signal);
+    return this.inSourceTurn(identity, context, signal, async () => {
+      // A selection that ran first may have advanced the operation.
+      const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
+      throwIfAborted(signal);
+      if (context.source) {
+        const fingerprint = await context.source.fingerprint();
+        throwIfAborted(signal);
+        if (context.source.identity !== record.source.identity || fingerprint !== record.source.fingerprint) {
+          throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
+        }
+      }
+      return this.continueRecord(record, context.source, context, signal);
+    });
+  }
+
+  /**
+   * Drops every operation retained for a source its owner discarded, such as a
+   * removed chat attachment. The next selection of those bytes starts over.
+   * A selection of the source that is running or waiting keeps them to use.
+   */
+  async discard(identity: string): Promise<void> {
+    if (sourceTurns.get(this.dependencies.recovery)?.has(identity)) return;
+    for (const record of await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, identity)) {
+      if (!isRetiredManagedRecoveryRecord(record)) await this.retire(record);
+    }
+  }
+
+  /**
+   * Runs one selection of a source at a time in this Obsidian session. A chat
+   * that selects a PDF another chat is converting waits, then continues the
+   * operation the first one kept, instead of starting or advancing its own.
+   */
+  private async inSourceTurn<T>(
+    identity: string,
+    context: ManagedDocumentProcessingContext,
+    signal: AbortSignal,
+    select: () => Promise<T>,
+  ): Promise<T> {
+    let turns = sourceTurns.get(this.dependencies.recovery);
+    if (!turns) sourceTurns.set(this.dependencies.recovery, turns = new Map());
+    const previous = turns.get(identity);
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    const turn = (previous ?? Promise.resolve()).then(() => finished);
+    turns.set(identity, turn);
+    try {
+      if (previous) {
+        context.onProgress?.(0, "This document is already being converted. Waiting…");
+        await waitForTurn(previous, signal);
+      }
+      return await select();
+    } finally {
+      finish();
+      if (turns.get(identity) === turn) turns.delete(identity);
+    }
+  }
+
+  // Selecting a document again is how every caller retries, so recovery
+  // selection stays with this owner, before another admission. The selected
+  // bytes choose among the operations retained for one source: an edited
+  // file starts its own operation and leaves earlier ones for their bytes.
+  private async select(
+    source: ManagedDocumentSource,
+    context: ManagedDocumentProcessingContext,
+    signal: AbortSignal,
+  ): Promise<ManagedDocumentProcessingResult> {
     let fingerprint: string | undefined;
     const retained = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
       .filter((record) => !isRetiredManagedRecoveryRecord(record));
@@ -149,10 +242,11 @@ export class ManagedDocumentProcessingAdapter {
         .filter((record) => !isRetiredManagedRecoveryRecord(record));
       throwIfAborted(signal);
       if (exact.length) {
-        // Chats that start converting the same bytes at the same moment each
-        // keep an operation. The one that got furthest continues, and the rest
-        // only repeat its work. Retiring them is best effort: one that another
-        // chat is still advancing can refuse, and a later selection retires it.
+        // Several operations can hold the same bytes, such as ones kept by an
+        // earlier version or by another device through sync. The one that got
+        // furthest continues, and the rest only repeat its work. Retiring them
+        // is best effort: one still advancing elsewhere can refuse, and a
+        // later selection retires it.
         const [furthest, ...repeats] = [...exact].sort(furthestFirst);
         for (const record of repeats) await this.retire(record).catch(() => undefined);
         throwIfAborted(signal);
@@ -192,34 +286,6 @@ export class ManagedDocumentProcessingAdapter {
     throwIfAborted(signal);
 
     return this.continueRecord(record, source, context, signal);
-  }
-
-  async resume(
-    operationId: string,
-    context: ManagedDocumentProcessingContext & Readonly<{ source?: ManagedDocumentSource }> = {},
-  ): Promise<ManagedDocumentProcessingResult> {
-    const signal = context.signal ?? new AbortController().signal;
-    throwIfAborted(signal);
-    const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
-    throwIfAborted(signal);
-    if (context.source) {
-      const fingerprint = await context.source.fingerprint();
-      throwIfAborted(signal);
-      if (context.source.identity !== record.source.identity || fingerprint !== record.source.fingerprint) {
-        throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
-      }
-    }
-    return this.continueRecord(record, context.source, context, signal);
-  }
-
-  /**
-   * Drops every operation retained for a source its owner discarded, such as a
-   * removed chat attachment. The next selection of those bytes starts over.
-   */
-  async discard(identity: string): Promise<void> {
-    for (const record of await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, identity)) {
-      if (!isRetiredManagedRecoveryRecord(record)) await this.retire(record);
-    }
   }
 
   /** An abandoned record that could not be deleted is already ignored, and pruned at startup. */
@@ -371,19 +437,37 @@ export class ManagedDocumentProcessingAdapter {
   }
 
   async beginLocalCommit(operationId: string, signal?: AbortSignal): Promise<ManagedJobRecoveryRecord> {
-    if (signal) throwIfAborted(signal);
-    const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
-    if (signal) throwIfAborted(signal);
-    if (record.phase === "local_commit_pending") return record;
-    return this.dependencies.recovery.markLocalCommitPending(CAPABILITY, operationId, record.revision);
+    return this.advanceLocalCommit(operationId, ["local_commit_pending", "completed"], signal, (record) =>
+      this.dependencies.recovery.markLocalCommitPending(CAPABILITY, operationId, record.revision));
   }
 
   async completeLocalCommit(operationId: string, signal?: AbortSignal): Promise<ManagedJobRecoveryRecord> {
+    return this.advanceLocalCommit(operationId, ["completed"], signal, (record) =>
+      this.dependencies.recovery.completeLocalCommit(CAPABILITY, operationId, record.revision));
+  }
+
+  /**
+   * Selections of the same bytes take turns and continue one operation, but
+   * each commits the result locally after its turn. The first to commit
+   * advances the operation, and the others find it there.
+   */
+  private async advanceLocalCommit(
+    operationId: string,
+    reached: readonly ManagedRecoveryPhase[],
+    signal: AbortSignal | undefined,
+    advance: (record: ManagedJobRecoveryRecord) => Promise<ManagedJobRecoveryRecord>,
+  ): Promise<ManagedJobRecoveryRecord> {
     if (signal) throwIfAborted(signal);
     const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
     if (signal) throwIfAborted(signal);
-    if (record.phase === "completed") return record;
-    return this.dependencies.recovery.completeLocalCommit(CAPABILITY, operationId, record.revision);
+    if (reached.includes(record.phase)) return record;
+    try {
+      return await advance(record);
+    } catch (error) {
+      const current = await this.dependencies.recovery.read(CAPABILITY, operationId).catch(() => undefined);
+      if (current && reached.includes(current.phase)) return current;
+      throw error;
+    }
   }
 
   private beginDispatch(
