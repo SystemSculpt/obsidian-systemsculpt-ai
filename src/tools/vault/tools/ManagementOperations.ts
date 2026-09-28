@@ -161,12 +161,17 @@ export class ManagementOperations {
               }
             );
 
+            // Excluded files are pinned only when named, so tell the agent how many it left out.
+            const excluded = allFolderFiles.length - folderFiles.length;
+            const exclusionNotice = excluded === 0 ? {} : { notice: excluded === 1
+              ? "1 file in this folder is excluded by the exclusion settings and was not pinned. Name a file by its path to pin it anyway."
+              : `${excluded} files in this folder are excluded by the exclusion settings and were not pinned. Name a file by its path to pin it anyway.` };
             if (addedCount > 0) {
-              results.push({ path, success: true });
+              results.push({ path, success: true, ...exclusionNotice });
               filesInCurrentRequest += addedCount;
               totalFilesProcessed += addedCount;
             } else {
-              results.push({ path, success: false, reason: "No files were pinned from directory" });
+              results.push({ path, success: false, reason: "No files were pinned from directory", ...exclusionNotice });
             }
 
           } else if (abstractFile instanceof TFile) {

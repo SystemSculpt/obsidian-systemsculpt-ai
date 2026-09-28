@@ -116,6 +116,19 @@ describe("DocumentProcessingService managed local effects", () => {
     );
   });
 
+  it("names the folder that holds the extracted images in the note", async () => {
+    const { app, dependencies, plugin } = harness({ images: true });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+
+    const receipt = await service.processDocumentWithReceipt(file(), { showNotices: false });
+
+    expect(receipt.imagePaths).toEqual([expect.stringMatching(/^SystemSculpt\/Extractions\/report\/images-report\//)]);
+    expect(app.vault.create).toHaveBeenCalledWith(
+      receipt.extractionPath,
+      expect.stringContaining("1 image was extracted from this document and saved in the 'images-report' folder."),
+    );
+  });
+
   it("shows a recovery notice for the selected file even when progress notices are off", async () => {
     const { app, dependencies, managed, plugin } = harness();
     const convert = managed.process.getMockImplementation()!;

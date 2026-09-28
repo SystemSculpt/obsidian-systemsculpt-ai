@@ -304,7 +304,7 @@ describe("ManagementOperations", () => {
         expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalled();
       });
 
-      it("pins only the files in a folder that search would show (#422)", async () => {
+      it("pins only the files in a folder that search would show, and says how to pin the rest (#422)", async () => {
         mockPlugin.settings = { embeddingsExclusions: { folders: ["dir/private"], patterns: ["*.draft.md"] } };
         const visible = new TFile({ path: "dir/notes.md" });
         const folderFiles = [visible, new TFile({ path: "dir/plan.draft.md" }), new TFile({ path: "dir/private/key.md" })];
@@ -315,7 +315,25 @@ describe("ManagementOperations", () => {
         const result = await mgmtOps.manageContext({ action: "add", paths: ["dir"] });
 
         expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalledWith([visible], mockContextManager, expect.anything());
-        expect(result.results[0]).toEqual({ path: "dir", success: true });
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "dir", success: true,
+          notice: "2 files in this folder are excluded by the exclusion settings and were not pinned. Name a file by its path to pin it anyway.",
+        }] });
+      });
+
+      it("explains the excluded files when none of a folder's visible files could be pinned (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { patterns: ["*.draft.md"] } };
+        const folderFiles = [new TFile({ path: "dir/notes.md" }), new TFile({ path: "dir/plan.draft.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+        mockDocumentContextManager.pinVaultFiles.mockResolvedValueOnce(0);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["dir"] });
+
+        expect(result.results[0]).toEqual({ path: "dir", success: false, reason: "No files were pinned from directory",
+          notice: "1 file in this folder is excluded by the exclusion settings and was not pinned. Name a file by its path to pin it anyway.",
+        });
       });
 
       it("pins nothing from an excluded folder and says why (#422)", async () => {

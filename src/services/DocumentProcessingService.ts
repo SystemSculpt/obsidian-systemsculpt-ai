@@ -309,6 +309,7 @@ export class DocumentProcessingService {
     const baseName = this.sanitizeFilename(file.basename);
     const parentPath = extractionFolder ? `${extractionFolder}/${baseName}` : `${file.parent?.path || ""}/${baseName}`;
     const imagesPath = `${parentPath}/images-${this.sanitizeFilename(baseName).substring(0, 20)}`;
+    const imagesFolder = imagesPath.split("/").pop() || "images";
     const rawImages = this.extractImagesFromData(result);
     const preparedImages: PreparedImageEffect[] = [];
     const imagePathMap = new Map<string, string>();
@@ -324,7 +325,7 @@ export class DocumentProcessingService {
       }
       const newName = this.generateUniqueImageName(baseName, imageName, imageBase64);
       const path = this.normalizePath(`${imagesPath}/${newName}`);
-      const relativePath = `${imagesPath.split("/").pop() || "images"}/${newName}`;
+      const relativePath = `${imagesFolder}/${newName}`;
       contentPaths.set(contentHash, { path, relativePath });
       imagePathMap.set(imageName, relativePath);
       preparedImages.push({ originalName: imageName, newName, path, bytes });
@@ -342,7 +343,7 @@ export class DocumentProcessingService {
       });
       processed.content = content;
     }
-    const markdown = this.formatExtractionContent(processed);
+    const markdown = this.formatExtractionContent(processed, imagesFolder);
     const markdownBytes = new TextEncoder().encode(markdown).buffer;
     const extractionPath = this.normalizePath(`${parentPath}/${baseName}-extraction.md`);
     return {
@@ -450,7 +451,7 @@ export class DocumentProcessingService {
     return Math.min(100, Math.max(0, value));
   }
 
-  private formatExtractionContent(data: unknown): string {
+  private formatExtractionContent(data: unknown, imagesFolder: string): string {
     const record = this.asRecord(data);
     const metadata = this.asRecord(record.metadata);
     const document = this.asRecord(record.document);
@@ -472,9 +473,9 @@ export class DocumentProcessingService {
     const rootImages = record.images;
     if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
       const imageCount = Object.keys(rootImages).length;
-      // Keep the first-delivery text stable across retries and prior conversions.
-      // Session metadata is diagnostic state, never an input to durable bytes.
-      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the images folder.\n`;
+      // Keep the first-delivery text stable across retries and prior conversions:
+      // the folder comes from the file's name, never from session metadata.
+      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the '${imagesFolder}' folder.\n`;
     }
     return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }
