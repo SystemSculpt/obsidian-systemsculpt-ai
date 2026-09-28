@@ -1,66 +1,153 @@
 import {
-  LEGACY_PI_AUTH_PATH,
-  SYSTEMSCULPT_GITIGNORE_PATH,
-  protectLegacyPiCredentials,
+  legacyCredentialNotice,
+  protectLegacyCredentials,
 } from "../LegacyCredentialProtection";
 
+const IGNORE_FILE = ".systemsculpt/.gitignore";
+const LEFT_BEHIND_AUTH = ".systemsculpt/retired-agent/auth.json";
+const LEFT_BEHIND_MODELS = ".systemsculpt/retired-agent/models.json";
+const BACKUP = ".systemsculpt/settings-backups/latest.json";
+const IGNORE_RULES = [
+  "# Added by SystemSculpt: keeps plain-text credential files out of Git.",
+  "auth.json",
+  "models.json",
+  "",
+].join("\n");
+
+/** An in-memory vault adapter whose folders are implied by its file paths. */
 function adapter(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial));
+  const isFolder = (path: string) => [...files.keys()].some((file) => file.startsWith(`${path}/`));
   return {
     files,
-    exists: jest.fn(async (path: string) => files.has(path)),
+    exists: jest.fn(async (path: string) => files.has(path) || isFolder(path)),
+    list: jest.fn(async (path: string) => {
+      const children = [...files.keys()]
+        .filter((file) => file.startsWith(`${path}/`))
+        .map((file) => file.slice(path.length + 1).split("/"));
+      return {
+        files: children.filter((parts) => parts.length === 1).map(([name]) => `${path}/${name}`),
+        folders: [...new Set(children.filter((parts) => parts.length > 1).map(([name]) => `${path}/${name}`))],
+      };
+    }),
     read: jest.fn(async (path: string) => files.get(path) ?? ""),
     write: jest.fn(async (path: string, content: string) => { files.set(path, content); }),
+    append: jest.fn(async (path: string, content: string) => { files.set(path, `${files.get(path) ?? ""}${content}`); }),
   };
 }
 
-describe("protectLegacyPiCredentials", () => {
-  it("creates a scoped ignore rule and reports a legacy credential file", async () => {
-    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}" });
+describe("protectLegacyCredentials", () => {
+  it("ignores credential files in the plugin folder before any appears", async () => {
+    const target = adapter({ [BACKUP]: "{}" });
 
-    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({
-      legacyCredentialsPresent: true,
-      ignoreRulePresent: true,
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "protected",
+      credentialFiles: [],
     });
-    expect(target.files.get(SYSTEMSCULPT_GITIGNORE_PATH)).toBe("/pi-agent/\n");
+    expect(target.files.get(IGNORE_FILE)).toBe(IGNORE_RULES);
   });
 
-  it("preserves existing ignore content and is idempotent", async () => {
-    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}", [SYSTEMSCULPT_GITIGNORE_PATH]: "cache/" });
+  it("reports credential files a retired feature left in a plugin subfolder without reading them", async () => {
+    const target = adapter({
+      [LEFT_BEHIND_AUTH]: "{}",
+      [LEFT_BEHIND_MODELS]: "{}",
+      [BACKUP]: "{}",
+      [IGNORE_FILE]: "cache/\n",
+    });
 
-    await protectLegacyPiCredentials(target);
-    await protectLegacyPiCredentials(target);
-
-    expect(target.files.get(SYSTEMSCULPT_GITIGNORE_PATH)).toBe("cache/\n/pi-agent/\n");
-    expect(target.write).toHaveBeenCalledTimes(1);
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "protected",
+      credentialFiles: [LEFT_BEHIND_AUTH, LEFT_BEHIND_MODELS],
+    });
+    expect(target.read.mock.calls).toEqual([[IGNORE_FILE]]);
   });
 
-  it("does not rewrite an existing exact rule", async () => {
-    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}", [SYSTEMSCULPT_GITIGNORE_PATH]: "# local\n/pi-agent/\n" });
+  it("appends to an existing ignore file once, leaving its content in place", async () => {
+    const target = adapter({ [LEFT_BEHIND_AUTH]: "{}", [IGNORE_FILE]: "cache/" });
 
-    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({
-      legacyCredentialsPresent: true,
-      ignoreRulePresent: true,
-    });
+    await protectLegacyCredentials(target);
+    await protectLegacyCredentials(target);
+
+    expect(target.files.get(IGNORE_FILE)).toBe(`cache/\n${IGNORE_RULES}`);
+    expect(target.append).toHaveBeenCalledTimes(1);
     expect(target.write).not.toHaveBeenCalled();
   });
 
-  it("leaves a vault without the retired credential file untouched", async () => {
-    const target = adapter({ [SYSTEMSCULPT_GITIGNORE_PATH]: "cache/" });
+  it("leaves rules that Git already applies alone, whatever their line endings", async () => {
+    const target = adapter({
+      [BACKUP]: "{}",
+      [IGNORE_FILE]: "# local\r\n!keep.md\r\nauth.json  \r\nmodels.json\r\n",
+    });
 
-    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({ legacyCredentialsPresent: false });
-    expect(target.read).not.toHaveBeenCalled();
+    await protectLegacyCredentials(target);
+
+    expect(target.append).not.toHaveBeenCalled();
     expect(target.write).not.toHaveBeenCalled();
   });
 
-  it("preserves credential detection when the ignore file cannot be written", async () => {
-    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}" });
+  it.each([
+    ["a commented-out rule", "# auth.json\nmodels.json\n", "auth.json\n"],
+    ["leading whitespace", "  auth.json\nmodels.json\n", "auth.json\n"],
+    ["a trailing tab", "auth.json\t\nmodels.json\n", "auth.json\n"],
+    ["a later negation", "auth.json\nmodels.json\n!*.json\n", "auth.json\nmodels.json\n"],
+  ])("adds rules Git would not apply because of %s", async (_case, existing, added) => {
+    const target = adapter({ [BACKUP]: "{}", [IGNORE_FILE]: existing });
+
+    await protectLegacyCredentials(target);
+
+    expect(target.append).toHaveBeenCalledWith(
+      IGNORE_FILE,
+      `# Added by SystemSculpt: keeps plain-text credential files out of Git.\n${added}`,
+    );
+  });
+
+  it("leaves a vault without the plugin folder untouched", async () => {
+    const target = adapter({ "Notes/auth.json": "{}" });
+
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({ status: "no-plugin-folder" });
+    expect(target.list).not.toHaveBeenCalled();
+    expect(target.write).not.toHaveBeenCalled();
+    expect(target.append).not.toHaveBeenCalled();
+  });
+
+  it("still reports credential files when the ignore file cannot be written", async () => {
+    const target = adapter({ [LEFT_BEHIND_AUTH]: "{}" });
     target.write.mockRejectedValueOnce(new Error("read only"));
 
-    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({
-      legacyCredentialsPresent: true,
-      ignoreRulePresent: false,
-      protectionError: "read only",
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "unprotected",
+      credentialFiles: [LEFT_BEHIND_AUTH],
+      error: "read only",
     });
+  });
+});
+
+describe("legacyCredentialNotice", () => {
+  it("stays quiet when no credential file was found", () => {
+    expect(legacyCredentialNotice({ status: "no-plugin-folder" })).toBeNull();
+    expect(legacyCredentialNotice({ status: "protected", credentialFiles: [] })).toBeNull();
+  });
+
+  it("names the file, covers sign-in tokens and states what the ignore rule cannot do", () => {
+    expect(legacyCredentialNotice({ status: "protected", credentialFiles: [LEFT_BEHIND_AUTH] })).toBe(
+      `SystemSculpt found a file from a retired feature: ${LEFT_BEHIND_AUTH}. ` +
+        "It may hold API keys or sign-in tokens in plain text, and SystemSculpt no longer uses it. " +
+        "Rotate those keys and revoke those sign-ins with each provider, delete the file, " +
+        "and remove it from Git history, sync history, and backups. " +
+        "A Git ignore rule now keeps new untracked copies out of commits, but it cannot clean up existing copies.",
+    );
+  });
+
+  it("warns that the files can still be committed when the ignore rule is missing", () => {
+    const notice = legacyCredentialNotice({
+      status: "unprotected",
+      credentialFiles: [LEFT_BEHIND_AUTH, LEFT_BEHIND_MODELS],
+      error: "read only",
+    });
+
+    expect(notice).toContain(`files from a retired feature: ${LEFT_BEHIND_AUTH}, ${LEFT_BEHIND_MODELS}.`);
+    expect(notice).toContain("They may hold API keys or sign-in tokens");
+    expect(notice).toContain("delete the files, and remove them");
+    expect(notice).toMatch(/The Git ignore rule could not be added, so these files can still be committed\.$/u);
   });
 });

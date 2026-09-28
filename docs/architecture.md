@@ -26,6 +26,7 @@ public operations and behavioral tests before following private helpers.
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
 | Search and Similar notes | `src/services/search/`, `src/services/embeddings/` | Vault indexing/search and managed semantic index integration. |
 | Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, settings presentation, and account connection respectively. |
+| Credential hygiene | `src/core/security/` | Keeps plain-text credential files that retired features left in the plugin folder out of Git, and tells the user how to clean them up. |
 | Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. |
 | Shared data primitives | `src/utils/sha256.ts`, `base64.ts` | Content hashing and byte encoding used across capabilities. These are independent of Studio and presentation. |
 | Desktop and window behavior | `src/platform/`, `src/core/ui/surface/` | Host capabilities, desktop adapters, mobile host chrome, owner-window DOM, and shared surface interaction. |
