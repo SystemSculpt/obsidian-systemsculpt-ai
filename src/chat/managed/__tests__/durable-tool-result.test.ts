@@ -35,6 +35,26 @@ describe("durableToolResult", () => {
     expect(result.data.files[0].content).toBe(content);
   });
 
+  it("keeps long artifact paths whole so a reopened chat still links to the file", () => {
+    const deep = `${"Archive/".repeat(80)}Plan.md`;
+    const moved = `${"Moved/".repeat(100)}Plan.md`;
+    const result = {
+      success: true,
+      data: {
+        results: [{ path: deep, destination: moved, note: "b".repeat(2_000), success: true }],
+        opened: [deep],
+      },
+    };
+    const bounded = durableToolResult(result);
+    const data = bounded.data as { results: Array<Record<string, unknown>>; opened: string[] };
+    expect(deep.length).toBeGreaterThan(DURABLE_TOOL_TEXT_LIMIT);
+    expect(data.results[0].path).toBe(deep);
+    expect(data.results[0].destination).toBe(moved);
+    expect(data.opened).toEqual([deep]);
+    expect(data.results[0].note).toHaveLength(DURABLE_TOOL_TEXT_LIMIT);
+    expect(durableToolResult(bounded)).toEqual(bounded);
+  });
+
   it("keeps the head of long lists, bounds depth, and bounds errors", () => {
     const matches = Array.from({ length: 500 }, (_, index) => ({ path: `Note ${index}.md` }));
     let nested: Record<string, unknown> = { leaf: true };

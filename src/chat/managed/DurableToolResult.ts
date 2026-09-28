@@ -5,9 +5,9 @@ import type { ToolCall, ToolCallResult } from "../../types/toolCalls";
 /*
  * Saved chats keep a bounded summary of each tool result; the server holds
  * the full result. History only presents a result's outcome, its error, item
- * outcomes and the paths behind artifact links, so structure and short values
- * are kept while long text (a read note's whole content, search snippets) is
- * cut. Lists keep every entry a batch can produce, so history still counts
+ * outcomes and the paths behind artifact links, so structure, short values
+ * and those paths are kept whole while other long text (a read note's whole
+ * content, search snippets) is cut. Lists keep every entry a batch can produce, so history still counts
  * each item's outcome; only longer lists keep their head.
  *
  * Bounding is idempotent: a bounded result bounds to itself, so a result read
@@ -18,6 +18,8 @@ export const DURABLE_TOOL_TEXT_LIMIT = 512;
 export const DURABLE_TOOL_LIST_LIMIT = 2 * MAX_BATCH_OPERATIONS;
 const DURABLE_TOOL_DEPTH_LIMIT = 6;
 const OMITTED_VALUE = "[omitted]";
+/** The fields artifact links are rebuilt from; a cut path would link to nothing. */
+const ARTIFACT_PATH_KEYS = new Set(["path", "destination", "opened"]);
 
 function omittedMarker(omitted: number): string {
   return `… [${omitted} more characters]`;
@@ -36,18 +38,18 @@ function boundedText(value: string): string {
   return `${value.slice(0, end)}${omittedMarker(value.length - end)}`;
 }
 
-function boundedValue(value: unknown, depth: number): unknown {
-  if (typeof value === "string") return boundedText(value);
+function boundedValue(value: unknown, depth: number, isPath = false): unknown {
+  if (typeof value === "string") return isPath ? value : boundedText(value);
   if (value === null || typeof value !== "object") return value;
   if (depth >= DURABLE_TOOL_DEPTH_LIMIT) return OMITTED_VALUE;
   if (Array.isArray(value)) {
     return value
       .slice(0, DURABLE_TOOL_LIST_LIMIT)
-      .map((entry) => boundedValue(entry, depth + 1));
+      .map((entry) => boundedValue(entry, depth + 1, isPath));
   }
   const bounded: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    bounded[key] = boundedValue(entry, depth + 1);
+    bounded[key] = boundedValue(entry, depth + 1, ARTIFACT_PATH_KEYS.has(key));
   }
   return bounded;
 }
