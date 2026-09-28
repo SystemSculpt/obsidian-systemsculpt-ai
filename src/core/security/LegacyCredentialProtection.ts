@@ -11,10 +11,16 @@ const GITIGNORE_PATH = `${PLUGIN_FOLDER_PATH}/.gitignore`;
 const CREDENTIAL_FILE_NAMES = ["auth.json", "models.json"] as const;
 const IGNORE_COMMENT = "# Added by SystemSculpt: keeps plain-text credential files out of Git.";
 
+type CredentialSearch = Readonly<{
+  credentialFiles: readonly string[];
+  /** Why part of the plugin folder could not be searched; the rules still cover it. */
+  searchError?: string;
+}>;
+
 export type LegacyCredentialProtectionResult = Readonly<
   | { status: "no-plugin-folder" }
-  | { status: "protected"; credentialFiles: readonly string[] }
-  | { status: "unprotected"; credentialFiles: readonly string[]; error: string }
+  | ({ status: "protected" } & CredentialSearch)
+  | ({ status: "unprotected"; error: string } & CredentialSearch)
 >;
 
 type ProtectionAdapter = Pick<DataAdapter, "append" | "exists" | "list" | "read" | "write">;
@@ -33,17 +39,17 @@ export async function protectLegacyCredentials(
   adapter: ProtectionAdapter,
 ): Promise<LegacyCredentialProtectionResult> {
   if (!(await adapter.exists(PLUGIN_FOLDER_PATH))) return { status: "no-plugin-folder" };
-  const credentialFiles = await findCredentialFiles(adapter);
+  // The rules go in first: they protect every copy, found or not.
+  let ignoreError: string | null = null;
   try {
     await ensureIgnoreRules(adapter);
-    return { status: "protected", credentialFiles };
   } catch (error) {
-    return {
-      status: "unprotected",
-      credentialFiles,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    ignoreError = errorMessage(error);
   }
+  const search = await findCredentialFiles(adapter);
+  return ignoreError === null
+    ? { status: "protected", ...search }
+    : { status: "unprotected", error: ignoreError, ...search };
 }
 
 /** The warning for credential files found in the plugin folder, or null when there are none. */
@@ -62,17 +68,35 @@ export function legacyCredentialNotice(result: LegacyCredentialProtectionResult)
   ].join(" ");
 }
 
-/** Credential files in the plugin folder or one of its folders. */
-async function findCredentialFiles(adapter: ProtectionAdapter): Promise<string[]> {
-  const { folders } = await adapter.list(PLUGIN_FOLDER_PATH);
-  const found: string[] = [];
+/**
+ * Credential files in the plugin folder or one of its folders. A folder that
+ * cannot be listed or a file that cannot be checked is skipped, so what could
+ * be searched is still reported.
+ */
+async function findCredentialFiles(adapter: ProtectionAdapter): Promise<CredentialSearch> {
+  let searchError: string | undefined;
+  let folders: string[] = [];
+  try {
+    folders = (await adapter.list(PLUGIN_FOLDER_PATH)).folders;
+  } catch (error) {
+    searchError = errorMessage(error);
+  }
+  const credentialFiles: string[] = [];
   for (const folder of [PLUGIN_FOLDER_PATH, ...folders]) {
     for (const name of CREDENTIAL_FILE_NAMES) {
       const path = `${folder}/${name}`;
-      if (await adapter.exists(path)) found.push(path);
+      try {
+        if (await adapter.exists(path)) credentialFiles.push(path);
+      } catch (error) {
+        searchError ??= errorMessage(error);
+      }
     }
   }
-  return found;
+  return searchError === undefined ? { credentialFiles } : { credentialFiles, searchError };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function ensureIgnoreRules(adapter: ProtectionAdapter): Promise<void> {

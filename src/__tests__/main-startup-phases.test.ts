@@ -74,7 +74,7 @@ describe("SystemSculptPlugin startup phases", () => {
     expect(registeredTaskIds(plugin, "layout")).toContain("updates.start");
   });
 
-  it("checks for retired credential files after layout-ready and hides its notice on unload", async () => {
+  it("warns about retired credential files and hides the notice on unload", async () => {
     const app = new App();
     const plugin = makePlugin(app);
     const adapter = app.vault.adapter as any;
@@ -85,10 +85,8 @@ describe("SystemSculptPlugin startup phases", () => {
     const hide = jest.fn();
     const notice = jest.spyOn(obsidian, "Notice").mockImplementation(() => ({ hide }) as any);
     const register = jest.spyOn(plugin, "register");
-    (plugin as any).configureLifecycle();
 
-    expect(registeredTaskIds(plugin, "critical")).not.toContain("security.legacyCredentials");
-    await runTask(plugin, "layout", "security.legacyCredentials");
+    await (plugin as any).checkLegacyCredentials();
 
     expect(notice).toHaveBeenCalledWith(expect.stringContaining(leftBehind), 0);
     const cleanup = register.mock.calls.at(-1)?.[0] as () => void;
@@ -103,10 +101,9 @@ describe("SystemSculptPlugin startup phases", () => {
     adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt" || path === ".systemsculpt/auth.json");
     adapter.write.mockResolvedValue(undefined);
     const notice = jest.spyOn(obsidian, "Notice");
-    (plugin as any).configureLifecycle();
     (plugin as any).isUnloading = true;
 
-    await runTask(plugin, "layout", "security.legacyCredentials");
+    await (plugin as any).checkLegacyCredentials();
 
     expect(notice).not.toHaveBeenCalled();
   });

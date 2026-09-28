@@ -110,6 +110,18 @@ describe("protectLegacyCredentials", () => {
     expect(target.append).not.toHaveBeenCalled();
   });
 
+  it("adds the rules and reports what it could search when the plugin folder cannot be listed", async () => {
+    const target = adapter({ ".systemsculpt/auth.json": "{}", [LEFT_BEHIND_AUTH]: "{}" });
+    target.list.mockRejectedValueOnce(new Error("permission denied"));
+
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "protected",
+      credentialFiles: [".systemsculpt/auth.json"],
+      searchError: "permission denied",
+    });
+    expect(target.files.get(IGNORE_FILE)).toBe(IGNORE_RULES);
+  });
+
   it("still reports credential files when the ignore file cannot be written", async () => {
     const target = adapter({ [LEFT_BEHIND_AUTH]: "{}" });
     target.write.mockRejectedValueOnce(new Error("read only"));
