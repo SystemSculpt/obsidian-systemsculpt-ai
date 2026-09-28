@@ -391,6 +391,37 @@ describe("ManagementOperations", () => {
         expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
       });
 
+      it.each([
+        ["a file", "report.pdf", new TFile({ path: "report.pdf" }), mockDocumentContextManager.pinVaultFile, false],
+        ["a folder", "dir", new TFolder({ path: "dir", children: [] }), mockDocumentContextManager.pinVaultFiles, 0],
+      ])("saves the image pins of a PDF conversion cancelled while pinning %s", async (_case, path, target, pin, cancelled) => {
+        const controller = new AbortController();
+        const pinned = new Set(["[[file1.md]]"]);
+        mockContextManager.getPinnedFiles.mockImplementation(() => pinned);
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(target);
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue([new TFile({ path: "dir/report.pdf" })]);
+        pin.mockImplementationOnce(async () => {
+          pinned.add("[[images-report/page-1.png]]");
+          controller.abort();
+          return cancelled;
+        });
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: [path] }, mockChatView, controller.signal);
+
+        expect(result.processed).toBe(0);
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not save when nothing new was pinned", async () => {
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFile({ path: "file1.md" }));
+        mockDocumentContextManager.pinVaultFile.mockResolvedValueOnce(false);
+
+        await mgmtOps.manageContext({ action: "add", paths: ["file1.md"] }, mockChatView);
+
+        expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+      });
+
       it("stops the remove path loop after cancellation", async () => {
         const controller = new AbortController();
         mockContextManager.hasPinnedFile.mockReturnValue(true);

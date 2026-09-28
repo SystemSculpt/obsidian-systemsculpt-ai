@@ -90,6 +90,7 @@ export class ManagementOperations {
       let filesInCurrentRequest = 0;
       // A folder pins only what find, search and list_items would show from it.
       const exclusions = searchVaultExclusions(this.plugin);
+      const pinnedBefore = new Set(currentChatView.contextManager.getPinnedFiles());
       
       for (const path of paths) {
         if (signal?.aborted) break;
@@ -221,8 +222,10 @@ export class ManagementOperations {
         }
       }
 
-      // Save changes once at the end
-      if (totalFilesProcessed > 0) {
+      // Save changes once at the end. A cancelled PDF conversion can pin the
+      // PDF's images without pinning the PDF, so any new pin is saved too.
+      const pinnedNow = currentChatView.contextManager.getPinnedFiles();
+      if (totalFilesProcessed > 0 || [...pinnedNow].some((link) => !pinnedBefore.has(link))) {
         await currentChatView.contextManager.triggerContextChange();
       }
 
