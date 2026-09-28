@@ -11,6 +11,7 @@ import { getFilesFromFolder, normalizeVaultPath } from "../utils";
 import { openFileInMainWorkspace } from '../../../utils/workspaceUtils';
 import { resolveFolderNotePath } from "../folderNotes";
 import type { FirstPartyToolChatTarget } from "../../types";
+import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
 
 /**
  * Management operations for first-party vault tools (workspace, context).
@@ -60,6 +61,7 @@ export class ManagementOperations {
   async manageContext(
     params: ManageContextParams,
     originatingChatView: FirstPartyToolChatTarget | undefined = this.defaultChatView,
+    signal?: AbortSignal,
   ): Promise<ContextManagementResult> {
     const { action, paths } = params;
     
@@ -72,7 +74,7 @@ export class ManagementOperations {
     }
 
     const MAX_FILES_PER_REQUEST = FILESYSTEM_LIMITS.MAX_FILES_PER_REQUEST;
-    const results: Array<{path: string; success: boolean; reason?: string}> = [];
+    const results: ContextManagementResult["results"] = [];
     let totalFilesProcessed = 0;
     
     // Context is scoped to the chat whose agent emitted the tool call. Looking
@@ -86,8 +88,12 @@ export class ManagementOperations {
     if (action === "add") {
       // Handle pinning files
       let filesInCurrentRequest = 0;
+      // A folder pins only what find, search and list_items would show from it.
+      const exclusions = searchVaultExclusions(this.plugin);
+      const pinnedBefore = new Set(currentChatView.contextManager.getPinnedFiles());
       
       for (const path of paths) {
+        if (signal?.aborted) break;
         try {
           const normalized = normalizePath(normalizeVaultPath(path));
           // Fall back to the Folder Notes layout (X.md -> X/X.md) so folder
@@ -106,8 +112,19 @@ export class ManagementOperations {
           }
 
           if (abstractFile instanceof TFolder) {
-            // Get all files in the directory recursively
-            const folderFiles = getFilesFromFolder(abstractFile);
+            if (exclusions.isFolderExcluded(abstractFile.path)) {
+              results.push({ path, success: false, notice: "This folder is excluded by the exclusion settings, so none of its files were pinned." });
+              continue;
+            }
+            // Get the directory's files recursively, without excluded files
+            const allFolderFiles = getFilesFromFolder(abstractFile);
+            const folderFiles = allFolderFiles.filter((file) => !exclusions.isExcluded(file.path));
+            if (folderFiles.length === 0) {
+              results.push({ path, success: false, notice: allFolderFiles.length === 0
+                ? "This folder is empty, so no files were pinned."
+                : "All files in this folder are excluded by the exclusion settings, so none were pinned." });
+              continue;
+            }
             
             if (folderFiles.length > MAX_FILES_PER_REQUEST) {
               results.push({ 
@@ -131,6 +148,7 @@ export class ManagementOperations {
 
             // Pin files from the directory through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
+            if (signal?.aborted) break;
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
             const addedCount = await documentContextManager.pinVaultFiles(
@@ -139,16 +157,22 @@ export class ManagementOperations {
               {
                 showNotices: false,
                 saveChanges: false, // We'll save once at the end
-                maxFiles: 100 // Use the global context limit
+                maxFiles: 100, // Use the global context limit
+                signal,
               }
             );
 
+            // Excluded files are pinned only when named, so tell the agent how many it left out.
+            const excluded = allFolderFiles.length - folderFiles.length;
+            const exclusionNotice = excluded === 0 ? {} : { notice: excluded === 1
+              ? "1 file in this folder is excluded by the exclusion settings and was not pinned. Name a file by its path to pin it anyway."
+              : `${excluded} files in this folder are excluded by the exclusion settings and were not pinned. Name a file by its path to pin it anyway.` };
             if (addedCount > 0) {
-              results.push({ path, success: true });
+              results.push({ path, success: true, ...exclusionNotice });
               filesInCurrentRequest += addedCount;
               totalFilesProcessed += addedCount;
             } else {
-              results.push({ path, success: false, reason: "No files were pinned from directory" });
+              results.push({ path, success: false, reason: "No files were pinned from directory", ...exclusionNotice });
             }
 
           } else if (abstractFile instanceof TFile) {
@@ -164,6 +188,7 @@ export class ManagementOperations {
 
             // Pin an individual file through the document processor.
             const { DocumentContextManager } = await import("../../../services/DocumentContextManager");
+            if (signal?.aborted) break;
             const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
             
             const success = await documentContextManager.pinVaultFile(
@@ -171,12 +196,16 @@ export class ManagementOperations {
               currentChatView.contextManager, 
               {
                 showNotices: false,
-                saveChanges: false // We'll save once at the end
+                saveChanges: false, // We'll save once at the end
+                signal,
               }
             );
 
             if (success) {
-              results.push({ path, success: true });
+              // Exclusions hide files from discovery; a file named explicitly is still pinned.
+              results.push(exclusions.isExcluded(abstractFile.path)
+                ? { path, success: true, notice: "Pinned because it was named explicitly; this file is hidden from search by the exclusion settings." }
+                : { path, success: true });
               filesInCurrentRequest++;
               totalFilesProcessed++;
             } else {
@@ -193,14 +222,17 @@ export class ManagementOperations {
         }
       }
 
-      // Save changes once at the end
-      if (totalFilesProcessed > 0) {
+      // Save changes once at the end. A cancelled PDF conversion can pin the
+      // PDF's images without pinning the PDF, so any new pin is saved too.
+      const pinnedNow = currentChatView.contextManager.getPinnedFiles();
+      if (totalFilesProcessed > 0 || [...pinnedNow].some((link) => !pinnedBefore.has(link))) {
         await currentChatView.contextManager.triggerContextChange();
       }
 
     } else if (action === "remove") {
       // Handle removing files from context
       for (const path of paths) {
+        if (signal?.aborted) break;
         try {
           // Normalize the path to match how files are stored in context
           const normalized = normalizePath(normalizeVaultPath(path));

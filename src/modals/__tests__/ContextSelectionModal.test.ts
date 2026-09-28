@@ -200,7 +200,7 @@ describe("ContextSelectionModal", () => {
     add.click();
     await Promise.resolve();
 
-    expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ path: checkbox.closest("li")?.querySelector(".ss-context-file-path")?.textContent })]);
+    expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ path: checkbox.closest("li")?.querySelector(".ss-context-file-path")?.textContent })], expect.any(AbortSignal));
     expect(document.body.contains(modal.modalEl)).toBe(false);
   });
 
@@ -220,6 +220,45 @@ describe("ContextSelectionModal", () => {
       "Couldn't pin files for every message. Processing failed",
       5000,
     );
+  });
+
+  it.each(["cancel", "close", "owner"] as const)("%s aborts Pinning and suppresses a late failure notice", async (action) => {
+    mockedNotice.mockClear();
+    const owner = new AbortController();
+    const { modal, onSelect } = harness({
+      signal: owner.signal, autoFocusSearch: false, initialSelectedPaths: ["documents/report.pdf"],
+    });
+    let reject!: (error: Error) => void;
+    onSelect.mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.pin"]')!.click();
+    const signal = onSelect.mock.calls[0][1] as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    const cancel = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.cancel"]')!;
+    expect(cancel.disabled).toBe(false);
+    expect(modal.modalEl.textContent).toContain("Pinning…");
+    if (action === "cancel") cancel.click();
+    else if (action === "owner") owner.abort();
+    else modal.close();
+    expect(signal.aborted).toBe(true);
+    reject(new Error("Late transport failure"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedNotice).not.toHaveBeenCalled();
+    expect(document.body.contains(modal.modalEl)).toBe(false);
+  });
+
+  it("creates the pin cancellation scope in the modal's owner window", () => {
+    const { modal, onSelect } = harness({ autoFocusSearch: false, initialSelectedPaths: ["documents/report.pdf"] });
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    frame.contentDocument!.body.append(modal.modalEl);
+    onSelect.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.pin"]')!.click();
+    const signal = onSelect.mock.calls[0][1] as AbortSignal;
+    expect(signal).toBeInstanceOf(frame.contentWindow!.AbortSignal);
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.cancel"]')!.click();
+    expect(signal.aborted).toBe(true);
+    frame.remove();
   });
 
   it("renders an honest empty state", () => {

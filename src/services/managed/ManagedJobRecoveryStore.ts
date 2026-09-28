@@ -36,6 +36,16 @@ const dispatchLegality: Record<ManagedRecoveryCapability, Partial<Record<Managed
   video_generation: { content_ready: ["prepare", "create"], prepared: ["create"] },
 };
 
+/**
+ * A record that holds no recoverable work: abandoned, upload-aborted, or
+ * completed without a local commit receipt to replay. Selection by source
+ * skips these records, and initialization prunes them.
+ */
+export function isRetiredManagedRecoveryRecord(record: Pick<ManagedJobRecoveryRecord, "phase" | "localCommitReceipt">): boolean {
+  if (record.phase === "abandoned" || record.phase === "upload_aborted") return true;
+  return record.phase === "completed" && !record.localCommitReceipt;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -71,7 +81,7 @@ export class ManagedJobRecoveryStore {
   private async scan(): Promise<void> {
     await this.adapter.mkdir(this.root); const files = await this.adapter.list(this.root);
     const bases = new Set(files.map(p => p.replace(/\.(?:tmp|journal|bak|delete-journal|deleting)$/, "")).filter(p => p.endsWith(".json"))); const errors: ManagedRecoveryError[] = [];
-    for (const path of [...bases].sort()) { try { await this.serial(path, async () => { await this.recover(path); if (await this.adapter.exists(path)) { const record = await this.readCandidate(path); if (this.shouldPruneInitializedRecord(record)) await this.deleteRecord(path, record); } }); } catch (error) { errors.push(error instanceof ManagedRecoveryError ? error : new ManagedRecoveryError("recovery_corrupt", "Recovery initialization failed.")); } }
+    for (const path of [...bases].sort()) { try { await this.serial(path, async () => { await this.recover(path); if (await this.adapter.exists(path)) { const record = await this.readCandidate(path); if (isRetiredManagedRecoveryRecord(record)) await this.deleteRecord(path, record); } }); } catch (error) { errors.push(error instanceof ManagedRecoveryError ? error : new ManagedRecoveryError("recovery_corrupt", "Recovery initialization failed.")); } }
     if (errors.length) throw errors[0];
   }
 
@@ -482,11 +492,6 @@ export class ManagedJobRecoveryStore {
   }
   private async optionalRecord(path: string) { if (!(await this.adapter.exists(path))) return undefined; return this.readCandidate(path); }
   private async finishDelete(path: string, j: DeleteJournal) { const current = await this.optionalRecord(path); if (current && current.revision !== j.revision) throw new ManagedRecoveryError("recovery_corrupt", "Refusing mismatched record deletion."); for (const suffix of [".deleting", ".tmp", ".bak", ".journal"]) if (await this.adapter.exists(`${path}${suffix}`)) await this.adapter.remove(`${path}${suffix}`); if (await this.adapter.exists(path)) await this.adapter.remove(path); if (await this.adapter.exists(`${path}.delete-journal`)) await this.adapter.remove(`${path}.delete-journal`); }
-  private shouldPruneInitializedRecord(record: ManagedJobRecoveryRecord): boolean {
-    if (record.phase === "abandoned" || record.phase === "upload_aborted") return true;
-    if (record.phase !== "completed") return false;
-    return !record.localCommitReceipt;
-  }
   private async listCapabilityRecords(capability: ManagedRecoveryCapability): Promise<ManagedJobRecoveryRecord[]> {
     const directory = `${this.root}/${capability}`;
     await this.adapter.mkdir(directory);

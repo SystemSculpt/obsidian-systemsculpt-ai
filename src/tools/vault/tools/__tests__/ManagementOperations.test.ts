@@ -3,6 +3,8 @@
  */
 import { App, TFile, TFolder, Notice } from "obsidian";
 import { ManagementOperations } from "../ManagementOperations";
+import { normalizeLocalToolOutcome } from "../../../../services/SystemSculptService";
+import { safeOutboundVaultToolResult } from "../../../../chat/managed/WireConversation";
 
 // Mock utils
 jest.mock("../../utils", () => ({
@@ -300,6 +302,148 @@ describe("ManagementOperations", () => {
         expect(result.results[0].success).toBe(true);
         expect(result.processed).toBe(2);
         expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalled();
+      });
+
+      it("pins only the files in a folder that search would show, and says how to pin the rest (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["dir/private"], patterns: ["*.draft.md"] } };
+        const visible = new TFile({ path: "dir/notes.md" });
+        const folderFiles = [visible, new TFile({ path: "dir/plan.draft.md" }), new TFile({ path: "dir/private/key.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["dir"] });
+
+        expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalledWith([visible], mockContextManager, expect.anything());
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "dir", success: true,
+          notice: "2 files in this folder are excluded by the exclusion settings and were not pinned. Name a file by its path to pin it anyway.",
+        }] });
+      });
+
+      it("explains the excluded files when none of a folder's visible files could be pinned (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { patterns: ["*.draft.md"] } };
+        const folderFiles = [new TFile({ path: "dir/notes.md" }), new TFile({ path: "dir/plan.draft.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+        mockDocumentContextManager.pinVaultFiles.mockResolvedValueOnce(0);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["dir"] });
+
+        expect(result.results[0]).toEqual({ path: "dir", success: false, reason: "No files were pinned from directory",
+          notice: "1 file in this folder is excluded by the exclusion settings and was not pinned. Name a file by its path to pin it anyway.",
+        });
+      });
+
+      it("pins nothing from an excluded folder and says why (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["Private"] } };
+        const folderFiles = [new TFile({ path: "Private/key.md" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "Private", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["Private"] });
+
+        expect(mockDocumentContextManager.pinVaultFiles).not.toHaveBeenCalled();
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "Private", success: false, notice: expect.stringContaining("excluded by the exclusion settings") }] });
+        expect(result.processed).toBe(0);
+      });
+
+      it("pins an excluded file named by path and notes the exclusion (#422)", async () => {
+        mockPlugin.settings = { embeddingsExclusions: { folders: ["Private"] } };
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFile({ path: "Private/key.md" }));
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["Private/key.md"] });
+
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalled();
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "Private/key.md", success: true, notice: expect.stringContaining("named explicitly") }] });
+      });
+
+      it.each([false, true])("keeps empty and entirely filtered folder notices distinct on the wire (filtered=%s)", async (filtered) => {
+        mockPlugin.settings = { embeddingsExclusions: { patterns: ["*.draft.md"] } };
+        const children = filtered ? [new TFile({ path: "folder/a.draft.md" })] : [];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFolder({ path: "folder", children }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(children);
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["folder"] });
+        const outbound = safeOutboundVaultToolResult(normalizeLocalToolOutcome(result, "context"));
+        expect(outbound.data).toMatchObject({ results: [{ path: "folder", success: false,
+          notice: filtered ? "All files in this folder are excluded by the exclusion settings, so none were pinned."
+            : "This folder is empty, so no files were pinned.",
+        }] });
+        expect(mockDocumentContextManager.pinVaultFiles).not.toHaveBeenCalled();
+      });
+
+      it("stops the add path loop after PDF cancellation and persists already applied pins", async () => {
+        const controller = new AbortController();
+        (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path) => new TFile({ path }));
+        mockDocumentContextManager.pinVaultFile.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
+          controller.abort();
+          return false;
+        });
+        const result = await mgmtOps.manageContext({ action: "add", paths: ["before.md", "stop.pdf", "after.md"] }, mockChatView, controller.signal);
+        expect(result.processed).toBe(1);
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledTimes(2);
+        expect(app.vault.getAbstractFileByPath).not.toHaveBeenCalledWith("after.md");
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        ["a file", "report.pdf", new TFile({ path: "report.pdf" }), mockDocumentContextManager.pinVaultFile, false],
+        ["a folder", "dir", new TFolder({ path: "dir", children: [] }), mockDocumentContextManager.pinVaultFiles, 0],
+      ])("saves the image pins of a PDF conversion cancelled while pinning %s", async (_case, path, target, pin, cancelled) => {
+        const controller = new AbortController();
+        const pinned = new Set(["[[file1.md]]"]);
+        mockContextManager.getPinnedFiles.mockImplementation(() => pinned);
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(target);
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue([new TFile({ path: "dir/report.pdf" })]);
+        pin.mockImplementationOnce(async () => {
+          pinned.add("[[images-report/page-1.png]]");
+          controller.abort();
+          return cancelled;
+        });
+
+        const result = await mgmtOps.manageContext({ action: "add", paths: [path] }, mockChatView, controller.signal);
+
+        expect(result.processed).toBe(0);
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not save when nothing new was pinned", async () => {
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFile({ path: "file1.md" }));
+        mockDocumentContextManager.pinVaultFile.mockResolvedValueOnce(false);
+
+        await mgmtOps.manageContext({ action: "add", paths: ["file1.md"] }, mockChatView);
+
+        expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+      });
+
+      it("stops the remove path loop after cancellation", async () => {
+        const controller = new AbortController();
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        mockContextManager.unpinFile.mockImplementationOnce(async () => { controller.abort(); return true; });
+        const result = await mgmtOps.manageContext({ action: "remove", paths: ["before.md", "after.md"] }, mockChatView, controller.signal);
+        expect(result.processed).toBe(1);
+        expect(mockContextManager.unpinFile).toHaveBeenCalledTimes(1);
+        expect(mockContextManager.unpinFile).toHaveBeenCalledWith("before.md");
+      });
+
+      it("forwards the tool call's cancel signal to document pinning (#420)", async () => {
+        const signal = new AbortController().signal;
+        const folderFiles = [new TFile({ path: "dir/report.pdf" })];
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(new TFolder({ path: "dir", children: folderFiles }));
+        const { getFilesFromFolder } = require("../../utils");
+        (getFilesFromFolder as jest.Mock).mockReturnValue(folderFiles);
+        await mgmtOps.manageContext({ action: "add", paths: ["dir"] }, mockChatView, signal);
+        expect(mockDocumentContextManager.pinVaultFiles).toHaveBeenCalledWith(folderFiles, mockContextManager, expect.objectContaining({ signal }));
+
+        (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(new TFile({ path: "report.pdf" }));
+        await mgmtOps.manageContext({ action: "add", paths: ["report.pdf"] }, mockChatView, signal);
+        expect(mockDocumentContextManager.pinVaultFile).toHaveBeenCalledWith(expect.anything(), mockContextManager, expect.objectContaining({ signal }));
       });
 
       it("rejects directory with too many files", async () => {

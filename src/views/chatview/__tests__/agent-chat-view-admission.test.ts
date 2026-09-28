@@ -1545,6 +1545,7 @@ describe("AgentChatView composer admission", () => {
         resolveFinished: jest.fn(),
       };
       Object.assign(view, {
+        contextManager: { dispose: jest.fn() },
         transcript: {
           snapshot: jest.fn(() => transcriptSnapshot),
           persistFailedReceipt,
@@ -1584,7 +1585,7 @@ describe("AgentChatView composer admission", () => {
       expect(persistFailedReceipt).toHaveBeenCalledTimes(1);
       expect(jest.getTimerCount()).toBe(1);
 
-      await expect((view as any).performClose()).resolves.toBeUndefined();
+      await expect(view.onClose()).resolves.toBeUndefined();
       expect(jest.getTimerCount()).toBe(0);
       await jest.advanceTimersByTimeAsync(1_000);
       expect(persistFailedReceipt).toHaveBeenCalledTimes(2);
@@ -1609,6 +1610,7 @@ describe("AgentChatView composer admission", () => {
         resolveFinished: jest.fn(),
       };
       Object.assign(view, {
+        contextManager: { dispose: jest.fn() },
         transcript: { idle: jest.fn(() => receiptWrite) },
         pendingLocalReportIds: new Map<string, string>(),
         localFailedReceiptPersistenceTasks: new Set([receiptWrite]),
@@ -1635,7 +1637,8 @@ describe("AgentChatView composer admission", () => {
       });
 
       let settled = false;
-      const closing = (view as any).onClose().then(() => { settled = true; });
+      const closing = view.onClose().then(() => { settled = true; });
+      expect(view.contextManager.dispose).toHaveBeenCalledTimes(1);
       await Promise.resolve();
       await Promise.resolve();
       expect(settled).toBe(false);
@@ -3304,12 +3307,14 @@ describe("AgentChatView controls", () => {
     document.body.empty();
   });
 
-  it("clicking New chat clears the owned draft and retires an in-flight attachment retry", async () => {
+  it("clicking New chat clears the owned draft and stops an in-flight attachment retry without discarding its conversion", async () => {
     const parent = document.body.createDiv();
     const app = new App();
     const retryStarted = deferred();
     const retryPrepared = deferred<Readonly<{ operationId: string; markdown: string }>>();
-    const retryCompleted = deferred();
+    let retrySignal: AbortSignal | undefined;
+    const complete = jest.fn(async () => undefined);
+    const discard = jest.fn(async () => undefined);
     let prepareAttempt = 0;
     const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -3337,16 +3342,15 @@ describe("AgentChatView controls", () => {
       onOpenHistory: jest.fn(),
       onOpenSettings: jest.fn(),
       documentAttachmentProcessor: {
-        prepare: jest.fn(async () => {
+        prepare: jest.fn(async (_input, { signal }) => {
           prepareAttempt += 1;
           if (prepareAttempt === 1) throw new Error("conversion failed");
+          retrySignal = signal;
           retryStarted.resolve();
           return retryPrepared.promise;
         }),
-        complete: jest.fn(async (operationId) => {
-          if (operationId === "retry-operation") retryCompleted.resolve();
-        }),
-        discard: jest.fn(async () => undefined),
+        complete,
+        discard,
       },
     });
     workspace.load();
@@ -3428,7 +3432,10 @@ describe("AgentChatView controls", () => {
     Object.defineProperty(pdf, "arrayBuffer", {
       value: async () => new TextEncoder().encode("%PDF").buffer,
     });
-    await (workspace.composer as any).ingestFiles([pdf]);
+    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
     expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")).not.toBeNull();
 
@@ -3440,6 +3447,7 @@ describe("AgentChatView controls", () => {
     await newChatFinished.promise;
 
     expect(newChatError).toBeUndefined();
+    expect(retrySignal?.aborted).toBe(true);
     expect(workspace.getInputText()).toBe("");
     expect(workspace.getMessageAttachments()).toEqual([]);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
@@ -3463,7 +3471,9 @@ describe("AgentChatView controls", () => {
     Object.defineProperty(newDraftFile, "arrayBuffer", {
       value: async () => new TextEncoder().encode("new").buffer,
     });
-    await (workspace.composer as any).ingestFiles([newDraftFile]);
+    Object.defineProperty(picker, "files", { configurable: true, value: [newDraftFile] });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(workspace.getMessageAttachments().map((attachment) => attachment.name))
       .toEqual(["new-draft.md"]);
 
@@ -3471,8 +3481,11 @@ describe("AgentChatView controls", () => {
       operationId: "retry-operation",
       markdown: "Recovered old document",
     });
-    await retryCompleted.promise;
-    await Promise.resolve();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    // The late conversion stays with the processor for the next attach of
+    // that PDF; only removing the attachment gives it up.
+    expect(complete).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
 
     expect(workspace.getMessageAttachments().map((attachment) => attachment.name))
       .toEqual(["new-draft.md"]);
@@ -5686,6 +5699,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     const cancel = jest.fn(async () => undefined);
     const recordLifecycle = jest.fn();
     Object.assign(view, {
+      contextManager: { dispose: jest.fn() },
       queueDrainSuppressionDepth: 0,
       queuedFollowUps: [],
       pendingThinConversationId: "conversation_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

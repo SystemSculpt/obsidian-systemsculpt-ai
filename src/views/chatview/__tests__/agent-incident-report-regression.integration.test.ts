@@ -1138,6 +1138,7 @@ describe("ChatView incident report regression integration", () => {
         resolveFinished: jest.fn(),
       };
       Object.assign(closeView, {
+        contextManager: { dispose: jest.fn() },
         transcript,
         pendingLocalReportIds: new Map([[REQUEST_ID, localReportId]]),
         plugin: { getLogger: () => logger },

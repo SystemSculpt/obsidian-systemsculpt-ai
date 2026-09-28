@@ -22,6 +22,8 @@ export class FileContextManager {
   private readonly onContextChange: () => Promise<void>;
 
   private pinnedFiles = new Set<string>();
+  /** One view lifetime owns both direct/drop pins and its open pickers. */
+  private readonly pinning = new AbortController();
 
   constructor(options: FileContextManagerOptions) {
     this.app = options.app;
@@ -46,6 +48,7 @@ export class FileContextManager {
   }
 
   public pinFile(fileOrWikiLink: string): boolean {
+    if (this.pinning.signal.aborted) return false;
     if (!fileOrWikiLink || typeof fileOrWikiLink !== "string") {
       return false;
     }
@@ -80,14 +83,16 @@ export class FileContextManager {
   }
 
   public async openPinFiles(): Promise<void> {
+    if (this.pinning.signal.aborted) return;
     const modal = new ContextSelectionModal(
       this.app,
-      async (files) => {
+      async (files, signal) => {
         const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
-        await documentContextManager.pinVaultFiles(files, this, { showNotices: true, saveChanges: true, maxFiles: 100 });
+        await documentContextManager.pinVaultFiles(files, this, { showNotices: true, saveChanges: true, maxFiles: 100, signal });
       },
       this.plugin,
       {
+        signal: this.pinning.signal,
         isFileAlreadyPinned: (file) => this.hasPinnedFile(file.path),
       }
     );
@@ -95,8 +100,13 @@ export class FileContextManager {
   }
 
   public async pinVaultFile(file: TFile): Promise<void> {
+    if (this.pinning.signal.aborted) return;
     const documentContextManager = DocumentContextManager.getInstance(this.app, this.plugin);
-    await documentContextManager.pinVaultFile(file, this, { showNotices: true, saveChanges: true });
+    await documentContextManager.pinVaultFile(file, this, { showNotices: true, saveChanges: true, signal: this.pinning.signal });
+  }
+
+  public dispose(): void {
+    this.pinning.abort();
   }
 
   public async triggerContextChange(): Promise<void> {

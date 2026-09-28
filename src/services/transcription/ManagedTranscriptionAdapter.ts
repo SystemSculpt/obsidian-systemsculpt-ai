@@ -1,6 +1,6 @@
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "../managed/ManagedJobClient";
-import { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
+import { isRetiredManagedRecoveryRecord, ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
 import type {
   ManagedJobRecoveryRecord,
   ManagedJobStatus,
@@ -690,16 +690,13 @@ export class ManagedTranscriptionAdapter {
     signal: AbortSignal,
   ): Promise<ManagedJobRecoveryRecord | null> {
     const identityMatches = await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity);
-    const activeIdentityMatches = identityMatches.filter((record) => !["abandoned", "upload_aborted"].includes(record.phase));
+    const activeIdentityMatches = identityMatches.filter((record) => !isRetiredManagedRecoveryRecord(record));
     if (!activeIdentityMatches.length) return null;
     const fingerprint = await this.readFingerprint(source, signal);
     const exactMatches = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, {
       identity: source.identity,
       fingerprint,
-    })).filter((record) => (
-      !["abandoned", "upload_aborted"].includes(record.phase)
-      && (record.phase !== "completed" || Boolean(record.localCommitReceipt))
-    ));
+    })).filter((record) => !isRetiredManagedRecoveryRecord(record));
     if (!exactMatches.length) return null;
     if (exactMatches.length > 1) {
       throw new Error("Multiple preserved transcription operations match this exact audio. Safe automatic resume is unavailable.");

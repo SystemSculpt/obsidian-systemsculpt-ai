@@ -413,6 +413,68 @@ describe("DocumentContextManager", () => {
     });
 
     describe("document files", () => {
+      it.each(["single", "batch"] as const)("persists a partial Markdown pin after cancellation during a %s pin", async (scope) => {
+        const controller = new AbortController();
+        const pinned = new Set<string>();
+        (mockContextManager.pinFile as jest.Mock).mockImplementation((link: string) => {
+          pinned.add(link);
+          controller.abort();
+          return true;
+        });
+        (mockContextManager.hasPinnedFile as jest.Mock).mockImplementation((link: string) => pinned.has(link));
+        (mockContextManager.getPinnedFiles as jest.Mock).mockImplementation(() => pinned);
+        mockProcessDocument.mockImplementationOnce(async (_file: TFile, options) => {
+          const receipt = documentReceipt("Extractions/report.md");
+          await options.commitContextEffect(receipt, options.signal);
+          return receipt;
+        });
+        const file = createMockFile({ path: "report.pdf", name: "report.pdf", extension: "pdf" });
+        const options = { saveChanges: true, signal: controller.signal };
+        const result = scope === "single"
+          ? await manager.pinVaultFile(file, mockContextManager, options)
+          : await manager.pinVaultFiles([file, createMockFile({ path: "later.md" })], mockContextManager, options);
+        expect(result).toBe(scope === "single" ? false : 0);
+        expect([...pinned]).toEqual(["[[Extractions/report.md]]"]);
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+        expect(mockedNotice).not.toHaveBeenCalled();
+      });
+
+      it.each(["single", "batch"] as const)("persists partial image pins after late cancellation during a %s pin", async (scope) => {
+        const controller = new AbortController();
+        let reading = false;
+        let release!: () => void;
+        const delayed = new Promise<void>((resolve) => { release = resolve; });
+        (mockApp.vault.adapter.exists as jest.Mock).mockImplementation(async () => {
+          reading = true;
+          await delayed;
+          return false;
+        });
+        const pinned = new Set<string>();
+        (mockContextManager.pinFile as jest.Mock).mockImplementation((link: string) => { pinned.add(link); return true; });
+        (mockContextManager.hasPinnedFile as jest.Mock).mockImplementation((link: string) => pinned.has(link));
+        (mockContextManager.getPinnedFiles as jest.Mock).mockImplementation(() => pinned);
+        mockProcessDocument.mockImplementationOnce(async (_file: TFile, options) => {
+          const receipt = documentReceipt("Extractions/report.md", ["Extractions/image.png"]);
+          await options.commitContextEffect(receipt, options.signal);
+          return receipt;
+        });
+        const file = createMockFile({ path: "report.pdf", name: "report.pdf", extension: "pdf" });
+        const options = { saveChanges: true, signal: controller.signal };
+        const pending = scope === "single"
+          ? manager.pinVaultFile(file, mockContextManager, options)
+          : manager.pinVaultFiles([file, createMockFile({ path: "later.md" })], mockContextManager, options);
+        for (let index = 0; index < 100 && !reading; index++) await Promise.resolve();
+        expect(reading).toBe(true);
+        expect([...pinned]).toEqual(["[[Extractions/image.png]]"]);
+        controller.abort();
+        release();
+        expect(await pending).toBe(scope === "single" ? false : 0);
+        expect([...pinned]).toEqual(["[[Extractions/image.png]]"]);
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+        expect(mockProcessDocument).toHaveBeenCalledTimes(1);
+        expect(mockedNotice).not.toHaveBeenCalled();
+      });
+
       it("processes PDF and adds extracted content to context", async () => {
         const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
         resolveDocument("Extractions/doc/doc.md");
@@ -425,6 +487,62 @@ describe("DocumentContextManager", () => {
         expect(mockProcessDocument).toHaveBeenCalled();
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[Extractions/doc/doc.md]]");
         expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
+      });
+
+      it("passes a pin's cancel signal to document processing, and stops a batch once cancelled (#420)", async () => {
+        const controller = new AbortController();
+        const file = createMockFile({ path: "test/doc.pdf", extension: "pdf", basename: "doc" });
+        resolveDocument("Extractions/doc/doc.md");
+        (mockApp.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+        (mockApp.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
+
+        await manager.pinVaultFile(file, mockContextManager, { signal: controller.signal });
+        expect(mockProcessDocument).toHaveBeenCalledWith(file, expect.objectContaining({ signal: controller.signal }));
+
+        mockProcessDocument.mockClear();
+        controller.abort();
+        const pinned = await manager.pinVaultFiles([file, createMockFile({ path: "test/other.pdf", extension: "pdf", basename: "other" })], mockContextManager, { signal: controller.signal });
+        expect(pinned).toBe(0);
+        expect(mockProcessDocument).not.toHaveBeenCalled();
+      });
+
+      it("does not pin or notify for a plain note after cancellation", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        expect(await manager.pinVaultFile(createMockFile(), mockContextManager, { signal: controller.signal })).toBe(false);
+        expect(mockContextManager.pinFile).not.toHaveBeenCalled();
+        expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+        expect(mockedNotice).not.toHaveBeenCalled();
+      });
+
+      it("stops after a cancelled PDF, leaves later Markdown untouched, and saves earlier pins", async () => {
+        const controller = new AbortController();
+        mockProcessDocument.mockImplementationOnce(async () => {
+          controller.abort();
+          throw new DOMException("Stopped", "AbortError");
+        });
+        const count = await manager.pinVaultFiles([
+          createMockFile({ path: "before.md" }),
+          createMockFile({ path: "stop.pdf", extension: "pdf" }),
+          createMockFile({ path: "after.md" }),
+        ], mockContextManager, { signal: controller.signal });
+        expect(count).toBe(1);
+        expect(mockContextManager.pinFile).toHaveBeenCalledTimes(1);
+        expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[before.md]]");
+        expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+        expect(mockedNotice).toHaveBeenCalledTimes(1);
+      });
+
+      it("rejects a document context callback after its owning UI cancels", async () => {
+        const controller = new AbortController();
+        mockProcessDocument.mockImplementationOnce(async (_file, options) => {
+          controller.abort();
+          await options.commitContextEffect(documentReceipt("late.md", ["late.png"]), options.signal);
+        });
+        expect(await manager.pinVaultFile(createMockFile({ path: "stop.pdf", extension: "pdf" }), mockContextManager, { signal: controller.signal })).toBe(false);
+        expect(mockContextManager.pinFile).not.toHaveBeenCalled();
+        expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("rejects unsupported Office files without managed processing or context routing", async () => {

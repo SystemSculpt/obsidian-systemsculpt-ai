@@ -41,6 +41,13 @@ Core controls:
   `list_items`, `find`, and `search` tools. Those tools also hide an excluded
   folder, or a folder when a rule such as `Daily/**` excludes everything
   inside it. A rule such as `Daily/*` hides only the notes it matches.
+- The agent's `context` tool applies the same exclusions when pinning a
+  folder: it pins only visible files and explains when the folder is excluded,
+  empty, or partly excluded. A file named explicitly can still be pinned; the
+  result explains that override when the file is excluded from search.
+  Exclusions can come from SystemSculpt settings, Obsidian's Excluded files,
+  or the Recordings, Attachments, and Extractions directories chosen in
+  SystemSculpt's Directories settings.
 - Excluded patterns are globs, such as `*.png`, `Daily/**`, or `**/Archive/*`.
   A pattern without `/` matches file names. Obsidian exclusions follow
   Obsidian's own rules.

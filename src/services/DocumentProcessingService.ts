@@ -7,7 +7,7 @@ import type {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
-import { sha256HexFromBytesPortable } from "../utils/sha256";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
@@ -67,7 +67,7 @@ export interface DocumentProcessingReceiptOptions extends DocumentProcessingOpti
 }
 
 type ManagedDocumentAdapterPort = Pick<ManagedDocumentProcessingAdapter,
-  "process" | "resume" | "beginLocalCommit" | "completeLocalCommit"
+  "processAndCommit" | "resume" | "beginLocalCommit" | "completeLocalCommit"
 >;
 type ManagedDocumentStagingPort = Pick<ManagedDocumentLocalStaging, "stage" | "readVerified" | "cleanup">;
 
@@ -150,21 +150,30 @@ export class DocumentProcessingService {
 
     try {
       const identity = `vault:${file.path}`;
-      const remote = await this.adapter().process({
+      // Hash and upload the same snapshot. An unchanged path alone cannot
+      // establish that bytes retained by a prior operation are still selected.
+      let loaded: Promise<Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>> | undefined;
+      const load = () => loaded ??= (async () => {
+        throwIfAborted(signal);
+        const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
+        if (!contentType) {
+          throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
+        }
+        const bytes = await this.app.vault.readBinary(file);
+        throwIfAborted(signal);
+        return { filename: file.name, contentType, bytes };
+      })();
+      // Conversions of one file take turns through their local commit, so a
+      // second one of the same bytes commits the result the first delivered.
+      const receipt = await this.adapter().processAndCommit({
         identity,
-        fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
-        load: async () => {
-          throwIfAborted(signal);
-          const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
-          if (!contentType) {
-            throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
-          }
-          const bytes = await this.app.vault.readBinary(file);
-          throwIfAborted(signal);
-          return { filename: file.name, contentType, bytes };
-        },
+        fingerprint: async () => `sha256:${await sha256HexFromArrayBuffer((await load()).bytes)}`,
+        load,
       }, {
         signal,
+        // A replacement conversion is a new server job: say so even when the
+        // caller shows its own progress instead of notices.
+        onNotice: (message) => new Notice(`${file.name}: ${message}`, 10_000),
         onProgress: (progress, status) => {
           if (signal.aborted) return;
           const stage: DocumentProcessingStage = progress < 70 ? "uploading" : "processing";
@@ -175,18 +184,18 @@ export class DocumentProcessingService {
             icon: STAGE_ICONS[stage],
           }, meta, flow);
         },
+      }, async (remote) => {
+        throwIfAborted(signal);
+        meta.documentId = remote.documentId;
+        this.emitProgress(options.onProgress, {
+          stage: "downloading",
+          progress: 96,
+          label: "Verifying converted document…",
+          icon: STAGE_ICONS.downloading,
+          documentId: remote.documentId,
+        }, meta, flow);
+        return this.commitLocalEffects(file, remote, options, signal);
       });
-      throwIfAborted(signal);
-      meta.documentId = remote.documentId;
-      this.emitProgress(options.onProgress, {
-        stage: "downloading",
-        progress: 96,
-        label: "Verifying converted document…",
-        icon: STAGE_ICONS.downloading,
-        documentId: remote.documentId,
-      }, meta, flow);
-
-      const receipt = await this.commitLocalEffects(file, remote, options, signal);
       throwIfAborted(signal);
       meta.durationMs = Date.now() - startedAt;
       this.emitProgress(options.onProgress, {
@@ -194,7 +203,7 @@ export class DocumentProcessingService {
         progress: 100,
         label: "Document ready",
         icon: STAGE_ICONS.ready,
-        documentId: remote.documentId,
+        documentId: meta.documentId,
       }, meta, flow);
       if (showNotices) new Notice("Document successfully converted to Markdown");
       return receipt;
@@ -302,6 +311,7 @@ export class DocumentProcessingService {
     const baseName = this.sanitizeFilename(file.basename);
     const parentPath = extractionFolder ? `${extractionFolder}/${baseName}` : `${file.parent?.path || ""}/${baseName}`;
     const imagesPath = `${parentPath}/images-${this.sanitizeFilename(baseName).substring(0, 20)}`;
+    const imagesFolder = imagesPath.split("/").pop() || "images";
     const rawImages = this.extractImagesFromData(result);
     const preparedImages: PreparedImageEffect[] = [];
     const imagePathMap = new Map<string, string>();
@@ -317,7 +327,7 @@ export class DocumentProcessingService {
       }
       const newName = this.generateUniqueImageName(baseName, imageName, imageBase64);
       const path = this.normalizePath(`${imagesPath}/${newName}`);
-      const relativePath = `${imagesPath.split("/").pop() || "images"}/${newName}`;
+      const relativePath = `${imagesFolder}/${newName}`;
       contentPaths.set(contentHash, { path, relativePath });
       imagePathMap.set(imageName, relativePath);
       preparedImages.push({ originalName: imageName, newName, path, bytes });
@@ -335,7 +345,7 @@ export class DocumentProcessingService {
       });
       processed.content = content;
     }
-    const markdown = this.formatExtractionContent(processed);
+    const markdown = this.formatExtractionContent(processed, imagesFolder);
     const markdownBytes = new TextEncoder().encode(markdown).buffer;
     const extractionPath = this.normalizePath(`${parentPath}/${baseName}-extraction.md`);
     return {
@@ -443,7 +453,7 @@ export class DocumentProcessingService {
     return Math.min(100, Math.max(0, value));
   }
 
-  private formatExtractionContent(data: unknown): string {
+  private formatExtractionContent(data: unknown, imagesFolder: string): string {
     const record = this.asRecord(data);
     const metadata = this.asRecord(record.metadata);
     const document = this.asRecord(record.document);
@@ -465,13 +475,9 @@ export class DocumentProcessingService {
     const rootImages = record.images;
     if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
       const imageCount = Object.keys(rootImages).length;
-      let folderInfo = "the images folder";
-      if (this.imageMetadataLog.length > 0) {
-        const firstImage = this.imageMetadataLog[Math.max(0, this.imageMetadataLog.length - imageCount)];
-        const parts = firstImage?.path?.split("/") ?? [];
-        if (parts.length >= 2) folderInfo = `the '${parts[parts.length - 2]}' folder`;
-      }
-      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in ${folderInfo}.\n`;
+      // Keep the first-delivery text stable across retries and prior conversions:
+      // the folder comes from the file's name, never from session metadata.
+      imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the '${imagesFolder}' folder.\n`;
     }
     return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }

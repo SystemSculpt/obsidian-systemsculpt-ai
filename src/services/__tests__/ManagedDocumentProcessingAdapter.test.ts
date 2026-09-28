@@ -1,6 +1,8 @@
-import { requestUrl } from "obsidian";
+import { App, TFile, requestUrl } from "obsidian";
+import { DocumentProcessingService } from "../DocumentProcessingService";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import fixture from "../../../testing/fixtures/managed/managed-job-protocol-v1.json";
-import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
+import { ManagedJobClient, ManagedJobError, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed/ManagedJobRecoveryStore";
 import { ManagedDocumentProcessingAdapter } from "../managed/ManagedDocumentProcessingAdapter";
 import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
@@ -49,17 +51,499 @@ function managedHarness() {
     download: jest.fn(async () => { events.push("download"); return { result: downloaded }; }),
   };
   const admission = { acquireLease: jest.fn(async () => { events.push("admission"); return { outcome: "allowed" as const }; }) };
+  let operations = 0;
   const adapter = new ManagedDocumentProcessingAdapter({
     admission,
     jobs,
     recovery,
-    createOperationId: () => "document-op-1",
+    createOperationId: () => `document-op-${++operations}`,
     wait: async () => undefined,
   });
   return { adapter, admission, events, jobs, recovery, storage };
 }
 
 describe("managed document processing adapter contract", () => {
+  it("replays only the interrupted multipart part with the retained bytes and acknowledged ETags", async () => {
+    const h = managedHarness();
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({
+      phase: "part_dispatching", completedParts: [{ partNumber: 1, etag }],
+    });
+    await expect(h.adapter.resume("document-op-1", { source })).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber, partBytes]) => [partNumber, [...new Uint8Array(partBytes)]]))
+      .toEqual([[1, [1, 2, 3, 4]], [2, [5, 6]], [2, [5, 6]]]);
+    expect(h.jobs.complete).toHaveBeenCalledWith(documentId, [{ partNumber: 1, etag }, { partNumber: 2, etag }], "document-op-1", expect.any(AbortSignal));
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects changed vault bytes before any new admission or dispatch on explicit operation retry", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Result transfer interrupted"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Result transfer interrupted");
+    await expect(h.adapter.resume("document-op-1", { source: { ...source, fingerprint: () => `sha256:${"b".repeat(64)}` } })).rejects.toThrow(/changed/);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+  });
+
+  it("newly selecting an edited PDF preserves the old operation and converts the new bytes", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Old result transfer interrupted"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Old result transfer interrupted");
+    const retained = await h.recovery.read("document_processing", "document-op-1");
+    const edited = { ...source, fingerprint: jest.fn(() => `sha256:${"b".repeat(64)}`),
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([9, 8, 7, 6, 5, 4]).buffer }) };
+    const adapter = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery,
+      createOperationId: () => "edited-document-op", wait: async () => undefined,
+    });
+    await expect(adapter.process(edited)).resolves.toMatchObject({ operationId: "edited-document-op" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+    expect(edited.fingerprint).toHaveBeenCalledTimes(1);
+    expect(h.jobs.uploadPart.mock.calls.slice(2).map(([, , bytes]) => [...new Uint8Array(bytes)]))
+      .toEqual([[9, 8, 7, 6], [5, 4]]);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toEqual(retained);
+
+    // Two versions at one path are unambiguous when their bytes identify one.
+    await expect(adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(adapter.process(edited)).resolves.toMatchObject({ operationId: "edited-document-op" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues the furthest of several operations holding the selected bytes and retires the rest, without another admission", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    // One upload of these bytes stopped after its first part...
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+    // ...and another device's, synced here, right after admission. It lists first.
+    await h.recovery.createAdmitted({ capability: "document_processing", operationId: "concurrent-op",
+      source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    const onNotice = jest.fn();
+
+    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    await expect(h.recovery.readOptional("document_processing", "concurrent-op")).resolves.toBeNull();
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber]) => partNumber)).toEqual([1, 2, 2]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(onNotice).not.toHaveBeenCalled();
+  });
+
+  it("continues with the operation it can when another holding the selected bytes refuses to retire", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    for (const operationId of ["concurrent-op-1", "concurrent-op-2"]) {
+      await h.recovery.createAdmitted({ capability: "document_processing", operationId,
+        source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    }
+    // Another device advanced the second operation since it was listed.
+    jest.spyOn(h.recovery, "abandon").mockRejectedValueOnce(new Error("Recovery record revision changed."));
+
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "concurrent-op-1", result: downloaded });
+    await expect(h.recovery.read("document_processing", "concurrent-op-2")).resolves.toMatchObject({ phase: "admitted" });
+    expect(h.admission.acquireLease).not.toHaveBeenCalled();
+  });
+
+  it("lets two chats that select the same PDF at once share one operation", async () => {
+    const h = managedHarness();
+    // Each chat view makes its own adapter over the plugin's one ledger.
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery,
+      createOperationId: () => "other-chat-op", wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    const progress = jest.fn();
+
+    const results = await Promise.all([h.adapter.process(source), otherChat.process(source, { onProgress: progress })]);
+
+    expect(results.map((result) => result.operationId)).toEqual(["document-op-1", "document-op-1"]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith(0, "This document is already being converted. Waiting…");
+  });
+
+  it("lets a selection that waited commit the result the one before it delivered", async () => {
+    const h = managedHarness();
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    const commits: string[] = [];
+    // The first commit finishes the operation before the waiting selection runs.
+    const commit = (adapter: ManagedDocumentProcessingAdapter, chat: string) => async (result: { operationId: string }) => {
+      commits.push(`${chat}:begin`);
+      await adapter.beginLocalCommit(result.operationId);
+      await adapter.completeLocalCommit(result.operationId);
+      commits.push(`${chat}:end`);
+      return result.operationId;
+    };
+
+    const committed = await Promise.all([
+      h.adapter.processAndCommit(source, {}, commit(h.adapter, "first")),
+      otherChat.processAndCommit(source, {}, commit(otherChat, "second")),
+    ]);
+
+    expect(committed).toEqual(["document-op-1", "document-op-1"]);
+    expect(commits).toEqual(["first:begin", "first:end", "second:begin", "second:end"]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "completed" });
+  });
+
+  it("lets two chats that retry one retained operation at once both finish it", async () => {
+    const h = managedHarness();
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+
+    const results = await Promise.all([h.adapter.process(source), otherChat.process(source)]);
+
+    expect(results.map((result) => result.operationId)).toEqual(["document-op-1", "document-op-1"]);
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber]) => partNumber)).toEqual([1, 2, 2]);
+    expect(h.jobs.start).toHaveBeenCalledTimes(1);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a selection waiting for its turn at once, without holding up the next", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    const next = h.adapter.process(source);
+
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+    for (let turn = 0; turn < 100; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(h.jobs.status).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(next).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps later selections and the operation waiting for a running selection after a waiting one stops", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+
+    // The first selection still runs: its operation stays, and the next waits.
+    await h.adapter.discard(source.identity);
+    const next = h.adapter.process(source);
+    for (let turn = 0; turn < 100; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(h.jobs.status).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(next).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires the operation on a discard once the running selection finishes, with only a stopped one left", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+    release!();
+
+    // The caller gives the result up at once, as a chat does with text too large to attach.
+    await first.then(() => h.adapter.discard(source.identity));
+
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+  });
+
+  it("reads a waiting selection's fingerprint before admission only to look for a delivered result", async () => {
+    const h = managedHarness();
+    const version = (hex: string) => ({ identity: "vault:documents/report.pdf",
+      fingerprint: () => { h.events.push(`fingerprint:${hex}`); return `sha256:${hex.repeat(64)}`; },
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) });
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(version("a"));
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    // The file is edited while its earlier bytes convert.
+    const edited = h.adapter.process(version("b"));
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(edited).resolves.toMatchObject({ operationId: "document-op-2" });
+    expect(h.events.filter((event) => event === "admission" || event.startsWith("fingerprint:")))
+      .toEqual(["admission", "fingerprint:a", "fingerprint:b", "admission"]);
+  });
+
+  it.each(["create", "part"] as const)("continues an interrupted %s upload when the same bytes come back under another name", async (interrupted) => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    if (interrupted === "create") h.jobs.create.mockRejectedValueOnce(new Error("Upload response was lost"));
+    else h.jobs.uploadPart.mockRejectedValueOnce(new Error("Upload response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Upload response was lost");
+    const renamed = { ...source,
+      load: async () => ({ filename: "renamed.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+
+    await expect(h.adapter.process(renamed)).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    // The recorded request keeps the name the operation was created with.
+    expect(h.jobs.create).toHaveBeenCalledTimes(interrupted === "create" ? 2 : 1);
+    expect(h.jobs.create).toHaveBeenLastCalledWith(createRequest, "document-op-1", expect.any(AbortSignal));
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires a legacy path-only operation on a new selection, with a notice; an explicit resume still fails closed", async () => {
+    const h = managedHarness();
+    const identity = "vault:report.pdf";
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    // 6.x fingerprinted the path, not the bytes.
+    const legacy = { identity,
+      fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+    h.jobs.download.mockRejectedValueOnce(new Error("Legacy transfer interrupted"));
+    await expect(h.adapter.process(legacy)).rejects.toThrow("Legacy transfer interrupted");
+    const current = { ...legacy, fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}` };
+
+    await expect(h.adapter.resume("document-op-1", { source: current })).rejects.toThrow(/cannot be verified/);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+
+    const onNotice = jest.fn();
+    await expect(h.adapter.process(current, { onNotice })).resolves.toMatchObject({ operationId: "document-op-2" });
+    expect(onNotice).toHaveBeenCalledTimes(1);
+    expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/earlier SystemSculpt version/));
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["reports the conversion failed", "status", () => new ManagedJobError("document_processing_failed", "The PDF could not be read.")],
+    ["no longer has the document", "status", () => new ManagedJobError("managed_job_error", "Managed job request failed (404).", 404)],
+    ["no longer has the result", "download", () => new ManagedJobError("managed_job_error", "Managed job request failed (404).", 404)],
+  ] as const)("retires the operation when the service %s, so selecting the file again converts it anew", async (_case, call, failure) => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    // The first document stays failed or gone for good, as it does on the service.
+    const healthy = h.jobs[call].getMockImplementation()!;
+    h.jobs[call].mockImplementation((async (...args: never[]) => {
+      if (h.jobs.create.mock.calls.length < 2) throw failure();
+      return (healthy as (...values: never[]) => Promise<unknown>)(...args);
+    }) as never);
+
+    await expect(h.adapter.process(source)).rejects.toMatchObject({ code: failure().code, status: failure().status });
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-2", result: downloaded });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the operation when the service refuses a status read for another reason", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.status.mockRejectedValueOnce(new ManagedJobError("license_required", "A valid license is required.", 401));
+    await expect(h.adapter.process(source)).rejects.toMatchObject({ code: "license_required" });
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "processing" });
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when an acknowledged upload has no persisted multipart descriptor", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let record = await h.recovery.createAdmitted({ capability: "document_processing", operationId: "legacy-upload",
+      source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    record = await h.recovery.markContentReady("document_processing", record.operationId, record.revision);
+    record = await h.recovery.beginDispatch("document_processing", record.operationId, record.revision, {
+      operation: "create", requestId: "legacy-create", idempotencyKey: "legacy-upload:create",
+      createRequest, dispatchedAt: "2026-07-12T12:00:00.000Z",
+    });
+    await h.recovery.acknowledgeCreated("document_processing", record.operationId, record.revision, documentId);
+    await expect(h.adapter.resume(record.operationId, { source })).rejects.toThrow(/multipart metadata/);
+    expect(h.admission.acquireLease).not.toHaveBeenCalled();
+    expect(h.jobs.create).not.toHaveBeenCalled();
+    expect(h.jobs.uploadPart).not.toHaveBeenCalled();
+  });
+
+  it.each(["fingerprint", "length"] as const)("rejects mismatched %s before replaying an interrupted create", async (mismatch) => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.create.mockRejectedValueOnce(new Error("Create response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Create response was lost");
+    const changed = { ...source,
+      fingerprint: () => `sha256:${(mismatch === "fingerprint" ? "b" : "a").repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf",
+        bytes: new Uint8Array(mismatch === "length" ? 7 : 6).buffer }),
+    };
+    await expect(h.adapter.resume("document-op-1", { source: changed })).rejects.toThrow(/changed|metadata/);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.uploadPart).not.toHaveBeenCalled();
+  });
+
+  it("pin retry resumes the original operation after the result transfer deadline", async () => {
+    // WebCrypto fingerprints the PDF on a real thread, outside the fake clock.
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask", "setImmediate"] });
+    const h = managedHarness();
+    const app = new App();
+    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const requestClient = new PlatformRequestClient();
+    const request = jest.spyOn(requestClient, "request");
+    const documents = new ManagedJobClient(new HostedTransportAdapter({
+      baseUrl: "https://api.test", pluginVersion: "6.10.0", licenseKey: () => "test-license", requestClient,
+    })).documents;
+    let operationCount = 0;
+    let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
+    const makeService = () => new DocumentProcessingService(app, plugin, {
+      managed: new ManagedDocumentProcessingAdapter({ ...h, createOperationId: () => `pin-retry-${++operationCount}` }),
+      staging: {
+        stage: async (_id, artifacts) => {
+          staged = [...artifacts];
+          return artifacts.map((artifact, index) => ({
+            id: String(index), kind: artifact.kind, byteLength: artifact.bytes.byteLength,
+            sha256: sha256HexFromBytesPortable(new Uint8Array(artifact.bytes)),
+          }));
+        },
+        readVerified: async () => staged.map((artifact) => artifact.bytes),
+        cleanup: async () => undefined,
+      },
+    });
+    const committed: string[] = [];
+    const options = { showNotices: false, commitContextEffect: async (receipt: { operationId: string }) => { committed.push(receipt.operationId); } };
+    try {
+      (requestUrl as jest.Mock).mockImplementation(() => new Promise(() => undefined));
+      h.jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
+      const failed = makeService().processDocumentWithReceipt(file, options).catch((error: unknown) => error);
+      for (let turn = 0; turn < 1_000 && !request.mock.calls.some(([value]) => value.url.endsWith("/download")); turn++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      await jest.advanceTimersByTimeAsync(600_000);
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600_000 }));
+      await expect(failed).resolves.toMatchObject({ code: "request_timeout" });
+      await expect(h.recovery.read("document_processing", "pin-retry-1")).resolves.toMatchObject({ phase: "result_ready" });
+      // A fresh service uses the plugin's retained ledger, not a private retry cache.
+      const receipt = await makeService().processDocumentWithReceipt(file, options);
+      expect(receipt.operationId).toBe("pin-retry-1");
+      expect(committed).toEqual(["pin-retry-1"]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      expect(h.jobs.create).toHaveBeenCalledTimes(1);
+      expect(h.jobs.start).toHaveBeenCalledTimes(1);
+      expect(h.jobs.download).toHaveBeenCalledTimes(2);
+      await expect(h.recovery.read("document_processing", "pin-retry-1")).resolves.toMatchObject({ phase: "completed" });
+    } finally { jest.useRealTimers(); jest.restoreAllMocks(); }
+  });
+
+  it("commits two pins of one file one after the other, with one conversion", async () => {
+    const h = managedHarness();
+    const app = new App();
+    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    const notes = new Map<string, string>();
+    app.vault.adapter.exists = jest.fn(async (path: string) => notes.has(path));
+    app.vault.adapter.read = jest.fn(async (path: string) => notes.get(path)!);
+    app.vault.create = jest.fn(async (path: string, text: string) => { notes.set(path, text); return new TFile({ path }); });
+    const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const events: string[] = [];
+    let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
+    // The context tool pins through the plugin's one service.
+    const service = new DocumentProcessingService(app, plugin, {
+      managed: new ManagedDocumentProcessingAdapter({ ...h, createOperationId: () => "pin-1" }),
+      staging: {
+        stage: async (id, artifacts) => {
+          events.push(`stage:${id}`);
+          staged = [...artifacts];
+          await new Promise((resolve) => setImmediate(resolve));
+          return artifacts.map((artifact, index) => ({
+            id: String(index), kind: artifact.kind, byteLength: artifact.bytes.byteLength,
+            sha256: sha256HexFromBytesPortable(new Uint8Array(artifact.bytes)),
+          }));
+        },
+        readVerified: async (id) => { events.push(`read:${id}`); return staged.map((artifact) => artifact.bytes); },
+        cleanup: async (id) => { events.push(`cleanup:${id}`); },
+      },
+    });
+
+    const receipts = await Promise.all([
+      service.processDocumentWithReceipt(file, { showNotices: false }),
+      service.processDocumentWithReceipt(file, { showNotices: false }),
+    ]);
+
+    expect(receipts.map((receipt) => receipt.operationId)).toEqual(["pin-1", "pin-1"]);
+    expect(receipts[1].extractionPath).toBe(receipts[0].extractionPath);
+    expect(events).toEqual(["stage:pin-1", "read:pin-1", "cleanup:pin-1", "stage:pin-1", "read:pin-1", "cleanup:pin-1"]);
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "pin-1")).resolves.toMatchObject({ phase: "completed" });
+  });
+
   it("matches the immutable Plan 019 document descriptor without an expired status", () => {
     const expected = fixture.descriptors.find((item) => item.capability === "document_processing")!;
     const actual = MANAGED_JOB_DESCRIPTORS.document_processing;
@@ -167,6 +651,7 @@ describe("managed document processing adapter contract", () => {
       { identity: "vault:documents/report.pdf", fingerprint: jest.fn(), load: jest.fn() },
       { signal: controller.signal },
     );
+    for (let index = 0; index < 100 && !admission.acquireLease.mock.calls.length; index++) await Promise.resolve();
     expect(admission.acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/documents" }, controller.signal);
     controller.abort();
 
@@ -363,7 +848,7 @@ describe("managed document processing adapter contract", () => {
     expect(resumedRecord.pendingDispatch).toBeUndefined();
   });
 
-  it("never cuts a slow result download off with a client deadline, and cancel still stops it", async () => {
+  it.each(["cancel", "timeout"] as const)("bounds only the result transfer and retains recovery after %s", async (outcomeKind) => {
     jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
     const nativeRequest = requestUrl as jest.Mock;
     try {
@@ -376,7 +861,7 @@ describe("managed document processing adapter contract", () => {
         licenseKey: () => "license",
         requestClient: new PlatformRequestClient(),
       })).documents;
-      const { adapter, jobs } = managedHarness();
+      const { adapter, jobs, recovery } = managedHarness();
       jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
       const controller = new AbortController();
       let settled = false;
@@ -387,15 +872,25 @@ describe("managed document processing adapter contract", () => {
       }, { signal: controller.signal }).finally(() => { settled = true; });
       const outcome = running.catch((error: unknown) => error);
 
-      await jest.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      await jest.advanceTimersByTimeAsync(9 * 60_000);
       expect(nativeRequest).toHaveBeenCalledWith(expect.objectContaining({
         url: `https://api.test/api/plugin/documents/${documentId}/download`,
       }));
       expect(settled).toBe(false);
-      expect(jest.getTimerCount()).toBe(0);
+      expect(jest.getTimerCount()).toBe(1);
 
-      controller.abort();
-      await expect(outcome).resolves.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+      if (outcomeKind === "cancel") {
+        controller.abort();
+        await expect(outcome).resolves.toMatchObject({ name: "AbortError", message: "Document conversion was cancelled locally." });
+      } else {
+        await jest.advanceTimersByTimeAsync(60_000);
+        await expect(outcome).resolves.toMatchObject({ code: "request_timeout", retryable: true });
+        expect(controller.signal.aborted).toBe(false);
+      }
+      expect(jest.getTimerCount()).toBe(0);
+      await expect(recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready", jobId: documentId });
+      await expect(adapter.resume("document-op-1", { signal: new AbortController().signal })).resolves.toMatchObject({ operationId: "document-op-1", documentId });
+      expect(jobs.create).toHaveBeenCalledTimes(1);
     } finally {
       nativeRequest.mockReset();
       jest.useRealTimers();

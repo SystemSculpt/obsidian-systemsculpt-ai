@@ -70,7 +70,8 @@ export interface MoveOperationResult extends ToolResult {
 export interface ContextManagementResult {
   action: string;
   processed: number;
-  results: Array<{ path: string; success: boolean; reason?: string }>;
+  /** Safe, user-facing explanations that survive the outbound tool boundary. */
+  results: Array<{ path: string; success: boolean; reason?: string; notice?: string }>;
   summary: string;
 }
 

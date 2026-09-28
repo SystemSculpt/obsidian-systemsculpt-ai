@@ -43,12 +43,12 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
     metadata: { title: "Managed" },
   };
   const managed = {
-    process: jest.fn(async (source: any, context: any) => {
+    processAndCommit: jest.fn(async (source: any, context: any, commit: (value: any) => Promise<unknown>) => {
       events.push("managed");
       await source.fingerprint();
       await source.load();
       context.onProgress?.(50, "Uploading document…");
-      return { operationId: "document-op-1", documentId: "document-1", result };
+      return commit({ operationId: "document-op-1", documentId: "document-1", result });
     }),
     resume: jest.fn(),
     beginLocalCommit: jest.fn(async () => { events.push("local-pending"); return {} as any; }),
@@ -107,13 +107,41 @@ describe("DocumentProcessingService managed local effects", () => {
     expect(events.indexOf("markdown-effect")).toBeLessThan(events.indexOf("context-effect"));
     expect(events.indexOf("context-effect")).toBeLessThan(events.indexOf("local-complete"));
     expect(events.at(-1)).toBe("cleanup");
-    expect(managed.process.mock.calls[0][1].signal).toBe(controller.signal);
+    expect(managed.processAndCommit.mock.calls[0][1].signal).toBe(controller.signal);
     expect(staging.stage.mock.calls[0][2]).toBe(controller.signal);
     expect(context.mock.calls[0][1]).toBe(controller.signal);
     expect(app.vault.create).toHaveBeenCalledWith(
       receipt.extractionPath,
       expect.stringContaining("images-report/report-figure-"),
     );
+  });
+
+  it("names the folder that holds the extracted images in the note", async () => {
+    const { app, dependencies, plugin } = harness({ images: true });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+
+    const receipt = await service.processDocumentWithReceipt(file(), { showNotices: false });
+
+    expect(receipt.imagePaths).toEqual([expect.stringMatching(/^SystemSculpt\/Extractions\/report\/images-report\//)]);
+    expect(app.vault.create).toHaveBeenCalledWith(
+      receipt.extractionPath,
+      expect.stringContaining("1 image was extracted from this document and saved in the 'images-report' folder."),
+    );
+  });
+
+  it("shows a recovery notice for the selected file even when progress notices are off", async () => {
+    const { app, dependencies, managed, plugin } = harness();
+    const convert = managed.processAndCommit.getMockImplementation()!;
+    managed.processAndCommit.mockImplementationOnce(async (source: any, context: any, commit: (value: any) => Promise<unknown>) => {
+      context.onNotice?.("A new conversion was started.");
+      return convert(source, context, commit);
+    });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+
+    await service.processDocument(file(), { showNotices: false });
+
+    expect(Notice).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledWith("report.pdf: A new conversion was started.", expect.any(Number));
   });
 
   it("stops all later local effects when abort wins an image write", async () => {
@@ -126,6 +154,43 @@ describe("DocumentProcessingService managed local effects", () => {
       .rejects.toMatchObject({ name: "AbortError" });
     expect(app.vault.create).not.toHaveBeenCalled();
     expect(managed.completeLocalCommit).not.toHaveBeenCalled();
+  });
+
+  it("reuses identical image and Markdown effects after cancellation on the same service", async () => {
+    const { app, dependencies, managed, plugin, staging } = harness({ images: true });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+    const controller = new AbortController();
+    const images = new Map<string, ArrayBuffer>();
+    const notes = new Map<string, string>();
+    (app.vault.adapter.exists as jest.Mock).mockImplementation(async (path: string) => images.has(path) || notes.has(path));
+    (app.vault.adapter.readBinary as jest.Mock).mockImplementation(async (path: string) => images.get(path));
+    (app.vault.adapter.read as jest.Mock).mockImplementation(async (path: string) => notes.get(path));
+    (app.vault.createBinary as jest.Mock).mockImplementation(async (path: string, bytes: ArrayBuffer) => {
+      images.set(path, bytes);
+      return file(path);
+    });
+    (app.vault.create as jest.Mock).mockImplementation(async (path: string, text: string) => {
+      notes.set(path, text);
+      return file(path);
+    });
+
+    await expect(service.processDocumentWithReceipt(file(), {
+      signal: controller.signal,
+      showNotices: false,
+      commitContextEffect: async () => { controller.abort(); },
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(managed.completeLocalCommit).not.toHaveBeenCalled();
+    const originalNotes = [...notes.entries()];
+
+    const receipt = await service.processDocumentWithReceipt(file(), { showNotices: false });
+    expect(receipt.imagePaths).toHaveLength(1);
+    expect(managed.completeLocalCommit).toHaveBeenCalledTimes(1);
+    expect(app.vault.createBinary).toHaveBeenCalledTimes(1);
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
+    expect([...notes.entries()]).toEqual(originalNotes);
+    const firstMarkdown = staging.stage.mock.calls[0][1].at(-1)!.bytes;
+    const retriedMarkdown = staging.stage.mock.calls[1][1].at(-1)!.bytes;
+    expect(new Uint8Array(retriedMarkdown)).toEqual(new Uint8Array(firstMarkdown));
   });
 
   it("fails closed when an existing Markdown target has a different effect identity", async () => {
