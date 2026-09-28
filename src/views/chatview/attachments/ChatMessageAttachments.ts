@@ -80,8 +80,8 @@ export type ChatAttachmentDisplay = ChatMessageAttachment | FailedChatMessageAtt
 
 export type ChatDocumentAttachmentProcessor = Readonly<{
   /**
-   * Stops and discards its managed operation when the attachment's `signal`
-   * aborts. Retriable failures retain it for the next prepare of these bytes.
+   * Converts one PDF. Aborting `signal` ends only this attempt: its managed
+   * operation stays retained, and the next prepare of these bytes continues it.
    */
   prepare: (input: Readonly<{
     name: string;
@@ -90,7 +90,8 @@ export type ChatDocumentAttachmentProcessor = Readonly<{
     fingerprint: `sha256:${string}`;
   }>, options: Readonly<{ signal: AbortSignal }>) => Promise<Readonly<{ operationId: string; markdown: string }>>;
   complete: (operationId: string) => Promise<void>;
-  discard: (operationId: string) => Promise<void>;
+  /** Gives up the operation retained for these bytes; the next prepare starts over. */
+  discard: (fingerprint: `sha256:${string}`) => Promise<void>;
 }>;
 
 export type ChatAttachmentIssueCode =
@@ -183,6 +184,7 @@ export class ChatMessageAttachmentCollection {
   /** Aborts document processing this draft started; replaced after a cancel. */
   private processing = new AbortController();
   private generation = 0;
+  /** Document attempts still running. A failed attempt leaves, so Stop cannot reach its retained work. */
   private readonly documentControllers = new Map<string, AbortController>();
 
   public constructor(
@@ -228,7 +230,10 @@ export class ChatMessageAttachmentCollection {
     this.completedDocuments.clear();
   }
 
-  /** Stop document processing still running. Each unfinished document stays listed and can be retried. */
+  /**
+   * Stop document processing still running. Each unfinished document stays
+   * listed, and Retry continues its conversion instead of starting another.
+   */
   public cancelProcessing(): void {
     this.processing.abort();
     for (const controller of this.documentControllers.values()) controller.abort();
@@ -278,11 +283,14 @@ export class ChatMessageAttachmentCollection {
 
   public remove(id: string): boolean {
     if (!this.entries.has(id)) return false;
+    const retained = this.retryDocuments.get(id);
     this.entries.delete(id);
     this.retryDocuments.delete(id);
     this.completedDocuments.delete(id);
     this.documentControllers.get(id)?.abort();
     this.documentControllers.delete(id);
+    // Removing a failed document is how the user gives up its conversion.
+    if (retained) void this.documentProcessor?.discard(retained.fingerprint).catch(() => undefined);
     return true;
   }
 
@@ -292,9 +300,7 @@ export class ChatMessageAttachmentCollection {
     if (!retry || failed?.status !== "failed" || !this.documentProcessor) {
       return Object.freeze({ accepted: Object.freeze([]), issues: Object.freeze([]) });
     }
-    const controller = this.documentControllers.get(id)?.signal.aborted === false
-      ? this.documentControllers.get(id)!
-      : new AbortController();
+    const controller = new AbortController();
     this.documentControllers.set(id, controller);
     const signal = controller.signal;
     const empty = () => Object.freeze({ accepted: Object.freeze([]), issues: Object.freeze([]) });
@@ -308,7 +314,6 @@ export class ChatMessageAttachmentCollection {
       this.entries.set(id, attachment);
       this.retryDocuments.delete(id);
       this.completedDocuments.delete(id);
-      this.documentControllers.delete(id);
       return Object.freeze({ accepted: Object.freeze([attachment]), issues: Object.freeze([]) });
     } catch (error) {
       if (this.entries.get(id) !== failed) return empty();
@@ -318,6 +323,8 @@ export class ChatMessageAttachmentCollection {
         accepted: Object.freeze([]),
         issues: Object.freeze([issue("processing_failed", failed.name, message)]),
       });
+    } finally {
+      if (this.documentControllers.get(id) === controller) this.documentControllers.delete(id);
     }
   }
 
@@ -468,7 +475,6 @@ export class ChatMessageAttachmentCollection {
           attachment = await this.preparePdfAttachment(file, buffer, fingerprint, controller.signal);
           if (generation !== this.generation) break;
           if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-          this.documentControllers.delete(id);
         } catch (error) {
           if (generation !== this.generation) break;
           const message = this.documentFailureMessage(name, error, controller.signal, this.completedDocuments.has(id));
@@ -477,6 +483,8 @@ export class ChatMessageAttachmentCollection {
           this.retryDocuments.set(id, Object.freeze({ file, bytes: buffer, fingerprint }));
           issues.push(issue("processing_failed", name, message));
           continue;
+        } finally {
+          if (this.documentControllers.get(id) === controller) this.documentControllers.delete(id);
         }
       } else {
         const mimeType = imageMime ?? textMime!;
@@ -523,41 +531,38 @@ export class ChatMessageAttachmentCollection {
       bytes,
       fingerprint,
     }, { signal });
-    let completed = false;
-    try {
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      const markdownBytes = new TextEncoder().encode(prepared.markdown);
-      const contentPart = createTextAttachmentPart(name, "text/markdown", markdownBytes);
-      const contentBytes = contentPart.type === "text" ? utf8Bytes(contentPart.text) : 0;
-      if (markdownBytes.byteLength < 1 || contentBytes > this.limits.maxTextBytesPerBlock) {
-        throw new Error(`The extracted document text is empty or exceeds ${formatMebibytes(this.limits.maxTextBytesPerBlock)}.`);
-      }
-      const attachment = Object.freeze({
-        status: "ready" as const,
-        id: `document-${fingerprint.slice("sha256:".length)}`,
-        name,
-        mimeType: "application/pdf",
-        byteLength: bytes.byteLength,
-        kind: "document" as const,
-        contentPart,
-      });
-      // The extracted text is the entire local effect of this managed job.
-      // Once the immutable ready attachment exists there is no later vault or
-      // transcript commit to recover, so settle the operation immediately.
-      await processor.complete(prepared.operationId);
-      completed = true;
-      // Completion can finish after Stop. Retain its text and identity for an
-      // explicit Retry only while this attachment still belongs to this draft.
-      // Remove/clear replace that ownership before any late callback arrives.
-      if (this.documentControllers.get(attachment.id)?.signal === signal) {
-        this.completedDocuments.set(attachment.id, { operationId: prepared.operationId, attachment });
-      }
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      return attachment;
-    } catch (error) {
-      if (!completed) await processor.discard(prepared.operationId).catch(() => undefined);
-      throw error;
+    // A conversion that finishes after Stop or Remove stays with the
+    // processor, which continues it on the next prepare of these bytes.
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const markdownBytes = new TextEncoder().encode(prepared.markdown);
+    const contentPart = createTextAttachmentPart(name, "text/markdown", markdownBytes);
+    const contentBytes = contentPart.type === "text" ? utf8Bytes(contentPart.text) : 0;
+    if (markdownBytes.byteLength < 1 || contentBytes > this.limits.maxTextBytesPerBlock) {
+      // Continuing this conversion could only return the same text.
+      await processor.discard(fingerprint).catch(() => undefined);
+      throw new Error(`The extracted document text is empty or exceeds ${formatMebibytes(this.limits.maxTextBytesPerBlock)}.`);
     }
+    const attachment = Object.freeze({
+      status: "ready" as const,
+      id: `document-${fingerprint.slice("sha256:".length)}`,
+      name,
+      mimeType: "application/pdf",
+      byteLength: bytes.byteLength,
+      kind: "document" as const,
+      contentPart,
+    });
+    // The extracted text is the entire local effect of this managed job.
+    // Once the immutable ready attachment exists there is no later vault or
+    // transcript commit to recover, so settle the operation immediately.
+    await processor.complete(prepared.operationId);
+    // Completion can finish after Stop. Retain its text and identity for an
+    // explicit Retry only while this attachment still belongs to this draft.
+    // Remove/clear replace that ownership before any late callback arrives.
+    if (this.documentControllers.get(attachment.id)?.signal === signal) {
+      this.completedDocuments.set(attachment.id, { operationId: prepared.operationId, attachment });
+    }
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    return attachment;
   }
 
   private documentFailureMessage(name: string, error: unknown, signal: AbortSignal, completed = false): string {

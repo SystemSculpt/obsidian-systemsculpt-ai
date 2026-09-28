@@ -3307,14 +3307,14 @@ describe("AgentChatView controls", () => {
     document.body.empty();
   });
 
-  it("clicking New chat clears the owned draft and retires an in-flight attachment retry", async () => {
+  it("clicking New chat clears the owned draft and stops an in-flight attachment retry without discarding its conversion", async () => {
     const parent = document.body.createDiv();
     const app = new App();
     const retryStarted = deferred();
     const retryPrepared = deferred<Readonly<{ operationId: string; markdown: string }>>();
-    const retryDiscarded = deferred();
     let retrySignal: AbortSignal | undefined;
     const complete = jest.fn(async () => undefined);
+    const discard = jest.fn(async () => undefined);
     let prepareAttempt = 0;
     const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -3350,9 +3350,7 @@ describe("AgentChatView controls", () => {
           return retryPrepared.promise;
         }),
         complete,
-        discard: jest.fn(async (operationId) => {
-          if (operationId === "retry-operation") retryDiscarded.resolve();
-        }),
+        discard,
       },
     });
     workspace.load();
@@ -3483,9 +3481,11 @@ describe("AgentChatView controls", () => {
       operationId: "retry-operation",
       markdown: "Recovered old document",
     });
-    await retryDiscarded.promise;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    // The late conversion stays with the processor for the next attach of
+    // that PDF; only removing the attachment gives it up.
     expect(complete).not.toHaveBeenCalled();
-    await Promise.resolve();
+    expect(discard).not.toHaveBeenCalled();
 
     expect(workspace.getMessageAttachments().map((attachment) => attachment.name))
       .toEqual(["new-draft.md"]);

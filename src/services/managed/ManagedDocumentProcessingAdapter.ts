@@ -21,7 +21,6 @@ const LEGACY_OPERATION_NOTICE = "An unfinished conversion from an earlier System
 const DUPLICATE_OPERATIONS_NOTICE = "Several unfinished conversions matched this file, so they were set aside and a new conversion was started.";
 
 export type ManagedDocumentProcessingContext = Readonly<{
-  operationId?: string;
   signal?: AbortSignal;
   onProgress?: (progress: number, status: string) => void;
   /** Explains a recovery decision the caller did not request, such as a replacement conversion. */
@@ -126,31 +125,29 @@ export class ManagedDocumentProcessingAdapter {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
 
-    // Vault callers retry by selecting the file again. Recovery selection and
-    // phase transitions stay with the managed owner, before another admission.
-    // The selected bytes choose among operations at one path: an edited file
-    // starts its own operation and leaves earlier ones for their own bytes.
+    // Selecting a document again is how every caller retries, so recovery
+    // selection stays with this owner, before another admission. The selected
+    // bytes choose among the operations retained for one source: an edited
+    // file starts its own operation and leaves earlier ones for their bytes.
     let fingerprint: string | undefined;
-    if (!context.operationId) {
-      const retained = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
+    const retained = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
+      .filter((record) => !isRetiredManagedRecoveryRecord(record));
+    throwIfAborted(signal);
+    if (retained.length) {
+      fingerprint = await this.readFingerprint(source, signal);
+      const exact = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, { identity: source.identity, fingerprint }))
         .filter((record) => !isRetiredManagedRecoveryRecord(record));
       throwIfAborted(signal);
-      if (retained.length) {
-        fingerprint = await this.readFingerprint(source, signal);
-        const exact = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, { identity: source.identity, fingerprint }))
-          .filter((record) => !isRetiredManagedRecoveryRecord(record));
+      if (exact.length === 1) return this.continueRecord(exact[0], source, context, signal);
+      // Neither duplicates nor a record fingerprinted by its path alone can
+      // show which operation holds these bytes. They must not lock the file:
+      // retire them and convert the selected bytes as a new operation.
+      const unverifiable = new Map([...(exact.length > 1 ? exact : []), ...retained.filter(hasPathOnlyFingerprint)]
+        .map((record) => [record.operationId, record]));
+      if (unverifiable.size) {
+        for (const record of unverifiable.values()) await this.retire(record);
         throwIfAborted(signal);
-        if (exact.length === 1) return this.continueRecord(exact[0], source, context, signal);
-        // Neither duplicates nor a record fingerprinted by its path alone can
-        // show which operation holds these bytes. They must not lock the file:
-        // retire them and convert the selected bytes as a new operation.
-        const unverifiable = new Map([...(exact.length > 1 ? exact : []), ...retained.filter(hasPathOnlyFingerprint)]
-          .map((record) => [record.operationId, record]));
-        if (unverifiable.size) {
-          for (const record of unverifiable.values()) await this.retire(record);
-          throwIfAborted(signal);
-          context.onNotice?.(exact.length > 1 ? DUPLICATE_OPERATIONS_NOTICE : LEGACY_OPERATION_NOTICE);
-        }
+        context.onNotice?.(exact.length > 1 ? DUPLICATE_OPERATIONS_NOTICE : LEGACY_OPERATION_NOTICE);
       }
     }
 
@@ -167,7 +164,7 @@ export class ManagedDocumentProcessingAdapter {
     }
 
     fingerprint ??= await this.readFingerprint(source, signal);
-    const operationId = context.operationId ?? this.createOperationId();
+    const operationId = this.createOperationId();
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)) throw new Error("Managed document operation ID is invalid.");
     const record = await this.dependencies.recovery.createAdmitted({
       capability: CAPABILITY,
@@ -195,6 +192,16 @@ export class ManagedDocumentProcessingAdapter {
       }
     }
     return this.continueRecord(record, context.source, context, signal);
+  }
+
+  /**
+   * Drops every operation retained for a source its owner discarded, such as a
+   * removed chat attachment. The next selection of those bytes starts over.
+   */
+  async discard(identity: string): Promise<void> {
+    for (const record of await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, identity)) {
+      if (!isRetiredManagedRecoveryRecord(record)) await this.retire(record);
+    }
   }
 
   /** An abandoned record that could not be deleted is already ignored, and pruned at startup. */

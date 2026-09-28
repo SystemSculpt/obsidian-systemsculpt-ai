@@ -229,6 +229,77 @@ describe("ChatMessageAttachmentCollection", () => {
     });
     const retried = await collection.retry(failed[0].id);
     expect(retried.accepted.map((attachment) => attachment.name)).toEqual(["stalled.pdf"]);
+    expect(processor.discard).not.toHaveBeenCalled();
+  });
+
+  it("Stop ends only work in flight and leaves a failed document's retained work alone", async () => {
+    const signals: AbortSignal[] = [];
+    const processor: ChatDocumentAttachmentProcessor = {
+      prepare: jest.fn((input, { signal }) => {
+        signals.push(signal);
+        if (input.name === "timed-out.pdf") return Promise.reject(new Error("The document took too long."));
+        return new Promise<never>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }),
+      complete: jest.fn(async () => undefined),
+      discard: jest.fn(async () => undefined),
+    };
+    const collection = new ChatMessageAttachmentCollection(reader({ "timed-out.pdf": "%PDF-1", "stalled.pdf": "%PDF-2" }), processor);
+    await collection.addFiles([file("timed-out.pdf", "application/pdf", "%PDF-1")]);
+    const pending = collection.addFiles([file("stalled.pdf", "application/pdf", "%PDF-2")]);
+    await started(signals, 2);
+
+    collection.cancelProcessing();
+    await pending;
+
+    expect(signals.map((signal) => signal.aborted)).toEqual([false, true]);
+    expect(processor.discard).not.toHaveBeenCalled();
+    expect(collection.displaySnapshot().map((entry) => [entry.name, entry.status]))
+      .toEqual([["timed-out.pdf", "failed"], ["stalled.pdf", "failed"]]);
+  });
+
+  it("keeps a conversion that finishes after Stop instead of discarding it", async () => {
+    let finish!: () => void;
+    const processor: ChatDocumentAttachmentProcessor = {
+      // A download that ignores cancellation and still delivers.
+      prepare: jest.fn(() => new Promise((resolve) => {
+        finish = () => resolve({ operationId: "finished-op", markdown: "Converted" });
+      })),
+      complete: jest.fn(async () => undefined),
+      discard: jest.fn(async () => undefined),
+    };
+    const collection = new ChatMessageAttachmentCollection(reader({ "late.pdf": "%PDF" }), processor);
+    const pending = collection.addFiles([file("late.pdf", "application/pdf", "%PDF")]);
+    for (let turn = 0; !finish && turn < 100; turn++) await Promise.resolve();
+
+    collection.cancelProcessing();
+    finish();
+
+    expect((await pending).issues).toEqual([expect.objectContaining({
+      message: "late.pdf could not be processed: processing was stopped. Retry to process it.",
+    })]);
+    expect(processor.complete).not.toHaveBeenCalled();
+    expect(processor.discard).not.toHaveBeenCalled();
+  });
+
+  it.each(["clear", "dispose"] as const)("%s keeps a failed document's retained conversion; only Remove discards it", async (action) => {
+    const processor: ChatDocumentAttachmentProcessor = {
+      prepare: jest.fn(async () => { throw new Error("The document took too long."); }),
+      complete: jest.fn(async () => undefined),
+      discard: jest.fn(async () => undefined),
+    };
+    const draft = new ChatMessageAttachmentCollection(reader({ "retry.pdf": "%PDF" }), processor);
+    await draft.addFiles([file("retry.pdf", "application/pdf", "%PDF")]);
+    draft[action]();
+    expect(processor.discard).not.toHaveBeenCalled();
+
+    const next = new ChatMessageAttachmentCollection(reader({ "retry.pdf": "%PDF" }), processor);
+    await next.addFiles([file("retry.pdf", "application/pdf", "%PDF")]);
+    expect(next.remove(next.displaySnapshot()[0].id)).toBe(true);
+    const { fingerprint } = (processor.prepare as jest.Mock).mock.calls[0][0];
+    expect(processor.discard).toHaveBeenCalledTimes(1);
+    expect(processor.discard).toHaveBeenCalledWith(fingerprint);
   });
 
   it("does not read or hash later files after cancelling a PDF batch", async () => {
@@ -290,7 +361,9 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(result).toEqual({ accepted: [], issues: [] });
     expect(collection.displaySnapshot()).toEqual([]);
     expect(processor.complete).not.toHaveBeenCalled();
-    if (outcome === "resolve") expect(processor.discard).toHaveBeenCalledWith("late");
+    // Remove itself discards the retained conversion; the late outcome does not.
+    expect(processor.discard).toHaveBeenCalledTimes(1);
+    expect(processor.discard).toHaveBeenCalledWith((processor.prepare as jest.Mock).mock.calls[0][0].fingerprint);
   });
 
   it("stops document processing when its draft is discarded (#420)", async () => {
@@ -397,7 +470,7 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(result.issues).toEqual([expect.objectContaining({ code: "processing_failed" })]);
     expect(collection.hasBlockingFailures()).toBe(true);
     expect(processor.complete).not.toHaveBeenCalled();
-    expect(processor.discard).toHaveBeenCalledWith("document-op-too-large");
+    expect(processor.discard).toHaveBeenCalledWith((processor.prepare as jest.Mock).mock.calls[0][0].fingerprint);
   });
 
   it("enforces server-delivered image, block, and text picker limits", async () => {

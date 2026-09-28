@@ -39,9 +39,18 @@ function harness(transportKind: "requestUrl" | "fetch" = "requestUrl") {
     baseUrl: transportKind === "fetch" ? "http://127.0.0.1:8787" : "https://api.test",
     pluginVersion: "6.10.0", licenseKey: () => "test-license", requestClient,
   });
-  const plugin = { getManagedCapabilityGraph: () => ({ admission, transport, recovery }) } as unknown as SystemSculptPlugin;
-  const processor = new ManagedChatDocumentAttachmentProcessor({} as App, plugin);
-  const collection = new ChatMessageAttachmentCollection(async () => bytes, processor);
+  const attach = (store: ManagedJobRecoveryStore) => {
+    const plugin = { getManagedCapabilityGraph: () => ({ admission, transport, recovery: store }) } as unknown as SystemSculptPlugin;
+    const processor = new ManagedChatDocumentAttachmentProcessor({} as App, plugin);
+    return { processor, collection: new ChatMessageAttachmentCollection(async () => bytes, processor) };
+  };
+  const { processor, collection } = attach(recovery);
+  /** A plugin reload: fresh objects over the same recovery files. */
+  const reload = async () => {
+    const store = new ManagedJobRecoveryStore(storage);
+    await store.initialize();
+    return { recovery: store, ...attach(store) };
+  };
   const state = { downloadReady: false, processing: false, polls: 0, creates: [] as string[] };
   const response = (payload: unknown, headers: Record<string, string> = {}) => ({
     status: 200, headers, text: JSON.stringify(payload), json: payload, arrayBuffer: new ArrayBuffer(0),
@@ -85,14 +94,14 @@ function harness(transportKind: "requestUrl" | "fetch" = "requestUrl") {
   });
   const download = () => request.mock.calls.find(([value]) => value.url.endsWith("/download"))?.[0];
   const operationId = () => state.creates[0].replace(/:create$/, "");
-  return { processor, collection, recovery, state, admission, download, operationId, restore: () => { window.fetch = oldFetch; } };
+  return { processor, collection, recovery, reload, state, admission, download, operationId, restore: () => { window.fetch = oldFetch; } };
 }
 
 describe("ManagedChatDocumentAttachmentProcessor through the plugin capability graph", () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
 
-  it.each(["requestUrl", "fetch"] as const)("forwards cancellation to a stalled %s download and intentionally discards recovery", async (kind) => {
+  it.each(["requestUrl", "fetch"] as const)("forwards cancellation to a stalled %s download and keeps the finished job for the next attempt (#420)", async (kind) => {
     const h = harness(kind);
     try {
       const controller = new AbortController();
@@ -102,8 +111,55 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
       expect(h.download()?.signal).toBe(controller.signal);
       controller.abort();
       await rejected;
-      await expect(h.recovery.readOptional("document_processing", h.operationId())).resolves.toBeNull();
-      expect(h.state.creates).toHaveLength(1);
+      const operationId = h.operationId();
+      await expect(h.recovery.read("document_processing", operationId)).resolves.toMatchObject({ phase: "result_ready", jobId: "doc-1" });
+      h.state.downloadReady = true;
+      await expect(h.processor.prepare(input, { signal: new AbortController().signal }))
+        .resolves.toEqual({ operationId, markdown: "# Converted" });
+      expect(h.state.creates).toEqual([`${operationId}:create`]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    } finally { h.restore(); }
+  });
+
+  it("Stop leaves a timed-out document's operation for Retry", async () => {
+    const h = harness();
+    try {
+      const pending = h.collection.addFiles([pdf]);
+      await until(() => Boolean(h.download()));
+      await jest.advanceTimersByTimeAsync(h.download()!.timeoutMs as number);
+      expect((await pending).issues).toHaveLength(1);
+      const operationId = h.operationId();
+      h.collection.cancelProcessing();
+      // Give any cleanup Stop might start time to reach the ledger.
+      for (let index = 0; index < 20; index++) await h.recovery.readOptional("document_processing", operationId);
+      await expect(h.recovery.read("document_processing", operationId)).resolves.toMatchObject({ phase: "result_ready" });
+      h.state.downloadReady = true;
+      const retried = await h.collection.retry(h.collection.displaySnapshot()[0].id);
+      expect(retried.issues).toEqual([]);
+      expect(retried.accepted).toHaveLength(1);
+      expect(h.state.creates).toEqual([`${operationId}:create`]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    } finally { h.collection.dispose(); h.restore(); }
+  });
+
+  it("continues the retained conversion when the same PDF is attached again after a reload", async () => {
+    const h = harness();
+    try {
+      const first = h.collection.addFiles([pdf]);
+      await until(() => Boolean(h.download()));
+      await jest.advanceTimersByTimeAsync(h.download()!.timeoutMs as number);
+      expect((await first).issues).toHaveLength(1);
+      const operationId = h.operationId();
+      h.collection.dispose();
+      const reloaded = await h.reload();
+      h.state.downloadReady = true;
+      const attached = await reloaded.collection.addFiles([pdf]);
+      expect(attached.issues).toEqual([]);
+      expect(attached.accepted).toHaveLength(1);
+      expect(h.state.creates).toEqual([`${operationId}:create`]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      await expect(reloaded.recovery.read("document_processing", operationId)).resolves.toMatchObject({ phase: "completed" });
+      reloaded.collection.dispose();
     } finally { h.restore(); }
   });
 
@@ -284,7 +340,6 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
       await jest.advanceTimersByTimeAsync(h.download()!.timeoutMs as number);
       await pending;
       h.collection.remove(h.collection.displaySnapshot()[0].id);
-      await until(() => h.download()?.signal?.aborted === true);
       // Drain the asynchronous local recovery cleanup through its public read.
       for (let index = 0; index < 20; index++) {
         if (!(await h.recovery.readOptional("document_processing", h.operationId()))) break;
