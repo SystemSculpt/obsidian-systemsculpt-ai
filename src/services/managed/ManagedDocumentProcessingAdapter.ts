@@ -7,6 +7,7 @@ import type {
   ManagedJobStatus,
   ManagedMultipartCreateRequest,
   ManagedPendingDispatch,
+  ManagedRecoveryPhase,
 } from "./ManagedTypes";
 import {
   isRetryableManagedJobObservationError,
@@ -18,7 +19,11 @@ const CAPABILITY = "document_processing" as const;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const UNVERIFIABLE_SOURCE_MESSAGE = "The document changed or its preserved source cannot be verified; automatic retry is unavailable.";
 const LEGACY_OPERATION_NOTICE = "An unfinished conversion from an earlier SystemSculpt version could not be checked against this file, so a new conversion was started.";
-const DUPLICATE_OPERATIONS_NOTICE = "Several unfinished conversions matched this file, so they were set aside and a new conversion was started.";
+/** How far an operation got; operations that cannot continue rank last. */
+const PHASE_PROGRESS: Partial<Record<ManagedRecoveryPhase, number>> = {
+  admitted: 0, content_ready: 1, create_dispatching: 2, created: 3, part_dispatching: 4, uploading: 4,
+  complete_dispatching: 5, upload_completed: 6, start_dispatching: 7, processing: 8, result_ready: 9, local_commit_pending: 10,
+};
 
 export type ManagedDocumentProcessingContext = Readonly<{
   signal?: AbortSignal;
@@ -92,6 +97,11 @@ function hasPathOnlyFingerprint(record: ManagedJobRecoveryRecord): boolean {
   return record.source.fingerprint === `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(record.source.identity))}`;
 }
 
+function furthestFirst(a: ManagedJobRecoveryRecord, b: ManagedJobRecoveryRecord): number {
+  return (PHASE_PROGRESS[b.phase] ?? -1) - (PHASE_PROGRESS[a.phase] ?? -1)
+    || (b.completedParts?.length ?? 0) - (a.completedParts?.length ?? 0);
+}
+
 function readDocumentId(value: unknown): string {
   const documentId = (value as { document?: { id?: unknown } })?.document?.id;
   if (typeof documentId !== "string" || !documentId) throw new Error("Managed document create response did not include a document ID.");
@@ -138,16 +148,24 @@ export class ManagedDocumentProcessingAdapter {
       const exact = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, { identity: source.identity, fingerprint }))
         .filter((record) => !isRetiredManagedRecoveryRecord(record));
       throwIfAborted(signal);
-      if (exact.length === 1) return this.continueRecord(exact[0], source, context, signal);
-      // Neither duplicates nor a record fingerprinted by its path alone can
-      // show which operation holds these bytes. They must not lock the file:
-      // retire them and convert the selected bytes as a new operation.
-      const unverifiable = new Map([...(exact.length > 1 ? exact : []), ...retained.filter(hasPathOnlyFingerprint)]
-        .map((record) => [record.operationId, record]));
-      if (unverifiable.size) {
-        for (const record of unverifiable.values()) await this.retire(record);
+      if (exact.length) {
+        // Chats that start converting the same bytes at the same moment each
+        // keep an operation. The one that got furthest continues, and the rest
+        // only repeat its work. Retiring them is best effort: one that another
+        // chat is still advancing can refuse, and a later selection retires it.
+        const [furthest, ...repeats] = [...exact].sort(furthestFirst);
+        for (const record of repeats) await this.retire(record).catch(() => undefined);
         throwIfAborted(signal);
-        context.onNotice?.(exact.length > 1 ? DUPLICATE_OPERATIONS_NOTICE : LEGACY_OPERATION_NOTICE);
+        return this.continueRecord(furthest, source, context, signal);
+      }
+      // A record fingerprinted by its path alone cannot show which bytes its
+      // operation uploaded. It must not lock the file: retire it and convert
+      // the selected bytes as a new operation.
+      const legacy = retained.filter(hasPathOnlyFingerprint);
+      if (legacy.length) {
+        for (const record of legacy) await this.retire(record);
+        throwIfAborted(signal);
+        context.onNotice?.(LEGACY_OPERATION_NOTICE);
       }
     }
 
@@ -267,8 +285,10 @@ export class ManagedDocumentProcessingAdapter {
         contentType: loaded.contentType,
         contentLengthBytes: loaded.bytes.byteLength,
       };
-      if (createRequest.filename !== loaded.filename || createRequest.contentType !== loaded.contentType
-        || createRequest.contentLengthBytes !== loaded.bytes.byteLength) {
+      // A recorded request is replayed as sent. The selected bytes match the
+      // record's fingerprint, so a copy under another name, such as a renamed
+      // chat attachment, continues with the filename it was created with.
+      if (createRequest.contentType !== loaded.contentType || createRequest.contentLengthBytes !== loaded.bytes.byteLength) {
         throw new Error("The original document upload metadata does not match the retained source.");
       }
       if (record.phase === "content_ready" || record.phase === "create_dispatching") {

@@ -122,28 +122,58 @@ describe("managed document processing adapter contract", () => {
     expect(h.jobs.create).toHaveBeenCalledTimes(2);
   });
 
-  it("retires several operations holding the selected bytes, with a notice, and converts them once", async () => {
+  it("continues the furthest of several operations holding the selected bytes and retires the rest, without another admission", async () => {
     const h = managedHarness();
-    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
-    for (const operationId of ["duplicate-op-1", "duplicate-op-2"]) {
+    // Two chats converted these bytes at once. One upload stopped after its first part...
+    h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
+      .mockRejectedValueOnce(new Error("Part response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
+    // ...and the other right after admission. It lists first.
+    await h.recovery.createAdmitted({ capability: "document_processing", operationId: "concurrent-op",
+      source: { identity: source.identity, fingerprint: source.fingerprint() } });
+    const onNotice = jest.fn();
+
+    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    await expect(h.recovery.readOptional("document_processing", "concurrent-op")).resolves.toBeNull();
+    expect(h.jobs.uploadPart.mock.calls.map(([, partNumber]) => partNumber)).toEqual([1, 2, 2]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(onNotice).not.toHaveBeenCalled();
+  });
+
+  it("continues with the operation it can when another holding the selected bytes refuses to retire", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    for (const operationId of ["concurrent-op-1", "concurrent-op-2"]) {
       await h.recovery.createAdmitted({ capability: "document_processing", operationId,
         source: { identity: source.identity, fingerprint: source.fingerprint() } });
     }
-    const onNotice = jest.fn();
-    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1" });
-    expect(onNotice).toHaveBeenCalledTimes(1);
-    expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/^Several unfinished conversions/));
-    for (const operationId of ["duplicate-op-1", "duplicate-op-2"]) {
-      await expect(h.recovery.readOptional("document_processing", operationId)).resolves.toBeNull();
-    }
-    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
-    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    // Another chat advanced the second operation since it was listed.
+    jest.spyOn(h.recovery, "abandon").mockRejectedValueOnce(new Error("Recovery record revision changed."));
 
-    // The replacement is now the only match: selecting the file again resumes it.
-    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "concurrent-op-1", result: downloaded });
+    await expect(h.recovery.read("document_processing", "concurrent-op-2")).resolves.toMatchObject({ phase: "admitted" });
+    expect(h.admission.acquireLease).not.toHaveBeenCalled();
+  });
+
+  it.each(["create", "part"] as const)("continues an interrupted %s upload when the same bytes come back under another name", async (interrupted) => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    if (interrupted === "create") h.jobs.create.mockRejectedValueOnce(new Error("Upload response was lost"));
+    else h.jobs.uploadPart.mockRejectedValueOnce(new Error("Upload response was lost"));
+    await expect(h.adapter.process(source)).rejects.toThrow("Upload response was lost");
+    const renamed = { ...source,
+      load: async () => ({ filename: "renamed.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+
+    await expect(h.adapter.process(renamed)).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
+    // The recorded request keeps the name the operation was created with.
+    expect(h.jobs.create).toHaveBeenCalledTimes(interrupted === "create" ? 2 : 1);
+    expect(h.jobs.create).toHaveBeenLastCalledWith(createRequest, "document-op-1", expect.any(AbortSignal));
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
-    expect(onNotice).toHaveBeenCalledTimes(1);
   });
 
   it("retires a legacy path-only operation on a new selection, with a notice; an explicit resume still fails closed", async () => {
@@ -223,7 +253,7 @@ describe("managed document processing adapter contract", () => {
     expect(h.jobs.uploadPart).not.toHaveBeenCalled();
   });
 
-  it.each(["fingerprint", "filename", "length"] as const)("rejects mismatched %s before replaying an interrupted create", async (mismatch) => {
+  it.each(["fingerprint", "length"] as const)("rejects mismatched %s before replaying an interrupted create", async (mismatch) => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
@@ -231,7 +261,7 @@ describe("managed document processing adapter contract", () => {
     await expect(h.adapter.process(source)).rejects.toThrow("Create response was lost");
     const changed = { ...source,
       fingerprint: () => `sha256:${(mismatch === "fingerprint" ? "b" : "a").repeat(64)}`,
-      load: async () => ({ filename: mismatch === "filename" ? "different.pdf" : "report.pdf", contentType: "application/pdf",
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf",
         bytes: new Uint8Array(mismatch === "length" ? 7 : 6).buffer }),
     };
     await expect(h.adapter.resume("document-op-1", { source: changed })).rejects.toThrow(/changed|metadata/);

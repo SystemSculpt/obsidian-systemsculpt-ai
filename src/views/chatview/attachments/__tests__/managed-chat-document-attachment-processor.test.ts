@@ -163,6 +163,37 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
     } finally { h.restore(); }
   });
 
+  it("continues an interrupted upload when the same PDF is attached under another name", async () => {
+    const h = harness();
+    try {
+      const nativeRequest = requestUrl as jest.Mock;
+      const route = nativeRequest.getMockImplementation()!;
+      let lost = false;
+      nativeRequest.mockImplementation(async (request) => {
+        // The service received the part; only its response was lost.
+        if (request.url === "https://upload.test/part" && !lost) {
+          lost = true;
+          return new Promise(() => undefined);
+        }
+        return route(request);
+      });
+      const controller = new AbortController();
+      const first = h.processor.prepare(input, { signal: controller.signal });
+      const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+      await until(() => lost);
+      controller.abort();
+      await rejected;
+      const operationId = h.operationId();
+      await expect(h.recovery.read("document_processing", operationId)).resolves.toMatchObject({ phase: "part_dispatching" });
+      h.state.downloadReady = true;
+
+      await expect(h.processor.prepare({ ...input, name: "renamed.pdf" }, { signal: new AbortController().signal }))
+        .resolves.toEqual({ operationId, markdown: "# Converted" });
+      expect(h.state.creates).toEqual([`${operationId}:create`]);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    } finally { h.collection.dispose(); h.restore(); }
+  });
+
   it.each(["requestUrl", "fetch"] as const)("retains a timed-out %s transfer and Retry resumes the SAME operation and job", async (kind) => {
     const h = harness(kind);
     try {
