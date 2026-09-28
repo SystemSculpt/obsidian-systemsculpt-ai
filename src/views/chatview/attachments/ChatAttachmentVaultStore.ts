@@ -343,15 +343,56 @@ export class ChatAttachmentVaultStore {
     };
   }
 
-  /** Deletes only well-formed CAS files that no durable chat or queue refers to. */
-  public async pruneUnreferenced(
-    referencedKeys: ReadonlySet<string>,
-    confirmReferences?: () => Promise<ReadonlySet<string> | null>,
-  ): Promise<number> {
+  /**
+   * Runs one conservative background mark/sweep per vault adapter and plugin
+   * session. A failed-closed scan may retry later, but opening additional chat
+   * views does not repeatedly walk the vault on mobile. The store is listed
+   * first: when nothing in it is old enough to delete, no chat is read.
+   */
+  public pruneOncePerSession(
+    discoverReferences: () => Promise<ReadonlySet<string> | null>,
+  ): Promise<void> {
+    if (this.state.sweepCompleted) return Promise.resolve();
+    const now = this.now();
+    if (!this.state.sweepInFlight
+      && this.state.sweepLastAttempt > 0
+      && now - this.state.sweepLastAttempt < ATTACHMENT_SWEEP_RETRY_MS) {
+      return Promise.resolve();
+    }
+    if (!this.state.sweepInFlight) {
+      this.state.sweepLastAttempt = now;
+      this.state.sweepInFlight = (async () => {
+        const candidates = await this.pruneCandidates();
+        if (!candidates || candidates.length === 0) return true;
+        const references = await discoverReferences();
+        if (!references) return false;
+        const unreferenced = candidates.filter(({ key }) => !references.has(key));
+        if (unreferenced.length === 0) return true;
+        let confirmationFailed = false;
+        await this.removeUnreferenced(unreferenced, references, async () => {
+          const confirmed = await discoverReferences();
+          if (!confirmed) confirmationFailed = true;
+          return confirmed;
+        });
+        if (confirmationFailed) return false;
+        return true;
+      })().then((completed) => {
+        if (completed) this.state.sweepCompleted = true;
+        return completed;
+      }).finally(() => { this.state.sweepInFlight = null; });
+    }
+    return this.state.sweepInFlight.then(() => undefined);
+  }
+
+  /**
+   * Well-formed CAS files older than the orphan grace window, the only files a
+   * sweep may delete. Null when the store is absent or cannot be swept.
+   */
+  private async pruneCandidates(): Promise<Array<Readonly<{ path: string; key: string }>> | null> {
     if (!this.adapter.list
       || !this.adapter.remove
       || !this.adapter.stat
-      || !await this.adapter.exists(CHAT_ATTACHMENT_STORE_ROOT)) return 0;
+      || !await this.adapter.exists(CHAT_ATTACHMENT_STORE_ROOT)) return null;
 
     const directories = [CHAT_ATTACHMENT_STORE_ROOT];
     const files: string[] = [];
@@ -378,7 +419,17 @@ export class ChatAttachmentVaultStore {
         || this.now() - Math.max(stat.mtime, ctime as number) < ATTACHMENT_ORPHAN_GRACE_MS) continue;
       candidates.push({ path, key });
     }
+    return candidates;
+  }
 
+  private async removeUnreferenced(
+    candidates: ReadonlyArray<Readonly<{ path: string; key: string }>>,
+    referencedKeys: ReadonlySet<string>,
+    confirmReferences?: () => Promise<ReadonlySet<string> | null>,
+  ): Promise<number> {
+    // Called on the adapter: Obsidian's DataAdapter.remove is a method that needs its `this`.
+    const adapter = this.adapter;
+    if (!adapter.remove) return 0;
     const confirmedReferences = confirmReferences ? await confirmReferences() : referencedKeys;
     if (!confirmedReferences) return 0;
     const reachable = new Set([...referencedKeys, ...confirmedReferences]);
@@ -390,7 +441,7 @@ export class ChatAttachmentVaultStore {
         || this.state.pendingRemovals.has(path)
         || this.state.sessionClaims.has(key)
         || reachable.has(key)) continue;
-      const removal = this.adapter.remove(path);
+      const removal = adapter.remove(path);
       this.state.pendingRemovals.set(path, removal);
       try {
         await removal;
@@ -400,42 +451,6 @@ export class ChatAttachmentVaultStore {
       }
     }
     return removed;
-  }
-
-  /**
-   * Runs one conservative background mark/sweep per vault adapter and plugin
-   * session. A failed-closed scan may retry later, but opening additional chat
-   * views does not repeatedly walk the vault on mobile.
-   */
-  public pruneOncePerSession(
-    discoverReferences: () => Promise<ReadonlySet<string> | null>,
-  ): Promise<void> {
-    if (this.state.sweepCompleted) return Promise.resolve();
-    const now = this.now();
-    if (!this.state.sweepInFlight
-      && this.state.sweepLastAttempt > 0
-      && now - this.state.sweepLastAttempt < ATTACHMENT_SWEEP_RETRY_MS) {
-      return Promise.resolve();
-    }
-    if (!this.state.sweepInFlight) {
-      this.state.sweepLastAttempt = now;
-      this.state.sweepInFlight = (async () => {
-        const references = await discoverReferences();
-        if (!references) return false;
-        let confirmationFailed = false;
-        await this.pruneUnreferenced(references, async () => {
-          const confirmed = await discoverReferences();
-          if (!confirmed) confirmationFailed = true;
-          return confirmed;
-        });
-        if (confirmationFailed) return false;
-        return true;
-      })().then((completed) => {
-        if (completed) this.state.sweepCompleted = true;
-        return completed;
-      }).finally(() => { this.state.sweepInFlight = null; });
-    }
-    return this.state.sweepInFlight.then(() => undefined);
   }
 
   private async hydrateContentPart(

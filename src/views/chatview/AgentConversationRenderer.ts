@@ -12,6 +12,7 @@ import {
   readManagedToolCallFunction,
 } from "../../chat/managed/ManagedToolExecution";
 import { tryCopyToClipboard } from "../../utils/clipboard";
+import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
 import {
   renderOperationsInlinePreview,
@@ -216,11 +217,29 @@ type ToolApprovalPreviewHydrationState = {
   hydration: Promise<void> | null;
 };
 
+/*
+ * What a rendered history row was built from. Frozen transcript messages
+ * stand for themselves, so an unchanged row costs identity checks rather than
+ * serializing every message on each history render.
+ */
+type HistoricalRowIdentity = Readonly<{
+  messages: readonly unknown[];
+  presentation: string;
+}>;
+
 type HistoricalRowState = Readonly<{
-  fingerprint: string;
+  identity: HistoricalRowIdentity;
   node: HTMLElement;
   partFingerprints: ReadonlyMap<string, string>;
 }>;
+
+function sameHistoricalRow(
+  left: HistoricalRowIdentity,
+  right: HistoricalRowIdentity,
+): boolean {
+  return left.presentation === right.presentation
+    && sameContentKeys(left.messages, right.messages);
+}
 
 type HistoricalDisclosureSnapshot = Readonly<{
   workedOpen: boolean;
@@ -728,14 +747,12 @@ export class AgentConversationRenderer extends Component {
       });
       const cancelledTurn = message.role === "assistant"
         && turnMessages.some((entry) => entry.terminalOutcome === "cancelled");
-      const fingerprint = JSON.stringify({
-        messages: turnMessages,
-        inlineEdit,
-        cancelledTurn,
-        failedReceipt,
-      });
+      const identity: HistoricalRowIdentity = {
+        messages: contentKeys(turnMessages),
+        presentation: JSON.stringify({ inlineEdit, cancelledTurn, failedReceipt }),
+      };
       const existing = this.historyRows.get(rowKey);
-      if (existing?.fingerprint === fingerprint) {
+      if (existing && sameHistoricalRow(existing.identity, identity)) {
         nextRows.set(rowKey, existing);
         nextHistoricalPartCount = boundedIncidentRenderCount(
           nextHistoricalPartCount + existing.partFingerprints.size,
@@ -841,7 +858,7 @@ export class AgentConversationRenderer extends Component {
           semantics.copyText,
         );
       }
-      const rendered: HistoricalRowState = { fingerprint, node: row, partFingerprints };
+      const rendered: HistoricalRowState = { identity, node: row, partFingerprints };
       nextRows.set(rowKey, rendered);
       nextHistoricalPartCount = boundedIncidentRenderCount(
         nextHistoricalPartCount + partFingerprints.size,

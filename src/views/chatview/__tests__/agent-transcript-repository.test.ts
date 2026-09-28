@@ -1,7 +1,22 @@
+import { TFile, type App } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
+import { ChatStorageService } from "../ChatStorageService";
+import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
+import { ConversationProjection } from "../../../chat/managed/ConversationProjection";
+import type { WireMessage } from "../../../chat/managed/WireConversation";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  const YAML = jest.requireActual("yaml");
+  return {
+    ...actual,
+    parseYaml: (text: string) => YAML.parse(text),
+    stringifyYaml: (value: unknown) => YAML.stringify(value),
+  };
+});
 
 function user(id: string, content = id): ChatMessage {
   return { role: "user", content, message_id: id };
@@ -425,6 +440,31 @@ describe("AgentTranscriptRepository", () => {
       .toEqual([100, 101, 102]);
     expect(replayed.messages[1].tool_calls?.[0].timestamp).toBe(101);
     expect(records.get(accepted.chatId).version).toBe(2);
+  });
+
+  it("announces an already reconciled response without writing the chat again", async () => {
+    const { repository, storage } = createHarness();
+    const commits: string[] = [];
+    repository.subscribeToCommits(({ role, messageId }) => commits.push(`${role}:${messageId}`));
+    await repository.commitUser({
+      kind: "append",
+      message: user("user-1", "Check the plan."),
+    }, conversationId);
+    const reconciled = await repository.reconcileServerHistory(projectedServerHistory(100));
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+
+    // The terminal assistant save carries its own synthesized timestamps.
+    const saved = await repository.persistAssistant(projectedServerHistory(20_000)[1]);
+    expect(storage.saveChat).toHaveBeenCalledTimes(1);
+    expect(saved.version).toBe(reconciled.version);
+    expect(saved.messages).toBe(reconciled.messages);
+    expect(commits).toEqual(["user:user-1", "assistant:assistant-1"]);
+
+    const changed = await repository.persistAssistant(
+      projectedServerHistory(20_000, "A revised plan.")[1],
+    );
+    expect(storage.saveChat).toHaveBeenCalledTimes(2);
+    expect(changed.messages[1].content).toBe("A revised plan.");
   });
 
   it("preserves local response duration when authoritative history omits it", async () => {
@@ -1294,10 +1334,220 @@ describe("AgentTranscriptRepository", () => {
       .not.toContain("TOOL_OUTCOME_UNKNOWN_AFTER_RESTART");
   });
 
-  it("returns copies so UI code cannot mutate durable state", async () => {
+  it("shares deeply frozen messages so UI code cannot mutate durable state", async () => {
     const { repository } = createHarness();
-    const accepted = await repository.commitUser({ kind: "append", message: user("u1") });
-    (accepted.messages[0] as ChatMessage).content = "tampered";
+    const input = user("u1");
+    const accepted = await repository.commitUser({ kind: "append", message: input });
+    input.content = "caller edit";
+    expect(() => {
+      (accepted.messages[0] as ChatMessage).content = "tampered";
+    }).toThrow(TypeError);
+    expect(Object.isFrozen(accepted.messages)).toBe(true);
     expect(repository.snapshot().messages[0].content).toBe("u1");
+    // Snapshots share the stored graph instead of cloning it.
+    expect(repository.snapshot().messages).toBe(accepted.messages);
+  });
+
+  it("keeps unchanged messages by reference across mutations", async () => {
+    const { repository } = createHarness();
+    const first = await repository.commitUser({ kind: "append", message: user("u1") });
+    const second = await repository.persistAssistant(assistant("a1"));
+    const third = await repository.commitUser({ kind: "append", message: user("u2") });
+    expect(second.messages[0]).toBe(first.messages[0]);
+    expect(third.messages[1]).toBe(second.messages[1]);
+    expect(third.agentConversationId).toBeUndefined();
+  });
+});
+
+describe("AgentTranscriptRepository with saved chat notes", () => {
+  const conversationId = "conversation_0123456789abcdef0123456789abcdef";
+  const chatPath = "SystemSculpt/Chats/chat-1.md";
+
+  /** Notes held in memory; every write updates the note's stat, as Obsidian's vault does. */
+  function noteVault() {
+    const notes = new Map<string, { file: TFile; content: string }>();
+    let clock = 1_000;
+    const vault = {
+      getAbstractFileByPath: jest.fn((path: string) => notes.get(path)?.file ?? null),
+      read: jest.fn(async (file: TFile) => notes.get(file.path)!.content),
+      modify: jest.fn(async (file: TFile, content: string) => {
+        notes.get(file.path)!.content = content;
+        file.stat = { ...file.stat, mtime: ++clock, size: content.length };
+      }),
+      create: jest.fn(async (path: string, content: string) => {
+        clock += 1;
+        const file = new TFile({ path, stat: { ctime: clock, mtime: clock, size: content.length } });
+        notes.set(path, { file, content });
+        return file;
+      }),
+      createFolder: jest.fn(async () => undefined),
+      adapter: { exists: jest.fn(async () => true) },
+    };
+    return { app: { vault } as unknown as App, vault, notes };
+  }
+
+  /** The server's durable history for one turn that read a note, as the session projects it. */
+  function serverHistory(
+    noteText: string,
+    now: number,
+    reply = "The plan has three phases.",
+  ): readonly ChatMessage[] {
+    const input = { paths: ["Plan.md"] };
+    const messages: WireMessage[] = [
+      { id: "user-1", role: "user", parts: [{ type: "text", text: "Summarize my plan." }] },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "Reading the plan." },
+          {
+            type: "data-systemsculpt-client-tool-request",
+            id: "request:call-read",
+            data: {
+              version: 1,
+              tool_call_id: "call-read",
+              tool_name: "read",
+              target: { id: "obsidian.vault", version: 1 },
+              input,
+            },
+          },
+          {
+            type: "tool-read",
+            toolCallId: "call-read",
+            input,
+            state: "output-available",
+            output: { success: true, data: { files: [{ path: "Plan.md", content: noteText }] } },
+          },
+          { type: "text", text: reply },
+        ],
+      },
+    ];
+    const projection = new ConversationProjection();
+    projection.observe({
+      revision: 1,
+      messages,
+      runState: { version: 1, cursor: 0, state: "idle" },
+      terminal: null,
+      queuedRequestIds: [],
+      cancelledQueuedRequestIds: [],
+      optimisticUser: null,
+    }, null);
+    return projection.history({ kind: "prefix", now })!.messages as readonly ChatMessage[];
+  }
+
+  /** The same history as chats saved it before tool results were bounded. */
+  function withFullReadResult(messages: readonly ChatMessage[], noteText: string): ChatMessage[] {
+    const result = { success: true, data: { files: [{ path: "Plan.md", content: noteText }] } };
+    return messages.map((message) => {
+      if (!message.tool_calls) return message;
+      const call = { ...message.tool_calls[0], result };
+      return {
+        ...message,
+        tool_calls: [call],
+        messageParts: message.messageParts!.map((part) =>
+          part.type === "tool_call" ? { ...part, data: call } : part),
+      };
+    });
+  }
+
+  /** Older versions wrote each tool call as indented JSON. */
+  function indentToolCalls(note: string): string {
+    return note.replace(/<!-- TOOL-CALLS\n(.*)\n-->/g, (_block, json: string) =>
+      `<!-- TOOL-CALLS\n${JSON.stringify(JSON.parse(json), null, 2).replace(/>/g, "\\u003e")}\n-->`);
+  }
+
+  async function saveNote(app: App, messages: readonly ChatMessage[]): Promise<void> {
+    await new ChatStorageService(app, "SystemSculpt/Chats").saveChat("chat-1", messages, {
+      title: "Plan review",
+      agentConversationId: conversationId,
+    });
+  }
+
+  function openChat(app: App) {
+    return new AgentTranscriptRepository(
+      new ChatStorageService(app, "SystemSculpt/Chats"),
+      () => ({ title: "Plan review" }),
+    );
+  }
+
+  it("opens a chat saved before tool results were bounded without rewriting its note", async () => {
+    const noteText = "Phase one covers research. ".repeat(1_000);
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, withFullReadResult(serverHistory(noteText, 1_000), noteText));
+    notes.get(chatPath)!.content = indentToolCalls(notes.get(chatPath)!.content);
+    const saved = notes.get(chatPath)!.content;
+    expect(saved).toContain(noteText);
+    vault.modify.mockClear();
+
+    const repository = openChat(app);
+    const loaded = await repository.load("chat-1");
+    // The server hydrates the chat with its own clocks and bounded tool results.
+    const reconciled = await repository.reconcileServerHistory(serverHistory(noteText, 9_000_000));
+
+    expect(vault.modify).not.toHaveBeenCalled();
+    expect(notes.get(chatPath)!.content).toBe(saved);
+    expect(reconciled.version).toBe(loaded!.version);
+
+    // The next real save stores the bounded summary instead of the whole note.
+    await repository.commitUser({ kind: "append", message: user("user-2", "Thanks.") }, conversationId);
+    const rewritten = notes.get(chatPath)!.content;
+    expect(vault.modify).toHaveBeenCalledTimes(1);
+    expect(rewritten).not.toContain(noteText);
+    expect(rewritten).toContain("more characters]");
+    expect(rewritten).toContain("Thanks.");
+  });
+
+  it("opens a chat it saved itself without rewriting its note", async () => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, serverHistory("A short plan.", 1_000));
+    const saved = notes.get(chatPath)!.content;
+    vault.modify.mockClear();
+
+    const repository = openChat(app);
+    await repository.load("chat-1");
+    await repository.reconcileServerHistory(serverHistory("A short plan.", 9_000_000));
+
+    expect(vault.modify).not.toHaveBeenCalled();
+    expect(notes.get(chatPath)!.content).toBe(saved);
+  });
+
+  it("holds the server's history once an opened chat matches it, so later comparisons need no read-back", async () => {
+    const { app, vault } = noteVault();
+    await saveNote(app, serverHistory("A short plan.", 1_000));
+    vault.modify.mockClear();
+    const repository = openChat(app);
+    const loaded = await repository.load("chat-1");
+    const server = serverHistory("A short plan.", 9_000_000);
+    const readBack = jest.spyOn(ChatMarkdownSerializer, "readBack");
+    try {
+      const reconciled = await repository.reconcileServerHistory(server);
+      expect(readBack).toHaveBeenCalled();
+      expect(reconciled.messages[0]).toBe(server[0]);
+      expect(reconciled.version).toBe(loaded!.version);
+
+      readBack.mockClear();
+      const again = await repository.reconcileServerHistory(serverHistory("A short plan.", 9_500_000));
+      expect(readBack).not.toHaveBeenCalled();
+      expect(again.version).toBe(loaded!.version);
+      expect(vault.modify).not.toHaveBeenCalled();
+    } finally {
+      readBack.mockRestore();
+    }
+  });
+
+  it("rewrites an opened chat whose server history really changed", async () => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, serverHistory("A short plan.", 1_000));
+    vault.modify.mockClear();
+
+    const repository = openChat(app);
+    const loaded = await repository.load("chat-1");
+    const reconciled = await repository.reconcileServerHistory(
+      serverHistory("A short plan.", 9_000_000, "The plan has four phases."),
+    );
+
+    expect(vault.modify).toHaveBeenCalledTimes(1);
+    expect(notes.get(chatPath)!.content).toContain("The plan has four phases.");
+    expect(reconciled.version).toBe(loaded!.version + 1);
   });
 });

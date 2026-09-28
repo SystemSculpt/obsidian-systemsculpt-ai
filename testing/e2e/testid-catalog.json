@@ -98,6 +98,7 @@
     "history.item.favorite",
     "history.retry",
     "history.search",
+    "history.show-more",
     "hover.*",
     "janitor.close",
     "janitor.confirm.accept",

@@ -16,6 +16,7 @@ import {
   type AgentToolResultCommand as ProtocolToolResultCommand,
   type AgentUserMessage,
 } from "./Protocol";
+import { isDeeplyFrozen } from "../../utils/immutableJson";
 /**
  * The synchronization states for the authoritative session.
  *
@@ -244,7 +245,13 @@ function unknownRunState(
   return Object.freeze({ version: 1, cursor, state: "unknown", busy: true, reason });
 }
 
+/**
+ * Own an authoritative value as a deeply frozen graph. Protocol parsing
+ * already returns sanitized, deeply frozen copies; those are kept as-is
+ * instead of being cloned and walked again.
+ */
 function cloneAndFreeze<TValue>(value: TValue): TValue {
+  if (isDeeplyFrozen(value)) return value;
   const cloned = structuredClone(value);
   if (cloned === null || typeof cloned !== "object") return cloned;
   const pending: object[] = [cloned];

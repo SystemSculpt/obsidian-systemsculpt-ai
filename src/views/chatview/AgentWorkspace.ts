@@ -9,6 +9,7 @@ import {
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import type { ChatMessage } from "../../types";
+import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
   AnchoredScroller,
   type AnchoredScrollerIncidentSnapshot,
@@ -157,7 +158,8 @@ export class AgentWorkspace extends Component {
   private readonly registeredRows = new Map<string, HTMLElement>();
   private readonly queuedRows = new Map<string, HTMLElement>();
   private history: readonly ChatMessage[] = [];
-  private historyFingerprint = "[]";
+  /** Frozen transcript messages compare by identity instead of by JSON. */
+  private historyKeys: readonly unknown[] = [];
   private snapshot: AgentConversationSnapshot | null = null;
   private runPending = false;
   private pendingTurnId: string | null = null;
@@ -583,11 +585,11 @@ export class AgentWorkspace extends Component {
       this.submittedPromptTurnId = null;
       this.scroller.clearSubmittedPromptAnchor();
     }
-    const fingerprint = JSON.stringify(messages);
+    const keys = contentKeys(messages);
     this.history = messages;
-    if (fingerprint === this.historyFingerprint) return Promise.resolve();
+    if (sameContentKeys(keys, this.historyKeys)) return Promise.resolve();
     return this.renderHistoryPreservingAnchor().then(() => {
-      this.historyFingerprint = fingerprint;
+      this.historyKeys = keys;
     });
   }
 
@@ -680,7 +682,7 @@ export class AgentWorkspace extends Component {
         }
         if (!this.isLifecycleCurrent(generation)) return;
         renderedHistory = true;
-        this.historyFingerprint = JSON.stringify(messages);
+        this.historyKeys = contentKeys(messages);
       } catch (error) {
         if (!this.isLifecycleCurrent(generation)) return;
         this.renderer.showCompletedRenderFallback();

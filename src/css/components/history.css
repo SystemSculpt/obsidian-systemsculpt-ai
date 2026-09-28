@@ -29,6 +29,11 @@
   max-height: none;
 }
 
+.systemsculpt-history-show-more {
+  align-self: center;
+  margin: 0 var(--ss-space-3) var(--ss-space-3);
+}
+
 .systemsculpt-history-item {
   padding: var(--ss-space-2) var(--ss-space-3);
   background-color: var(--ss-surface-0);

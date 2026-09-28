@@ -2,10 +2,13 @@
  * Configuration constants for first-party vault tools.
  */
 
+/** The most items one vault batch tool call accepts. */
+export const MAX_BATCH_OPERATIONS = 100;
+
 export const FILESYSTEM_LIMITS = {
   MAX_FILE_READ_LENGTH: 25000, // Characters per read window
   MAX_LINE_LENGTH: 2000,
-  MAX_OPERATIONS: 100, // Max operations for batch tools
+  MAX_OPERATIONS: MAX_BATCH_OPERATIONS, // Max operations for batch tools
   MAX_MULTI_EDIT_FILES: 20,
   MAX_READ_FILES: 10,
   DEFAULT_LIST_PAGE_SIZE: 25,

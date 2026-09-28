@@ -34,6 +34,7 @@ import {
   type AgentRunResult,
 } from "../ChatSession";
 import { AgentMutationJournal } from "../MutationJournal";
+import { ConversationProjection } from "../ConversationProjection";
 
 const CONVERSATION_ID = `conversation_${"a".repeat(32)}`;
 const CLIENT_ID = `client_${"b".repeat(32)}`;
@@ -3749,6 +3750,81 @@ describe("AgentChatSession", () => {
       toolCallId: "call_unestablished_transport_only",
     });
     expect(dispatch).not.toHaveProperty("toolExecutionOrdinal");
+  });
+
+  it("reconciles the terminal turn before the assistant save so a turn is written once", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_single_write";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Answer in two steps"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_step_1", "Step one")));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_step_2", "Step two")));
+    await tick();
+    harness.reconcileHistory.mockClear();
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(waitForResult(run)).resolves.toMatchObject({ kind: "completed" });
+
+    const terminalSync = harness.reconcileHistory.mock.calls.findIndex(([messages]) =>
+      (messages as readonly ChatMessage[]).some((message) =>
+        message.message_id === "assistant_step_2"));
+    expect(terminalSync).toBeGreaterThanOrEqual(0);
+    expect(harness.persistAssistant).toHaveBeenCalledTimes(1);
+    expect(harness.reconcileHistory.mock.invocationCallOrder[terminalSync])
+      .toBeLessThan(harness.persistAssistant.mock.invocationCallOrder[0]!);
+    // Persistence shares the projection's frozen graph instead of a clone.
+    const [saved] = harness.persistAssistant.mock.calls[0]!;
+    expect(Object.isFrozen(saved)).toBe(true);
+  });
+
+  it("projects a streamed burst once per render window instead of once per frame", async () => {
+    const harness = trackedHarness();
+    const server = await harness.open();
+    const turnId = "user_burst";
+    const run = harness.agent.start({
+      conversationId: CONVERSATION_ID,
+      turnId,
+      message: userMessage(turnId, "Stream a long answer"),
+    });
+    await waitFor(() => harness.commands(server).some((command) =>
+      command.kind === "submit"));
+    server.serverMessage(runState(active(1, turnId, turnId)));
+    server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_burst", [{
+      type: "text",
+      text: "Frame 0",
+      state: "streaming",
+    }])));
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const presented: ReturnType<AgentChatSession["getSnapshot"]>[] = [];
+    harness.agent.subscribe((snapshot) => presented.push(snapshot));
+    const present = jest.spyOn(ConversationProjection.prototype, "present");
+    for (let frame = 1; frame <= 8; frame += 1) {
+      server.serverMessage(assistantSnapshot(turnId, wireAssistant("assistant_burst", [{
+        type: "text",
+        text: `Frame ${frame}`,
+        state: "streaming",
+      }])));
+    }
+    await tick();
+    await waitFor(() => presented.some((snapshot) => snapshot.parts.some((part) =>
+      part.kind === "text" && part.markdown === "Frame 8")));
+    // The leading frame paints at once and the rest of the burst is projected
+    // once when its render window closes. Under load one window can expire
+    // mid-burst, which adds at most one more projection.
+    expect(present.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(presented.length).toBeLessThanOrEqual(3);
+    present.mockRestore();
+
+    server.serverMessage(succeededTerminal(turnId, turnId));
+    await expect(waitForResult(run)).resolves.toMatchObject({ kind: "completed" });
   });
 
   it("orders the optimistic user before full assistant replacements and coalesces presentation", async () => {

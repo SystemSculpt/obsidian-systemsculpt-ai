@@ -120,9 +120,36 @@ describe("ChatMarkdownSerializer", () => {
       const result = ChatMarkdownSerializer.serializeMessages(messages);
 
       expect(result).toContain("<!-- TOOL-CALLS");
-      expect(result).toContain('"id": "call-1"');
-      expect(result).toContain('"name": "search"');
+      // Tool calls are stored as compact JSON on one line.
+      expect(result).toContain(
+        '<!-- TOOL-CALLS\n[{"id":"call-1","name":"search","arguments":{"query":"test"}}]\n-->',
+      );
       expect(result).toContain('has-tool-calls="true"');
+      expect(ChatMarkdownSerializer.parseMarkdown(
+        `---\nid: compact\ncreated: 2024-01-01T00:00:00.000Z\nlastModified: 2024-01-01T00:00:00.000Z\ntitle: Compact\n---\n\n${result}`,
+      )?.messages[0]?.tool_calls).toEqual([toolCallData]);
+    });
+
+    it("still reads pretty-printed tool calls written by earlier versions", () => {
+      const toolCall = { id: "call-1", name: "search", arguments: { query: "test" } };
+      const content = [
+        "---",
+        "id: legacy-tools",
+        "created: 2024-01-01T00:00:00.000Z",
+        "lastModified: 2024-01-01T00:00:00.000Z",
+        "title: Legacy",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="asst-1" has-tool-calls="true" -->',
+        "",
+        "<!-- TOOL-CALLS",
+        JSON.stringify([toolCall], null, 2),
+        "-->",
+        "",
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+      expect(ChatMarkdownSerializer.parseMarkdown(content)?.messages[0]?.tool_calls)
+        .toEqual([toolCall]);
     });
 
     it("serializes array content with text and images", () => {
