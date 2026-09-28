@@ -4,14 +4,15 @@ export const LEGACY_PI_AUTH_PATH = ".systemsculpt/pi-agent/auth.json";
 export const SYSTEMSCULPT_GITIGNORE_PATH = ".systemsculpt/.gitignore";
 const PI_AGENT_IGNORE_RULE = "/pi-agent/";
 
-export type LegacyCredentialProtectionResult = Readonly<{
-  legacyCredentialsPresent: boolean;
-  ignoreRulePresent: boolean;
-  protectionError?: string;
-}>;
+export type LegacyCredentialProtectionResult = Readonly<
+  | { legacyCredentialsPresent: false }
+  | { legacyCredentialsPresent: true; ignoreRulePresent: boolean; protectionError?: string }
+>;
 
 /**
- * Hardens the retired Pi credential location against new Git commits.
+ * Finds the retired Pi credential file and, while it is still in the vault,
+ * keeps its folder out of new Git commits with an ignore rule. Vaults without
+ * the file are left untouched.
  *
  * This cannot remove a file that Git already tracks and it does not protect
  * cloud-sync or backup copies. Callers must surface those limits whenever a
@@ -20,7 +21,7 @@ export type LegacyCredentialProtectionResult = Readonly<{
 export async function protectLegacyPiCredentials(
   adapter: Pick<DataAdapter, "exists" | "read" | "write">,
 ): Promise<LegacyCredentialProtectionResult> {
-  const legacyCredentialsPresent = await adapter.exists(LEGACY_PI_AUTH_PATH);
+  if (!(await adapter.exists(LEGACY_PI_AUTH_PATH))) return { legacyCredentialsPresent: false };
   try {
     const ignoreExists = await adapter.exists(SYSTEMSCULPT_GITIGNORE_PATH);
     const current = ignoreExists ? await adapter.read(SYSTEMSCULPT_GITIGNORE_PATH) : "";
@@ -35,10 +36,10 @@ export async function protectLegacyPiCredentials(
       );
     }
 
-    return { legacyCredentialsPresent, ignoreRulePresent: true };
+    return { legacyCredentialsPresent: true, ignoreRulePresent: true };
   } catch (error) {
     return {
-      legacyCredentialsPresent,
+      legacyCredentialsPresent: true,
       ignoreRulePresent: false,
       protectionError: error instanceof Error ? error.message : String(error),
     };

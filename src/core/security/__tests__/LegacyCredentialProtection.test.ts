@@ -26,7 +26,7 @@ describe("protectLegacyPiCredentials", () => {
   });
 
   it("preserves existing ignore content and is idempotent", async () => {
-    const target = adapter({ [SYSTEMSCULPT_GITIGNORE_PATH]: "cache/" });
+    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}", [SYSTEMSCULPT_GITIGNORE_PATH]: "cache/" });
 
     await protectLegacyPiCredentials(target);
     await protectLegacyPiCredentials(target);
@@ -36,14 +36,23 @@ describe("protectLegacyPiCredentials", () => {
   });
 
   it("does not rewrite an existing exact rule", async () => {
-    const target = adapter({ [SYSTEMSCULPT_GITIGNORE_PATH]: "# local\n/pi-agent/\n" });
+    const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}", [SYSTEMSCULPT_GITIGNORE_PATH]: "# local\n/pi-agent/\n" });
 
     await expect(protectLegacyPiCredentials(target)).resolves.toEqual({
-      legacyCredentialsPresent: false,
+      legacyCredentialsPresent: true,
       ignoreRulePresent: true,
     });
     expect(target.write).not.toHaveBeenCalled();
   });
+
+  it("leaves a vault without the retired credential file untouched", async () => {
+    const target = adapter({ [SYSTEMSCULPT_GITIGNORE_PATH]: "cache/" });
+
+    await expect(protectLegacyPiCredentials(target)).resolves.toEqual({ legacyCredentialsPresent: false });
+    expect(target.read).not.toHaveBeenCalled();
+    expect(target.write).not.toHaveBeenCalled();
+  });
+
   it("preserves credential detection when the ignore file cannot be written", async () => {
     const target = adapter({ [LEGACY_PI_AUTH_PATH]: "{}" });
     target.write.mockRejectedValueOnce(new Error("read only"));
