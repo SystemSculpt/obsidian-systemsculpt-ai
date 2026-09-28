@@ -23,6 +23,7 @@ import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { StorageManager } from "./core/storage";
+import { legacyCredentialNotice, protectLegacyCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
@@ -301,6 +302,7 @@ export default class SystemSculptPlugin extends Plugin {
         ...(developmentBuild ? { developmentBuild: developmentBuild.id } : {}),
       },
     });
+    this.startLegacyCredentialCheck(tracer);
 
     try {
       this.warnIfObsidianVersionUnsupported();
@@ -1037,6 +1039,48 @@ export default class SystemSculptPlugin extends Plugin {
 
       throw error;
     }
+  }
+
+  /**
+   * Keeps retired credential files out of Git and tells the user how to clean
+   * them up (#327). It runs beside startup rather than in a lifecycle phase,
+   * so a failed phase cannot skip it and it never holds up the interface.
+   */
+  private startLegacyCredentialCheck(tracer: InitializationTracer): void {
+    const phase = tracer.startPhase("security.legacyCredentials", {
+      slowThresholdMs: 2000,
+      timeoutMs: 20000,
+    });
+    void this.checkLegacyCredentials().then(
+      () => phase.complete(),
+      (error: unknown) => {
+        phase.fail(error);
+        this.getLogger().warn("Could not check for retired credential files", {
+          source: "SystemSculptPlugin",
+          metadata: { error: error instanceof Error ? error.message : String(error) },
+        });
+      },
+    );
+  }
+
+  private async checkLegacyCredentials(): Promise<void> {
+    const result = await protectLegacyCredentials(this.app.vault.adapter);
+    if (result.status === "unprotected") {
+      this.getLogger().warn("Could not add the Git ignore rule for retired credential files", {
+        source: "SystemSculptPlugin",
+        metadata: { error: result.error },
+      });
+    }
+    if (result.searchError) {
+      this.getLogger().warn("Could not search all of the plugin folder for retired credential files", {
+        source: "SystemSculptPlugin",
+        metadata: { error: result.searchError },
+      });
+    }
+    const message = legacyCredentialNotice(result);
+    if (message === null || this.isUnloading) return;
+    const notice = new Notice(message, 0);
+    this.register(() => notice.hide());
   }
 
   private async initializeDirectories() {

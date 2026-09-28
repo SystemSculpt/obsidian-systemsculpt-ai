@@ -5,6 +5,8 @@ import SystemSculptPlugin from "../main";
 import { DiagnosticsSessionLifecycle } from "../core/diagnostics/DiagnosticsSessionLifecycle";
 import { DEFAULT_SETTINGS } from "../types";
 
+const obsidian = require("obsidian");
+
 function makePlugin(app: App = new App()): SystemSculptPlugin {
   return new SystemSculptPlugin(app, {
     id: "systemsculpt-ai",
@@ -70,6 +72,40 @@ describe("SystemSculptPlugin startup phases", () => {
 
     expect(registeredTaskIds(plugin, "critical")).not.toContain("updates.start");
     expect(registeredTaskIds(plugin, "layout")).toContain("updates.start");
+  });
+
+  it("warns about retired credential files and hides the notice on unload", async () => {
+    const app = new App();
+    const plugin = makePlugin(app);
+    const adapter = app.vault.adapter as any;
+    const leftBehind = ".systemsculpt/retired-agent/auth.json";
+    adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt" || path === leftBehind);
+    adapter.list.mockResolvedValue({ files: [], folders: [".systemsculpt/retired-agent"] });
+    adapter.write.mockResolvedValue(undefined);
+    const hide = jest.fn();
+    const notice = jest.spyOn(obsidian, "Notice").mockImplementation(() => ({ hide }) as any);
+    const register = jest.spyOn(plugin, "register");
+
+    await (plugin as any).checkLegacyCredentials();
+
+    expect(notice).toHaveBeenCalledWith(expect.stringContaining(leftBehind), 0);
+    const cleanup = register.mock.calls.at(-1)?.[0] as () => void;
+    cleanup();
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no credential notice once the plugin is unloading", async () => {
+    const app = new App();
+    const plugin = makePlugin(app);
+    const adapter = app.vault.adapter as any;
+    adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt" || path === ".systemsculpt/auth.json");
+    adapter.write.mockResolvedValue(undefined);
+    const notice = jest.spyOn(obsidian, "Notice");
+    (plugin as any).isUnloading = true;
+
+    await (plugin as any).checkLegacyCredentials();
+
+    expect(notice).not.toHaveBeenCalled();
   });
 
   it("runs layout tasks only after the critical phase has loaded settings", async () => {

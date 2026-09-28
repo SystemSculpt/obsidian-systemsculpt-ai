@@ -95,6 +95,20 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(debug).toHaveBeenCalledWith("[SystemSculpt] v1.0.0 build dev");
   });
 
+  it("checks for retired credential files even when core initialization throws (#327)", async () => {
+    const plugin = makePlugin();
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const check = jest.spyOn(plugin as any, "checkLegacyCredentials").mockResolvedValue(undefined);
+    jest.spyOn(plugin as any, "configureLifecycle").mockImplementation(() => {
+      throw new Error("simulated fatal init failure");
+    });
+
+    await plugin.onload();
+
+    expect(plugin.safeMode).toBe(true);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
   it("stops recorder capture before any fallible service teardown", async () => {
     const plugin = makePlugin();
     const order: string[] = [];
