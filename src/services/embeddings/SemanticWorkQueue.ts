@@ -76,19 +76,8 @@ export class SemanticWorkQueue {
     sourceMtime: number | null,
     now = Date.now(),
   ): Promise<SemanticWorkItem | null> {
-    if (!path) return null;
-    const existing = this.items.get(path);
-    const item: SemanticWorkItem = {
-      path,
-      revision: this.nextItemRevision++,
-      sourceMtime: Number.isFinite(sourceMtime) ? sourceMtime : null,
-      reason,
-      requestedAt: existing?.requestedAt ?? now,
-      readyAt: now + this.quietPeriodMs,
-      attempts: existing?.attempts ?? 0,
-      failure: null,
-    };
-    this.items.set(path, item);
+    const item = this.put(path, reason, sourceMtime, now);
+    if (!item) return null;
     await this.persist();
     return clone(item);
   }
@@ -100,6 +89,25 @@ export class SemanticWorkQueue {
     now = Date.now(),
   ): Promise<SemanticWorkItem | null> {
     return this.enqueue(path, reason, sourceMtime, now - this.quietPeriodMs);
+  }
+
+  /**
+   * Queue many paths as immediately due work with one durable write. Every
+   * claim is persisted before this resolves, exactly as with enqueueImmediate,
+   * so work captured before a crash is restored on the next launch.
+   */
+  async enqueueManyImmediate(
+    entries: Iterable<Readonly<{ path: string; sourceMtime: number | null }>>,
+    reason: SemanticWorkReason,
+    now = Date.now(),
+  ): Promise<Map<string, SemanticWorkItem>> {
+    const claims = new Map<string, SemanticWorkItem>();
+    for (const entry of entries) {
+      const item = this.put(entry.path, reason, entry.sourceMtime, now - this.quietPeriodMs);
+      if (item) claims.set(item.path, clone(item));
+    }
+    if (claims.size > 0) await this.persist();
+    return claims;
   }
 
   async rename(oldPath: string, newPath: string, now = Date.now()): Promise<void> {
@@ -174,20 +182,25 @@ export class SemanticWorkQueue {
     failure: FailedProcessingDetail,
     now = Date.now(),
   ): Promise<boolean> {
-    const existing = this.items.get(claim.path);
-    if (
-      !existing
-      || existing.revision !== claim.revision
-      || existing.sourceMtime !== claim.sourceMtime
-    ) return false;
-    this.items.set(claim.path, {
-      ...existing,
-      readyAt: Number.MAX_SAFE_INTEGER,
-      attempts: existing.attempts + 1,
-      failure: { ...failure, failedAt: now },
-    });
+    if (!this.markFailed(claim, failure, now)) return false;
     await this.persist();
     return true;
+  }
+
+  /**
+   * Record many failures with one durable write. Returns the paths whose
+   * claimed revision was still current; stale claims are ignored as in fail.
+   */
+  async failMany(
+    failures: Iterable<Readonly<{ claim: SemanticWorkItem; failure: FailedProcessingDetail }>>,
+    now = Date.now(),
+  ): Promise<Set<string>> {
+    const recorded = new Set<string>();
+    for (const { claim, failure } of failures) {
+      if (this.markFailed(claim, failure, now)) recorded.add(claim.path);
+    }
+    if (recorded.size > 0) await this.persist();
+    return recorded;
   }
 
   async retryFailures(now = Date.now()): Promise<void> {
@@ -234,6 +247,48 @@ export class SemanticWorkQueue {
 
   async settled(): Promise<void> {
     await this.persistChain;
+  }
+
+  private put(
+    path: string,
+    reason: SemanticWorkReason,
+    sourceMtime: number | null,
+    now: number,
+  ): SemanticWorkItem | null {
+    if (!path) return null;
+    const existing = this.items.get(path);
+    const item: SemanticWorkItem = {
+      path,
+      revision: this.nextItemRevision++,
+      sourceMtime: Number.isFinite(sourceMtime) ? sourceMtime : null,
+      reason,
+      requestedAt: existing?.requestedAt ?? now,
+      readyAt: now + this.quietPeriodMs,
+      attempts: existing?.attempts ?? 0,
+      failure: null,
+    };
+    this.items.set(path, item);
+    return item;
+  }
+
+  private markFailed(
+    claim: SemanticWorkItem,
+    failure: FailedProcessingDetail,
+    now: number,
+  ): boolean {
+    const existing = this.items.get(claim.path);
+    if (
+      !existing
+      || existing.revision !== claim.revision
+      || existing.sourceMtime !== claim.sourceMtime
+    ) return false;
+    this.items.set(claim.path, {
+      ...existing,
+      readyAt: Number.MAX_SAFE_INTEGER,
+      attempts: existing.attempts + 1,
+      failure: { ...failure, failedAt: now },
+    });
+    return true;
   }
 
   private persist(): Promise<void> {

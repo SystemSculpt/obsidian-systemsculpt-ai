@@ -62,16 +62,21 @@
 @import 'views/studio/shapes.css';
 @import 'views/studio/menus.css';
 /* Studio node editors: component bodies, overlays, responsive rules, details. */
-@import 'views/studio/editor-preview.css';
 @import 'views/studio/editor-text.css';
-@import 'views/studio/editor-json.css';
 @import 'views/studio/editor-notes.css';
 @import 'views/studio/editor-dropdowns.css';
+@import 'views/studio/editor-model-picker.css';
 @import 'views/studio/editor-media.css';
 @import 'views/studio/caption-board.css';
 @import 'views/studio/editor-responsive.css';
 @import 'views/studio/inline-config.css';
 @import 'views/studio/node-details.css';
+@import 'views/studio/collection.css';
+@import 'views/studio/source-cards.css';
+@import 'views/studio/run-board.css';
+@import 'views/studio/command-center.css';
+/* Run-state visuals for every Studio surface; last so a phase always wins. */
+@import 'views/studio/activity.css';
 
 /* Post-cascade invariant: feature sheets may alter action geometry or tone,
  * but every canonical action retains the same keyboard focus treatment. */

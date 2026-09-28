@@ -11,7 +11,7 @@ import 'obsidian';
 declare global {
   interface Element {
     /** Create a child element with Obsidian-style options support */
-    createEl<K extends keyof HTMLElementTagNameMap>(tag: K, options?: string | Partial<Record<string, any>>): HTMLElementTagNameMap[K];
+    createEl<K extends keyof HTMLElementTagNameMap>(tag: K, options?: string | Partial<Record<string, unknown>>): HTMLElementTagNameMap[K];
     /** Add CSS class(es) */
     addClass(cls: string): this;
     /** Remove CSS class(es) */
@@ -19,9 +19,9 @@ declare global {
     /** Set attribute helper */
     setAttr(attr: string, value: string): this;
     /** Obsidian helper to create a <div> */
-    createDiv(opts?: string | Partial<Record<string, any>>): HTMLDivElement;
+    createDiv(opts?: string | Partial<Record<string, unknown>>): HTMLDivElement;
     /** Obsidian helper to create a <span> */
-    createSpan(opts?: string | Partial<Record<string, any>>): HTMLSpanElement;
+    createSpan(opts?: string | Partial<Record<string, unknown>>): HTMLSpanElement;
     /** Remove all child nodes */
     empty(): this;
     /** Toggle class presence */

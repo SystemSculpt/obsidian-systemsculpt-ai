@@ -48,4 +48,15 @@ describe("FileContextManager", () => {
     expect(Array.from(manager.getPinnedFiles())).toEqual(["[[Note]]"]);
   });
 
+  it("does not restore the old conversation's pins after the context is cleared", async () => {
+    const { app, manager } = createManager();
+    app.metadataCache.getFirstLinkpathDest = jest.fn(() => new TFile({ path: "Note.md" }));
+
+    const restoring = manager.setPinnedFiles(["Note.md"]);
+    manager.clearPinnedFiles();
+    await restoring;
+
+    expect(manager.getPinnedFiles().size).toBe(0);
+  });
+
 });

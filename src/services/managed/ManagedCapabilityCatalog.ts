@@ -72,7 +72,7 @@ function validEmbeddingGeneration(value: unknown): boolean {
 export class ManagedCapabilityCatalog {
   static parse(value: unknown): ManagedCapabilityCatalogContract {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Malformed managed capability catalog");
-    const catalog = value as Record<string, any>;
+    const catalog = value as Record<string, unknown>;
     if (!exactKeys(catalog, CATALOG_KEYS) || catalog.contract_version !== MANAGED_CAPABILITY_CONTRACT || catalog.cache_ttl_seconds !== 300) {
       throw new Error("Unsupported managed capability contract");
     }
@@ -80,28 +80,36 @@ export class ManagedCapabilityCatalog {
     if (!(catalog.disclosure_version === null || (typeof catalog.disclosure_version === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(catalog.disclosure_version)))) {
       throw new Error("Malformed disclosure version");
     }
-    if (!Array.isArray(catalog.capabilities) || catalog.capabilities.length !== RULES.length) throw new Error("Incomplete managed capability catalog");
+    const capabilities = catalog.capabilities;
+    if (!Array.isArray(capabilities) || capabilities.length !== RULES.length) throw new Error("Incomplete managed capability catalog");
 
     RULES.forEach((rule, index) => {
-      const descriptor = catalog.capabilities[index];
+      const descriptorValue = capabilities[index];
       const descriptorKeys = rule.alias === "systemsculpt/embeddings"
         ? EMBEDDINGS_DESCRIPTOR_KEYS
         : DESCRIPTOR_KEYS;
-      if (!descriptor || typeof descriptor !== "object" || Array.isArray(descriptor) || !exactKeys(descriptor, descriptorKeys)) throw new Error("Malformed capability descriptor");
+      if (!descriptorValue || typeof descriptorValue !== "object" || Array.isArray(descriptorValue)) throw new Error("Malformed capability descriptor");
+      const descriptor = descriptorValue as Record<string, unknown>;
+      if (!exactKeys(descriptor, descriptorKeys)) throw new Error("Malformed capability descriptor");
       if (
         descriptor.alias !== rule.alias || descriptor.endpoint !== rule.endpoint || descriptor.mode !== rule.mode ||
         descriptor.auth !== "license" || descriptor.metering !== rule.metering ||
         descriptor.cancellation_supported !== rule.cancellation || descriptor.background_eligible !== rule.background ||
-        !["available", "unavailable"].includes(descriptor.availability) || !validLimits(descriptor.limits) ||
+        (descriptor.availability !== "available" && descriptor.availability !== "unavailable") || !validLimits(descriptor.limits) ||
         !Array.isArray(descriptor.request_contracts) || descriptor.request_contracts.length !== rule.contracts.length
       ) throw new Error(`Malformed descriptor ${rule.alias}`);
       if (rule.alias === "systemsculpt/embeddings" && !validEmbeddingGeneration(descriptor.generation)) {
         throw new Error("Malformed embeddings generation");
       }
 
+      const requestContracts = descriptor.request_contracts as unknown[];
       rule.contracts.forEach((contractId, contractIndex) => {
-        const contract = descriptor.request_contracts[contractIndex];
-        if (!contract || contract.capability !== contractId || fingerprint(contract) !== CONTRACT_FINGERPRINTS[contractId]) {
+        const contractValue = requestContracts[contractIndex];
+        if (!contractValue || typeof contractValue !== "object" || Array.isArray(contractValue)) {
+          throw new Error(`Malformed request contract ${contractId}`);
+        }
+        const contract = contractValue as Record<string, unknown>;
+        if (contract.capability !== contractId || fingerprint(contract) !== CONTRACT_FINGERPRINTS[contractId]) {
           throw new Error(`Malformed request contract ${contractId}`);
         }
       });

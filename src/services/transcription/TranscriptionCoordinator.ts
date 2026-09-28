@@ -2,14 +2,12 @@ import type { App, Editor } from "obsidian";
 import { TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
 import { DEFAULT_SETTINGS } from "../../types";
 import { MAX_FILE_SIZE, formatFileSize } from "../../utils/FileValidator";
 import { logError } from "../../utils/errorHandling";
 import { PostProcessingService } from "../PostProcessingService";
 import { ManagedJobClient } from "../managed/ManagedJobClient";
-import { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
-import { ObsidianManagedRecoveryAdapter } from "../managed/adapters/ObsidianManagedRecoveryAdapter";
 import {
   ManagedTranscriptionAdapter,
   ManagedTranscriptionInterruptedError,
@@ -605,7 +603,7 @@ export class TranscriptionCoordinator {
     this.managedAdapter = new ManagedTranscriptionAdapter({
       admission: graph.admission,
       jobs: new ManagedJobClient(graph.transport).transcription,
-      recovery: new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app)),
+      recovery: graph.recovery,
     });
     return this.managedAdapter;
   }
@@ -940,7 +938,7 @@ export class TranscriptionCoordinator {
       && "value" in value
       && "receipt" in value
     ) {
-      return value as Readonly<{ value: T; receipt?: ManagedLocalCommitReceipt }>;
+      return value;
     }
     return { value: value as T };
   }

@@ -118,6 +118,20 @@ describe("StudioGraphCompiler managed node graph", () => {
     expect(() => compiler.compile(project, registry)).toThrow("cycle");
   });
 
+  it("rejects cycles even when a predecessor connects through multiple edges", () => {
+    const project = baseProject();
+    project.graph.nodes = ["source", "a", "b"].map((id) => ({
+      id, kind: "studio.text_output", version: "1.0.0", title: id,
+      position: { x: 0, y: 0 }, config: {},
+    }));
+    project.graph.edges = [
+      ["source", "a"], ["source", "a"], ["a", "b"], ["b", "a"],
+    ].map(([fromNodeId, toNodeId], index) => ({
+      id: `edge-${index}`, fromNodeId, fromPortId: "text", toNodeId, toPortId: "text",
+    }));
+    expect(() => compiler.compile(project, registry)).toThrow("cycle");
+  });
+
   it("rejects retired HTTP request nodes", () => {
     const project = baseProject();
     project.graph.nodes.push({

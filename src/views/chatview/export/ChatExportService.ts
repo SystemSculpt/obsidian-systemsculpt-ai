@@ -98,7 +98,7 @@ export class ChatExportService {
           summary.reasoningBlockCount += 1;
         }
         if (part.type === 'content') {
-          summary.imageCount += this.countImages(part.data as string | MultiPartContent[] | null);
+          summary.imageCount += this.countImages(part.data);
         }
       });
 

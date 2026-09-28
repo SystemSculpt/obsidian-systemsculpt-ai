@@ -89,6 +89,32 @@ describe("ViewManager", () => {
     expect(app.viewRegistry?.viewByType[EMBEDDINGS_VIEW_TYPE]).toEqual(expect.any(Function));
   });
 
+  it("drains chats admitted after the first restore batch has finished", async () => {
+    const { manager } = createFixture();
+    const queue = manager as unknown as {
+      scheduleChatRestore(leaf: unknown, priority: "high" | "low"): void;
+      processRestoreQueue(): Promise<void>;
+    };
+    const makeLeaf = (chatId: string) => ({
+      view: {
+        getViewType: () => CHAT_VIEW_TYPE,
+        isFullyLoaded: false,
+        setState: jest.fn().mockResolvedValue(undefined),
+      },
+      getViewState: () => ({ state: { chatId } }),
+    });
+    const visible = makeLeaf("visible");
+    const hidden = makeLeaf("hidden");
+    queue.scheduleChatRestore(visible, "high");
+    await jest.runAllTimersAsync();
+    await queue.processRestoreQueue();
+    queue.scheduleChatRestore(hidden, "low");
+    await jest.runAllTimersAsync();
+    await queue.processRestoreQueue();
+    expect(visible.view.setState).toHaveBeenCalledTimes(1);
+    expect(hidden.view.setState).toHaveBeenCalledTimes(1);
+  });
+
   it("opens Similar Notes in the desktop right sidebar", async () => {
     const { app, manager } = createFixture();
     const leaf = {
@@ -204,7 +230,6 @@ describe("ViewManager", () => {
     expect(detachLeavesOfType.mock.calls).toEqual([
       [CHAT_VIEW_TYPE],
       [EMBEDDINGS_VIEW_TYPE],
-      [SYSTEMSCULPT_STUDIO_VIEW_TYPE],
     ]);
     expect(cleanup).toHaveBeenCalledTimes(1);
   });

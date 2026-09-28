@@ -109,6 +109,13 @@ class Component {
     return callback;
   }
 
+  // Obsidian ties the timer to component unload; mirror that so a suite that
+  // unloads its plugin does not leak the interval into the next test.
+  registerInterval(id) {
+    this.register(() => clearInterval(id));
+    return id;
+  }
+
   registerDomEvent(el, type, callback) {
     if (!el || !type || typeof callback !== "function") return;
     el.addEventListener(type, callback);
@@ -273,6 +280,15 @@ class App {
       create: jest.fn(),
       createFolder: jest.fn(),
       modify: jest.fn(),
+      // Mirrors Obsidian's read-transform-write under a file lock, so suites
+      // that assert on `modify` keep working when a caller switches to
+      // `process`.
+      process: jest.fn(async function (file, transform) {
+        const current = await this.read(file);
+        const next = transform(current ?? "");
+        await this.modify(file, next);
+        return next;
+      }),
       configDir: "/.obsidian",
       // Adapter without getBasePath: filesystem tools must stay on the
       // Vault/adapter path rather than assuming a desktop filesystem handle.
@@ -294,6 +310,7 @@ class App {
       renameFile: jest.fn(),
     };
     this.workspace = {
+      activeLeaf: null,
       on: jest.fn(() => ({ unload: jest.fn() })),
       off: jest.fn(),
       trigger: jest.fn(),
@@ -302,6 +319,7 @@ class App {
       getLeavesOfType: jest.fn(() => []),
       onLayoutReady: jest.fn((cb) => cb()),
     };
+    this.workspace.getMostRecentLeaf = jest.fn(() => this.workspace.activeLeaf);
     this.metadataCache = {
       getFileCache: jest.fn(() => null),
       getFirstLinkpathDest: jest.fn(() => null),
@@ -407,9 +425,21 @@ class WorkspaceLeaf {
   }
 }
 
-class ItemView extends Component {
+class View extends Component {
   constructor(leaf) {
     super();
+    this.leaf = leaf;
+    this.app = leaf?.app;
+  }
+
+  getViewType() {
+    return "";
+  }
+}
+
+class ItemView extends View {
+  constructor(leaf) {
+    super(leaf);
     this.leaf = leaf;
     this.app = leaf?.app;
     // Mirror Obsidian's container layout: header + content container
@@ -753,11 +783,75 @@ class Scope {
   unregister(handler) {
     this.keys = this.keys.filter((entry) => entry !== handler);
   }
+
+  /**
+   * Mirrors Obsidian's dispatch: the first matching handler decides, `false`
+   * asks the keymap to prevent the event, and only an unhandled catch-all
+   * (null modifiers and key) falls through to the parent scope.
+   */
+  handleKey(event, info) {
+    for (const entry of this.keys) {
+      if (!scopeEntryMatches(entry, info)) continue;
+      const result = entry.func(event, info);
+      if (result !== undefined) return result;
+      if (entry.key !== null || entry.modifiers !== null) return result;
+    }
+    return this.parent ? this.parent.handleKey(event, info) : undefined;
+  }
+}
+
+function compileScopeModifiers(modifiers) {
+  const isMac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || "");
+  return modifiers
+    .map((modifier) => (modifier === "Mod" ? (isMac ? "Meta" : "Ctrl") : modifier))
+    .sort()
+    .join(",");
+}
+
+function scopeEntryMatches(entry, info) {
+  if (entry.modifiers !== null && compileScopeModifiers(entry.modifiers) !== info.modifiers) return false;
+  if (!entry.key) return true;
+  return entry.key === info.vkey || (Boolean(info.key) && entry.key.toLowerCase() === info.key.toLowerCase());
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)));
+  }
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+const MOCK_API_VERSION = "1.5.0";
+
+function requireApiVersion(version) {
+  const current = MOCK_API_VERSION.split(".").map(Number);
+  const required = String(version).split(".").map(Number);
+  for (let index = 0; index < Math.max(current.length, required.length); index += 1) {
+    const difference = (current[index] ?? 0) - (required[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
 }
 
 module.exports = {
   App,
-  apiVersion: "1.5.0",
+  View,
+  arrayBufferToBase64,
+  base64ToArrayBuffer,
+  apiVersion: MOCK_API_VERSION,
+  requireApiVersion: jest.fn(requireApiVersion),
   Plugin,
   Scope,
   Notice: class Notice {

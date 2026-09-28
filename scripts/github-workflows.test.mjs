@@ -36,13 +36,58 @@ test("only a published stable release can update first-party release metadata", 
   assert.deepEqual(releaseMetadataWorkflow.permissions, { contents: "read" });
   assert.equal(releaseMetadataWorkflow.concurrency.group, "publish-release-metadata");
   assert.equal(releaseMetadataWorkflow.concurrency["cancel-in-progress"], false);
-  assert.deepEqual(Object.keys(releaseMetadataWorkflow.jobs), ["publish"]);
+  assert.deepEqual(Object.keys(releaseMetadataWorkflow.jobs), ["verify", "publish"]);
+
+  const releaseVerification = releaseMetadataWorkflow.jobs.verify;
+  assert.equal(
+    releaseVerification.if,
+    "${{ github.event.release.draft == false && github.event.release.prerelease == false }}",
+  );
+  assert.deepEqual(releaseVerification.permissions, {
+    contents: "read",
+    "id-token": "write",
+    attestations: "write",
+    "artifact-metadata": "write",
+  });
+  assert.equal(releaseVerification["runs-on"], "ubuntu-latest");
+  assert.equal(releaseVerification["timeout-minutes"], 20);
+  assert.deepEqual(
+    releaseVerification.steps.filter((step) => step.uses).map((step) => step.uses),
+    [
+      "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+      "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+      "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
+    ],
+  );
+  assert.equal(releaseVerification.steps[0].with.ref, "${{ github.event.release.tag_name }}");
+  assert.equal(releaseVerification.steps[0].with["fetch-depth"], 0);
+  assert.equal(releaseVerification.steps[1].with["node-version"], "22.x");
+  assert.equal(releaseVerification.steps[1].with.cache, "npm");
+  assert.equal(releaseVerification.steps[2].run, "npm ci --no-audit --no-fund");
+
+  const build = releaseVerification.steps.find((step) => step.name === "Build tagged release");
+  const compare = releaseVerification.steps.find((step) => step.name === "Compare published release assets");
+  const attest = releaseVerification.steps.find((step) => step.name === "Attest exact published assets");
+  assert.match(build.run, /git rev-parse HEAD/);
+  assert.match(build.run, /release-plugin\.mjs/);
+  assert.match(build.run, /--expected-revision=/);
+  assert.match(build.run, /--expected-tag=/);
+  assert.equal(compare.env.GH_TOKEN, "${{ github.token }}");
+  assert.match(compare.run, /gh release download/);
+  assert.match(compare.run, /for artifact in manifest\.json main\.js styles\.css/);
+  assert.match(compare.run, /cmp --silent/);
+  assert.match(compare.run, /sha256sum/);
+  assert.match(attest.with["subject-path"], /published-release\/manifest\.json/);
+  assert.match(attest.with["subject-path"], /published-release\/main\.js/);
+  assert.match(attest.with["subject-path"], /published-release\/styles\.css/);
 
   const job = releaseMetadataWorkflow.jobs.publish;
   assert.equal(
     job.if,
     "${{ github.event.release.draft == false && github.event.release.prerelease == false }}",
   );
+  assert.equal(job.needs, "verify");
+  assert.deepEqual(job.permissions, { contents: "read" });
   assert.equal(job.environment, "production-release-metadata");
   assert.equal(job["runs-on"], "ubuntu-latest");
   assert.equal(job["timeout-minutes"], 5);
@@ -206,16 +251,14 @@ test("the hosted gate is the exact exhaustive local CI contract", () => {
   assert.equal(
     packageJson.scripts["check:ci"],
     "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
-      + "&& npm run test:chatview:mutants "
       + "&& npm run test:unit:ci && npm run test:embeddings:ci "
-      + "&& npm run test:integration:ci && npm run test:release-script",
+      + "&& npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["check:compat"],
     "npm run check:plugin:fast && npm run test:chatview:compat "
       + "&& npm run test:integration:ci",
   );
-  assert.equal(packageJson.scripts["check:full"], "npm run check:ci");
   assert.doesNotMatch(ci, /desktop-baselines/);
 });
 

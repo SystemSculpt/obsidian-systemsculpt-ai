@@ -1,6 +1,6 @@
 import { normalizePath } from "obsidian";
 import type { StudioCapabilityGrant, StudioPermissionPolicyV1 } from "./types";
-import { isBlanketCliCommandPattern, nowIso, randomId } from "./utils";
+import { isBlanketCliCommandPattern } from "./utils";
 
 function wildcardToRegExp(pattern: string): RegExp {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
@@ -9,31 +9,7 @@ function wildcardToRegExp(pattern: string): RegExp {
 }
 
 export class StudioPermissionManager {
-  constructor(private policy: StudioPermissionPolicyV1) {}
-
-  public getPolicy(): StudioPermissionPolicyV1 {
-    return this.policy;
-  }
-
-  public setPolicy(next: StudioPermissionPolicyV1): void {
-    this.policy = next;
-  }
-
-  public addGrant(grant: Omit<StudioCapabilityGrant, "id" | "grantedAt">): StudioCapabilityGrant {
-    const nextGrant: StudioCapabilityGrant = {
-      ...grant,
-      id: randomId("grant"),
-      grantedAt: nowIso(),
-    };
-
-    this.policy = {
-      ...this.policy,
-      updatedAt: nowIso(),
-      grants: [...this.policy.grants, nextGrant],
-    };
-
-    return nextGrant;
-  }
+  constructor(private readonly policy: StudioPermissionPolicyV1) {}
 
   private grantsFor(capability: StudioCapabilityGrant["capability"]): StudioCapabilityGrant[] {
     return this.policy.grants.filter((grant) => grant.capability === capability);
@@ -43,6 +19,13 @@ export class StudioPermissionManager {
     const normalized = normalizePath(String(path || "").trim());
     if (!normalized) {
       throw new Error("Filesystem permission denied: path is empty.");
+    }
+
+    // Obsidian normalizes separators but does not resolve parent segments.
+    // Checking a textual prefix first would authorize "approved/../private".
+    // Reject traversal instead of resolving it lexically across possible symlinks.
+    if (normalized.split("/").includes("..")) {
+      throw new Error(`Filesystem permission denied: use a path without parent traversal ("${normalized}").`);
     }
 
     const grants = this.grantsFor("filesystem");
@@ -61,7 +44,7 @@ export class StudioPermissionManager {
     throw new Error(`Filesystem permission denied for path "${normalized}".`);
   }
 
-  public assertCliCommand(command: string): void {
+  public assertCliCommand(command: string, requireExact = false): void {
     const trimmed = String(command || "").trim();
     if (!trimmed) {
       throw new Error("CLI permission denied: command is empty.");
@@ -75,6 +58,7 @@ export class StudioPermissionManager {
         // SEC-03 defense-in-depth: a bare "*" matches every command. Even if a
         // policy bypassed parse-time stripping, never honor it as an allow-all.
         if (isBlanketCliCommandPattern(pattern)) continue;
+        if (requireExact && (pattern.trim() !== trimmed || /[*?]/.test(pattern))) continue;
         if (wildcardToRegExp(pattern.trim()).test(trimmed)) {
           return;
         }

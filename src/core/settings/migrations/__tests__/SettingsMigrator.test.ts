@@ -345,6 +345,7 @@ describe("migrateSettingsToCurrentSchema", () => {
 
     expect(result.appliedSteps).toEqual([
       "Add the persisted default output preset for Audio Processor",
+      "Remove the write-only embeddings rebuild flag",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -358,6 +359,7 @@ describe("migrateSettingsToCurrentSchema", () => {
 
     expect(result.appliedSteps).toEqual([
       "Add the persisted default output preset for Audio Processor",
+      "Remove the write-only embeddings rebuild flag",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("clean_transcript");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -370,6 +372,17 @@ describe("migrateSettingsToCurrentSchema", () => {
     }, DEFAULT_SETTINGS);
 
     expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
+  });
+
+  it("removes the write-only embeddings rebuild flag when upgrading schema v13", () => {
+    const result = migrateSettingsToCurrentSchema({
+      schemaVersion: 13,
+      embeddingsRebuildPending: true,
+    }, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toEqual(["Remove the write-only embeddings rebuild flag"]);
+    expect(result.settings).not.toHaveProperty("embeddingsRebuildPending");
+    expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
   });
 
   it("back-fills brand-new install defaults for empty persisted data", () => {

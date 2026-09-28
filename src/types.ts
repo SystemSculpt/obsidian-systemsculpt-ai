@@ -12,9 +12,6 @@ export type { ToolCall };
 export type {
   WorkflowEngineSettings,
   WorkflowSkipEntry,
-  WorkflowTrigger,
-  WorkflowCondition,
-  WorkflowStep,
 } from "./types/workflows";
 
 export { createDefaultWorkflowEngineSettings } from "./types/workflows";
@@ -35,6 +32,16 @@ export interface PendingRecorderCapture {
   operationId?: string;
   /** Automatic recovery is disabled when synced state names incompatible jobs. */
   recoveryBlocked?: "conflicting-operation-ids";
+  /**
+   * The recording is still streaming to this file. An entry that outlives its
+   * session marks audio from a capture that Obsidian quit or crashed during.
+   */
+  captureInProgress?: true;
+  /**
+   * An abandoned fragment of a capture that fell back to memory. Recovery
+   * deletes the file and never treats it as a recording.
+   */
+  discarded?: true;
 }
 
 export interface PendingAudioProcessorUploadPart {
@@ -74,6 +81,10 @@ export type AudioProcessorOutputPreset =
 export const LICENSE_URL = "https://systemsculpt.com/pricing";
 
 export interface SystemSculptSettings {
+  codexModel?: string;
+  codexThinkingLevel?: string;
+  codexServiceTier?: string;
+  textExecutionBackend?: "systemsculpt" | "codex";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -114,6 +125,14 @@ export interface SystemSculptSettings {
   userEmail?: string;
   subscriptionStatus?: string;
   chatsDirectory: string;
+  /**
+   * Every chats folder that has held transcripts: the folder configured when
+   * this list was first seeded and each folder a chat was created in since.
+   * A chat keeps its folder when chatsDirectory changes, and attachment
+   * cleanup scans every listed folder. The list only grows; updateSettings
+   * appends the entries it is given.
+   */
+  knownChatsDirectories?: string[];
   /**
    * Directory where notes created via the "Save chat as note" feature are stored
    */
@@ -163,6 +182,9 @@ export interface SystemSculptSettings {
 
   favoriteChats: string[];
   favoriteStudioSessions: string[];
+  /** Starred Studio generation models, per media kind (opaque catalog ids). */
+  favoriteImageModels: string[];
+  favoriteVideoModels: string[];
 
   /**
    * Remembers export preferences for chat exports (toggle selections, folder, etc.)
@@ -208,16 +230,11 @@ export interface SystemSculptSettings {
   };
   /**
    * When true (default), persist a portable copy of the embedding index into the
-   * synced vault (`.systemsculpt/embeddings/`) so Obsidian Sync/backup restores
-   * it on a new device instead of re-embedding the whole vault.
+   * vault folder (`.systemsculpt/embeddings/`) so file-level vault sync or a
+   * backup restores it on a new device instead of re-embedding the whole vault.
+   * Obsidian Sync skips dot-folders and does not carry it.
    */
   embeddingsPortableIndex?: boolean;
-  /**
-   * Set true while a managed bulk rebuild is incomplete. On the next load the
-   * durable per-file completeness markers let the run resume without repeating
-   * completed files. Cleared after a clean vault completion.
-   */
-  embeddingsRebuildPending?: boolean;
   
   /**
    * Automatic backup settings
@@ -230,6 +247,8 @@ export interface SystemSculptSettings {
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
+  textExecutionBackend: "systemsculpt",
+  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -273,6 +292,8 @@ Please:
 
   favoriteChats: [],
   favoriteStudioSessions: [],
+  favoriteImageModels: [],
+  favoriteVideoModels: [],
 
   chatExportPreferences: {
     options: createDefaultChatExportOptions(),
@@ -305,7 +326,6 @@ Please:
     respectObsidianExclusions: true
   },
   embeddingsPortableIndex: true,
-  embeddingsRebuildPending: false,
   
   /**
    * Automatic backup defaults
@@ -427,51 +447,4 @@ export interface ChatMessage {
   terminalFailureCode?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
-}
-
-export interface SystemSculptResponse {
-  id: string;
-  choices: {
-    message: ChatMessage;
-  }[];
-}
-
-export interface SystemSculptStreamChunk {
-  id?: string;
-  choices?: Array<{
-    delta?: {
-      content?: string;
-      text?: string;
-      reasoning?: string;
-      reasoning_details?: unknown[];
-      tool_calls?: Array<{
-        id?: string;
-        type?: "function";
-        function?: {
-          name?: string;
-          arguments?: string;
-        };
-      }>;
-    };
-    finish_reason?: string;
-  }>;
-  completion?: string;
-  delta?: {
-    text?: string;
-    reasoning?: string;
-  };
-	  error?: {
-	    code: string;
-	    message: string;
-	    statusCode?: number;
-	    model?: string;
-	  };
-	}
-
-export interface TextModificationState {
-  originalText: string;
-  modifiedText: string;
-  isStreaming: boolean;
-  streamComplete: boolean;
-  error?: string;
 }

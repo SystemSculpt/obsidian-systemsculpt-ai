@@ -8,10 +8,18 @@ import {
   createSimpleDiff,
   runWithConcurrency,
   createLineCalculator,
-  evaluateQuery,
   wouldExceedCharLimit,
   fuzzyMatchScore,
 } from "../utils";
+import { desktopHost } from "../../../platform/desktopOnly";
+
+beforeEach(() => {
+  jest.spyOn(desktopHost, "fs").mockResolvedValue(require("node:fs/promises"));
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 describe("formatBytes", () => {
   it("returns '0 Bytes' for 0", () => {
@@ -244,104 +252,7 @@ describe("createLineCalculator", () => {
   });
 });
 
-describe("evaluateQuery", () => {
-  describe("equals operator", () => {
-    it("returns true for equal strings", () => {
-      expect(evaluateQuery("test", "equals", "test")).toBe(true);
-    });
 
-    it("returns false for unequal strings", () => {
-      expect(evaluateQuery("test", "equals", "other")).toBe(false);
-    });
-
-    it("handles non-date strings as regular equality", () => {
-      // Non-date strings are compared directly
-      expect(evaluateQuery("foo", "equals", "foo")).toBe(true);
-      expect(evaluateQuery("foo", "equals", "bar")).toBe(false);
-    });
-  });
-
-  describe("not_equals operator", () => {
-    it("returns true for unequal values", () => {
-      expect(evaluateQuery("a", "not_equals", "b")).toBe(true);
-    });
-
-    it("returns false for equal values", () => {
-      expect(evaluateQuery("a", "not_equals", "a")).toBe(false);
-    });
-  });
-
-  describe("contains operator", () => {
-    it("returns true if string contains substring", () => {
-      expect(evaluateQuery("hello world", "contains", "world")).toBe(true);
-    });
-
-    it("returns false if string does not contain substring", () => {
-      expect(evaluateQuery("hello", "contains", "world")).toBe(false);
-    });
-
-    it("returns true if array contains element", () => {
-      expect(evaluateQuery(["a", "b", "c"], "contains", "b")).toBe(true);
-    });
-
-    it("returns false if array does not contain element", () => {
-      expect(evaluateQuery(["a", "b"], "contains", "c")).toBe(false);
-    });
-
-    it("returns false for non-string non-array", () => {
-      expect(evaluateQuery(123, "contains", "1")).toBe(false);
-    });
-  });
-
-  describe("starts_with operator", () => {
-    it("returns true if string starts with prefix", () => {
-      expect(evaluateQuery("hello world", "starts_with", "hello")).toBe(true);
-    });
-
-    it("returns false if string does not start with prefix", () => {
-      expect(evaluateQuery("hello world", "starts_with", "world")).toBe(false);
-    });
-
-    it("returns false for non-string", () => {
-      expect(evaluateQuery(123, "starts_with", "1")).toBe(false);
-    });
-  });
-
-  describe("greater_than operator", () => {
-    it("returns true for greater number", () => {
-      expect(evaluateQuery(10, "greater_than", 5)).toBe(true);
-    });
-
-    it("returns false for smaller number", () => {
-      expect(evaluateQuery(3, "greater_than", 5)).toBe(false);
-    });
-
-    it("compares dates correctly", () => {
-      expect(evaluateQuery("2024-01-15", "greater_than", "2024-01-01")).toBe(true);
-      expect(evaluateQuery("2024-01-01", "greater_than", "2024-01-15")).toBe(false);
-    });
-  });
-
-  describe("less_than operator", () => {
-    it("returns true for smaller number", () => {
-      expect(evaluateQuery(3, "less_than", 5)).toBe(true);
-    });
-
-    it("returns false for greater number", () => {
-      expect(evaluateQuery(10, "less_than", 5)).toBe(false);
-    });
-
-    it("compares dates correctly", () => {
-      expect(evaluateQuery("2024-01-01", "less_than", "2024-01-15")).toBe(true);
-    });
-  });
-
-  describe("unknown operator", () => {
-    it("returns false for unknown operators", () => {
-      expect(evaluateQuery("a", "unknown_op", "b")).toBe(false);
-    });
-  });
-});
 
 describe("wouldExceedCharLimit", () => {
   it("returns false when within limit", () => {
@@ -523,11 +434,11 @@ describe("resolveAdapterPath", () => {
       expect(result).toContain("subfolder");
     });
 
-    it("allows paths that contain .. but stay within vault", () => {
+    it("rejects dot segments even when they would normalize inside the vault", () => {
       const adapter = { getBasePath: () => "/vault" };
-      // folder/sub/../file.md resolves to folder/file.md which is still in vault
-      const result = resolveAdapterPath(adapter, "folder/sub/../file.md");
-      expect(result).toBeDefined();
+      expect(() => resolveAdapterPath(adapter, "folder/sub/../file.md")).toThrow(
+        "Path traversal detected"
+      );
     });
 
     it("prevents prefix attack (vault-escape vs vault)", () => {
@@ -623,202 +534,6 @@ describe("getFilesFromFolder", () => {
     expect(result).toHaveLength(2);
     expect(result).toContain(file1);
     expect(result).toContain(file2);
-  });
-});
-
-describe("shouldExcludeFromSearch", () => {
-  const { shouldExcludeFromSearch } = require("../utils");
-  const { TFile } = require("obsidian");
-
-  const createMockPlugin = (overrides: any = {}) => ({
-    settings: {
-      chatsDirectory: "SystemSculpt/Chats",
-      embeddingsExclusions: {
-        ignoreChatHistory: true,
-        respectObsidianExclusions: false,
-        folders: [],
-        patterns: [],
-        ...overrides.embeddingsExclusions,
-      },
-      ...overrides.settings,
-    },
-    app: {
-      vault: {
-        configDir: ".obsidian",
-        getConfig: jest.fn().mockReturnValue([]),
-      },
-    },
-    ...overrides,
-  });
-
-  it("excludes files in chats directory", () => {
-    const plugin = createMockPlugin();
-    const file = new TFile({ path: "SystemSculpt/Chats/chat.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("excludes .obsidian files", () => {
-    const plugin = createMockPlugin();
-    const file = new TFile({ path: ".obsidian/plugins/plugin.json" });
-    file.extension = "json";
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("excludes node_modules files", () => {
-    const plugin = createMockPlugin();
-    const file = new TFile({ path: "folder/node_modules/package.json" });
-    file.extension = "json";
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("excludes SystemSculpt internal directories", () => {
-    const plugin = createMockPlugin();
-
-    const recordingsFile = new TFile({ path: "SystemSculpt/Recordings/audio.md" });
-    expect(shouldExcludeFromSearch(recordingsFile, plugin)).toBe(true);
-
-    const promptsFile = new TFile({ path: "SystemSculpt/System Prompts/prompt.md" });
-    expect(shouldExcludeFromSearch(promptsFile, plugin)).toBe(true);
-  });
-
-  it("excludes files in configured exclusion folders", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          folders: ["private", "drafts"],
-        },
-      },
-    });
-    const file = new TFile({ path: "private/secret.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("excludes files matching configured patterns", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          patterns: ["\\.test\\."],
-        },
-      },
-    });
-    const file = new TFile({ path: "src/utils.test.ts" });
-    file.extension = "ts";
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("does not exclude regular files", () => {
-    const plugin = createMockPlugin();
-    const file = new TFile({ path: "notes/my-note.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
-  });
-
-  it("handles invalid regex patterns gracefully", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          patterns: ["[invalid"],
-        },
-      },
-    });
-    const file = new TFile({ path: "notes/file.md" });
-    // Should not throw, just skip invalid pattern
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
-  });
-
-  it("skips likely unsafe regex patterns", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          patterns: ["(a+)+b", "\\.tmp$"],
-        },
-      },
-    });
-    const regularFile = new TFile({ path: "notes/aaaaaaaaaaaaaaaaaaaaaaaaaaaa.md" });
-    const tmpFile = new TFile({ path: "notes/cache.tmp" });
-
-    expect(shouldExcludeFromSearch(regularFile, plugin)).toBe(false);
-    expect(shouldExcludeFromSearch(tmpFile, plugin)).toBe(true);
-  });
-
-  it("respects ignoreChatHistory setting when false", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          ignoreChatHistory: false,
-        },
-      },
-    });
-    const file = new TFile({ path: "SystemSculpt/Chats/chat.md" });
-    // Chat files should NOT be excluded when ignoreChatHistory is false
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
-  });
-
-  it("respects Obsidian native exclusions", () => {
-    const plugin = createMockPlugin({
-      app: {
-        vault: {
-          getConfig: jest.fn().mockReturnValue(["^templates/"]),
-        },
-      },
-    });
-    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
-
-    const file = new TFile({ path: "templates/template.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(true);
-  });
-
-  it("handles getConfig throwing", () => {
-    const plugin = createMockPlugin({
-      app: {
-        vault: {
-          getConfig: jest.fn().mockImplementation(() => {
-            throw new Error("Config unavailable");
-          }),
-        },
-      },
-    });
-    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
-
-    const file = new TFile({ path: "regular/file.md" });
-    // Should not throw, continue without native exclusions
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
-  });
-
-  it("handles invalid Obsidian exclusion regex patterns", () => {
-    const plugin = createMockPlugin({
-      app: {
-        vault: {
-          getConfig: jest.fn().mockReturnValue(["[invalid"]),
-        },
-      },
-    });
-    plugin.settings.embeddingsExclusions.respectObsidianExclusions = true;
-
-    const file = new TFile({ path: "regular/file.md" });
-    // Should not throw, skip invalid pattern
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
-  });
-
-  it("excludes Attachments and Extractions directories", () => {
-    const plugin = createMockPlugin();
-
-    const attachmentsFile = new TFile({ path: "SystemSculpt/Attachments/image.md" });
-    expect(shouldExcludeFromSearch(attachmentsFile, plugin)).toBe(true);
-
-    const extractionsFile = new TFile({ path: "SystemSculpt/Extractions/data.md" });
-    expect(shouldExcludeFromSearch(extractionsFile, plugin)).toBe(true);
-  });
-
-  it("handles empty folder array in exclusions", () => {
-    const plugin = createMockPlugin({
-      settings: {
-        embeddingsExclusions: {
-          folders: ["", null, undefined],
-        },
-      },
-    });
-    const file = new TFile({ path: "regular/file.md" });
-    expect(shouldExcludeFromSearch(file, plugin)).toBe(false);
   });
 });
 
@@ -1283,33 +998,7 @@ describe("createLineCalculator additional coverage", () => {
   });
 });
 
-describe("evaluateQuery additional coverage", () => {
-  const { evaluateQuery } = require("../utils");
 
-  it("equals with same non-date values", () => {
-    expect(evaluateQuery("test", "equals", "test")).toBe(true);
-  });
-
-  it("not_equals with numbers", () => {
-    expect(evaluateQuery(5, "not_equals", 10)).toBe(true);
-  });
-
-  it("contains with empty array", () => {
-    expect(evaluateQuery([], "contains", "x")).toBe(false);
-  });
-
-  it("starts_with with empty string", () => {
-    expect(evaluateQuery("hello", "starts_with", "")).toBe(true);
-  });
-
-  it("greater_than with equal values", () => {
-    expect(evaluateQuery(5, "greater_than", 5)).toBe(false);
-  });
-
-  it("less_than with equal values", () => {
-    expect(evaluateQuery(5, "less_than", 5)).toBe(false);
-  });
-});
 
 describe("normalizeLineEndings additional coverage", () => {
   const { normalizeLineEndings } = require("../utils");
@@ -1403,30 +1092,7 @@ describe("renameAdapterPath (adapter without base path)", () => {
   });
 });
 
-describe("removeAdapterPath (adapter without base path)", () => {
-  const { removeAdapterPath } = require("../utils");
 
-  it("removes a file via adapter.remove", async () => {
-    const adapter = {
-      stat: jest.fn(async () => ({ type: "file" })),
-      remove: jest.fn(async () => {}),
-      rmdir: jest.fn(async () => {}),
-    };
-    await removeAdapterPath(adapter, "Notes/a.md");
-    expect(adapter.remove).toHaveBeenCalledWith("Notes/a.md");
-    expect(adapter.rmdir).not.toHaveBeenCalled();
-  });
-
-  it("removes a folder via adapter.rmdir(recursive)", async () => {
-    const adapter = {
-      stat: jest.fn(async () => ({ type: "folder" })),
-      remove: jest.fn(async () => {}),
-      rmdir: jest.fn(async () => {}),
-    };
-    await removeAdapterPath(adapter, "Notes/sub");
-    expect(adapter.rmdir).toHaveBeenCalledWith("Notes/sub", true);
-  });
-});
 
 // Some adapter fallbacks expose non-recursive mkdir, so a missing mid-level
 // folder used to abort the whole create. ensureAdapterFolder must build each

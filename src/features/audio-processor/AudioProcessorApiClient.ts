@@ -1,4 +1,4 @@
-import { PlatformRequestClient } from "../../services/PlatformRequestClient";
+import { PlatformRequestClient, platformTransferTimeoutMs } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
 import type {
   AudioProcessorArtifactDescriptor,
@@ -21,6 +21,7 @@ import {
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
 import { retryAfterHeaderMs } from "../../services/managed/ManagedJobObservation";
+import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -70,6 +71,7 @@ const STAGES: readonly AudioProcessorStage[] = [
 ];
 const MAX_JSON_RESPONSE_CHARS = 1024 * 1024;
 const MAX_NOTE_BYTES = 32 * 1024 * 1024;
+const NOTE_DOWNLOAD_TIMEOUT_MS = platformTransferTimeoutMs(MAX_NOTE_BYTES);
 
 export class AudioProcessorApiError extends Error {
   constructor(
@@ -299,6 +301,7 @@ export class AudioProcessorApiClient {
       preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
+      timeoutMs: NOTE_DOWNLOAD_TIMEOUT_MS,
     });
     if (!response.ok) {
       throw new AudioProcessorApiError(
@@ -378,12 +381,17 @@ export class AudioProcessorApiClient {
     if (!response.ok) {
       const root = isRecord(payload) ? payload : {};
       const error = isRecord(root.error) ? root.error : root;
-      const code = typeof error.code === "string" ? error.code : "request_failed";
+      const paymentRequired = response.status === 402;
+      const code = typeof error.code === "string"
+        ? error.code
+        : paymentRequired ? "payment_required" : "request_failed";
       const message = typeof error.message === "string"
         ? error.message
         : typeof root.error === "string"
           ? root.error
-        : `Audio service request failed (${response.status}).`;
+        : paymentRequired
+          ? CREDITS_REQUIRED_MESSAGE
+          : `Audio service request failed (${response.status}).`;
       throw new AudioProcessorApiError(
         message,
         response.status,

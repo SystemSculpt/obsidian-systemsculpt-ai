@@ -1,8 +1,9 @@
 import { App, Notice, TFile, normalizePath } from "obsidian";
-import type {
-  StudioNodeDefinition,
-  StudioNodeInstance,
-  StudioProjectV1,
+import {
+  STUDIO_DISPLAY_NAME,
+  type StudioNodeDefinition,
+  type StudioNodeInstance,
+  type StudioProjectV1,
 } from "../../../studio/types";
 import { mutateStudioDiagram } from "../../../studio/StudioShapes";
 import { randomId } from "../../../studio/utils";
@@ -44,7 +45,8 @@ export type StudioCreatedNodesFinalization = {
  * the existing note-node materializer, which remains part of note runtime.
  */
 export interface StudioClipboardAndDropHost {
-  isActive(): boolean;
+  /** Whether the active Studio view owns an event aimed at this target, not a modal or other surface. */
+  ownsEventTarget(target: EventTarget | null): boolean;
   isBusy(): boolean;
   isEditableTarget(target: EventTarget | null): boolean;
   getCurrentProject(): StudioProjectV1 | null;
@@ -56,6 +58,9 @@ export interface StudioClipboardAndDropHost {
   removeDiagramSelection?(): boolean;
   selectPastedShapes?(shapeIds: string[]): void;
   getGraphZoom(): number;
+  /** Client point → world px (origin-aware). */
+  graphPointFromClient(clientX: number, clientY: number): { x: number; y: number } | null;
+  getViewportCenterWorldPoint(): { x: number; y: number } | null;
   getDefaultNodePosition(project: StudioProjectV1): StudioGraphPoint;
   normalizeNodePosition(position: StudioGraphPoint): StudioGraphPoint;
   commitNodeCreation(mutator: (project: StudioProjectV1) => boolean | void): boolean;
@@ -293,7 +298,7 @@ export class StudioClipboardAndDropController {
   async handlePaste(event: ClipboardEvent): Promise<void> {
     if (
       event.defaultPrevented ||
-      !this.host.isActive() ||
+      !this.host.ownsEventTarget(event.target) ||
       this.host.isBusy() ||
       !this.host.getCurrentProject() ||
       !this.host.getProjectPath() ||
@@ -457,7 +462,7 @@ export class StudioClipboardAndDropController {
       return;
     }
     if (dropped.folderPaths.length > 0) {
-      new Notice("Dropping folders into Studio is not supported yet.");
+      new Notice(`Dropping folders into ${STUDIO_DISPLAY_NAME} is not supported yet.`);
     }
 
     const anchor =
@@ -481,7 +486,7 @@ export class StudioClipboardAndDropController {
       handledSomething = true;
     }
     if (!handledSomething && dropped.unsupportedPaths.length > 0) {
-      new Notice("Only Markdown notes and media files can be dropped into Studio.");
+      new Notice(`Only Markdown notes and media files can be dropped into ${STUDIO_DISPLAY_NAME}.`);
     }
   }
 
@@ -590,13 +595,9 @@ export class StudioClipboardAndDropController {
     if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
       return { ...pointer };
     }
-    const viewport = this.viewportEl;
-    if (viewport) {
-      const zoom = this.host.getGraphZoom() || 1;
-      return {
-        x: (viewport.scrollLeft + viewport.clientWidth * 0.5) / zoom,
-        y: (viewport.scrollTop + viewport.clientHeight * 0.5) / zoom,
-      };
+    const center = this.viewportEl ? this.host.getViewportCenterWorldPoint() : null;
+    if (center) {
+      return { ...center };
     }
     const project = this.host.getCurrentProject();
     return project ? this.host.getDefaultNodePosition(project) : { x: 120, y: 120 };
@@ -606,17 +607,10 @@ export class StudioClipboardAndDropController {
     clientX: number,
     clientY: number,
   ): StudioGraphPoint | null {
-    const viewport = this.viewportEl;
-    if (!viewport) return null;
-    const rect = viewport.getBoundingClientRect();
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
-    if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
-    const zoom = this.host.getGraphZoom() || 1;
-    return {
-      x: (viewport.scrollLeft + localX) / zoom,
-      y: (viewport.scrollTop + localY) / zoom,
-    };
+    if (!this.viewportEl) return null;
+    const point = this.host.graphPointFromClient(clientX, clientY);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    return { x: point.x, y: point.y };
   }
 
   private resolveMarkdownVaultPathFromReference(reference: string): string | null {

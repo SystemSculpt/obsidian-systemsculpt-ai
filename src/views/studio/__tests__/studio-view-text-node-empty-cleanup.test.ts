@@ -1,12 +1,14 @@
 /** @jest-environment jsdom */
 
+import { StudioTextEditSessions } from "../StudioTextEditSessions";
+
 import type {
   StudioNodeDefinition,
   StudioNodeInstance,
   StudioProjectV1,
 } from "../../../studio/types";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
-import { createStudioGraphHistoryState } from "../systemsculpt-studio-view/StudioGraphHistoryState";
+import { StudioGraphHistory } from "../StudioGraphHistory";
 
 // Spy on the actual CJS module object so the view's `new Notice(...)` call
 // sites (compiled to property access on the module) are intercepted.
@@ -28,7 +30,6 @@ const REAL_VIEW_METHODS = [
   "removeNodes",
   "findNode",
   "commitCurrentProjectMutation",
-  "captureProjectHistoryCheckpoint",
   "handleNodeConfigValueChange",
   "setHistoryCurrentSnapshot",
   "resetProjectHistory",
@@ -113,8 +114,9 @@ function createEditEndHarness(options: {
       commitReasons.push(reason);
       return mutator(sessionRef.project) !== false;
     },
-    replaceProjectSnapshot: (next: StudioProjectV1) => {
+    applyHistorySnapshot: (next: StudioProjectV1) => {
       sessionRef.project = next;
+      return true;
     },
     schedulePersist: jest.fn(),
     getProject: () => sessionRef.project,
@@ -125,12 +127,14 @@ function createEditEndHarness(options: {
     commitMutation: (
       reason: string,
       mutator: (target: StudioProjectV1) => boolean | void,
-      mutationOptions?: { captureHistory?: boolean; mode?: "continuous" | "discrete" }
+      mutationOptions?: { captureHistory?: boolean; historyGroup?: string; mode?: "continuous" | "discrete" }
     ): boolean => {
-      if (mutationOptions?.captureHistory !== false) {
-        context.captureProjectHistoryCheckpoint();
-      }
-      return session.mutate(reason, mutator);
+      const before = JSON.parse(JSON.stringify(context.currentProject));
+      const changed = session.mutate(reason, mutator);
+      if (changed && mutationOptions?.captureHistory !== false) context.historyState.recordEdit(
+        { project: before, selectedNodeIds: [] }, { project: context.currentProject, selectedNodeIds: [] }, mutationOptions?.historyGroup
+      );
+      return changed;
     },
     syncProjectFromSession: (): void => {
       context.currentProject = session.getProject();
@@ -143,12 +147,8 @@ function createEditEndHarness(options: {
     currentProjectPath: "SystemSculpt/Studio/Text Cleanup.systemsculpt",
     currentProjectSession: session,
     projectSessionController,
-    historyState: createStudioGraphHistoryState(),
-    editingTextNodeIds: new Set<string>(options.editingNodeIds ?? []),
-    dirtyTextNodeEditIds: new Set<string>(),
-    pendingTextNodeAutofocusNodeId: null,
-    pendingTextNodeFocusPointByNodeId: new Map<string, { x: number; y: number }>(),
-    textNodeEditorSnapshots: new Map<string, unknown>(),
+    historyState: new StudioGraphHistory(),
+    textEdits: new StudioTextEditSessions(),
     transientFieldErrorsByNodeId: new Map<string, unknown>(),
     nodeContextMenuOverlay: null,
     nodeActionContextMenuOverlay: null,
@@ -170,6 +170,7 @@ function createEditEndHarness(options: {
     render: jest.fn(),
     commitCurrentProjectMutationAsync: jest.fn(() => Promise.resolve(false)),
   };
+  for (const id of options.editingNodeIds ?? []) context.textEdits.begin(id);
   for (const methodName of REAL_VIEW_METHODS) {
     context[methodName] = viewPrototype[methodName];
   }
@@ -234,7 +235,6 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     harness.context.stopTextNodeEdit(createdNode.id);
 
     expect(harness.nodeIds()).toEqual([]);
-    expect(harness.context.historyState.undoSnapshots).toHaveLength(0);
     expect(harness.context.undoGraphHistory()).toBe(false);
   });
 
@@ -257,7 +257,6 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     harness.context.stopTextNodeEdit(createdNode.id);
 
     expect(harness.nodeIds()).toEqual(["existing"]);
-    expect(harness.context.historyState.undoSnapshots).toHaveLength(1);
     expect(harness.context.undoGraphHistory()).toBe(true);
     expect(harness.findValue("existing")).toBe("before");
   });
@@ -296,7 +295,7 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
 
     expect(harness.nodeIds()).toEqual([]);
     expect(harness.commitReasons).toEqual(["graph.node.remove"]);
-    expect(harness.context.editingTextNodeIds.size).toBe(0);
+    expect(harness.context.textEdits.isEditing("node_text")).toBe(false);
     expect(noticeSpy).not.toHaveBeenCalled();
   });
 
@@ -323,7 +322,7 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
 
     expect(harness.nodeIds()).toEqual(["node_text"]);
     expect(harness.commitReasons).toEqual([]);
-    expect(harness.context.editingTextNodeIds.size).toBe(0);
+    expect(harness.context.textEdits.isEditing("node_text")).toBe(false);
     expect(harness.context.render).toHaveBeenCalledTimes(1);
   });
 
@@ -363,7 +362,7 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
 
     expect(harness.nodeIds()).toEqual(["node_text"]);
     expect(harness.commitReasons).toEqual([]);
-    expect(harness.context.editingTextNodeIds.size).toBe(0);
+    expect(harness.context.textEdits.isEditing("node_text")).toBe(false);
   });
 
   it("groups a complete text edit into one graph undo transaction", () => {
@@ -381,11 +380,30 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     }
     harness.context.stopTextNodeEdit("node_text");
 
-    expect(harness.context.historyState.undoSnapshots).toHaveLength(1);
     expect(harness.findValue("node_text")).toBe("after");
 
     expect(harness.context.undoGraphHistory()).toBe(true);
     expect(harness.findValue("node_text")).toBe("before");
+  });
+
+  it.each([false, true])("preserves peer edits during a text editing session (continued typing: %s)", continuesTyping => {
+    const harness = createEditEndHarness({
+      nodes: [createTextNode("local", "before"), createTextNode("peer", "peer-before")],
+      editingNodeIds: ["local"],
+    });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+    harness.context.handleNodeConfigValueChange("local", "value", "after", { mode: "continuous", captureHistory: false });
+    harness.context.currentProject.graph.nodes[1].config.value = "peer-after";
+    if (continuesTyping) harness.context.handleNodeConfigValueChange("local", "value", "after-more", { mode: "continuous", captureHistory: false });
+    harness.context.stopTextNodeEdit("local");
+
+    expect(harness.context.undoGraphHistory()).toBe(true);
+    expect(harness.findValue("local")).toBe("before");
+    expect(harness.findValue("peer")).toBe("peer-after");
+    expect(harness.context.undoGraphHistory()).toBe(false);
+    expect(harness.context.redoGraphHistory()).toBe(true);
+    expect(harness.findValue("local")).toBe(continuesTyping ? "after-more" : "after");
+    expect(harness.findValue("peer")).toBe("peer-after");
   });
 
   it("restores the auto-deleted node with a single undo, edit session closed", () => {
@@ -397,30 +415,18 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     harness.context.resetProjectHistory(harness.context.currentProject);
 
     // The user clears the text (a continuous keystroke commit), then ends the edit.
-    harness.context.commitCurrentProjectMutation(
-      "node.config",
-      (project: StudioProjectV1) => {
-        const node = project.graph.nodes.find((entry) => entry.id === "node_text");
-        if (!node) {
-          return false;
-        }
-        node.config.value = "";
-        return true;
-      },
-      { mode: "continuous" }
-    );
+    harness.context.handleNodeConfigValueChange("node_text", "value", "", { mode: "continuous" });
     harness.context.stopTextNodeEdit("node_text");
 
     expect(harness.nodeIds()).toEqual([]);
     // The whole clear-and-auto-delete interaction lands as one undo entry.
-    expect(harness.context.historyState.undoSnapshots).toHaveLength(1);
 
     const undone = harness.context.undoGraphHistory();
 
     expect(undone).toBe(true);
     expect(harness.nodeIds()).toEqual(["node_text"]);
     expect(harness.findValue("node_text")).toBe("hello");
-    expect(harness.context.editingTextNodeIds.size).toBe(0);
+    expect(harness.context.textEdits.isEditing("node_text")).toBe(false);
 
     const redone = harness.context.redoGraphHistory();
 

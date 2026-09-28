@@ -14,7 +14,7 @@ export function findLeafByPath(app: App, path: string): WorkspaceLeaf | null {
   const matchingLeaves: WorkspaceLeaf[] = [];
 
   app.workspace.iterateAllLeaves((leaf) => {
-    const view = leaf.view as any;
+    const view = leaf.view as { file?: TFile };
     const state = leaf.getViewState();
 
     // A leaf's file path can be in one of two places:
@@ -62,7 +62,7 @@ export async function openFileInMainWorkspace(
 }> {
   const normalizedPath = normalizePath(filePath);
   const file = app.vault.getAbstractFileByPath(normalizedPath);
-  const currentLeaf = app.workspace.activeLeaf;
+  const currentLeaf = app.workspace.getMostRecentLeaf();
 
   if (!file) {
     return { leaf: null, action: 'error' };

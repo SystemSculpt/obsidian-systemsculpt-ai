@@ -87,11 +87,46 @@ describe("EmbeddingsStatusBar", () => {
     expect(element.title).toContain("Try again later");
   });
 
+  it("skips DOM writes for snapshots that change nothing it shows", () => {
+    const indexing = snapshot({ phase: "reconciling", total: 20, completed: 7, pending: 13, currentPath: "A.md" });
+    listener?.(indexing);
+    const setText = jest.spyOn(element as any, "setText");
+    const setAttr = jest.spyOn(element as any, "setAttr");
+
+    listener?.({ ...indexing, updatedAt: indexing.updatedAt + 1 });
+    expect(setText).not.toHaveBeenCalled();
+    expect(setAttr).not.toHaveBeenCalled();
+
+    listener?.({ ...indexing, completed: 8, pending: 12 });
+    expect(setText).toHaveBeenCalledWith("8/20");
+  });
+
   it("opens the canonical Similar notes view with pointer or keyboard activation", () => {
     element.click();
     element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     element.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     expect(activateEmbeddingsView).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows Starting at launch without constructing the embeddings manager", () => {
+    statusBar.unload();
+    const launchElement = document.createElement("div");
+    installObsidianDomHelpers(launchElement);
+    plugin.addStatusBarItem.mockReturnValue(launchElement);
+    const manager = plugin.embeddingsManager;
+    plugin.embeddingsManager = null;
+    plugin.getOrCreateEmbeddingsManager.mockClear();
+
+    const launch = new EmbeddingsStatusBar(plugin);
+    launch.load();
+
+    expect(plugin.getOrCreateEmbeddingsManager).not.toHaveBeenCalled();
+    expect(launchElement.hidden).toBe(false);
+    expect(launchElement.textContent).toBe("Starting");
+
+    launch.startMonitoring(manager);
+    expect(launchElement.textContent).toBe("12");
+    launch.unload();
   });
 
   it("is absent while embeddings are disabled", () => {

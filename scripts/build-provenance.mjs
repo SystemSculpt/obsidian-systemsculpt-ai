@@ -3,44 +3,14 @@ import path from "node:path";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
+export { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 import { REQUIRED_PLUGIN_ARTIFACTS } from "./plugin-artifacts.mjs";
 import { replaceFileAtomically } from "./platform-portability.mjs";
 
 export const DEFAULT_CI_EVIDENCE_DIRECTORY = ".cache/ci-evidence";
 export const HOSTED_JEST_PHASE_MARKER_FILE = "hosted-jest-phase-started.json";
 
-const REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES = new Set([
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_COMMON_DIR",
-  "GIT_CONFIG",
-  "GIT_CONFIG_COUNT",
-  "GIT_CONFIG_PARAMETERS",
-  "GIT_DIR",
-  "GIT_GRAFT_FILE",
-  "GIT_IMPLICIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_INTERNAL_SUPER_PREFIX",
-  "GIT_NO_REPLACE_OBJECTS",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_PREFIX",
-  "GIT_REPLACE_REF_BASE",
-  "GIT_SHALLOW_FILE",
-  "GIT_WORK_TREE",
-]);
-
-export function createRepositoryScopedGitEnvironment(environment = process.env) {
-  const result = { ...environment };
-  for (const name of Object.keys(result)) {
-    const canonicalName = name.toUpperCase();
-    if (
-      REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES.has(canonicalName)
-      || /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(canonicalName)
-    ) {
-      delete result[name];
-    }
-  }
-  return result;
-}
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");

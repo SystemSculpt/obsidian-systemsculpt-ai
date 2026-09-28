@@ -1,5 +1,7 @@
 import type { EventRef } from "obsidian";
 import type { SystemSculptSettings } from "../types";
+import type { FileContextStateChangedEvent } from "../views/chatview/FileContextManager";
+import type { ChatTranscriptCommittedEvent } from "../views/chatview/ChatTranscriptEvents";
 
 interface SystemSculptWorkspaceEvents {
   "systemsculpt:settings-loaded": (settings: SystemSculptSettings) => void;
@@ -12,6 +14,8 @@ interface SystemSculptWorkspaceEvents {
   "systemsculpt:chat-loaded": (chatId: string) => void;
   "systemsculpt:content-rendered": () => void;
   "systemsculpt:settings-focus-tab": (tabId: string) => void;
+  "systemsculpt:file-context-state-changed": (event: FileContextStateChangedEvent) => void;
+  "systemsculpt:chat-transcript-committed": (event: ChatTranscriptCommittedEvent) => void;
 }
 
 declare module "obsidian" {

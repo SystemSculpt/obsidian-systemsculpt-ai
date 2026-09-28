@@ -19,8 +19,10 @@
 .ss-studio-shape-arrows-layer {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  /* The infinite graph world is a zero-sized coordinate origin. SVG needs a
+   * nonzero viewport to paint; overflow exposes arrows at any world position. */
+  width: 1px;
+  height: 1px;
   overflow: visible;
 }
 
@@ -227,6 +229,8 @@
 /* A tool is armed: the canvas is in draw/connect mode, so the pointer reads
  * as a crosshair over the surfaces that tool acts on. */
 .ss-studio-graph-viewport.is-arrow-tool .ss-studio-shape,
+.ss-studio-graph-viewport.is-arrow-tool .ss-studio-node-card,
+.ss-studio-graph-viewport.is-arrow-tool .ss-studio-node-card *,
 .ss-studio-graph-viewport.is-shape-tool,
 .ss-studio-graph-viewport.is-shape-tool .ss-studio-graph-canvas {
   cursor: crosshair;

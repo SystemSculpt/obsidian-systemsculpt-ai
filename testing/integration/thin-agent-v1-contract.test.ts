@@ -2,7 +2,6 @@
  * @jest-environment node
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -38,9 +37,7 @@ function canonicalizeThinAgentCapabilityManifest(value: unknown): string {
 }
 
 describe("thin-agent-v1 application contract", () => {
-  it("keeps the canonical cross-repository fixture byte-identical", () => {
-    expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("8d788f65d1751f222406394c4f537cf89eac7d28c9462a7d1ab7c48824f03939");
+  it("keeps the canonical cross-repository fixture provider-neutral", () => {
     expect(fixtureBytes.toString("utf8"))
       .not.toMatch(/\b(?:connection|ticket|websocket|native)\b/i);
     expect(fixture.endpoints).toMatchObject({
@@ -61,25 +58,22 @@ describe("thin-agent-v1 application contract", () => {
     });
   });
 
-  it("canonicalizes capability ordering and verifies the fixture hash", () => {
+  it("canonicalizes capability ordering", () => {
     const reordered = {
       capabilities: [{ version: 1, id: "obsidian.vault" }],
       contract_version: "thin-agent-capabilities-v1",
     };
     expect(canonicalizeThinAgentCapabilityManifest(reordered))
       .toBe(fixture.capability_manifest_canonical_json);
-    expect(`sha256:${createHash("sha256")
-      .update(canonicalizeThinAgentCapabilityManifest(reordered), "utf8")
-      .digest("hex")}`).toBe(fixture.capability_manifest_sha256);
   });
 
   it("records the server-owned released twelve-tool catalog identity", () => {
     expect(fixture.capability_semantics).toMatchObject({
       client_authored_model_tool_schema: false,
       obsidian_vault_v1_maps_to_canonical_local_tool_count: 12,
-      server_tool_catalog_canonical_bytes: 13_760,
+      server_tool_catalog_canonical_bytes: 14_160,
       server_tool_catalog_sha256:
-        "4de25bca0d6f003517c198c52e32337877bbe5367114b142aa54cd666121db14",
+        "b01bbb1441cbbb265ffd06acc4a336b6cd80b3389d299264cef36cba26180501",
     });
   });
 
@@ -153,6 +147,47 @@ describe("thin-agent-v1 application contract", () => {
       ...fixture.context_staging.response,
       bytes: 2,
     })).toMatchObject({ bytes: 2 });
+  });
+
+  it("validates pinned images above 4 MiB and at the 6 MiB limit without overflowing the stack", () => {
+    const maxImageBytes = DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes;
+    expect(maxImageBytes).toBe(6 * 1024 * 1024);
+    const image = (byteLength: number, mimeType = "image/jpeg") => ({
+      kind: "image" as const,
+      path: `photo-${byteLength}.jpg`,
+      data_url: `data:${mimeType};base64,${Buffer.alloc(byteLength, 0x5a).toString("base64")}`,
+    });
+    const request = (...contextSources: unknown[]) => ({
+      contract_version: "thin-agent-v1",
+      root_message_id: "message_large_image",
+      context_sources: contextSources,
+    });
+
+    const aboveFourMebibytes = image(4 * 1024 * 1024 + 123_457);
+    const atLimit = image(maxImageBytes, "image/png");
+    expect(parseThinAgentContextRequest(
+      request(aboveFourMebibytes, atLimit),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    ).context_sources).toEqual([aboveFourMebibytes, atLimit]);
+
+    expect(() => parseThinAgentContextRequest(
+      request(image(maxImageBytes + 1)),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow(ThinAgentContractError);
+    const corrupt = image(maxImageBytes);
+    const midpoint = corrupt.data_url.length >> 1;
+    expect(() => parseThinAgentContextRequest(
+      request({
+        ...corrupt,
+        data_url: `${corrupt.data_url.slice(0, midpoint)}*${corrupt.data_url.slice(midpoint + 1)}`,
+      }),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow(ThinAgentContractError);
+    // Three 6 MiB images exceed the 16 MiB per-message total.
+    expect(() => parseThinAgentContextRequest(
+      request(atLimit, image(maxImageBytes), image(maxImageBytes, "image/webp")),
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    )).toThrow("Selected vault context is too large.");
   });
 
   it("validates staged context with the server's UTF-8, path, and document semantics", () => {

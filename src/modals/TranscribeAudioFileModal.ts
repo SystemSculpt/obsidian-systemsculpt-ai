@@ -25,6 +25,7 @@ import {
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import type { SystemSculptSettings } from "../types";
 import { formatFileSize, validateBrowserFileSize } from "../utils/FileValidator";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 
 type AudioSource = "vault" | "device";
@@ -38,7 +39,7 @@ const DEFAULT_RECORDINGS_DIRECTORY = "SystemSculpt/Recordings";
 const MAX_VISIBLE_FILES = 50;
 
 const sanitizeFileName = (name: string): string =>
-  name.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+  toSafeVaultFileName(name.replace(/\s+/g, " "), { replacement: "-", fallback: "" });
 
 /**
  * A mobile-first handoff from a concrete audio source to the managed
@@ -239,7 +240,7 @@ export class TranscribeAudioFileModal extends StandardModal {
         type: "file",
         accept: Array.from(AUDIO_FILE_EXTENSIONS).map((extension) => `.${extension}`).join(","),
       },
-    }) as HTMLInputElement;
+    });
 
     dropzone.createEl("label", {
       cls: "ss-button ss-button--primary ss-transcribe-audio__choose-file",
@@ -348,7 +349,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     const rememberInput = rememberRow.createEl("input", {
       cls: "ss-transcribe-audio__remember-checkbox",
       attr: { id: rememberId, type: "checkbox" },
-    }) as HTMLInputElement;
+    });
     rememberRow.createEl("label", {
       cls: "ss-transcribe-audio__remember-label",
       text: "Remember this format",

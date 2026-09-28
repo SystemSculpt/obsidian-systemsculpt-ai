@@ -202,6 +202,71 @@ describe("ManagedTranscriptionAdapter", () => {
     expect(storage.files.size).toBe(0);
   });
 
+  it("honors Cancel while the license check is still waiting", async () => {
+    const { adapter, admission, jobs, storage } = harness();
+    let received: AbortSignal | undefined;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    admission.acquireLease.mockImplementationOnce(((_operation: unknown, signal?: AbortSignal) => {
+      received = signal;
+      entered();
+      // Like ManagedAdmission over the platform client: settles only on abort.
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    }) as never);
+    const load = jest.fn();
+    const controller = new AbortController();
+
+    const running = adapter.transcribe({
+      identity: opaqueIdentity("c"),
+      fingerprint: () => fingerprintFor("c"),
+      load,
+    }, { signal: controller.signal });
+    await waiting;
+    expect(received).toBe(controller.signal);
+    controller.abort();
+
+    await expect(running).rejects.toBeInstanceOf(ManagedTranscriptionInterruptedError);
+    await expect(running).rejects.toMatchObject({
+      name: "AbortError",
+      resumeAvailable: false,
+      retryDisposition: "restart",
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(jobs.create).not.toHaveBeenCalled();
+    expect(storage.files.size).toBe(0);
+  });
+
+  it("does not start the license check once Cancel lands during the recovery lookup", async () => {
+    const { admission, jobs, recovery } = harness();
+    const controller = new AbortController();
+    const recoveryPort = new Proxy(recovery, {
+      get(target, property) {
+        if (property === "findSourceIdentityMatches") {
+          return async (...args: Parameters<typeof recovery.findSourceIdentityMatches>) => {
+            const matches = await target.findSourceIdentityMatches(...args);
+            controller.abort();
+            return matches;
+          };
+        }
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const adapter = new ManagedTranscriptionAdapter({
+      admission,
+      jobs,
+      recovery: recoveryPort,
+      createOperationId: () => "cancel-before-admission",
+      wait: async () => undefined,
+    });
+
+    await expect(adapter.transcribe(source("d"), { signal: controller.signal }))
+      .rejects.toBeInstanceOf(ManagedTranscriptionInterruptedError);
+    expect(admission.acquireLease).not.toHaveBeenCalled();
+  });
+
   it("rejects non-opaque source identities before any recovery write", async () => {
     const { adapter, storage } = harness();
 

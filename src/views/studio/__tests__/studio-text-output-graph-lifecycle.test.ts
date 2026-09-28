@@ -5,17 +5,10 @@ import { createEmptyStudioProject } from "../../../studio/schema";
 import type { StudioProjectV1 } from "../../../studio/types";
 import {
   buildGraphClipboardPayload,
-  cloneProjectSnapshot,
 } from "../systemsculpt-studio-view/StudioGraphClipboardModel";
 import { materializeGraphClipboardPaste } from "../systemsculpt-studio-view/StudioGraphClipboardPasteMaterializer";
-import {
-  captureStudioGraphHistoryCheckpoint,
-  consumeStudioGraphRedoSnapshot,
-  consumeStudioGraphUndoSnapshot,
-  createStudioGraphHistoryState,
-  resetStudioGraphHistory,
-  setStudioGraphHistoryCurrentSnapshot,
-} from "../systemsculpt-studio-view/StudioGraphHistoryState";
+import { StudioGraphHistory } from "../StudioGraphHistory";
+import { cloneStudioProjectSnapshot } from "../../../studio/StudioProjectSnapshots";
 
 function connectedTextPromptProject(): StudioProjectV1 {
   const project = createEmptyStudioProject({
@@ -111,29 +104,27 @@ describe("minimal text output graph lifecycle", () => {
     ).toEqual(["pasted-prompt", "pasted-image"]);
   });
 
-  it("restores and reapplies a text-edge deletion through graph undo and redo", () => {
+  it.each([false, true])("restores edge identity through graph undo and redo (with peer edit: %s)", withPeerEdit => {
     const connected = connectedTextPromptProject();
-    const deleted = cloneProjectSnapshot(connected);
+    const deleted = cloneStudioProjectSnapshot(connected);
     deleted.graph.nodes = deleted.graph.nodes.filter((node) => node.id !== "prompt");
     deleted.graph.edges = deleted.graph.edges.filter(
       (edge) => edge.fromNodeId !== "prompt" && edge.toNodeId !== "prompt"
     );
     deleted.graph.entryNodeIds = ["image"];
 
-    const history = createStudioGraphHistoryState();
-    resetStudioGraphHistory(history, connected, { selectedNodeIds: ["prompt"] });
-    captureStudioGraphHistoryCheckpoint(history, deleted, ["image"], 20);
+    const history = new StudioGraphHistory(20);
+    history.reset(connected, ["prompt"]);
+    history.checkpoint(deleted, ["image"]);
 
-    const undo = consumeStudioGraphUndoSnapshot(history, 20);
+    const live = cloneStudioProjectSnapshot(deleted);
+    if (withPeerEdit) live.name = "Peer renamed project";
+    const undo = history.undo(undefined, { project: live, selectedNodeIds: [] });
     expect(undo?.project.graph.nodes.some((node) => node.id === "prompt")).toBe(true);
     expect(undo?.project.graph.edges).toEqual(connected.graph.edges);
+    expect(undo?.project.name).toBe(withPeerEdit ? "Peer renamed project" : connected.name);
 
-    setStudioGraphHistoryCurrentSnapshot(
-      history,
-      undo!.project,
-      undo!.selectedNodeIds
-    );
-    const redo = consumeStudioGraphRedoSnapshot(history, 20);
+    const redo = history.redo();
     expect(redo?.project.graph.nodes.some((node) => node.id === "prompt")).toBe(false);
     expect(redo?.project.graph.edges).toEqual([]);
   });

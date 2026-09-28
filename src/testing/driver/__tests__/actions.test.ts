@@ -6,7 +6,7 @@ import type { App } from "obsidian";
 
 import type { ChatMessage, MessagePart } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
-import { canonicalAgentToolInput } from "../../../views/chatview/agent/MutationJournal";
+import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
   DEVELOPMENT_TEST_ROOT,
   runDriverAction,
@@ -31,7 +31,7 @@ function makeContext(
         adapter: { read },
         getAbstractFileByPath,
       },
-      workspace: { getLeavesOfType: () => [] },
+      workspace: { getLeavesOfType: () => [], getMostRecentLeaf: () => null },
     } as unknown as App,
     pluginId: "systemsculpt-ai",
     pluginVersion: "0.0.0-test",
@@ -129,6 +129,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   const trashFile = jest.fn(async () => undefined);
   const workspace = {
     activeLeaf: leaf,
+    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
     getLeavesOfType: jest.fn(() => [leaf]),
     revealLeaf: jest.fn(async () => undefined),
     getLeaf: jest.fn(),
@@ -4554,15 +4555,17 @@ describe("incident report and reload ownership bridges", () => {
     }
   });
 
-  it("reads only an exact persisted incident copy", async () => {
+  it("resolves a copied incident report ID to its persisted report", async () => {
     const reportId = `report_${"a".repeat(32)}`;
     const serialized = `{"report_id":"${reportId}"}`;
-    const readText = jest.fn(async () => serialized);
+    const readText = jest.fn(async () => reportId);
     Object.defineProperty(window.navigator, "clipboard", {
       configurable: true,
       value: { readText },
     });
-    const { ctx, read } = makeContext(jest.fn(async () => serialized));
+    const { ctx, read } = makeContext(jest.fn()
+      .mockRejectedValueOnce(new Error("not yet persisted"))
+      .mockResolvedValue(serialized));
 
     await expect(runDriverAction(
       ctx,
@@ -4570,16 +4573,51 @@ describe("incident report and reload ownership bridges", () => {
       {},
     )).resolves.toEqual({ reportId, serialized });
     expect(readText).toHaveBeenCalledTimes(1);
-    expect(read).toHaveBeenCalledWith(
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenLastCalledWith(
       `.systemsculpt/diagnostics/incidents/${reportId}.json`,
     );
 
-    read.mockResolvedValueOnce(`${serialized}\n`);
+    for (const copied of [serialized, `${reportId}\n`, `report_${"0".repeat(32)}`]) {
+      readText.mockResolvedValueOnce(copied);
+      await expect(runDriverAction(
+        ctx,
+        "chat.readCopiedIncidentReport",
+        {},
+      )).rejects.toThrow(/does not hold exactly one incident report ID/);
+    }
+    expect(read).toHaveBeenCalledTimes(2);
+
+    read.mockResolvedValueOnce("");
     await expect(runDriverAction(
       ctx,
       "chat.readCopiedIncidentReport",
       {},
-    )).rejects.toThrow(/differs from its stored bytes/);
+    )).rejects.toThrow(/stored incident report has an invalid size/);
+  });
+
+  it("fails when the copied incident report ID is never persisted", async () => {
+    jest.useFakeTimers({ now: 0 });
+    try {
+      const reportId = `report_${"b".repeat(32)}`;
+      Object.defineProperty(window.navigator, "clipboard", {
+        configurable: true,
+        value: { readText: jest.fn(async () => reportId) },
+      });
+      const { ctx, read } = makeContext(jest.fn<Promise<string>, [string]>(async () => {
+        throw new Error("missing incident file");
+      }));
+
+      const result = runDriverAction(ctx, "chat.readCopiedIncidentReport", {});
+      const assertion = expect(result).rejects.toThrow(/not durably stored/);
+      await jest.advanceTimersByTimeAsync(5_100);
+      await assertion;
+      expect(read).toHaveBeenCalledWith(
+        `.systemsculpt/diagnostics/incidents/${reportId}.json`,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("restores exact reload ownership, trashes only its chat, and restores the prior chat", async () => {

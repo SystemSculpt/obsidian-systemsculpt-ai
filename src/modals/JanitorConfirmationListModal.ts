@@ -78,7 +78,7 @@ export class JanitorConfirmationListModal extends StandardModal {
     );
   }
 
-  open(): Promise<boolean> {
+  openAndWait(): Promise<boolean> {
     return new Promise((resolve) => {
       this.resolver = resolve;
       super.open();

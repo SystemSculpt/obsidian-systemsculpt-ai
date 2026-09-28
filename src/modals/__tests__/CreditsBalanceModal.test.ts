@@ -570,6 +570,55 @@ describe("CreditsBalanceModal", () => {
     expect(modal.modalEl.textContent).toContain("Prompt cache: reused 1,200 tokens from earlier context and wrote 450 tokens for future turns.");
   });
 
+  it("serializes usage refresh and paging, preserving order while removing duplicate IDs", async () => {
+    const entry = (id: string) => ({ id, endpoint: id, createdAt: "2026-09-16T12:00:00Z", usageKind: "agent_turn", creditsCharged: 1, totalBefore: 10, totalAfter: 9 }) as any;
+    let resolvePage!: (value: any) => void;
+    const loadUsage = jest.fn().mockImplementationOnce(() => new Promise((resolve) => { resolvePage = resolve; }));
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      initialUsage: { items: [entry("first")], nextBefore: "cursor-1" },
+      loadBalance: async () => null,
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+    modal.onOpen();
+    await flushPromises();
+    findButtonByText(modal.modalEl, "Usage").click();
+    findButtonByText(modal.modalEl, "Load more").click();
+    expect(loadUsage).toHaveBeenCalledWith({ limit: 50, before: "cursor-1" });
+    expect(findButtonByText(modal.modalEl, "Load more").disabled).toBe(true);
+    expect(findButtonByText(modal.modalEl, "Refresh").disabled).toBe(true);
+    resolvePage({ items: [entry("first"), entry("second"), entry("second")], nextBefore: null });
+    await flushPromises();
+    const titles = [...modal.modalEl.querySelectorAll(".ss-credits-usage__item-title")].map((element) => element.textContent);
+    expect(titles).toEqual(["first", "second"]);
+    expect(findButtonByText(modal.modalEl, "Refresh").disabled).toBe(false);
+    modal.onClose();
+  });
+
+  it("discards a pending usage page after closing and reopening", async () => {
+    let resolvePage!: (value: any) => void;
+    const loadUsage = jest.fn().mockImplementationOnce(() => new Promise((resolve) => { resolvePage = resolve; }));
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: null,
+      initialUsage: { items: [], nextBefore: "cursor-1" },
+      loadBalance: async () => null,
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+    modal.onOpen();
+    await flushPromises();
+    findButtonByText(modal.modalEl, "Usage").click();
+    findButtonByText(modal.modalEl, "Load more").click();
+    modal.onClose();
+    modal.onOpen();
+    resolvePage({ items: [{ id: "stale", endpoint: "stale page" }], nextBefore: null });
+    await flushPromises();
+    expect(modal.modalEl.textContent).not.toContain("stale page");
+    expect(findButtonByText(modal.modalEl, "Load more").disabled).toBe(false);
+    modal.onClose();
+  });
+
   it("drops a closed balance request and refreshes normally after reopening", async () => {
     let resolveStale!: (balance: any) => void;
     const loadBalance = jest

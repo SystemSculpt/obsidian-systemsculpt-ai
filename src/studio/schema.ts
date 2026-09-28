@@ -1,3 +1,5 @@
+import { normalizeGroupColor } from "./StudioGraphGroupModel";
+import { restoreLegacyStudioPositions } from "./StudioLegacyLayout";
 import { normalizePath } from "obsidian";
 import {
   STUDIO_POLICY_SCHEMA_V1,
@@ -5,8 +7,10 @@ import {
   STUDIO_PROJECT_SCHEMA_V2,
   type StudioCapabilityGrant,
   type StudioDiagram,
+  type StudioGraphLayout,
   type StudioEdge,
   type StudioNodeGroup,
+  type StudioJsonValue,
   type StudioPermissionPolicyV1,
   type StudioProjectV1,
 } from "./types";
@@ -19,7 +23,10 @@ import {
   nowIso,
   randomId,
 } from "./utils";
-import { ALL_STUDIO_GRAPH_MIGRATION_IDS } from "./StudioGraphMigrations";
+import {
+  ALL_STUDIO_GRAPH_MIGRATION_IDS,
+  migrateStudioProjectToPathOnlyPorts,
+} from "./StudioGraphMigrations";
 import { deriveStudioPolicyPath } from "./paths";
 import {
   convertLegacyShapeNodesToDiagram,
@@ -46,24 +53,26 @@ export type StudioProjectParseContext = {
 
 const DEFAULT_MAX_RUNS = 100;
 const DEFAULT_MAX_ARTIFACTS_MB = 1024;
-const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
-function normalizeHexColor(value: string): string | null {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return null;
+function isStudioJsonValue(value: unknown): value is StudioJsonValue {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) {
+    return true;
   }
-  if (!HEX_COLOR_PATTERN.test(trimmed)) {
-    return null;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isStudioJsonValue);
+  return isRecord(value) && Object.values(value).every(isStudioJsonValue);
+}
+
+function readStudioJsonRecord(value: unknown): Record<string, StudioJsonValue> {
+  if (!isRecord(value)) return {};
+  if (!Object.values(value).every(isStudioJsonValue)) {
+    throw new Error("Invalid node config: expected JSON values.");
   }
-  const lower = trimmed.toLowerCase();
-  if (lower.length === 4) {
-    const r = lower.charAt(1);
-    const g = lower.charAt(2);
-    const b = lower.charAt(3);
-    return `#${r}${r}${g}${g}${b}${b}`;
-  }
-  return lower;
+  return value as Record<string, StudioJsonValue>;
 }
 
 function readNodeSize(raw: unknown): { width: number; height?: number } | null {
@@ -93,10 +102,11 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   const kind = asString(raw.kind).trim();
   const version = asString(raw.version).trim() || "1.0.0";
   const title = asString(raw.title).trim() || kind || id;
-  const x = asNumber((raw.position as any)?.x) ?? 0;
-  const y = asNumber((raw.position as any)?.y) ?? 0;
+  const position = isRecord(raw.position) ? raw.position : {};
+  const x = asNumber(position.x) ?? 0;
+  const y = asNumber(position.y) ?? 0;
   const size = readNodeSize(raw.size);
-  const config = isRecord(raw.config) ? (raw.config as Record<string, any>) : {};
+  const config = readStudioJsonRecord(raw.config);
   const continueOnError = raw.continueOnError === true;
   const disabled = raw.disabled === true;
 
@@ -113,6 +123,7 @@ function readNode(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     version,
     title,
     position: { x, y },
+    ...(typeof raw.parentId === "string" ? { parentId: raw.parentId } : {}),
     ...(size ? { size } : {}),
     config,
     continueOnError,
@@ -149,7 +160,7 @@ function readGroup(raw: unknown): StudioNodeGroup {
   const id = asString(raw.id).trim();
   const name = asString(raw.name).trim();
   const colorRaw = asString(raw.color).trim();
-  const color = normalizeHexColor(colorRaw);
+  const color = normalizeGroupColor(colorRaw);
   const nodeIds = ensureArray<unknown>(raw.nodeIds)
     .map((value) => asString(value).trim())
     .filter((value) => value.length > 0)
@@ -173,9 +184,31 @@ function readGroup(raw: unknown): StudioNodeGroup {
     id,
     name,
     ...(color ? { color } : {}),
+    ...(asString(raw.outputForNodeId).trim() ? { outputForNodeId: asString(raw.outputForNodeId).trim() } : {}),
+    ...(asString(raw.outputForNodeId).trim() && isRecord(raw.outputOffset) && asNumber(raw.outputOffset.x) !== null && asNumber(raw.outputOffset.y) !== null
+      ? { outputOffset: { x: Number(raw.outputOffset.x), y: Number(raw.outputOffset.y) } } : {}),
     nodeIds,
     ...(shapeIds.length > 0 ? { shapeIds } : {}),
   };
+}
+
+function retainExistingGroupMembers(
+  groups: StudioNodeGroup[], nodeIdSet: ReadonlySet<string>, diagram: StudioDiagram
+): StudioNodeGroup[] {
+  const diagramShapeIdSet = new Set(diagram.shapes.map(shape => shape.id));
+  return groups
+    .map((group) => {
+      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
+      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
+      if (shapeIds.length > 0) {
+        next.shapeIds = shapeIds;
+      } else {
+        delete next.shapeIds;
+      }
+      if (next.outputForNodeId && !nodeIdSet.has(next.outputForNodeId)) { delete next.outputForNodeId; delete next.outputOffset; }
+      return next;
+    })
+    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
 }
 
 function mergeStudioDiagrams(
@@ -212,10 +245,10 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const createdAt = asString(raw.createdAt).trim() || nowIso();
   const updatedAt = asString(raw.updatedAt).trim() || createdAt;
   const graphRaw = isRecord(raw.graph) ? raw.graph : {};
-  const nodesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).nodes);
-  const edgesRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).edges);
-  const entryNodeIdsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).entryNodeIds);
-  const groupsRaw = ensureArray<unknown>((graphRaw as Record<string, unknown>).groups);
+  const nodesRaw = ensureArray<unknown>((graphRaw).nodes);
+  const edgesRaw = ensureArray<unknown>((graphRaw).edges);
+  const entryNodeIdsRaw = ensureArray<unknown>((graphRaw).entryNodeIds);
+  const groupsRaw = ensureArray<unknown>((graphRaw).groups);
 
   // Shapes are lifted out of the graph BEFORE edge validation: a project
   // written by the build where shapes were still a node kind carries shape
@@ -225,7 +258,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
   const lifted = convertLegacyShapeNodesToDiagram({ nodes: parsedNodes, edges: parsedEdges });
   const nodes = lifted ? lifted.nodes : parsedNodes;
   const edges = lifted ? lifted.edges : parsedEdges;
-  const diagram = mergeStudioDiagrams(readStudioDiagram(raw.diagram), lifted?.diagram);
+  const diagram = mergeStudioDiagrams(readStudioDiagram(raw.diagram, nodes.map((node) => node.id)), lifted?.diagram);
   const nodeIdSet = new Set(nodes.map((node) => node.id));
   for (const edge of edges) {
     if (!nodeIdSet.has(edge.fromNodeId)) {
@@ -250,20 +283,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
 
   // A group frames nodes, shapes, or both, so it survives while either half
   // still resolves.
-  const diagramShapeIdSet = new Set(diagram.shapes.map((shape) => shape.id));
-  const groups = groupsRaw
-    .map(readGroup)
-    .map((group) => {
-      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
-      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
-      if (shapeIds.length > 0) {
-        next.shapeIds = shapeIds;
-      } else {
-        delete next.shapeIds;
-      }
-      return next;
-    })
-    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
+  const groups = retainExistingGroupMembers(groupsRaw.map(readGroup), nodeIdSet, diagram);
 
   const permissionsRefRaw = isRecord(raw.permissionsRef) ? raw.permissionsRef : {};
   const policyPath = normalizePath(asString(permissionsRefRaw.policyPath).trim());
@@ -271,10 +291,10 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     throw new Error("Invalid Studio project: permissionsRef.policyPath is required.");
   }
 
-  const policyVersion = asNumber((permissionsRefRaw as Record<string, unknown>).policyVersion) ?? 1;
+  const policyVersion = asNumber((permissionsRefRaw).policyVersion) ?? 1;
   const settingsRaw = isRecord(raw.settings) ? raw.settings : {};
-  const retentionRaw = isRecord((settingsRaw as Record<string, unknown>).retention)
-    ? ((settingsRaw as Record<string, unknown>).retention as Record<string, unknown>)
+  const retentionRaw = isRecord((settingsRaw).retention)
+    ? ((settingsRaw).retention)
     : {};
 
   const maxRuns = Math.max(
@@ -286,6 +306,8 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     Math.floor(asNumber(retentionRaw.maxArtifactsMb) ?? DEFAULT_MAX_ARTIFACTS_MB)
   );
 
+  const engine = isRecord(raw.engine) ? raw.engine : {};
+  const migrations = isRecord(raw.migrations) ? raw.migrations : {};
   const project: StudioProjectV1 = {
     schema: STUDIO_PROJECT_SCHEMA_V1,
     projectId,
@@ -294,13 +316,14 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     updatedAt,
     engine: {
       apiMode: "systemsculpt_only",
-      minPluginVersion: asString((raw.engine as any)?.minPluginVersion).trim() || "0.0.0",
+      minPluginVersion: asString(engine.minPluginVersion).trim() || "0.0.0",
     },
     graph: {
       nodes,
       edges,
       entryNodeIds,
       groups,
+      ...(isRecord(graphRaw.layout) ? { layout: graphRaw.layout as unknown as StudioGraphLayout } : {}),
     },
     diagram,
     permissionsRef: {
@@ -317,7 +340,7 @@ function readProjectV1(raw: Record<string, unknown>): StudioProjectV1 {
     },
     migrations: {
       projectSchemaVersion: "1.0.0",
-      applied: ensureArray<unknown>((raw.migrations as any)?.applied)
+      applied: ensureArray<unknown>(migrations.applied)
         .filter(isRecord)
         .map((entry) => ({
           id: asString(entry.id).trim(),
@@ -350,8 +373,9 @@ function readNodeV2(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
     version: resolveBuiltInStudioNodeVersion(kind) || "1.0.0",
     title: asString(raw.title).trim() || compactStudioNodeKind(kind),
     position: { x: asNumber(raw.x) ?? 0, y: asNumber(raw.y) ?? 0 },
+    ...(typeof raw.parent === "string" ? { parentId: raw.parent } : {}),
     ...(width !== null ? { size: { width, ...(height !== null ? { height } : {}) } } : {}),
-    config: isRecord(raw.config) ? (raw.config as Record<string, any>) : {},
+    config: readStudioJsonRecord(raw.config),
     continueOnError: raw.continueOnError === true,
     disabled: raw.disabled === true,
   };
@@ -480,6 +504,8 @@ function readGroupV2(raw: unknown): StudioNodeGroup {
     color: raw.color,
     nodeIds: raw.nodes ?? raw.nodeIds,
     shapeIds: raw.shapes ?? raw.shapeIds,
+    outputForNodeId: raw.outputFor,
+    outputOffset: raw.outputOffset,
   });
 }
 
@@ -521,23 +547,11 @@ function readProjectV2(
   const diagram = readStudioDiagram({
     shapes: ensureArray<unknown>(canvas.shapes).map(liftShapeV2),
     arrows: ensureArray<unknown>(canvas.arrows).map(liftArrowV2).filter(Boolean),
-  });
+  }, nodesById.keys());
 
-  const nodeIdSet = new Set(nodes.map((node) => node.id));
-  const diagramShapeIdSet = new Set(diagram.shapes.map((shape) => shape.id));
-  const groups = ensureArray<unknown>(canvas.groups)
-    .map(readGroupV2)
-    .map((group) => {
-      const shapeIds = (group.shapeIds || []).filter((shapeId) => diagramShapeIdSet.has(shapeId));
-      const next = { ...group, nodeIds: group.nodeIds.filter((nodeId) => nodeIdSet.has(nodeId)) };
-      if (shapeIds.length > 0) {
-        next.shapeIds = shapeIds;
-      } else {
-        delete next.shapeIds;
-      }
-      return next;
-    })
-    .filter((group) => group.nodeIds.length > 0 || (group.shapeIds || []).length > 0);
+  const groups = retainExistingGroupMembers(
+    ensureArray<unknown>(canvas.groups).map(readGroupV2), new Set(nodesById.keys()), diagram
+  );
 
   const now = nowIso();
   return {
@@ -557,6 +571,7 @@ function readProjectV2(
       // them from executable-graph structure, so v2 never persists them.
       entryNodeIds: [],
       groups,
+      ...(isRecord(canvas.layout) ? { layout: canvas.layout as unknown as StudioGraphLayout } : {}),
     },
     diagram,
     permissionsRef: {
@@ -599,10 +614,10 @@ function migrateLegacyProject(raw: Record<string, unknown>): StudioProjectV1 | n
         id,
         kind: "studio.input",
         version: "1.0.0",
-        title: asString(node.title).trim() || asString((node as any).text).trim() || `Node ${index + 1}`,
+        title: asString(node.title).trim() || asString(node.text).trim() || `Node ${index + 1}`,
         position: {
-          x: asNumber((node as any).x) ?? 0,
-          y: asNumber((node as any).y) ?? 0,
+          x: asNumber(node.x) ?? 0,
+          y: asNumber(node.y) ?? 0,
         },
         config: {},
         continueOnError: false,
@@ -614,8 +629,8 @@ function migrateLegacyProject(raw: Record<string, unknown>): StudioProjectV1 | n
   const edges = edgesRaw
     .filter(isRecord)
     .map((edge, index) => {
-      const fromNodeId = asString((edge as any).fromNodeId || (edge as any).fromNode).trim();
-      const toNodeId = asString((edge as any).toNodeId || (edge as any).toNode).trim();
+      const fromNodeId = asString(edge.fromNodeId || edge.fromNode).trim();
+      const toNodeId = asString(edge.toNodeId || edge.toNode).trim();
       if (!nodeIds.has(fromNodeId) || !nodeIds.has(toNodeId)) {
         return null;
       }
@@ -674,14 +689,44 @@ export function parseStudioProject(
   rawText: string,
   context?: StudioProjectParseContext
 ): StudioProjectV1 {
+  return readStudioProject(JSON.parse(rawText), context);
+}
+
+/**
+ * Parse a project file and bring an older dialect up to the current graph
+ * before anything validates or compiles it. v1 files can still carry node
+ * kinds that later releases renamed or retired (studio.label,
+ * studio.http_request, studio.prompt_template, studio.resend_audience_sync);
+ * only the graph migrations rewrite them, and the built-in registry no longer
+ * defines them. v2 content is written in the current dialect by definition,
+ * so it is returned as parsed.
+ */
+export function parseAndMigrateStudioProject(
+  rawText: string,
+  context?: StudioProjectParseContext
+): StudioProjectV1 {
   const parsed: unknown = JSON.parse(rawText);
+  const project = readStudioProject(parsed, context);
+  if (isCurrentStudioDialect(parsed)) {
+    return project;
+  }
+  return migrateStudioProjectToPathOnlyPorts(project).project;
+}
+
+function isCurrentStudioDialect(parsed: unknown): boolean {
+  return isRecord(parsed) && asString(parsed.schema).trim() === STUDIO_PROJECT_SCHEMA_V2;
+}
+
+function readStudioProject(parsed: unknown, context?: StudioProjectParseContext): StudioProjectV1 {
   if (!isRecord(parsed)) {
     throw new Error("Invalid Studio project: root JSON value must be an object.");
   }
 
   const schema = asString(parsed.schema).trim();
   if (schema === STUDIO_PROJECT_SCHEMA_V2) {
-    return readProjectV2(parsed, context);
+    // A 6.10 file may still embed its former merge state in `document`. The
+    // readable canvas is the content; that state is history and is dropped.
+    return restoreLegacyStudioPositions(readProjectV2(parsed, context), parsed);
   }
   if (schema !== STUDIO_PROJECT_SCHEMA_V1) {
     const migrated = migrateLegacyProject(parsed);
@@ -693,7 +738,7 @@ export function parseStudioProject(
     return migrated;
   }
 
-  return readProjectV1(parsed);
+  return restoreLegacyStudioPositions(readProjectV1(parsed), parsed);
 }
 
 function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Record<string, unknown> {
@@ -702,8 +747,8 @@ function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Recor
     id: node.id,
     kind: compactStudioNodeKind(node.kind),
     title: node.title,
-    x: node.position.x,
-    y: node.position.y,
+    x: node.position.x, y: node.position.y,
+    ...(node.parentId ? { parent: node.parentId } : {}),
     ...(node.size ? { width: node.size.width } : {}),
     ...(node.size && typeof node.size.height === "number" ? { height: node.size.height } : {}),
     ...(hasConfig ? { config: node.config } : {}),
@@ -715,16 +760,19 @@ function serializeNodeV2(node: StudioProjectV1["graph"]["nodes"][number]): Recor
 /**
  * Serialization always writes the v2 dialect: pure canvas content plus the
  * project identity and a pointer to the generated agent reference document.
- * Opening any older file and saving it upgrades it in place.
+ * Opening any older file and saving it upgrades it in place. A published file
+ * also carries Studio's `merge` record last; without it, the text is the
+ * canonical canvas whose SHA-256 is the agent revision.
  */
-export function serializeStudioProject(project: StudioProjectV1): string {
+export function serializeStudioProject(project: StudioProjectV1, merge?: object): string {
   const document = {
     schema: STUDIO_PROJECT_SCHEMA_V2,
     id: project.projectId,
     name: project.name,
     docs: STUDIO_AGENT_DOCS_PATH,
     canvas: {
-      nodes: project.graph.nodes.map(serializeNodeV2),
+      layout: { mode: "manual" },
+      nodes: project.graph.nodes.map((node) => serializeNodeV2(node)),
       edges: project.graph.edges.map(
         (edge) => `${edge.fromNodeId}.${edge.fromPortId} -> ${edge.toNodeId}.${edge.toPortId}`
       ),
@@ -733,6 +781,8 @@ export function serializeStudioProject(project: StudioProjectV1): string {
         name: group.name,
         ...(group.color ? { color: group.color } : {}),
         nodes: group.nodeIds,
+        ...(group.outputForNodeId ? { outputFor: group.outputForNodeId } : {}),
+        ...(group.outputForNodeId && group.outputOffset ? { outputOffset: group.outputOffset } : {}),
         ...((group.shapeIds || []).length > 0 ? { shapes: group.shapeIds } : {}),
       })),
       shapes: (project.diagram?.shapes || []).map((shape) => ({
@@ -751,6 +801,7 @@ export function serializeStudioProject(project: StudioProjectV1): string {
           : `${arrow.fromShapeId} -> ${arrow.toShapeId}`
       ),
     },
+    ...(merge ? { merge } : {}),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }
@@ -778,6 +829,7 @@ export function createEmptyStudioProject(options: {
       edges: [],
       entryNodeIds: [],
       groups: [],
+      layout: { mode: "manual" },
     },
     diagram: createEmptyStudioDiagram(),
     permissionsRef: {

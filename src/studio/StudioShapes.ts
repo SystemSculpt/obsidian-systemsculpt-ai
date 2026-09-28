@@ -17,8 +17,8 @@ import { asNumber, asString, ensureArray, isRecord, randomId } from "./utils";
  * A shape is NOT a node: it has no kind, no version, no ports, no config, no
  * definition in the node registry, and it never reaches the compiler or the
  * runtime. It lives in `project.diagram`, beside `project.graph`, so a run can
- * neither see it nor be broken by it. Arrows connect shape to shape only;
- * shape-to-node interaction is deliberately absent for now.
+ * neither see it nor be broken by it. Visual arrows may join nodes or shapes;
+ * they never carry data or become graph edges.
  *
  * `style` is the reserved home for shape properties (fill, stroke, font …).
  * Normalization preserves whatever it finds there so a future property can be
@@ -116,9 +116,9 @@ function readShape(raw: unknown, index: number): StudioShapeInstance | null {
 /**
  * Diagram data is presentation, never execution, so normalization heals rather
  * than throws: an unreadable shape is dropped and an arrow that points at a
- * missing shape disappears with it, exactly like a deleted shape's arrows.
+ * missing canvas item disappears with it, like a deleted item's arrows.
  */
-export function readStudioDiagram(raw: unknown): StudioDiagram {
+export function readStudioDiagram(raw: unknown, nodeIds: Iterable<string> = []): StudioDiagram {
   if (!isRecord(raw)) {
     return createEmptyStudioDiagram();
   }
@@ -134,6 +134,7 @@ export function readStudioDiagram(raw: unknown): StudioDiagram {
     shapes.push(shape);
   });
 
+  const itemIds = new Set([...shapeIds, ...nodeIds]);
   const arrows: StudioShapeArrow[] = [];
   const arrowPairs = new Set<string>();
   ensureArray<unknown>(raw.arrows).forEach((entry, index) => {
@@ -142,7 +143,7 @@ export function readStudioDiagram(raw: unknown): StudioDiagram {
     }
     const fromShapeId = asString(entry.fromShapeId).trim();
     const toShapeId = asString(entry.toShapeId).trim();
-    if (!shapeIds.has(fromShapeId) || !shapeIds.has(toShapeId) || fromShapeId === toShapeId) {
+    if (!itemIds.has(fromShapeId) || !itemIds.has(toShapeId) || fromShapeId === toShapeId) {
       return;
     }
     const pair = `${fromShapeId}->${toShapeId}`;
@@ -293,7 +294,7 @@ export function removeStudioShapeArrow(project: StudioProjectV1, arrowId: string
   });
 }
 
-/** Connects two shapes, ignoring self-links and duplicates of an existing arrow. */
+/** Visually connects two nodes or shapes without creating an executable edge. */
 export function connectStudioShapes(
   project: StudioProjectV1,
   fromShapeId: string,
@@ -303,8 +304,11 @@ export function connectStudioShapes(
     if (fromShapeId === toShapeId) {
       return false;
     }
-    const shapeIds = new Set(diagram.shapes.map((shape) => shape.id));
-    if (!shapeIds.has(fromShapeId) || !shapeIds.has(toShapeId)) {
+    const itemIds = new Set([
+      ...diagram.shapes.map((shape) => shape.id),
+      ...project.graph.nodes.map((node) => node.id),
+    ]);
+    if (!itemIds.has(fromShapeId) || !itemIds.has(toShapeId)) {
       return false;
     }
     const exists = diagram.arrows.some(
@@ -314,6 +318,21 @@ export function connectStudioShapes(
       return false;
     }
     diagram.arrows.push({ id: randomId("arrow"), fromShapeId, toShapeId });
+    return true;
+  });
+}
+
+/** Removes visual arrows touching any deleted canvas item. */
+export function removeStudioArrowsForItems(
+  project: StudioProjectV1,
+  itemIds: ReadonlySet<string>
+): boolean {
+  return mutateStudioDiagram(project, (diagram) => {
+    const arrows = diagram.arrows.filter(
+      (arrow) => !itemIds.has(arrow.fromShapeId) && !itemIds.has(arrow.toShapeId)
+    );
+    if (arrows.length === diagram.arrows.length) return false;
+    diagram.arrows = arrows;
     return true;
   });
 }

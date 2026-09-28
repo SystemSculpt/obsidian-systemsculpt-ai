@@ -68,6 +68,7 @@ export function sanitizeGraphGroups(project: StudioProjectV1): boolean {
   const shapeIdSet = new Set(readStudioDiagramFromProject(project).shapes.map((shape) => shape.id));
   const nextGroups: StudioNodeGroup[] = [];
   const seenGroupIds = new Set<string>();
+  const outputOwners = new Map<string, StudioNodeGroup>();
 
   for (const group of ensureGraphGroups(project)) {
     const groupId = String(group.id || "").trim();
@@ -83,14 +84,18 @@ export function sanitizeGraphGroups(project: StudioProjectV1): boolean {
       continue;
     }
 
+    const existingOutput = group.outputForNodeId ? outputOwners.get(group.outputForNodeId) : undefined;
+    if (existingOutput) { existingOutput.nodeIds = [...new Set([...existingOutput.nodeIds, ...nodeIds])]; continue; }
     seenGroupIds.add(groupId);
     nextGroups.push({
       id: groupId,
       name: groupName,
       ...(groupColor ? { color: groupColor } : {}),
       nodeIds,
+      ...(group.outputForNodeId && nodeIdSet.has(group.outputForNodeId) ? { outputForNodeId: group.outputForNodeId, ...(group.outputOffset ? { outputOffset: group.outputOffset } : {}) } : {}),
       ...(shapeIds.length > 0 ? { shapeIds } : {}),
     });
+    if (nextGroups[nextGroups.length - 1].outputForNodeId) outputOwners.set(group.outputForNodeId!, nextGroups[nextGroups.length - 1]);
   }
 
   const previousGroups = ensureGraphGroups(project);
@@ -136,6 +141,7 @@ export function createGroupFromSelection(
   }
 
   const selectedSet = new Set(nodeIds);
+  if (project.graph.groups?.some(group => group.outputForNodeId && group.nodeIds.some(id => selectedSet.has(id)))) return null;
   const selectedShapeSet = new Set(shapeIds);
   const groups = ensureGraphGroups(project);
   const nextGroups = groups
@@ -175,8 +181,9 @@ export function assignNodesToGroup(
   }
 
   const previousGroups = ensureGraphGroups(project);
+  if (previousGroups.some(group => group.outputForNodeId && group.nodeIds.some(id => normalizedNodeIds.includes(id)))) return false;
   const targetGroupIndex = previousGroups.findIndex((group) => group.id === normalizedGroupId);
-  if (targetGroupIndex < 0) {
+  if (targetGroupIndex < 0 || previousGroups[targetGroupIndex].outputForNodeId) {
     return false;
   }
 
@@ -285,13 +292,14 @@ function removeMembersFromGroups(
   }
   const previousGroups = ensureGraphGroups(project);
   const nextGroups = previousGroups
-    .map((group) =>
-      withMembers({
+    .map((group) => {
+      if (group.outputForNodeId && nodesToRemove.has(group.outputForNodeId)) { group = { ...group }; delete group.outputForNodeId; delete group.outputOffset; }
+      return withMembers({
         ...group,
         nodeIds: normalizeNodeIds(group.nodeIds || []).filter((nodeId) => !nodesToRemove.has(nodeId)),
         shapeIds: readShapeIds(group).filter((shapeId) => !shapesToRemove.has(shapeId)),
-      })
-    )
+      });
+    })
     .filter((group) => !groupIsEmpty(group));
   const previousSerialized = JSON.stringify(previousGroups);
   const nextSerialized = JSON.stringify(nextGroups);

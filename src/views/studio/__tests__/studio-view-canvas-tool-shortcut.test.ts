@@ -2,39 +2,38 @@
 
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import type { StudioCanvasTool } from "../StudioCanvasTool";
+import { isStudioGraphEditableTarget } from "../StudioGraphDomTargeting";
 
 /**
- * "A" is the way back to the pointer. An armed shape or arrow tool otherwise
- * stays armed, so this key has to work from anywhere on the canvas — and never
- * while the user is typing.
+ * Canvas tool shortcuts must work across the canvas and leave typing alone.
  */
 type KeydownContext = {
-  isActiveStudioView: jest.Mock<boolean, []>;
+  ownsKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   isEditableKeyboardTarget: jest.Mock<boolean, [EventTarget | null]>;
   activeCanvasTool: StudioCanvasTool;
   selectCanvasTool: jest.Mock<void, [StudioCanvasTool]>;
   busy: boolean;
   currentProject: unknown;
-  shapeController: { hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
+  shapeController: { setSelectedShapeIds: jest.Mock<void, [string[]]>; hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
   graphInteraction: { getSelectedNodeIds: jest.Mock<string[], []> };
   removeNodes: jest.Mock<void, [string[]]>;
 };
 
-const handleWindowKeyDown = (SystemSculptStudioView as any).prototype.handleWindowKeyDown as (
+const handleCanvasKeyDown = (SystemSculptStudioView as any).prototype.handleCanvasKeyDown as (
   this: KeydownContext,
   event: KeyboardEvent
-) => void;
+) => boolean;
 
 function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
   return {
-    isActiveStudioView: jest.fn(() => true),
-    isEditableKeyboardTarget: jest.fn(() => false),
+    ownsKeyboardTarget: jest.fn(() => true),
+    isEditableKeyboardTarget: jest.fn(isStudioGraphEditableTarget),
     activeCanvasTool: "diamond",
     selectCanvasTool: jest.fn(),
     busy: false,
-    currentProject: { graph: { nodes: [] } },
-    shapeController: { hasSelection: jest.fn(() => false), removeSelection: jest.fn() },
-    graphInteraction: { getSelectedNodeIds: jest.fn(() => []) },
+    currentProject: { graph: { nodes: [{ id: "card" }] }, diagram: { shapes: [{ id: "drawing" }] } },
+    shapeController: { setSelectedShapeIds: jest.fn(), hasSelection: jest.fn(() => false), removeSelection: jest.fn() },
+    graphInteraction: { setSelectedNodeIds: jest.fn(), getSelectedNodeIds: jest.fn(() => []) },
     removeNodes: jest.fn(),
     ...overrides,
   };
@@ -42,8 +41,8 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
 
 function createKeydownEvent(overrides?: Partial<Record<string, unknown>>): KeyboardEvent {
   return {
-    key: "a",
-    code: "KeyA",
+    key: "s",
+    code: "KeyS",
     metaKey: false,
     ctrlKey: false,
     altKey: false,
@@ -57,20 +56,61 @@ function createKeydownEvent(overrides?: Partial<Record<string, unknown>>): Keybo
 }
 
 describe("SystemSculptStudioView canvas tool shortcut", () => {
+  it.each([
+    ["b", "rectangle"],
+    ["c", "ellipse"],
+    ["a", "arrow"],
+    ["s", "select"],
+    ["Escape", "select"],
+  ] as const)("selects %s's tool", (key, tool) => {
+    const context = createContext();
+    const event = createKeydownEvent({ key });
+
+    handleCanvasKeyDown.call(context, event);
+
+    expect(context.selectCanvasTool).toHaveBeenCalledWith(tool);
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
   it("disarms an armed shape tool back to the pointer", () => {
     const context = createContext();
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
   });
 
+  it("switches from the circle tool to Select with Shift+C", () => {
+    const context = createContext({ activeCanvasTool: "ellipse" });
+    const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true });
+
+    handleCanvasKeyDown.call(context, event);
+
+    expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["metaKey", "ctrlKey", "altKey", "isComposing"])(
+    "leaves Shift+C alone with %s so app shortcuts keep working",
+    (modifier) => {
+      const context = createContext();
+      const event = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, [modifier]: true });
+
+      handleCanvasKeyDown.call(context, event);
+
+      expect(context.selectCanvasTool).not.toHaveBeenCalled();
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+  );
+
   it("disarms the arrow tool too", () => {
     const context = createContext({ activeCanvasTool: "arrow" });
 
-    handleWindowKeyDown.call(context, createKeydownEvent());
+    handleCanvasKeyDown.call(context, createKeydownEvent());
 
     expect(context.selectCanvasTool).toHaveBeenCalledWith("select");
   });
@@ -79,8 +119,55 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
+    expect(context.selectCanvasTool).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '<input />',
+    '<textarea></textarea>',
+    '<select></select>',
+    '<div contenteditable="true"><span></span></div>',
+    '<div contenteditable=""><span></span></div>',
+    '<div contenteditable="plaintext-only"><span></span></div>',
+    '<div class="cm-editor"><div class="cm-content"></div></div>',
+  ])("preserves typing inside %s", (markup) => {
+    const root = document.createElement("div");
+    root.innerHTML = markup;
+    const target = root.querySelector("span, .cm-content") ?? root.firstElementChild;
+    const context = createContext();
+    for (const key of ["b", "c", "s", "a", "Escape"]) {
+      const event = createKeydownEvent({ key, target });
+      handleCanvasKeyDown.call(context, event);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+    const selectEvent = createKeydownEvent({ key: "C", code: "KeyC", shiftKey: true, target });
+    handleCanvasKeyDown.call(context, selectEvent);
+    expect(selectEvent.preventDefault).not.toHaveBeenCalled();
+    expect(context.selectCanvasTool).not.toHaveBeenCalled();
+  });
+
+  it.each(["metaKey", "ctrlKey", "altKey", "shiftKey", "isComposing"])(
+    "leaves box shortcuts alone with %s",
+    (modifier) => {
+      const context = createContext();
+      const event = createKeydownEvent({ key: "b", [modifier]: true });
+      handleCanvasKeyDown.call(context, event);
+      expect(context.selectCanvasTool).not.toHaveBeenCalled();
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { busy: true },
+    { currentProject: null },
+    { ownsKeyboardTarget: jest.fn(() => false) },
+  ])("ignores tool shortcuts when unavailable (%j)", (overrides) => {
+    const context = createContext(overrides);
+    const event = createKeydownEvent({ key: "b" });
+    handleCanvasKeyDown.call(context, event);
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
@@ -89,19 +176,78 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
     const context = createContext({ activeCanvasTool: "select" });
     const event = createKeydownEvent();
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
-  it("keeps Mod+A available for the host", () => {
+  it.each(["metaKey", "ctrlKey"])("selects the canvas with %s+A without changing tools", (modifier) => {
     const context = createContext();
-    const event = createKeydownEvent({ metaKey: true });
+    const event = createKeydownEvent({ key: "a", code: "KeyA", [modifier]: true });
 
-    handleWindowKeyDown.call(context, event);
+    handleCanvasKeyDown.call(context, event);
 
     expect(context.selectCanvasTool).not.toHaveBeenCalled();
+    expect(context.graphInteraction.setSelectedNodeIds).toHaveBeenCalledWith(["card"]);
+    expect(context.shapeController.setSelectedShapeIds).toHaveBeenCalledWith(["drawing"]);
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SystemSculptStudioView canvas tool gestures", () => {
+  it("cancels pending gestures before switching tools", () => {
+    const context = {
+      activeCanvasTool: "rectangle",
+      shapeController: { cancelDrawGesture: jest.fn(), cancelArrowGesture: jest.fn() },
+      graphInteraction: { clearPendingConnection: jest.fn() },
+      render: jest.fn(),
+    };
+
+    (SystemSculptStudioView as any).prototype.selectCanvasTool.call(context, "select");
+
+    expect(context.activeCanvasTool).toBe("select");
+    expect(context.shapeController.cancelDrawGesture).toHaveBeenCalledTimes(1);
+    expect(context.shapeController.cancelArrowGesture).toHaveBeenCalledTimes(1);
+    expect(context.graphInteraction.clearPendingConnection).toHaveBeenCalledTimes(1);
+    expect(context.render).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts visual arrows from node inputs before editor and node handlers", () => {
+    const input = document.createElement("input");
+    const event = {
+      button: 0,
+      target: input,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+    const context = {
+      activeCanvasTool: "arrow",
+      shapeController: { startArrowGesture: jest.fn(() => true) },
+      isEditableKeyboardTarget: jest.fn(() => true),
+      blurActiveStudioEditableTarget: jest.fn(),
+    };
+
+    (SystemSculptStudioView as any).prototype.handleGraphViewportPointerDown.call(context, event);
+
+    expect(context.shapeController.startArrowGesture).toHaveBeenCalledWith(event);
+    expect(context.isEditableKeyboardTarget).not.toHaveBeenCalled();
+    expect(context.blurActiveStudioEditableTarget).not.toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves background gestures available when no arrow source is hit", () => {
+    const event = { button: 0, preventDefault: jest.fn(), stopPropagation: jest.fn() };
+    const context = {
+      activeCanvasTool: "arrow",
+      shapeController: { startArrowGesture: jest.fn(() => false) },
+    };
+
+    (SystemSculptStudioView as any).prototype.handleGraphViewportPointerDown.call(context, event);
+
     expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
   });
 });

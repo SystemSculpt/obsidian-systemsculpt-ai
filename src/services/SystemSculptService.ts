@@ -1,4 +1,3 @@
-import { SystemSculptSettings } from "../types";
 import {
   SystemSculptError,
   ERROR_CODES,
@@ -22,6 +21,7 @@ import {
   localToolOutcomeSchema,
 } from "../tools/LocalToolOutcome";
 import { parseBoundedServerTiming } from "../utils/serverTiming";
+import { CreditsBalanceCache, type CreditsBalanceReadOptions } from "./credits/CreditsBalanceCache";
 
 /**
  * First-party tools often return an honest structured result instead of throwing.
@@ -304,12 +304,14 @@ export type CreditsUsageHistoryPage = {
 };
 
 /**
- * Main service facade that delegates to specialized services
+ * Main service facade that delegates to specialized services.
+ *
+ * Settings are read from `plugin.settings` where they are used: the
+ * SettingsManager installs a new settings object on every save.
  */
 export class SystemSculptService {
-  private settings: SystemSculptSettings;
   private static instance: SystemSculptService | null = null;
-  public baseUrl: string;
+  public readonly baseUrl: string;
   private plugin: SystemSculptPlugin;
   private licenseService: LicenseService;
   private toolService: FirstPartyToolService;
@@ -317,10 +319,9 @@ export class SystemSculptService {
 
   private constructor(plugin: SystemSculptPlugin) {
     this.plugin = plugin;
-    this.settings = plugin.settings;
-    
+
     // The endpoint is injected at build time; settings never own network routing.
-    this.baseUrl = this.getValidServerUrl();
+    this.baseUrl = SystemSculptEnvironment.resolveBaseUrl();
 
     this.licenseService = new LicenseService(plugin);
     this.toolService = new FirstPartyToolService(plugin, plugin.app);
@@ -330,12 +331,7 @@ export class SystemSculptService {
    * Get the singleton instance - use this instead of creating new instances
    */
   public static getInstance(plugin: SystemSculptPlugin): SystemSculptService {
-    if (!SystemSculptService.instance) {
-      SystemSculptService.instance = new SystemSculptService(plugin);
-    } else {
-      // Update settings if instance exists
-      SystemSculptService.instance.updateSettings(plugin.settings);
-    }
+    SystemSculptService.instance ??= new SystemSculptService(plugin);
     return SystemSculptService.instance;
   }
 
@@ -346,35 +342,16 @@ export class SystemSculptService {
     SystemSculptService.instance = null;
   }
 
-  /**
-   * Update settings on existing instance
-   */
-  public updateSettings(settings: SystemSculptSettings): void {
-    this.settings = settings;
-    this.refreshSettings();
-  }
-
-  private getValidServerUrl(): string {
-    return SystemSculptEnvironment.resolveBaseUrl();
-  }
-
-  private refreshSettings(): void {
-    this.settings = this.plugin.settings;
-    this.baseUrl = this.getValidServerUrl();
-  }
-
   // DELEGATE TO LICENSE SERVICE
-  async validateLicenseDetailed(): Promise<LicenseValidationResult> {
-    this.refreshSettings(); // Ensure settings are current before validation
-    return this.licenseService.validateLicenseDetailed();
+  async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
+    return this.licenseService.validateLicenseDetailed(signal);
   }
 
   public async getCreditsBalance(options: Readonly<{
     onObservation?: (observation: CreditsBalanceObservation) => void;
+    signal?: AbortSignal;
   }> = {}): Promise<CreditsBalanceSnapshot> {
-    this.refreshSettings();
-
-    const licenseKey = (this.settings.licenseKey || "").trim();
+    const licenseKey = (this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
       throw new SystemSculptError(
         "License key required to fetch credits balance.",
@@ -397,6 +374,7 @@ export class SystemSculptService {
         url,
         method: "GET",
         headers,
+        signal: options.signal,
         onTransportSelected: (selected) => { transport = selected; },
       });
     } catch (error) {
@@ -441,10 +419,9 @@ export class SystemSculptService {
     limit?: number;
     before?: string;
     endpoints?: string[];
+    signal?: AbortSignal;
   }): Promise<CreditsUsageHistoryPage> {
-    this.refreshSettings();
-
-    const licenseKey = (this.settings.licenseKey || "").trim();
+    const licenseKey = (this.plugin.settings.licenseKey || "").trim();
     if (!licenseKey) {
       throw new SystemSculptError(
         "License key required to fetch credits usage.",
@@ -479,6 +456,7 @@ export class SystemSculptService {
       url: requestUrlValue.toString(),
       method: "GET",
       headers,
+      signal: params?.signal,
     });
 
     if (!response.ok) {
@@ -487,7 +465,12 @@ export class SystemSculptService {
       });
     }
 
-    const payload = (await response.json()) as any;
+    const payloadValue: unknown = await response.json();
+    const payload: Record<string, unknown> = payloadValue
+      && typeof payloadValue === "object"
+      && !Array.isArray(payloadValue)
+      ? payloadValue as Record<string, unknown>
+      : {};
     const asNumber = (value: unknown): number => {
       if (typeof value === "number" && Number.isFinite(value)) return value;
       if (typeof value === "string") {
@@ -515,54 +498,61 @@ export class SystemSculptService {
       return "request";
     };
 
-    const rawItems = Array.isArray(payload?.items) ? payload.items : [];
-    const items: CreditsUsageSnapshot[] = rawItems.map((item: any) => ({
-      id: asString(item?.id),
-      createdAt: asString(item?.created_at),
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const items: CreditsUsageSnapshot[] = rawItems.map((itemValue: unknown) => {
+      const item: Record<string, unknown> = itemValue
+        && typeof itemValue === "object"
+        && !Array.isArray(itemValue)
+        ? itemValue as Record<string, unknown>
+        : {};
+      return {
+      id: asString(item.id),
+      createdAt: asString(item.created_at),
       transactionType: "agent_turn",
-      endpoint: asNullableString(item?.endpoint),
-      usageKind: asUsageKind(item?.usage_kind),
-      durationSeconds: asNumber(item?.duration_seconds),
-      totalTokens: asNumber(item?.total_tokens),
-      inputTokens: asNumber(item?.input_tokens),
-      outputTokens: asNumber(item?.output_tokens),
-      cacheReadTokens: asNumber(item?.cache_read_tokens),
-      cacheWriteTokens: asNumber(item?.cache_write_tokens),
-      pageCount: asNumber(item?.page_count),
-      creditsCharged: asNumber(item?.credits_charged),
-      includedDelta: asNumber(item?.included_delta),
-      addOnDelta: asNumber(item?.add_on_delta),
-      totalDelta: asNumber(item?.total_delta),
-      includedBefore: asNumber(item?.included_before),
-      includedAfter: asNumber(item?.included_after),
-      addOnBefore: asNumber(item?.add_on_before),
-      addOnAfter: asNumber(item?.add_on_after),
-      totalBefore: asNumber(item?.total_before),
-      totalAfter: asNumber(item?.total_after),
-      rawUsd: asNumber(item?.raw_usd),
+      endpoint: asNullableString(item.endpoint),
+      usageKind: asUsageKind(item.usage_kind),
+      durationSeconds: asNumber(item.duration_seconds),
+      totalTokens: asNumber(item.total_tokens),
+      inputTokens: asNumber(item.input_tokens),
+      outputTokens: asNumber(item.output_tokens),
+      cacheReadTokens: asNumber(item.cache_read_tokens),
+      cacheWriteTokens: asNumber(item.cache_write_tokens),
+      pageCount: asNumber(item.page_count),
+      creditsCharged: asNumber(item.credits_charged),
+      includedDelta: asNumber(item.included_delta),
+      addOnDelta: asNumber(item.add_on_delta),
+      totalDelta: asNumber(item.total_delta),
+      includedBefore: asNumber(item.included_before),
+      includedAfter: asNumber(item.included_after),
+      addOnBefore: asNumber(item.add_on_before),
+      addOnAfter: asNumber(item.add_on_after),
+      totalBefore: asNumber(item.total_before),
+      totalAfter: asNumber(item.total_after),
+      rawUsd: asNumber(item.raw_usd),
       fileSizeBytes:
-        item?.file_size_bytes === null || item?.file_size_bytes === undefined
+        item.file_size_bytes === null || item.file_size_bytes === undefined
           ? null
-          : asNumber(item?.file_size_bytes),
-      fileFormat: asNullableString(item?.file_format),
-      billingFormulaVersion: asNullableString(item?.billing_formula_version),
+          : asNumber(item.file_size_bytes),
+      fileFormat: asNullableString(item.file_format),
+      billingFormulaVersion: asNullableString(item.billing_formula_version),
       billingCreditsPerUsd:
-        item?.billing_credits_per_usd === null || item?.billing_credits_per_usd === undefined
+        item.billing_credits_per_usd === null || item.billing_credits_per_usd === undefined
           ? null
-          : asNumber(item?.billing_credits_per_usd),
+          : asNumber(item.billing_credits_per_usd),
       billingMarkupMultiplier:
-        item?.billing_markup_multiplier === null || item?.billing_markup_multiplier === undefined
+        item.billing_markup_multiplier === null || item.billing_markup_multiplier === undefined
           ? null
-          : asNumber(item?.billing_markup_multiplier),
+          : asNumber(item.billing_markup_multiplier),
       billingCreditsExact:
-        item?.billing_credits_exact === null || item?.billing_credits_exact === undefined
+        item.billing_credits_exact === null || item.billing_credits_exact === undefined
           ? null
-          : asNumber(item?.billing_credits_exact),
-    }));
+          : asNumber(item.billing_credits_exact),
+      };
+    });
 
     return {
       items,
-      nextBefore: asNullableString(payload?.next_before),
+      nextBefore: asNullableString(payload.next_before),
     };
   }
   public async executeLocalVaultToolCall(options: {
@@ -571,7 +561,7 @@ export class SystemSculptService {
     timeoutMs?: number;
     signal?: AbortSignal;
   }): Promise<ToolCallResult> {
-    const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {}) as ToolCallRequest;
+    const request = ((options.toolCall as ToolCall)?.request || options.toolCall || {});
     if (options.signal?.aborted) {
       return {
         success: false,
@@ -593,7 +583,7 @@ export class SystemSculptService {
     }
 
     const rawArguments = request?.function?.arguments;
-    let parsedArgs: any = {};
+    let parsedArgs: unknown = {};
     if (typeof rawArguments === "string" && rawArguments.trim().length > 0) {
       try {
         parsedArgs = JSON.parse(rawArguments);
@@ -632,4 +622,27 @@ export class SystemSculptService {
     }
   }
 
+  // Declared here, beside its accessors, so the balance cache stays one unit.
+  private creditsBalanceCache: CreditsBalanceCache | null = null;
+
+  private creditsBalances(): CreditsBalanceCache {
+    return this.creditsBalanceCache ??= new CreditsBalanceCache({
+      fetch: (request) => this.getCreditsBalance(request),
+      licenseKey: () => this.plugin.settings?.licenseKey || "",
+    });
+  }
+
+  /**
+   * The credits balance for display and preflight surfaces: at most one read
+   * per minute per license key, shared across views and in-flight callers
+   * (#359). Pass `fresh` after a billed turn, a billing failure, or a purchase.
+   */
+  public readCreditsBalance(options: CreditsBalanceReadOptions = {}): Promise<CreditsBalanceSnapshot> {
+    return this.creditsBalances().read(options);
+  }
+
+  /** Hears every balance read from the server, e.g. to resume work after a top-up. */
+  public onCreditsBalance(listener: (balance: CreditsBalanceSnapshot) => void): () => void {
+    return this.creditsBalances().subscribe(listener);
+  }
 }

@@ -1,4 +1,5 @@
 import type { StudioAssetRef } from "./types";
+import { bytesToBase64 } from "../utils/base64";
 import type {
   StudioCaptionBoardAnnotation,
   StudioCaptionBoardCrop,
@@ -48,7 +49,7 @@ function xmlEscape(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 }
 
@@ -215,21 +216,8 @@ function detectStudioImageDimensions(bytes: ArrayBuffer, mimeType: string): Stud
   return null;
 }
 
-function base64FromArrayBuffer(bytes: ArrayBuffer): string {
-  const uint8 = new Uint8Array(bytes);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < uint8.length; index += chunkSize) {
-    binary += String.fromCharCode(...uint8.subarray(index, index + chunkSize));
-  }
-  if (typeof btoa !== "function") {
-    throw new Error("Base64 encoding is unavailable in this environment.");
-  }
-  return btoa(binary);
-}
-
 function arrayBufferToDataUrl(bytes: ArrayBuffer, mimeType: string): string {
-  return `data:${mimeType};base64,${base64FromArrayBuffer(bytes)}`;
+  return `data:${mimeType};base64,${bytesToBase64(new Uint8Array(bytes))}`;
 }
 
 function resolveTextAnchor(alignment: StudioCaptionBoardTextAlign): "start" | "middle" | "end" {
@@ -665,7 +653,7 @@ function drawIrreversibleBlurAnnotation(
   const patchCanvas = createCanvas(width, height);
   const patchCtx = patchCanvas.getContext("2d");
   if (!patchCtx) {
-    return;
+    throw new Error("Canvas context is unavailable for raster blur rendering.");
   }
   patchCtx.clearRect(0, 0, width, height);
   patchCtx.drawImage(ctx.canvas, x, y, width, height, 0, 0, width, height);
@@ -676,7 +664,7 @@ function drawIrreversibleBlurAnnotation(
   const reducedCanvas = createCanvas(reducedWidth, reducedHeight);
   const reducedCtx = reducedCanvas.getContext("2d");
   if (!reducedCtx) {
-    return;
+    throw new Error("Canvas context is unavailable for raster blur rendering.");
   }
   reducedCtx.imageSmoothingEnabled = true;
   reducedCtx.drawImage(patchCanvas, 0, 0, reducedWidth, reducedHeight);
@@ -934,6 +922,12 @@ export async function renderStudioCaptionBoardImageFromBytes(options: {
     } catch {
       // Fall back to SVG composition below.
     }
+  }
+
+  // SVG composition embeds the complete original image. It is safe for an
+  // editor preview, but would expose pixels hidden by a final crop or blur.
+  if (mode === "final" && (boardState.crop || boardState.annotations.some(annotation => annotation.kind === "blur_rect"))) {
+    throw new Error("Cannot export cropped or blurred images because raster rendering is unavailable. Try again when image rendering is available.");
   }
 
   return buildFallbackSvgFromBaseBytes({

@@ -3,7 +3,9 @@
  */
 
 /**
- * Generates a default chat title using the current date and time
+ * Generates a default chat title using the current date and time.
+ * The locale format can contain `/` and `:`, so this is a display title only;
+ * a file name derived from it must go through `toSafeVaultFileName`.
  * @returns A formatted chat title string
  */
 export function generateDefaultChatTitle(): string {
@@ -12,9 +14,12 @@ export function generateDefaultChatTitle(): string {
 }
 
 /**
- * Sanitizes a title to ensure it doesn't contain characters that are invalid in filenames
+ * Removes path separators and other filesystem-reserved characters from a
+ * chat title. Chat files are named by chat ID, so this title is display text
+ * and keeps characters such as `#` ("C#"). Any file or folder name derived
+ * from a title must go through `toSafeVaultFileName` instead.
  * @param title The title to sanitize
- * @returns A sanitized title safe for use as a filename
+ * @returns The title without path-breaking characters
  */
 export function sanitizeChatTitle(title: string): string {
   // Remove characters that are invalid in filenames: \ / : * ? " < > |

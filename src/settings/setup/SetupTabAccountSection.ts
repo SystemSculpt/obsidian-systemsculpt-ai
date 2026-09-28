@@ -200,7 +200,7 @@ export function renderAccountSection(
     codeSetting.addButton((button) => {
       button.setButtonText("Cancel").onClick(() => {
         connectService.cancelPending();
-        tabInstance.display();
+        void tabInstance.display();
       });
     });
   }
@@ -260,7 +260,7 @@ export function renderAccountSection(
           tabInstance.display();
         }
       } catch {
-        await plugin.getSettingsManager().updateSettings(priorLicenseState).catch(() => {});
+        await plugin.getSettingsManager().updateSettings(priorLicenseState).catch(() => undefined);
         new Notice("Unable to update license. Try again.");
       } finally {
         licenseInput.setValue("");
@@ -323,7 +323,7 @@ export function renderAccountSection(
     const syncCredits = async () => {
       try {
         creditsSetting.setDesc("Fetching credits balance…");
-        const balance = await aiService.getCreditsBalance();
+        const balance = await aiService.readCreditsBalance();
         if (
           (
             balance.usageClass === "master_auth"

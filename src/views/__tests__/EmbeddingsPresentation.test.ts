@@ -297,6 +297,20 @@ describe("SimilarNotesPresentation", () => {
     expect(root.querySelector<HTMLElement>(".ss-embeddings-view__index-status")?.hidden).toBe(true);
   });
 
+  it("repaints the lifecycle strip only when what it shows changes", () => {
+    const presentation = new SimilarNotesPresentation(root, createActions());
+    const indexing = indexSnapshot({ phase: "reconciling", total: 20, completed: 7, pending: 13, currentPath: "A.md" });
+    presentation.setIndexSnapshot(indexing);
+    const label = root.querySelector(".ss-embeddings-view__index-label");
+
+    presentation.setIndexSnapshot({ ...indexing, updatedAt: indexing.updatedAt + 1 });
+    expect(root.querySelector(".ss-embeddings-view__index-label")).toBe(label);
+
+    presentation.setIndexSnapshot({ ...indexing, completed: 8, pending: 12 });
+    expect(root.querySelector(".ss-embeddings-view__index-label")).not.toBe(label);
+    expect(root.querySelector(".ss-embeddings-view__index-label")?.textContent).toBe("Indexing 8 of 20");
+  });
+
   it("clears stale lifecycle state when indexing is disabled", () => {
     const presentation = new SimilarNotesPresentation(root, createActions());
     presentation.setIndexSnapshot(indexSnapshot({

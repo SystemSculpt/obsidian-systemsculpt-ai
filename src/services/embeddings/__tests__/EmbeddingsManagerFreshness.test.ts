@@ -45,6 +45,7 @@ function harness() {
     snapshot: jest.fn(() => { throw new Error("bulk snapshot must not back a point lookup"); }),
   };
   manager.failedFiles = new Map();
+  manager.similarCache = new Map();
   manager.config = {
     exclusions: { folders: [], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
   };

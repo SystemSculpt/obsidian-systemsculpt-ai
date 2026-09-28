@@ -1,7 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-import { readFileSync } from "node:fs";
 import { OperationProgressPanel } from "../OperationProgressPanel";
 
 describe("OperationProgressPanel", () => {
@@ -116,18 +115,5 @@ describe("OperationProgressPanel", () => {
       .toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(toggle.getAttribute("aria-label")).toBe("Expand");
-  });
-
-  it("keeps the fixed mobile panel above native navigation and inside safe areas", () => {
-    const css = readFileSync("src/css/modals/progress-toast.css", "utf8");
-
-    expect(css).toMatch(
-      /\.ss-mobile-layout \.systemsculpt-progress-stack\s*\{[^}]*bottom:\s*calc\([^}]*--ss-mobile-bottom-clearance[^}]*--ss-recorder-mobile-stack-offset/s,
-    );
-    expect(css).toMatch(
-      /\.ss-mobile-layout \.systemsculpt-progress-stack\s*\{[^}]*max-height:\s*calc\([^}]*safe-area-inset-top/s,
-    );
-    expect(css).toMatch(/env\(safe-area-inset-left,\s*0px\)/);
-    expect(css).toMatch(/env\(safe-area-inset-right,\s*0px\)/);
   });
 });

@@ -72,7 +72,7 @@ export function parseStudioNoteItems(raw: StudioJsonValue | undefined): StudioNo
   }
   const items: StudioNoteConfigItem[] = [];
   for (const entry of notes.items) {
-    const parsed = parseStudioNoteItem(entry as StudioJsonValue);
+    const parsed = parseStudioNoteItem(entry);
     if (!parsed) {
       continue;
     }
@@ -87,7 +87,7 @@ export function serializeStudioNoteItems(items: StudioNoteConfigItem[]): StudioJ
       path: normalizeStudioNotePath(item.path),
       enabled: item.enabled !== false,
     })),
-  } as unknown as StudioJsonValue;
+  };
 }
 
 function readStudioNoteItemsFromConfig(

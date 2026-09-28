@@ -53,7 +53,7 @@ export class PromptModal extends StandardModal {
     this.modalEl.addClass("ss-prompt-modal");
   }
 
-  open(): Promise<PromptResult | null> {
+  openAndWait(): Promise<PromptResult | null> {
     this.result = null;
     this.settled = false;
     this.checkboxEl = undefined;
@@ -309,5 +309,5 @@ export async function showPrompt(
   options: PromptOptions = {}
 ): Promise<PromptResult | null> {
   const prompt = new PromptModal(app, message, options);
-  return prompt.open();
+  return prompt.openAndWait();
 }

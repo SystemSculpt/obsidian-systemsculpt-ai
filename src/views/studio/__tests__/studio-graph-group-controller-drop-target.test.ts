@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { StudioProjectSession } from "../../../studio/StudioProjectSession";
 import type { StudioProjectV1 } from "../../../studio/types";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
 import {
@@ -110,6 +111,31 @@ function createController(
 }
 
 describe("StudioGraphGroupController drop target resolution", () => {
+  it("keeps an output container drag anchored to its initial offset across session patches", () => {
+    const project = createProject();
+    project.graph.groups![0].outputForNodeId = "drag_far";
+    project.graph.groups![0].outputOffset = {x: 96, y: 0};
+    const session = new StudioProjectSession({projectPath: "test.systemsculpt", project, saveProject: async () => undefined});
+    const live = session.getProject();
+    const controller = createController(live, {
+      getGraphZoom: () => 0.25,
+      commitProjectMutation: (reason, mutator) => session.mutate(reason, mutator),
+    });
+    const frame = document.body.createDiv();
+    const raf = jest.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {callback(0); return 1;});
+    const harness = installWindowPointerListenerHarness();
+    try {
+      (controller as any).startGroupDrag("group_1", {button: 0, pointerId: 17, clientX: 100, clientY: 100, preventDefault() {}, stopPropagation() {}}, frame);
+      for (let step = 1; step <= 20; step++) {
+        harness.emit("pointermove", {pointerId: 17, clientX: 100 + step, clientY: 100 - step} as PointerEvent);
+        if (step >= 3) expect(live.graph.groups![0].outputOffset).toEqual({x: 96 + step * 4, y: -step * 4});
+      }
+      harness.emit("pointerup", {pointerId: 17, clientX: 120, clientY: 80} as PointerEvent);
+      expect(live.graph.groups![0].outputOffset).toEqual({x: 176, y: -80});
+      expect(live.graph.nodes[0].position).toEqual({x: 180, y: 20});
+    } finally { controller.clearRenderBindings(); harness.restore(); raf.mockRestore(); session.blockProjectFileWrites(); frame.remove(); }
+  });
+
   it("matches a group when dragged node center is inside bounds", () => {
     const project = createProject();
     const controller = createController(project);

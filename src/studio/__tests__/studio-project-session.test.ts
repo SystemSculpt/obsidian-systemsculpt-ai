@@ -1,3 +1,4 @@
+import { reconcileStudioProject } from "../StudioProjectReconciliation";
 import { StudioProjectSession } from "../StudioProjectSession";
 import type { StudioProjectV1 } from "../types";
 
@@ -44,6 +45,33 @@ describe("StudioProjectSession", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it("persists history as a local edit and notifies both views without resetting the accepted base", async () => {
+    let disk = projectFixture();
+    disk.name = "4";
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: disk,
+      saveProject: async (_path, desired, _before, base) => {
+        const result = reconcileStudioProject(base!, desired, disk);
+        disk = result.project;
+        return result;
+      },
+    });
+    const activeView = jest.fn(() => session.getProject().name);
+    const hiddenView = jest.fn(() => session.getProject().name);
+    session.subscribe(activeView);
+    session.subscribe(hiddenView);
+    const restored = session.getProjectSnapshot();
+    restored.name = "3";
+    expect(session.applyHistorySnapshot(restored)).toBe(true);
+    expect(activeView).toHaveLastReturnedWith("3");
+    expect(hiddenView).toHaveLastReturnedWith("3");
+    await session.flushPendingSaveWork();
+    expect(disk.name).toBe("3");
+    expect(session.getProject().name).toBe("3");
+    expect(session.getDebugState().hasPendingLocalSaveWork).toBe(false);
+    await session.close();
   });
 
   it("returns defensive project snapshots so callers cannot mutate session state accidentally", () => {
@@ -209,10 +237,10 @@ describe("StudioProjectSession", () => {
       project.name = "Still editable in memory";
     });
     await session.flushPendingSaveWork({ force: true });
-    await session.close();
+    await expect(session.close()).rejects.toThrow("unsaved edits");
 
     expect(saveProject).not.toHaveBeenCalled();
-    expect(saveBlockedProjectRecovery).toHaveBeenCalledTimes(1);
+    expect(saveBlockedProjectRecovery).not.toHaveBeenCalled();
     expect(session.hasPendingLocalSaveWork()).toBe(true);
   });
 
@@ -248,7 +276,7 @@ describe("StudioProjectSession", () => {
     expect(session.hasPendingLocalSaveWork()).toBe(true);
   });
 
-  it("preserves blocked canvas work through the plugin-owned recovery callback on close", async () => {
+  it("retains blocked work in its session without creating another document", async () => {
     const saveBlockedProjectRecovery = jest.fn(async () => {});
     const session = new StudioProjectSession({
       projectPath: "Studio/Test.systemsculpt",
@@ -262,12 +290,10 @@ describe("StudioProjectSession", () => {
       project.name = "Unsaved canvas survives close";
     });
 
-    await session.close();
-
-    expect(saveBlockedProjectRecovery).toHaveBeenCalledWith(
-      "Studio/Test.systemsculpt",
-      expect.objectContaining({ name: "Unsaved canvas survives close" })
-    );
+    await expect(session.close()).rejects.toThrow("unsaved edits");
+    expect(session.isDisposed()).toBe(false);
+    expect(session.getProject().name).toBe("Unsaved canvas survives close");
+    expect(saveBlockedProjectRecovery).not.toHaveBeenCalled();
   });
 
   it("keeps the session alive when blocked canvas recovery cannot be stored", async () => {
@@ -285,7 +311,7 @@ describe("StudioProjectSession", () => {
       project.name = "Only remaining canvas copy";
     });
 
-    await expect(session.close()).rejects.toThrow("storage unavailable");
+    await expect(session.close()).rejects.toThrow("unsaved edits");
 
     expect(session.isDisposed()).toBe(false);
     expect(session.hasPendingLocalSaveWork()).toBe(true);
@@ -367,4 +393,93 @@ describe("StudioProjectSession", () => {
       },
     );
   });
+  it("keeps keystrokes made during persistence and adopts unrelated reconciled fields", async () => {
+    const project = projectFixture();
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    let finish!: (result: { project: StudioProjectV1; conflicts: string[] }) => void;
+    let submitted!: StudioProjectV1;
+    const saveProject = jest.fn(async (_path: string, snapshot: StudioProjectV1) => {
+      submitted = snapshot;
+      return new Promise<{ project: StudioProjectV1; conflicts: string[] }>(resolve => { finish = resolve; });
+    });
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject });
+    session.mutate("node.config", current => { current.graph.nodes[0].config.value = "first edit"; });
+    await jest.advanceTimersByTimeAsync(40);
+    session.mutate("node.config", current => { current.graph.nodes[0].config.value = "second edit"; });
+    expect(submitted.graph.nodes[0].config.value).toBe("first edit");
+    submitted.name = "An external title";
+    finish({ project: submitted, conflicts: [] });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(session.getProject().graph.nodes[0].config.value).toBe("second edit");
+    expect(session.getProject().name).toBe("An external title");
+    expect(session.getDebugState().hasPendingLocalSaveWork).toBe(true);
+    session.blockProjectFileWrites();
+  });
+
+  it("rebases an async producer without erasing edits made while it awaited I/O", async () => {
+    const project = projectFixture();
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => undefined });
+    let resume!: () => void;
+    const waiting = new Promise<void>(resolve => { resume = resolve; });
+    const mutation = session.mutateAsync("runtime.projector", async draft => { await waiting; draft.graph.nodes[0].config.value = "generated result"; });
+    session.mutate("node.title", current => { current.name = "Typed while running"; });
+    resume(); await mutation;
+    expect(session.getProject().name).toBe("Typed while running");
+    expect(session.getProject().graph.nodes[0].config.value).toBe("generated result");
+    await session.close();
+  });
+
+  it("keeps edits made while an async producer preserves its conflicting draft", async () => {
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: projectFixture(),
+      saveProject: async () => undefined, saveBlockedProjectRecovery: () => recovery,
+    });
+    let finishProducer!: () => void;
+    const producer = new Promise<void>(resolve => { finishProducer = resolve; });
+    const pending = session.mutateAsync("runtime.projector", async draft => {
+      await producer;
+      draft.name = "Generated name";
+    });
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    finishProducer();
+    await Promise.resolve(); await Promise.resolve();
+    session.mutate("node.title", current => { current.name = "Latest user edit"; });
+    finishRecovery();
+    await pending;
+    expect(session.getProject().name).toBe("Latest user edit");
+    await session.close();
+  });
+
+  it("keeps edits made during external-conflict recovery before adopting the external document", async () => {
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    const session = new StudioProjectSession({
+      projectPath: "Studio/Test.systemsculpt", project: projectFixture(),
+      saveProject: async () => undefined, saveBlockedProjectRecovery: () => recovery,
+    });
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    const external = projectFixture(); external.name = "External name";
+    const pending = session.reconcileExternalProject(external, null);
+    session.mutate("node.title", current => { current.name = "Latest user edit"; });
+    finishRecovery();
+    await pending;
+    expect(session.getProject().name).toBe("Latest user edit");
+    await session.close();
+  });
+
+  it("allows continued editing after a close fails without a recovery copy", async () => {
+    const saveBlockedProjectRecovery = jest.fn(async () => {});
+    const session = new StudioProjectSession({projectPath: "Studio/Test.systemsculpt", project: projectFixture(), saveProject: async () => undefined, saveBlockedProjectRecovery});
+    session.blockProjectFileWrites();
+    session.mutate("node.title", current => { current.name = "First user edit"; });
+    await expect(session.close()).rejects.toThrow("unsaved edits");
+    session.mutate("node.title", current => { current.name = "Continued edit"; });
+    expect(session.getProject().name).toBe("Continued edit");
+    expect(session.isDisposed()).toBe(false);
+    expect(saveBlockedProjectRecovery).not.toHaveBeenCalled();
+  });
+
 });

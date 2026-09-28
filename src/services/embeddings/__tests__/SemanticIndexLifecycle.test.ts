@@ -28,4 +28,43 @@ describe("SemanticIndexLifecycle", () => {
     lifecycle.update({ phase: "idle", pending: 0 });
     expect(observed).toHaveLength(2);
   });
+
+  it("drops updates that change nothing an observer can see", () => {
+    const lifecycle = new SemanticIndexLifecycle();
+    const observed: unknown[] = [];
+    lifecycle.subscribe((snapshot) => observed.push(snapshot));
+    const first = lifecycle.update({ phase: "idle", ready: true, total: 3, completed: 3 });
+
+    const second = lifecycle.update({ phase: "idle", ready: true, total: 3, completed: 3, lastError: null });
+
+    expect(second).toBe(first);
+    expect(observed).toHaveLength(2);
+    lifecycle.clearListeners();
+  });
+
+  it("coalesces progress-only updates to about four per second but publishes phase changes at once", () => {
+    jest.useFakeTimers();
+    try {
+      const lifecycle = new SemanticIndexLifecycle();
+      const observed: Array<{ phase: string; completed: number }> = [];
+      lifecycle.subscribe((snapshot) => observed.push({ phase: snapshot.phase, completed: snapshot.completed }));
+      lifecycle.update({ phase: "reconciling", ready: true, total: 100, completed: 0 });
+      for (let completed = 1; completed <= 50; completed += 1) lifecycle.update({ completed });
+
+      expect(observed).toHaveLength(2);
+      expect(lifecycle.getSnapshot().completed).toBe(50);
+      jest.advanceTimersByTime(250);
+      expect(observed).toHaveLength(3);
+      expect(observed[2]).toEqual({ phase: "reconciling", completed: 50 });
+
+      lifecycle.update({ completed: 51 });
+      lifecycle.update({ phase: "idle", completed: 100 });
+      expect(observed.at(-1)).toEqual({ phase: "idle", completed: 100 });
+      jest.advanceTimersByTime(1_000);
+      expect(observed.at(-1)).toEqual({ phase: "idle", completed: 100 });
+      lifecycle.clearListeners();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

@@ -10,7 +10,7 @@ const NETWORK_OWNERSHIP_ROOTS = [
   "src/services/managed",
   "src/services/images",
   "src/services/transcription",
-  "src/services/workflow/WorkflowEngineService.ts",
+  "src/features/inbox-transcription/InboxTranscriptionService.ts",
   "src/services/DocumentProcessingService.ts",
   "src/services/PostProcessingService.ts",
   "src/services/TitleGenerationService.ts",
@@ -38,7 +38,7 @@ const FORBIDDEN_PACKAGES = [
   "react-dom",
 ];
 const CHAT_AUTHORITY_ROOTS = [
-  "src/services/chat/",
+  "src/chat/",
   "src/services/managed/",
   "src/views/chatview/",
 ];
@@ -51,6 +51,21 @@ const LEGACY_ALLOWLIST = new Set([
 ]);
 const TOOL_COMPATIBILITY_ALLOWLIST = new Set([
   "src/tools/toolNames.ts",
+]);
+// Mirrors the OpenAI rule in scripts/plugin-artifacts.mjs so a provider
+// identity is rejected at the source, not only in the compiled bundle.
+const UPSTREAM_PROVIDER_IDENTITY = /\bopenai\b|openai(?:api|client|credential|key|model|provider|secret)|api\.openai\.com/i;
+// The retired BYOK credential key that schema v4 prunes from data.json. Its
+// name is an upstream provider identity, so SettingsMigrator spells it with
+// character codes instead of a literal. That is the ONLY sanctioned encoded
+// identifier in src: the named constant must decode to exactly this value, the
+// sanctioned file may hold no other encoded literal, and no other production
+// file may hard-code a character-code string at all.
+const ENCODED_IDENTIFIER_ALLOWLIST = new Map([
+  [
+    "src/core/settings/migrations/SettingsMigrator.ts",
+    { constant: "LEGACY_CLIENT_CREDENTIAL_KEY", decodes: "openAiApiKey" },
+  ],
 ]);
 const RETIRED_CHAT_TOOL_PREFIX = /\bfilesystem_[a-z0-9_]+\b|\bmcp[-_:][a-z0-9_-]+/i;
 const CLIENT_CONTINUATION_POLICY = /\bautoContinue\b/;
@@ -275,6 +290,69 @@ function importedBindings(source, fileName) {
   return Array.from(bindings.values());
 }
 
+/**
+ * `String.fromCharCode(<numeric literals only>)` calls: the one way to smuggle
+ * a forbidden identifier past a text policy. Dynamic decoding (spread of a
+ * byte view, a loop variable) is ordinary binary handling and is not reported.
+ */
+function encodedStringLiterals(source, fileName) {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const found = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === "String"
+      && node.expression.name.text === "fromCharCode"
+      && node.arguments.length > 0
+      && node.arguments.every((argument) => ts.isNumericLiteral(argument))
+    ) {
+      const constant = ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
+        ? node.parent.name.text
+        : null;
+      found.push({
+        constant,
+        decoded: String.fromCharCode(...node.arguments.map((argument) => Number(argument.text))),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+function encodedIdentifierViolations(source, relative) {
+  const encoded = encodedStringLiterals(source, relative);
+  const describe = ({ constant, decoded }) =>
+    `${constant ?? "(inline)"} -> ${JSON.stringify(decoded)}`;
+  const allowed = ENCODED_IDENTIFIER_ALLOWLIST.get(relative);
+  if (!allowed) {
+    return encoded.map((entry) => `${relative}: encoded string literal ${describe(entry)}`);
+  }
+  const isSanctioned = ({ constant, decoded }) =>
+    constant === allowed.constant && decoded === allowed.decodes;
+  const findings = encoded
+    .filter((entry) => !isSanctioned(entry))
+    .map((entry) => `${relative}: encoded string literal ${describe(entry)} is not the sanctioned ${allowed.constant}`);
+  if (!encoded.some(isSanctioned)) {
+    findings.push(`${relative}: expected ${allowed.constant} to decode to ${JSON.stringify(allowed.decodes)}`);
+  }
+  return findings;
+}
+
+function upstreamProviderIdentityViolations(source, relative) {
+  return UPSTREAM_PROVIDER_IDENTITY.test(source)
+    ? [`${relative}: upstream provider identity`]
+    : [];
+}
+
 function vendorImportViolations(source, relative) {
   return importedBindings(source, relative).flatMap(({ specifier, binding }) => {
     if (!isForbiddenPackageSpecifier(specifier)) return [];
@@ -328,6 +406,8 @@ function authorityViolations(file) {
   const findings = [
     ...vendorImportViolations(source, relative),
     ...chatAuthorityConceptViolations(source, relative),
+    ...upstreamProviderIdentityViolations(source, relative),
+    ...encodedIdentifierViolations(source, relative),
   ];
   if (!LEGACY_ALLOWLIST.has(relative) && CUSTOM_PROVIDER.test(source)) {
     findings.push(`${relative}: custom-provider concept`);
@@ -337,7 +417,8 @@ function authorityViolations(file) {
   if (!TOOL_COMPATIBILITY_ALLOWLIST.has(relative) && RETIRED_TOOL_ARCHITECTURE.test(source)) {
     findings.push(`${relative}: retired tool architecture`);
   }
-  if (relative.startsWith("src/views/chatview/") && CLIENT_CONTINUATION_POLICY.test(source)) {
+  if ((relative.startsWith("src/chat/") || relative.startsWith("src/views/chatview/"))
+    && CLIENT_CONTINUATION_POLICY.test(source)) {
     findings.push(`${relative}: client-owned continuation policy`);
   }
   return findings;
@@ -362,7 +443,7 @@ function networkViolations(file) {
 }
 
 test("first-party client import policy rejects every vendor SDK import form", () => {
-  const relative = "src/views/chatview/agent/FutureFirstPartyRuntime.ts";
+  const relative = "src/chat/managed/FutureFirstPartyRuntime.ts";
   const mutations = [
     {
       label: "extra named symbol",
@@ -452,6 +533,62 @@ test("chat authority policy rejects renamed client-owned orchestration mutations
   }
 });
 
+test("encoded identifier policy sanctions only the retired credential key in SettingsMigrator", () => {
+  const sanctionedFile = "src/core/settings/migrations/SettingsMigrator.ts";
+  const encodedKey = "String.fromCharCode(111, 112, 101, 110, 65, 105, 65, 112, 105, 75, 101, 121)";
+  const sanctioned = `const LEGACY_CLIENT_CREDENTIAL_KEY = ${encodedKey};`;
+
+  assert.deepEqual(encodedIdentifierViolations(sanctioned, sanctionedFile), []);
+  assert.deepEqual(
+    encodedIdentifierViolations(
+      "const header = String.fromCharCode(...bytes.slice(0, 4));",
+      "src/studio/StudioCaptionBoardComposition.ts",
+    ),
+    [],
+    "dynamic decoding of a byte view is not an encoded literal",
+  );
+
+  const rejected = [
+    {
+      label: "the same constant in any other production file",
+      source: sanctioned,
+      relative: "src/views/chatview/FutureChatRuntime.ts",
+    },
+    {
+      label: "a renamed constant in the sanctioned file",
+      source: `const OTHER_KEY = ${encodedKey};`,
+      relative: sanctionedFile,
+    },
+    {
+      label: "a different decoded value in the sanctioned file",
+      source: "const LEGACY_CLIENT_CREDENTIAL_KEY = String.fromCharCode(97, 98, 99);",
+      relative: sanctionedFile,
+    },
+    {
+      label: "a second encoded literal in the sanctioned file",
+      source: `${sanctioned} const EXTRA = String.fromCharCode(97);`,
+      relative: sanctionedFile,
+    },
+    {
+      label: "an inline encoded literal in the sanctioned file",
+      source: `${sanctioned} keys.push(String.fromCharCode(97));`,
+      relative: sanctionedFile,
+    },
+  ];
+  for (const mutation of rejected) {
+    assert.ok(
+      encodedIdentifierViolations(mutation.source, mutation.relative).length > 0,
+      `${mutation.label} was not rejected`,
+    );
+  }
+
+  assert.deepEqual(
+    upstreamProviderIdentityViolations('const key = "openAiApiKey";', sanctionedFile),
+    [`${sanctionedFile}: upstream provider identity`],
+    "a plain provider-credential literal is rejected even in the sanctioned file",
+  );
+});
+
 test("managed production modules have only SystemSculpt network ownership", () => {
   const productionFilesToCheck = PRODUCTION_ROOTS.flatMap(productionFiles);
   assert.ok(productionFilesToCheck.length > 0, "production tree is empty");
@@ -487,9 +624,9 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
   for (const retiredPath of [
     "src/views/chatview/ManagedAgentController.ts",
     "src/views/chatview/turn/ManagedChatRuntimeAdapter.ts",
-    "src/services/chat/AcceptedChatRequestSnapshot.ts",
-    "src/services/chat/ChatRequestPreparationService.ts",
-    "src/services/chat/ManagedToolResult.ts",
+    "src/chat/managed/AcceptedChatRequestSnapshot.ts",
+    "src/chat/managed/ChatRequestPreparationService.ts",
+    "src/chat/managed/ManagedToolResult.ts",
     "src/services/managed/ManagedChatInputLimits.ts",
     "src/services/managed/ManagedChatSessionBudget.ts",
   ]) {
@@ -500,14 +637,6 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
     );
   }
 
-  const managedClient = fs.readFileSync(
-    path.resolve("src/services/managed/ManagedCapabilityClient.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(
-    managedClient,
-    /^\s*(?:public\s+)?(?:async\s+)?(?:request|stream|job|acquireChatTurnLease)\s*\(/mu,
-  );
   const hostedTransport = fs.readFileSync(
     path.resolve("src/services/managed/adapters/HostedTransportAdapter.ts"),
     "utf8",
@@ -524,7 +653,7 @@ test("thin Chat has no legacy client loop or generic managed-chat authority", ()
 });
 
 test("current chat code and fixtures use only canonical first-party tool names", () => {
-  const findings = sourceFiles("src/views/chatview").flatMap((file) => {
+  const findings = [...sourceFiles("src/chat"), ...sourceFiles("src/views/chatview")].flatMap((file) => {
     const source = fs.readFileSync(file, "utf8");
     const match = source.match(RETIRED_CHAT_TOOL_PREFIX);
     const relative = toRepositoryPath(path.relative(process.cwd(), file));

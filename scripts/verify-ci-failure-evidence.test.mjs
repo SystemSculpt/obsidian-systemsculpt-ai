@@ -9,7 +9,6 @@ import {
   writeBuildProvenance,
   writeJsonEvidence,
 } from "./build-provenance.mjs";
-import { CHATVIEW_CRITICAL_MUTANTS } from "./check/chatview-critical-mutants.manifest.mjs";
 import { CANONICAL_API_BASE_URL } from "./plugin-build-options.mjs";
 import { inspectPluginArtifacts } from "./plugin-artifacts.mjs";
 import { verifyCiFailureEvidence as verifyCiFailureEvidenceImpl } from "./verify-ci-failure-evidence.mjs";
@@ -99,54 +98,6 @@ function writeRecordedEvidence(
   });
 }
 
-function writeMutationRecord(root, record) {
-  return writeJsonEvidence(
-    path.join(root, ".cache", "ci-evidence", "chatview-critical-mutants.json"),
-    record,
-  );
-}
-
-function mutationRecord({
-  status = "passed",
-  baselineStatus = "passed",
-  results = CHATVIEW_CRITICAL_MUTANTS.map((mutant) => ({
-    id: mutant.id,
-    category: mutant.category,
-    status: "killed",
-    durationMs: 1,
-    testPaths: [...mutant.testPaths],
-    argv: ["node", "scripts/jest.mjs", "--runTestsByPath", ...mutant.testPaths],
-    cwd: "/tmp/mirror",
-    output: null,
-  })),
-  failure = null,
-} = {}) {
-  return {
-    schemaVersion: 1,
-    runId: "mutation-run",
-    recordedAt: "2026-07-28T12:00:00.000Z",
-    status,
-    mutantsTotal: CHATVIEW_CRITICAL_MUTANTS.length,
-    baseline: baselineStatus === "not_run"
-      ? {
-          status: "not_run",
-          suiteCount: 0,
-          argv: null,
-          cwd: null,
-          output: null,
-        }
-      : {
-          status: baselineStatus,
-          suiteCount: 3,
-          argv: ["node", "scripts/jest.mjs"],
-          cwd: "/tmp/mirror",
-          output: null,
-        },
-    results,
-    failure,
-  };
-}
-
 test("verifies structured CI evidence sidecars for a failed gate", (t) => {
   const root = fixture(t);
   withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
@@ -157,11 +108,10 @@ test("verifies structured CI evidence sidecars for a failed gate", (t) => {
   const summary = verifyCiFailureEvidence({ root, job: "plugin" });
   assert.equal(summary.jestPhaseStarted, true);
   assert.equal(summary.jestEvidenceCount, 1);
-  assert.equal(summary.mutationEvidencePresent, false);
 });
 
 for (const job of ["plugin", "compatibility"]) {
-  test(`accepts pre-Jest and pre-mutation ${job} failures`, (t) => {
+  test(`accepts pre-Jest ${job} failures`, (t) => {
     const root = fixture(t);
     withJestEvidenceDir(t, ".cache/ci-evidence/jest-seeds");
     writeRecordedEvidence(root);
@@ -169,7 +119,6 @@ for (const job of ["plugin", "compatibility"]) {
     const summary = verifyCiFailureEvidence({ root, job });
     assert.equal(summary.jestPhaseStarted, false);
     assert.equal(summary.jestEvidenceCount, 0);
-    assert.equal(summary.mutationEvidencePresent, false);
   });
 }
 
@@ -402,70 +351,6 @@ test("rejects malformed nested hosted Jest evidence", (t) => {
   assert.throws(
     () => verifyCiFailureEvidence({ root, job: "plugin" }),
     /Jest evidence is not valid JSON/,
-  );
-});
-
-test("accepts complete terminal mutation evidence", (t) => {
-  const root = fixture(t);
-  writeRecordedEvidence(root);
-  writeMutationRecord(root, mutationRecord());
-
-  const summary = verifyCiFailureEvidence({ root, job: "plugin" });
-  assert.equal(summary.mutationEvidencePresent, true);
-});
-
-test("accepts an early mutation infrastructure failure before the baseline starts", (t) => {
-  const root = fixture(t);
-  writeRecordedEvidence(root);
-  writeMutationRecord(root, mutationRecord({
-    status: "failed",
-    baselineStatus: "not_run",
-    results: [],
-    failure: "Failed to create the isolated source mirror.",
-  }));
-
-  const summary = verifyCiFailureEvidence({ root, job: "plugin" });
-  assert.equal(summary.mutationEvidencePresent, true);
-});
-
-test("rejects mutation evidence that claims success with missing results", (t) => {
-  const root = fixture(t);
-  writeRecordedEvidence(root);
-  writeMutationRecord(root, mutationRecord({ results: [] }));
-
-  assert.throws(
-    () => verifyCiFailureEvidence({ root, job: "plugin" }),
-    /passed without a complete killed-mutant record/,
-  );
-});
-
-test("rejects mutation evidence that omits a curated mutant", (t) => {
-  const root = fixture(t);
-  writeRecordedEvidence(root);
-  const record = mutationRecord();
-  record.results[0] = {
-    ...record.results[0],
-    id: "not-the-curated-mutant",
-  };
-  writeMutationRecord(root, record);
-
-  assert.throws(
-    () => verifyCiFailureEvidence({ root, job: "plugin" }),
-    /result 1 must be/,
-  );
-});
-
-test("rejects non-terminal mutation evidence", (t) => {
-  const root = fixture(t);
-  writeRecordedEvidence(root);
-  writeMutationRecord(root, {
-    ...mutationRecord(),
-    status: "running",
-  });
-
-  assert.throws(
-    () => verifyCiFailureEvidence({ root, job: "plugin" }),
-    /must record a terminal status/,
   );
 });
 

@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import {
   getText,
   parseStructuredPromptInput,
@@ -22,7 +22,7 @@ export const textGenerationNode: StudioNodeDefinition = {
     fields: [
       {
         key: "systemPrompt",
-        label: "System Prompt",
+        label: "System prompt",
         type: "textarea",
         required: false,
         placeholder: "Optional system instructions. Supports {{prompt}} placeholder.",
@@ -35,12 +35,14 @@ export const textGenerationNode: StudioNodeDefinition = {
     if (lockOutput) {
       return {
         outputs: {
-          text: getText(context.node.config.value as StudioJsonValue),
+          text: getText(context.node.config.value),
         },
       };
     }
 
     const result = await context.services.api.generateText({
+      projectId: context.projectId,
+      log: context.log,
       runId: context.runId,
       nodeId: context.node.id,
       projectPath: context.projectPath,
@@ -51,7 +53,7 @@ export const textGenerationNode: StudioNodeDefinition = {
         if (!prompt) {
           throw new Error(`Text generation node "${context.node.id}" requires a prompt input.`);
         }
-        const configuredTemplate = getText(context.node.config.systemPrompt as StudioJsonValue);
+        const configuredTemplate = getText(context.node.config.systemPrompt);
         const templateVariables = resolveTemplateVariables(context);
         const configuredSystemPrompt = renderTemplate(configuredTemplate, templateVariables).trim();
         const systemPrompt = configuredSystemPrompt || structured.systemPrompt.trim() || undefined;
@@ -62,7 +64,7 @@ export const textGenerationNode: StudioNodeDefinition = {
       outputs: {
         text: result.text,
       },
-      managedOperations: [result.operation],
+      managedOperations: result.operation ? [result.operation] : [],
     };
   },
 };

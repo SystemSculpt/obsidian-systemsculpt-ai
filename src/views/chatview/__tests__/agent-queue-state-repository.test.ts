@@ -182,8 +182,14 @@ describe("AgentQueueStateRepository", () => {
 
     const loaded = await repository.load("chat-1");
     expect(attachmentAdapter.readBinary).not.toHaveBeenCalled();
-    await expect(store.hydratePersistedAttachment(
-      store.dehydrateAttachment(loaded[0].attachments![0]),
-    )).rejects.toThrow("missing");
+    const restored = await store.hydrateMessage({
+      role: "user", message_id: loaded[0].id, content: loaded[0].text,
+      attachmentMetadata: [{
+        ...store.dehydrateAttachment(loaded[0].attachments![0]), contentPartIndex: 0,
+      }],
+    });
+    expect(restored.content).toEqual([expect.objectContaining({
+      type: "text", text: expect.stringContaining("[[SYSTEMSCULPT_ATTACHMENT_UNAVAILABLE]]"),
+    })]);
   });
 });

@@ -40,8 +40,27 @@ test("response failure recovery covers Retry, incident copy, reload, and console
   assert.equal(actions.filter((action) => action === "e2e.console.assertNoErrors").length, 1);
   assert.equal(scenario.cleanup.at(-1).action, "e2e.console.assertNoErrors");
   assert.ok(labels.includes("Retry resubmits the failed turn"));
-  assert.ok(labels.includes("copy report enters its preparing state immediately"));
-  assert.ok(labels.includes("reload preserves the exact canonical copied report bytes"));
+  assert.ok(labels.includes("copy report ID enters its copying state immediately"));
+  assert.ok(labels.includes("reload preserves the exact canonical persisted report bytes"));
+
+  const copyReportTexts = scenario.steps
+    .filter((step) => step.params?.target === "chat.turn.copy-incident-report")
+    .map((step) => step.params.text ?? step.params.immediateTextEquals);
+  assert.deepEqual(copyReportTexts, [
+    module.COPY_REPORT_ID_LABEL,
+    module.COPYING_REPORT_ID_LABEL,
+    module.REPORT_ID_COPIED_LABEL,
+    module.COPY_REPORT_ID_LABEL,
+    module.COPYING_REPORT_ID_LABEL,
+    module.REPORT_ID_COPIED_LABEL,
+  ]);
+  const renderer = fs.readFileSync(
+    path.join(root, "src/views/chatview/AgentConversationRenderer.ts"),
+    "utf8",
+  );
+  for (const text of new Set(copyReportTexts)) {
+    assert.ok(renderer.includes(`label: "${text}"`), `the failure card never shows "${text}"`);
+  }
 
   const capture = scenario.steps.find((step) =>
     step.action === "e2e.incident.captureCopiedReport");

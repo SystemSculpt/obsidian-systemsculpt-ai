@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { App, TFile } from "obsidian";
+import { CodexThreadLocator } from "../../../services/codex/CodexThreadLocator";
+import { App, TFile, Platform } from "obsidian";
 import { AgentChatView } from "../AgentChatView";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import {
@@ -15,9 +16,30 @@ import type { ChatMessageAttachment } from "../attachments/ChatMessageAttachment
 import type {
   AgentRunInput,
   AgentRunResult,
-} from "../agent/ChatSession";
+} from "../../../chat/managed/ChatSession";
 import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
+import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
+import {
+  isThinAgentContextWithinLimits,
+  parseThinAgentContextRequest,
+  type MeasuredThinAgentContext,
+  type ThinAgentContextSource,
+} from "../../../services/managed/ThinAgentV1Contract";
+
+const EMPTY_CONTEXT: MeasuredThinAgentContext = {
+  sources: [],
+  measurement: {
+    largestTextBlockBytes: 0,
+    totalTextBytes: 0,
+    imageCount: 0,
+    largestImageBytes: 0,
+    totalImageBytes: 0,
+    imageMimeTypes: [],
+  },
+};
+
+jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -222,7 +244,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     thinClientId: `client_${"c".repeat(32)}`,
     chatId: "",
     chatTitle: "New chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -352,7 +374,7 @@ function createHistoricalResubmitHarness(
     thinClientId: `client_${"c".repeat(32)}`,
     chatId: "2026-07-30 08-02-11",
     chatTitle: "Saved chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     applyTranscriptIdentity: jest.fn(),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -532,7 +554,7 @@ async function createPersistentHistoricalResubmitHarness(
     thinClientId: `client_${"c".repeat(32)}`,
     chatId,
     chatTitle: "Saved chat",
-    readThinAgentContextSources: jest.fn(async () => []),
+    readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
     prepareSubmission: jest.fn(async (submission: AgentComposerSubmit) => submission),
     bindQueueToChat: jest.fn(async () => undefined),
     updateViewState: jest.fn(),
@@ -608,7 +630,7 @@ function createSavedChatLoadHarness(
     subscribe: jest.fn(() => jest.fn()),
   };
   const transcript = {
-    load: jest.fn(async () => loaded),
+    load: jest.fn(async (_chatId: string) => loaded),
     saveMetadata: jest.fn(async () => loaded),
     snapshot: jest.fn(() => loaded),
   };
@@ -776,7 +798,7 @@ describe("AgentChatView composer admission", () => {
       plugin: {
         settings: { licenseKey: "test-license" },
       },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       workspace: { setCreditsBalance },
       creditsPromise: null,
       creditsBalance: null,
@@ -826,7 +848,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordClientRequestLifecycle },
       workspace: { setCreditsBalance: jest.fn() },
       creditsPromise: null,
@@ -1106,7 +1128,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
       workspace: { setCreditsBalance },
       creditsPromise: null,
@@ -1149,7 +1171,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { getCreditsBalance },
+      aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
       workspace: { setCreditsBalance: jest.fn() },
       creditsPromise: null,
@@ -1660,7 +1682,7 @@ describe("AgentChatView composer admission", () => {
     const capturedPinnedSets: string[][] = [];
     const readThinAgentContextSources = jest.fn(async (entries: ReadonlySet<string>) => {
       capturedPinnedSets.push([...entries]);
-      return [];
+      return EMPTY_CONTEXT;
     });
     (harness.view as any).contextManager = { getPinnedFiles };
     (harness.view as any).readThinAgentContextSources = readThinAgentContextSources;
@@ -1689,6 +1711,169 @@ describe("AgentChatView composer admission", () => {
     ]);
     expect(getPinnedFiles).toHaveBeenCalledTimes(2);
     harness.composer.unload();
+  });
+
+  describe("pinned image context", () => {
+    function contextView(
+      images: Record<string, { bytes: number; statSize?: number; text?: string }>,
+      limits = DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    ) {
+      const files = new Map(Object.entries(images).map(([path, image]) => [
+        path,
+        {
+          file: new TFile({ path, stat: { size: image.statSize ?? image.bytes } }),
+          bytes: image.bytes,
+          text: image.text ?? "",
+        },
+      ]));
+      const readBinary = jest.fn(async (file: TFile) =>
+        new Uint8Array(files.get(file.path)?.bytes ?? 0).fill(0x41).buffer);
+      const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+      Object.assign(view, {
+        chatInputLimits: limits,
+        app: {
+          metadataCache: {
+            getFirstLinkpathDest: jest.fn((path: string) => files.get(path)?.file ?? null),
+          },
+          vault: {
+            getAbstractFileByPath: jest.fn((path: string) => files.get(path)?.file ?? null),
+            readBinary,
+            read: jest.fn(async (file: TFile) => files.get(file.path)?.text ?? ""),
+          },
+        },
+      });
+      const readContext = (...entries: string[]) =>
+        (view as any).readThinAgentContextSources(new Set(entries)) as Promise<MeasuredThinAgentContext>;
+      const read = async (...entries: string[]) => (await readContext(...entries)).sources;
+      return { read, readContext, readBinary };
+    }
+
+    it("reads pinned images above 4 MiB and at the 6 MiB limit into sources the contract accepts", async () => {
+      const { read, readBinary } = contextView({
+        "Photos/large.jpg": { bytes: 4 * 1024 * 1024 + 4_321 },
+        "Photos/limit.png": { bytes: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes },
+      });
+
+      const sources = await read("[[Photos/large.jpg]]", "[[Photos/limit.png]]");
+
+      expect(readBinary).toHaveBeenCalledTimes(2);
+      expect(sources.map((source) => [source.kind, source.path])).toEqual([
+        ["image", "Photos/large.jpg"],
+        ["image", "Photos/limit.png"],
+      ]);
+      const [large, limit] = sources as Array<Extract<ThinAgentContextSource, { kind: "image" }>>;
+      expect(large.data_url.startsWith("data:image/jpeg;base64,")).toBe(true);
+      expect(limit.data_url.startsWith("data:image/png;base64,")).toBe(true);
+      expect(Buffer.from(limit.data_url.split(",")[1], "base64").byteLength)
+        .toBe(DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes);
+      // Server-parity check: the untrusted-input parser accepts exactly what
+      // the view built, so skipping the client-side re-parse loses nothing.
+      expect(parseThinAgentContextRequest({
+        contract_version: "thin-agent-v1",
+        root_message_id: "user-large-images",
+        context_sources: sources,
+      }, DEFAULT_THIN_AGENT_INPUT_LIMITS).context_sources).toEqual(sources);
+    });
+
+    it("measures what it read so staging can re-check it against negotiated limits", async () => {
+      const { readContext } = contextView({
+        "Photos/a.png": { bytes: 2 * 1024 * 1024 },
+        "Photos/b.jpg": { bytes: 3 * 1024 * 1024 },
+        "Notes/Brief.md": { bytes: 0, text: "é".repeat(1_000) },
+        "Notes/Plan.md": { bytes: 0, text: "plan" },
+      });
+
+      const context = await readContext(
+        "[[Photos/a.png]]",
+        "[[Photos/b.jpg]]",
+        "[[Notes/Brief.md]]",
+        "[[Notes/Plan.md]]",
+      );
+
+      expect(context.measurement).toEqual({
+        largestTextBlockBytes: 2_000,
+        totalTextBytes: "Notes/Brief.md".length + 2_000 + "Notes/Plan.md".length + 4,
+        imageCount: 2,
+        largestImageBytes: 3 * 1024 * 1024,
+        totalImageBytes: 5 * 1024 * 1024,
+        imageMimeTypes: ["image/png", "image/jpeg"],
+      });
+      // Accepted under the limits it was read against; a server that
+      // negotiates a lower image limit gets it refused before upload.
+      expect(isThinAgentContextWithinLimits(context, DEFAULT_THIN_AGENT_INPUT_LIMITS)).toBe(true);
+      expect(isThinAgentContextWithinLimits(context, {
+        ...DEFAULT_THIN_AGENT_INPUT_LIMITS,
+        maxImageBytes: 2 * 1024 * 1024,
+      })).toBe(false);
+    });
+
+    it("measures the bytes actually read rather than trusting a stale stat", async () => {
+      const { read } = contextView({
+        "Photos/grew.png": {
+          statSize: 1_024,
+          bytes: DEFAULT_THIN_AGENT_INPUT_LIMITS.maxImageBytes + 1,
+        },
+        "Photos/empty.png": { bytes: 0 },
+      });
+
+      await expect(read("[[Photos/grew.png]]"))
+        .rejects.toThrow("grew.png exceeds the pinned image limit.");
+      await expect(read("[[Photos/empty.png]]"))
+        .rejects.toThrow("empty.png is an empty image.");
+    });
+
+    it("rejects an image type the negotiated limits do not accept before reading it", async () => {
+      const { read, readBinary } = contextView(
+        { "Photos/photo.webp": { bytes: 16 } },
+        { ...DEFAULT_THIN_AGENT_INPUT_LIMITS, imageMimeTypes: ["image/png", "image/jpeg"] },
+      );
+
+      await expect(read("[[Photos/photo.webp]]"))
+        .rejects.toThrow("photo.webp is not a supported pinned image type.");
+      expect(readBinary).not.toHaveBeenCalled();
+    });
+  });
+
+  it("names a not-yet-loaded chat's history file in the live chats folder", () => {
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      chatId: "2026-09-24 10-00-00",
+      plugin: { settings: { chatsDirectory: "SystemSculpt/Chats" } },
+      transcript: new AgentTranscriptRepository({} as ChatStorageService, () => ({})),
+    });
+    expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
+
+    view.plugin = { settings: { chatsDirectory: "Archive/Chats/" } };
+    expect(view.getExpectedChatHistoryFilePath()).toBe("Archive/Chats/2026-09-24 10-00-00.md");
+
+    view.plugin = { settings: { chatsDirectory: "" } };
+    expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
+  });
+
+  it("keeps naming a loaded chat's own file after the chats folder changes", async () => {
+    const chatId = "2026-09-24 10-00-00";
+    const transcript = new AgentTranscriptRepository({
+      loadChat: jest.fn(async () => ({
+        id: chatId,
+        title: "Moved setting",
+        version: 3,
+        messages: [],
+        lastModified: 0,
+        chatPath: `SystemSculpt/Chats/${chatId}.md`,
+        chatDirectory: "SystemSculpt/Chats",
+      })),
+    } as unknown as ChatStorageService, () => ({}));
+    await transcript.load(chatId);
+    const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
+    Object.assign(view, {
+      chatId,
+      plugin: { settings: { chatsDirectory: "Archive/Chats" } },
+      transcript,
+    });
+
+    expect(view.getExpectedChatHistoryFilePath()).toBe(`SystemSculpt/Chats/${chatId}.md`);
+    view.chatId = "2026-09-24 11-00-00";
+    expect(view.getExpectedChatHistoryFilePath()).toBe("Archive/Chats/2026-09-24 11-00-00.md");
   });
 
   it("does not pin a file merely because the agent read it", async () => {
@@ -2653,7 +2838,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Old chat",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -2795,7 +2980,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Settlement test",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -2896,7 +3081,7 @@ describe("AgentChatView composer admission", () => {
       thinClientId: `client_${"c".repeat(32)}`,
       chatId: "",
       chatTitle: "Cache missed settlement",
-      readThinAgentContextSources: jest.fn(async () => []),
+      readThinAgentContextSources: jest.fn(async () => EMPTY_CONTEXT),
       applyTranscriptIdentity: jest.fn(),
       bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
@@ -4610,6 +4795,111 @@ describe("AgentChatView thin conversation lifecycle", () => {
     expect((harness.view as any).agent).toBe(finalAgent);
   });
 
+  it("does not replace a newer chat when an older locator lookup finishes late", async () => {
+    const harness = createSavedChatLoadHarness([], { agentConversationId: "conversation_0123456789abcdef0123456789abcdef" });
+    const started = deferred();
+    const lookup = deferred<string | undefined>();
+    const locator = jest.spyOn(CodexThreadLocator.prototype, "read").mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      return lookup.promise;
+    });
+    try {
+      const loading = harness.view.loadChatById("older-chat");
+      await started.promise;
+      (harness.view as any).conversationOriginToken = "newer-chat-origin";
+      lookup.resolve(undefined);
+      await loading;
+
+      expect((harness.view as any).applyTranscriptIdentity).not.toHaveBeenCalled();
+      expect(harness.workspace.setHistory).not.toHaveBeenCalled();
+      expect(harness.prepareThinConversation).not.toHaveBeenCalled();
+    } finally {
+      locator.mockRestore();
+    }
+  });
+
+  it.each(["success", "failure"])("keeps the latest chat's queue when an older queue read settles with %s", async (outcome) => {
+    const harness = createSavedChatLoadHarness([]);
+    const olderQueue = deferred<Array<{ id: string; text: string; includeContextFiles: boolean }>>();
+    const started = deferred();
+    const newestItems = [{ id: "newest-prompt", text: "For the newest chat", includeContextFiles: false }];
+    const view = harness.view as any;
+    delete view.hydrateQueue;
+    view.queueRepository = {
+      load: jest.fn(async (key: string) => {
+        if (key === "older-chat") {
+          started.resolve(undefined);
+          return olderQueue.promise;
+        }
+        return newestItems;
+      }),
+    };
+    view.workspace.setQueue = jest.fn();
+    view.reportQueuePersistenceError = jest.fn();
+    harness.transcript.load.mockImplementation(async (chatId: string) => ({ ...harness.loaded, chatId }));
+
+    const olderLoad = view.loadChatById("older-chat");
+    await started.promise;
+    await view.loadChatById("newer-chat");
+    view.workspace.setQueue.mockClear();
+    if (outcome === "success") olderQueue.resolve([{ id: "older-prompt", text: "For the old chat", includeContextFiles: false }]);
+    else olderQueue.reject(new Error("Older queue read failed"));
+    await olderLoad;
+
+    expect(view.queuedFollowUps).toEqual(newestItems);
+    expect(view.workspace.setQueue).not.toHaveBeenCalled();
+    expect(view.reportQueuePersistenceError).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a saved chat's execution locator is unreadable", async () => {
+    const harness = createSavedChatLoadHarness([{ role: "user", content: "Saved question", message_id: "saved-user" }], { agentConversationId: "conversation_0123456789abcdef0123456789abcdef" });
+    const locator = jest.spyOn(CodexThreadLocator.prototype, "read").mockRejectedValueOnce(new Error("Invalid saved Codex thread locator."));
+    const reset = jest.fn(async () => undefined);
+    (harness.view as any).resetAfterFailedChatLoad = reset;
+    try {
+      await expect(harness.view.loadChatById("broken-locator-chat")).resolves.toBeUndefined();
+
+      expect(reset).toHaveBeenCalledWith("This chat could not be loaded.");
+      expect(harness.workspace.setHistory).not.toHaveBeenCalled();
+      expect(harness.agent.hydrate).not.toHaveBeenCalled();
+      expect(harness.transcript.saveMetadata).not.toHaveBeenCalled();
+    } finally {
+      locator.mockRestore();
+    }
+  });
+
+  it("retires a failed-load reset when a newer chat wins its history render", async () => {
+    const harness = createSavedChatLoadHarness([]);
+    const view = harness.view as any;
+    const started = deferred();
+    const rendering = deferred();
+    view.workspace.resetComposerDraft = jest.fn();
+    view.workspace.setQueue = jest.fn();
+    view.contextManager.clearPinnedFiles = jest.fn();
+    view.queueRepository = { save: jest.fn(async () => undefined) };
+    view.transcript.reset = jest.fn(() => ({ chatId: "", title: "New chat", version: 0, messages: [] }));
+    harness.workspace.setHistory.mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      await rendering.promise;
+    });
+    harness.transcript.load.mockImplementation(async (chatId: string) => ({ ...harness.loaded, chatId }));
+
+    const reset = view.resetAfterFailedChatLoad("The old saved chat is corrupted.");
+    await started.promise;
+    await view.loadChatById("newer-chat");
+    harness.workspace.setBanner.mockClear();
+    harness.workspace.setAgentSnapshot.mockClear();
+    harness.prepareThinConversation.mockClear();
+    rendering.resolve(undefined);
+    await reset;
+
+    expect(view.chatId).toBe("newer-chat");
+    expect(harness.workspace.setAgentSnapshot).not.toHaveBeenCalled();
+    expect(harness.workspace.setBanner).not.toHaveBeenCalled();
+    expect(view.queueRepository.save).not.toHaveBeenCalled();
+    expect(harness.prepareThinConversation).not.toHaveBeenCalled();
+  });
+
   it("keeps an empty saved chat without a server conversation writable", async () => {
     const harness = createSavedChatLoadHarness([]);
 
@@ -4941,14 +5231,14 @@ describe("AgentChatView thin conversation lifecycle", () => {
       snapshot: jest.fn(() => durableSnapshot),
     };
     const promotion = { item: { id: "queued-after-recovery" } };
-    const promoteRecoveredQueuedSubmission = jest.fn();
+    const promoteQueuedSubmission = jest.fn();
     const runPromotedQueuedSubmission = jest.fn();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       conversationOriginToken: expectedOrigin,
       deferredRecoveredCompletion: null,
       transcript,
-      promoteRecoveredQueuedSubmission,
+      promoteQueuedSubmission,
       runPromotedQueuedSubmission,
     });
     const setDeferred = (overrides: Record<string, string> = {}) => {
@@ -4978,10 +5268,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
     setDeferred();
     (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
 
-    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+    expect(promoteQueuedSubmission).not.toHaveBeenCalled();
     expect((view as any).deferredRecoveredCompletion).toBeNull();
 
-    promoteRecoveredQueuedSubmission
+    promoteQueuedSubmission
       .mockReturnValueOnce(null)
       .mockReturnValueOnce(promotion);
     setDeferred();
@@ -4989,9 +5279,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
     setDeferred();
     (view as any).promoteDeferredRecoveredCompletion(expectedOrigin);
 
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledTimes(2);
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenNthCalledWith(
+    expect(promoteQueuedSubmission).toHaveBeenCalledTimes(2);
+    expect(promoteQueuedSubmission).toHaveBeenNthCalledWith(
       1,
+      null,
       expectedOrigin,
     );
     expect(runPromotedQueuedSubmission).toHaveBeenCalledWith(
@@ -5060,7 +5351,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       includeContextFiles: true,
     };
     const getSnapshot = jest.fn(() => ({ status: "running" }));
-    const promoteRecoveredQueuedSubmission = jest.fn(() => null);
+    const promoteQueuedSubmission = jest.fn(() => null);
     const runPromotedQueuedSubmission = jest.fn();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
@@ -5068,17 +5359,18 @@ describe("AgentChatView thin conversation lifecycle", () => {
       activeSubmissionOperation: null,
       queuedFollowUps: [queued],
       agent: { getSnapshot },
-      promoteRecoveredQueuedSubmission,
+      promoteQueuedSubmission,
       runPromotedQueuedSubmission,
     });
 
     (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
-    expect(promoteRecoveredQueuedSubmission).not.toHaveBeenCalled();
+    expect(promoteQueuedSubmission).not.toHaveBeenCalled();
 
     getSnapshot.mockReturnValueOnce({ status: "idle" });
     (view as any).promoteHydratedQueuedSubmission("origin-hydration-guard");
 
-    expect(promoteRecoveredQueuedSubmission).toHaveBeenCalledWith(
+    expect(promoteQueuedSubmission).toHaveBeenCalledWith(
+      null,
       "origin-hydration-guard",
     );
     expect(runPromotedQueuedSubmission).not.toHaveBeenCalled();
@@ -5517,4 +5809,19 @@ describe("AgentChatView thin conversation lifecycle", () => {
 
     expect(sessionTrustedToolNames).toEqual(new Set(["write"]));
   });
+});
+
+it.each([false, true])('keeps saved native history on Codex and adapts its composer when mobile=%s', async (mobile) => {
+  const previousDesktop = Platform.isDesktopApp, previousMobile = Platform.isMobileApp;
+  const locator = jest.spyOn(CodexThreadLocator.prototype, 'read').mockResolvedValue('native-thread');
+  try {
+    Platform.isDesktopApp = !mobile; Platform.isMobileApp = mobile;
+    const messages: ChatMessage[] = [{ role: 'user', content: 'Native question', message_id: 'native-user' }, { role: 'assistant', content: 'Native answer', message_id: 'native-assistant' }];
+    const harness = createSavedChatLoadHarness(messages, { agentConversationId: 'native-conversation' });
+    await harness.view.loadChatById('legacy-chat');
+    expect((harness.view as any).chatExecutionBackend).toBe('codex');
+    expect(harness.workspace.setHistory).toHaveBeenCalledWith(messages);
+    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(mobile ? 'Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.' : null);
+    expect(harness.loaded.messages).toEqual(messages);
+  } finally { locator.mockRestore(); Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
 });

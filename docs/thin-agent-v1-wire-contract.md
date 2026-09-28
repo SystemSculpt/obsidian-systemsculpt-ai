@@ -11,7 +11,9 @@ The fixture exists at both paths:
 - Website: `src/lib/plugin/contracts/fixtures/thin-agent-v1/thin-agent-v1.json`
 - Plugin: `testing/fixtures/managed/thin-agent-v1/thin-agent-v1.json`
 
-The files have identical bytes with SHA-256 `9d58aaf6d2ccf7db67d5b4e77435ddc4b3911bb7ae7e91b4b0016521ba26ef1b`.
+The files have identical bytes with SHA-256 `d33b221fee3d060bbf657fec978f691c4701a32955c8c51b586d6550426cc8db`.
+
+The catalog identity includes server-owned tool descriptions. The current identity reflects Studio-aware descriptions for `list_items`, `find`, and `search`; their names, input schemas, and wire fields are unchanged. Clients do not use this description hash as execution authority.
 
 A fixture change is a protocol change. It requires compatibility review against released plugin builds.
 

@@ -22,7 +22,7 @@ import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import type { AgentArtifact, AgentConversationSnapshot } from "./AgentConversation";
+import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import {
   AgentConversationRenderer,
@@ -883,7 +883,7 @@ export class AgentWorkspace extends Component {
       closest?: (selectors: string) => Element | null;
     }) | null;
     if (typeof target?.closest !== "function") return;
-    const summary = target.closest("summary") as HTMLElement | null;
+    const summary = target.closest("summary");
     if (!summary || !this.renderer.element.contains(summary)) return;
     if (event.type === "keydown" && target !== summary) return;
     const nestedControl = target.closest(

@@ -4,6 +4,7 @@ import { TEST_DRIVER_ARTIFACT_ID } from "virtual:systemsculpt-test-driver-artifa
 import { runDriverAction, type ActionContext } from "./actions";
 import { DriverDiagnostics } from "./diagnostics";
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
+import { toError } from "../../utils/errors";
 import {
   parseTestDriverClientMessage,
   parseHandshake,
@@ -56,7 +57,7 @@ function waitForActionOrAbort<T>(task: Promise<T>, signal: AbortSignal): Promise
       },
       (error: unknown) => {
         signal.removeEventListener("abort", cancelled);
-        reject(error);
+        reject(toError(error, "Driver action failed."));
       },
     );
   });

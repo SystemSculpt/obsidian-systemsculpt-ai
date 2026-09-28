@@ -1,0 +1,157 @@
+{
+  "schema": "studio.project.v2",
+  "id": "proj_4aca4604-0e35-4d12-a7e6-64a14059da6d",
+  "name": "Process Protocol Example",
+  "docs": "SystemSculpt/Studio/AGENTS.md",
+  "canvas": {
+    "nodes": [
+      {
+        "id": "capture",
+        "kind": "process",
+        "title": "Observe native work and quota",
+        "x": 80,
+        "y": 260,
+        "width": 560,
+        "height": 328,
+        "config": {
+          "executable": "/opt/homebrew/bin/python3",
+          "arguments": [
+            "/example/process-helper.py",
+            "capture"
+          ],
+          "workingDirectory": "/vault",
+          "environment": {},
+          "inputs": [],
+          "outputs": [
+            {
+              "id": "snapshot",
+              "type": "json",
+              "required": true
+            }
+          ],
+          "manifestToStdin": false,
+          "failOnTimeout": true,
+          "failOnNonZero": true,
+          "timeoutMs": 180000,
+          "maxOutputBytes": 1048576,
+          "maxArtifactMb": 1
+        }
+      },
+      {
+        "id": "render",
+        "kind": "process",
+        "title": "Render the operations report",
+        "x": 730,
+        "y": 260,
+        "width": 560,
+        "height": 328,
+        "config": {
+          "executable": "/opt/homebrew/bin/python3",
+          "arguments": [
+            "/example/process-helper.py",
+            "render"
+          ],
+          "workingDirectory": "/vault",
+          "environment": {},
+          "inputs": [
+            {
+              "id": "snapshot",
+              "type": "json",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "id": "report",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "expected_sha",
+              "type": "text",
+              "required": true
+            }
+          ],
+          "manifestToStdin": false,
+          "failOnTimeout": true,
+          "failOnNonZero": true,
+          "timeoutMs": 180000,
+          "maxOutputBytes": 1048576,
+          "maxArtifactMb": 1
+        }
+      },
+      {
+        "id": "publish",
+        "kind": "process",
+        "title": "Publish Runtime Status atomically",
+        "x": 1380,
+        "y": 260,
+        "width": 560,
+        "height": 328,
+        "config": {
+          "executable": "/opt/homebrew/bin/python3",
+          "arguments": [
+            "/example/process-helper.py",
+            "publish"
+          ],
+          "workingDirectory": "/vault",
+          "environment": {},
+          "inputs": [
+            {
+              "id": "report",
+              "type": "text",
+              "required": true
+            },
+            {
+              "id": "expected_sha",
+              "type": "text",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "id": "publication",
+              "type": "json",
+              "required": true
+            }
+          ],
+          "manifestToStdin": false,
+          "failOnTimeout": true,
+          "failOnNonZero": true,
+          "timeoutMs": 180000,
+          "maxOutputBytes": 1048576,
+          "maxArtifactMb": 1
+        }
+      }
+    ],
+    "edges": [
+      "capture.snapshot -> render.snapshot",
+      "render.report -> publish.report",
+      "render.expected_sha -> publish.expected_sha"
+    ],
+    "groups": [
+      {
+        "id": "workflow_runtime_status",
+        "name": "Refresh canonical Runtime Status",
+        "color": "#4f8f79",
+        "nodes": [
+          "capture",
+          "render",
+          "publish"
+        ]
+      }
+    ],
+    "shapes": [
+      {
+        "id": "purpose",
+        "shape": "note",
+        "x": 80,
+        "y": 40,
+        "width": 1860,
+        "height": 170,
+        "label": "Process Protocol Example\nRun manually to observe Workboard, weekly quota pacing, and confirmed Team Room delivery counts; then refresh the canonical vault Runtime Status note. All steps use local process nodes. No model calls or worker dispatch. Durable goals and decisions remain separate notes."
+      }
+    ],
+    "arrows": []
+  }
+}

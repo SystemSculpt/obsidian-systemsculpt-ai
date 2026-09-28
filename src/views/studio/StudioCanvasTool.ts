@@ -8,6 +8,23 @@ import type { StudioShapeKind } from "../../studio/types";
  */
 export type StudioCanvasTool = "select" | StudioShapeKind | "arrow";
 
+export function resolveStudioCanvasToolShortcut(key: string, shiftKey = false): StudioCanvasTool | null {
+  if (shiftKey) return key.toLowerCase() === "c" ? "select" : null;
+  switch (key.toLowerCase()) {
+    case "s":
+    case "escape":
+      return "select";
+    case "b":
+      return "rectangle";
+    case "c":
+      return "ellipse";
+    case "a":
+      return "arrow";
+    default:
+      return null;
+  }
+}
+
 export function resolveStudioCanvasToolShape(tool: StudioCanvasTool): StudioShapeKind | null {
   return STUDIO_SHAPE_KINDS.includes(tool as StudioShapeKind) ? (tool as StudioShapeKind) : null;
 }

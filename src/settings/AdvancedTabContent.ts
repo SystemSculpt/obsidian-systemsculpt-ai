@@ -18,7 +18,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     new Setting(containerEl)
         .setName("Relative line numbers")
-        .setDesc("Show a vim-style line number gutter in the editor: the current line shows its absolute number, every other line shows its distance from the cursor. Tip: turn off Obsidian's core \"Show line number\" to avoid a doubled gutter.")
+        .setDesc("Use a vim-style line number gutter in the editor. The current line shows its absolute number; other lines show their distance from the Cursor. Turn off Obsidian's core \"show line number\" setting to avoid a doubled gutter.")
         .addToggle((toggle) => {
             toggle
                 .setValue(Boolean(plugin.settings.relativeLineNumbersEnabled))
@@ -83,6 +83,19 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     containerEl.createEl("hr", { cls: "settings-separator" });
 
     containerEl.createEl("h3", { text: "Diagnostics" });
+
+    new Setting(containerEl)
+        .setName("Record diagnostics")
+        .setDesc("Save resource samples, long-frame reports, and chat lifecycle logs in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Failed chat runs still save incident reports.")
+        .addToggle((toggle) => {
+            toggle
+                .setValue(plugin.settings.showDiagnostics === true)
+                .onChange(async (value) => {
+                    await plugin.getSettingsManager().updateSettings({
+                        showDiagnostics: value,
+                    });
+                });
+        });
 
     new Setting(containerEl)
         .setName("Copy diagnostics snapshot")

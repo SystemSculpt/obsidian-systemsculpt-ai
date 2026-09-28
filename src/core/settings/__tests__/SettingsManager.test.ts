@@ -9,6 +9,7 @@ jest.mock("obsidian", () => ({
     isMobileApp: false,
   },
   normalizePath: (value: string) => String(value || "").replace(/\\/g, "/"),
+  TFolder: class TFolder {},
 }));
 
 const backupStart = jest.fn();
@@ -161,6 +162,39 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.licenseKey).toBe("backup-license");
     expect(manager.settings).not.toHaveProperty("customProviders");
     expect(manager.settings).not.toHaveProperty("serverUrl");
+  });
+
+  it("seeds the known chats folders from the configured folder and only ever appends to them", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatsDirectory: "Archive/Chats",
+    });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    // Chats saved before the list existed are in the folder configured now.
+    expect(manager.settings.knownChatsDirectories).toEqual(["Archive/Chats"]);
+
+    await Promise.all([
+      manager.updateSettings({ knownChatsDirectories: ["Work/Chats"] }),
+      manager.updateSettings({ knownChatsDirectories: ["Home/Chats"] }),
+      manager.updateSettings({ chatsDirectory: "Home/Chats" }),
+    ]);
+    expect(manager.settings.knownChatsDirectories)
+      .toEqual(["Archive/Chats", "Work/Chats", "Home/Chats"]);
+
+    // A restored backup, which carries its own list, cannot drop a folder
+    // that chats may still be in.
+    await manager.restoreFromExternalSettings({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatsDirectory: "SystemSculpt/Chats",
+      knownChatsDirectories: ["SystemSculpt/Chats"],
+    });
+    expect(manager.settings.knownChatsDirectories)
+      .toEqual(["Archive/Chats", "Work/Chats", "Home/Chats", "SystemSculpt/Chats"]);
+    expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({
+      knownChatsDirectories: ["Archive/Chats", "Work/Chats", "Home/Chats", "SystemSculpt/Chats"],
+    });
   });
 
   it("removes retired recorder settings and synced microphone preferences", async () => {
@@ -382,6 +416,70 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.pendingRecorderCaptures[1]).not.toHaveProperty("operationId");
   });
 
+  it("keeps the in-progress marker of a recording that was streaming to disk", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      pendingRecorderCaptures: [
+        {
+          filePath: "SystemSculpt/Recordings/streaming.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 12_000,
+          stopReason: "interrupted",
+          destination: "chat",
+          captureInProgress: true,
+        },
+        {
+          filePath: "SystemSculpt/Recordings/finished.webm",
+          startedAt: 1,
+          durationMs: 2_000,
+          sizeBytes: 24_000,
+          stopReason: "manual",
+          destination: "note",
+          captureInProgress: "yes",
+        },
+      ],
+    });
+    const manager = new SettingsManager(plugin);
+
+    await manager.loadSettings();
+
+    expect(manager.settings.pendingRecorderCaptures[0]).toMatchObject({ captureInProgress: true });
+    expect(manager.settings.pendingRecorderCaptures[1]).not.toHaveProperty("captureInProgress");
+  });
+
+  it("keeps a discarded recording fragment even though it has no recorded size", async () => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      pendingRecorderCaptures: [
+        {
+          filePath: ".systemsculpt/recordings-in-progress/fragment.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 0,
+          stopReason: "interrupted",
+          destination: "note",
+          discarded: true,
+        },
+        {
+          filePath: "SystemSculpt/Recordings/empty.webm",
+          startedAt: 1,
+          durationMs: 0,
+          sizeBytes: 0,
+          stopReason: "manual",
+          destination: "note",
+        },
+      ],
+    });
+    const manager = new SettingsManager(plugin);
+
+    await manager.loadSettings();
+
+    expect(manager.settings.pendingRecorderCaptures).toEqual([
+      expect.objectContaining({ filePath: ".systemsculpt/recordings-in-progress/fragment.webm", discarded: true }),
+    ]);
+  });
+
   it("logs primary save and backup failures without breaking updates", async () => {
     const plugin = createPlugin();
     const manager = new SettingsManager(plugin);
@@ -403,5 +501,153 @@ describe("SettingsManager managed settings contract", () => {
       expect.any(Error),
       expect.objectContaining({ source: "SettingsManager" }),
     );
+  });
+
+  it("writes the settings backup when a concurrent save already created its folder", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    plugin.app.vault.adapter.write.mockClear();
+
+    const backupDir = ".systemsculpt/settings-backups";
+    plugin.app.vault.adapter.exists.mockImplementation(async () => false);
+    plugin.app.vault.createFolder.mockImplementationOnce(async () => {
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path === backupDir);
+      throw new Error("Folder already exists.");
+    });
+    plugin.app.vault.getAbstractFileByPath = jest.fn(() => null);
+    plugin.app.vault.adapter.stat = jest.fn().mockResolvedValue({ type: "folder" });
+
+    await manager.updateSettings({ chatFontSize: "large" });
+
+    expect(plugin.app.vault.adapter.write).toHaveBeenCalledWith(
+      `${backupDir}/settings-backup-latest.json`,
+      expect.any(String),
+    );
+    expect(plugin.logger.error).not.toHaveBeenCalledWith(
+      "Failed to write SystemSculpt settings backup",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  describe("empty or unreadable data.json", () => {
+    const LATEST_BACKUP = ".systemsculpt/settings-backups/settings-backup-latest.json";
+    const restoredBackup = {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      chatFontSize: "large",
+      defaultChatTag: "restored-from-backup",
+    };
+
+    function installLatestBackup(plugin: ReturnType<typeof createPlugin>) {
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path === LATEST_BACKUP);
+      plugin.app.vault.adapter.read.mockImplementation(async (path: string) => {
+        if (path !== LATEST_BACKUP) throw new Error(`ENOENT: ${path}`);
+        return JSON.stringify(restoredBackup);
+      });
+    }
+
+    it("restores the latest backup when loadData resolves null instead of saving defaults over it", async () => {
+      const plugin = createPlugin(null);
+      installLatestBackup(plugin);
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.chatFontSize).toBe("large");
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+      expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({
+        chatFontSize: "large",
+        defaultChatTag: "restored-from-backup",
+      }));
+      expect(plugin.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Restored SystemSculpt settings from backup"),
+        expect.objectContaining({ source: "SettingsManager" }),
+      );
+    });
+
+    it("consults the backup for an empty data.json object as well", async () => {
+      const plugin = createPlugin({});
+      installLatestBackup(plugin);
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+    });
+
+    it("skips corrupt or empty backups until it finds a valid dated backup", async () => {
+      const plugin = createPlugin(null);
+      const paths = [
+        LATEST_BACKUP,
+        ".systemsculpt/settings-backups/settings-backup-2026-09-16.json",
+        ".systemsculpt/settings-backups/settings-backup-2026-09-15.json",
+      ];
+      plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => paths.includes(path));
+      plugin.app.vault.adapter.list.mockResolvedValue({ files: paths.slice(1), folders: [] });
+      plugin.app.vault.adapter.read.mockImplementation(async (path: string) => {
+        if (path === LATEST_BACKUP) return "{truncated";
+        if (path === paths[1]) return "{}";
+        return JSON.stringify(restoredBackup);
+      });
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+    });
+
+    it("still ends up with defaults on a fresh install with no data and no backup", async () => {
+      const plugin = createPlugin(null);
+      plugin.app.vault.adapter.list.mockRejectedValue(new Error("ENOENT: .systemsculpt/settings-backups"));
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+      expect(manager.settings.chatFontSize).toBe("medium");
+      expect(manager.settings.defaultChatTag).toBe("");
+      expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+      expect(plugin.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("serialized persistence", () => {
+    it("applies concurrent updates in order so no key is dropped", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      plugin.saveData.mockClear();
+
+      await Promise.all([
+        manager.updateSettings({ chatFontSize: "large" }),
+        manager.updateSettings({ defaultChatTag: "queued" }),
+        manager.saveSettings(),
+      ]);
+
+      expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
+      expect(plugin._internal_settings_systemsculpt_plugin).toMatchObject({
+        chatFontSize: "large",
+        defaultChatTag: "queued",
+      });
+      expect(plugin.saveData).toHaveBeenCalledTimes(3);
+      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large", "large"]);
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
+    });
+
+    it("keeps the queue usable after a failed save", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
+
+      const failing = manager.updateSettings({ chatFontSize: "large" });
+      const following = manager.updateSettings({ defaultChatTag: "after-failure" });
+
+      await expect(failing).resolves.toBeUndefined();
+      await expect(following).resolves.toBeUndefined();
+      expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "after-failure" });
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ defaultChatTag: "after-failure" });
+    });
   });
 });

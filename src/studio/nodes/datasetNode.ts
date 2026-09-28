@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { isRecord } from "../utils";
 import { getText } from "./shared";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
 const DATASET_CACHE_SCHEMA = "studio.dataset-cache.v2" as const;
 const DATASET_QUERY_PLACEHOLDER = /\{\{\s*query\s*\}\}/gi;
@@ -55,7 +56,7 @@ function sanitizeFileSegment(value: string): string {
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return normalized || "value";
+  return toSafeVaultFileName(normalized, { fallback: "value" });
 }
 
 function readNumber(value: StudioJsonValue | undefined, fallback: number): number {
@@ -75,7 +76,7 @@ function readStringList(value: StudioJsonValue | undefined): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.map((entry) => getText(entry as StudioJsonValue));
+  return value.map((entry) => getText(entry));
 }
 
 function parseAdapterArgs(raw: StudioJsonValue | undefined): string[] {
@@ -176,7 +177,7 @@ export function readDatasetOutputFields(value: StudioJsonValue | undefined): str
   if (!Array.isArray(value)) {
     return [];
   }
-  return uniqueDatasetFieldIds(value.map((entry) => getText(entry as StudioJsonValue)));
+  return uniqueDatasetFieldIds(value.map((entry) => getText(entry)));
 }
 
 export function deriveDatasetOutputFieldsFromOutputs(
@@ -500,7 +501,7 @@ export const datasetNode: StudioNodeDefinition = {
     fields: [
       {
         key: "workingDirectory",
-        label: "Working Directory",
+        label: "Working directory",
         description:
           "Folder where Studio runs your adapter command. Keep credentials there via env (for example .env.local/DATABASE_URL).",
         type: "directory_path",
@@ -510,7 +511,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "customQuery",
-        label: "Custom Query",
+        label: "Custom query",
         description: "Dataset query/request payload text sent to your adapter.",
         type: "textarea",
         required: true,
@@ -518,7 +519,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "adapterCommand",
-        label: "Adapter Command",
+        label: "Adapter command",
         description: "Command used to resolve this dataset (for example node, bun, python3, curl).",
         type: "text",
         required: true,
@@ -526,7 +527,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "adapterArgs",
-        label: "Adapter Arguments",
+        label: "Adapter arguments",
         description:
           "One argument per line. Use {{query}} to inject the query directly into args. Query is always available in STUDIO_DATASET_QUERY env.",
         type: "string_list",
@@ -534,7 +535,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "refreshHours",
-        label: "Refresh Hours",
+        label: "Refresh hours",
         type: "number",
         required: true,
         min: 1,
@@ -552,7 +553,7 @@ export const datasetNode: StudioNodeDefinition = {
       },
       {
         key: "maxOutputBytes",
-        label: "Max Output Bytes",
+        label: "Max output bytes",
         type: "number",
         required: true,
         min: 1024,
@@ -563,9 +564,8 @@ export const datasetNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const fs = desktopHost.fs();
-    const path = desktopHost.path();
-    const workingDirectory = getText(context.node.config.workingDirectory as StudioJsonValue).trim();
+    const [fs, path] = await Promise.all([desktopHost.fs(), desktopHost.path()]);
+    const workingDirectory = getText(context.node.config.workingDirectory).trim();
     if (!workingDirectory) {
       throw new Error(`Dataset node "${context.node.id}" requires a working directory.`);
     }
@@ -577,31 +577,31 @@ export const datasetNode: StudioNodeDefinition = {
 
     context.services.assertFilesystemPath(workingDirectory);
 
-    const query = getText(context.node.config.customQuery as StudioJsonValue).trim();
+    const query = getText(context.node.config.customQuery).trim();
     if (!query) {
       throw new Error(`Dataset node "${context.node.id}" requires a custom query.`);
     }
 
     const adapterCommand =
-      getText(context.node.config.adapterCommand as StudioJsonValue).trim() || DEFAULT_ADAPTER_COMMAND;
+      getText(context.node.config.adapterCommand).trim() || DEFAULT_ADAPTER_COMMAND;
     if (!adapterCommand) {
       throw new Error(`Dataset node "${context.node.id}" requires an adapter command.`);
     }
 
-    const adapterArgTemplates = parseAdapterArgs(context.node.config.adapterArgs as StudioJsonValue);
+    const adapterArgTemplates = parseAdapterArgs(context.node.config.adapterArgs);
     const adapterArgsResult = renderAdapterArgs(adapterArgTemplates, query);
 
     const refreshHours = Math.max(
       1,
-      Math.floor(readNumber(context.node.config.refreshHours as StudioJsonValue, DEFAULT_REFRESH_HOURS))
+      Math.floor(readNumber(context.node.config.refreshHours, DEFAULT_REFRESH_HOURS))
     );
     const timeoutMs = Math.max(
       1000,
-      Math.floor(readNumber(context.node.config.timeoutMs as StudioJsonValue, DEFAULT_TIMEOUT_MS))
+      Math.floor(readNumber(context.node.config.timeoutMs, DEFAULT_TIMEOUT_MS))
     );
     const maxOutputBytes = Math.max(
       1024,
-      Math.floor(readNumber(context.node.config.maxOutputBytes as StudioJsonValue, DEFAULT_MAX_OUTPUT_BYTES))
+      Math.floor(readNumber(context.node.config.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES))
     );
 
     const cacheRelativePath = normalizePath(

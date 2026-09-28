@@ -82,8 +82,9 @@ function createHarness(options?: {
   let projectPath: string | null = project ? "Studio/Clipboard.systemsculpt" : null;
   let id = 0;
   const copyText = jest.fn(async () => true);
+  let boundViewport: HTMLElement | null = null;
   const host: Harness["host"] = {
-    isActive: jest.fn(() => true),
+    ownsEventTarget: jest.fn(() => true),
     isBusy: jest.fn(() => false),
     isEditableTarget: jest.fn(() => false),
     getCurrentProject: jest.fn(() => project),
@@ -94,6 +95,17 @@ function createHarness(options?: {
     removeDiagramSelection: jest.fn(() => true),
     selectPastedShapes: jest.fn(),
     getGraphZoom: jest.fn(() => 1),
+    // Mirror the engine: world = scroll-box px / zoom (origin 0 here, zoom 1).
+    graphPointFromClient: jest.fn((clientX: number, clientY: number) => {
+      if (!boundViewport) return null;
+      const rect = boundViewport.getBoundingClientRect();
+      return { x: boundViewport.scrollLeft + clientX - rect.left, y: boundViewport.scrollTop + clientY - rect.top };
+    }),
+    getViewportCenterWorldPoint: jest.fn(() =>
+      boundViewport
+        ? { x: boundViewport.scrollLeft + boundViewport.clientWidth * 0.5, y: boundViewport.scrollTop + boundViewport.clientHeight * 0.5 }
+        : null
+    ),
     getDefaultNodePosition: jest.fn(() => ({ x: 120, y: 240 })),
     normalizeNodePosition: jest.fn((position) => ({
       x: Math.round(position.x),
@@ -113,6 +125,11 @@ function createHarness(options?: {
     createId: (prefix) => `${prefix}_${++id}`,
     copyText,
   });
+  const bindViewport = controller.bindViewport.bind(controller);
+  controller.bindViewport = (viewport) => {
+    boundViewport = viewport;
+    bindViewport(viewport);
+  };
   return {
     app,
     controller,
@@ -214,6 +231,21 @@ describe("StudioClipboardAndDropController", () => {
     const whitespaceEvent = clipboardEvent({ text: "  \n  " });
     await harness.controller.handlePaste(whitespaceEvent);
     expect(whitespaceEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("ignores a paste aimed at a surface the view does not own, such as a modal", async () => {
+    const harness = createHarness();
+    const modalButton = document.body.createEl("button");
+    (harness.host.ownsEventTarget as jest.Mock).mockImplementation((target) => target !== modalButton);
+    const pasteText = jest.spyOn(harness.controller, "pasteClipboardText");
+    const event = { ...clipboardEvent({ text: "pasted into a modal" }), target: modalButton } as ClipboardEvent;
+
+    await harness.controller.handlePaste(event);
+
+    expect(harness.host.ownsEventTarget).toHaveBeenCalledWith(modalButton);
+    expect(pasteText).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(harness.getProject()?.graph.nodes).toHaveLength(0);
   });
 
   it("routes note references to note runtime but keeps multiline content as text", async () => {

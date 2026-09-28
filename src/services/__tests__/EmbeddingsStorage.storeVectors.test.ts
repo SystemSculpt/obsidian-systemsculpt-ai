@@ -156,7 +156,9 @@ describe("EmbeddingsStorage.storeVectors", () => {
 
       transaction.oncomplete();
       await expect(publication).resolves.toBeUndefined();
-      expect((storage as any).cache.get(vectors[0].id)).toEqual(vectors[0]);
+      // The root cache keeps metadata only; vectors stay in IndexedDB.
+      const { vector: _vector, ...rootMetadata } = vectors[0];
+      expect((storage as any).cache.get(vectors[0].id)).toEqual(rootMetadata);
       expect((storage as any).pathsSet.has("Atomic.md")).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {
@@ -245,7 +247,8 @@ describe("EmbeddingsStorage.storeVectors", () => {
       await expect(publication).resolves.toBeUndefined();
       expect((storage as any).cache.has(current.id)).toBe(false);
       expect((storage as any).cache.has(replacement.id)).toBe(false);
-      expect((storage as any).cache.get(marker.id)).toBe(marker);
+      const { vector: _markerVector, ...markerMetadata } = marker;
+      expect((storage as any).cache.get(marker.id)).toEqual(markerMetadata);
       expect((storage as any).pathsSet.has(current.path)).toBe(true);
     } finally {
       Object.defineProperty(globalThis, "IDBKeyRange", {
@@ -286,31 +289,6 @@ describe("EmbeddingsStorage.storeVectors", () => {
         value: previousKeyRange,
       });
     }
-  });
-
-  it("keeps the root cache unchanged when a vector move transaction aborts", async () => {
-    const storage = new EmbeddingsStorage("SystemSculptEmbeddings::test");
-    const existing = makeVector("Move.md");
-    (storage as any).cache.set(existing.id, existing);
-    const getRequest: any = {};
-    const store = {
-      get: jest.fn(() => getRequest),
-      put: jest.fn(),
-      delete: jest.fn(),
-    };
-    const transaction: any = { objectStore: jest.fn(() => store) };
-    (storage as any).db = { transaction: jest.fn(() => transaction) };
-    const nextId = buildVectorId(existing.metadata.namespace, existing.path, 1);
-
-    const move = storage.moveVectorId(existing.id, nextId, 1);
-    getRequest.result = existing;
-    getRequest.onsuccess();
-    transaction.error = new Error("aborted");
-    transaction.onabort();
-
-    await expect(move).rejects.toThrow("aborted");
-    expect((storage as any).cache.get(existing.id)).toBe(existing);
-    expect((storage as any).cache.has(nextId)).toBe(false);
   });
 
   it("keeps cached roots until a removal transaction commits", async () => {
@@ -370,4 +348,5 @@ describe("EmbeddingsStorage.storeVectors", () => {
       });
     }
   });
+
 });

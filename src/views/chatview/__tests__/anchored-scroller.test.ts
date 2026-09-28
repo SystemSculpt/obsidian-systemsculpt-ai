@@ -404,7 +404,7 @@ describe("AnchoredScroller", () => {
         scrollHeight: 1,
         clientHeight: 1,
       });
-      expect(harness.scroller.getMode()).toBe(expectedMode);
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe(expectedMode);
       expect({
         bucket: harness.scroller.captureIncidentSnapshot().distanceFromEndBucket,
         active: harness.scrollButton.dataset.active,
@@ -418,7 +418,7 @@ describe("AnchoredScroller", () => {
 
   it("follows streaming growth only while the reader remains at the end", () => {
     const harness = createHarness();
-    expect(harness.scroller.isFollowingEnd()).toBe(true);
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
 
     const finishEndGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
@@ -429,14 +429,14 @@ describe("AnchoredScroller", () => {
     expect(harness.content.getAttribute("aria-busy")).toBe("true");
 
     harness.manualScroll(120);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     expect(harness.scrollButton.getAttribute("data-active")).toBe("true");
 
     const finishManualGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_400;
     finishManualGrowth();
     expect(harness.state.scrollTop).toBe(120);
-    expect(harness.scroller.isFollowingEnd()).toBe(false);
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     harness.scroller.setStreaming(false);
     expect(harness.content.hasAttribute("aria-busy")).toBe(false);
@@ -446,10 +446,10 @@ describe("AnchoredScroller", () => {
   it("does not yank a manual reader when a new turn starts", () => {
     const harness = createHarness({ scrollTop: 120, scrollHeight: 1_600 });
     harness.manualScroll(120);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     harness.scroller.notifyTurnStarted();
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     expect(harness.state.scrollTop).toBe(120);
 
     const finishGrowth = harness.scroller.beginLayoutMutation();
@@ -459,7 +459,7 @@ describe("AnchoredScroller", () => {
 
     harness.manualScroll(1_600);
     harness.scroller.notifyTurnStarted();
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(harness.state.scrollTop).toBe(1_600);
     harness.cleanup();
   });
@@ -512,14 +512,14 @@ describe("AnchoredScroller", () => {
       deltaY: -120,
     }));
     harness.manualScroll(300);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_600;
     finishGrowth();
 
     expect(harness.state.scrollTop).toBe(300);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -573,7 +573,7 @@ describe("AnchoredScroller", () => {
 
     expect(harness.state.scrollTop).toBe(550);
     expect(visible.offsetTop - harness.state.scrollTop).toBe(-50);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     harness.setRowLayout(visible, { top: 700 });
     finishMutation();
@@ -601,7 +601,7 @@ describe("AnchoredScroller", () => {
 
     expect(harness.state.scrollTop).toBe(300);
     expect(answer.getBoundingClientRect().top).toBe(50);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -735,7 +735,7 @@ describe("AnchoredScroller", () => {
     expect(offsetTopReads.every((read) => read.mock.calls.length === 0)).toBe(true);
     expect(offsetHeightReads.every((read) => read.mock.calls.length === 0)).toBe(true);
     expect(harness.state.scrollTop).toBe(250);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -769,7 +769,7 @@ describe("AnchoredScroller", () => {
     expect(answer.getBoundingClientRect().top).toBe(50);
     expect(offsetTopReads.every((read) => read.mock.calls.length === 0)).toBe(true);
     expect(offsetHeightReads.every((read) => read.mock.calls.length === 0)).toBe(true);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -830,7 +830,7 @@ describe("AnchoredScroller", () => {
     expect(harness.state.scrollTop).toBe(250);
     finishOuterMutation();
     expect(harness.state.scrollTop).toBe(550);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -858,7 +858,7 @@ describe("AnchoredScroller", () => {
     finishMutation();
 
     expect(harness.state.scrollTop).toBe(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -884,7 +884,7 @@ describe("AnchoredScroller", () => {
     finishOuterOpen();
     expect(harness.state.scrollTop).toBe(600);
     expect(outerSummary.getBoundingClientRect().top).toBe(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const finishNestedOpen = harness.scroller.beginDisclosureLayoutMutation(nestedSummary);
     nestedLayout.top = 900;
@@ -899,7 +899,7 @@ describe("AnchoredScroller", () => {
     finishNestedClose();
     expect(harness.state.scrollTop).toBe(550);
     expect(nestedSummary.getBoundingClientRect().top).toBe(250);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -921,7 +921,7 @@ describe("AnchoredScroller", () => {
 
     expect(harness.state.scrollTop).toBe(650);
     expect(row.offsetTop - harness.state.scrollTop).toBe(-200);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -941,7 +941,7 @@ describe("AnchoredScroller", () => {
     finishOuterMutation();
     expect(harness.state.scrollTop).toBe(550);
     expect(visible.offsetTop - harness.state.scrollTop).toBe(-50);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -952,11 +952,11 @@ describe("AnchoredScroller", () => {
 
     harness.state.scrollHeight = 1_400;
     harness.manualScroll(600);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     finishMutation();
 
     expect(harness.state.scrollTop).toBe(1_000);
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(harness.calls.at(-1)).toEqual({ top: 1_000, behavior: "auto" });
     harness.cleanup();
   });
@@ -975,7 +975,7 @@ describe("AnchoredScroller", () => {
     finishMutation();
 
     expect(harness.state.scrollTop).toBe(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
@@ -989,31 +989,15 @@ describe("AnchoredScroller", () => {
     finishMutation();
 
     expect(harness.state.scrollTop).toBe(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.cleanup();
   });
 
-  it.each([
-    ["start", 700],
-    ["center", 550],
-    ["end", 400],
-  ] as const)("jumps to a stable row with %s alignment", (align, expectedTop) => {
-    const harness = createHarness({ scrollTop: 0, scrollHeight: 1_500, clientHeight: 400 });
-    harness.addRow("target", 700, 100);
-    harness.scroller.jumpTo("target", { align });
-    expect(harness.state.scrollTop).toBe(expectedTop);
-    expect(harness.calls.at(-1)).toEqual({ top: expectedTop, behavior: "smooth" });
-    expect(harness.scroller.getMode()).toBe("manual");
-    harness.cleanup();
-  });
-
-  it("uses auto behavior for reduced motion across turn following, jumping, and end scrolling", () => {
+  it("uses auto behavior for reduced motion across turn following and end scrolling", () => {
     const harness = createHarness({ scrollTop: 0, scrollHeight: 1_500, reducedMotion: true });
     harness.addRow("turn", 500, 100);
 
     harness.scroller.notifyTurnStarted();
-    expect(harness.calls.at(-1)?.behavior).toBe("auto");
-    harness.scroller.jumpTo("turn", { align: "center" });
     expect(harness.calls.at(-1)?.behavior).toBe("auto");
     harness.scroller.scrollToEnd();
     expect(harness.calls.at(-1)).toEqual({ top: 1_100, behavior: "auto" });
@@ -1035,7 +1019,7 @@ describe("AnchoredScroller", () => {
 
     harness.scrollButton.click();
     expect(harness.state.scrollTop).toBe(600);
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(harness.scrollButton.hasAttribute("inert")).toBe(true);
     expect(harness.scrollButton.tabIndex).toBe(-1);
     harness.cleanup();
@@ -1044,9 +1028,9 @@ describe("AnchoredScroller", () => {
   it("recognizes a manual return to the end as renewed follow ownership", () => {
     const harness = createHarness();
     harness.manualScroll(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.manualScroll(590);
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
 
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
@@ -1057,23 +1041,23 @@ describe("AnchoredScroller", () => {
 
   it("preserves follow ownership across owned viewport geometry changes only", () => {
     const harness = createHarness();
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
 
     harness.state.clientHeight = 260;
     harness.scroller.notifyViewportGeometryChanged();
 
     expect(harness.state.scrollTop).toBe(740);
     expect(harness.calls.at(-1)).toEqual({ top: 740, behavior: "auto" });
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(harness.scrollButton.dataset.active).toBe("false");
 
     harness.manualScroll(200);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     harness.state.clientHeight = 320;
     harness.scroller.notifyViewportGeometryChanged();
 
     expect(harness.state.scrollTop).toBe(200);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     expect(harness.scrollButton.dataset.active).toBe("true");
     harness.cleanup();
   });
@@ -1177,7 +1161,7 @@ describe("AnchoredScroller", () => {
 
       expect(harness.state.scrollTop).toBe(850);
       expect(answer.getBoundingClientRect().top).toBe(50);
-      expect(harness.scroller.getMode()).toBe("manual");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     } finally {
       harness?.cleanup();
       resize.cleanup();
@@ -1215,7 +1199,7 @@ describe("AnchoredScroller", () => {
 
       expect(harness.state.scrollTop).toBe(730);
       expect(answer.getBoundingClientRect().top).toBe(180);
-      expect(harness.scroller.getMode()).toBe("manual");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     } finally {
       harness?.cleanup();
       resize.cleanup();
@@ -1263,7 +1247,7 @@ describe("AnchoredScroller", () => {
 
       expect(harness.state.scrollTop).toBe(820);
       expect(answer.getBoundingClientRect().top).toBe(180);
-      expect(harness.scroller.getMode()).toBe("manual");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     } finally {
       harness?.cleanup();
       resize.cleanup();
@@ -1286,7 +1270,7 @@ describe("AnchoredScroller", () => {
 
       expect(harness.state.scrollTop).toBe(900);
       expect(harness.calls.at(-1)).toEqual({ top: 900, behavior: "auto" });
-      expect(harness.scroller.getMode()).toBe("end");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     } finally {
       harness?.cleanup();
       resize.cleanup();
@@ -1334,12 +1318,12 @@ describe("AnchoredScroller", () => {
 
       finishMutation();
       expect(harness.state.scrollTop).toBe(600);
-      expect(harness.scroller.getMode()).toBe("manual");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
       resizeCallback?.([], {} as ResizeObserver);
       frames.shift()?.(0);
       expect(harness.state.scrollTop).toBe(600);
-      expect(harness.scroller.getMode()).toBe("manual");
+      expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
     } finally {
       harness?.cleanup();
       requestFrame.mockRestore();
@@ -1358,7 +1342,7 @@ describe("AnchoredScroller", () => {
     expect(() => harness.scroller.registerRow("row", document.createElement("div"))).toThrow(
       "AnchoredScroller row row is already registered to another element.",
     );
-    expect(() => harness.scroller.jumpTo("missing")).toThrow(
+    expect(() => harness.scroller.notifyTurnStarted({ submittedPromptRowId: "missing" })).toThrow(
       "AnchoredScroller row missing is not registered.",
     );
 
@@ -1379,7 +1363,7 @@ describe("AnchoredScroller", () => {
     harness.state.scrollHeight = 1_700;
     harness.setRowLayout(turn, { top: 1_200 });
     finishMutation();
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(harness.state.scrollTop).toBe(1_300);
     harness.cleanup();
   });
@@ -1403,7 +1387,7 @@ describe("AnchoredScroller", () => {
       scrollHeight: 1,
       clientHeight: 1,
     });
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_900;
     finishGrowth();
@@ -1425,13 +1409,13 @@ describe("AnchoredScroller", () => {
       bubbles: true,
       key: " ",
     }));
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
 
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
     finishGrowth();
     expect(harness.state.scrollTop).toBe(800);
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     harness.cleanup();
   });
 
@@ -1443,11 +1427,11 @@ describe("AnchoredScroller", () => {
     const harness = createHarness();
     harness.viewport.dispatchEvent(createEvent());
     harness.manualScroll(100);
-    expect(harness.scroller.getMode()).toBe("manual");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     harness.viewport.dispatchEvent(createEvent());
     harness.manualScroll(600);
-    expect(harness.scroller.getMode()).toBe("end");
+    expect(harness.scroller.captureIncidentSnapshot().mode).toBe("end");
     const finishGrowth = harness.scroller.beginLayoutMutation();
     harness.state.scrollHeight = 1_200;
     finishGrowth();

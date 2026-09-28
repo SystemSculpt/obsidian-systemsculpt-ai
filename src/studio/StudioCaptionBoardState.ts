@@ -273,7 +273,7 @@ function createLegacyMigratedLabel(config: Record<string, StudioJsonValue>): Stu
 export function createStudioCaptionBoardLabel(
   patch: Partial<StudioCaptionBoardLabel> = {}
 ): StudioCaptionBoardLabel {
-  const frame = normalizeFrame(patch as Record<string, unknown>, {
+  const frame = normalizeFrame(patch, {
     defaultWidth: DEFAULT_LABEL_WIDTH,
     defaultHeight: DEFAULT_LABEL_HEIGHT,
     minWidth: 0.12,
@@ -296,7 +296,7 @@ export function createStudioCaptionBoardLabel(
 export function createStudioCaptionBoardAnnotation(
   patch: Partial<StudioCaptionBoardAnnotation> = {}
 ): StudioCaptionBoardAnnotation {
-  const frame = normalizeFrame(patch as Record<string, unknown>, {
+  const frame = normalizeFrame(patch, {
     defaultWidth: DEFAULT_ANNOTATION_WIDTH,
     defaultHeight: DEFAULT_ANNOTATION_HEIGHT,
     minWidth: MIN_RECT_WIDTH,
@@ -319,7 +319,7 @@ export function createStudioCaptionBoardAnnotation(
 export function createStudioCaptionBoardCrop(
   patch: Partial<StudioCaptionBoardCrop> = {}
 ): StudioCaptionBoardCrop {
-  return normalizeFrame(patch as Record<string, unknown>, {
+  return normalizeFrame(patch, {
     defaultWidth: DEFAULT_CROP_WIDTH,
     defaultHeight: DEFAULT_CROP_HEIGHT,
     minWidth: MIN_CROP_WIDTH,

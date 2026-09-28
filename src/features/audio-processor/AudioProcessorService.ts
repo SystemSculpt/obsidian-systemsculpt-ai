@@ -10,7 +10,6 @@ import { AudioProcessorDelivery } from "./AudioProcessorDelivery";
 import { AudioProcessorDeviceStaging } from "./AudioProcessorDeviceStaging";
 import { AudioProcessorUploadRecovery } from "./AudioProcessorUploadRecovery";
 import { createVaultAudioSource } from "./audioSource";
-import { sha256HexFromArrayBuffer } from "../../studio/hash";
 import {
   type AudioProcessorAudioSource,
   type AudioProcessorArtifactKind,
@@ -29,6 +28,14 @@ import {
 } from "../../services/managed/ManagedJobObservation";
 
 const POLL_INTERVAL_MS = 2_000;
+/**
+ * A job waiting for credits cannot progress until the user adds some, so it
+ * is not polled on the server cadence. It is rechecked after a minute, then
+ * at doubling intervals up to fifteen minutes, and at once when the user
+ * returns to Obsidian, the host reconnects, or a balance read shows credits.
+ */
+const AWAITING_FUNDS_FIRST_RECHECK_MS = 60_000;
+const AWAITING_FUNDS_MAX_RECHECK_MS = 15 * 60_000;
 const MAX_UPLOAD_ATTEMPTS = 3;
 const UPLOAD_RETRY_DELAY_MS = 750;
 const MAX_UPLOAD_COMPLETION_ATTEMPTS = 3;
@@ -64,6 +71,7 @@ export class AudioProcessorService {
   private readonly pollIntervalMs: number;
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly uploadRecovery: AudioProcessorUploadRecovery;
+  private readonly delivery: AudioProcessorDelivery;
   private deviceStaging: AudioProcessorServiceOptions["deviceStaging"] | null;
 
   constructor(
@@ -77,6 +85,7 @@ export class AudioProcessorService {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.sleep = options.sleep ?? abortableSleep;
     this.uploadRecovery = new AudioProcessorUploadRecovery(plugin);
+    this.delivery = new AudioProcessorDelivery(plugin, (url, signal) => this.api.downloadNote(url, signal));
     this.deviceStaging = options.deviceStaging ?? null;
   }
 
@@ -568,14 +577,29 @@ export class AudioProcessorService {
       );
     }
 
+    let awaitingFundsRechecks = 0;
     for await (const observed of observeManagedJob<AudioProcessorJob>({
       initial: job,
       read: () => this.api.getJob(job.id, options.signal),
       signal: options.signal,
-      pollAfterMs: value => value.pollAfterMs ?? this.pollIntervalMs,
+      pollAfterMs: (value) => {
+        if (value.status !== "awaiting_funds") {
+          awaitingFundsRechecks = 0;
+          return value.pollAfterMs ?? this.pollIntervalMs;
+        }
+        const recheckMs = Math.min(
+          AWAITING_FUNDS_MAX_RECHECK_MS,
+          AWAITING_FUNDS_FIRST_RECHECK_MS * 2 ** awaitingFundsRechecks,
+        );
+        awaitingFundsRechecks += 1;
+        return Math.max(recheckMs, value.pollAfterMs ?? 0);
+      },
       isRetryableError: isRetryableManagedJobObservationError,
       retryAfterMs: error => (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs,
-      wait: this.sleep,
+      onRetrying: () => this.reportServerProgress(job, options, true),
+      wait: (milliseconds, signal) => job.status === "awaiting_funds"
+        ? this.waitForFunding(milliseconds, signal)
+        : this.sleep(milliseconds, signal),
     })) {
       job = observed;
       if (job.status === "succeeded") {
@@ -609,9 +633,48 @@ export class AudioProcessorService {
     );
   }
 
+  /**
+   * Waits up to `milliseconds` for a job paused for credits, returning early
+   * when the user comes back to Obsidian, the host reconnects, or any balance
+   * read (the credits modal, settings, or a chat view) shows credits.
+   */
+  private async waitForFunding(milliseconds: number, signal: AbortSignal): Promise<void> {
+    const woken = new AbortController();
+    const wake = (): void => woken.abort();
+    const wakeWhenVisible = (): void => {
+      if (typeof document === "undefined" || !document.hidden) wake();
+    };
+    const hasWindow = typeof window !== "undefined";
+    if (hasWindow) {
+      window.addEventListener("focus", wake);
+      window.addEventListener("online", wake);
+    }
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", wakeWhenVisible);
+    signal.addEventListener("abort", wake, { once: true });
+    const aiService = (this.plugin as Partial<Pick<SystemSculptPlugin, "aiService">>).aiService;
+    const unsubscribe = aiService?.onCreditsBalance?.((balance) => {
+      if (balance.usageClass === "master_auth" || (balance.availableUnreserved ?? balance.totalRemaining) > 0) wake();
+    });
+    try {
+      await this.sleep(milliseconds, woken.signal);
+    } catch (error) {
+      if (signal.aborted || !woken.signal.aborted) throw error;
+    } finally {
+      if (hasWindow) {
+        window.removeEventListener("focus", wake);
+        window.removeEventListener("online", wake);
+      }
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", wakeWhenVisible);
+      signal.removeEventListener("abort", wake);
+      unsubscribe?.();
+    }
+    if (signal.aborted) throw abortError();
+  }
+
   private reportServerProgress(
     job: AudioProcessorJob,
     options: ProcessAudioOptions,
+    stillWaiting = false,
   ): void {
     const messages: Record<AudioProcessorJob["stage"], string> = {
       uploading: "Receiving audio…",
@@ -635,9 +698,11 @@ export class AudioProcessorService {
     options.onProgress?.({
       stage: job.stage,
       progress: Math.max(0.36, Math.min(0.98, job.progress)),
-      message: job.status === "failed" && job.transcriptArtifact
-        ? "Transcript ready; primary note unavailable"
-        : messages[job.stage],
+      message: stillWaiting
+        ? "Still waiting for the audio service. Retrying…"
+        : job.status === "failed" && job.transcriptArtifact
+          ? "Transcript ready; primary note unavailable"
+          : messages[job.stage],
       serverOwned: true,
       quotedCredits: job.quotedCredits,
       chargedCredits: job.chargedCredits,
@@ -665,41 +730,14 @@ export class AudioProcessorService {
     });
 
     const artifactJobId = job.result.artifactJobId;
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const plan = await delivery.resolvePlan(
+    const files = await this.delivery.deliverPair({
       artifactJobId,
-      job.result.filename,
-      persistence,
-    );
-    const [note, transcript] = await Promise.all([
-      plan.note.file
-        ? Promise.resolve(null)
-        : this.api.downloadNote(job.result.noteUrl, options.signal),
-      plan.transcript.file
-        ? Promise.resolve(null)
-        : this.api.downloadNote(job.result.transcriptUrl, options.signal),
-    ]);
-    if (note != null && job.result.artifactManifest) {
-      await verifyArtifactDigest(
-        note,
-        job.result.artifactManifest.note.sha256,
-        "audio note",
-      );
-    }
-    if (transcript != null && job.result.artifactManifest) {
-      await verifyArtifactDigest(
-        transcript,
-        job.result.artifactManifest.transcript.sha256,
-        "audio transcript",
-      );
-    }
-    const files = await delivery.persist(
-      plan,
-      artifactJobId,
-      { note, transcript },
-      options.signal,
-      { deliveryJobId: job.id },
-    );
+      deliveryJobId: job.id,
+      filename: job.result.filename,
+      ...persistence,
+      note: { url: job.result.noteUrl, sha256: job.result.artifactManifest?.note.sha256 },
+      transcript: { url: job.result.transcriptUrl, sha256: job.result.artifactManifest?.transcript.sha256 },
+    }, options.signal);
 
     // Delivery acknowledgement is intentionally after both Vault.create
     // promises resolve. A partial local write remains recoverable and keeps
@@ -759,27 +797,15 @@ export class AudioProcessorService {
       message: "Saving the recovered transcript…",
     });
 
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const plan = await delivery.resolvePlan(
-      artifact.artifactJobId,
-      stripTranscriptFilenameSuffix(artifact.filename),
-      persistence,
-      ["transcript"],
-    );
-    const markdown = plan.transcript.file
-      ? null
-      : await this.api.downloadNote(artifact.transcriptUrl, options.signal);
-    if (markdown != null) {
-      await verifyArtifactDigest(markdown, artifact.sha256, "audio transcript");
-    }
-    const transcript = plan.transcript.file ?? await delivery.persistOne(
-      plan,
-      artifact.artifactJobId,
-      "transcript",
-      markdown!,
-      options.signal,
-      { deliveryJobId: job.id, linkedArtifactAvailable: false },
-    );
+    const transcript = await this.delivery.deliverArtifact({
+      artifactJobId: artifact.artifactJobId,
+      deliveryJobId: job.id,
+      filename: stripTranscriptFilenameSuffix(artifact.filename),
+      ...persistence,
+      kind: "transcript",
+      source: { url: artifact.transcriptUrl, sha256: artifact.sha256 },
+      standalone: true,
+    }, options.signal);
 
     await this.acknowledgeAfterLocalCommit(job.id, operationId, options.signal);
     const open = async (): Promise<void> => await this.openNote(transcript);
@@ -843,30 +869,23 @@ export class AudioProcessorService {
         "artifact_unavailable",
       );
     }
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const existing = delivery.findArtifact(artifact.artifactJobId, "transcript");
+    const existing = this.delivery.findArtifact(artifact.artifactJobId, "transcript");
     if (existing) {
       return {
         notePath: existing.path,
         open: async (): Promise<void> => await this.openNote(existing),
       };
     }
-    const plan = await delivery.resolvePlan(
-      artifact.artifactJobId,
-      stripTranscriptFilenameSuffix(artifact.filename),
-      { recoverMovedFiles: true },
-      ["transcript"],
-    );
-    const markdown = await this.api.downloadNote(artifact.transcriptUrl, signal);
-    await verifyArtifactDigest(markdown, artifact.sha256, "audio transcript");
-    const transcript = await delivery.persistOne(
-      plan,
-      artifact.artifactJobId,
-      "transcript",
-      markdown,
-      signal,
-      { deliveryJobId: job.id, linkedArtifactAvailable: false },
-    );
+    const transcript = await this.delivery.deliverArtifact({
+      artifactJobId: artifact.artifactJobId,
+      deliveryJobId: job.id,
+      filename: stripTranscriptFilenameSuffix(artifact.filename),
+      recoverMovedFiles: true,
+      kind: "transcript",
+      source: { url: artifact.transcriptUrl, sha256: artifact.sha256 },
+      standalone: true,
+      refreshDeliveryAlias: true,
+    }, signal);
     return {
       notePath: transcript.path,
       open: async (): Promise<void> => await this.openNote(transcript),
@@ -880,8 +899,7 @@ export class AudioProcessorService {
     signal: AbortSignal,
   ): Promise<AudioProcessorSavedArtifact> {
     if (signal.aborted) throw abortError();
-    const delivery = new AudioProcessorDelivery(this.plugin);
-    const existing = delivery.findArtifact(artifactJobId, kind);
+    const existing = this.delivery.findArtifact(artifactJobId, kind);
     if (existing) {
       return {
         notePath: existing.path,
@@ -916,37 +934,14 @@ export class AudioProcessorService {
     } else {
       artifactUrl = refreshed.result.transcriptUrl;
     }
-    const plan = await delivery.resolvePlan(
+    const file = await this.delivery.deliverArtifact({
       artifactJobId,
-      refreshed.result.filename,
-      { recoverMovedFiles: true },
-      [kind],
-    );
-    const slot = kind === "summary" ? plan.summary : plan.transcript;
-    if (slot.file) {
-      return {
-        notePath: slot.file.path,
-        open: async (): Promise<void> => await this.openNote(slot.file!),
-      };
-    }
-    const markdown = await this.api.downloadNote(artifactUrl, signal);
-    const manifestArtifact = refreshed.result.artifactManifest?.[kind];
-    if (manifestArtifact) {
-      await verifyArtifactDigest(markdown, manifestArtifact.sha256, `audio ${kind}`);
-    }
-    const file = await delivery.persistOne(
-      plan,
-      artifactJobId,
+      deliveryJobId,
+      filename: refreshed.result.filename,
+      recoverMovedFiles: true,
       kind,
-      markdown,
-      signal,
-      {
-        deliveryJobId,
-        linkedArtifactAvailable: kind === "summary"
-          ? Boolean(plan.transcript.file)
-          : Boolean(plan.note.file),
-      },
-    );
+      source: { url: artifactUrl, sha256: refreshed.result.artifactManifest?.[kind]?.sha256 },
+    }, signal);
     return {
       notePath: file.path,
       open: async (): Promise<void> => await this.openNote(file),
@@ -997,22 +992,6 @@ export class AudioProcessorService {
 
 function stripTranscriptFilenameSuffix(filename: string): string {
   return filename.replace(/\s+—\s+Transcript\.md$/i, ".md");
-}
-
-async function verifyArtifactDigest(
-  markdown: string,
-  expectedSha256: string,
-  label: string,
-): Promise<void> {
-  const bytes = new TextEncoder().encode(markdown);
-  const actualSha256 = await sha256HexFromArrayBuffer(bytes.buffer);
-  if (actualSha256 !== expectedSha256.toLowerCase()) {
-    throw new AudioProcessorApiError(
-      `The downloaded ${label} failed its integrity check. Please retry the download.`,
-      0,
-      "artifact_integrity_failed",
-    );
-  }
 }
 
 function createOperationId(): string {

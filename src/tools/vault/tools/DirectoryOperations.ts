@@ -13,7 +13,6 @@ import {
   validatePath,
   formatBytes,
   runWithConcurrency,
-  shouldExcludeFromSearch,
   normalizeVaultPath,
   isHiddenSystemPath,
   ensureAdapterFolder,
@@ -21,8 +20,11 @@ import {
   listAdapterDirectory,
   renameAdapterPath,
   statAdapterPath,
+  resolvePortableVaultPath,
+  portableVaultPathNotice,
 } from "../utils";
 import SystemSculptPlugin from "../../../main";
+import { searchVaultExclusions } from "../../../services/search/VaultExclusions";
 import { resolveFolderNotePath } from "../folderNotes";
 
 /**
@@ -40,9 +42,10 @@ export class DirectoryOperations {
   }
 
   /**
-   * Create multiple directories
+   * Create multiple directories. New folders whose requested names would not
+   * sync are created under portable names, reported as `path` plus a `notice`.
    */
-  async createDirectories(params: CreateDirectoriesParams): Promise<{ results: Array<{ path: string, success: boolean, error?: string }> }> {
+  async createDirectories(params: CreateDirectoriesParams): Promise<{ results: Array<{ path: string, success: boolean, error?: string, requestedPath?: string, notice?: string }> }> {
     const { paths } = params;
     
     // Limit operations to prevent resource exhaustion
@@ -55,20 +58,29 @@ export class DirectoryOperations {
         return { path, success: false, error: `Access denied: ${path}` };
       }
       
-      const normalizedPath = normalizePath(normalizeVaultPath(path));
+      const requestedPath = normalizePath(normalizeVaultPath(path));
+      const normalizedPath = this.shouldUseAdapter(requestedPath)
+        ? requestedPath
+        : resolvePortableVaultPath(this.app, requestedPath);
+      if (!validatePath(normalizedPath, this.allowedPaths)) {
+        return { path, success: false, error: `Access denied: ${normalizedPath}` };
+      }
+      const renamed = normalizedPath === requestedPath
+        ? {}
+        : { path: normalizedPath, requestedPath: path, notice: portableVaultPathNotice(requestedPath, normalizedPath) };
       
       try {
         if (this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           await ensureAdapterFolder(adapter, normalizedPath);
         } else {
           await this.app.vault.createFolder(normalizedPath);
         }
-        return { path, success: true };
+        return { path, success: true, ...renamed };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (errorMessage.includes("already exists")) {
-          return { path, success: true }; // Directory already exists
+          return { path, success: true, ...renamed }; // Directory already exists
         }
         return { path, success: false, error: errorMessage };
       }
@@ -81,13 +93,13 @@ export class DirectoryOperations {
    */
   async listDirectories(params: ListDirectoriesParams): Promise<{ results: ListDirectoryResult[] }> {
     const { paths } = params;
-    const filter = (params as any).filter ?? "all";
-    const sort = (params as any).sort ?? "modified";
-    const recursive = (params as any).recursive ?? false;
-    const offset = Math.max(0, Math.floor(Number((params as any).offset ?? 0) || 0));
+    const filter = params.filter ?? "all";
+    const sort = params.sort ?? "modified";
+    const recursive = params.recursive ?? false;
+    const offset = Math.max(0, Math.floor(Number(params.offset ?? 0) || 0));
     const defaultPageSize = FILESYSTEM_LIMITS.DEFAULT_LIST_PAGE_SIZE ?? 25;
     const maxPageSize = FILESYSTEM_LIMITS.MAX_LIST_PAGE_SIZE ?? 50;
-    const requestedLimit = Math.floor(Number((params as any).limit ?? defaultPageSize) || defaultPageSize);
+    const requestedLimit = Math.floor(Number(params.limit ?? defaultPageSize) || defaultPageSize);
     const limit = Math.max(1, Math.min(maxPageSize, requestedLimit));
 
     if (!Array.isArray(paths) || paths.length === 0) {
@@ -99,7 +111,7 @@ export class DirectoryOperations {
     const pageOrders = new WeakMap<ListDirectoryResult, Array<{ type: "file" | "folder"; path: string }>>();
     
     // Semantic filter is no longer supported - removed complex search engine
-    if (typeof filter === 'object' && (filter as any).semantic) {
+    if (typeof filter === 'object' && (filter).semantic) {
       return { results: [{
         path: paths[0] || '',
         error: 'Semantic search has been disabled – use "Search Note Contents" instead',
@@ -119,7 +131,7 @@ export class DirectoryOperations {
         const normalizedCandidate = normalizePath(normalizeVaultPath(path));
         const normalizedPath = normalizedCandidate === "." ? "" : normalizedCandidate;
         if (normalizedPath && this.shouldUseAdapter(normalizedPath)) {
-          const adapter: any = this.app.vault.adapter as any;
+          const adapter = this.app.vault.adapter;
           const pathResult: ListDirectoryResult = { path, offset, totalItems: 0, nextOffset: null };
 
           if (filter === 'all' || filter === 'files') {
@@ -171,7 +183,7 @@ export class DirectoryOperations {
           }));
 
           items.sort((a, b) => {
-            const sortType = sort as "modified" | "size" | "name" | "created";
+            const sortType = sort;
             if (sortType === "name") {
               return a.path.localeCompare(b.path);
             }
@@ -255,14 +267,25 @@ export class DirectoryOperations {
             pathResult.directories = [];
         }
 
+        // Naming an excluded folder directly must not bypass the exclusion
+        // that hides it from its parent's listing.
+        const exclusions = searchVaultExclusions(this.plugin);
+        if (exclusions.isFolderExcluded(folder.path)) {
+          pathResult.notice = `${path} is excluded from vault search and listings by the exclusion settings, so its contents are not listed.`;
+          return pathResult;
+        }
+
         // Collect all items (with recursion if needed)
         let allItems: (TFile | TFolder)[] = [];
-        
+
+        const isVisible = (child: TFile | TFolder) => child instanceof TFile
+          ? !exclusions.isExcluded(child.path)
+          : !exclusions.isFolderExcluded(child.path);
         const collectItems = (folder: TFolder) => {
           for (const child of folder.children) {
             if (child instanceof TFile || child instanceof TFolder) {
-              // Skip chat history and system files for files
-              if (child instanceof TFile && shouldExcludeFromSearch(child, this.plugin)) {
+              // Skip excluded files and folders, such as chat history and system folders
+              if (!isVisible(child)) {
                 continue;
               }
               allItems.push(child);
@@ -282,24 +305,27 @@ export class DirectoryOperations {
         
         // Sort items based on the sort parameter
         allItems.sort((a, b) => {
-          const sortType = sort as "modified" | "size" | "name" | "created";
+          const sortType = sort;
           switch (sortType) {
-            case "size":
+            case "size": {
               // Folders don't have size, put them last
               const aSize = a instanceof TFile ? a.stat.size : -1;
               const bSize = b instanceof TFile ? b.stat.size : -1;
               return bSize - aSize || a.path.localeCompare(b.path); // Largest first
+            }
             case "name":
               return a.path.localeCompare(b.path);
-            case "created":
+            case "created": {
               const aCtime = a instanceof TFile ? a.stat.ctime : 0;
               const bCtime = b instanceof TFile ? b.stat.ctime : 0;
               return bCtime - aCtime || a.path.localeCompare(b.path); // Newest first
+            }
             case "modified":
-            default:
+            default: {
               const aMtime = a instanceof TFile ? a.stat.mtime : 0;
               const bMtime = b instanceof TFile ? b.stat.mtime : 0;
               return bMtime - aMtime || a.path.localeCompare(b.path); // Newest first
+            }
           }
         });
         
@@ -358,7 +384,8 @@ export class DirectoryOperations {
                 const folderInfo: DirectoryInfo = {
                   path: child.path,
                   name: child.name,
-                  itemCount: child.children.length,
+                  itemCount: child.children.filter((entry) =>
+                    (entry instanceof TFile || entry instanceof TFolder) && isVisible(entry)).length,
                   modified: undefined // Folders don't have stat in Obsidian API
                 };
                 
@@ -425,9 +452,11 @@ export class DirectoryOperations {
   }
 
   /**
-   * Move or rename multiple files/folders
+   * Move or rename multiple files/folders. A destination name that would not
+   * sync is replaced by a portable one, reported as `destination` plus a
+   * `notice`; the source may keep any name so unsyncable files can be fixed.
    */
-  async moveItems(params: MoveItemsParams): Promise<{ results: Array<{ source: string, destination: string, success: boolean, error?: string }> }> {
+  async moveItems(params: MoveItemsParams): Promise<{ results: Array<{ source: string, destination: string, success: boolean, error?: string, requestedDestination?: string, notice?: string }> }> {
     const { items } = params;
     
     // Enforce global safety cap
@@ -435,7 +464,7 @@ export class DirectoryOperations {
       throw new Error(`Cannot move more than ${FILESYSTEM_LIMITS.MAX_OPERATIONS} items at once.`);
     }
 
-    const results: Array<{ source: string, destination: string, success: boolean, error?: string }> = [];
+    const results: Array<{ source: string, destination: string, success: boolean, error?: string, requestedDestination?: string, notice?: string }> = [];
 
     // Process in small batches to keep UI responsive and avoid file-lock contention
     const CHUNK_SIZE = 5; // keep individual operations small; aligns with previous per-call limit
@@ -454,7 +483,7 @@ export class DirectoryOperations {
           }
 
           if (this.shouldUseAdapter(source) || this.shouldUseAdapter(destination)) {
-            const adapter: any = this.app.vault.adapter as any;
+            const adapter = this.app.vault.adapter;
             const destFolder = destination.split("/").slice(0, -1).join("/");
             if (destFolder) {
               await ensureAdapterFolder(adapter, destFolder);
@@ -466,7 +495,18 @@ export class DirectoryOperations {
           }
 
           const normalizedSource = normalizePath(normalizeVaultPath(source));
-          const normalizedDestination = normalizePath(normalizeVaultPath(destination));
+          const requestedDestination = normalizePath(normalizeVaultPath(destination));
+          const normalizedDestination = resolvePortableVaultPath(this.app, requestedDestination);
+          if (!validatePath(normalizedDestination, this.allowedPaths)) {
+            throw new Error(`Access denied: ${normalizedDestination}`);
+          }
+          const renamed = normalizedDestination === requestedDestination
+            ? {}
+            : {
+              destination: normalizedDestination,
+              requestedDestination: destination,
+              notice: portableVaultPathNotice(requestedDestination, normalizedDestination),
+            };
 
           // Get the source file/folder, falling back to the Folder Notes
           // layout (X.md -> X/X.md) so moves work on folder notes too (#154).
@@ -488,9 +528,14 @@ export class DirectoryOperations {
 
           // Move/rename operation
           await this.app.fileManager.renameFile(sourceFile, normalizedDestination);
-          results.push({ source, destination, success: true });
-        } catch (error: any) {
-          results.push({ source, destination, success: false, error: error?.message || String(error) });
+          results.push({ source, destination, success: true, ...renamed });
+        } catch (error: unknown) {
+          results.push({
+            source,
+            destination,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
@@ -501,7 +546,9 @@ export class DirectoryOperations {
     const failed = results.length - ok;
     try {
       if (ok > 0) new Notice(`Moved ${ok} item${ok === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}.`);
-    } catch {}
+    } catch {
+      // Notices are optional in headless hosts.
+    }
 
     return { results };
   }
@@ -524,14 +571,13 @@ export class DirectoryOperations {
     });
 
     // Normalise results & map errors
-    const results = settled.map((res) => {
-      if (res && (res as any).success) return res as { path: string; success: boolean };
-      // An error was caught – convert to typed result object
-      const errObj = res as any;
+    const results = settled.map((result) => {
+      if ("success" in result && result.success) return result;
+      const error = "error" in result ? result.error : "Trash operation failed";
       return {
-        path: errObj?.path ?? "<unknown>",
+        path: result.path,
         success: false,
-        error: errObj?.error?.message ?? errObj?.message ?? String(errObj)
+        error: error instanceof Error ? error.message : String(error),
       };
     });
 

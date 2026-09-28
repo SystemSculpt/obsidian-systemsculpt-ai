@@ -5,7 +5,7 @@ export interface ErrorContext {
   method?: string;
   userId?: string;
   providerId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface ErrorLogEntry {
@@ -45,7 +45,7 @@ class ErrorLogger {
     this.minimumLevel = level;
   }
 
-  log(level: ErrorLevel, message: string, error?: Error | any, context?: ErrorContext): void {
+  log(level: ErrorLevel, message: string, error?: unknown, context?: ErrorContext): void {
     const entry: ErrorLogEntry = {
       timestamp: new Date().toISOString(),
       level,
@@ -63,7 +63,7 @@ class ErrorLogger {
       return;
     }
 
-    const consoleArgs: any[] = [`[SystemSculpt][${level.toUpperCase()}] ${message}`];
+    const consoleArgs: unknown[] = [`[SystemSculpt][${level.toUpperCase()}] ${message}`];
     if (entry.context) {
       consoleArgs.push(entry.context);
     }
@@ -81,7 +81,7 @@ class ErrorLogger {
     }
   }
 
-  error(message: string, error?: Error | any, context?: ErrorContext): void {
+  error(message: string, error?: unknown, context?: ErrorContext): void {
     this.log('error', message, error, context);
   }
 
@@ -118,19 +118,19 @@ class ErrorLogger {
     return LEVEL_ORDER[level] <= LEVEL_ORDER[this.minimumLevel];
   }
 
-  private resolveConsoleMethod(level: ErrorLevel): (...args: any[]) => void {
+  private resolveConsoleMethod(level: ErrorLevel): (...args: unknown[]) => void {
     if (typeof console === 'undefined') {
       return () => {};
     }
     switch (level) {
       case 'error':
-        return console.error ? console.error.bind(console) : console.warn.bind(console);
+        return (...args) => console.error(...args);
       case 'warn':
-        return console.warn ? console.warn.bind(console) : console.debug.bind(console);
+        return (...args) => console.warn(...args);
       case 'info':
-        return console.debug ? console.debug.bind(console) : console.warn.bind(console);
+        return (...args) => console.debug(...args);
       default:
-        return console.debug ? console.debug.bind(console) : console.warn.bind(console);
+        return (...args) => console.debug(...args);
     }
   }
 
@@ -144,7 +144,12 @@ class ErrorLogger {
       if (typeof error.stack === 'string') {
         output.stack = error.stack;
       }
-      const extra = error as any;
+      const extra = error as Error & {
+        code?: unknown;
+        status?: unknown;
+        retryInMs?: unknown;
+        details?: unknown;
+      };
       if (typeof extra.code !== 'undefined') {
         output.code = extra.code;
       }
@@ -161,7 +166,7 @@ class ErrorLogger {
     }
     if (typeof error === 'object') {
       try {
-        return JSON.parse(JSON.stringify(error));
+        return Object.fromEntries(Object.entries(error));
       } catch {
         return { message: String(error) };
       }

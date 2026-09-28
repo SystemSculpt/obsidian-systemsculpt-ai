@@ -1,16 +1,12 @@
 import { App, Notice } from "obsidian";
-import SystemSculptPlugin from "../../main";
+import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "./viewTypes";
 import { generateDefaultChatTitle } from "../../utils/titleUtils";
+import { AgentChatView } from "../../views/chatview/AgentChatView";
 
 type RibbonHandle = HTMLElement;
 
-type AgentChatViewModule = typeof import("../../views/chatview/AgentChatView");
 const AUDIO_PROCESSOR_UNAVAILABLE_NOTICE = "Audio Processor is temporarily unavailable.";
-
-function loadAgentChatViewModule(): AgentChatViewModule {
-  return require("../../views/chatview/AgentChatView");
-}
 
 export class RibbonManager {
   private plugin: SystemSculptPlugin;
@@ -97,12 +93,18 @@ export class RibbonManager {
   private registerRibbonIcon(
     icon: string,
     title: string,
-    callback: () => void
+    callback: () => void | Promise<void>
   ) {
     if (this.isDisposed || this.plugin?.isPluginUnloading?.()) {
       return;
     }
-    const ribbon = this.plugin.addRibbonIcon(icon, title, callback) as RibbonHandle;
+    const ribbon = this.plugin.addRibbonIcon(icon, title, () => {
+      void Promise.resolve()
+        .then(callback)
+        .catch(() => {
+          new Notice(`Unable to ${title.toLowerCase()}.`, 5000);
+        });
+    });
     if (ribbon) {
       this.ribbons.push(ribbon);
       this.plugin.register(() => {
@@ -117,7 +119,7 @@ export class RibbonManager {
       if (ribbon) {
         ribbon.remove();
       }
-    } catch (error) {
+    } catch {
       // Best-effort cleanup; ignore failures.
     }
   }
@@ -147,7 +149,6 @@ export class RibbonManager {
       },
     });
 
-    const { AgentChatView } = loadAgentChatViewModule();
     const view = new AgentChatView(leaf, this.plugin);
     await leaf.open(view);
     workspace.setActiveLeaf(leaf, { focus: true });

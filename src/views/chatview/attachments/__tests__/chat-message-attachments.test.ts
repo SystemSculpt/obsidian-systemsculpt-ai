@@ -9,7 +9,7 @@ import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
   type ThinAgentInputLimits,
 } from "../../../../services/managed/ThinAgentInputLimits";
-import { parseAttachedTextContent } from "../ChatAttachmentContent";
+import { parseAttachedTextContent } from "../../../../chat/ChatAttachmentContent";
 
 function limits(overrides: Partial<ThinAgentInputLimits>): ThinAgentInputLimits {
   return Object.freeze({ ...DEFAULT_THIN_AGENT_INPUT_LIMITS, ...overrides });

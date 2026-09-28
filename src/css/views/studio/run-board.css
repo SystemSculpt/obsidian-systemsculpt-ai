@@ -1,0 +1,48 @@
+.ss-studio-run-board { container-type: inline-size; padding: 12px; }
+.ss-studio-run-toolbar, .ss-studio-run-actions, .ss-studio-run-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.ss-studio-run-toolbar input { flex: 1; min-width: 140px; }
+.ss-studio-run-lanes { display: flex; gap: 12px; overflow-x: auto; max-height: 700px; }
+.ss-studio-run-lane { flex: 1 0 260px; min-width: 0; }
+.ss-studio-run-lane h3 { font-size: 13px; margin: 0 0 10px; }
+.ss-studio-run-card { padding: 12px; margin-bottom: 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); cursor: pointer; }
+.ss-studio-run-card:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.ss-studio-run-meta { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; margin: 5px 0; }
+.ss-studio-run-current { font-size: 13px; margin: 8px 0; overflow-wrap: anywhere; }
+.ss-studio-run-empty { padding: 20px; color: var(--text-muted); }
+.ss-studio-run-detail .ss-modal__content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 16px; }
+.ss-studio-run-stream { flex: 1; overflow: auto; min-height: 0; padding-right: 8px; }
+.ss-studio-run-stream pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.ss-studio-run-event { padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.ss-studio-run-summary { margin-bottom: 12px; overflow-wrap: anywhere; }
+.ss-studio-run-error { color: var(--text-error); font-size: 12px; }
+.ss-studio-run-composer { width: 100%; resize: vertical; }
+.ss-studio-run-inline { padding: 0 12px; }
+.ss-studio-run-inline:empty { display: none; }
+.ss-studio-run-inline button { max-width: 100%; white-space: normal; text-align: left; }
+.ss-studio-run-board.is-compact .ss-studio-run-lanes { flex-direction: column; max-height: 500px; }
+.ss-studio-run-board.is-compact .ss-studio-run-lane { flex: auto; }
+@container (max-width: 600px) {
+  .ss-studio-run-lanes { flex-direction: column; }
+  .ss-studio-run-lane { flex: auto; }
+  .ss-studio-run-board button { min-height: 44px; }
+}
+
+.ss-studio-run-tabs button[aria-pressed="true"] { color: var(--text-on-accent); background: var(--interactive-accent); }
+
+.ss-modal.ss-studio-run-detail { width: min(1440px, calc(100vw - 32px)); max-width: calc(100vw - 32px); height: calc(100dvh - 48px); max-height: calc(100dvh - 48px); }
+.ss-studio-run-detail .ss-modal__content { flex: 1; }
+.ss-studio-run-detail .ss-modal__footer { flex-shrink: 0; }
+.ss-studio-run-detail .ss-studio-run-composer { max-height: 20dvh; min-height: 64px; }
+.ss-studio-run-tabs { flex-shrink: 0; align-items: center; }
+.ss-modal.ss-studio-run-detail .ss-studio-run-tabs button { min-height: 44px; }
+.ss-studio-run-source-toggle { order: 1; margin-left: auto; }
+.ss-studio-run-markdown { line-height: 1.6; overflow-wrap: anywhere; }
+.ss-studio-run-markdown > :first-child { margin-top: 0; }
+.ss-studio-run-markdown table { border-collapse: collapse; width: 100%; min-width: 560px; margin: 0; }
+.ss-studio-run-markdown th, .ss-studio-run-markdown td { padding: 10px 12px; min-width: 120px; border: 1px solid var(--background-modifier-border); text-align: left; vertical-align: top; }
+.ss-studio-run-markdown th { background: var(--background-secondary); }
+.ss-studio-run-markdown pre { overflow-x: auto; }
+.ss-studio-run-markdown a { overflow-wrap: anywhere; }
+
+.ss-studio-run-table { overflow-x: auto; margin: 16px 0; }
+.ss-studio-run-table:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }

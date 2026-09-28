@@ -1,3 +1,4 @@
+import { readManagedOutputPendingFlag, remapCopiedMediaOutputOwner } from "../../../studio/StudioManagedOutputNodes";
 import type {
   StudioEdge,
   StudioNodeGroup,
@@ -50,6 +51,7 @@ export function materializeGraphClipboardPaste(options: {
   const deltaY = anchor.y + repeatedPasteOffset - payload.anchor.y;
 
   for (const sourceNode of payload.nodes) {
+    if (readManagedOutputPendingFlag(sourceNode)) continue;
     const sourceNodeId = String(sourceNode.id || "").trim();
     if (!sourceNodeId) {
       continue;
@@ -64,6 +66,13 @@ export function materializeGraphClipboardPaste(options: {
       y: Number(clonedNode.position?.y || 0) + deltaY,
     });
     newNodes.push(clonedNode);
+  }
+
+  for (const node of newNodes) {
+    remapCopiedMediaOutputOwner(node, nodeIdMap);
+    const parent = node.parentId ? nodeIdMap.get(node.parentId) : undefined;
+    if (parent) node.parentId = parent;
+    else delete node.parentId;
   }
 
   const shapeIdMap = new Map<string, string>();
@@ -89,10 +98,11 @@ export function materializeGraphClipboardPaste(options: {
     return null;
   }
 
+  const itemIdMap = new Map([...nodeIdMap, ...shapeIdMap]);
   const newArrows: StudioShapeArrow[] = [];
   for (const sourceArrow of payload.arrows || []) {
-    const fromShapeId = shapeIdMap.get(String(sourceArrow.fromShapeId || "").trim());
-    const toShapeId = shapeIdMap.get(String(sourceArrow.toShapeId || "").trim());
+    const fromShapeId = itemIdMap.get(String(sourceArrow.fromShapeId || "").trim());
+    const toShapeId = itemIdMap.get(String(sourceArrow.toShapeId || "").trim());
     if (!fromShapeId || !toShapeId || fromShapeId === toShapeId) {
       continue;
     }
@@ -133,7 +143,9 @@ export function materializeGraphClipboardPaste(options: {
     const groupShapeIds = normalizeNodeIdList(sourceGroup.shapeIds || [])
       .map((shapeId) => shapeIdMap.get(shapeId) || "")
       .filter((shapeId) => shapeId.length > 0);
-    if (groupNodeIds.length + groupShapeIds.length < 2) {
+    const outputForNodeId = sourceGroup.outputForNodeId
+      ? nodeIdMap.get(sourceGroup.outputForNodeId) : undefined;
+    if (groupNodeIds.length + groupShapeIds.length < (outputForNodeId ? 1 : 2)) {
       continue;
     }
     const groupName = String(sourceGroup.name || "").trim();
@@ -143,6 +155,7 @@ export function materializeGraphClipboardPaste(options: {
     const groupColor = String(sourceGroup.color || "").trim();
     newGroups.push({
       id: nextGroupId(),
+      ...(outputForNodeId ? { outputForNodeId, ...(sourceGroup.outputOffset ? { outputOffset: { ...sourceGroup.outputOffset } } : {}) } : {}),
       name: groupName,
       ...(groupColor ? { color: groupColor } : {}),
       nodeIds: groupNodeIds,

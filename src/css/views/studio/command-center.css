@@ -1,0 +1,44 @@
+.ss-studio-command-center { container-type: inline-size; padding: 20px; }
+.ss-studio-command-intro { color: var(--text-muted); margin-bottom: 22px; font-size: 14px; }
+.ss-studio-command-section + .ss-studio-command-section { margin-top: 24px; }
+.ss-studio-command-section h3 { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.ss-studio-command-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ss-studio-command-item { padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
+.ss-studio-command-item.is-run { border-top: 2px solid var(--interactive-accent); }
+.ss-studio-command-button { width: 100%; min-height: 44px; justify-content: flex-start; text-align: left; white-space: normal; }
+.ss-studio-command-description { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin-top: 8px; }
+.ss-studio-command-status { font-size: 11px; color: var(--text-accent); margin-top: 8px; overflow-wrap: anywhere; }
+.ss-studio-command-status:empty { display: none; }
+@container (max-width: 700px) { .ss-studio-command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 420px) { .ss-studio-command-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.ss-studio-command-center.is-single-button .ss-studio-command-section h3 { display: none; }
+.ss-studio-command-center.is-single-button .ss-studio-command-grid { grid-template-columns: minmax(0, 1fr); }
+.ss-studio-command-center.is-single-button .ss-studio-command-item { padding: 0; border: 0; background: transparent; }
+
+.ss-studio-command-execution { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--background-modifier-border); }
+.ss-studio-command-execution-field { display: flex; flex: 1 1 180px; flex-direction: column; gap: 6px; min-width: 0; font-size: var(--font-ui-small); color: var(--text-muted); }
+.ss-studio-command-execution-field select { width: 100%; min-width: 0; min-height: 44px; }
+.ss-studio-command-standard { display: flex; align-items: center; min-height: 44px; color: var(--text-muted); font-size: var(--font-ui-small); }
+.ss-studio-command-execution-status { flex-basis: 100%; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.ss-studio-command-execution-status:empty { display: none; }
+
+.ss-studio-orchestrator { margin-bottom: 24px; }
+.ss-studio-orchestrator h3 { margin: 0 0 12px; font-size: 18px; }
+.ss-studio-workflow-prompt, .ss-studio-workflow-followup { display: block; width: 100%; min-height: 80px; resize: vertical; padding: 12px; line-height: 1.5; }
+.ss-studio-orchestrator .ss-studio-command-execution { margin: 12px 0; padding: 0; border: 0; }
+.ss-studio-workflow-start { min-height: 44px; background: var(--interactive-accent); color: var(--text-on-accent); }
+.ss-studio-workflow-card { margin-top: 16px; padding: 16px; border: 1px solid var(--background-modifier-border); border-top: 2px solid var(--interactive-accent); border-radius: 8px; background: var(--background-primary); overflow-wrap: anywhere; }
+.ss-studio-workflow-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: start; justify-content: space-between; }
+.ss-studio-workflow-header h4 { margin: 0; flex: 1 1 240px; font-size: 15px; white-space: pre-wrap; }
+.ss-studio-workflow-status { color: var(--text-accent); font-size: 12px; }
+.ss-studio-workflow-boundaries { margin: 12px 0; color: var(--text-muted); font-size: 12px; white-space: pre-wrap; }
+.ss-studio-workflow-steps { display: grid; gap: 10px; padding-left: 24px; }
+.ss-studio-workflow-steps li { padding: 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); }
+.ss-studio-workflow-steps button { margin-top: 8px; min-height: 44px; max-width: 100%; white-space: normal; }
+.ss-studio-workflow-step-title { font-size: 13px; font-weight: var(--font-semibold); }
+.ss-studio-workflow-outcome { margin: 16px 0; white-space: pre-wrap; line-height: 1.5; }
+.ss-studio-workflow-followup { margin: 12px 0 8px; }
+
+.ss-studio-workflow-header { cursor: pointer; min-height: 44px; }
+.ss-studio-workflow-card:not([open]) .ss-studio-workflow-header h4 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

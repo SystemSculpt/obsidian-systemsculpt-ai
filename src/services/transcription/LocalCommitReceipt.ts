@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import { TFile } from "obsidian";
 import type { ManagedLocalCommitReceipt } from "../managed/ManagedTypes";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 
 const UTF8 = new TextEncoder();
 

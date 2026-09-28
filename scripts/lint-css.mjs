@@ -107,7 +107,7 @@ const FORBIDDEN_PATTERNS = [
 
 const LEGACY_STATE_CLASS_PATTERN = /\.(active|completed|error|primary|danger|disabled|loading)(?![a-z0-9_-])/i;
 const RUNTIME_CUSTOM_PROPERTIES = new Set([
-  "--ss-link-flow-phase",
+  "--ss-activity-progress",
   "--ss-recorder-mobile-stack-offset",
   "--ss-studio-chip-color",
   "--ss-studio-swatch-color",

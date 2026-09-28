@@ -1,165 +1,611 @@
-import { describe, expect, it, jest } from "@jest/globals";
+import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import {
+  readPortableSnapshot,
   restoreEmbeddingsIndexIfEmpty,
-  writeEmbeddingsIndexSnapshot,
+  retainRestorableGenerations,
   PortableCheckpointCoordinator,
   type PortableIndexFile,
   type PortableIndexStore,
 } from "../EmbeddingsPortableIndex";
 import {
-  EMBEDDINGS_INDEX_FORMAT,
-  type SerializedEmbeddingsIndex,
+  decodePortableShard,
+  encodePortableShard,
+  portableShardOf,
+  PORTABLE_SHARD_COUNT,
+  type PortableIndexManifest,
 } from "../EmbeddingsIndexSerialization";
+import type { EmbeddingVector } from "../../types";
+import { buildVectorId } from "../../utils/vectorId";
+import { createLocalEmptyEmbeddingMarkerForRevision } from "../../LocalEmptyEmbeddingMarker";
+import { serializeLegacyEmbeddingsIndex } from "../../__tests__/support/legacyIndexFixture";
 
-function index(vectorCount: number): SerializedEmbeddingsIndex {
-  return { format: EMBEDDINGS_INDEX_FORMAT, createdAt: 1, vectorCount, vectors: [] };
+const V3 = "systemsculpt:managed:semantic-v1:v3:3";
+
+function root(namespace: string, path: string, createdAt: number, chunkId = 0): EmbeddingVector {
+  return {
+    id: buildVectorId(namespace, path, chunkId),
+    path,
+    chunkId,
+    vector: new Float32Array([1, 0, 0]),
+    metadata: {
+      title: path.replace(/\.md$/, ""),
+      mtime: 1,
+      contentHash: `${path}:${chunkId}`,
+      generation: "semantic-v1",
+      dimension: 3,
+      createdAt,
+      namespace,
+      ...(chunkId === 0 ? { complete: true, chunkCount: 1 } : {}),
+    },
+  };
 }
 
-function makeStore(overrides: Partial<PortableIndexStore> = {}): jest.Mocked<PortableIndexStore> {
-  return {
-    countVectors: jest.fn(async () => 0),
-    exportAll: jest.fn(async () => index(0)),
-    importAll: jest.fn(async () => ({ imported: 0 })),
-    ...overrides,
-  } as jest.Mocked<PortableIndexStore>;
+/** An in-memory store holding records and the snapshot change log. */
+function memoryStore(records: EmbeddingVector[] = []) {
+  const vectors = new Map(records.map((record) => [record.id, record]));
+  const state = new Map<string, unknown>();
+  let changes = { all: false, paths: new Set<string>() };
+  const store = {
+    vectors,
+    state,
+    listRoots: jest.fn(() => [...vectors.values()].filter((record) => record.chunkId === 0)),
+    readState: jest.fn(async (key: string) => (state.get(key) ?? null) as never),
+    writeState: jest.fn(async (key: string, value: unknown) => { state.set(key, JSON.parse(JSON.stringify(value))); }),
+    countVectors: jest.fn(async () => vectors.size),
+    importVectors: jest.fn(async (imported: EmbeddingVector[]) => {
+      for (const record of imported) vectors.set(record.id, record);
+      return { imported: imported.length };
+    }),
+    getDistinctPaths: jest.fn(() => [...new Set([...vectors.values()]
+      .filter((record) => record.chunkId === 0)
+      .map((record) => record.path))]),
+    readPaths: jest.fn(async (paths: readonly string[]) => [...vectors.values()].filter((record) => paths.includes(record.path))),
+    takePortableChanges: jest.fn(() => {
+      const taken = { all: changes.all, paths: [...changes.paths] };
+      changes = { all: false, paths: new Set() };
+      return taken;
+    }),
+    put(record: EmbeddingVector) {
+      vectors.set(record.id, record);
+      changes.paths.add(record.path);
+    },
+    removePath(path: string) {
+      for (const [id, record] of vectors) if (record.path === path) vectors.delete(id);
+      changes.paths.add(path);
+    },
+    /** A change the snapshot never heard about (a crash before the flush). */
+    removePathUntracked(path: string) {
+      for (const [id, record] of vectors) if (record.path === path) vectors.delete(id);
+    },
+  };
+  return store as typeof store & jest.Mocked<PortableIndexStore>;
 }
 
-function makeFile(overrides: Partial<PortableIndexFile> = {}): jest.Mocked<PortableIndexFile> {
-  return {
-    read: jest.fn(async () => null),
-    write: jest.fn(async () => undefined),
-    ...overrides,
-  } as jest.Mocked<PortableIndexFile>;
+function readBack(bytes: ArrayBuffer, shard: number): EmbeddingVector[] {
+  return decodePortableShard(bytes, shard);
+}
+
+function buildManifest(): PortableIndexManifest {
+  return { format: 4, vectorEncoding: "int8-scaled-v1", shardCount: PORTABLE_SHARD_COUNT, committedNamespace: V3 };
+}
+
+/** An in-memory snapshot directory. */
+function memoryFile(initial: { index?: Record<string, unknown> | null } = {}) {
+  let index: Record<string, unknown> | null = initial.index ?? null;
+  const shards = new Map<number, ArrayBuffer>();
+  const modified = new WeakMap<ArrayBuffer, number>();
+  let clock = 0;
+  const file = {
+    shards,
+    get index() { return index; },
+    read: jest.fn(async () => index),
+    write: jest.fn(async (manifest: PortableIndexManifest) => { index = JSON.parse(JSON.stringify(manifest)); }),
+    size: jest.fn(async () => (index ? JSON.stringify(index).length : null)),
+    listShards: jest.fn(async () => new Set(shards.keys())),
+    readShard: jest.fn(async (shard: number) => shards.get(shard) ?? null),
+    // Every new file contents gets a new modification time, as on disk.
+    shardStat: jest.fn(async (shard: number) => {
+      const bytes = shards.get(shard);
+      if (!bytes) return null;
+      if (!modified.has(bytes)) modified.set(bytes, ++clock);
+      return { size: bytes.byteLength, mtime: modified.get(bytes)! };
+    }),
+    writeShard: jest.fn(async (shard: number, bytes: ArrayBuffer) => { shards.set(shard, bytes); }),
+    removeShard: jest.fn(async (shard: number) => { shards.delete(shard); }),
+    removeRecoveryCopy: jest.fn(async () => undefined),
+    remove: jest.fn(async () => {
+      index = null;
+      shards.clear();
+    }),
+  };
+  return file as typeof file & jest.Mocked<PortableIndexFile>;
 }
 
 describe("restoreEmbeddingsIndexIfEmpty", () => {
-  it("imports the snapshot when the local store is empty", async () => {
-    const snapshot = index(5);
-    const store = makeStore({
-      countVectors: jest.fn(async () => 0),
-      importAll: jest.fn(async () => ({ imported: 5 })),
-    });
-    const file = makeFile({ read: jest.fn(async () => snapshot) });
+  it("restores an older release's single-file index", async () => {
+    const snapshot = serializeLegacyEmbeddingsIndex([root(V3, "A.md", 1), root(V3, "B.md", 1)]);
+    const store = memoryStore();
+    const file = memoryFile({ index: snapshot as unknown as Record<string, unknown> });
 
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
 
-    expect(file.read).toHaveBeenCalledTimes(1);
-    expect(store.importAll).toHaveBeenCalledWith(snapshot);
-    expect(result).toEqual({ restored: true, imported: 5, reason: "restored" });
+    expect(result).toEqual({ restored: true, imported: 2, reason: "restored" });
+    expect(store.importVectors.mock.calls[0][0].map((vector) => vector.path)).toEqual(["A.md", "B.md"]);
+  });
+
+  it("restores the sharded snapshot, even before its manifest has synced", async () => {
+    const records = ["A.md", "B.md", "C.md"].map((path) => root(V3, path, 1));
+    const file = memoryFile();
+    for (const record of records) {
+      file.shards.set(portableShardOf(record.path), encodePortableShard(portableShardOf(record.path), [record])!);
+    }
+    const store = memoryStore();
+
+    const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
+
+    expect(result).toMatchObject({ restored: true, imported: 3 });
+    expect(store.importVectors.mock.calls[0][0].map((vector) => vector.id).sort()).toEqual(
+      records.map((record) => record.id).sort(),
+    );
+  });
+
+  it("reads intact shards when index.json is parseable but not a manifest this build knows", async () => {
+    const record = root(V3, "A.md", 1);
+    const file = memoryFile({ index: { format: 99, note: "written by a future or broken build" } });
+    file.shards.set(portableShardOf(record.path), encodePortableShard(portableShardOf(record.path), [record])!);
+    const store = memoryStore();
+
+    await expect(restoreEmbeddingsIndexIfEmpty({ store, file })).resolves.toMatchObject({ restored: true, imported: 1 });
+    expect(store.importVectors.mock.calls[0][0].map((vector) => vector.id)).toEqual([record.id]);
+  });
+
+  it("keeps each note's newer embedding when an older release's index.json sits beside the shards", async () => {
+    const shardOnly = root(V3, "ShardOnly.md", 1);
+    const shardNewer = { ...root(V3, "Both.md", 1), metadata: { ...root(V3, "Both.md", 1).metadata, mtime: 20 } };
+    const legacyOlder = { ...root(V3, "Both.md", 1), metadata: { ...root(V3, "Both.md", 1).metadata, mtime: 10, excerpt: "old" } };
+    const legacyNewer = { ...root(V3, "Rewritten.md", 1), metadata: { ...root(V3, "Rewritten.md", 1).metadata, mtime: 30, excerpt: "newer" } };
+    const shardOlder = { ...root(V3, "Rewritten.md", 1), metadata: { ...root(V3, "Rewritten.md", 1).metadata, mtime: 5 } };
+    const file = memoryFile({ index: serializeLegacyEmbeddingsIndex([legacyOlder, legacyNewer]) as never });
+    for (const record of [shardOnly, shardNewer, shardOlder]) {
+      const shard = portableShardOf(record.path);
+      const existing = file.shards.get(shard);
+      const previous = existing ? readBack(existing, shard) : [];
+      file.shards.set(shard, encodePortableShard(shard, [...previous, record])!);
+    }
+
+    const snapshot = await readPortableSnapshot(file);
+
+    const byPath = new Map(snapshot!.vectors.map((vector) => [vector.path, vector]));
+    expect([...byPath.keys()].sort()).toEqual(["Both.md", "Rewritten.md", "ShardOnly.md"]);
+    expect(byPath.get("Both.md")!.metadata.mtime).toBe(20);
+    expect(byPath.get("Rewritten.md")!.metadata).toMatchObject({ mtime: 30, excerpt: "newer" });
+  });
+
+  it("never restores notes this vault deleted or now excludes", async () => {
+    const records = ["Kept.md", "Deleted.md", "Private/Excluded.md"].map((path) => root(V3, path, 1));
+    const file = memoryFile();
+    for (const record of records) {
+      const shard = portableShardOf(record.path);
+      const existing = file.shards.get(shard);
+      file.shards.set(shard, encodePortableShard(shard, [...(existing ? readBack(existing, shard) : []), record])!);
+    }
+    const store = memoryStore();
+
+    await restoreEmbeddingsIndexIfEmpty({
+      store,
+      file,
+      isRestorable: (path) => path === "Kept.md",
+    });
+
+    expect(store.importVectors.mock.calls[0][0].map((vector) => vector.path)).toEqual(["Kept.md"]);
+    // The shards still holding the other notes are rewritten on the next reconcile.
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, { quietMs: 60_000, maxWaitMs: 60_000 });
+    file.write(buildManifest());
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    checkpoint.cancel();
+    const remaining = (await readPortableSnapshot(file))!.vectors.map((vector) => vector.path);
+    expect(remaining).toEqual(["Kept.md"]);
+  });
+
+  it("skips a corrupt shard and restores the rest", async () => {
+    const good = root(V3, "Good.md", 1);
+    const file = memoryFile();
+    file.shards.set(portableShardOf(good.path), encodePortableShard(portableShardOf(good.path), [good])!);
+    const corruptShard = (portableShardOf(good.path) + 1) % PORTABLE_SHARD_COUNT;
+    file.shards.set(corruptShard, new Uint8Array([1, 2, 3]).buffer);
+
+    const snapshot = await readPortableSnapshot(file);
+
+    expect(snapshot?.vectors.map((vector) => vector.path)).toEqual(["Good.md"]);
   });
 
   it("skips entirely when the store already has vectors", async () => {
-    const store = makeStore({ countVectors: jest.fn(async () => 42) });
-    const file = makeFile({ read: jest.fn(async () => index(5)) });
+    const store = memoryStore([root(V3, "Local.md", 1)]);
+    const file = memoryFile({ index: serializeLegacyEmbeddingsIndex([root(V3, "A.md", 1)]) as never });
 
     const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
 
     expect(file.read).not.toHaveBeenCalled();
-    expect(store.importAll).not.toHaveBeenCalled();
+    expect(store.importVectors).not.toHaveBeenCalled();
     expect(result).toEqual({ restored: false, imported: 0, reason: "store-not-empty" });
   });
 
-  it("skips when no snapshot file is present", async () => {
-    const store = makeStore({ countVectors: jest.fn(async () => 0) });
-    const file = makeFile({ read: jest.fn(async () => null) });
+  it("skips when no snapshot is present", async () => {
+    const store = memoryStore();
 
-    const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
+    const result = await restoreEmbeddingsIndexIfEmpty({ store, file: memoryFile() });
 
-    expect(store.importAll).not.toHaveBeenCalled();
+    expect(store.importVectors).not.toHaveBeenCalled();
     expect(result).toEqual({ restored: false, imported: 0, reason: "no-snapshot" });
   });
 
-  it("reports an empty/unusable snapshot without claiming a restore", async () => {
-    const store = makeStore({
-      countVectors: jest.fn(async () => 0),
-      importAll: jest.fn(async () => ({ imported: 0 })),
-    });
-    const file = makeFile({ read: jest.fn(async () => index(0)) });
+  it("restores only the committed and in-progress generations of an old snapshot", async () => {
+    const v2 = "systemsculpt:managed:semantic-v1:v2:3";
+    const v4 = "systemsculpt:managed:semantic-v1:v4:3";
+    const snapshot = serializeLegacyEmbeddingsIndex([
+      root(v2, "A.md", 10), root(v2, "B.md", 10),
+      root(V3, "A.md", 20), root(V3, "B.md", 20), root(V3, "C.md", 20), root(V3, "C.md", 20, 1),
+      root(v4, "A.md", 30),
+      createLocalEmptyEmbeddingMarkerForRevision({ path: "Empty.md", basename: "Empty", mtime: 1 }, ""),
+    ]);
+    const store = memoryStore();
 
-    const result = await restoreEmbeddingsIndexIfEmpty({ store, file });
+    await restoreEmbeddingsIndexIfEmpty({ store, file: memoryFile({ index: snapshot as never }) });
+
+    const restored = store.importVectors.mock.calls[0][0];
+    expect([...new Set(restored.map((vector) => vector.metadata.namespace))].sort()).toEqual([
+      "systemsculpt:local-empty:v1:1",
+      V3,
+      v4,
+    ].sort());
+    expect(restored.filter((vector) => vector.metadata.namespace === V3)).toHaveLength(4);
+  });
+
+  it("reports an empty or unusable snapshot without claiming a restore", async () => {
+    const result = await restoreEmbeddingsIndexIfEmpty({
+      store: memoryStore(),
+      file: memoryFile({ index: { format: 999 } }),
+    });
     expect(result).toEqual({ restored: false, imported: 0, reason: "empty-snapshot" });
   });
 });
 
-describe("writeEmbeddingsIndexSnapshot", () => {
-  it("writes the exported index when it has vectors", async () => {
-    const exported = index(7);
-    const store = makeStore({ exportAll: jest.fn(async () => exported) });
-    const file = makeFile();
+describe("retainRestorableGenerations", () => {
+  it("prefers the committed generation named by the snapshot over the most complete one", () => {
+    const v2 = "systemsculpt:managed:semantic-v1:v2:3";
+    const v4 = "systemsculpt:managed:semantic-v1:v4:3";
+    const vectors = [root(v2, "A.md", 1), root(v2, "B.md", 1), root(V3, "A.md", 1), root(v4, "A.md", 9)];
+    const namespaces = (kept: EmbeddingVector[]) => [...new Set(kept.map((vector) => vector.metadata.namespace))].sort();
 
-    const result = await writeEmbeddingsIndexSnapshot({ store, file });
-
-    expect(file.write).toHaveBeenCalledWith(exported);
-    expect(result).toEqual({ written: true, count: 7 });
-  });
-
-  it("does not write an empty index (nothing to snapshot)", async () => {
-    const store = makeStore({ exportAll: jest.fn(async () => index(0)) });
-    const file = makeFile();
-
-    const result = await writeEmbeddingsIndexSnapshot({ store, file });
-
-    expect(file.write).not.toHaveBeenCalled();
-    expect(result).toEqual({ written: false, count: 0 });
+    expect(namespaces(retainRestorableGenerations(vectors))).toEqual([v2, v4]);
+    expect(namespaces(retainRestorableGenerations(vectors, V3))).toEqual([V3, v4]);
   });
 });
 
 describe("PortableCheckpointCoordinator", () => {
-  it("coalesces ordinary edits into one atomic snapshot flush", async () => {
-    const store = makeStore({ exportAll: jest.fn(async () => index(3)) });
-    const file = makeFile();
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+  const timing = { quietMs: 60_000, maxWaitMs: 60_000, destructiveQuietMs: 1_000, destructiveMaxWaitMs: 5_000 };
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function seeded(count: number) {
+    const store = memoryStore(Array.from({ length: count }, (_, index) => root(V3, `Notes/${index}.md`, 1)));
+    const file = memoryFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file, committedNamespace: () => V3 }, timing);
+    return { store, file, checkpoint };
+  }
+
+  it("migrates an older release's snapshot once, then rewrites only the shard an edit touched", async () => {
+    const { store, file, checkpoint } = seeded(200);
+    (file as unknown as { write: (value: object) => Promise<void> }).write({ format: 3, vectors: [] });
+    file.write.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    const occupied = new Set(store.getDistinctPaths().map((path) => portableShardOf(path)));
+    expect(new Set(file.shards.keys())).toEqual(occupied);
+    expect(file.index).toEqual({ format: 4, vectorEncoding: "int8-scaled-v1", shardCount: 32, committedNamespace: V3 });
+    expect(file.removeRecoveryCopy).toHaveBeenCalled();
+
+    file.writeShard.mockClear();
+    file.write.mockClear();
+    store.put({ ...root(V3, "Notes/7.md", 2) });
     checkpoint.markChanged();
-    checkpoint.markChanged();
-    checkpoint.markChanged();
-    expect(store.exportAll).not.toHaveBeenCalled();
+    await checkpoint.flush();
+
+    expect(file.writeShard).toHaveBeenCalledTimes(1);
+    expect(file.writeShard.mock.calls[0][0]).toBe(portableShardOf("Notes/7.md"));
+    expect(file.write).not.toHaveBeenCalled();
+    checkpoint.cancel();
+  });
+
+  it("schedules nothing when the snapshot on disk is already current", async () => {
+    const { store, file, checkpoint } = seeded(50);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    file.writeShard.mockClear();
+
+    // A restart keeps the store (and what it recorded about each shard).
+    const restarted = new PortableCheckpointCoordinator({ store, file }, timing);
+    await restarted.reconcileFormat();
+
+    expect(restarted.status().pending).toBe(false);
+    expect(file.writeShard).not.toHaveBeenCalled();
+  });
+
+  it("restores a shard that went missing from disk", async () => {
+    const { store, file, checkpoint } = seeded(50);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const lost = portableShardOf(store.getDistinctPaths()[0]);
+    file.shards.delete(lost);
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([lost]);
+  });
+
+  it("removes a shard whose last note was deleted", async () => {
+    const { store, file, checkpoint } = seeded(1);
+    store.put(root(V3, "Other.md", 1));
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/0.md");
+    expect(file.shards.has(shard)).toBe(true);
+
+    store.removePath("Notes/0.md");
+    checkpoint.markDestructive();
+    await checkpoint.flush();
+
+    if (shard !== portableShardOf("Other.md")) expect(file.shards.has(shard)).toBe(false);
+    expect(file.index).not.toBeNull();
+  });
+
+  it("writes nothing when nothing changed", async () => {
+    const { file, checkpoint } = seeded(3);
 
     await checkpoint.flush();
 
-    expect(store.exportAll).toHaveBeenCalledTimes(1);
-    expect(file.write).toHaveBeenCalledTimes(1);
-    expect(checkpoint.status().pending).toBe(false);
+    expect(file.writeShard).not.toHaveBeenCalled();
+    expect(file.write).not.toHaveBeenCalled();
+  });
+
+  it("waits out a quiet period for edits, bounded by the maximum wait", async () => {
+    jest.useFakeTimers();
+    const store = memoryStore([root(V3, "A.md", 1)]);
+    const file = memoryFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, {
+      ...timing,
+      quietMs: 30_000,
+      maxWaitMs: 120_000,
+    });
+
+    for (let tick = 0; tick < 9; tick += 1) {
+      store.put(root(V3, "A.md", tick));
+      checkpoint.markChanged();
+      await jest.advanceTimersByTimeAsync(20_000);
+    }
+
+    // Continuous edits every 20 s never go quiet, so only the 2-minute cap fires.
+    expect(file.writeShard).toHaveBeenCalledTimes(1);
     checkpoint.cancel();
   });
 
-  it("commits destructive mutations immediately and deletes an empty checkpoint", async () => {
-    const store = makeStore({ exportAll: jest.fn(async () => index(0)) });
-    const file = makeFile({ remove: jest.fn(async () => undefined) });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+  it("coalesces a burst of removals into one expedited write", async () => {
+    jest.useFakeTimers();
+    const { store, file, checkpoint } = seeded(30);
 
-    await checkpoint.commitDestructiveMutation();
+    for (let index = 0; index < 20; index += 1) {
+      store.removePath(`Notes/${index}.md`);
+      checkpoint.markDestructive();
+      await jest.advanceTimersByTimeAsync(100);
+    }
+    expect(file.writeShard).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1_000);
 
-    expect(store.exportAll).toHaveBeenCalledTimes(1);
-    expect(file.write).not.toHaveBeenCalled();
-    expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(store.takePortableChanges).toHaveBeenCalledTimes(1);
+    expect(file.index).not.toBeNull();
     checkpoint.cancel();
+  });
+
+  it("removes the whole snapshot once no notes remain", async () => {
+    const { store, file, checkpoint } = seeded(1);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    store.removePath("Notes/0.md");
+    checkpoint.markDestructive();
+    await checkpoint.flush();
+
+    expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(file.index).toBeNull();
+    expect(file.shards.size).toBe(0);
   });
 
   it("clear always removes the portable checkpoint instead of preserving ghost notes", async () => {
-    const store = makeStore({ exportAll: jest.fn(async () => index(4)) });
-    const file = makeFile({ remove: jest.fn(async () => undefined) });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+    const { file, checkpoint } = seeded(4);
     checkpoint.markChanged();
 
     await checkpoint.clear();
 
     expect(file.remove).toHaveBeenCalledTimes(1);
-    expect(file.write).not.toHaveBeenCalled();
+    expect(file.writeShard).not.toHaveBeenCalled();
     expect(checkpoint.status().pending).toBe(false);
   });
 
-  it("deletes a stale checkpoint when a destructive rewrite fails", async () => {
-    const store = makeStore({ exportAll: jest.fn(async () => index(2)) });
-    const file = makeFile({
-      write: jest.fn(async () => { throw new Error("sync adapter failed"); }),
-      remove: jest.fn(async () => undefined),
-    });
-    const checkpoint = new PortableCheckpointCoordinator({ store, file }, 60_000, 60_000);
+  it("drops the affected shard and reports it when a removal rewrite fails", async () => {
+    jest.useFakeTimers();
+    const { store, file, checkpoint } = seeded(2);
+    const onError = jest.fn();
+    const failing = new PortableCheckpointCoordinator({ store, file, onError }, timing);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/1.md");
+    file.writeShard.mockImplementation(async () => { throw new Error("sync adapter failed"); });
 
-    await expect(checkpoint.commitDestructiveMutation()).rejects.toThrow("sync adapter failed");
+    store.removePath("Notes/1.md");
+    store.put(root(V3, `Other-${shard}.md`, 1));
+    failing.markDestructive();
+    await jest.advanceTimersByTimeAsync(1_000);
 
-    expect(file.remove).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "sync adapter failed" }), true);
+    expect(file.removeShard).toHaveBeenCalledWith(shard);
+    expect(file.shards.has(shard)).toBe(false);
+    expect(failing.status().pending).toBe(false);
+  });
+
+  it("keeps a removal pending until a shard that could not be rewritten or deleted is fixed", async () => {
+    jest.useFakeTimers();
+    // Two notes sharing a shard, so deleting one rewrites that shard.
+    const paths = Array.from({ length: 200 }, (_, index) => `Notes/${index}.md`);
+    const deleted = paths.find((path) => paths.some((other) => other !== path && portableShardOf(other) === portableShardOf(path)))!;
+    const store = memoryStore(paths.map((path) => root(V3, path, 1)));
+    const file = memoryFile();
+    const checkpoint = new PortableCheckpointCoordinator({ store, file }, timing);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf(deleted);
+    const stale = file.shards.get(shard);
+    file.writeShard.mockImplementationOnce(async () => { throw new Error("sync adapter failed"); });
+    file.removeShard.mockImplementationOnce(async () => { throw new Error("file locked"); });
+
+    store.removePath(deleted);
+    checkpoint.markDestructive();
+    await expect(checkpoint.flush()).rejects.toThrow("sync adapter failed");
+
+    // The deleted note's shard is still on disk, so the removal stays pending.
+    expect(file.shards.get(shard)).toBe(stale);
+    expect(checkpoint.status().pending).toBe(true);
+    await jest.advanceTimersByTimeAsync(10_000);
     expect(checkpoint.status().pending).toBe(false);
+    const restored = (await readPortableSnapshot(file))!.vectors.map((vector) => vector.path);
+    expect(restored).not.toContain(deleted);
+    expect(restored).toHaveLength(199);
+    checkpoint.cancel();
+  });
+
+  it("rewrites a shard whose contents no longer match the store, even though it exists", async () => {
+    const { store, file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    file.writeShard.mockClear();
+
+    // A deletion the snapshot never heard about, e.g. the app quit before the flush.
+    store.removePathUntracked("Notes/3.md");
+    const restarted = new PortableCheckpointCoordinator({ store, file }, timing);
+    file.removeShard.mockClear();
+    await restarted.reconcileFormat();
+    await restarted.flush();
+
+    const touched = [...file.writeShard.mock.calls, ...file.removeShard.mock.calls].map((call) => call[0]);
+    expect(touched).toEqual([portableShardOf("Notes/3.md")]);
+    const restored = (await readPortableSnapshot(file))!.vectors.map((vector) => vector.path);
+    expect(restored).not.toContain("Notes/3.md");
+    expect(restored).toHaveLength(19);
+  });
+
+  it("rewrites a shard another writer replaced", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/5.md");
+    // Another device (or a partial sync) left different contents in this shard.
+    file.shards.set(shard, encodePortableShard(shard, [root(V3, "Notes/5.md", 1), root(V3, "Ghost.md", 1)])!);
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    expect((await readPortableSnapshot(file))!.vectors.map((vector) => vector.path)).not.toContain("Ghost.md");
+    checkpoint.cancel();
+  });
+
+  it("rewrites a shard a sync tool replaced with different contents of the same size", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/5.md");
+    const original = file.shards.get(shard)!;
+    const inShard = readBack(original, shard);
+    // Same notes and byte length, different bytes: one content hash differs.
+    const altered = inShard.map((record) => record.path === "Notes/5.md"
+      ? { ...record, metadata: { ...record.metadata, contentHash: record.metadata.contentHash.replace(/.$/, "X") } }
+      : record);
+    const replacement = encodePortableShard(shard, altered)!;
+    expect(replacement.byteLength).toBe(original.byteLength);
+    file.shards.set(shard, replacement);
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    const restored = (await readPortableSnapshot(file))!.vectors.find((vector) => vector.path === "Notes/5.md")!;
+    expect(restored.metadata.contentHash).toBe("Notes/5.md:0");
+    checkpoint.cancel();
+  });
+
+  it("rewrites a same-size shard whose prefix is unreadable", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/5.md");
+    file.shards.set(shard, new ArrayBuffer(file.shards.get(shard)!.byteLength));
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+
+    expect(file.writeShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    checkpoint.cancel();
+  });
+
+  it("only stats shards that are unchanged, and accepts a re-touched identical shard", async () => {
+    const { file, checkpoint } = seeded(20);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    file.readShard.mockClear();
+    file.writeShard.mockClear();
+
+    await checkpoint.reconcileFormat();
+    expect(file.readShard).not.toHaveBeenCalled();
+
+    // A sync tool rewrote identical bytes: new modification time, same checksum.
+    const shard = portableShardOf("Notes/5.md");
+    file.shards.set(shard, file.shards.get(shard)!.slice(0));
+    await checkpoint.reconcileFormat();
+    expect(file.readShard.mock.calls.map((call) => call[0])).toEqual([shard]);
+    expect(checkpoint.status().pending).toBe(false);
+
+    file.readShard.mockClear();
+    await checkpoint.reconcileFormat();
+    expect(file.readShard).not.toHaveBeenCalled();
+    expect(file.writeShard).not.toHaveBeenCalled();
+    checkpoint.cancel();
+  });
+
+  it("keeps the previous shard and retries when an ordinary rewrite fails", async () => {
+    const { store, file, checkpoint } = seeded(2);
+    await checkpoint.reconcileFormat();
+    await checkpoint.flush();
+    const shard = portableShardOf("Notes/1.md");
+    const previous = file.shards.get(shard);
+    file.writeShard.mockImplementationOnce(async () => { throw new Error("disk full"); });
+
+    store.put(root(V3, "Notes/1.md", 5));
+    checkpoint.markChanged();
+    await expect(checkpoint.flush()).rejects.toThrow("disk full");
+
+    expect(file.shards.get(shard)).toBe(previous);
+    expect(checkpoint.status().pending).toBe(true);
+    await checkpoint.flush();
+    expect(file.shards.get(shard)).not.toBe(previous);
+    checkpoint.cancel();
   });
 });

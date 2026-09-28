@@ -92,3 +92,25 @@ export function decodeManagedAdmissionResponse(
   }
   return { outcome: outcome as ManagedServerOutcome };
 }
+
+export type LegacyLicenseProfile = Readonly<{
+  email: string;
+  userName: string;
+  displayName: string;
+}>;
+
+/**
+ * The established success envelope of servers that predate admission-v1.
+ * Only license validation accepts it, and only as proof of a valid license;
+ * managed admission never treats it as `allowed`.
+ */
+export function decodeLegacyLicenseProfile(status: number, value: unknown): LegacyLicenseProfile | null {
+  if (status !== 200 || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.status !== "success" || !envelope.data || typeof envelope.data !== "object") return null;
+  const profile = envelope.data as Record<string, unknown>;
+  if (profile.subscription_status !== "active" || typeof profile.email !== "string") return null;
+  const userName = typeof profile.user_name === "string" ? profile.user_name : profile.email;
+  const displayName = typeof profile.display_name === "string" ? profile.display_name : userName;
+  return { email: profile.email, userName, displayName };
+}

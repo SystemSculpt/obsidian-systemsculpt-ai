@@ -1,14 +1,12 @@
+import type { StudioMovementSnap } from "./canvas/StudioGraphAlignmentGuides";
+import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeGroup, StudioProjectV1 } from "../../studio/types";
 import type { StudioGraphProjectMutationOptions } from "./StudioGraphInteractionTypes";
 import {
-  autoAlignGroupNodes,
-  type GroupAutoAlignResult,
-} from "./graph-v3/StudioGraphGroupAutoLayout";
-import {
   computeStudioGraphGroupBounds,
   type StudioGraphGroupBounds,
-} from "./graph-v3/StudioGraphGroupBounds";
+} from "./canvas/StudioGraphGroupBounds";
 import {
   resolveMeasuredStudioNodeHeight,
   resolveMeasuredStudioNodeWidth,
@@ -79,6 +77,10 @@ type StudioGraphGroupControllerHost = {
   notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
+  createMovementSnap?: (nodes: readonly string[], shapes: readonly string[]) => StudioMovementSnap;
+  showMovementGuides?: (nodes: readonly string[], shapes: readonly string[]) => void;
+  clearMovementGuides?: () => void;
+  onGroupSelected?: () => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
     mutator: (project: StudioProjectV1) => boolean | void,
@@ -118,7 +120,15 @@ export class StudioGraphGroupController {
   private openColorPaletteGroupId: string | null = null;
   private colorPaletteRadioGroup: UiRadioGroupHandle<string> | null = null;
   private dropTargetGroupId: string | null = null;
+  private selectedGroupId: string | null = null;
   private listenerWindow: Window | null = null;
+  private cancelPointerGesture: (() => void) | null = null;
+
+  private readonly onWindowSelectionPointerDown = (event: PointerEvent): void => {
+    const selected = this.selectedGroupId ? this.groupElsById.get(this.selectedGroupId) : null;
+    const pressed = event.target as Node | null;
+    if (selected && pressed && this.canvasEl?.contains(pressed) && !selected.frameEl.contains(pressed) && !selected.tagEl.contains(pressed)) this.clearSelection();
+  };
 
   private readonly onWindowPointerDown = (event: PointerEvent): void => {
     if (!this.openColorPaletteGroupId) {
@@ -142,7 +152,7 @@ export class StudioGraphGroupController {
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.canvasEl = canvas;
-    this.bindWindowListeners();
+    this.syncWindowListeners();
     const frameLayerAttached = this.frameLayerEl && this.frameLayerEl.parentElement === canvas;
     const tagLayerAttached = this.tagLayerEl && this.tagLayerEl.parentElement === canvas;
     if (!frameLayerAttached || !tagLayerAttached) {
@@ -154,6 +164,7 @@ export class StudioGraphGroupController {
   }
 
   clearRenderBindings(): void {
+    this.cancelPointerGesture?.();
     this.destroyColorPaletteRadioGroup();
     this.groupElsById.clear();
     this.previewColorByGroupId.clear();
@@ -185,6 +196,7 @@ export class StudioGraphGroupController {
 
     const project = this.host.getCurrentProject();
     if (!project) {
+      this.syncWindowListeners();
       return;
     }
 
@@ -196,6 +208,7 @@ export class StudioGraphGroupController {
         (group.shapeIds || []).some((shapeId) => shapeIdSet.has(shapeId))
     );
     const visibleGroupIds = new Set(groups.map((group) => group.id));
+    if (this.selectedGroupId && !visibleGroupIds.has(this.selectedGroupId)) this.selectedGroupId = null;
     if (this.openColorPaletteGroupId && !visibleGroupIds.has(this.openColorPaletteGroupId)) {
       this.openColorPaletteGroupId = null;
       this.previewColorByGroupId.clear();
@@ -207,10 +220,23 @@ export class StudioGraphGroupController {
     for (const group of groups) {
       const frameEl = this.frameLayerEl.createDiv({ cls: "ss-studio-group-frame" });
       frameEl.dataset.groupId = group.id;
+      if (group.outputForNodeId) {
+        frameEl.dataset.outputFor = group.outputForNodeId;
+        frameEl.title = "Generated outputs · automatically arranged inside this container";
+      }
+      frameEl.tabIndex = 0;
+      frameEl.setAttribute("role", "button");
+      frameEl.setAttribute("aria-label", `Select group ${normalizeGroupName(group.name) || 'Untitled'}`);
+      frameEl.setAttribute("aria-pressed", String(group.id === this.selectedGroupId));
+      frameEl.classList.toggle("is-selected", group.id === this.selectedGroupId);
+      frameEl.addEventListener("keydown", event => {
+        if (event.isComposing || !["Enter", " "].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey) return;
+        event.preventDefault(); event.stopPropagation(); this.selectGroup(group.id);
+      });
       frameEl.style.setProperty("--ss-studio-group-accent", this.resolveDisplayedGroupColor(group));
       frameEl.classList.toggle("is-drop-target", group.id === this.dropTargetGroupId);
       frameEl.addEventListener("pointerdown", (event) => {
-        this.startGroupDrag(group.id, event as PointerEvent, frameEl);
+        this.startGroupDrag(group.id, event, frameEl);
       });
 
       const tagEl = this.tagLayerEl.createDiv({ cls: "ss-studio-group-tag" });
@@ -231,18 +257,6 @@ export class StudioGraphGroupController {
         event.preventDefault();
         event.stopPropagation();
         this.startGroupNameEdit(group.id, { selectText: true });
-      });
-
-      createStudioAction(tagRowEl, {
-        className: "ss-studio-group-tag-action ss-studio-group-align-button",
-        label: "Align",
-        testId: "studio.group.align",
-        ariaLabel: "Auto-align group nodes",
-        title: "Auto-align group nodes",
-        stopPointerDown: true,
-        onSelect: () => {
-          this.alignGroup(group.id);
-        },
       });
 
       const colorButtonEl = createStudioAction(tagRowEl, {
@@ -276,6 +290,7 @@ export class StudioGraphGroupController {
     }
 
     this.refreshGroupBounds();
+    this.syncWindowListeners();
 
     if (this.pendingNameEditGroupId) {
       const pendingId = this.pendingNameEditGroupId;
@@ -318,6 +333,39 @@ export class StudioGraphGroupController {
         elements.nameButtonEl.setText(normalizeGroupName(group.name) || nextDefaultGroupName(project));
       }
     }
+  }
+
+  /** Group focus is distinct from selecting its members: fit includes the entire colored frame. */
+  private selectGroup(groupId: string): void {
+    this.host.onGroupSelected?.();
+    this.selectedGroupId = groupId;
+    this.refreshSelectionClasses();
+    this.syncWindowListeners();
+  }
+
+  clearSelection(): void {
+    this.cancelPointerGesture?.();
+    if (!this.selectedGroupId) return;
+    this.selectedGroupId = null;
+    this.refreshSelectionClasses();
+    this.syncWindowListeners();
+  }
+
+  private refreshSelectionClasses(): void {
+    for (const [id, { frameEl }] of this.groupElsById) {
+      frameEl.classList.toggle("is-selected", id === this.selectedGroupId);
+      frameEl.setAttribute("aria-pressed", String(id === this.selectedGroupId));
+    }
+  }
+
+  getSelectedGroupBounds(): { left: number; top: number; right: number; bottom: number } | null {
+    const group = this.host.getCurrentProject()?.graph.groups?.find(group => group.id === this.selectedGroupId);
+    if (!group) return null;
+    const bounds = this.computeGroupBounds(group);
+    if (!bounds) return null;
+    // The tag sits below the frame, translated down by 52% of its own height.
+    const tagHeight = this.groupElsById.get(group.id)?.tagEl.offsetHeight || 24;
+    return { left: bounds.left, top: bounds.top, right: bounds.left + bounds.width, bottom: bounds.top + bounds.height + tagHeight * 1.52 };
   }
 
   requestGroupNameEdit(groupId: string): void {
@@ -366,6 +414,7 @@ export class StudioGraphGroupController {
     } | null = null;
 
     for (const group of project.graph.groups || []) {
+      if (group.outputForNodeId) continue;
       const groupNodeIds = new Set(
         (group.nodeIds || [])
           .map((nodeId) => String(nodeId || "").trim())
@@ -449,6 +498,18 @@ export class StudioGraphGroupController {
     this.host.requestRender();
   }
 
+  /**
+   * Owner-window listeners dismiss a group selection or color palette, so they
+   * are bound only while one of them is active on the canvas.
+   */
+  private syncWindowListeners(): void {
+    if (this.canvasEl && (this.selectedGroupId || this.openColorPaletteGroupId)) {
+      this.bindWindowListeners();
+    } else {
+      this.unbindWindowListeners();
+    }
+  }
+
   private bindWindowListeners(): void {
     if (!this.canvasEl) {
       return;
@@ -458,6 +519,7 @@ export class StudioGraphGroupController {
       return;
     }
     this.unbindWindowListeners();
+    ownerWindow.addEventListener("pointerdown", this.onWindowSelectionPointerDown, true);
     ownerWindow.addEventListener("pointerdown", this.onWindowPointerDown);
     ownerWindow.addEventListener("keydown", this.onWindowKeyDown);
     this.listenerWindow = ownerWindow;
@@ -546,6 +608,7 @@ export class StudioGraphGroupController {
   }
 
   private unbindWindowListeners(): void {
+    this.listenerWindow?.removeEventListener("pointerdown", this.onWindowSelectionPointerDown, true);
     this.listenerWindow?.removeEventListener("pointerdown", this.onWindowPointerDown);
     this.listenerWindow?.removeEventListener("keydown", this.onWindowKeyDown);
     this.listenerWindow = null;
@@ -690,65 +753,10 @@ export class StudioGraphGroupController {
     elements.colorChipEl.style.setProperty("--ss-studio-chip-color", displayedColor);
   }
 
-  private alignGroup(groupId: string): void {
-    const project = this.host.getCurrentProject();
-    if (!project) {
-      return;
-    }
-
-    let result: GroupAutoAlignResult | null = null;
-    const changed = this.host.commitProjectMutation(
-      "node.position",
-      (currentProject) => {
-        result = autoAlignGroupNodes(currentProject, groupId, {
-          getNodeWidth: (nodeId) => {
-            const node = this.findNode(currentProject, nodeId);
-            const nodeEl = this.host.getNodeElement(nodeId);
-            if (!node) {
-              return nodeEl ? nodeEl.offsetWidth : null;
-            }
-            return resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
-          },
-          getNodeHeight: (nodeId) => {
-            const nodeEl = this.host.getNodeElement(nodeId);
-            if (!nodeEl) {
-              return null;
-            }
-            return resolveMeasuredStudioNodeHeight(nodeEl.offsetHeight);
-          },
-        });
-        return result.changed;
-      }
-    );
-    if (!changed || !result) {
-      return;
-    }
-
-    const currentProject = this.host.getCurrentProject();
-    if (!currentProject) {
-      return;
-    }
-    const currentGroup = (currentProject.graph.groups || []).find((entry) => entry.id === groupId);
-    if (!currentGroup) {
-      return;
-    }
-    const nodeMap = buildNodeMap(currentProject);
-    for (const nodeId of currentGroup.nodeIds) {
-      const node = nodeMap.get(nodeId);
-      const nodeEl = this.host.getNodeElement(nodeId);
-      if (!node || !nodeEl) {
-        continue;
-      }
-      nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
-    }
-    this.host.notifyNodePositionsChanged();
-  }
-
   private startGroupDrag(groupId: string, startEvent: PointerEvent, dragSurfaceEl: HTMLElement): void {
     if (startEvent.button !== 0) {
       return;
     }
-    const ownerWindow = getStudioOwnerWindow(dragSurfaceEl);
 
     const project = this.host.getCurrentProject();
     if (!project) {
@@ -764,20 +772,24 @@ export class StudioGraphGroupController {
       .map((nodeId) => nodeMap.get(nodeId))
       .filter((node): node is StudioProjectV1["graph"]["nodes"][number] => Boolean(node));
     const dragShapeIds = group.shapeIds || [];
+    // Session reconciliation patches nested objects in place. A gesture origin
+    // must be a value snapshot, never a reference to the live offset.
+    const outputOffsetOrigin = { ...(group.outputOffset || { x: 96, y: 0 }) };
     if (dragNodes.length === 0 && dragShapeIds.length === 0) {
       return;
     }
 
+    this.cancelPointerGesture?.();
     startEvent.preventDefault();
     startEvent.stopPropagation();
+    this.selectGroup(groupId);
+    dragSurfaceEl.focus({ preventScroll: true });
 
-    const pointerId = startEvent.pointerId;
     const startX = startEvent.clientX;
     const startY = startEvent.clientY;
     const zoom = this.host.getGraphZoom() || 1;
     let pendingClientX = startX;
     let pendingClientY = startY;
-    let dragFrameRequested = false;
     let captureHistoryOnNextMutation = false;
     const originByNodeId = new Map(
       dragNodes.map((node) => [
@@ -793,21 +805,14 @@ export class StudioGraphGroupController {
       this.host.beginShapeTranslation?.(dragShapeIds);
     }
 
-    if (typeof dragSurfaceEl.setPointerCapture === "function") {
-      try {
-        dragSurfaceEl.setPointerCapture(pointerId);
-      } catch {
-        // Pointer capture can fail in some environments.
-      }
-    }
-
+    const snapMovement = this.host.createMovementSnap?.(group.nodeIds, dragShapeIds) || (delta => delta);
     const commitDraggedNodePositions = (options?: {
       captureHistory?: boolean;
       mode?: StudioGraphProjectMutationOptions["mode"];
       forceChanged?: boolean;
     }): boolean => {
-      const deltaX = (pendingClientX - startX) / zoom;
-      const deltaY = (pendingClientY - startY) / zoom;
+      const { x: deltaX, y: deltaY } = snapMovement({ x: (pendingClientX - startX) / zoom,
+        y: (pendingClientY - startY) / zoom });
       return this.host.commitProjectMutation(
         "node.position",
         (currentProject) => {
@@ -818,13 +823,18 @@ export class StudioGraphGroupController {
             if (!currentNode || !origin) {
               continue;
             }
-            const nextX = Math.max(24, Math.round(origin.x + deltaX));
-            const nextY = Math.max(24, Math.round(origin.y + deltaY));
+            const nextX = Math.round(origin.x + deltaX);
+            const nextY = Math.round(origin.y + deltaY);
             if (currentNode.position.x !== nextX || currentNode.position.y !== nextY) {
               currentNode.position.x = nextX;
               currentNode.position.y = nextY;
               changed = true;
             }
+          }
+          const currentGroup = currentProject.graph.groups?.find(entry => entry.id === groupId);
+          if (currentGroup?.outputForNodeId) {
+            const offset = { x: outputOffsetOrigin.x + deltaX, y: outputOffsetOrigin.y + deltaY };
+            if (currentGroup.outputOffset?.x !== offset.x || currentGroup.outputOffset?.y !== offset.y) { currentGroup.outputOffset = offset; changed = true; }
           }
           if (dragShapeIds.length > 0) {
             changed =
@@ -841,7 +851,6 @@ export class StudioGraphGroupController {
     };
 
     const flushDragFrame = (): void => {
-      dragFrameRequested = false;
       const travel = Math.hypot(pendingClientX - startX, pendingClientY - startY);
       if (!dragged && travel > 3) {
         dragged = true;
@@ -874,52 +883,19 @@ export class StudioGraphGroupController {
         nodeEl.style.transform = `translate(${currentNode.position.x}px, ${currentNode.position.y}px)`;
       }
       this.host.previewShapeTranslation?.();
+      this.host.showMovementGuides?.(group.nodeIds, dragShapeIds);
       this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
     };
 
-    const scheduleDragFrame = (): void => {
-      if (dragFrameRequested) {
-        return;
-      }
-      dragFrameRequested = true;
-      if (typeof ownerWindow.requestAnimationFrame === "function") {
-        ownerWindow.requestAnimationFrame(flushDragFrame);
-        return;
-      }
-      flushDragFrame();
-    };
-
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== pointerId) {
-        return;
-      }
-      const latestEvent = this.resolveLatestPointerEvent(moveEvent);
+      const latestEvent = latestStudioPointerEvent(moveEvent);
       pendingClientX = latestEvent.clientX;
       pendingClientY = latestEvent.clientY;
-      scheduleDragFrame();
     };
 
-    const finishDrag = (event: PointerEvent): void => {
-      if (event.pointerId !== pointerId) {
-        return;
-      }
-
-      if (dragFrameRequested) {
-        flushDragFrame();
-      }
-
-      ownerWindow.removeEventListener("pointermove", onPointerMove);
-      ownerWindow.removeEventListener("pointerup", finishDrag);
-      ownerWindow.removeEventListener("pointercancel", finishDrag);
-
-      if (typeof dragSurfaceEl.releasePointerCapture === "function") {
-        try {
-          dragSurfaceEl.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release failures.
-        }
-      }
-
+    const finishDrag = (): void => {
+      this.cancelPointerGesture = null;
+      this.host.clearMovementGuides?.();
       dragSurfaceEl.classList.remove("is-dragging");
       if (!dragged) {
         this.host.finishShapeTranslation?.();
@@ -936,19 +912,17 @@ export class StudioGraphGroupController {
       this.host.notifyNodePositionsChanged();
     };
 
-    ownerWindow.addEventListener("pointermove", onPointerMove);
-    ownerWindow.addEventListener("pointerup", finishDrag);
-    ownerWindow.addEventListener("pointercancel", finishDrag);
-  }
-
-  private resolveLatestPointerEvent(event: PointerEvent): PointerEvent {
-    if (typeof event.getCoalescedEvents === "function") {
-      const coalescedEvents = event.getCoalescedEvents();
-      if (Array.isArray(coalescedEvents) && coalescedEvents.length > 0) {
-        return coalescedEvents[coalescedEvents.length - 1] as PointerEvent;
-      }
-    }
-    return event;
+    this.cancelPointerGesture = startStudioPointerGesture({
+      element: dragSurfaceEl, event: startEvent, onMove: onPointerMove,
+      onFrame: flushDragFrame, onFinish: finishDrag,
+      onCancel: () => {
+        this.cancelPointerGesture = null;
+        this.host.clearMovementGuides?.();
+        dragSurfaceEl.classList.remove("is-dragging");
+        if (dragged) this.host.onNodeDragStateChange?.(false);
+        this.host.finishShapeTranslation?.();
+      },
+    });
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioProjectV1["graph"]["nodes"][number] | null {
@@ -1003,6 +977,7 @@ export class StudioGraphGroupController {
 
     this.openColorPaletteGroupId = null;
     this.previewColorByGroupId.delete(normalizedGroupId);
+    this.syncWindowListeners();
     this.editingGroupId = normalizedGroupId;
     elements.nameSlotEl.empty();
     elements.nameButtonEl = null;

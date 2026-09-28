@@ -95,7 +95,7 @@ Continue?`
             const backupDir = '.systemsculpt/settings-backups';
             try {
               await plugin.app.vault.createFolder(backupDir);
-            } catch (_) {
+            } catch {
               // folder already exists
             }
             const adapter = plugin.app.vault.adapter;
@@ -105,7 +105,7 @@ Continue?`
             if (!opened) {
               new Notice(`Backups are stored in: ${backupDir}`);
             }
-          } catch (error) {
+          } catch {
             new Notice('Failed to open backup folder');
           }
         });

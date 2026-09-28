@@ -25,11 +25,12 @@ export function nowIso(): string {
 
 export function randomId(prefix: string): string {
   try {
-    const globalCrypto: any = (window as any).crypto;
-    if (typeof globalCrypto?.randomUUID === "function") {
-      return `${prefix}_${globalCrypto.randomUUID()}`;
+    if (typeof window.crypto?.randomUUID === "function") {
+      return `${prefix}_${window.crypto.randomUUID()}`;
     }
-  } catch {}
+  } catch {
+    // Fall through to the timestamp-based portable identifier.
+  }
 
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -53,4 +54,3 @@ export function ensureArray<T>(value: unknown): T[] {
 export function isBlanketCliCommandPattern(pattern: string): boolean {
   return asString(pattern).trim() === "*";
 }
-

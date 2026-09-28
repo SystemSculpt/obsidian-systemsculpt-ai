@@ -15,6 +15,7 @@ import path from "node:path";
 import { buildProductionPlugin } from "./plugin-artifacts.mjs";
 import { inspectPluginArtifacts } from "./plugin-artifacts.mjs";
 import { lintCssDirectory } from "./lint-css.mjs";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 import {
   writeArtifactInspectionEvidence,
   writeBuildProvenance,
@@ -25,18 +26,19 @@ const fast = args.includes("--fast");
 const skipTests = args.includes("--skip-tests");
 const root = process.cwd();
 const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "") || 20 * 60 * 1000;
+// The script suites create temp Git fixtures. Git hooks export GIT_DIR and
+// related variables, so child checks never inherit repository routing.
+const childEnvironment = createRepositoryScopedGitEnvironment();
 
 const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/verify-ci-failure-evidence.test.mjs",
-  "scripts/chatview-critical-mutants.test.mjs",
-  "scripts/check/chatview-critical-mutants-policy.test.mjs",
-  "scripts/check/test-gate-partition-policy.test.mjs",
   "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
   "scripts/plugin-release-metadata.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",
+  "scripts/module-ownership.test.mjs",
   "scripts/plugin-build-options.test.mjs",
   "scripts/check/managed-only-policy.test.mjs",
   "scripts/check/testid-coverage-policy.test.mjs",
@@ -48,6 +50,9 @@ const FAST_SCRIPT_TESTS = [
 const NORMAL_SCRIPT_TESTS = [
   "scripts/mobile-compatibility.test.mjs",
   "scripts/dev-watcher-service.test.mjs",
+  "scripts/watcher-ownership.test.mjs",
+  "scripts/repository-git.test.mjs",
+  "scripts/build-provenance.test.mjs",
   "scripts/plugin-artifacts.test.mjs",
   "scripts/plugin-sync.test.mjs",
   "scripts/release-plugin.test.mjs",
@@ -61,6 +66,7 @@ function run(command, options = {}) {
     const stdout = execSync(command, {
       cwd: root,
       encoding: "utf8",
+      env: childEnvironment,
       stdio: "pipe",
       timeout: timeoutMs,
       ...execOptions,
@@ -84,6 +90,7 @@ function runAsync(command, options = {}) {
     exec(command, {
       cwd: root,
       encoding: "utf8",
+      env: childEnvironment,
       timeout: timeoutMs,
       ...execOptions,
     }, (error, stdout, stderr) => {

@@ -62,6 +62,10 @@ function withUtm(url: string): string {
  */
 export class UpgradePlanModal extends StandardModal {
   private static current: UpgradePlanModal | null = null;
+  /** The browser handoff is on screen and its sign-in has not finished. */
+  private awaitingSignIn = false;
+  /** Closing because the sign-in finished or moved to a code exchange. */
+  private closingForCompletion = false;
 
   /** Opens the modal unless one is already on screen (gate calls can race). */
   static openOnce(plugin: SystemSculptPlugin, options: UpgradePlanOptions = {}): UpgradePlanModal {
@@ -73,7 +77,10 @@ export class UpgradePlanModal extends StandardModal {
 
   /** Closes any open instance — used when the sign-in callback arrives. */
   static closeCurrent(): void {
-    UpgradePlanModal.current?.close();
+    const current = UpgradePlanModal.current;
+    if (!current) return;
+    current.closingForCompletion = true;
+    current.close();
   }
 
   constructor(
@@ -93,10 +100,23 @@ export class UpgradePlanModal extends StandardModal {
 
   onClose(): void {
     if (UpgradePlanModal.current === this) UpgradePlanModal.current = null;
+    if (!this.closingForCompletion) this.abandonSignIn();
     super.onClose();
   }
 
+  /**
+   * Leaving the browser handoff without finishing slows sign-in polling to a
+   * background cadence (#359). The sign-in itself stays open: background
+   * polls, its deep link, a pasted code, or returning to Obsidian complete it.
+   */
+  private abandonSignIn(): void {
+    if (!this.awaitingSignIn) return;
+    this.awaitingSignIn = false;
+    this.plugin.getAccountConnectService().pollInBackground();
+  }
+
   private renderMain(): void {
+    this.abandonSignIn();
     this.resetSections();
     if (this.options.context === "onboarding") {
       this.renderOnboarding();
@@ -196,6 +216,7 @@ export class UpgradePlanModal extends StandardModal {
    */
   private beginConnect(mode: AccountConnectMode): void {
     this.resetSections();
+    this.awaitingSignIn = true;
     this.addTitle(
       "Continue in your browser",
       mode === "sign-up" ? "Create your free SystemSculpt account." : "Sign in to SystemSculpt.",
@@ -248,6 +269,7 @@ export class UpgradePlanModal extends StandardModal {
     const code = rawCode.trim();
     if (!code) return;
     const plugin = this.plugin;
+    this.closingForCompletion = true;
     this.close();
     new AccountConnectModal(
       plugin.app,

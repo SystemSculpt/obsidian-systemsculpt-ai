@@ -1,16 +1,30 @@
 import { API_BASE_URL, SYSTEMSCULPT_API_HEADERS } from "../constants/api";
 import SystemSculptPlugin from "../main";
-import { PlatformRequestClient } from "./PlatformRequestClient";
+import { PLATFORM_REQUEST_TIMEOUT_MS, PlatformRequestClient } from "./PlatformRequestClient";
 import { openExternalUrl } from "../utils/externalUrl";
+import { bytesToBase64 } from "../utils/base64";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
 
-type PendingConnectRequest = Readonly<{
-  state: string;
-  verifier: string;
-  mode: AccountConnectMode;
-  createdAt: number;
-}>;
+/** A server answer to one sign-in request, whatever its status. */
+type SignInAnswer = Readonly<{ status: number; payload: unknown }>;
+
+type PendingConnectRequest = {
+  readonly state: string;
+  readonly verifier: string;
+  readonly mode: AccountConnectMode;
+  readonly createdAt: number;
+  /** Aborts this sign-in's requests still in flight once it ends. */
+  readonly controller: AbortController;
+  /** This sign-in's requests whose answer has not been handled yet. */
+  readonly unsettled: Set<Promise<SignInAnswer | null>>;
+  /**
+   * A request of this sign-in ended without a definitive answer. The server
+   * may still have burned the single-use code for it, so a later "invalid
+   * code" does not prove the sign-in failed.
+   */
+  unanswered: boolean;
+};
 
 type ExchangeAccount = Readonly<{ email: string | null; name: string | null }>;
 type ExchangeSuccess =
@@ -24,7 +38,8 @@ export type ConnectErrorReason =
   | "network"
   | "invalid-code"
   | "rate-limited"
-  | "unavailable";
+  | "unavailable"
+  | "unconfirmed";
 
 /**
  * Result of a callback or manual-code exchange. Presentation (the connect
@@ -46,12 +61,33 @@ const PENDING_CONNECT_TTL_MS = 10 * 60_000;
  */
 const CONNECT_POLL_INTERVAL_MS = 3_500;
 
+/**
+ * Once the user leaves the sign-in screen, polling slows to this cadence
+ * until the sign-in expires (#359). It still finishes a sign-in whose deep
+ * link was lost (the mobile callback-loss path, #322) while Obsidian stays
+ * in the foreground.
+ */
+const CONNECT_BACKGROUND_POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Each poll owns the in-flight slot until it is answered, and a code exchange
+ * waits on it. A poll the network does not answer gives that slot back after
+ * a few intervals so later polls and the exchange can proceed; its request
+ * stays observed (see send()).
+ */
+const CONNECT_POLL_TIMEOUT_MS = 15_000;
+
+/** How long a code exchange waits for its own answer before reporting a network failure. */
+const CONNECT_EXCHANGE_TIMEOUT_MS = PLATFORM_REQUEST_TIMEOUT_MS;
+
+/**
+ * How long an exchange told the code is already used waits for this sign-in's
+ * requests still in flight, since one of them may have used it.
+ */
+const CONNECT_LATE_ANSWER_GRACE_MS = 15_000;
+
 function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 /**
@@ -62,15 +98,27 @@ function base64UrlEncode(bytes: Uint8Array): string {
  * (or a manually pasted code), and exchanges the one-time code for the
  * account's license key. The verifier and state live only in this service and
  * are never persisted to settings or data.json.
+ *
+ * Polls and exchanges race for the same single-use code, and the one answer
+ * that carries the license key cannot be fetched again. So each sign-in has
+ * exactly one completer: whichever of its requests first delivers a success,
+ * whenever that answer lands. An exchange never races a poll it can wait for,
+ * and it presents the completion's outcome itself; otherwise the completion
+ * is announced in the background.
  */
 export class AccountConnectService {
   private readonly requestClient: Pick<PlatformRequestClient, "request">;
   private readonly openUrl: (url: string, ownerWindow?: Window) => Promise<boolean>;
   private pending: PendingConnectRequest | null = null;
   private pollTimer: number | null = null;
-  private pollInFlight = false;
-  private pollSettled: Promise<void> | null = null;
-  private lastOutcome: ConnectOutcome | null = null;
+  /** Detaches the one-poll-per-return listeners of a background sign-in. */
+  private detachReturnPoll: (() => void) | null = null;
+  /** The sign-in screen was left: poll at the background cadence. */
+  private backgroundPolling = false;
+  /** Settles when the poll holding the in-flight slot is answered or gives the slot back. */
+  private pollSlot: Promise<void> | null = null;
+  /** The completion of the latest sign-in, adopted by an exchange that was waiting on it. */
+  private completion: Promise<ConnectOutcome> | null = null;
   private exchangeInProgress = false;
   private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
 
@@ -81,6 +129,8 @@ export class AccountConnectService {
   ) {
     this.requestClient = requestClient;
     this.openUrl = openUrl;
+    // Unloading ends any pending sign-in: its timer, listeners, and requests.
+    this.plugin.register(() => this.endPending());
   }
 
   public hasPendingRequest(): boolean {
@@ -88,9 +138,32 @@ export class AccountConnectService {
   }
 
   public cancelPending(): void {
-    this.pending = null;
-    this.lastOutcome = null;
-    this.stopPolling();
+    this.endPending();
+    this.completion = null;
+  }
+
+  /**
+   * The user left the sign-in screen without finishing it (#359). Polling
+   * slows from every 3.5 s to every 30 s until the sign-in expires, and each
+   * return to Obsidian polls at once. The deep link or a pasted code still
+   * completes it; a new sign-in or plugin unload ends it.
+   */
+  public pollInBackground(): void {
+    if (!this.activePending()) return;
+    this.backgroundPolling = true;
+    // An exchange in progress restarts polling itself when it needs to.
+    if (!this.exchangeInProgress) this.startPolling();
+    if (this.detachReturnPoll || typeof window === "undefined") return;
+    const pollOnReturn = (): void => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void this.pollOnce();
+    };
+    window.addEventListener("focus", pollOnReturn);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", pollOnReturn);
+    this.detachReturnPoll = () => {
+      window.removeEventListener("focus", pollOnReturn);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", pollOnReturn);
+    };
   }
 
   /**
@@ -109,8 +182,19 @@ export class AccountConnectService {
   public async begin(mode: AccountConnectMode, ownerWindow?: Window): Promise<boolean> {
     const state = base64UrlEncode(this.randomBytes());
     const verifier = base64UrlEncode(this.randomBytes());
-    this.pending = { state, verifier, mode, createdAt: Date.now() };
-    this.lastOutcome = null;
+    // A superseded sign-in's requests must neither hold the slot nor complete this one.
+    this.endPending();
+    this.completion = null;
+    this.backgroundPolling = false;
+    this.pending = {
+      state,
+      verifier,
+      mode,
+      createdAt: Date.now(),
+      controller: new AbortController(),
+      unsettled: new Set(),
+      unanswered: false,
+    };
     this.startPolling();
 
     const opened = await this.openUrl(await this.connectUrl(this.pending), ownerWindow);
@@ -139,10 +223,11 @@ export class AccountConnectService {
 
   private startPolling(): void {
     this.stopPolling();
+    if (!this.backgroundPolling) this.stopReturnPoll();
     if (typeof window === "undefined") return;
     const timer = window.setInterval(() => {
       void this.pollOnce();
-    }, CONNECT_POLL_INTERVAL_MS);
+    }, this.backgroundPolling ? CONNECT_BACKGROUND_POLL_INTERVAL_MS : CONNECT_POLL_INTERVAL_MS);
     this.pollTimer = timer;
     // Registered so a plugin unload can never leak the interval.
     this.plugin.registerInterval(timer);
@@ -155,52 +240,101 @@ export class AccountConnectService {
     }
   }
 
+  private stopReturnPoll(): void {
+    this.detachReturnPoll?.();
+    this.detachReturnPoll = null;
+  }
+
+  /**
+   * Ends the pending sign-in, whether it completed, failed, was cancelled,
+   * superseded, or expired: stops polling and aborts its requests in flight.
+   */
+  private endPending(): void {
+    const pending = this.pending;
+    this.pending = null;
+    this.pollSlot = null;
+    this.stopPolling();
+    this.stopReturnPoll();
+    pending?.controller.abort();
+  }
+
   private async pollOnce(): Promise<void> {
     const pending = this.activePending();
     if (!pending) {
       this.stopPolling();
       return;
     }
-    if (this.pollInFlight) return;
-    this.pollInFlight = true;
-    let settle!: () => void;
-    this.pollSettled = new Promise((resolve) => { settle = resolve; });
-    try {
-      let response: Response;
+    // An exchange owns the single-use code while it runs; never race it.
+    if (this.pollSlot || this.exchangeInProgress) return;
+    const answer = this.send(pending, "/auth/poll", { verifier: pending.verifier });
+    const slot = this.waitFor(answer, CONNECT_POLL_TIMEOUT_MS).then(() => undefined);
+    this.pollSlot = slot;
+    await slot;
+    if (this.pollSlot === slot) this.pollSlot = null;
+  }
+
+  /**
+   * Sends one sign-in request. Poll and exchange both burn the single-use
+   * code, and the answer that carries the license key cannot be fetched
+   * again, so the request has no client deadline: it stays observed until it
+   * settles or this sign-in ends, and callers bound only how long they wait
+   * for it. Resolves once its answer has been handled, or null when none came.
+   */
+  private send(
+    pending: PendingConnectRequest,
+    path: "/auth/poll" | "/auth/exchange",
+    body: Record<string, string>,
+  ): Promise<SignInAnswer | null> {
+    const answer = (async (): Promise<SignInAnswer | null> => {
+      let received: SignInAnswer;
       try {
-        response = await this.requestClient.request({
-          url: `${API_BASE_URL}/auth/poll`,
+        const response = await this.requestClient.request({
+          url: `${API_BASE_URL}${path}`,
           method: "POST",
           headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
-          body: { verifier: pending.verifier },
+          body,
+          signal: pending.controller.signal,
+          timeoutMs: null,
         });
+        received = { status: response.status, payload: await this.readJson(response) };
       } catch {
-        return; // Transient network failure — keep polling until the TTL.
+        pending.unanswered = true;
+        return null;
       }
-      if (response.status !== 200) return;
-      const payload = await this.readJson(response);
-      const envelope =
-        payload && typeof payload === "object" && !Array.isArray(payload)
-          ? (payload as Record<string, unknown>)
-          : null;
-      if (!envelope || envelope.status === "pending") return;
-      const success = this.readExchangeSuccess(payload);
-      if (!success) return;
-      // A deep-link or manual-code exchange may have won the race meanwhile.
-      if (this.pending !== pending) return;
-      this.stopPolling();
-      const outcome =
-        success.status === "ok"
-          ? await this.completeSignIn(success.licenseKey, success.account)
-          : await this.completeWithoutLicense(success.account);
-      // When an exchange is awaiting this poll it delivers the outcome to
-      // its own modal — announcing here too would stack a second one.
-      if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
-    } finally {
-      this.pollInFlight = false;
-      this.pollSettled = null;
-      settle();
-    }
+      // A server failure can come after the code was already burned.
+      if (received.status >= 500) pending.unanswered = true;
+      // A completion that fails reaches the exchange adopting it, if any.
+      await this.acceptSuccess(pending, received).catch(() => undefined);
+      return received;
+    })();
+    pending.unsettled.add(answer);
+    void answer.then(() => pending.unsettled.delete(answer));
+    return answer;
+  }
+
+  /**
+   * Completes the sign-in from the first of its requests to deliver a
+   * success. An exchange waiting on this sign-in presents the outcome in its
+   * own modal; otherwise it is announced in the background.
+   */
+  private async acceptSuccess(pending: PendingConnectRequest, answer: SignInAnswer): Promise<void> {
+    if (answer.status !== 200) return;
+    const success = this.readExchangeSuccess(answer.payload);
+    // Another request completed this sign-in first, or it already ended.
+    if (!success || this.pending !== pending) return;
+    const outcome = await this.complete(success);
+    if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
+  }
+
+  /** Waits up to `ms` for `promise`; null when it has not settled by then. */
+  private waitFor<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => resolve(null), ms);
+      void promise.then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      });
+    });
   }
 
   /** Handles the obsidian://systemsculpt-connect deep link from the website. */
@@ -240,54 +374,69 @@ export class AccountConnectService {
       // single-use code would 401 here while the poll succeeds, so wait for
       // it and adopt its outcome instead.
       this.stopPolling();
-      if (this.pollSettled) await this.pollSettled;
-      if (this.pending !== pending) {
-        return this.lastOutcome ?? { kind: "error", reason: "expired" };
-      }
+      if (this.pollSlot) await this.pollSlot;
+      if (this.pending !== pending) return await this.adoptCompletion();
 
-      let response: Response;
-      try {
-        response = await this.requestClient.request({
-          url: `${API_BASE_URL}/auth/exchange`,
-          method: "POST",
-          headers: { ...SYSTEMSCULPT_API_HEADERS.DEFAULT },
-          body: { code, verifier: pending.verifier },
-        });
-      } catch {
+      const request = this.send(pending, "/auth/exchange", { code, verifier: pending.verifier });
+      const answer = await this.waitFor(request, CONNECT_EXCHANGE_TIMEOUT_MS);
+      // This exchange's own success, or a late poll's, completed the sign-in.
+      if (this.pending !== pending) return await this.adoptCompletion();
+      if (!answer) {
         // Keep the pending request (and its polling guarantee) so the
-        // manual code can be retried offline.
+        // manual code can be retried offline. If this exchange is still in
+        // flight, a late success completes the sign-in in the background.
         this.startPolling();
         return { kind: "error", reason: "network" };
       }
-
-      const payload = await this.readJson(response);
-      if (response.status === 200) {
-        const success = this.readExchangeSuccess(payload);
-        if (success?.status === "ok") {
-          return this.completeSignIn(success.licenseKey, success.account);
-        }
-        if (success?.status === "no_license") {
-          return this.completeWithoutLicense(success.account);
-        }
-      }
-      if (response.status === 401) {
-        this.pending = null;
-        return { kind: "error", reason: "invalid-code" };
-      }
-      if (response.status === 429) {
-        this.startPolling();
-        return { kind: "error", reason: "rate-limited" };
+      if (answer.status === 401) {
+        return await this.codeRejected(pending, request);
       }
       this.startPolling();
-      return { kind: "error", reason: "unavailable" };
+      return { kind: "error", reason: answer.status === 429 ? "rate-limited" : "unavailable" };
     } finally {
       this.exchangeInProgress = false;
     }
   }
 
+  /**
+   * The server says the code is invalid or already used. If another request
+   * of this sign-in may have used it without its answer reaching us, that
+   * proves nothing: wait briefly for such requests still in flight, and
+   * otherwise keep the sign-in open so a fresh code from the browser can
+   * finish it.
+   */
+  private async codeRejected(
+    pending: PendingConnectRequest,
+    exchange: Promise<SignInAnswer | null>,
+  ): Promise<ConnectOutcome> {
+    const inFlight = [...pending.unsettled].filter((request) => request !== exchange);
+    if (!pending.unanswered && inFlight.length === 0) {
+      this.endPending();
+      return { kind: "error", reason: "invalid-code" };
+    }
+    if (inFlight.length > 0) {
+      await this.waitFor(Promise.all(inFlight), CONNECT_LATE_ANSWER_GRACE_MS);
+    }
+    if (this.pending !== pending) return this.adoptCompletion();
+    this.startPolling();
+    return { kind: "error", reason: "unconfirmed" };
+  }
+
+  /** The outcome of whatever ended this sign-in while an exchange waited on it. */
+  private adoptCompletion(): Promise<ConnectOutcome> {
+    return this.completion ?? Promise.resolve({ kind: "error", reason: "expired" });
+  }
+
+  /** Stores the account from the one request that completed this sign-in. */
+  private complete(success: ExchangeSuccess): Promise<ConnectOutcome> {
+    this.endPending();
+    this.completion = success.status === "ok"
+      ? this.completeSignIn(success.licenseKey, success.account)
+      : this.completeWithoutLicense(success.account);
+    return this.completion;
+  }
+
   private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<ConnectOutcome> {
-    this.pending = null;
-    this.stopPolling();
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey,
       userEmail: account.email ?? "",
@@ -296,19 +445,15 @@ export class AccountConnectService {
     });
     await this.plugin.getLicenseManager().validateLicenseKeyDetailed();
     this.refreshSettingsTab();
-    const outcome: ConnectOutcome = {
+    return {
       kind: "signed-in",
       name: account.name,
       email: account.email,
       licenseValid: this.plugin.settings.licenseValid === true,
     };
-    this.lastOutcome = outcome;
-    return outcome;
   }
 
   private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
-    this.pending = null;
-    this.stopPolling();
     await this.plugin.getSettingsManager().updateSettings({
       licenseKey: "",
       licenseValid: false,
@@ -318,15 +463,13 @@ export class AccountConnectService {
       subscriptionStatus: "",
     });
     this.refreshSettingsTab();
-    const outcome: ConnectOutcome = { kind: "no-license", name: account.name, email: account.email };
-    this.lastOutcome = outcome;
-    return outcome;
+    return { kind: "no-license", name: account.name, email: account.email };
   }
 
   private activePending(): PendingConnectRequest | null {
     if (!this.pending) return null;
     if (Date.now() - this.pending.createdAt > PENDING_CONNECT_TTL_MS) {
-      this.pending = null;
+      this.endPending();
       return null;
     }
     return this.pending;

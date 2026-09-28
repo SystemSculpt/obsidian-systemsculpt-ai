@@ -7,6 +7,7 @@ import {
 } from "../types/documentProcessing";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { isCreditsRequiredError } from "../utils/errors";
 
 type TimelineStep = "queued" | "uploading" | "processing" | "contextualizing" | "ready";
 
@@ -63,11 +64,12 @@ export interface DocumentProcessingFailurePayload {
 
 export function describeDocumentProcessingFailure(error: unknown): string {
   const code = typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code: unknown }).code)
+    ? String((error).code)
     : "";
   const messages: Record<string, string> = {
     license_required: "An active SystemSculpt Pro license is required.",
     license_rejected: "Your SystemSculpt license could not be verified.",
+    payment_required: "Not enough credits are available. Add credits to convert documents.",
     capability_unavailable: "Document conversion is temporarily unavailable.",
     temporarily_unavailable: "Document conversion is temporarily unavailable. Try again shortly.",
     rate_limited: "Too many document conversions. Try again shortly.",
@@ -81,6 +83,7 @@ export function describeDocumentProcessingFailure(error: unknown): string {
     local_abort: "Conversion cancelled.",
   };
   if (messages[code]) return messages[code];
+  if (isCreditsRequiredError(error)) return messages.payment_required;
   if (error instanceof DOMException && error.name === "AbortError") return messages.local_abort;
   return error instanceof Error ? error.message : String(error ?? "Unknown error");
 }
@@ -103,11 +106,13 @@ export type DocumentProcessingPanelLauncher = (
 ) => DocumentProcessingPanelHandle;
 
 class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
+  private readonly plugin: SystemSculptPlugin;
   private readonly onCancel?: () => void;
   private readonly panel: OperationProgressPanel;
   private destroyed = false;
 
   constructor(options: DocumentProcessingPanelOptions) {
+    this.plugin = options.plugin;
     this.onCancel = options.onCancel;
 
     const metaParts: string[] = [options.file.name];
@@ -124,7 +129,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       steps: TIMELINE_ORDER.map((step) => ({ id: step, label: STEP_LABEL[step] })),
     });
 
-    this.setButtons([
+    this.panel.setActions([
       {
         label: "Hide",
         testId: "document.progress.hide",
@@ -184,18 +189,18 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     });
     this.panel.setTimelineState("ready", "complete");
 
-    this.setButtons([
+    this.panel.setActions([
       {
         label: "Open Markdown",
         testId: "document.progress.open-markdown",
         variant: "primary",
-        onClick: async () => {
-          try {
-            await payload.openOutput();
-          } catch (error) {
-            new Notice("Unable to open converted file. See console for details.", 4000);
-          }
-          this.close();
+        onClick: () => {
+          void Promise.resolve()
+            .then(payload.openOutput)
+            .catch(() => {
+              new Notice("Unable to open converted file. See console for details.", 4000);
+            })
+            .finally(() => this.close());
         },
       },
       {
@@ -225,27 +230,40 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     });
     this.panel.setTimelineState(failedStep, "error");
 
-    this.setButtons([
+    const creditsRequired = isCreditsRequiredError(payload.error);
+    this.panel.setActions([
+      ...(creditsRequired
+        ? [{
+            label: "Add credits",
+            testId: "document.progress.add-credits",
+            variant: "primary" as const,
+            onClick: () => {
+              this.close();
+              void this.plugin.openCreditsBalanceModal();
+            },
+          }]
+        : []),
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
-        onClick: async () => {
-          try {
-            const copied = await tryCopyToClipboard(message, this.panel.element);
-            new Notice(
-              copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
-              copied ? 2500 : 4000,
-            );
-          } catch (error) {
-            console.error(error);
-          }
-          this.close();
+        onClick: () => {
+          void tryCopyToClipboard(message, this.panel.element)
+            .then((copied) => {
+              new Notice(
+                copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
+                copied ? 2500 : 4000,
+              );
+            })
+            .catch((error: unknown) => {
+              console.error(error);
+            })
+            .finally(() => this.close());
         },
       },
       {
         label: "Close",
         testId: "document.progress.close",
-        variant: "primary",
+        variant: creditsRequired ? "default" : "primary",
         onClick: () => this.close(),
       },
     ]);
@@ -260,16 +278,6 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.panel.close();
   }
 
-  private setButtons(
-    descriptors: Array<{
-      label: string;
-      testId: string;
-      onClick: () => void;
-      variant?: "primary" | "default";
-    }>
-  ): void {
-    this.panel.setActions(descriptors);
-  }
 
 }
 
@@ -288,7 +296,7 @@ function clampPercentage(value: number): number {
 
 function resolveFailedTimelineStep(error: unknown): TimelineStep {
   const code = typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code: unknown }).code)
+    ? String((error).code)
     : "";
 
   if (code === "license_required" || code === "license_rejected" || code === "local_abort") {

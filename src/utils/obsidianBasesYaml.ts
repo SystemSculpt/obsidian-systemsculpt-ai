@@ -59,7 +59,10 @@ function createObsidianBasesYamlError(
     parts.push(`\n...and ${remaining} more.`);
   }
 
-  const err: any = new Error(parts.join("\n"));
+  const err = new Error(parts.join("\n")) as Error & {
+    code: string;
+    details: ObsidianBasesYamlErrorDetails;
+  };
   err.code = "BASE_YAML_INVALID";
   err.details = {
     path,

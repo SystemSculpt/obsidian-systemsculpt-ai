@@ -46,12 +46,6 @@ const mockStorage = {
     }
     for (const vector of vectors) mockVectors.set(vector.id, vector);
   }),
-  removeByPathExceptIds: jest.fn(async (path: string, namespace: string, keepIds: Set<string>) => {
-    for (const [id, vector] of mockVectors) {
-      if (vector.path === path && vector.metadata.namespace === namespace && !keepIds.has(id)) mockVectors.delete(id);
-    }
-  }),
-  moveVectorId: jest.fn(async () => undefined),
   removeByPath: jest.fn(async (path: string) => {
     for (const [id, vector] of mockVectors) if (vector.path === path) mockVectors.delete(id);
   }),
@@ -167,7 +161,6 @@ function harness(initialContent: string) {
     embeddingsVectorFormatVersion: 5,
     embeddingsEnabled: false,
     embeddingsPortableIndex: false,
-    embeddingsRebuildPending: false,
     embeddingsExclusions: { folders: [], patterns: [], ignoreChatHistory: false, respectObsidianExclusions: false },
     chatsDirectory: "Chats",
     savedChatsDirectory: "Saved Chats",
@@ -179,6 +172,7 @@ function harness(initialContent: string) {
     getMarkdownFiles: jest.fn(() => [file]),
     getAbstractFileByPath: jest.fn(() => file),
     read: jest.fn(async () => content),
+    cachedRead: jest.fn(async () => content),
     on: jest.fn((event: string, callback: (...args: any[]) => void) => {
       watchers.set(event, callback);
       return {};
@@ -188,8 +182,8 @@ function harness(initialContent: string) {
   const plugin = {
     settings,
     emitter: { emit: jest.fn() },
-    getManagedCapabilityClient: jest.fn(() => ({
-      getEmbeddingsIndex: () => indexAdapter,
+    getManagedCapabilityGraph: jest.fn(() => ({
+      embeddingsIndex: indexAdapter,
     })),
     getSettingsManager: jest.fn(() => ({ updateSettings })),
   };
@@ -238,7 +232,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getStats()).toEqual({ total: 1, processed: 1, present: 0, needsProcessing: 0, failed: 0 });
     await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
     expect(state.index).not.toHaveBeenCalled();
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(false);
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({
       phase: "idle",
       total: 1,
@@ -276,7 +269,6 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const result = await state.manager.processVault();
 
     expect(result).toMatchObject({ status: "complete", processed: 0, partialSuccess: true });
-    expect(state.plugin.settings.embeddingsRebuildPending).toBe(true);
     expect(state.manager.getStats()).toMatchObject({ failed: 1, needsProcessing: 1 });
     expect(state.index).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -297,7 +289,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("This note would otherwise be uploaded for embeddings. ".repeat(4));
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => ({
+      readCreditsBalance: jest.fn(async () => ({
         usageClass: "customer",
         totalRemaining: 5,
         heldInFlight: 5,
@@ -326,7 +318,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const balanceStarted = new Promise<void>((resolve) => { signalBalanceStarted = resolve; });
     const balanceRelease = new Promise<void>((resolve) => { releaseBalance = resolve; });
     (state.plugin as any).aiService = {
-      getCreditsBalance: jest.fn(async () => {
+      readCreditsBalance: jest.fn(async () => {
         signalBalanceStarted();
         await balanceRelease;
         return {
@@ -485,6 +477,29 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     warn.mockRestore();
   });
 
+  it("validates stored vectors once per vector format instead of at every launch", async () => {
+    const first = harness("A note indexed in an earlier session.");
+    await first.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+    expect(mockState.get("semantic-vector-validation")).toMatchObject({ version: 1 });
+
+    const relaunched = harness("A note indexed in an earlier session.");
+    await relaunched.manager.initialize();
+    expect(mockStorage.purgeCorruptedVectors).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes no settings when a launch reconcile finds the vault current", async () => {
+    const state = harness("A note that is indexed once.");
+    await state.manager.initialize();
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 1 });
+    state.updateSettings.mockClear();
+
+    await expect(state.manager.processVault()).resolves.toMatchObject({ status: "complete", processed: 0 });
+
+    // Indexing runs never save settings: the write-only rebuild flag is gone (#341).
+    expect(state.updateSettings).not.toHaveBeenCalled();
+  });
+
   it("queues corrupted stored paths for an explicit retry and rebuild", async () => {
     const state = harness("A note whose corrupted stored vector must be rebuilt.");
     (mockStorage.purgeCorruptedVectors as jest.Mock).mockResolvedValueOnce({
@@ -552,7 +567,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     });
 
     const processing = state.manager.processVault();
-    for (let attempt = 0; attempt < 20 && !releaseResponse; attempt += 1) await Promise.resolve();
+    for (let attempt = 0; attempt < 50 && !releaseResponse; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(releaseResponse).toBeDefined();
     const queue = (state.manager as any).workQueue;
     const claimed = queue.get(state.file.path);

@@ -1,4 +1,5 @@
 import { normalizePath } from "obsidian";
+import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { STUDIO_PROJECT_EXTENSION } from "./types";
 
 export const DEFAULT_STUDIO_PROJECTS_DIR = "SystemSculpt/Studio" as const;
@@ -14,14 +15,7 @@ export function sanitizeStudioProjectName(name: string): string {
     return DEFAULT_STUDIO_PROJECT_NAME;
   }
 
-  const safe = raw
-    // Block path separators and filesystem-reserved characters.
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[. ]+$/g, "")
-    .trim();
-
-  return safe || DEFAULT_STUDIO_PROJECT_NAME;
+  return toSafeVaultFileName(raw.replace(/\s+/g, " "), { fallback: DEFAULT_STUDIO_PROJECT_NAME });
 }
 
 export function normalizeStudioProjectPath(path: string): string {

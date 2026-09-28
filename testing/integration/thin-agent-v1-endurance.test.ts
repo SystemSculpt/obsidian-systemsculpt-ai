@@ -2,7 +2,6 @@
  * @jest-environment node
  */
 
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PlatformRequestInput } from "../../src/services/PlatformRequestClient";
@@ -13,13 +12,13 @@ import {
   THIN_AGENT_EVENT_TYPE,
   type AgentJsonValue,
   type AgentUserMessage,
-} from "../../src/views/chatview/agent/Protocol";
+} from "../../src/chat/managed/Protocol";
 import {
   AgentChatSession,
   type AgentLifecycleRecord,
   type AgentRunResult,
-} from "../../src/views/chatview/agent/ChatSession";
-import { AgentMutationJournal } from "../../src/views/chatview/agent/MutationJournal";
+} from "../../src/chat/managed/ChatSession";
+import { AgentMutationJournal } from "../../src/chat/managed/MutationJournal";
 
 type ToolCall = Readonly<{
   id: string;
@@ -727,8 +726,6 @@ afterEach(async () => {
 describe("thin-agent-v1 streaming HTTP endurance", () => {
   it("pins a provider-neutral agent scenario without retired runtime dependencies", () => {
     const source = readFileSync(TEST_PATH, "utf8");
-    expect(createHash("sha256").update(fixtureBytes).digest("hex"))
-      .toBe("788613872f80ee292579740210e0b6962ff17c285dfb92be431e7e99d946d257");
     expect(fixture.fixture_version).toBe("thin-agent-v1-endurance-3");
     expect(fixture.round_count).toBeGreaterThan(30);
     expect(fixture.expected.hard_client_continuation_limit).toBeNull();

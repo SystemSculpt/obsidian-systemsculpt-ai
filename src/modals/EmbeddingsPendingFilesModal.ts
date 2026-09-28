@@ -17,13 +17,14 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   private listEl: HTMLElement | null = null;
   private searchInput: HTMLInputElement | null = null;
   private copyButtons: HTMLButtonElement[] = [];
+  private pendingLoad: Promise<void> = Promise.resolve();
 
   constructor(app: App, plugin: SystemSculptPlugin) {
     super(app);
     this.plugin = plugin;
   }
 
-  async onOpen(): Promise<void> {
+  onOpen(): void {
     super.onOpen();
 
     this.allFiles = [];
@@ -71,7 +72,12 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
 
     this.addActionButton("embeddings.pending.close", "Close", () => this.close(), true);
 
-    await this.loadPendingFiles();
+    this.startPendingFilesLoad();
+  }
+
+  private startPendingFilesLoad(): void {
+    this.pendingLoad = this.loadPendingFiles();
+    void this.pendingLoad;
   }
 
   private async loadPendingFiles(): Promise<void> {
@@ -153,7 +159,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
         label: "Retry",
         testId: "embeddings.pending.retry",
         tone: "primary",
-        onSelect: () => void this.loadPendingFiles(),
+        onSelect: () => this.startPendingFilesLoad(),
       },
     });
 

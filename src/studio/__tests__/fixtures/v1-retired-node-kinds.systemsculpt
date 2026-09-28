@@ -1,0 +1,101 @@
+{
+  "schema": "studio.project.v1",
+  "projectId": "proj_v1_retired_kinds",
+  "name": "Legacy API digest",
+  "createdAt": "2025-11-02T10:00:00.000Z",
+  "updatedAt": "2025-11-02T10:30:00.000Z",
+  "engine": {
+    "apiMode": "systemsculpt_only",
+    "minPluginVersion": "4.0.0"
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "caption",
+        "kind": "studio.label",
+        "version": "1.0.0",
+        "title": "Text",
+        "position": { "x": 80, "y": 360 },
+        "config": {
+          "value": "Fetches the item list and shows the response body.",
+          "fontSize": 18,
+          "width": 300,
+          "height": 120
+        }
+      },
+      {
+        "id": "endpoint",
+        "kind": "studio.input",
+        "version": "1.0.0",
+        "title": "Endpoint",
+        "position": { "x": 80, "y": 80 },
+        "config": { "value": "https://api.example.com/items" },
+        "continueOnError": false,
+        "disabled": false
+      },
+      {
+        "id": "fetch",
+        "kind": "studio.http_request",
+        "version": "1.0.0",
+        "title": "Fetch items",
+        "position": { "x": 520, "y": 80 },
+        "config": {
+          "method": "GET",
+          "url": "",
+          "headers": { "Authorization": "Bearer sentinel-header" },
+          "bearerToken": "sentinel-token",
+          "width": 410,
+          "height": 320
+        },
+        "continueOnError": false,
+        "disabled": false
+      },
+      {
+        "id": "response",
+        "kind": "studio.text",
+        "version": "1.0.0",
+        "title": "Response",
+        "position": { "x": 1000, "y": 80 },
+        "config": { "value": "", "textDisplayMode": "rendered" },
+        "continueOnError": false,
+        "disabled": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_endpoint_fetch",
+        "fromNodeId": "endpoint",
+        "fromPortId": "text",
+        "toNodeId": "fetch",
+        "toPortId": "url"
+      },
+      {
+        "id": "edge_fetch_response",
+        "fromNodeId": "fetch",
+        "fromPortId": "body",
+        "toNodeId": "response",
+        "toPortId": "text"
+      }
+    ],
+    "entryNodeIds": ["endpoint"],
+    "groups": []
+  },
+  "permissionsRef": {
+    "policyVersion": 1,
+    "policyPath": "SystemSculpt/Studio/Legacy API digest.systemsculpt-assets/policy/grants.json"
+  },
+  "settings": {
+    "runConcurrency": "adaptive",
+    "defaultFsScope": "vault",
+    "retention": {
+      "maxRuns": 100,
+      "maxArtifactsMb": 1024
+    }
+  },
+  "migrations": {
+    "projectSchemaVersion": "1.0.0",
+    "applied": [
+      { "id": "studio.path-only-ports.v1", "at": "2025-11-02T10:00:00.000Z" }
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 import {
   PlatformRequestClient,
+  platformTransferTimeoutMs,
   type PlatformRequestInput,
 } from "../../../services/PlatformRequestClient";
 import {
@@ -236,7 +237,10 @@ describe("AudioProcessorApiClient", () => {
       method: "GET",
       bodyEncoding: "raw",
       transport: "requestUrl",
+      // A note may approach its 32 MiB cap; the JSON default would cut it off.
+      timeoutMs: platformTransferTimeoutMs(32 * 1024 * 1024),
     }));
+    expect(requestClient.inputs[0]).not.toHaveProperty("timeoutMs");
   });
 
   it("rejects malformed plans and private signed URLs before upload", async () => {
@@ -272,6 +276,23 @@ describe("AudioProcessorApiClient", () => {
       status: 402,
       code: "insufficient_credits",
       message: "Add credits to process this recording.",
+    }));
+  });
+
+  it("maps a bare 402 to the credits code and wording (#300)", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({}, 402));
+
+    await expect(client.createYouTubeJob(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      {
+        operationId: "audio-op:create",
+        outputPreset: "detailed",
+      },
+    )).rejects.toEqual(expect.objectContaining({
+      status: 402,
+      code: "payment_required",
+      message: "Not enough credits are available. Add credits to continue.",
     }));
   });
 

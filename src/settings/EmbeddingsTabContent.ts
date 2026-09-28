@@ -184,7 +184,9 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
 
   folderSetting.addText((text) => {
     text.setPlaceholder("Select folder...");
-    attachFolderSuggester(text.inputEl, (value) => text.setValue(value), tabInstance.plugin.app);
+    attachFolderSuggester(text.inputEl, (value) => {
+      text.setValue(value);
+    }, tabInstance.plugin.app);
   });
 
   folderSetting.addButton((button) => {
@@ -333,7 +335,7 @@ async function buildStatusSummary(plugin: SystemSculptPlugin): Promise<string> {
     return snapshot.total > 0
       ? `${snapshot.completed} ${snapshot.completed === 1 ? "note" : "notes"} indexed`
       : "Ready";
-  } catch (_error) {
+  } catch {
     return "Status unavailable";
   }
 }

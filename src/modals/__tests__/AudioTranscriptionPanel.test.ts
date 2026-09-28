@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 import { App, MarkdownView, Notice, TFile } from "obsidian";
-import { ManagedTranscriptionInterruptedError } from "../../services/transcription/ManagedTranscriptionAdapter";
+import { ManagedJobError } from "../../services/managed/ManagedJobClient";
+import { ManagedTranscriptionInterruptedError, ManagedTranscriptionRetryError } from "../../services/transcription/ManagedTranscriptionAdapter";
 import { AudioTranscriptionPanel } from "../AudioTranscriptionPanel";
 
 jest.mock("obsidian", () => {
@@ -69,6 +70,7 @@ function createPanel(options: { openOnComplete?: boolean; targetEditor?: any; pl
   activeView.editor = activeEditor;
   activeView.file = activeFile;
   const activeLeaf = { view: activeView };
+  activeView.leaf = activeLeaf as any;
   const leaf = { openFile: jest.fn(async () => undefined) };
   (app.workspace as any).activeLeaf = activeLeaf;
   (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeView);
@@ -243,6 +245,31 @@ describe("AudioTranscriptionPanel", () => {
     await flushPromises();
   });
 
+  it.each(["resume", "restart", "blocked"] as const)("preserves %s recovery policy for interrupted and failed tasks", async (disposition) => {
+    for (const interrupted of [false, true]) {
+      const running = deferred<typeof completedResult>();
+      mockStart.mockReturnValue({ promise: running.promise, cancel: jest.fn() });
+      const { panel, plugin } = createPanel();
+      panel.open();
+      running.reject(interrupted
+        ? new ManagedTranscriptionInterruptedError("same-operation", disposition === "resume", "processing", disposition)
+        : new ManagedTranscriptionRetryError("same-operation", disposition, "processing", new Error("connection lost")));
+      await flushPromises();
+      const retry = document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.retry"]');
+      if (disposition === "blocked") {
+        expect(retry).toBeNull();
+        expect(document.body.textContent).toContain("prevent duplicate work");
+      } else {
+        expect(retry?.textContent).toBe(disposition === "resume" ? "Resume" : "Retry");
+        retry!.click();
+        const request = mockStart.mock.calls.at(-1)![0];
+        expect(request.resumeOperationId).toBe(disposition === "resume" ? "same-operation" : undefined);
+      }
+      AudioTranscriptionPanel.disposeOwnedBy(plugin);
+      document.body.innerHTML = "";
+    }
+  });
+
   it("opens the coordinator-owned output without creating a second transcript", async () => {
     const { app, leaf, output, panel } = createPanel({ openOnComplete: true });
     panel.open();
@@ -309,6 +336,46 @@ describe("AudioTranscriptionPanel", () => {
     expect(document.body.textContent).toContain("managed job failed");
     expect(app.vault.create).not.toHaveBeenCalled();
     expect((app.fileManager as any).trashFile).toBeUndefined();
+  });
+
+  it("routes a preserved 402 transcription to credits while keeping Resume (#300)", async () => {
+    const running = deferred<typeof completedResult>();
+    mockStart.mockReturnValue({ promise: running.promise, cancel: jest.fn() });
+    const openCreditsBalanceModal = jest.fn(async () => undefined);
+    const { panel } = createPanel({ plugin: { settings: {}, openCreditsBalanceModal } });
+    panel.open();
+    const paymentRequired = new ManagedJobError(
+      "payment_required",
+      "Not enough credits are available. Add credits to continue.",
+      402,
+    );
+    running.reject(new ManagedTranscriptionRetryError("credits-op", "resume", "processing", paymentRequired));
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("Not enough credits are available.");
+    expect(document.body.textContent).not.toContain("(402)");
+    expect(document.querySelector('[data-testid="transcription.progress.retry"]')?.textContent).toBe("Resume");
+    document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.add-credits"]')!.click();
+    expect(openCreditsBalanceModal).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Add credits on a terminal credits failure but not on other failures", async () => {
+    for (const [error, expected] of [
+      [new ManagedJobError("payment_required", "Not enough credits are available. Add credits to continue.", 402), true],
+      [new Error("managed job failed"), false],
+    ] as const) {
+      const failed = deferred<typeof completedResult>();
+      mockStart.mockReturnValue({ promise: failed.promise, cancel: jest.fn() });
+      const { panel, plugin } = createPanel({ plugin: { settings: {}, openCreditsBalanceModal: jest.fn() } });
+      panel.open();
+      failed.reject(error);
+      await flushPromises();
+
+      expect(document.body.textContent).toContain("Transcription failed");
+      expect(document.querySelector('[data-testid="transcription.progress.add-credits"]') !== null).toBe(expected);
+      AudioTranscriptionPanel.disposeOwnedBy(plugin);
+      document.body.innerHTML = "";
+    }
   });
 
   it("disposes only the unloading plugin's panels and suppresses late abort recovery UI", async () => {

@@ -1,5 +1,6 @@
 import {
   cancelSurfaceAnimationFrame,
+  createSurfaceSvgElement,
   getSurfaceOwnerDocument,
   getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
@@ -24,13 +25,7 @@ export function createStudioSvgElement<K extends keyof SVGElementTagNameMap>(
   host: Node,
   tagName: K
 ): SVGElementTagNameMap[K] {
-  // Obsidian's createSvg helper appends immediately; this adapter also serves
-  // unattached SVG assembly, so use the owner document directly.
-  // eslint-disable-next-line obsidianmd/prefer-create-el
-  return getStudioOwnerDocument(host).createElementNS(
-    "http://www.w3.org/2000/svg",
-    tagName
-  );
+  return createSurfaceSvgElement(getStudioOwnerDocument(host), tagName);
 }
 
 export function requestStudioAnimationFrame(

@@ -432,9 +432,10 @@ describe("AgentIncidentRecorder", () => {
     expect(recorder.finalize(
       { conversationId: CONVERSATION_ID, requestId: REQUEST_ID },
       { failureAuthority: "client" },
-    )).toBe(report);
-    expect(recorder.getByReportId(REPORT_ID)).toBe(report);
-    expect(recorder.getByIncidentId(INCIDENT_ID)).toBe(report);
+    )).toBeNull();
+    expect(recorder.record(event("run_started", 10))).toBe(false);
+    expect(recorder.reserveReportId({ conversationId: CONVERSATION_ID, requestId: REQUEST_ID }))
+      .toBeNull();
   });
 
   it("does not invoke inherited toJSON hooks while sizing reports", () => {
@@ -939,7 +940,6 @@ describe("AgentIncidentRecorder", () => {
         },
       }),
     )).not.toThrow();
-    expect(recorder.getByReportId(Symbol("report-secret") as unknown as string)).toBeNull();
   });
 
   it("ignores removed caller-supplied missing-field declarations without reading them", () => {
@@ -1167,8 +1167,6 @@ describe("AgentIncidentRecorder", () => {
       "server_incident_id",
       "server_run_id",
     ]));
-    expect(recorder.getByIncidentId(ZERO_INCIDENT_ID)).toBeNull();
-    expect(recorder.getByReportId(ZERO_REPORT_ID)).toBeNull();
     expect(reportIdAttempt).toBe(3);
   });
 
@@ -1480,8 +1478,6 @@ describe("AgentIncidentRecorder", () => {
     expect(second?.incident.incident_id).toBe(secondIncident);
     expect(second?.tools).toHaveLength(0);
     expect(second?.timeline.map((item) => item.source_sequence)).toEqual([1, 2, 3]);
-    expect(recorder.getByIncidentId(INCIDENT_ID)).toBe(first);
-    expect(recorder.getByIncidentId(secondIncident)).toBe(second);
   });
 
   it.each(["run_finished_completed", "run_finished_cancelled"] as const)(
@@ -1502,7 +1498,6 @@ describe("AgentIncidentRecorder", () => {
         { conversationId: CONVERSATION_ID, requestId: REQUEST_ID },
         completeContext(),
       )).toBeNull();
-      expect(recorder.getByIncidentId(INCIDENT_ID)).toBeNull();
     },
   );
 
@@ -2027,33 +2022,32 @@ describe("AgentIncidentRecorder", () => {
     ]));
   });
 
-  it("evicts old in-memory reports without mixing incident lookups", () => {
-    let reportIndex = 1;
+  it("never reuses a frozen report ID and bounds remembered frozen correlations", () => {
     const recorder = new AgentIncidentRecorder({
       maximumFrozenReports: 1,
-      createReportId: () => `report_${reportIndex.toString(16).padStart(32, "0")}`,
+      createReportId: () => REPORT_ID,
     });
     recordFailure(recorder);
     const first = recorder.finalize(
       { conversationId: CONVERSATION_ID, requestId: REQUEST_ID },
       completeContext(),
     )!;
-    reportIndex += 1;
     const otherRequest = "user-22222222-2222-4222-8222-222222222222";
-    const otherIncident = `incident_${"8".repeat(32)}`;
     recorder.record({ ...event("run_started", 1), request_id: otherRequest });
     recorder.record({
       ...event("run_finished_failed", 2),
       request_id: otherRequest,
-      incident_id: otherIncident,
+      incident_id: `incident_${"8".repeat(32)}`,
     });
     const second = recorder.finalize(
       { conversationId: CONVERSATION_ID, requestId: otherRequest },
       completeContext(),
     )!;
-    expect(recorder.getByReportId(first.report_id)).toBeNull();
-    expect(recorder.getByIncidentId(INCIDENT_ID)).toBeNull();
-    expect(recorder.getByReportId(second.report_id)).toBe(second);
-    expect(recorder.getByIncidentId(otherIncident)).toBe(second);
+
+    expect(first.report_id).toBe(REPORT_ID);
+    expect(second.report_id).toMatch(/^report_[a-f0-9]{32}$/u);
+    expect(second.report_id).not.toBe(first.report_id);
+    expect(recorder.record({ ...event("run_started", 3), request_id: otherRequest })).toBe(false);
+    expect(recorder.record(event("run_started", 3))).toBe(true);
   });
 });

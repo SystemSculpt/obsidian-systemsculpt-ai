@@ -1,7 +1,8 @@
 /* ------------------------------------------------------------------ *
  * Edges — static presentation for StudioEdgeRenderer's SVG paths.
- * Dynamic status stroke/opacity and preview stroke/dash stay inline
- * (set by StudioEdgeRenderer.ts).
+ * The base stroke and the preview stroke/dash stay inline (set by
+ * StudioEdgeRenderer.ts); run-state colors, glow and energy live in
+ * activity.css.
  * ------------------------------------------------------------------ */
 .ss-studio-edge-line {
   transition: stroke var(--ss-dur-fast) var(--ss-ease), stroke-width var(--ss-dur-fast) var(--ss-ease);
@@ -22,11 +23,6 @@
   stroke: var(--ss-studio-link-stroke-hover) !important;
   stroke-width: 2.4 !important;
   opacity: 1 !important;
-}
-
-.ss-studio-edge-group[data-status="flowing"] .ss-studio-edge-line {
-  stroke-dasharray: 10 8;
-  stroke-dashoffset: calc(var(--ss-link-flow-phase, 0) * -18px);
 }
 
 /* Wide, transparent hit target for hover/right-click selection. */

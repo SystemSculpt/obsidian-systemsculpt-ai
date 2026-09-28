@@ -1,3 +1,4 @@
+import type { StudioMovementSnap } from "../canvas/StudioGraphAlignmentGuides";
 import type { StudioProjectSessionMutationReason } from "../../../studio/StudioProjectSession";
 import type { StudioProjectV1, StudioShapeKind } from "../../../studio/types";
 import {
@@ -51,6 +52,7 @@ export type StudioShapeControllerHost = {
   clearNodeSelection: () => void;
   requestRender: () => void;
   /** Node side of a drag that started on a shape. */
+  createMovementSnap?: () => StudioMovementSnap;
   beginNodeTranslation: () => void;
   translateNodes: (project: StudioProjectV1, delta: { x: number; y: number }) => boolean;
   previewNodeTranslation: () => void;
@@ -63,6 +65,8 @@ export class StudioShapeController {
   private shapeIds = new Set<string>();
   private arrowIds = new Set<string>();
   private layerHandle: StudioShapeLayerHandle | null = null;
+  private cancelDraw: (() => void) | null = null;
+  private snapMovement: StudioMovementSnap = delta => delta;
   private translationOrigins: ShapeOrigin[] = [];
   private marqueeBaseline: StudioShapeSelection = EMPTY_STUDIO_SHAPE_SELECTION;
 
@@ -92,6 +96,7 @@ export class StudioShapeController {
   setSelectedShapeIds(shapeIds: readonly string[]): void {
     this.shapeIds = new Set(shapeIds);
     this.arrowIds.clear();
+    this.refreshSelectionVisuals();
   }
 
   /**
@@ -168,7 +173,32 @@ export class StudioShapeController {
   }
 
   registerLayerHandle(handle: StudioShapeLayerHandle | null): void {
+    this.cancelArrowGesture();
     this.layerHandle = handle;
+  }
+
+  startArrowGesture(event: PointerEvent): boolean {
+    if (this.host.isBusy() || !this.layerHandle) return false;
+    const target = event.target as HTMLElement | null;
+    const item = target?.closest?.<HTMLElement>(".ss-studio-shape, .ss-studio-node-card");
+    if (!item || !this.host.getCanvasEl()?.contains(item)) return false;
+    const itemId = item.dataset.shapeId || item.dataset.nodeId;
+    if (!itemId) return false;
+    this.layerHandle.startArrowGesture(itemId, event);
+    return true;
+  }
+
+  cancelArrowGesture(): void {
+    this.layerHandle?.cancelArrowGesture();
+  }
+
+  cancelDrawGesture(): void {
+    this.cancelDraw?.();
+    this.cancelDraw = null;
+  }
+
+  refreshArrows(): void {
+    this.layerHandle?.refreshArrows();
   }
 
   /**
@@ -235,7 +265,8 @@ export class StudioShapeController {
     if (!canvasEl) {
       return;
     }
-    startStudioShapeDrawGesture({
+    this.cancelDrawGesture();
+    this.cancelDraw = startStudioShapeDrawGesture({
       canvasEl,
       startEvent,
       shape,
@@ -245,6 +276,7 @@ export class StudioShapeController {
       defaultWidth: STUDIO_SHAPE_DEFAULT_WIDTH,
       defaultHeight: STUDIO_SHAPE_DEFAULT_HEIGHT,
       onCommit: (rect) => {
+        this.cancelDraw = null;
         const created = createStudioShape({
           shape,
           position: { x: rect.x, y: rect.y },
@@ -259,7 +291,7 @@ export class StudioShapeController {
         this.shapeIds.add(created.id);
         onSettled();
       },
-      onCancel: onSettled,
+      onCancel: () => { this.cancelDraw = null; onSettled(); },
     });
   }
 
@@ -319,16 +351,19 @@ export class StudioShapeController {
     if (phase.first) {
       this.beginTranslation();
       this.host.beginNodeTranslation();
+      this.snapMovement = this.host.createMovementSnap?.() || (delta => delta);
     }
     this.host.commitMutation(
       "diagram.shape.move",
       (project) => {
-        const shapesMoved = this.applyTranslation(project, delta);
-        const nodesMoved = this.host.translateNodes(project, delta);
+        const snapped = phase.cancelled ? { x: 0, y: 0 } : this.snapMovement(delta);
+        const shapesMoved = this.applyTranslation(project, snapped);
+        const nodesMoved = this.host.translateNodes(project, snapped);
         return shapesMoved || nodesMoved;
       },
       { captureHistory: phase.first, mode: "continuous" }
     );
+    this.previewTranslation();
     this.host.previewNodeTranslation();
     if (phase.final) {
       this.finishTranslation();

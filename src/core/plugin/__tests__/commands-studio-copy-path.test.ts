@@ -31,18 +31,11 @@ describe("CommandManager copy-current-file-path command", () => {
   }) {
     const app = new App();
     (app.workspace.getActiveFile as jest.Mock).mockReturnValue(options?.activeFile ?? null);
-    (app.workspace.getActiveViewOfType as jest.Mock).mockImplementation((viewType: unknown) => {
-      const viewName =
-        typeof viewType === "function" && typeof viewType.name === "string"
-          ? viewType.name
-          : String(viewType);
-      if (options?.activeChatViewFile && viewName.includes("ChatView")) {
-        return {
-          getChatHistoryFilePath: jest.fn(() => options.activeChatViewFile),
-        };
-      }
-      return null;
-    });
+    // CommandManager reads the focused view through getActiveViewOfType(View)
+    // rather than the deprecated workspace.activeLeaf, so the harness resolves
+    // it from the leaf it builds below.
+    let activeLeafView: unknown = null;
+    (app.workspace.getActiveViewOfType as jest.Mock).mockImplementation(() => activeLeafView);
 
     if (options?.activeLeafViewFile || options?.activeLeafStateFile || options?.activeChatViewFile) {
       const activeLeaf = new WorkspaceLeaf(app);
@@ -66,7 +59,11 @@ describe("CommandManager copy-current-file-path command", () => {
           state: { file: options.activeLeafStateFile },
         };
       }
-      (app.workspace as any).activeLeaf = activeLeaf;
+      // A real leaf always has a view, even when the path only lives in its
+      // view state, and the view is how CommandManager reaches the leaf.
+      (activeLeaf as any).view = (activeLeaf as any).view ?? {};
+      (activeLeaf as any).view.leaf = activeLeaf;
+      activeLeafView = (activeLeaf as any).view;
     }
 
     const hasExplicitKnownVaultFiles = Array.isArray(options?.knownVaultFiles);
@@ -111,20 +108,20 @@ describe("CommandManager copy-current-file-path command", () => {
     return { copyCommand };
   }
 
-  it("registers copy-current-file-path with Mod+Shift+C", () => {
+  it("registers copy-current-file-path without overriding user hotkeys", () => {
     const { copyCommand } = registerCopyPathCommand();
 
     expect(copyCommand).toEqual(
       expect.objectContaining({
         id: "copy-current-file-path",
-        name: "Copy current file path",
-        hotkeys: [{ modifiers: ["Mod", "Shift"], key: "c" }],
+        name: "Copy vault-relative file path",
         checkCallback: expect.any(Function),
       })
     );
+    expect(copyCommand).not.toHaveProperty("hotkeys");
   });
 
-  it("copies the active file absolute path and shows a success notice", async () => {
+  it("copies the active file vault-relative path and shows a success notice", async () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
@@ -140,8 +137,8 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Notes/Inbox.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Notes/Inbox.md");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -160,8 +157,8 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Canvas/Map.canvas");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("SystemSculpt/Canvas/Map.canvas");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -180,8 +177,8 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/Research/Papers/SystemSculpt.pdf");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Research/Papers/SystemSculpt.pdf");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -200,8 +197,8 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("/vault/SystemSculpt/Chats/2026-03-06 12-42-10.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("SystemSculpt/Chats/2026-03-06 12-42-10.md");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -220,9 +217,9 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
-      "/vault/SystemSculpt/Chats/current-chat.md"
+      "SystemSculpt/Chats/current-chat.md"
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -241,9 +238,9 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
-      "/vault/SystemSculpt/Studio/Current.systemsculpt"
+      "SystemSculpt/Studio/Current.systemsculpt"
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Full file path copied to clipboard.");
+    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
     consoleLogSpy.mockRestore();
   });
 
@@ -271,6 +268,24 @@ describe("CommandManager copy-current-file-path command", () => {
   it("is unavailable when no current file can be resolved", () => {
     const { copyCommand } = registerCopyPathCommand({ activeFile: null });
     expect(copyCommand.checkCallback(true)).toBe(false);
+  });
+
+  it("shows a failure notice instead of a success toast when copying fails", async () => {
+    const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    mockedTryCopyToClipboard.mockResolvedValue(false);
+    const { copyCommand } = registerCopyPathCommand({
+      activeFile: new TFile({ path: "Notes/Inbox.md", extension: "md" }),
+    });
+    try {
+      expect(copyCommand.checkCallback(false)).toBe(true);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Unable to copy file path to clipboard.");
+      expect(consoleLogSpy).not.toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    } finally {
+      consoleLogSpy.mockRestore();
+    }
   });
 
   it("is unavailable when active leaf references a non-file path", () => {

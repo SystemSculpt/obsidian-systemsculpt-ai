@@ -1,0 +1,344 @@
+/* ------------------------------------------------------------------ *
+ * Media model picker trigger and rich catalog modal
+ * ------------------------------------------------------------------ */
+.ss-studio-media-model-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  width: 100%;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  background: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-xs);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-studio-media-model-picker-trigger:hover {
+  border-color: var(--ss-line-strong);
+}
+
+.ss-studio-media-model-picker-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-trigger-chevron {
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-media-model-picker-modal-shell {
+  min-width: min(1080px, 94vw);
+  height: min(760px, 88vh);
+}
+
+.ss-studio-media-model-picker-modal .ss-modal__search {
+  margin-bottom: var(--ss-space-2);
+}
+
+.ss-studio-media-model-picker-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  padding: 0 var(--ss-space-5) var(--ss-space-2);
+}
+
+.ss-studio-media-model-picker-sortbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+/* Sort chips and model cards are <button>s: Obsidian's global button rules
+   (fixed height, nowrap, interactive background, input shadow) must be reset
+   or card content collapses and text spills across the grid. The parent-class
+   scope outranks button:not(.clickable-icon) and common theme button rules. */
+.ss-studio-media-model-picker-sortbar .ss-studio-media-model-picker-sort-chip {
+  appearance: none;
+  height: auto;
+  min-height: var(--ss-control-height-sm);
+  margin: 0;
+  padding: 0 var(--ss-space-3);
+  background-color: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  box-shadow: none;
+  color: var(--ss-ink-muted);
+  font: inherit;
+  font-size: var(--ss-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-media-model-picker-sortbar .ss-studio-media-model-picker-sort-chip:hover {
+  background-color: var(--ss-surface-sunken);
+  border-color: var(--ss-line-strong);
+  box-shadow: none;
+  color: var(--ss-ink);
+}
+
+.ss-studio-media-model-picker-sortbar .ss-studio-media-model-picker-sort-chip.is-active {
+  background-color: var(--ss-accent-tint);
+  border-color: var(--ss-accent);
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-studio-media-model-picker-count {
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-studio-media-model-picker-list {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--ss-space-2);
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--ss-space-5) var(--ss-space-5);
+}
+
+/* Release months span the whole card grid, so a section always starts its
+   own row instead of sitting in a column beside the cards it labels. */
+.ss-studio-media-model-picker-group {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-4);
+  padding-bottom: var(--ss-space-1);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.ss-studio-media-model-picker-group:first-child {
+  margin-top: 0;
+}
+
+.ss-studio-media-model-picker-group-label {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ss-studio-media-model-picker-group-count {
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+/* The star sits beside the card so the card stays one real button. */
+.ss-studio-media-model-picker-card-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-button.ss-studio-media-model-picker-favorite {
+  flex: 0 0 auto;
+}
+
+.ss-button.ss-studio-media-model-picker-favorite.is-favorite {
+  color: var(--ss-warning);
+}
+
+.ss-studio-media-model-picker-favorite.is-favorite svg {
+  fill: currentColor;
+}
+
+.ss-studio-media-model-picker-list .ss-studio-media-model-picker-card {
+  appearance: none;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ss-space-2);
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  margin: 0;
+  padding: var(--ss-space-3);
+  background-color: var(--ss-surface-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  box-shadow: none;
+  color: var(--ss-ink);
+  font: inherit;
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-studio-media-model-picker-list .ss-studio-media-model-picker-card:hover,
+.ss-studio-media-model-picker-list .ss-studio-media-model-picker-card.is-selected {
+  background-color: var(--ss-accent-tint);
+  border-color: var(--ss-accent);
+  box-shadow: none;
+}
+
+.ss-studio-media-model-picker-card-heading,
+.ss-studio-media-model-picker-card-provider {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-studio-media-model-picker-card-heading {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.ss-studio-media-model-picker-card-name-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-studio-media-model-picker-card-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--ss-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-default {
+  flex: 0 0 auto;
+  padding: 0 var(--ss-space-2);
+  background: var(--ss-accent-tint);
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-accent);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-price {
+  flex: 0 0 auto;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-semibold);
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-provider {
+  flex-wrap: wrap;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-studio-media-model-picker-card-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ss-ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-selected {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ss-accent);
+  font-weight: var(--ss-weight-semibold);
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ss-studio-media-model-picker-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+
+.ss-studio-media-model-picker-card-tag {
+  padding: 0 var(--ss-space-2);
+  background: var(--ss-surface-sunken);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  white-space: nowrap;
+}
+
+.ss-studio-media-model-picker-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-studio-media-model-picker-empty {
+  grid-column: 1 / -1;
+  padding: var(--ss-space-5);
+  color: var(--ss-ink-muted);
+  text-align: center;
+}
+
+@container ss-surface (max-width: 640px) {
+  .ss-studio-media-model-picker-modal-shell {
+    min-width: 0;
+  }
+
+  .ss-studio-media-model-picker-toolbar {
+    padding-inline: var(--ss-space-3);
+  }
+
+  .ss-studio-media-model-picker-sortbar {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .ss-studio-media-model-picker-list {
+    grid-template-columns: 1fr;
+    padding-inline: var(--ss-space-3);
+    padding-bottom: calc(var(--ss-space-5) + var(--ss-safe-bottom, 0px));
+  }
+}
+
+@media (pointer: coarse) {
+  .ss-studio-media-model-picker-sortbar .ss-studio-media-model-picker-sort-chip {
+    min-height: var(--ss-control-height);
+  }
+
+  .ss-studio-media-model-picker-list .ss-studio-media-model-picker-card {
+    padding: var(--ss-space-4) var(--ss-space-3);
+  }
+}

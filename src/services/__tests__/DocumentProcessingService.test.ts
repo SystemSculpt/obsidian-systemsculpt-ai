@@ -4,7 +4,7 @@ import {
   ManagedDocumentLocalEffectError,
   type DocumentProcessingDependencies,
 } from "../DocumentProcessingService";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { errorLogger } from "../../utils/errorLogger";
 
 jest.mock("obsidian", () => {

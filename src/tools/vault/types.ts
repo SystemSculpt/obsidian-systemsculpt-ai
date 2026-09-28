@@ -42,6 +42,8 @@ export interface ListDirectoryResult {
   files?: FileInfo[];
   directories?: DirectoryInfo[];
   summary?: string;
+  /** Informational text for the model; kept out of `message`, which delivery treats as a failure. */
+  notice?: string;
   error?: string;
   offset: number;
   totalItems: number;
@@ -96,6 +98,17 @@ export interface WriteFileParams {
   createDirs?: boolean | null;
   ifExists?: "overwrite" | "skip" | "error" | "append" | null;
   appendNewline?: boolean | null;
+}
+
+/**
+ * `path` is where the content was written. When the requested name would not
+ * work on every device, `requestedPath` and `notice` say what changed.
+ */
+export interface WriteFileResult {
+  path: string;
+  success: boolean;
+  requestedPath?: string;
+  notice?: string;
 }
 
 export interface FileEditRange {

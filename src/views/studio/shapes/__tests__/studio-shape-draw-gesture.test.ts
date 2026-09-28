@@ -12,9 +12,9 @@ function pointerEvent(type: string, clientX: number, clientY: number): PointerEv
 function drawOn(
   canvas: HTMLElement,
   options?: { zoom?: number; onCancel?: () => void }
-): { commits: Array<{ x: number; y: number; width: number; height: number }> } {
+): { commits: Array<{ x: number; y: number; width: number; height: number }>; cancel: () => void } {
   const commits: Array<{ x: number; y: number; width: number; height: number }> = [];
-  startStudioShapeDrawGesture({
+  const cancel = startStudioShapeDrawGesture({
     canvasEl: canvas,
     startEvent: pointerEvent("pointerdown", 100, 100),
     shape: "rectangle",
@@ -26,7 +26,7 @@ function drawOn(
     onCommit: (rect) => commits.push(rect),
     onCancel: options?.onCancel,
   });
-  return { commits };
+  return { commits, cancel };
 }
 
 describe("studio shape draw gesture", () => {
@@ -93,6 +93,20 @@ describe("studio shape draw gesture", () => {
 
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(commits).toEqual([]);
+    expect(canvas.querySelector(".ss-studio-shape-draw-preview")).toBeNull();
+  });
+
+  it("cancels a pending draw on tool switch without committing on later release", () => {
+    const onCancel = jest.fn();
+    const { commits, cancel } = drawOn(canvas, { onCancel });
+    window.dispatchEvent(pointerEvent("pointermove", 200, 200));
+
+    cancel();
+    cancel();
+    window.dispatchEvent(pointerEvent("pointerup", 250, 250));
+
+    expect(commits).toEqual([]);
+    expect(onCancel).not.toHaveBeenCalled();
     expect(canvas.querySelector(".ss-studio-shape-draw-preview")).toBeNull();
   });
 });

@@ -18,8 +18,10 @@ const CLEANUP_TOTAL_TIMEOUT_MS = 2_000;
 
 function makeStorage(writeFile: jest.Mock = jest.fn(async () => ({ success: true, path: "saved" }))) {
   return {
+    initialize: jest.fn(async () => undefined),
     getPath: jest.fn(() => DIAGNOSTICS_PATH),
     writeFile,
+    appendToFile: jest.fn(async () => ({ success: true, path: "saved" })),
   };
 }
 
@@ -133,7 +135,7 @@ describe("DiagnosticsSessionLifecycle", () => {
   it.each([
     { name: "Android", isAndroidApp: true, isIosApp: false, operatingSystem: "Android" },
     { name: "iOS", isAndroidApp: false, isIosApp: true, operatingSystem: "iOS" },
-  ])("writes exact allowlisted metadata for $name to both session files", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
+  ])("records exact allowlisted metadata for $name to both session files", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
     platform.isDesktopApp = false;
     platform.isAndroidApp = isAndroidApp;
     platform.isIosApp = isIosApp;
@@ -144,11 +146,13 @@ describe("DiagnosticsSessionLifecycle", () => {
     (app.vault as any).configDir = ".private-config-canary";
     (app as any).plugins = { enabledPlugins: new Set(["private-plugin-canary"]) };
     const writeFile = jest.fn(async () => ({ success: true, path: "saved" }));
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
     const lifecycle = makeLifecycle(app, makeStorage(writeFile), "6.6.0", () => "1.13.2/private-version-canary");
     jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
     const session = {
       sessionId: "20260813-160000",
-      startedAt: "2026-08-13T16:00:00.000Z",
+      startedAt: new Date(2026, 7, 13, 16, 0, 0).toISOString(),
     };
     const expectedMetadata = {
       schemaVersion: 2,
@@ -162,7 +166,7 @@ describe("DiagnosticsSessionLifecycle", () => {
       },
     };
 
-    await lifecycle.schedule(session);
+    await lifecycle.recordSession();
 
     expect(writeFile.mock.calls).toEqual([
       ["diagnostics", "session-latest.json", expectedMetadata],
@@ -177,10 +181,7 @@ describe("DiagnosticsSessionLifecycle", () => {
     const lifecycle = makeLifecycle();
     const cleanup = jest.spyOn(lifecycle, "run").mockReturnValue(new Promise<void>(() => undefined));
 
-    await expect(lifecycle.schedule({
-      sessionId: "20260813-160000",
-      startedAt: "2026-08-13T16:00:00.000Z",
-    })).resolves.toBeUndefined();
+    await expect(lifecycle.start()).resolves.toBeUndefined();
 
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
@@ -195,10 +196,7 @@ describe("DiagnosticsSessionLifecycle", () => {
     jest.spyOn(lifecycle, "run").mockRejectedValue(new Error("private-cleanup-failure"));
 
     try {
-      await lifecycle.schedule({
-        sessionId: "20260813-160000",
-        startedAt: "2026-08-13T16:00:00.000Z",
-      });
+      await lifecycle.start();
       await Promise.resolve();
       await Promise.resolve();
 
@@ -208,19 +206,132 @@ describe("DiagnosticsSessionLifecycle", () => {
     }
   });
 
-  it("uses a generic warning when session metadata persistence fails", async () => {
+  it("uses generic warnings when session record persistence fails", async () => {
     const writeFile = jest.fn(async () => { throw new Error("private-write-failure"); });
-    const lifecycle = makeLifecycle(new App(), makeStorage(writeFile));
+    const storage = makeStorage(writeFile);
+    storage.appendToFile.mockRejectedValue(new Error("private-append-failure"));
+    const lifecycle = makeLifecycle(new App(), storage);
     jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
     const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await lifecycle.schedule({
-      sessionId: "20260813-160000",
-      startedAt: "2026-08-13T16:00:00.000Z",
-    });
+    await lifecycle.recordSession();
 
-    expect(warning.mock.calls).toEqual([["[SystemSculpt][Diagnostics] Failed to write session metadata"]]);
-    expect(JSON.stringify(warning.mock.calls)).not.toContain("private-write-failure");
+    expect(warning.mock.calls).toEqual([
+      ["[SystemSculpt][Diagnostics] Failed to write session header"],
+      ["[SystemSculpt][Diagnostics] Failed to write session metadata"],
+    ]);
+    expect(JSON.stringify(warning.mock.calls)).not.toMatch(/private-(write|append)-failure/u);
+  });
+
+  it("writes nothing at startup when no previous session files exist", async () => {
+    const app = new App();
+    const adapter = app.vault.adapter as any;
+    adapter.exists.mockResolvedValue(false);
+    const storage = makeStorage();
+    const lifecycle = makeLifecycle(app, storage);
+    jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
+
+    await lifecycle.start();
+
+    expect(lifecycle.sessionId).toEqual(expect.stringMatching(/^\d{8}-\d{6}$/u));
+    expect(adapter.rename).not.toHaveBeenCalled();
+    expect(adapter.write).not.toHaveBeenCalled();
+    expect(storage.writeFile).not.toHaveBeenCalled();
+    expect(storage.appendToFile).not.toHaveBeenCalled();
+  });
+
+  it("records the session header and metadata once, after startup", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
+    const app = new App();
+    (app.vault.adapter as any).exists.mockResolvedValue(false);
+    const storage = makeStorage();
+    const lifecycle = makeLifecycle(app, storage);
+    jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
+
+    const first = lifecycle.recordSession();
+    expect(lifecycle.recordSession()).toBe(first);
+    await first;
+    await lifecycle.recordSession();
+
+    expect(storage.initialize).toHaveBeenCalledTimes(1);
+    expect(storage.appendToFile.mock.calls).toEqual([
+      ["diagnostics", lifecycle.logFileName, "SystemSculpt diagnostics session 20260813-160000 (plugin v6.6.0)\n"],
+    ]);
+    expect(storage.writeFile.mock.calls.map(([, name]) => name)).toEqual([
+      "session-latest.json",
+      "session-20260813-160000.json",
+    ]);
+  });
+
+  it("shares startup and archives each previous output without recreating it", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
+    const app = new App();
+    const calls: string[] = [];
+    const adapter = app.vault.adapter;
+    jest.spyOn(adapter, "exists").mockImplementation(async (path) => {
+      calls.push(`exists:${path}`);
+      return true;
+    });
+    jest.spyOn(adapter, "rename").mockImplementation(async (from, to) => {
+      calls.push(`rename:${from}:${to}`);
+    });
+    jest.spyOn(adapter, "write").mockImplementation(async (path) => {
+      calls.push(`write:${path}`);
+    });
+    const writeFile = jest.fn(async (_type: string, name: string) => {
+      calls.push(`metadata:${name}`);
+      return { success: true, path: name };
+    });
+    const storage = makeStorage(writeFile);
+    let initialize!: () => void;
+    storage.initialize.mockImplementation(() => new Promise<void>((resolve) => { initialize = resolve; }));
+    const lifecycle = makeLifecycle(app, storage);
+    jest.spyOn(lifecycle, "run").mockResolvedValue(undefined);
+
+    const first = lifecycle.start();
+    const second = lifecycle.start();
+    expect(first).toBe(second);
+    expect(calls).toEqual([]);
+    initialize();
+    await first;
+    await lifecycle.start();
+
+    expect(storage.initialize).toHaveBeenCalledTimes(1);
+    expect(lifecycle.sessionId).toBe("20260813-160000");
+    expect(calls).toEqual([
+      `exists:${DIAGNOSTICS_PATH}/${lifecycle.logFileName}`,
+      `rename:${DIAGNOSTICS_PATH}/${lifecycle.logFileName}:${DIAGNOSTICS_PATH}/systemsculpt-20260813-160000.log`,
+      `exists:${DIAGNOSTICS_PATH}/${lifecycle.metricsFileName}`,
+      `rename:${DIAGNOSTICS_PATH}/${lifecycle.metricsFileName}:${DIAGNOSTICS_PATH}/resource-metrics-20260813-160000.ndjson`,
+    ]);
+    expect(storage.appendToFile).not.toHaveBeenCalled();
+  });
+
+  it("does not start diagnostics writes when closed during storage initialization", async () => {
+    const app = new App();
+    const storage = makeStorage();
+    let initialize!: () => void;
+    storage.initialize.mockImplementation(() => new Promise<void>((resolve) => { initialize = resolve; }));
+    const lifecycle = makeLifecycle(app, storage);
+    const write = jest.spyOn(app.vault.adapter, "write");
+    const cleanup = jest.spyOn(lifecycle, "run");
+
+    const rename = jest.spyOn(app.vault.adapter, "rename");
+
+    const startup = lifecycle.start();
+    lifecycle.close();
+    initialize();
+    await startup;
+    await lifecycle.start();
+    await lifecycle.recordSession();
+
+    expect(rename).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(storage.writeFile).not.toHaveBeenCalled();
+    expect(storage.appendToFile).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
   });
 
   it("removes expired and privacy-unsafe automatic files only", async () => {
@@ -745,5 +856,46 @@ describe("DiagnosticsSessionLifecycle", () => {
     await lifecycle.run(NOW);
 
     expect(adapter.remove).not.toHaveBeenCalled();
+  });
+  it("treats a file removed by sync during collection as an ordinary race", async () => {
+    const path = `${DIAGNOSTICS_PATH}/session-20260813-155957.json`;
+    const adapter = makeDiagnosticsAdapter({ [path]: { contents: "{}", mtime: NOW, size: 2 } });
+    adapter.stat.mockResolvedValue(null);
+    const app = new App(); (app.vault as any).adapter = adapter;
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    await makeLifecycle(app).run(NOW);
+    expect(warning).not.toHaveBeenCalled();
+    expect(adapter.remove).not.toHaveBeenCalled();
+  });
+
+  it("defers a slow cleanup without misreporting it as a failed file check", async () => {
+    jest.useFakeTimers();
+    const adapter = makeDiagnosticsAdapter({});
+    adapter.list.mockReturnValue(new Promise(() => undefined));
+    const app = new App(); (app.vault as any).adapter = adapter;
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const pending = makeLifecycle(app).run(NOW);
+    await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
+    await pending;
+    expect(warning).not.toHaveBeenCalled();
+  });
+
+});
+
+describe("DiagnosticsSessionLifecycle deferred archive", () => {
+  it("fixes the session identity at construction without touching storage", () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
+    const app = new App();
+    const storage = makeStorage();
+    const exists = jest.spyOn(app.vault.adapter, "exists");
+
+    const lifecycle = makeLifecycle(app, storage);
+    jest.setSystemTime(new Date(2026, 7, 13, 17, 0, 0));
+
+    expect(lifecycle.sessionId).toBe("20260813-160000");
+    expect(storage.initialize).not.toHaveBeenCalled();
+    expect(exists).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 });

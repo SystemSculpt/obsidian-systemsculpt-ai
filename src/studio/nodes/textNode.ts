@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import {
   STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
@@ -33,7 +33,7 @@ export const textNode: StudioNodeDefinition = {
       },
       {
         key: "fontSize",
-        label: "Font Size",
+        label: "Font size",
         type: "number",
         required: false,
         min: STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
@@ -44,7 +44,7 @@ export const textNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const text = getText(context.node.config.value as StudioJsonValue);
+    const text = getText(context.node.config.value);
     return {
       outputs: {
         text,

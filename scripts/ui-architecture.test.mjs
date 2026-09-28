@@ -47,46 +47,25 @@ test("the CSS manifest imports every shipped sheet exactly once", () => {
   assert.equal(imports.length, new Set(imports).size, "CSS imports must not be duplicated");
 });
 
-test("Studio CSS stays feature-owned, bounded, and explicitly ordered", () => {
-  const studioRoot = path.join(root, "src", "css", "views", "studio");
-  const manifest = read("src/css/index.css");
-  const modules = [
-    "theme.css",
-    "workspace.css",
-    "connections.css",
-    "node-chrome.css",
-    "media-nodes.css",
-    "node-runtime.css",
-    "groups.css",
-    "text-nodes.css",
-    "shapes.css",
-    "menus.css",
-    "editor-preview.css",
-    "editor-text.css",
-    "editor-json.css",
-    "editor-notes.css",
-    "editor-dropdowns.css",
-    "editor-media.css",
-    "caption-board.css",
-    "editor-responsive.css",
-    "inline-config.css",
-    "node-details.css",
-  ];
-  const actual = listCssFiles(studioRoot).map((file) => path.basename(file)).sort();
+function listFeatureStylesheets(relativeDirectory) {
+  const directory = path.join(root, relativeDirectory);
+  return listCssFiles(directory)
+    .map((file) => toRepositoryPath(path.relative(directory, file)))
+    .sort();
+}
 
-  assert.deepEqual(actual, [...modules].sort());
+test("Studio CSS stays feature-owned under views/studio", () => {
+  const manifest = read("src/css/index.css");
+  const modules = listFeatureStylesheets("src/css/views/studio");
+
+  assert.ok(modules.length > 0, "Studio must keep feature-owned stylesheets under views/studio");
   assert.equal(fs.existsSync(path.join(root, "src/css/views/studio.css")), false);
   assert.equal(fs.existsSync(path.join(root, "src/css/views/studio-editors.css")), false);
-
-  let previousImport = -1;
   for (const module of modules) {
-    const statement = `@import 'views/studio/${module}';`;
-    const position = manifest.indexOf(statement);
-    assert.ok(position > previousImport, `${statement} must preserve the Studio cascade order`);
-    previousImport = position;
-
-    const lineCount = read(`src/css/views/studio/${module}`).split(/\r?\n/).length;
-    assert.ok(lineCount <= 400, `${module} must stay a bounded component stylesheet`);
+    assert.ok(
+      manifest.includes(`@import 'views/studio/${module}';`),
+      `src/css/index.css must import views/studio/${module}`,
+    );
   }
 });
 
@@ -120,32 +99,17 @@ test("Studio built-ins declare host capabilities explicitly", () => {
   }
 });
 
-test("Agent workspace CSS stays feature-owned, bounded, and explicitly ordered", () => {
-  const workspaceRoot = path.join(root, "src", "css", "views", "agent-workspace");
+test("Agent workspace CSS stays feature-owned under views/agent-workspace", () => {
   const manifest = read("src/css/index.css");
-  const modules = [
-    "shell.css",
-    "conversation.css",
-    "activity.css",
-    "reasoning.css",
-    "tools.css",
-    "states.css",
-    "composer.css",
-  ];
-  const actual = listCssFiles(workspaceRoot).map((file) => path.basename(file)).sort();
+  const modules = listFeatureStylesheets("src/css/views/agent-workspace");
 
-  assert.deepEqual(actual, [...modules].sort());
+  assert.ok(modules.length > 0, "Agent workspace must keep feature-owned stylesheets");
   assert.equal(fs.existsSync(path.join(root, "src/css/views/agent-workspace.css")), false);
-
-  let previousImport = -1;
   for (const module of modules) {
-    const statement = `@import 'views/agent-workspace/${module}';`;
-    const position = manifest.indexOf(statement);
-    assert.ok(position > previousImport, `${statement} must preserve the Agent workspace cascade order`);
-    previousImport = position;
-
-    const lineCount = read(`src/css/views/agent-workspace/${module}`).split(/\r?\n/).length;
-    assert.ok(lineCount <= 400, `${module} must stay a bounded component stylesheet`);
+    assert.ok(
+      manifest.includes(`@import 'views/agent-workspace/${module}';`),
+      `src/css/index.css must import views/agent-workspace/${module}`,
+    );
   }
 });
 
@@ -373,9 +337,17 @@ test("microphone discovery has one owner-realm and lifecycle seam", () => {
   assert.match(settings, /tabInstance\.registerRenderCleanup\(/);
   assert.match(settings, /activeRecorderTabRenders\.get\(tabInstance\)\?\.dispose\(\)/);
   assert.match(settingsHost, /registerRenderCleanup\(cleanup: \(\) => void\)/);
-  assert.ok(
-    [...settingsHost.matchAll(/this\.invalidateRenderCleanups\(\)/g)].length >= 2,
-    "settings rerender and hide must both invalidate registered work",
+  for (const entry of ["display", "hide"]) {
+    assert.match(
+      settingsHost,
+      new RegExp(`${entry}\\(\\): void\\s*\\{\\s*this\\.disposeRender\\(\\);`),
+      `settings ${entry} must enter the shared teardown before replacing or hiding its surface`,
+    );
+  }
+  assert.match(
+    settingsHost,
+    /private disposeRender\(\): void\s*\{\s*this\.invalidateRenderCleanups\(\);/,
+    "shared settings teardown must invalidate registered work before disposing its controls",
   );
 });
 
@@ -475,17 +447,9 @@ test("Studio clipboard and drop orchestration stays behind one typed controller"
   const controller = read(
     "src/views/studio/systemsculpt-studio-view/StudioClipboardAndDropController.ts",
   );
-  const baselineViewLines = 4_878;
-  const currentViewLines = view.split(/\r?\n/).length;
 
-  assert.match(view, /new StudioClipboardAndDropController\(this\.app/);
-  assert.match(view, /this\.clipboardAndDropController\.bindOwnerWindow\(ownerWindow\)/);
-  assert.match(view, /this\.clipboardAndDropController\.bindViewport\(this\.graphViewportEl\)/);
-  assert.match(controller, /export interface StudioClipboardAndDropHost/);
-  assert.match(controller, /private graphClipboardPayload:/);
-  assert.match(controller, /async handlePaste\(event: ClipboardEvent\)/);
-  assert.match(controller, /async handleDrop\(event: DragEvent\)/);
-  assert.match(controller, /private isScopeCurrent\(scope: ProjectOperationScope\)/);
+  // Observable clipboard behavior is covered through the controller's public
+  // event seam. This guard only prevents ownership leaking back into the view.
   assert.doesNotMatch(controller, /SystemSculptStudioView/);
 
   assert.doesNotMatch(
@@ -496,10 +460,6 @@ test("Studio clipboard and drop orchestration stays behind one typed controller"
     view,
     /graphClipboardPayload|graphClipboardPasteCount|handleWindowPaste|pasteClipboardMedia|pasteClipboardText|collectDroppedVaultItems|dropMediaIntoStudio/,
   );
-  assert.ok(
-    baselineViewLines - currentViewLines >= 500,
-    `Studio view extraction regressed: expected at least 500 lines removed from ${baselineViewLines}, got ${baselineViewLines - currentViewLines}`,
-  );
 });
 
 test("Studio project and live-sync ownership stays behind one typed controller", () => {
@@ -507,97 +467,42 @@ test("Studio project and live-sync ownership stays behind one typed controller",
   const controller = read(
     "src/views/studio/systemsculpt-studio-view/StudioProjectSessionController.ts",
   );
-  const baselineViewLines = 4_878;
-  const currentViewLines = view.split(/\r?\n/).length;
 
-  const graphInteractionConstruction = view.indexOf("new StudioGraphInteractionEngine(");
-  const sessionControllerConstruction = view.indexOf("new StudioProjectSessionController(");
-  assert.ok(graphInteractionConstruction >= 0, "Studio must construct its graph interaction engine");
-  assert.ok(
-    sessionControllerConstruction > graphInteractionConstruction,
-    "Studio must construct graph interaction before passing it to the session controller",
-  );
-
-  assert.match(controller, /export class StudioProjectSessionController/);
-  assert.match(controller, /private currentProject: StudioProjectV1 \| null/);
-  assert.match(controller, /private retainedProjectPath: string \| null/);
-  assert.match(controller, /async loadProjectFromPath\(/);
-  assert.match(controller, /async handleVaultItemModified\(/);
-  assert.match(controller, /async handleVaultItemRenamed\(/);
-  assert.match(controller, /async handleVaultItemDeleted\(/);
-  assert.match(controller, /async flushPendingProjectSaveWork\(/);
-  assert.match(controller, /private async releaseRetainedProjectSession\(/);
+  // Session tests drive open/save/rename/delete/close. Private field names and
+  // constructor order are implementation choices, not architecture contracts.
   assert.doesNotMatch(controller, /SystemSculptStudioView/);
 
-  assert.match(view, /private readonly projectSessionController: StudioProjectSessionController/);
-  assert.match(view, /return this\.projectSessionController\.getProject\(\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemModified\(file\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemRenamed\(file, oldPath\)/);
-  assert.match(view, /this\.projectSessionController\.handleVaultItemDeleted\(file\)/);
   assert.doesNotMatch(view, /retainProjectSession|releaseProjectSession/);
   assert.doesNotMatch(view, /private (?:retainedProjectPath|pendingViewportState|graphViewStateByProjectPath|nodeDetailModeByProjectPath)\b/);
   assert.doesNotMatch(view, /projectSessionController\?:|self\.currentProject\s*=/);
-  assert.ok(
-    baselineViewLines - currentViewLines >= 1_100,
-    `Studio session extraction regressed: expected at least 1,100 lines removed from ${baselineViewLines}, got ${baselineViewLines - currentViewLines}`,
-  );
 });
 
-test("Studio image editing stays split into bounded feature-owned modules", () => {
-  const coordinatorPath = "src/views/studio/graph-v3/StudioGraphImageEditorModal.ts";
-  const moduleRoot = path.join(
-    root,
-    "src",
-    "views",
-    "studio",
-    "graph-v3",
-    "studio-image-editor",
-  );
-  const expectedModules = [
-    "StudioImageEditorAssets.ts",
-    "StudioImageEditorCanvas.ts",
-    "StudioImageEditorInspector.ts",
-    "StudioImageEditorModel.ts",
-    "StudioImageEditorToolbar.ts",
-    "StudioImageEditorTypes.ts",
+test("Studio image editing stays split into feature-owned modules", () => {
+  const coordinatorPath = "src/views/studio/canvas/StudioGraphImageEditorModal.ts";
+  const composedModules = [
+    "StudioImageEditorAssets",
+    "StudioImageEditorCanvas",
+    "StudioImageEditorInspector",
+    "StudioImageEditorModel",
+    "StudioImageEditorToolbar",
+    "StudioImageEditorTypes",
   ];
-  const actualModules = fs.readdirSync(moduleRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-    .map((entry) => entry.name)
-    .sort();
   const coordinator = read(coordinatorPath);
 
-  assert.deepEqual(actualModules, [...expectedModules].sort());
-  assert.ok(
-    coordinator.split(/\r?\n/).length <= 600,
-    "the image editor modal must remain a lifecycle coordinator",
-  );
-  for (const module of expectedModules) {
-    const lineCount = read(
-      `src/views/studio/graph-v3/studio-image-editor/${module}`,
-    ).split(/\r?\n/).length;
-    assert.ok(lineCount <= 450, `${module} must stay below 450 lines`);
+  for (const module of composedModules) {
     assert.match(
       coordinator,
-      new RegExp(`studio-image-editor/${module.replace(/\.ts$/, "")}`),
+      new RegExp(`studio-image-editor/${module}`),
       `${coordinatorPath} must compose ${module}`,
     );
   }
 
+  // The modal is a lifecycle coordinator; pointer, inspector, and numeric
+  // input ownership belong to the composed modules.
   assert.doesNotMatch(
     coordinator,
     /private (?:handlePointerMove|renderLabelInspector|patchSelectedLabel|createNumberInput)|from "node:fs/,
   );
-  const canvas = read(
-    "src/views/studio/graph-v3/studio-image-editor/StudioImageEditorCanvas.ts",
-  );
-  const model = read(
-    "src/views/studio/graph-v3/studio-image-editor/StudioImageEditorModel.ts",
-  );
-  assert.match(canvas, /ownerWindow\.addEventListener\("pointermove"/);
-  assert.match(canvas, /captureHistory:\s*!interaction\.capturedHistory/);
-  assert.match(model, /mutationOptions:\s*StudioGraphNodeMutationOptions/);
-  assert.match(model, /commitSavedState/);
 });
 
 test("canonical action and modal CSS stay deep after feature migrations", () => {

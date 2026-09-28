@@ -8,7 +8,7 @@ import {
   type AgentArtifact,
   type AgentConversationSnapshot,
   type AgentPart,
-} from "../AgentConversation";
+} from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
@@ -1349,6 +1349,7 @@ describe("AgentWorkspace", () => {
   });
 
   it("confirms response copying in place, preserves focus, and recovers from failure", async () => {
+    jest.useFakeTimers();
     const host = document.body.createDiv();
     const onCopyText = jest.fn<Promise<boolean>, [string]>()
       .mockResolvedValueOnce(true)
@@ -1415,6 +1416,11 @@ describe("AgentWorkspace", () => {
     expect(copy.title).toBe("Could not copy response. Try again");
     expect(document.activeElement).toBe(copy);
     expect((renderer as any).copyFeedbackTimers.size).toBe(1);
+
+    jest.advanceTimersByTime(3_000);
+    expect(copy.getAttribute("aria-label")).toBe("Copy response");
+    expect(copy.title).toBe("Copy response");
+    expect(copy.classList.contains("is-copy-failed")).toBe(false);
 
     renderer.unload();
     expect((renderer as any).copyFeedbackTimers.size).toBe(0);
@@ -5672,7 +5678,7 @@ describe("AgentWorkspace", () => {
 
     expect(input.style.height).toBe("180px");
     expect(viewportState.scrollTop).toBe(740);
-    expect((workspace as any).scroller.getMode()).toBe("end");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("end");
     expect(jump.dataset.active).toBe("false");
     expect(jump.hasAttribute("inert")).toBe(true);
     expect(onSubmit).not.toHaveBeenCalled();
@@ -5683,7 +5689,7 @@ describe("AgentWorkspace", () => {
     }));
     viewportState.scrollTop = 200;
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     input.value = "Short follow-up";
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -5691,7 +5697,7 @@ describe("AgentWorkspace", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(viewportState.scrollTop).toBe(200);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     expect(jump.dataset.active).toBe("true");
     expect(jump.hasAttribute("inert")).toBe(false);
     workspace.unload();
@@ -5768,7 +5774,7 @@ describe("AgentWorkspace", () => {
     });
 
     expect(viewportState.scrollTop).toBe(1_200);
-    expect((workspace as any).scroller.getMode()).toBe("end");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("end");
     workspace.unload();
   });
 

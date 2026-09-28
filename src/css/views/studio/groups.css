@@ -141,3 +141,15 @@
 .ss-studio-group-tag .ss-studio-group-color-swatch.is-active {
   box-shadow: var(--ss-ring);
 }
+
+.ss-studio-group-frame.is-selected {
+  border-style: solid;
+  border-color: var(--ss-studio-group-accent);
+  background-color: color-mix(in srgb, var(--ss-studio-group-accent) 10%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-studio-group-accent) 45%, transparent);
+}
+
+.ss-studio-group-frame:focus-visible {
+  outline: 2px solid var(--ss-studio-group-accent);
+  outline-offset: 3px;
+}

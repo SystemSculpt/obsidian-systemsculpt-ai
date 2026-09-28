@@ -10,7 +10,7 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
-} from "../AgentConversation";
+} from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { CHAT_1450_REGRESSION_FIXTURE as fixture } from "./fixtures/chat-1450-regression.fixture";

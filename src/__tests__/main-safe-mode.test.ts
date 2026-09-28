@@ -3,7 +3,6 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
-import { FreezeMonitor } from "../services/FreezeMonitor";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -31,6 +30,11 @@ function makePlugin(): any {
   jest.spyOn(plugin as any, "getInitializationTracer").mockReturnValue(createTracer());
   jest.spyOn(plugin, "getLogger").mockReturnValue(createLogger() as any);
   return plugin;
+}
+
+function beginUnload(plugin: any): Promise<void> {
+  plugin.onunload();
+  return plugin.unloadPromise;
 }
 
 describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
@@ -104,10 +108,29 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(order).toEqual(["recorder", "settings"]);
     expect((plugin as any).recorderService).toBeNull();
+  });
+
+  it("releases capture and remaining services when early update and diagnostics cleanup fail", async () => {
+    const plugin = makePlugin();
+    const order: string[] = [];
+    plugin.recorderService = { unload: jest.fn(() => { order.push("recorder"); }) };
+    plugin.pluginUpdateService = { stop: jest.fn(() => {
+      order.push("updates");
+      throw new Error("update teardown failed");
+    }) };
+    plugin.diagnosticsSessionLifecycle = { close: jest.fn(() => {
+      order.push("diagnostics");
+      throw new Error("diagnostics teardown failed");
+    }) };
+    plugin.settingsManager = { destroy: jest.fn(() => { order.push("settings"); }) };
+
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
+
+    expect(order).toEqual(["recorder", "updates", "diagnostics", "settings"]);
   });
 
   it("bounds incident persistence drain while its accepted write continues best-effort", async () => {
@@ -131,7 +154,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unloadViews: jest.fn(() => { order.push("views"); }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
     expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
@@ -172,7 +195,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unloadViews: jest.fn(() => { order.push("views"); }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
     jest.advanceTimersByTime(1_499);
@@ -217,7 +240,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    const unloading = plugin.onunload();
+    const unloading = beginUnload(plugin);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -243,10 +266,16 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
   it("flushes and disposes diagnostics before the unload guard flips", async () => {
     const plugin = makePlugin();
     const order: string[] = [];
-    jest.spyOn(FreezeMonitor, "stop").mockImplementation(() => {
-      order.push("freeze-monitor");
-      throw new Error("simulated monitor stop failure");
-    });
+    (plugin as any).resourceMonitor = {
+      stop: jest.fn(() => {
+        order.push("resource-monitor-stop");
+        throw new Error("simulated monitor stop failure");
+      }),
+      flushPending: jest.fn(async () => {
+        expect(plugin.isPluginUnloading()).toBe(false);
+        order.push("resource-monitor-flush");
+      }),
+    };
     const logger = createLogger();
     logger.flushBeforeUnload.mockImplementation(async () => {
       expect(plugin.isPluginUnloading()).toBe(false);
@@ -265,11 +294,11 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(logger.flushBeforeUnload).toHaveBeenCalledTimes(1);
     expect(logger.dispose).toHaveBeenCalledTimes(1);
-    expect(order).toEqual(["recorder", "freeze-monitor", "flush", "dispose"]);
+    expect(order).toEqual(["recorder", "resource-monitor-stop", "flush", "resource-monitor-flush", "dispose"]);
     expect(plugin.isPluginUnloading()).toBe(true);
   });
 
@@ -286,7 +315,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
       unload: jest.fn(() => { order.push("transcription"); }),
     };
 
-    await expect(plugin.onunload()).resolves.toBeUndefined();
+    await expect(beginUnload(plugin)).resolves.toBeUndefined();
 
     expect(disposePanels).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["panels", "transcription"]);

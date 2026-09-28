@@ -56,8 +56,15 @@ describe("ChatAttachmentVaultStore", () => {
     }));
     expect(files.size).toBe(1);
 
-    const restored = await store.hydratePersistedAttachment(store.dehydrateAttachment(externalized));
-    expect(restored).toEqual(externalized);
+    const persisted = store.dehydrateAttachment(externalized);
+    const reference = store.referencePersistedAttachment(persisted);
+    expect(adapter.readBinary).not.toHaveBeenCalled();
+    const restored = await store.hydrateMessage({
+      role: "user", message_id: "attachment-roundtrip", content: [reference.contentPart],
+      attachmentMetadata: [{ ...persisted, contentPartIndex: 0 }],
+    });
+    expect(restored.content).toEqual([externalized.contentPart]);
+    expect(restored.attachmentMetadata?.[0].contentRef).toEqual(externalized.contentRef);
   });
 
   it("writes identical payloads once across repeated and concurrent externalization", async () => {
@@ -93,11 +100,11 @@ describe("ChatAttachmentVaultStore", () => {
     const [externalized] = await store.externalizeAttachments([imageAttachment]);
     files.clear();
 
-    const placeholder = await store.hydrateContentPart({
-      name: externalized.name,
-      mimeType: externalized.mimeType,
-      contentRef: externalized.contentRef,
-    }, { strict: false });
+    const restored = await store.hydrateMessage({
+      role: "user", message_id: "missing-attachment", content: "",
+      attachmentMetadata: [{ ...store.dehydrateAttachment(externalized), contentPartIndex: 0 }],
+    });
+    const placeholder = (restored.content as readonly unknown[])[0];
 
     expect(placeholder).toEqual({
       type: "text",
@@ -109,7 +116,7 @@ describe("ChatAttachmentVaultStore", () => {
     });
   });
 
-  it("throws when a strict hydration target is corrupt", async () => {
+  it("marks a corrupt payload unavailable when hydrating the accepted message", async () => {
     const { adapter, files } = harness();
     const store = new ChatAttachmentVaultStore(adapter);
     const [externalized] = await store.externalizeAttachments([imageAttachment]);
@@ -126,7 +133,13 @@ describe("ChatAttachmentVaultStore", () => {
       contentRef: externalized.contentRef,
     };
 
-    await expect(store.hydrateContentPart(metadata)).rejects.toThrow("corrupt");
+    const restored = await store.hydrateMessage({
+      role: "user", message_id: "corrupt-attachment", content: "",
+      attachmentMetadata: [metadata],
+    });
+    expect(restored.content).toEqual([expect.objectContaining({
+      type: "text", text: expect.stringContaining("[[SYSTEMSCULPT_ATTACHMENT_UNAVAILABLE]]"),
+    })]);
   });
 
   it("prunes only unreachable well-formed CAS payloads", async () => {

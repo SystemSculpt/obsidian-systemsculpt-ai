@@ -9,6 +9,8 @@ module.exports = {
 	collectCoverage: false,
 	testPathIgnorePatterns: [
 		...base.testPathIgnorePatterns,
+		// The dedicated embeddings gate also owns named suites outside its source tree.
+		"/__tests__/(?:.*/)?Embeddings[^/]*\\.test\\.ts$",
 		...critical.testMatch,
 		...mobile.testMatch,
 	],

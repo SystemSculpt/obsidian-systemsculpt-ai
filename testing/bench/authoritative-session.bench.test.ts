@@ -14,7 +14,7 @@ import {
   type AgentAuthoritativeEvent,
   type AgentConnectionPort,
   type AgentConnectionState,
-} from "../../src/views/chatview/agent/AuthoritativeSession";
+} from "../../src/chat/managed/AuthoritativeSession";
 
 type Message = Readonly<{
   id: string;

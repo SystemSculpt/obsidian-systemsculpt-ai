@@ -3,7 +3,7 @@ import {
   presentAgentToolDetails,
   presentAgentToolFailure,
 } from "../AgentToolPresentation";
-import type { AgentToolPart } from "../AgentConversation";
+import type { AgentToolPart } from "../../../chat/ChatConversation";
 
 function part(overrides: Partial<AgentToolPart> = {}): AgentToolPart {
   return {

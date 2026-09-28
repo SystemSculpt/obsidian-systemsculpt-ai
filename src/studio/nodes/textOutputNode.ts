@@ -1,4 +1,4 @@
-import type { StudioJsonValue, StudioNodeDefinition } from "../types";
+import type { StudioNodeDefinition } from "../types";
 import { getText } from "./shared";
 
 export const textOutputNode: StudioNodeDefinition = {
@@ -30,8 +30,8 @@ export const textOutputNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    const configured = getText(context.node.config.value as StudioJsonValue);
-    const fallbackInput = getText(context.inputs.text as StudioJsonValue);
+    const configured = getText(context.node.config.value);
+    const fallbackInput = getText(context.inputs.text);
     const text = configured.trim().length > 0 ? configured : fallbackInput;
     return {
       outputs: {

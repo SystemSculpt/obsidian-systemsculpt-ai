@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { isCreditsRequiredError, isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { OperationProgressPanel } from "../../core/ui/progress/OperationProgressPanel";
 import type {
@@ -19,6 +19,7 @@ export class AudioProcessorPanel {
   private panel: OperationProgressPanel | null;
   private hidden = false;
   private finished = false;
+  private disposed = false;
   private currentStep: TimelineStep = "source";
   private artifactBusy = false;
   private serverOwned = false;
@@ -27,17 +28,23 @@ export class AudioProcessorPanel {
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
-    sourceLabel: string,
+    private readonly sourceLabel: string,
     private readonly onCancel: () => void,
-    host?: HTMLElement,
+    private readonly host?: HTMLElement,
   ) {
-    this.panel = new OperationProgressPanel({
+    this.panel = this.createPanel();
+    this.renderRunningActions("Cancel");
+    plugin.register(() => this.close());
+  }
+
+  private createPanel(): OperationProgressPanel {
+    return new OperationProgressPanel({
       title: "Audio Processor",
       icon: "notebook-tabs",
-      metaText: sourceLabel,
+      metaText: this.sourceLabel,
       metaIcon: "audio-lines",
       dismissLabel: "Hide audio progress",
-      host,
+      host: this.host,
       onDismiss: () => {
         this.hidden = true;
         this.panel = null;
@@ -50,8 +57,17 @@ export class AudioProcessorPanel {
         { id: "saving", label: "Save" },
       ],
     });
-    this.renderRunningActions("Cancel");
-    plugin.register(() => this.close());
+  }
+
+  /** Brings a hidden job's panel back for a result that needs the user. */
+  private reopenHiddenPanel(): void {
+    if (this.panel || !this.hidden || this.disposed) return;
+    this.panel = this.createPanel();
+    this.hidden = false;
+    const stepIndex = TIMELINE_STEPS.indexOf(this.currentStep);
+    TIMELINE_STEPS.forEach((step, index) => {
+      if (index < stepIndex) this.panel?.setTimelineState(step, "complete");
+    });
   }
 
   update(event: AudioProcessorProgressEvent): void {
@@ -188,6 +204,10 @@ export class AudioProcessorPanel {
       this.renderPlanRequired();
       return;
     }
+    if (!cancelled && isCreditsRequiredError(error)) {
+      this.renderCreditsRequired();
+      return;
+    }
     if (!this.panel || this.hidden) {
       if (cancelled) return;
       new Notice(`Audio processing failed: ${message}`, 7000);
@@ -239,7 +259,37 @@ export class AudioProcessorPanel {
     ]);
   }
 
+  /** Credit failures route to Credits & usage instead of a raw status. */
+  private renderCreditsRequired(): void {
+    const details = "Not enough credits are available. Add credits to process audio.";
+    // A hidden job has no other way back to Add credits, and a timed notice
+    // would lose it, so the panel returns in its Not enough credits state.
+    this.reopenHiddenPanel();
+    if (!this.panel) return;
+    this.panel.setStatus({
+      label: "Not enough credits",
+      icon: "circle-alert",
+      progress: 100,
+      details,
+      state: "error",
+    });
+    this.panel.setTimelineState(this.currentStep, "error");
+    this.panel.setActions([
+      {
+        label: "Add credits",
+        testId: "audio.progress.add-credits",
+        variant: "primary",
+        onClick: () => {
+          this.close();
+          void this.plugin.openCreditsBalanceModal();
+        },
+      },
+      { label: "Close", testId: "audio.progress.close", onClick: () => this.close() },
+    ]);
+  }
+
   close(): void {
+    this.disposed = true;
     this.panel?.close();
     this.panel = null;
     this.hidden = true;

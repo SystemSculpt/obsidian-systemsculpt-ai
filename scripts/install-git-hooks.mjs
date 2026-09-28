@@ -15,6 +15,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { normalizeLineEndings } from "./platform-portability.mjs";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -24,6 +25,8 @@ try {
   const resolved = execFileSync("git", ["rev-parse", "--git-path", "hooks"], {
     cwd: repoRoot,
     encoding: "utf8",
+    // An inherited GIT_DIR would install into whichever repository it names.
+    env: createRepositoryScopedGitEnvironment(),
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
   targetDir = path.isAbsolute(resolved) ? resolved : path.resolve(repoRoot, resolved);

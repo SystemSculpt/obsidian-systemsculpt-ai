@@ -1,6 +1,6 @@
 import { normalizePath } from "obsidian";
 import { deriveStudioAssetBlobDir } from "./paths";
-import { sha256HexFromArrayBuffer } from "./hash";
+import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import type { StudioAssetRef } from "./types";
 import { StudioProjectStore } from "./StudioProjectStore";
 

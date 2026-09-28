@@ -29,6 +29,11 @@
 
 ## Diagnostics helpers
 
+- Advanced tab: `Record diagnostics`. Off by default. Turn it on while you
+  reproduce a problem: SystemSculpt then records a resource sample once a
+  minute (paused while Obsidian is hidden), long-frame freezes, and chat
+  lifecycle logs in `.systemsculpt/diagnostics`. Failed chat runs save
+  incident reports whether or not it is on.
 - `Copy Resource Usage Report`
 - Advanced tab: `Copy diagnostics snapshot`
 - Advanced tab: `Open diagnostics folder`

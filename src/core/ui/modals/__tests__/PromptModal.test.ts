@@ -15,7 +15,7 @@ describe("PromptModal", () => {
       inputs: [{ type: "textarea", placeholder: "https://...", required: true }],
     });
 
-    void prompt.open();
+    void prompt.openAndWait();
 
     const textarea = prompt.modalEl.querySelector<HTMLTextAreaElement>("textarea");
     expect(prompt.modalEl.classList.contains("ss-modal")).toBe(true);
@@ -66,7 +66,7 @@ describe("PromptModal", () => {
       secondaryButton: "Keep editing",
     });
 
-    const result = prompt.open();
+    const result = prompt.openAndWait();
     Array.from(prompt.modalEl.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Keep editing")
       ?.click();
@@ -79,7 +79,7 @@ describe("PromptModal", () => {
 
   it("cancels from Escape and the close button", async () => {
     const first = new PromptModal(new App(), "Test message");
-    const firstResult = first.open();
+    const firstResult = first.openAndWait();
     first.modalEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await expect(firstResult).resolves.toEqual({
       confirmed: false,
@@ -87,7 +87,7 @@ describe("PromptModal", () => {
     });
 
     const second = new PromptModal(new App(), "Another message", { title: "Heads up" });
-    const secondResult = second.open();
+    const secondResult = second.openAndWait();
     second.modalEl.querySelector<HTMLButtonElement>('[aria-label="Close"]')?.click();
     await expect(secondResult).resolves.toEqual({
       confirmed: false,
@@ -118,7 +118,7 @@ describe("PromptModal", () => {
       primaryButton: "Submit",
       inputs: [{ type: "textarea", placeholder: "Notes", required: true, value: "draft" }],
     });
-    const textareaResult = textareaPrompt.open();
+    const textareaResult = textareaPrompt.openAndWait();
     const textarea = textareaPrompt.modalEl.querySelector<HTMLTextAreaElement>("textarea")!;
 
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

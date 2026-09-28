@@ -1,10 +1,10 @@
 import type { App } from "obsidian";
 
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import { sha256HexFromBytesPortable } from "../../studio/hash";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ChatMessage } from "../../types";
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
-import { canonicalAgentToolInput } from "../../views/chatview/agent/MutationJournal";
+import { canonicalAgentToolInput } from "../../chat/managed/MutationJournal";
 import { FILESYSTEM_LIMITS } from "../../tools/vault/constants";
 import type { DriverDiagnostics } from "./diagnostics";
 import {
@@ -57,6 +57,10 @@ function throwIfActionCancelled(ctx: ActionContext): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function asDriverActionError(error: unknown): Error {
+  return error instanceof Error ? error : new DriverActionError(errorMessage(error));
 }
 
 function continuationContentMetadata(text: string): Readonly<{
@@ -136,6 +140,7 @@ const developmentChatOwners = new WeakMap<App, DevelopmentChatOwnership>();
 const INCIDENT_REPORT_ID_PATTERN = /^report_(?!0{32}$)[a-f0-9]{32}$/u;
 const INCIDENT_REPORT_DIRECTORY = ".systemsculpt/diagnostics/incidents";
 const INCIDENT_REPORT_MAX_BYTES = 256 * 1024;
+const INCIDENT_REPORT_PERSIST_TIMEOUT_MS = 5000;
 
 /**
  * Diagnostics-export attribution state. The harness may only trash a
@@ -349,7 +354,7 @@ interface DevelopmentChatView {
 
 function activeChatView(ctx: ActionContext): DevelopmentChatView | null {
   const leaves = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-  const active = ctx.app.workspace.activeLeaf;
+  const active = ctx.app.workspace.getMostRecentLeaf();
   const leaf = active && leaves.includes(active) ? active : leaves.length === 1 ? leaves[0] : null;
   if (!leaf) return null;
   const view = leaf.view as Partial<DevelopmentChatView>;
@@ -3444,7 +3449,7 @@ async function assertExactToolPlanCleanClose(
       && resultDeliveryCommandProof(evidence).valid)
     && currentCommandSegments.every((ordinal): ordinal is number => ordinal !== null)
     && new Set(currentCommandSegments).size === proof.expectedTools.length
-    && sameOrdinalPlan(proof.commandSegmentOrdinals, currentCommandSegments as number[])
+    && sameOrdinalPlan(proof.commandSegmentOrdinals, currentCommandSegments)
     && sameOrdinalPlan(proof.toolExecutionOrdinals, currentToolExecutionOrdinals);
   if (!exactDeliverySurface) {
     throw new DriverActionError(
@@ -4397,52 +4402,52 @@ async function importDevelopmentOwnershipReceipt(
   };
 }
 
+/**
+ * The failure card copies only the report ID. Resolve it to the report the
+ * plugin persisted under that ID, allowing a bounded wait for the local save.
+ */
 async function readCopiedIncidentReport(
   ctx: ActionContext,
 ): Promise<Readonly<{ reportId: string; serialized: string }>> {
   const ownerWindow = chatContainer(ctx.app)?.ownerDocument.defaultView ?? window;
   const clipboard = ownerWindow.navigator.clipboard;
-  const readText = clipboard?.readText;
-  if (typeof readText !== "function") {
+  if (typeof clipboard?.readText !== "function") {
     throw new DriverActionError("Clipboard reading is unavailable in this development build.");
   }
-  let serialized: string;
+  let reportId: string;
   try {
-    serialized = await readText.call(clipboard);
+    reportId = await clipboard.readText();
   } catch {
-    throw new DriverActionError("The copied incident report could not be read.");
+    throw new DriverActionError("The copied incident report ID could not be read.");
   }
+  if (!INCIDENT_REPORT_ID_PATTERN.test(reportId)) {
+    throw new DriverActionError("The clipboard does not hold exactly one incident report ID.");
+  }
+  const serialized = await waitForPersistedIncidentReport(ctx, reportId);
   const bytes = new TextEncoder().encode(serialized).byteLength;
   if (bytes === 0 || bytes > INCIDENT_REPORT_MAX_BYTES) {
-    throw new DriverActionError("The copied incident report has an invalid size.");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(serialized);
-  } catch {
-    throw new DriverActionError("The copied incident report is not valid JSON.");
-  }
-  const reportId = typeof parsed === "object"
-    && parsed !== null
-    && !Array.isArray(parsed)
-    && typeof (parsed as { report_id?: unknown }).report_id === "string"
-    ? (parsed as { report_id: string }).report_id
-    : "";
-  if (!INCIDENT_REPORT_ID_PATTERN.test(reportId)) {
-    throw new DriverActionError("The copied incident report has an invalid identity.");
-  }
-  let persisted: string;
-  try {
-    persisted = await ctx.app.vault.adapter.read(
-      `${INCIDENT_REPORT_DIRECTORY}/${reportId}.json`,
-    );
-  } catch {
-    throw new DriverActionError("The copied incident report is not durably stored.");
-  }
-  if (persisted !== serialized) {
-    throw new DriverActionError("The copied incident report differs from its stored bytes.");
+    throw new DriverActionError("The stored incident report has an invalid size.");
   }
   return { reportId, serialized };
+}
+
+async function waitForPersistedIncidentReport(
+  ctx: ActionContext,
+  reportId: string,
+): Promise<string> {
+  const path = `${INCIDENT_REPORT_DIRECTORY}/${reportId}.json`;
+  const startedAt = Date.now();
+  for (;;) {
+    throwIfActionCancelled(ctx);
+    try {
+      return await ctx.app.vault.adapter.read(path);
+    } catch {
+      if (Date.now() - startedAt >= INCIDENT_REPORT_PERSIST_TIMEOUT_MS) {
+        throw new DriverActionError("The copied incident report is not durably stored.");
+      }
+    }
+    await sleep(50);
+  }
 }
 
 function developmentCleanupProgress(
@@ -4748,8 +4753,8 @@ async function resetDevelopmentChatState(
         + `Previous-chat restoration failed: ${errorMessage(restoreError)}`,
     );
   }
-  if (cleanupError) throw cleanupError;
-  if (restoreError) throw restoreError;
+  if (cleanupError) throw asDriverActionError(cleanupError);
+  if (restoreError) throw asDriverActionError(restoreError);
   if (!complete) {
     throw new DriverActionError(
       "Development cleanup remains incomplete; exact ownership was retained for retry.",
@@ -5808,7 +5813,7 @@ interface DiagnosticsAdapter {
 }
 
 function diagnosticsAdapter(ctx: ActionContext): DiagnosticsAdapter {
-  return ctx.app.vault.adapter as unknown as DiagnosticsAdapter;
+  return ctx.app.vault.adapter;
 }
 
 function diagnosticsAttributionState(ctx: ActionContext): DiagnosticsExportAttribution {
@@ -5956,7 +5961,7 @@ async function attributeNewDiagnosticsExport(
     }
     await new Promise((resolve) => window.setTimeout(resolve, 100));
   }
-  const basename = fresh[0]!;
+  const basename = fresh[0];
   const path = `${DIAGNOSTICS_EXPORT_DIRECTORY}/${basename}`;
   const adapter = diagnosticsAdapter(ctx);
   const stat = await adapter.stat(path);
@@ -6040,7 +6045,7 @@ export async function runDriverAction(
     }
     case "chat.open": {
       const leaves = ctx.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-      const activeLeaf = ctx.app.workspace.activeLeaf;
+      const activeLeaf = ctx.app.workspace.getMostRecentLeaf();
       const existing = activeLeaf && leaves.includes(activeLeaf)
         ? activeLeaf
         : leaves[0];

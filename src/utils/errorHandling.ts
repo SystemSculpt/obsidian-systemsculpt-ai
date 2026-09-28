@@ -48,7 +48,7 @@ export function setLogLevel(level: LogLevel): void {
  * @param message The error message
  * @param error The error object
  */
-export function logError(context: string, message: string, error: any): void {
+export function logError(context: string, message: string, error: unknown): void {
     const text = context ? `${context}: ${message}` : message;
     errorLogger.error(text, error, {
         source: context
@@ -58,7 +58,7 @@ export function logError(context: string, message: string, error: any): void {
 /**
  * Log an informational message with consistent formatting
  */
-export function logInfo(context: string, message: string, data?: any): void {
+export function logInfo(context: string, message: string, data?: unknown): void {
     if (currentLogLevel >= LogLevel.INFO) {
         const text = context ? `${context}: ${message}` : message;
         errorLogger.info(text, {
@@ -71,7 +71,7 @@ export function logInfo(context: string, message: string, data?: any): void {
 /**
  * Log a debug message with consistent formatting
  */
-export function logDebug(context: string, message: string, data?: any): void {
+export function logDebug(context: string, message: string, data?: unknown): void {
     if (currentLogLevel >= LogLevel.DEBUG) {
         const text = context ? `${context}: ${message}` : message;
         errorLogger.debug(text, {

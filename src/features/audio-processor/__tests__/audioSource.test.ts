@@ -114,4 +114,44 @@ describe("Audio Processor audio sources", () => {
     await Promise.resolve();
     expect(close).toHaveBeenCalledTimes(1);
   });
+  it("does not open a released source while filesystem loading is pending", async () => {
+    mockHasNodeRuntime.mockReturnValue(true);
+    const app = new App();
+    const file = new (TFile as any)({
+      path: "recording.flac", name: "recording.flac", extension: "flac",
+      stat: { size: 10, mtime: 1 },
+    }) as TFile;
+    (app.vault as any).adapter = { getFullPath: () => "/vault/recording.flac" };
+    let loadFs!: (fs: unknown) => void;
+    mockDesktopFs.mockImplementationOnce(() => new Promise((resolve) => { loadFs = resolve; }));
+    const source = createVaultAudioSource(app, file);
+    const reading = source.readSlice(0, 1);
+    source.release();
+    const open = jest.fn();
+    loadFs({ open });
+    await expect(reading).rejects.toThrow("released");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("closes a handle that finishes opening after release", async () => {
+    mockHasNodeRuntime.mockReturnValue(true);
+    const app = new App();
+    const file = new (TFile as any)({
+      path: "recording.flac", name: "recording.flac", extension: "flac",
+      stat: { size: 10, mtime: 1 },
+    }) as TFile;
+    (app.vault as any).adapter = { getFullPath: () => "/vault/recording.flac" };
+    let finishOpen!: (handle: unknown) => void;
+    const open = jest.fn(() => new Promise((resolve) => { finishOpen = resolve; }));
+    mockDesktopFs.mockReturnValueOnce({ open });
+    const source = createVaultAudioSource(app, file);
+    const reading = source.readSlice(0, 1);
+    await Promise.resolve();
+    source.release();
+    const close = jest.fn().mockResolvedValue(undefined);
+    finishOpen({ close });
+    await expect(reading).rejects.toThrow("released");
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
 });

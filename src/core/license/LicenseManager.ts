@@ -51,7 +51,7 @@ export class LicenseManager {
 
     try {
       return await this.plugin.aiService.validateLicenseDetailed();
-    } catch (error) {
+    } catch {
       return { outcome: "unavailable", isValid: !!this.plugin.settings.licenseValid };
     }
   }
@@ -62,8 +62,8 @@ export class LicenseManager {
     }
 
     const scheduler =
-      typeof window !== "undefined" && typeof (window as any).requestIdleCallback === "function"
-        ? (callback: () => void) => (window as any).requestIdleCallback(callback)
+      typeof window !== "undefined" && typeof window.requestIdleCallback === "function"
+        ? (callback: () => void) => window.requestIdleCallback(callback)
         : (callback: () => void) => window.setTimeout(callback, 0);
 
     this.pendingValidation = new Promise<void>((resolve) => {

@@ -905,4 +905,22 @@ describe("TranscriptionCoordinator", () => {
     expect(originEditor.replaceSelection).toHaveBeenCalledWith("processed:managed transcript");
     expect(result.sourceDisposition).toBe("trashed");
   });
+
+  it("gives every transcription task the plugin's one recovery store", () => {
+    const app = new App();
+    const recovery = { initialize: jest.fn() };
+    const plugin = {
+      app,
+      settings: {},
+      getManagedCapabilityGraph: jest.fn(() => ({ admission: {}, transport: {}, recovery })),
+    } as any;
+
+    const first = (new TranscriptionCoordinator(app, plugin) as any).adapter();
+    const second = (new TranscriptionCoordinator(app, plugin) as any).adapter();
+
+    expect(first).not.toBe(second);
+    expect(first.dependencies.recovery).toBe(recovery);
+    expect(second.dependencies.recovery).toBe(recovery);
+  });
 });
+

@@ -1,19 +1,31 @@
-# ChatView thin-agent flow
+# Managed chat execution
 
 Architecture requirement adopted: **2026-07-29**.
 
-ChatView is a thin UI and Obsidian capability adapter. The server owns the agent, history, model execution, and continuation.
+This page describes the SystemSculpt API backend. The server owns its agent,
+history, model execution, and continuation; the plugin presents activity and
+performs approved Obsidian operations. On-machine Codex instead adapts its native
+thread through `src/services/codex/CodexChatSession.ts`. Both backends implement
+`src/chat/ChatSession.ts` for the same chat workspace.
 
 ## Client structure
 
 Each loaded conversation owns one `AgentChatSession` instance. A view replaces that local instance when it loads another conversation. It does not cancel server work during the replacement.
 
-The client uses:
+The managed client lives under `src/chat/managed/` and uses:
 
 - `StreamingTransport` for bootstrap, snapshot reads, and streaming HTTP commands;
 - `AuthoritativeSession` for ordered server state and idempotent command delivery;
-- `ChatSession` for Obsidian tools, approvals, rendering, and final persistence;
+- `ChatSession` for Obsidian tools, lifecycle coordination, and final persistence;
+- `VaultActionAuthorization` for immutable action identity and local approval decisions;
+- `ConversationProjection` for optimistic display, interrupted responses,
+  local-result overlays, and live/durable message conversion;
 - `MutationJournal` for crash-safe vault mutation receipts.
+
+`WireConversation` is shared implementation code for interpreting validated
+wire messages; execution and projection use the same identity rules. It is not
+a second execution or authorization owner. Projection outputs cannot grant
+permission to perform a vault action or become authoritative server history.
 
 The plugin does not run a model harness. It does not select a provider, build model context, compact history, or choose continuation limits.
 
@@ -89,6 +101,8 @@ The plugin stages selected context after bootstrap:
 }
 ```
 
+The plugin measures each source once while reading it. After bootstrap, it checks those sizes against the negotiated `client_input_limits` before uploading. If the server negotiated lower limits and the context no longer fits, the turn fails with `context_too_large` and nothing is uploaded. The server validates the staged request again.
+
 The server returns one opaque, expiring `context_ref`. The turn command contains that reference, not raw vault context.
 
 Web search is server policy and a server-side tool. It is not a plugin capability.
@@ -122,6 +136,8 @@ A completed receipt returns its recorded result. A started receipt has an unknow
 
 If receipt persistence fails after a mutation returns, the plugin reports `TOOL_MUTATION_OUTCOME_UNKNOWN`. It does not repeat the mutation.
 
+A receipt only matters while the server may still replay its tool call. The first time a conversation goes idle in a session, the journal removes receipts older than 30 days in the background, then the oldest completed receipts beyond 5,000, but never one from the last day. Each receipt is re-read immediately before removal, inside the same serialized step as claims and completions, so a receipt rewritten in the meantime is kept. A replayed call whose receipt was removed fails closed as unapproved.
+
 ## Diagnostics
 
 Client lifecycle records stay local. They contain safe identities and status fields. They do not contain prompts, paths, file content, arguments, results, credentials, access tokens, or stack traces.
@@ -137,7 +153,7 @@ Focused tests also cover:
 - approval and result acknowledgement;
 - repeated synchronization after request failure;
 - completed, started, conflicting, and write-failed receipts;
-- receipt retention beyond the removed 256-entry cap;
+- receipt retention beyond the removed 256-entry cap, and the 30-day idle cleanup;
 - concurrent journal instances without lost receipts;
 - independent overlapping conversations and historical forks;
 - descendant-fork cache affinity and full-input fallback after cache expiry.

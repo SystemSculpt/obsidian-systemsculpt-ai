@@ -29,7 +29,7 @@ export class ManagementOperations {
     const { files } = params;
     const opened: string[] = [];
     const errors: string[] = [];
-    const currentLeaf = this.app.workspace.activeLeaf;
+    const currentLeaf = this.app.workspace.getMostRecentLeaf();
     let shouldRestoreFocus = true;
 
     for (const file of files) {

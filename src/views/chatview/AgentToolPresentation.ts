@@ -3,7 +3,7 @@ import {
   countLocalToolOutcome,
   localToolOutcomeSchema,
 } from "../../tools/LocalToolOutcome";
-import type { AgentToolPart } from "./AgentConversation";
+import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";

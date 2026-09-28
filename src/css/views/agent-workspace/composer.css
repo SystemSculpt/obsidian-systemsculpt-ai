@@ -270,3 +270,71 @@
     margin-left: 0;
   }
 }
+
+
+.ss-codex-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 0.7fr);
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-3);
+  margin-bottom: var(--ss-space-2);
+  min-width: 0;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  background: var(--ss-surface-1);
+}
+.ss-codex-controls:not(.is-codex) { grid-template-columns: minmax(0, 1fr); }
+.ss-codex-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  font-size: var(--ss-text-xs);
+  font-weight: var(--ss-weight-medium);
+  color: var(--ss-ink-muted);
+}
+.ss-codex-control[hidden] { display: none; }
+.ss-codex-control select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ss-control-height);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background-color: var(--ss-surface-0);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  text-overflow: ellipsis;
+  box-shadow: none;
+}
+.ss-codex-control select:hover { border-color: var(--ss-line-accent); }
+.ss-codex-control select:focus-visible { outline: 2px solid var(--ss-ink-accent); outline-offset: 2px; }
+.ss-codex-control select:disabled { opacity: 0.55; }
+.ss-codex-controls-status {
+  grid-column: 1 / -1;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+  overflow-wrap: anywhere;
+}
+@container ss-surface (max-width: 600px) {
+  .ss-codex-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@container ss-surface (max-width: 280px) {
+  .ss-codex-controls { grid-template-columns: minmax(0, 1fr); padding: var(--ss-space-2); }
+}
+@media (pointer: coarse) {
+  .ss-codex-control select { min-height: var(--ss-touch-target); }
+}
+
+.ss-codex-retry { justify-self: start; min-height: var(--ss-touch-target); }
+.ss-codex-retry[hidden] { display: none; }
+
+.ss-native-codex-composer .systemsculpt-agent-approval-mode { display: none; }
+.ss-codex-permissions {
+  grid-column: 1 / -1;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+  overflow-wrap: anywhere;
+}
+.ss-codex-permissions[hidden] { display: none; }

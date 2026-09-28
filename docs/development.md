@@ -17,7 +17,7 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-check runs the canonical Obsidian source and metadata lint, production bundle,
+check runs the canonical Obsidian source, community-directory, and metadata lint, production bundle,
 CSS contracts, cheap architecture policy tests, focused mobile interactions,
 the ChatView critical-risk coverage gate, and an exact built-bundle mobile-host
 smoke. It is the normal edit loop, not a native-device or provider test.
@@ -28,10 +28,17 @@ Useful focused gates:
 npm run check:ui
 npm run check:mobile
 npm run test:chatview:critical
-npm run test:chatview:mutants
 npm run test:integration
 npm run test:release-script
 ~~~
+
+check:ui runs the CSS and UI architecture policy tests, then test:ui:focused:
+one Jest `--testPathPatterns` expression over the UI-owned suites (the surface,
+modals, progress, audio processor, recorder, history, editor, and Studio test
+directories plus the named settings, context-menu, main-initialize,
+EmbeddingsPresentation, and chat-workspace tests). test:release-script runs the
+build-provenance, build-options, artifact, and release-plugin script contracts
+on their own; check:plugin already runs the same files.
 
 check:mobile runs static mobile safety, rebuilds the production artifact, and
 runs the focused mobile interaction suite before opening settings, Chat,
@@ -44,27 +51,22 @@ adapters unavailable. It does not launch Android or iOS.
 npm run check:plugin
 npm run check:ci
 npm run check:compat
-npm run check:full
 ~~~
 
 check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
 guards. test:chatview:critical runs the thin Bridge, session transport,
 transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
-detection, adversarial race cases, and per-file coverage budgets. check:ci is
-the exact exhaustive PR contract and adds strict
-mobile interaction, curated mutation, unit, embeddings, already-built
-integration, and release-script suites. The mutation gate creates an isolated
-temporary source mirror and requires every high-risk native reconciliation,
-approval, continuation, mutation-receipt, and conversation-scope mutant to be
-killed.
+detection, adversarial race cases, and a global coverage floor over the
+critical ChatView modules (the small identity and tool-execution modules stay
+at 100%). check:ci is the exact exhaustive PR contract and adds strict mobile
+interaction, unit, embeddings, and already-built integration suites.
 The unit CI remainder excludes focused mobile and ChatView paths already proven
 by earlier gates, keeping the exhaustive workflow broad without rerunning the
 same suites a third time.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
 already enforced by check:ci.
-check:full is the local alias for check:ci.
 
 CI runs check:ci on Ubuntu/Node 22, then runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22. The merge queue runs the same
@@ -76,10 +78,7 @@ remain authoritative.
 Each top-level hosted Jest gate records its replay seed and normalized child
 Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
 records, the ChatView coverage summary, artifact inspection, build provenance,
-and the exact plugin artifact bytes for 14 days. The mutation gate records its
-baseline, every killed, surviving, or infrastructure-failed mutant, and its
-exact child Jest commands in
-`.cache/ci-evidence/chatview-critical-mutants.json`. CI validates the
+and the exact plugin artifact bytes for 14 days. CI validates the
 structured provenance and artifact-inspection sidecars before uploading a
 failed gate. Successful release validation writes SHA-256, size, Git revision,
 dirty state, Node, platform, and architecture to
@@ -150,6 +149,11 @@ npm run dev:watch:install
 npm run dev:watch:status
 ~~~
 
+Watcher startup and installation reject linked Git worktrees. A direct restart
+hands over only from a recorded process whose start identity still matches.
+If an older PID-only lock names a live process, stop that watcher manually
+before retrying; startup will not guess whether the PID still belongs to it.
+
 The per-user launch agent starts at login, stays running, rebuilds after source
 changes, atomically replaces each local artifact, and reloads the plugin through
 the official Obsidian CLI. Re-running the install command deliberately moves
@@ -158,6 +162,16 @@ production-shaped artifacts without inline source maps, including for local
 and staging API targets, so the artifact safety gate and automatic sync use
 the same bytes. Use `npm run
 dev:watch:uninstall` to remove it.
+
+The default production watcher usually targets the everyday vault, so it
+omits the E2E test driver. Install `npm run dev:watch:install:e2e` (the
+production-watch-e2e route) before live CLI QA, and reinstall the default
+watcher afterwards. Staging and local-agent watchers always include the
+driver.
+
+Production-shaped builds are minified and retain class/function names for
+diagnostics. `npm run dev` keeps readable output and inline source maps for
+source-level debugging.
 
 Successful development syncs copy main.js, manifest.json, and styles.css. The
 synced manifest retains the release version used by server wire contracts and
@@ -178,9 +192,12 @@ or removes `data.json`.
 A successful command must report the configured plugin reload. A failed
 Obsidian CLI reload makes `npm run sync:local` fail instead of reporting a
 completed installation. At runtime the plugin hashes the installed `main.js`
-through the vault adapter and, for a development install, rejects any mismatch
-with the generated manifest claim. The runtime does not use that claim as the
-loaded bundle identity.
+through the vault adapter when a chat first needs it and, for a development
+install, rejects any mismatch with the generated manifest claim. A release
+install's digest is memoized per device by the file's mtime, ctime, and size,
+so an unchanged install is not re-read at every launch; a development install
+is always re-read and verified. The runtime does not use the manifest claim as
+the loaded bundle identity.
 
 Use the official Obsidian CLI or Computer Use to verify real desktop UI.
 Mobile release confidence comes from portable architecture, focused
@@ -193,9 +210,10 @@ this repository.
 
 ## CLI E2E driving
 
-Development, staging, and local-agent builds embed SystemSculptTestDriver/v1
-(src/testing/driver). Release builds exclude it via the __SS_TEST_DRIVER__
-define, and artifact inspection enforces both directions. The driver dials out
+Development, staging, local-agent, and production-watch-e2e builds embed
+SystemSculptTestDriver/v1 (src/testing/driver). Release builds and the default
+production-watch watcher exclude it via the __SS_TEST_DRIVER__ define, and
+artifact inspection enforces both directions for release artifacts. The driver dials out
 to a CLI-hosted localhost WebSocket server; the plugin never listens.
 
 With Obsidian running a development build, drive the real GUI from the
@@ -279,11 +297,7 @@ revision recorded in release provenance. It always rebuilds the artifacts;
 there is no release CLI path that can bind stale pre-existing bytes to a newer
 source revision.
 
-Publishing a stable GitHub release runs `publish-release-metadata.yml`. The job
-checks out the release tag, requires its version and URL to match manifest.json,
-and writes only `plugin/releases/latest.json` to the release-metadata R2 bucket.
-It then waits through the API's 60-second cache and verifies the public endpoint.
-Drafts, prereleases, ordinary tags, and merges to main cannot announce a release.
+Publishing a stable GitHub release runs `publish-release-metadata.yml`. Its unprivileged verification job checks out and rebuilds the full tag, downloads `manifest.json`, `main.js`, and `styles.css` from the published release, requires byte-for-byte equality, and creates GitHub build-provenance attestations for those exact published assets. Only then can the environment-protected job write `plugin/releases/latest.json` to the release-metadata R2 bucket, wait through the API's 60-second cache, and verify the public endpoint. Drafts, prereleases, ordinary tags, mismatched assets, and merges to main cannot announce a release.
 
 Configure the `production-release-metadata` GitHub environment with:
 
@@ -294,11 +308,12 @@ Use credentials limited to the dedicated `systemsculpt-plugin-releases` bucket.
 The workflow cannot create, edit, or delete GitHub releases and does not deploy
 the plugin or API worker.
 
-Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with a controlled QA vault:
+Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with an explicitly supplied smoke license and candidate version (it makes no inference requests):
 
 ~~~bash
-cd ../website
-SYSTEMSCULPT_E2E_VAULT=/absolute/path/to/qa-vault npm run test:plugin-agent:live
+cd ../systemsculpt-website
+SYSTEMSCULPT_E2E_PLUGIN_VERSION=6.8.0 npm run test:agent-control-plane:live
+# Supply SYSTEMSCULPT_E2E_LICENSE_KEY securely through the environment.
 ~~~
 
 Then install the exact production-built candidate in real Obsidian. Verify one server web-search turn, a follow-up over the settled transcript, reconnect, and any changed approval or vault-tool flow. Record the Obsidian version and SHA-256 values for `main.js`, `manifest.json`, and `styles.css`. The credentialed production check is manual and cannot replace the deterministic critical-risk, endurance, integration, and byte-pinned cross-repository fixture gates.
@@ -316,3 +331,27 @@ Then install the exact production-built candidate in real Obsidian. Verify one s
 - CSS contract: src/css/README.md
 - Managed contracts: testing/fixtures/managed
 - Release artifacts: scripts/plugin-artifacts.mjs
+
+## Native Codex discovery
+
+On-machine Codex launches the installed `codex app-server` directly and uses
+`~/.codex` for its existing native login and configuration. This is independent
+of an agent-specific `CODEX_HOME` inherited when Obsidian was opened. The plugin
+adds common Homebrew and user CLI directories to the desktop application's PATH.
+Codex continues to own credentials, permissions, tools, and thread history.
+
+For a custom installation or provider wrapper, create the machine-local file
+`~/.config/systemsculpt/codex.json`, for example:
+
+```json
+{ "binary": "~/.local/bin/custom-codex", "home": "~/.codex-custom" }
+```
+
+Both fields are optional. `binary` is an executable name or path, not a shell
+command; use a wrapper for additional launch arguments. `home` must resolve to
+an absolute directory. These preferences stay outside the vault so another
+machine does not inherit its paths. No credentials belong in this file.
+Changes apply to new connections; use Reconnect Codex or reload the plugin to
+refresh the model picker. Existing threads remain owned by their original
+Codex home. Custom providers reporting `requiresOpenaiAuth: false` can connect
+without a ChatGPT account.

@@ -10,7 +10,9 @@ import {
   ChatMessageAttachmentCollection,
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
+  type ChatAttachmentIngestionResult,
 } from "./attachments/ChatMessageAttachments";
+import { containsControlCharacters } from "../../utils/characterValidation";
 
 export type AgentComposerAttachment = Readonly<{
   id: string;
@@ -144,9 +146,7 @@ export class AgentComposer extends Component {
       cls: "dropdown systemsculpt-agent-approval-mode",
       attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
     });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- Familiar product mode name.
     this.approvalMode.createEl("option", { value: "full-access", text: "Full Access" });
     this.micButton = options.onMic
       ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
@@ -482,36 +482,29 @@ export class AgentComposer extends Component {
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);
   }
 
-  private async ingestFiles(files: readonly File[]): Promise<void> {
-    if (files.length === 0 || this.attachmentBusy || this.readOnlyMessage) return;
-    const generation = this.attachmentGeneration;
-    const collection = this.messageAttachments;
-    this.attachmentBusy = true;
-    this.syncControls();
-    try {
-      this.hint.setText("Processing attachments…");
-      const result = await collection.addFiles(files, this.input.value);
-      if (!this.isCurrentAttachmentOperation(generation, collection)) return;
-      for (const problem of result.issues) new Notice(problem.message, 5000);
-      this.renderAttachments();
-    } finally {
-      if (this.isCurrentAttachmentOperation(generation, collection)) {
-        this.attachmentBusy = false;
-        this.hint.setText(this.running ? "Enter to queue" : "Enter to send");
-        this.syncControls();
-      }
-    }
+  private ingestFiles(files: readonly File[]): Promise<void> {
+    if (files.length === 0) return Promise.resolve();
+    return this.runAttachmentOperation("Processing attachments…", collection =>
+      collection.addFiles(files, this.input.value));
   }
 
-  private async retryMessageAttachment(id: string): Promise<void> {
+  private retryMessageAttachment(id: string): Promise<void> {
+    return this.runAttachmentOperation("Retrying document…", collection =>
+      collection.retry(id, this.input.value));
+  }
+
+  private async runAttachmentOperation(
+    label: string,
+    run: (collection: ChatMessageAttachmentCollection) => Promise<ChatAttachmentIngestionResult>,
+  ): Promise<void> {
     if (this.attachmentBusy || this.readOnlyMessage) return;
     const generation = this.attachmentGeneration;
     const collection = this.messageAttachments;
     this.attachmentBusy = true;
-    this.hint.setText("Retrying document…");
+    this.hint.setText(label);
     this.syncControls();
     try {
-      const result = await collection.retry(id, this.input.value);
+      const result = await run(collection);
       if (!this.isCurrentAttachmentOperation(generation, collection)) return;
       for (const problem of result.issues) new Notice(problem.message, 5000);
       this.renderAttachments();
@@ -543,7 +536,7 @@ export class AgentComposer extends Component {
   private async removeMessageAttachment(id: string): Promise<void> {
     if (this.readOnlyMessage) return;
     try {
-      await this.messageAttachments.remove(id);
+      this.messageAttachments.remove(id);
     } catch {
       new Notice("The attachment recovery record could not be cleaned up.", 5000);
     }
@@ -573,7 +566,7 @@ export class AgentComposer extends Component {
       const parsed: unknown = JSON.parse(transfer.getData("application/x-systemsculpt-similar-note"));
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
       const path = (parsed as Record<string, unknown>).path;
-      if (typeof path !== "string" || !path.trim() || path.length > 1024 || /[\u0000-\u001f\u007f-\u009f]/.test(path)) return null;
+      if (typeof path !== "string" || !path.trim() || path.length > 1024 || containsControlCharacters(path, true)) return null;
       return path.trim();
     } catch {
       return null;

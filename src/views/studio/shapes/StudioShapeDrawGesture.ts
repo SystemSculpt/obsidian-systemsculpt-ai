@@ -45,7 +45,7 @@ function graphPointFromClient(
   };
 }
 
-export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptions): void {
+export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptions): () => void {
   const {
     canvasEl,
     startEvent,
@@ -180,4 +180,12 @@ export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptio
   ownerWindow.addEventListener("pointerup", onEnd);
   ownerWindow.addEventListener("pointercancel", onCancelled);
   ownerWindow.addEventListener("keydown", onKeyDown);
+  // Tool switches and view teardown own their next render and tool state.
+  return () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    cleanup();
+  };
 }

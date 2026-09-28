@@ -31,7 +31,7 @@ export const terminalNode: StudioNodeDefinition = {
       },
       {
         key: "cwd",
-        label: "Working Directory",
+        label: "Working directory",
         type: "directory_path",
         required: false,
         allowOutsideVault: true,

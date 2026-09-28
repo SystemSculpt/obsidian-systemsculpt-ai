@@ -52,7 +52,6 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
 
     expect(knowledge?.anchor?.desc).toContain("semantic search");
     expect(knowledge?.anchor?.desc).toContain("related note discovery");
-    expect(knowledge?.anchor?.desc).not.toContain("Readwise");
     expect(knowledge?.anchor?.desc).not.toMatch(/custom provider|your own api/i);
 
     expect(workspace?.anchor?.title).toContain("Directories");

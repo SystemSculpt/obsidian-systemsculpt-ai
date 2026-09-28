@@ -86,19 +86,28 @@ describe("buildNodeInsertMenuItems", () => {
     expect(capabilitiesByKind).toEqual({
       "studio.audio_extract": ["local-filesystem", "absolute-paths", "local-cli"],
       "studio.cli_command": ["local-cli"],
+      "studio.codex": ["local-cli"],
+      "studio.collection": [],
+      "studio.run_collection": [],
+      "studio.command_center": [],
+      "studio.button": [],
+      "studio.workflow": ["local-cli"],
       "studio.dataset": ["local-filesystem", "absolute-paths", "local-cli"],
       "studio.image_generation": [],
       "studio.input": [],
       "studio.json": [],
       "studio.media_ingest": [],
       "studio.note": [],
+      "studio.process": ["local-cli", "local-filesystem", "absolute-paths"],
       "studio.retired_http_request": [],
+      "studio.script": ["local-cli"],
       "studio.terminal": ["local-cli"],
       "studio.text": [],
       "studio.text_generation": [],
       "studio.text_output": [],
       "studio.transcription": [],
       "studio.value": [],
+      "studio.video_generation": [],
     });
   });
 

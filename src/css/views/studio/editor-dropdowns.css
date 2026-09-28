@@ -16,7 +16,7 @@
   padding: 0 var(--ss-space-2);
   background-color: var(--ss-surface-sunken);
   border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
+  border-radius: var(--ss-radius-sm);
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
   cursor: pointer;
@@ -25,6 +25,22 @@
 
 .ss-studio-searchable-select-trigger:hover {
   border-color: var(--ss-line-strong);
+}
+
+/* The selected option's badge (credits, availability) as a quiet chip. */
+.ss-studio-searchable-select-trigger-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 var(--ss-space-1);
+  border-radius: var(--ss-radius-full);
+  background-color: var(--ss-surface-1);
+  font-size: var(--ss-text-xs);
+  color: var(--ss-ink-muted);
+  white-space: nowrap;
+}
+
+.ss-studio-searchable-select-trigger-badge[hidden] {
+  display: none;
 }
 
 .ss-studio-searchable-select-trigger-label {

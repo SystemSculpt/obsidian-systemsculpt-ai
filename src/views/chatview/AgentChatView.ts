@@ -1,3 +1,9 @@
+import type { ChatSession } from "../../chat/ChatSession";
+import { hasHostCapability } from "../../platform/hostCapabilities";
+import { mountCodexExecutionControls } from "../../services/codex/CodexExecutionControls";
+import { codexOptionsFromSettings, defaultTextBackend } from "../../services/codex/CodexExecutionSettings";
+import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
+import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { ItemView, normalizePath, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
@@ -8,7 +14,7 @@ import {
   type CreditsBalanceSnapshot,
 } from "../../services/SystemSculptService";
 import type { RecorderService } from "../../services/RecorderService";
-import { readManagedToolCallFunction } from "../../services/chat/ManagedToolExecution";
+import { readManagedToolCallFunction } from "../../chat/managed/ManagedToolExecution";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
@@ -18,7 +24,11 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { generateDefaultChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
-import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
+import {
+  ChatStorageService,
+  resolveChatsDirectory,
+  SavedChatCorruptedError,
+} from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -34,7 +44,7 @@ import type {
   AgentTextPart,
   AgentToolPart,
   ManagedAgentError,
-} from "./AgentConversation";
+} from "../../chat/ChatConversation";
 import { AgentConversationSessionBinding } from "./AgentConversationSessionBinding";
 import type { AgentComposerSubmit } from "./AgentComposer";
 import { presentAgentError } from "./AgentConversationPresentation";
@@ -60,18 +70,19 @@ import {
   type AgentLifecycleCode,
   type AgentLifecyclePhase,
   type AgentRunResult,
-} from "./agent/ChatSession";
-import { isAgentBillingFailure } from "./agent/AgentFailurePolicy";
-import type { CreditsRefreshReason } from "./agent/Lifecycle";
-import { AgentMutationJournal } from "./agent/MutationJournal";
+} from "../../chat/managed/ChatSession";
+import { isAgentBillingFailure } from "../../chat/managed/AgentFailurePolicy";
+import type { CreditsRefreshReason } from "../../chat/managed/Lifecycle";
+import { AgentMutationJournal } from "../../chat/managed/MutationJournal";
 import {
   thinAgentDataUrl,
   toThinAgentUserMessage,
-} from "./agent/MessageAdapter";
+} from "../../chat/managed/MessageAdapter";
 import {
   THIN_AGENT_CAPABILITIES,
   THIN_AGENT_CAPABILITY_CONTRACT_VERSION,
   THIN_AGENT_CONTRACT_VERSION,
+  type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
   type ThinAgentContextSource,
 } from "../../services/managed/ThinAgentV1Contract";
@@ -435,9 +446,8 @@ export class AgentChatView extends ItemView {
   public approvalMode: ChatApprovalMode;
   public isFullyLoaded = false;
   public creditsBalance: CreditsBalanceSnapshot | null = null;
-
   private readonly transcript: AgentTranscriptRepository;
-  private agent: AgentChatSession;
+  private agent: ChatSession;
   private readonly agentBaseUrl: string;
   // Journal instances share one adapter-and-path state. Concurrent views
   // therefore serialize receipts before they write the common file.
@@ -449,11 +459,13 @@ export class AgentChatView extends ItemView {
   private exportService: ChatExportService | null = null;
   private creditsPromise: Promise<void> | null = null;
   private creditsFreshTail: Promise<void> | null = null;
+  private creditsDisplayGeneration = 0;
+  private creditsDisplayLicenseKey: string | undefined;
   private creditsRefreshSequence = 0;
   private agentUnsubscribe: (() => void) | null = null;
   private agentSessionBinding: AgentConversationSessionBinding<
     AgentConversationSnapshot,
-    AgentChatSession
+    ChatSession
   > | null = null;
   private transcriptCommitUnsubscribe: (() => void) | null = null;
   private recorderToggleUnsubscribe: (() => void) | null = null;
@@ -498,8 +510,14 @@ export class AgentChatView extends ItemView {
       ? plugin.settings.thinAgentClientId!
       : protocolId("client");
     this.aiService = SystemSculptService.getInstance(plugin);
-    this.chatStorage = new ChatStorageService(plugin.app, plugin.settings.chatsDirectory);
-    this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter as any);
+    // Resolved on each use: SettingsManager replaces plugin.settings on every
+    // save, and the chats folder may change while this view stays open.
+    this.chatStorage = new ChatStorageService(
+      plugin.app,
+      () => resolveChatsDirectory(this.plugin.settings),
+      plugin,
+    );
+    this.attachmentStore = new ChatAttachmentVaultStore(plugin.app.vault.adapter);
     this.queueRepository = new AgentQueueStateRepository(plugin.app.vault.adapter, this.attachmentStore);
     const initial = (leaf.getViewState()?.state ?? {}) as ChatLeafState;
     this.chatId = initial.chatId?.trim() || "";
@@ -564,7 +582,17 @@ export class AgentChatView extends ItemView {
    * Building a fresh session per conversation makes that unrepresentable, and
    * lets independent conversations run at the same time.
    */
-  private createAgentSession(): AgentChatSession {
+  private codexControlsCleanup?: () => void;
+  private chatExecutionBackend?: "systemsculpt" | "codex";
+  private createAgentSession(): ChatSession {
+    const persistAssistant = async (message: ChatMessage): Promise<void> => {
+      const snapshot = await this.transcript.persistAssistant(message);
+      this.applyTranscriptIdentity(snapshot);
+    };
+    if ((this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings)) === "codex") {
+      return new CodexChatSession(this.app, { persistAssistant },
+        () => this.pendingForkHistory?.prefix ?? [], () => codexOptionsFromSettings(this.plugin.settings));
+    }
     return new AgentChatSession({
       baseUrl: this.agentBaseUrl,
       pluginVersion: this.plugin.manifest.version,
@@ -588,10 +616,7 @@ export class AgentChatView extends ItemView {
           chatView: this,
           signal,
         }),
-      persistAssistant: async (message) => {
-        const snapshot = await this.transcript.persistAssistant(message);
-        this.applyTranscriptIdentity(snapshot);
-      },
+      persistAssistant,
       reconcileHistory: (messages) => this.reconcileAgentHistory(messages),
       updateInputLimits: (limits) => {
         this.chatInputLimits = limits;
@@ -636,12 +661,11 @@ export class AgentChatView extends ItemView {
       monotonicNow: () => this.clientMonotonicNow(),
     });
   }
-
   private bindAgentSession(): void {
     if (this.agentSessionBinding) return;
     const binding = new AgentConversationSessionBinding<
       AgentConversationSnapshot,
-      AgentChatSession
+      ChatSession
     >(
       this.agent,
       (session, snapshot) => {
@@ -669,12 +693,23 @@ export class AgentChatView extends ItemView {
     this.bindAgentSession();
     const binding = this.agentSessionBinding;
     if (!binding) throw new Error("The chat session binding is unavailable.");
-    this.agent = await binding.replace(() => this.createAgentSession());
+    const replacement = await binding.replace(() => this.createAgentSession());
+    const wasNative = this.agent instanceof CodexChatSession;
+    this.agent = replacement;
+    if (this.agent instanceof CodexChatSession) {
+      // A managed balance read may still be in flight from opening this view.
+      // Retire its display ownership before restoring the native conversation.
+      this.creditsDisplayGeneration = (this.creditsDisplayGeneration ?? 0) + 1;
+      this.creditsBalance = null;
+      this.workspace?.setCreditsBalance(null);
+    } else if (wasNative) {
+      void this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
+    }
+    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: this.agent instanceof CodexChatSession ? "codex" : "systemsculpt", onProviderChange: () => this.plugin.openNewChat() }) : undefined;
   }
 
-
   public get messages(): ChatMessage[] {
-    return this.transcript.snapshot().messages.map((message) => ({ ...message })) as ChatMessage[];
+    return this.transcript.snapshot().messages.map((message) => ({ ...message }));
   }
 
   public getViewType(): string { return CHAT_VIEW_TYPE; }
@@ -727,7 +762,7 @@ export class AgentChatView extends ItemView {
     });
     this.addChild(this.workspace);
     this.bindAgentSession();
-    this.register(() => this.agentUnsubscribe?.());
+    this.register(() => this.agentUnsubscribe?.()); this.register(() => this.codexControlsCleanup?.());
     this.installRecorderBindings();
     this.installWorkspaceBindings();
     this.applyFontSize();
@@ -797,6 +832,7 @@ export class AgentChatView extends ItemView {
       this.localReportIds().clear();
       this.workspace?.resetMessageEditor();
       if (this.queueHydrated) await this.persistQueueState();
+      if (this.conversationOriginToken !== loadOriginToken) return;
       // Each loaded conversation gets its own local session object. Retiring
       // the old object must not cancel server work that another view can resume.
       await this.replaceAgentSession();
@@ -808,37 +844,55 @@ export class AgentChatView extends ItemView {
       this.setLegacyHistoryViewOnly(false);
       this.workspace?.setBanner("Loading chat…");
       let loaded;
+      let executionBackend: "codex" | "systemsculpt";
       try {
         loaded = await this.transcript.load(chatId);
+        if (this.conversationOriginToken !== loadOriginToken) return;
+        executionBackend = loaded?.agentConversationId
+          && await new CodexThreadLocator(this.app).read(loaded.agentConversationId)
+          ? "codex"
+          : "systemsculpt";
       } catch (error) {
+        if (this.conversationOriginToken !== loadOriginToken) return;
         const message = error instanceof SavedChatCorruptedError
           ? "This saved chat is corrupted and was left unchanged. Start a new chat to continue."
           : "This chat could not be loaded.";
         await this.resetAfterFailedChatLoad(message);
         return;
       }
+      if (this.conversationOriginToken !== loadOriginToken) return;
       if (!loaded) {
         await this.resetAfterFailedChatLoad("This chat could not be loaded.");
         return;
       }
       this.contextLoading = true;
       try { await this.contextManager.setPinnedFiles([...loaded.contextFiles]); }
-      finally { this.contextLoading = false; }
+      finally {
+        if (this.conversationOriginToken === loadOriginToken) this.contextLoading = false;
+      }
+      if (this.conversationOriginToken !== loadOriginToken) return;
+      this.chatExecutionBackend = executionBackend;
+      if ((this.agent instanceof CodexChatSession) !== (this.chatExecutionBackend === "codex")) await this.replaceAgentSession();
+      if (this.conversationOriginToken !== loadOriginToken) return;
       this.applyTranscriptIdentity(loaded);
       this.draftKey = loaded.chatId;
       await this.hydrateQueue(this.draftKey);
+      if (this.conversationOriginToken !== loadOriginToken) return;
       if (loaded.chatFontSize) this.chatFontSize = loaded.chatFontSize;
       this.approvalMode = loaded.approvalMode === "full-access" ? "full-access" : "ask";
       this.applyFontSize();
       this.workspace?.setApprovalMode(this.approvalMode);
       this.workspace?.setTitle(this.chatTitle);
-      await this.workspace?.setHistory(loaded.messages as readonly ChatMessage[]);
+      await this.workspace?.setHistory(loaded.messages);
+      if (this.conversationOriginToken !== loadOriginToken) return;
       const recoverySnapshot = loaded.agentConversationId
         ? cachedTranscriptRecoverySnapshot(loaded.messages)
         : null;
       await this.workspace?.setAgentSnapshot(recoverySnapshot);
+      if (this.conversationOriginToken !== loadOriginToken) return;
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
+      if (this.chatExecutionBackend === "codex" && !hasHostCapability("local-cli")) this.workspace?.setComposerReadOnly?.("Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.");
       let hydrationFailed = false;
       if (loaded.agentConversationId) {
         const conversationId = loaded.agentConversationId;
@@ -911,9 +965,11 @@ export class AgentChatView extends ItemView {
       }
     }
   }
-
   private async resetAfterFailedChatLoad(message: string): Promise<void> {
-    await this.startNewChat(false);
+    const resetting = this.startNewChat(false);
+    const resetOriginToken = this.conversationOriginToken;
+    await resetting;
+    if (this.conversationOriginToken !== resetOriginToken) return;
     this.workspace?.setBanner(message, "error");
   }
 
@@ -969,7 +1025,6 @@ export class AgentChatView extends ItemView {
       throw error;
     }
   }
-
   private applyApprovalMode(mode: ChatApprovalMode): void {
     this.approvalMode = mode === "full-access" ? "full-access" : "ask";
     this.workspace?.setApprovalMode(this.approvalMode);
@@ -1038,7 +1093,12 @@ export class AgentChatView extends ItemView {
   }
 
   public getExpectedChatHistoryFilePath(): string | null {
-    return this.chatId ? `${this.plugin.settings.chatsDirectory}/${this.chatId}.md` : null;
+    if (!this.chatId) return null;
+    // A loaded or created chat keeps its file after the chats folder setting
+    // changes. A chat id from restored leaf state that has not loaded yet
+    // resolves against the configured folder.
+    return this.transcript.chatPath(this.chatId)
+      ?? `${resolveChatsDirectory(this.plugin.settings)}/${this.chatId}.md`;
   }
 
   public getChatHistoryFilePath(): string | null {
@@ -1069,15 +1129,25 @@ export class AgentChatView extends ItemView {
   public async refreshCreditsBalance(
     options: CreditsRefreshOptions = {},
   ): Promise<void> {
-    if (!this.plugin.settings.licenseKey?.trim()) {
+    const licenseKey = this.plugin.settings.licenseKey?.trim() ?? "";
+    const licenseChanged = this.creditsDisplayLicenseKey !== undefined
+      && this.creditsDisplayLicenseKey !== licenseKey;
+    this.creditsDisplayLicenseKey = licenseKey;
+    if (licenseChanged) {
+      // Retire both the displayed balance and any pending response from the
+      // previous account before queuing the current account's serialized read.
+      this.creditsDisplayGeneration = (this.creditsDisplayGeneration ?? 0) + 1;
+      this.creditsBalance = null;
+      this.workspace?.setCreditsBalance(null);
+    }
+    if (this.agent instanceof CodexChatSession || !licenseKey) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return;
     }
-    if (options.requireFresh) return this.enqueueFreshCreditsRefresh(options);
+    if (options.requireFresh || licenseChanged) return this.enqueueFreshCreditsRefresh(options);
     return this.startCreditsRefresh(options);
   }
-
   private enqueueFreshCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
     const predecessor = this.creditsFreshTail ?? this.creditsPromise;
     if (!predecessor) {
@@ -1092,7 +1162,6 @@ export class AgentChatView extends ItemView {
     });
     return this.trackFreshCreditsRefresh(queued);
   }
-
   private trackFreshCreditsRefresh(refresh: Promise<void>): Promise<void> {
     let tracked!: Promise<void>;
     tracked = refresh.finally(() => {
@@ -1101,9 +1170,19 @@ export class AgentChatView extends ItemView {
     this.creditsFreshTail = tracked;
     return tracked;
   }
-
   private startCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
+    // A fresh request may have queued while a different backend was active.
+    if (this.agent instanceof CodexChatSession || !this.plugin.settings.licenseKey?.trim()) {
+      this.creditsBalance = null;
+      this.workspace?.setCreditsBalance(null);
+      return Promise.resolve();
+    }
     if (this.creditsPromise) return this.creditsPromise;
+    const displayGeneration = this.creditsDisplayGeneration ?? 0;
+    const licenseKey = this.plugin.settings.licenseKey.trim();
+    const canPublish = () => !(this.agent instanceof CodexChatSession)
+      && (this.creditsDisplayGeneration ?? 0) === displayGeneration
+      && this.plugin.settings.licenseKey?.trim() === licenseKey;
     const refreshSequence = (this.creditsRefreshSequence ?? 0) + 1;
     this.creditsRefreshSequence = refreshSequence;
     const refreshReason = options.reason ?? "unspecified";
@@ -1121,9 +1200,13 @@ export class AgentChatView extends ItemView {
     });
     this.creditsPromise = (async () => {
       try {
-        this.creditsBalance = await this.aiService.getCreditsBalance({
+        // Views share one balance read per minute; billing events read fresh.
+        const balance = await this.aiService.readCreditsBalance({
+          fresh: options.requireFresh === true || refreshReason === "billing_failure",
           onObservation: (value) => { observation = value; },
         });
+        if (!canPublish()) return;
+        this.creditsBalance = balance;
         this.workspace?.setCreditsBalance(this.creditsBalance);
         this.recordCreditsRefreshLifecycle({
           code: "credits_refresh_succeeded",
@@ -1136,6 +1219,7 @@ export class AgentChatView extends ItemView {
           status: observation?.status ?? 200,
         });
       } catch (error) {
+        if (!canPublish()) return;
         this.creditsBalance = null;
         this.workspace?.setCreditsBalance(null);
         const failure = creditsRefreshFailure(error);
@@ -1154,7 +1238,6 @@ export class AgentChatView extends ItemView {
     })().finally(() => { this.creditsPromise = null; });
     return this.creditsPromise;
   }
-
   private readCreditsRefreshMonotonicTime(): number | undefined {
     try {
       const value = this.clientMonotonicNow();
@@ -1163,14 +1246,12 @@ export class AgentChatView extends ItemView {
       return undefined;
     }
   }
-
   private creditsRefreshElapsedMs(startedAt: number | undefined): number | undefined {
     if (startedAt === undefined) return undefined;
     const finishedAt = this.readCreditsRefreshMonotonicTime();
     if (finishedAt === undefined || finishedAt < startedAt) return undefined;
     return finishedAt - startedAt;
   }
-
   private recordCreditsRefreshLifecycle(input: Readonly<{
     code: Extract<AgentLifecycleCode,
       "credits_refresh_started" | "credits_refresh_succeeded" | "credits_refresh_failed">;
@@ -1235,6 +1316,7 @@ export class AgentChatView extends ItemView {
    * usable and the first send opens the guided upgrade/sign-in modal.
    */
   private planReminderBanner(): string | null {
+    if (this.agent instanceof CodexChatSession) return null;
     if (hasActivePlan(this.plugin)) return null;
     const email = this.plugin.settings?.userEmail?.trim();
     return email
@@ -1624,7 +1706,7 @@ export class AgentChatView extends ItemView {
   }
 
   private hasAuthoritativeUnavailableBalance(): boolean {
-    if (!this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
+    if (this.agent instanceof CodexChatSession || !this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
     return (this.creditsBalance.availableUnreserved ?? this.creditsBalance.totalRemaining) <= 0;
   }
 
@@ -1653,7 +1735,7 @@ export class AgentChatView extends ItemView {
     expectedConversationOriginToken?: string,
     clearComposerAfterAdmission = false,
     clientStartedAtMonotonicMs = this.clientMonotonicNow(),
-  ): void | Promise<void> {
+  ): void {
     if (this.blockLegacyHistoryAction()) return;
     const admissionOriginToken = expectedConversationOriginToken
       ?? this.conversationOriginToken;
@@ -1757,11 +1839,19 @@ export class AgentChatView extends ItemView {
     return Object.freeze({ ...submission, attachments });
   }
 
+  /**
+   * Reads pinned context and measures every source once, against the limits
+   * known now. Staging re-checks these measurements against the limits the
+   * server negotiates at bootstrap.
+   */
   private async readThinAgentContextSources(
     pinnedEntries: ReadonlySet<string>,
-  ): Promise<ThinAgentContextSource[]> {
+  ): Promise<MeasuredThinAgentContext> {
     const sources: ThinAgentContextSource[] = [];
+    const imageMimeTypes = new Set<string>();
+    let largestTextBlockBytes = 0;
     let textBytes = 0;
+    let largestImageBytes = 0;
     let imageBytes = 0;
     let imageCount = 0;
     for (const entry of pinnedEntries) {
@@ -1801,10 +1891,25 @@ export class AgentChatView extends ItemView {
         if (imageCount > this.chatInputLimits.maxImagesPerTurn) {
           throw new Error("Pinned files exceed the per-message image count limit.");
         }
+        const mimeType = imageMimeType(resolved.extension);
+        if (!this.chatInputLimits.imageMimeTypes.includes(mimeType)) {
+          throw new Error(`${resolved.name} is not a supported pinned image type.`);
+        }
         if (resolved.stat.size > this.chatInputLimits.maxImageBytes) {
           throw new Error(`${resolved.name} exceeds the pinned image limit.`);
         }
         const bytes = new Uint8Array(await this.app.vault.readBinary(resolved));
+        // These sources are sent without being parsed again, so this is the
+        // one place their sizes are measured. Check the bytes actually read,
+        // not only the possibly stale stat.
+        if (bytes.byteLength === 0) {
+          throw new Error(`${resolved.name} is an empty image.`);
+        }
+        if (bytes.byteLength > this.chatInputLimits.maxImageBytes) {
+          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
+        }
+        imageMimeTypes.add(mimeType);
+        largestImageBytes = Math.max(largestImageBytes, bytes.byteLength);
         imageBytes += bytes.byteLength;
         if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
           throw new Error("Pinned images exceed the total per-message image limit.");
@@ -1812,7 +1917,7 @@ export class AgentChatView extends ItemView {
         sources.push({
           kind: "image",
           path: resolved.path,
-          data_url: thinAgentDataUrl(imageMimeType(resolved.extension), bytes),
+          data_url: thinAgentDataUrl(mimeType, bytes),
         });
       } else {
         const content = await this.app.vault.read(resolved);
@@ -1820,6 +1925,7 @@ export class AgentChatView extends ItemView {
         if (byteLength > this.chatInputLimits.maxTextBytesPerBlock) {
           throw new Error(`${resolved.name} exceeds the pinned text file limit.`);
         }
+        largestTextBlockBytes = Math.max(largestTextBlockBytes, byteLength);
         textBytes += new TextEncoder().encode(resolved.path).byteLength + byteLength;
         if (textBytes > this.chatInputLimits.maxTotalTextBytes) {
           throw new Error("Pinned files exceed the total per-message text limit.");
@@ -1827,7 +1933,17 @@ export class AgentChatView extends ItemView {
         sources.push({ kind: "text", path: resolved.path, content });
       }
     }
-    return sources;
+    return {
+      sources,
+      measurement: {
+        largestTextBlockBytes,
+        totalTextBytes: textBytes,
+        imageCount,
+        largestImageBytes,
+        totalImageBytes: imageBytes,
+        imageMimeTypes: [...imageMimeTypes],
+      },
+    };
   }
 
   /**
@@ -1932,7 +2048,7 @@ export class AgentChatView extends ItemView {
       // the next run publishes. Later isCurrentSubmissionOperation guards
       // still fence conversation switches.
       void this.workspace?.setHistory(
-        this.transcript.snapshot().messages as readonly ChatMessage[],
+        this.transcript.snapshot().messages,
       ).catch(() => {});
       void this.workspace?.setAgentSnapshot(null).catch(() => {});
 
@@ -1979,7 +2095,7 @@ export class AgentChatView extends ItemView {
               ? new Set<string>()
               : this.sessionTrustedToolNames,
           };
-      if (!hasActivePlan(this.plugin)) {
+      if (!(this.agent instanceof CodexChatSession) && !hasActivePlan(this.plugin)) {
         throw planRequiredError("Chat");
       }
       const previousConversationId = this.transcript.snapshot().agentConversationId;
@@ -2014,7 +2130,7 @@ export class AgentChatView extends ItemView {
       await this.workspace?.setHistory(optimisticHistory);
       if (!this.isCurrentSubmissionOperation(operation)) return;
 
-      const [hydratedUserMessage, contextSources, pluginBuildId] = await Promise.all([
+      const [hydratedUserMessage, context, pluginBuildId] = await Promise.all([
         this.attachmentStore.hydrateMessage(admittedUserMessage),
         this.readThinAgentContextSources(
           options.includeContextFiles === false
@@ -2054,10 +2170,10 @@ export class AgentChatView extends ItemView {
           }
           // No sources means there is nothing to stage; context_ref is
           // optional on the wire, so skip the staging round trip entirely.
-          if (contextSources.length === 0) return undefined;
+          if (context.sources.length === 0) return undefined;
           const staged = await this.agent.stageContext(
             admittedUserMessage.message_id,
-            contextSources,
+            context,
             signal,
           );
           if (!this.isCurrentSubmissionOperation(operation)) {
@@ -2112,7 +2228,7 @@ export class AgentChatView extends ItemView {
         // The optimistic bubble is withdrawn with the restored draft so the
         // same words never sit in the transcript and the composer at once.
         await this.workspace?.setHistory(
-          this.transcript.snapshot().messages as readonly ChatMessage[],
+          this.transcript.snapshot().messages,
         );
         if (result.kind === "failed") {
           this.pendingRejectedRetry = {
@@ -2165,7 +2281,7 @@ export class AgentChatView extends ItemView {
         // down to what history cannot carry: the error and its Retry.
         try {
           await this.workspace?.settleUnfinishedRun(
-            this.transcript.snapshot().messages as readonly ChatMessage[],
+            this.transcript.snapshot().messages,
           );
         } catch (error) {
           this.logAgentError(error, "unfinishedRunSettlement");
@@ -2244,7 +2360,7 @@ export class AgentChatView extends ItemView {
     ) {
       throw new Error("This chat changed before the request was admitted.");
     }
-    await this.workspace?.setHistory(snapshot.messages as readonly ChatMessage[]);
+    await this.workspace?.setHistory(snapshot.messages);
     if (
       !this.isCurrentConversationOrigin(expectedConversationOriginToken)
       || (operation && this.activeSubmissionOperation !== operation)
@@ -2390,7 +2506,7 @@ export class AgentChatView extends ItemView {
   }
 
   private promoteQueuedSubmission(
-    completedOperation: ActiveSubmissionOperation,
+    completedOperation: ActiveSubmissionOperation | null,
     expectedConversationOriginToken: string,
   ): Readonly<{
     operation: ActiveSubmissionOperation;
@@ -2398,8 +2514,9 @@ export class AgentChatView extends ItemView {
     submission: AgentComposerSubmit;
   }> | null {
     if (
-      this.activeSubmissionOperation !== completedOperation
-      || completedOperation.controller.signal.aborted
+      (completedOperation
+        ? this.activeSubmissionOperation !== completedOperation || completedOperation.controller.signal.aborted
+        : Boolean(this.activeSubmissionOperation))
       || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
     ) return null;
     const item = this.queuedFollowUps.shift();
@@ -2424,40 +2541,7 @@ export class AgentChatView extends ItemView {
     this.activeSubmissionOperation = operation;
     this.workspace?.setRunPending(true, operation.turnId ?? undefined);
     this.recordUiLifecycle("queued_submission_promoted");
-    this.finishSubmissionOperation(completedOperation);
-    return { operation, item, submission };
-  }
-
-  private promoteRecoveredQueuedSubmission(
-    expectedConversationOriginToken: string,
-  ): Readonly<{
-    operation: ActiveSubmissionOperation;
-    item: AgentQueuedFollowUp;
-    submission: AgentComposerSubmit;
-  }> | null {
-    if (
-      this.activeSubmissionOperation
-      || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
-    ) return null;
-    const item = this.queuedFollowUps.shift();
-    if (!item) return null;
-    const submission: AgentComposerSubmit = {
-      text: item.text,
-      mode: "send",
-      ...(item.attachments?.length ? { attachments: item.attachments } : {}),
-    };
-    const operation = this.createSubmissionOperation(
-      "submission",
-      expectedConversationOriginToken,
-      submission,
-      true,
-    );
-    operation.preparedSubmission = submission;
-    operation.includeContextFiles = item.includeContextFiles;
-    this.syncQueue();
-    this.activeSubmissionOperation = operation;
-    this.workspace?.setRunPending(true, operation.turnId ?? undefined);
-    this.recordUiLifecycle("queued_submission_promoted");
+    if (completedOperation) this.finishSubmissionOperation(completedOperation);
     return { operation, item, submission };
   }
 
@@ -2620,7 +2704,7 @@ export class AgentChatView extends ItemView {
       return null;
     }
     const generation = ++this.messageEditGeneration;
-    const hydratedMessage = await this.attachmentStore.hydrateMessage(message as ChatMessage);
+    const hydratedMessage = await this.attachmentStore.hydrateMessage(message);
     if (
       generation !== this.messageEditGeneration
       || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
@@ -2655,7 +2739,7 @@ export class AgentChatView extends ItemView {
     };
     const pending: PendingHistoricalResubmit = {
       kind: "resend",
-      message: { ...message } as ChatMessage,
+      message: { ...message },
       targetMessageId: messageIdToRetry,
       expectedIndex: index,
       expectedVersion: snapshot.version,
@@ -2918,12 +3002,13 @@ export class AgentChatView extends ItemView {
       // The old draft no longer owns preparation errors once New chat wins.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
-      await this.replaceAgentSession();
+      this.chatExecutionBackend = defaultTextBackend(this.plugin.settings); await this.replaceAgentSession();
       if (this.conversationOriginToken !== newChatOriginToken) return;
       this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");
       this.pendingThinConversationId = newConversationId;
       if (this.queueHydrated) await this.persistQueueState();
+      if (this.conversationOriginToken !== newChatOriginToken) return;
       const preservedKey = restoredDraftKey?.trim();
       this.draftKey = preservedKey || messageId("draft");
       this.queuedFollowUps = [];
@@ -2948,7 +3033,9 @@ export class AgentChatView extends ItemView {
         this.workspace?.setBanner(null);
       }
       await this.workspace?.setHistory([]);
+      if (this.conversationOriginToken !== newChatOriginToken) return;
       await this.workspace?.setAgentSnapshot(null);
+      if (this.conversationOriginToken !== newChatOriginToken) return;
       this.syncAttachments();
       this.syncQueue();
       if (preservedKey) {
@@ -2957,6 +3044,7 @@ export class AgentChatView extends ItemView {
         this.queueHydrated = true;
         await this.queueRepository.save(this.draftKey, []);
       }
+      if (this.conversationOriginToken !== newChatOriginToken) return;
       this.isFullyLoaded = true;
       this.recordUiLifecycle("conversation_reset", "session", newConversationId);
       this.updateViewState();
@@ -3015,9 +3103,14 @@ export class AgentChatView extends ItemView {
   }
 
   private async hydrateQueue(key: string): Promise<void> {
+    const originToken = this.conversationOriginToken;
+    const isCurrent = () => this.conversationOriginToken === originToken && this.draftKey === key;
     try {
-      this.queuedFollowUps = [...await this.queueRepository.load(key)];
+      const items = await this.queueRepository.load(key);
+      if (!isCurrent()) return;
+      this.queuedFollowUps = [...items];
     } catch (error) {
+      if (!isCurrent()) return;
       this.queuedFollowUps = [];
       this.reportQueuePersistenceError(error, "Queued follow-ups could not be restored.");
     }
@@ -3082,7 +3175,7 @@ export class AgentChatView extends ItemView {
   }
 
   private installWorkspaceBindings(): void {
-    this.registerEvent((this.app.workspace as any).on(
+    this.registerEvent(this.app.workspace.on(
       FILE_CONTEXT_STATE_CHANGED_EVENT,
       (event: FileContextStateChangedEvent) => {
         if (event?.manager === this.contextManager) this.syncAttachments();
@@ -3124,7 +3217,9 @@ export class AgentChatView extends ItemView {
 
     const current = this.getInputText();
     const combined = [current.trim(), text.trim()].filter(Boolean).join(current.trim() ? "\n\n" : "");
-    this.setInputText(combined, { focus: this.app.workspace.activeLeaf === this.leaf });
+    this.setInputText(combined, {
+      focus: this.app.workspace.getActiveViewOfType(AgentChatView) === this,
+    });
     if (this.plugin.settings.autoSubmitAfterTranscription && combined.trim()) {
       this.acceptComposerSubmission(
         { text: combined, mode: "send" },
@@ -3220,7 +3315,7 @@ export class AgentChatView extends ItemView {
       snapshot.chatId !== previousSnapshot.chatId
       || snapshot.version !== previousSnapshot.version
     ) {
-      await this.workspace?.setHistory(snapshot.messages as readonly ChatMessage[]);
+      await this.workspace?.setHistory(snapshot.messages);
     }
 
     if (
@@ -3332,200 +3427,65 @@ export class AgentChatView extends ItemView {
             || part.kind === "reasoning"
             || part.kind === "tool")
         ) return;
-        const needsDomMilestone = agent.needsClientRenderMilestone?.(
-          "response_first_dom_committed",
-          snapshot.turnId,
-        ) ?? true;
-        const needsPaintMilestone = agent.needsClientRenderMilestone?.(
-          "response_first_paint_opportunity",
-          snapshot.turnId,
-        ) ?? true;
-        const terminalToolStates: ReadonlySet<AgentToolPart["state"]> = new Set([
-          "succeeded",
-          "failed",
-          "denied",
-          "cancelled",
-          "outcome-unknown",
+        const turnId = snapshot.turnId;
+        const terminalStates = new Set<AgentToolPart["state"]>([
+          "succeeded", "failed", "denied", "cancelled", "outcome-unknown",
         ]);
-        const toolEvidence = snapshot.parts
-          .filter((part): part is AgentToolPart =>
-            part.kind === "tool"
-            && part.location === "vault"
-            && terminalToolStates.has(part.state))
-          .map((tool) => ({
-            tool,
-            continuation: snapshot.parts.find((part): part is AgentTextPart =>
-              part.kind === "text"
-              && part.order > tool.order
-              && part.markdown.trim().length > 0),
-          }));
-        const needsToolDom = toolEvidence.some(({ tool }) =>
-          agent.needsClientToolRenderMilestone?.(
-            "local_tool_terminal_dom_committed",
-            snapshot.turnId!,
-            tool.callId,
-          ) ?? false);
-        const needsToolPaint = toolEvidence.some(({ tool }) =>
-          agent.needsClientToolRenderMilestone?.(
-            "local_tool_terminal_paint_opportunity",
-            snapshot.turnId!,
-            tool.callId,
-          ) ?? false);
-        const needsContinuationDom = toolEvidence.some(({ tool, continuation }) =>
-          Boolean(continuation) && (agent.needsClientToolRenderMilestone?.(
-            "continuation_content_dom_committed",
-            snapshot.turnId!,
-            tool.callId,
-          ) ?? false));
-        const needsContinuationPaint = toolEvidence.some(({ tool, continuation }) =>
-          Boolean(continuation) && (agent.needsClientToolRenderMilestone?.(
-            "continuation_content_paint_opportunity",
-            snapshot.turnId!,
-            tool.callId,
-          ) ?? false));
-        if (
-          !needsDomMilestone
-          && !needsPaintMilestone
-          && !needsToolDom
-          && !needsToolPaint
-          && !needsContinuationDom
-          && !needsContinuationPaint
-        ) return;
-        const hasRenderedContent = (): boolean => Array.from(
-          workspace.element.querySelectorAll<HTMLElement>(
+        const evidence = snapshot.parts
+          .filter((part): part is AgentToolPart => part.kind === "tool"
+            && part.location === "vault" && terminalStates.has(part.state))
+          .flatMap((tool) => {
+            const continuation = snapshot.parts.find((part): part is AgentTextPart =>
+              part.kind === "text" && part.order > tool.order && part.markdown.trim().length > 0);
+            return [
+              { callId: tool.callId, prefix: "local_tool_terminal" as const, continuation: undefined },
+              ...(continuation ? [{ callId: tool.callId, prefix: "continuation_content" as const, continuation }] : []),
+            ];
+          });
+        type RenderPhase = "dom_committed" | "paint_opportunity";
+        const needsMilestone = (phase: RenderPhase): boolean =>
+          (agent.needsClientRenderMilestone?.(`response_first_${phase}`, turnId) ?? true)
+          || evidence.some(({ callId, prefix }) =>
+            agent.needsClientToolRenderMilestone?.(`${prefix}_${phase}`, turnId, callId) ?? false);
+        const needsPaint = needsMilestone("paint_opportunity");
+        if (!needsMilestone("dom_committed") && !needsPaint) return;
+
+        // Index the rendered turn once per observation. Paint gets a fresh index
+        // because a later render may replace its nodes before the frame arrives.
+        const recordMilestones = (phase: RenderPhase, observedAt: number): boolean => {
+          if (this.workspace !== workspace || this.agent !== agent) return false;
+          const turn = Array.from(workspace.element.querySelectorAll<HTMLElement>(
             ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-          ),
-        ).some((turn) =>
-          turn.dataset.turnId === snapshot.turnId
-          && turn.querySelector(".systemsculpt-agent-part") !== null);
-        const renderedTurn = (): HTMLElement | undefined => Array.from(
-          workspace.element.querySelectorAll<HTMLElement>(
-            ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-          ),
-        ).find((turn) => turn.dataset.turnId === snapshot.turnId);
-        const partNode = (key: string): HTMLElement | undefined => Array.from(
-          renderedTurn()?.querySelectorAll<HTMLElement>(
+          )).find((element) => element.dataset.turnId === turnId);
+          if (!turn?.querySelector(".systemsculpt-agent-part")) return false;
+          if (phase === "dom_committed") workspace.recordIncidentDomCommit?.();
+          else workspace.recordIncidentPaintOpportunity?.();
+          const responseCode = `response_first_${phase}` as const;
+          if (agent.needsClientRenderMilestone?.(responseCode, turnId) ?? true) {
+            agent.recordClientRenderMilestone?.(responseCode, turnId, observedAt);
+          }
+          const nodes = new Map(Array.from(turn.querySelectorAll<HTMLElement>(
             ".systemsculpt-agent-part[data-part-key]",
-          ) ?? [],
-        ).find((node) => node.dataset.partKey === key);
-        const terminalToolNode = (callId: string): HTMLElement | undefined => {
-          const node = partNode(`tool:${callId}`);
-          if (!node) return undefined;
-          return [
-            "is-succeeded",
-            "is-partial",
-            "is-failed",
-            "is-denied",
-            "is-cancelled",
-            "is-outcome-unknown",
-          ].some((className) => node.classList.contains(className))
-            ? node
-            : undefined;
-        };
-        const continuationNode = (
-          callId: string,
-          continuation: AgentTextPart,
-        ): HTMLElement | undefined => {
-          const tool = terminalToolNode(callId);
-          const text = partNode(`text:${continuation.id}`);
-          if (!tool || !text) return undefined;
-          return tool.compareDocumentPosition(text) & 4 ? text : undefined;
-        };
-        if (!hasRenderedContent()) return;
-        workspace.recordIncidentDomCommit?.();
-        if (needsDomMilestone) {
-          agent.recordClientRenderMilestone(
-            "response_first_dom_committed",
-            snapshot.turnId,
-            this.clientMonotonicNow(),
-          );
-        }
-        for (const { tool, continuation } of toolEvidence) {
-          if (
-            terminalToolNode(tool.callId)
-            && (agent.needsClientToolRenderMilestone?.(
-              "local_tool_terminal_dom_committed",
-              snapshot.turnId,
-              tool.callId,
-            ) ?? false)
-          ) {
-            agent.recordClientToolRenderMilestone?.(
-              "local_tool_terminal_dom_committed",
-              snapshot.turnId,
-              tool.callId,
-              this.clientMonotonicNow(),
-            );
+          )).map((node) => [node.dataset.partKey, node]));
+          for (const { callId, prefix, continuation } of evidence) {
+            const code = `${prefix}_${phase}` as const;
+            if (!(agent.needsClientToolRenderMilestone?.(code, turnId, callId) ?? false)) continue;
+            const toolNode = nodes.get(`tool:${callId}`);
+            if (!toolNode || ![
+              "is-succeeded", "is-partial", "is-failed", "is-denied", "is-cancelled", "is-outcome-unknown",
+            ].some((name) => toolNode.classList.contains(name))) continue;
+            if (continuation) {
+              const textNode = nodes.get(`text:${continuation.id}`);
+              if (!textNode || !(toolNode.compareDocumentPosition(textNode) & 4)) continue;
+            }
+            agent.recordClientToolRenderMilestone?.(code, turnId, callId, observedAt);
           }
-          if (
-            continuation
-            && continuationNode(tool.callId, continuation)
-            && (agent.needsClientToolRenderMilestone?.(
-              "continuation_content_dom_committed",
-              snapshot.turnId,
-              tool.callId,
-            ) ?? false)
-          ) {
-            agent.recordClientToolRenderMilestone?.(
-              "continuation_content_dom_committed",
-              snapshot.turnId,
-              tool.callId,
-              this.clientMonotonicNow(),
-            );
-          }
-        }
-        if (!needsPaintMilestone && !needsToolPaint && !needsContinuationPaint) return;
+          return true;
+        };
+        if (!recordMilestones("dom_committed", this.clientMonotonicNow()) || !needsPaint) return;
         const paintOwnerWindow = getSurfaceOwnerWindow(workspace.element);
         requestSurfaceAnimationFrame(workspace.element, (timestamp) => {
-          if (
-            this.workspace !== workspace
-            || this.agent !== agent
-            || !hasRenderedContent()
-          ) return;
-          workspace.recordIncidentPaintOpportunity?.();
-          const observedAt = crossWindowMonotonicTimestamp(paintOwnerWindow, timestamp);
-          if (agent.needsClientRenderMilestone?.(
-            "response_first_paint_opportunity",
-            snapshot.turnId!,
-          ) ?? true) {
-            agent.recordClientRenderMilestone(
-              "response_first_paint_opportunity",
-              snapshot.turnId!,
-              observedAt,
-            );
-          }
-          for (const { tool, continuation } of toolEvidence) {
-            if (
-              terminalToolNode(tool.callId)
-              && (agent.needsClientToolRenderMilestone?.(
-                "local_tool_terminal_paint_opportunity",
-                snapshot.turnId!,
-                tool.callId,
-              ) ?? false)
-            ) {
-              agent.recordClientToolRenderMilestone?.(
-                "local_tool_terminal_paint_opportunity",
-                snapshot.turnId!,
-                tool.callId,
-                observedAt,
-              );
-            }
-            if (
-              continuation
-              && continuationNode(tool.callId, continuation)
-              && (agent.needsClientToolRenderMilestone?.(
-                "continuation_content_paint_opportunity",
-                snapshot.turnId!,
-                tool.callId,
-              ) ?? false)
-            ) {
-              agent.recordClientToolRenderMilestone?.(
-                "continuation_content_paint_opportunity",
-                snapshot.turnId!,
-                tool.callId,
-                observedAt,
-              );
-            }
-          }
+          recordMilestones("paint_opportunity", crossWindowMonotonicTimestamp(paintOwnerWindow, timestamp));
         });
       }).catch((error) => {
         this.logAgentError(error, "agentSnapshotRender");
@@ -3550,7 +3510,8 @@ export class AgentChatView extends ItemView {
       }
       return;
     }
-    const promotion = this.promoteRecoveredQueuedSubmission(
+    const promotion = this.promoteQueuedSubmission(
+      null,
       expectedConversationOriginToken,
     );
     if (!promotion) return;
@@ -3594,7 +3555,8 @@ export class AgentChatView extends ItemView {
       || !transcript.messages.some((message) =>
         message.message_id === deferred.turnId)
     ) return;
-    const promotion = this.promoteRecoveredQueuedSubmission(
+    const promotion = this.promoteQueuedSubmission(
+      null,
       expectedConversationOriginToken,
     );
     if (!promotion) return;
@@ -3620,7 +3582,8 @@ export class AgentChatView extends ItemView {
     ) return;
     const status = this.agent.getSnapshot().status;
     if (status !== "idle" && status !== "completed") return;
-    const promotion = this.promoteRecoveredQueuedSubmission(
+    const promotion = this.promoteQueuedSubmission(
+      null,
       expectedConversationOriginToken,
     );
     if (!promotion) return;

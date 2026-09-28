@@ -1,6 +1,7 @@
 import { App, normalizePath, TFolder } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
+import { createVaultFolder, isVaultFolder } from "../utils/vaultFolders";
 
 const DIRECTORY_SETTING_KEYS = [
   "chatsDirectory",
@@ -61,8 +62,12 @@ export class DirectoryManager {
   }
 
   public async verifyDirectories(): Promise<{ valid: boolean; issues: string[] }> {
-    const issues = this.configuredDirectories()
-      .filter((path) => !(this.app.vault.getAbstractFileByPath(path) instanceof TFolder))
+    // Same test initialization and repair accept, so a folder on disk that the
+    // vault tree has not indexed yet is healthy rather than a false failure.
+    const directories = this.configuredDirectories();
+    const present = await Promise.all(directories.map((path) => isVaultFolder(this.app, path)));
+    const issues = directories
+      .filter((_path, index) => !present[index])
       .map((path) => `Directory "${path}" does not exist or is not accessible`);
     return { valid: issues.length === 0, issues };
   }
@@ -100,14 +105,10 @@ export class DirectoryManager {
     if (existing instanceof TFolder) return;
     if (existing) throw new Error(`Cannot create directory "${path}": a file already exists at that path.`);
 
-    try {
-      await this.app.vault.createFolder(path);
-    } catch (error) {
-      // A concurrent caller may have won the create race. Only accept the
-      // rejection when Obsidian now resolves the requested path as a folder.
-      if (this.app.vault.getAbstractFileByPath(path) instanceof TFolder) return;
-      throw error;
-    }
+    // The vault tree can miss a folder that exists on disk (onload before
+    // indexing settles, a concurrent create). Obsidian then rejects with
+    // "Folder already exists."; the helper accepts only a real folder.
+    await createVaultFolder(this.app, path);
   }
 
   private normalizedDirectory(value: string): string {

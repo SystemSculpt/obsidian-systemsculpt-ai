@@ -98,13 +98,13 @@ type InternalMarkdownEmbedInstance = {
   useIframe?: boolean;
   text?: string;
   _loaded?: boolean;
-  set?: (value: string, clear?: boolean) => void;
-  save?: (value: string, clear?: boolean) => void;
-  showEditor?: (point?: EmbeddableMarkdownEditorPoint) => void;
-  showPreview?: (clear?: boolean) => void;
-  load?: () => void;
-  unload?: () => void;
-  register?: (disposer: () => void) => void;
+  set?(value: string, clear?: boolean): void;
+  save?(value: string, clear?: boolean): void;
+  showEditor?(point?: EmbeddableMarkdownEditorPoint): void;
+  showPreview?(clear?: boolean): void;
+  load?(): void;
+  unload?(): void;
+  register?(disposer: () => void): void;
 };
 
 type InternalMarkdownEmbedConstructor = new (
@@ -217,7 +217,7 @@ function getEmbeddableMarkdownClass(
     return cached;
   }
 
-  class EmbeddableMarkdownSurface extends (Base as new (...args: never[]) => object) {
+  class EmbeddableMarkdownSurface extends (Base) {
     private embeddableOptions: EmbeddableMarkdownEditorOptions = {};
     private embeddableScope: unknown = null;
     private embeddableScopePushed = false;
@@ -234,7 +234,7 @@ function getEmbeddableMarkdownClass(
       containerEl: HTMLElement,
       options: EmbeddableMarkdownEditorOptions
     ) {
-      super(...([app, containerEl, null, { mode: "source" }] as never[]));
+      super(app, containerEl, null, { mode: "source" });
       this.embeddableOptions = options;
       this.embeddableLastReportedValue = options.value ?? "";
 
@@ -300,7 +300,7 @@ function getEmbeddableMarkdownClass(
       focusRootEl.addEventListener(
         "focusout",
         (event) => {
-          const relatedTarget = (event as FocusEvent).relatedTarget;
+          const relatedTarget = (event).relatedTarget;
           if (
             relatedTarget
             && typeof (relatedTarget as Node).nodeType === "number"
@@ -326,7 +326,6 @@ function getEmbeddableMarkdownClass(
             this.embeddableDestroyed
             || event.key !== "Escape"
             || event.isComposing
-            || event.keyCode === 229
           ) {
             return;
           }
@@ -348,7 +347,7 @@ function getEmbeddableMarkdownClass(
           if (this.embeddableDestroyed) {
             return;
           }
-          this.embeddableOptions.onPaste?.(event as ClipboardEvent);
+          this.embeddableOptions.onPaste?.(event);
         },
         { signal }
       );
@@ -387,7 +386,7 @@ function getEmbeddableMarkdownClass(
       const HTMLElementCtor = activeEditorDOM?.ownerDocument.defaultView?.HTMLElement;
       const activeHTMLElement =
         HTMLElementCtor && activeElement instanceof HTMLElementCtor
-          ? (activeElement as HTMLElement)
+          ? (activeElement)
           : null;
       const activeContentDOM =
         activeHTMLElement?.matches(".cm-content")

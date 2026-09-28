@@ -412,7 +412,6 @@ describe("StudioService session-backed mutation commands", () => {
         }),
       }),
     }));
-    expect(renamed.replacedCanvasProject).toBeNull();
     expect(session.getProjectPath()).toBe("Studio/Moved.systemsculpt");
     expect(service.getProjectSession("Studio/Moved.systemsculpt")).toBe(session);
     expect(service.getProjectSession("Studio/Test.systemsculpt")).toBeNull();
@@ -439,7 +438,6 @@ describe("StudioService session-backed mutation commands", () => {
         policyPath: "Studio/Moved.systemsculpt-assets/policy/grants.json",
       },
     };
-    const preserve = jest.spyOn(service, "preserveProjectRecovery").mockResolvedValue();
     const store = (service as any).projectStore;
     jest.spyOn(store, "readVisibleProjectRawText").mockResolvedValue(movedRawText);
     jest.spyOn(store, "adoptVisibleProjectRename").mockResolvedValue({
@@ -456,10 +454,6 @@ describe("StudioService session-backed mutation commands", () => {
       "Studio/Moved.systemsculpt"
     );
 
-    expect(preserve).toHaveBeenCalledWith(expect.objectContaining({ name: "Pending canvas" }));
-    expect(renamed.replacedCanvasProject).toEqual(
-      expect.objectContaining({ name: "Pending canvas" })
-    );
     expect(session.getProject().name).toBe("Moved");
   });
 

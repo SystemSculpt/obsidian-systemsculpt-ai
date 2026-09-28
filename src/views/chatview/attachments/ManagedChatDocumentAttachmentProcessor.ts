@@ -2,8 +2,7 @@ import type { App } from "obsidian";
 import type SystemSculptPlugin from "../../../main";
 import { ManagedDocumentProcessingAdapter } from "../../../services/managed/ManagedDocumentProcessingAdapter";
 import { ManagedJobClient } from "../../../services/managed/ManagedJobClient";
-import { ManagedJobRecoveryStore } from "../../../services/managed/ManagedJobRecoveryStore";
-import { ObsidianManagedRecoveryAdapter } from "../../../services/managed/adapters/ObsidianManagedRecoveryAdapter";
+import type { ManagedJobRecoveryStore } from "../../../services/managed/ManagedJobRecoveryStore";
 import { getRuntimeCrypto } from "../../../utils/runtimeWindow";
 import type { ChatDocumentAttachmentProcessor } from "./ChatMessageAttachments";
 
@@ -22,9 +21,10 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
   private readonly recovery: ManagedJobRecoveryStore;
   private readonly managed: ManagedDocumentProcessingAdapter;
 
-  public constructor(app: App, plugin: SystemSculptPlugin) {
+  public constructor(_app: App, plugin: SystemSculptPlugin) {
     const graph = plugin.getManagedCapabilityGraph();
-    this.recovery = new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(app));
+    // The plugin's one recovery ledger, shared with every other managed job.
+    this.recovery = graph.recovery;
     this.managed = new ManagedDocumentProcessingAdapter({
       admission: graph.admission,
       jobs: new ManagedJobClient(graph.transport).documents,

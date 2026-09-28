@@ -89,6 +89,8 @@ export function renderStudioSearchableDropdown(
   triggerEl.type = "button";
   triggerEl.disabled = disabled;
   const triggerLabelEl = triggerEl.createSpan({ cls: "ss-studio-searchable-select-trigger-label" });
+  const triggerBadgeEl = triggerEl.createSpan({ cls: "ss-studio-searchable-select-trigger-badge" });
+  triggerBadgeEl.hidden = true;
   const triggerChevronEl = triggerEl.createSpan({ cls: "ss-studio-searchable-select-trigger-chevron" });
   triggerChevronEl.setText("▾");
 
@@ -279,13 +281,17 @@ export function renderStudioSearchableDropdown(
     const optionsList = loadedOptions ? ensureCurrentValuePresent(loadedOptions) : [];
     const selected = optionsList.find((option) => option.value === currentValue) || null;
     if (selected) {
-      const badgePrefix = selected.badge ? `[${selected.badge}] ` : "";
-      triggerLabelEl.setText(`${badgePrefix}${selected.label}`);
+      triggerLabelEl.setText(selected.label);
+      const badge = String(selected.badge || "").trim();
+      triggerBadgeEl.setText(badge);
+      triggerBadgeEl.hidden = !badge;
       triggerEl.title = selected.description || selected.label;
       return;
     }
     const fallback = currentValue || placeholder || "Select option";
     triggerLabelEl.setText(fallback);
+    triggerBadgeEl.setText("");
+    triggerBadgeEl.hidden = true;
     triggerEl.title = fallback;
   };
 

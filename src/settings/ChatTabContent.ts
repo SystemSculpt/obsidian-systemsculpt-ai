@@ -1,8 +1,11 @@
+import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
 import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 
+const codexSettingsCleanup = new WeakMap<HTMLElement, () => void>();
+
 export async function displayChatTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
-    containerEl.empty();
+    codexSettingsCleanup.get(containerEl)?.(); containerEl.empty();
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "chat";
     }
@@ -14,6 +17,11 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         text: 'Use this tab for chat preferences and display choices.',
         cls: 'setting-item-description'
     });
+
+    const execution = containerEl.createDiv();
+    const cleanup = mountCodexExecutionControls(execution, plugin, {});
+    const unregister = tabInstance.registerRenderCleanup(cleanup);
+    codexSettingsCleanup.set(containerEl, () => { cleanup(); unregister(); });
 
     const normalizeDefaultChatTag = (value: string): string => value.trim().replace(/^#+/, "");
 
@@ -41,21 +49,22 @@ new Setting(containerEl)
             .addOption("large", "Large")
             .setValue(plugin.settings.chatFontSize || "medium")
             .onChange(async (value: string) => {
-                await plugin.getSettingsManager().updateSettings({ chatFontSize: value as any });
+                if (value !== "small" && value !== "medium" && value !== "large") return;
+                await plugin.getSettingsManager().updateSettings({ chatFontSize: value });
                 new Notice(`Default chat font size set to: ${value}`);
             });
 	    });
 
 // --- Reduced Motion Preference ---
 new Setting(containerEl)
-    .setName("Honor OS reduced motion")
+    .setName("Honor reduced motion")
     .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
     .addToggle((toggle) => {
         toggle
             .setValue(plugin.settings.respectReducedMotion ?? true)
             .onChange(async (value) => {
                 await plugin.getSettingsManager().updateSettings({ respectReducedMotion: value });
-                new Notice(`Honor OS reduced motion ${value ? 'enabled' : 'disabled'}.`);
+                new Notice(`Reduced motion ${value ? 'enabled' : 'disabled'}.`);
             });
     });
 }

@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
-import { createTextAttachmentPart } from "../attachments/ChatAttachmentContent";
+import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
 
 function user(id: string, content = id): ChatMessage {
   return { role: "user", content, message_id: id };
@@ -102,6 +102,32 @@ function createHarness() {
 
 describe("AgentTranscriptRepository", () => {
   const conversationId = "conversation_0123456789abcdef0123456789abcdef";
+
+  it("saves back to the folder a chat was created in or loaded from", async () => {
+    const { repository, records, storage } = createHarness();
+    storage.createChatExclusive.mockImplementationOnce(async (id: string, messages: ChatMessage[]) => {
+      records.set(id, { id, version: 1, messages, context_files: [], chatDirectory: "Old/Chats" });
+      return { version: 1, chatDirectory: "Old/Chats" } as any;
+    });
+    const created = await repository.commitUser({ kind: "append", message: user("u1") });
+    await repository.persistAssistant(assistant("a1"));
+    await repository.saveMetadata();
+
+    expect(storage.saveChat.mock.calls.map(([, , options]) => options.chatDirectory))
+      .toEqual(["Old/Chats", "Old/Chats"]);
+    expect(repository.chatPath(created.chatId)).toBe(`Old/Chats/${created.chatId}.md`);
+    expect(repository.chatPath("another-chat")).toBeNull();
+
+    records.set("loaded", {
+      id: "loaded", version: 4, messages: [], context_files: [], chatDirectory: "Archive/Chats",
+    });
+    await repository.load("loaded");
+    await repository.persistAssistant(assistant("a2"));
+    expect(storage.saveChat.mock.calls.at(-1)?.[2]).toMatchObject({ chatDirectory: "Archive/Chats" });
+
+    repository.reset();
+    expect(repository.chatPath("loaded")).toBeNull();
+  });
 
   it("allocates on the first user turn and durably upserts assistant output", async () => {
     const { repository, storage } = createHarness();
@@ -320,6 +346,29 @@ describe("AgentTranscriptRepository", () => {
       messages: [],
     });
     expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(storage.saveChat).not.toHaveBeenCalled();
+  });
+
+  it("lets a newer saved-chat load supersede an in-flight read", async () => {
+    const { repository, storage, records } = createHarness();
+    const older = { id: "older", title: "Older", messages: [user("older-user")], context_files: [] };
+    const newer = { id: "newer", title: "Newer", messages: [user("newer-user")], context_files: [] };
+    records.set("newer", newer);
+    const started = deferred<void>();
+    const read = deferred<typeof older>();
+    storage.loadChat.mockImplementationOnce(async () => {
+      started.resolve(undefined);
+      return read.promise;
+    });
+    const first = repository.load("older");
+    const rejected = expect(first).rejects.toBeInstanceOf(AgentTranscriptConflictError);
+    await started.promise;
+    const second = repository.load("newer");
+    read.resolve(older);
+
+    await rejected;
+    await expect(second).resolves.toMatchObject({ chatId: "newer", messages: newer.messages });
+    expect(repository.snapshot()).toMatchObject({ chatId: "newer", messages: newer.messages });
     expect(storage.saveChat).not.toHaveBeenCalled();
   });
 

@@ -5,9 +5,9 @@ import {
   MultiPartContent,
   type ChatAttachmentMetadata,
 } from "../../../types";
-import { parseAttachedTextContent } from "../attachments/ChatAttachmentContent";
+import { parseAttachedTextContent } from "../../../chat/ChatAttachmentContent";
+import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
-import { MessagePartList } from "../utils/MessagePartList";
 import {
   hasChatIdentityMetadata,
   parseChatFrontmatterYaml,
@@ -21,8 +21,29 @@ import {
 import {
   normalizeFailedTerminalReceipt,
 } from "../FailedTerminalReceipt";
+import type { ToolCall } from "../../../types/toolCalls";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
+/**
+ * Only these literal markers can change how a stored message is parsed, so
+ * only they force a message into the opaque framed payload.
+ */
+const RESERVED_MARKERS = [
+  "<!-- SYSTEMSCULPT-",
+  "<!-- REASONING",
+  "<!-- TOOL-CALLS",
+] as const;
+/**
+ * Reasoning is stored inside an HTML comment, and `-->` or `--!>` would close
+ * it early. The writer inserts one backslash after the `--` of every
+ * `--`, backslashes, optional `!`, `>` run, and this attribute tells the
+ * reader to remove it. Messages without the attribute store reasoning
+ * verbatim, so older notes read exactly as before.
+ */
+const REASONING_ESCAPE_ATTRIBUTE = "reasoning-escape";
+const REASONING_ESCAPE_VERSION = "v1";
+const REASONING_CLOSER_RUN = /--(\\*)(!?)>/gu;
+const ESCAPED_REASONING_CLOSER_RUN = /--\\(\\*)(!?)>/gu;
 const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 type FramedMessagePayload =
@@ -144,16 +165,16 @@ export class ChatMarkdownSerializer {
       const storedMultipart = this.extractStoredMultipart(match[2]);
       if (storedMultipart.state === "invalid") return { success: false, messages: [] };
       const body = storedMultipart.body;
+      const reasoningEscape = this.reasoningEscape(attrs);
+      if (reasoningEscape === "invalid") return { success: false, messages: [] };
 
       const parts: MessagePart[] = [];
       let ts = Date.now();
 
-      const extractedBlocks: Array<{
-        type: "reasoning" | "tool_calls";
-        data: any;
-        start: number;
-        end: number;
-      }> = [];
+      const extractedBlocks: Array<
+        | { type: "reasoning"; data: string; start: number; end: number }
+        | { type: "tool_calls"; data: ToolCall[]; start: number; end: number }
+      > = [];
 
       const reasoningRegex = /<!-- REASONING\r?\n([\s\S]*?)\r?\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
@@ -162,7 +183,9 @@ export class ChatMarkdownSerializer {
         if (reasoningText) {
           extractedBlocks.push({
             type: "reasoning",
-            data: reasoningText,
+            data: reasoningEscape === "escaped"
+              ? this.unescapeReasoning(reasoningText)
+              : reasoningText,
             start: reasoningMatch.index,
             end: reasoningMatch.index + reasoningMatch[0].length,
           });
@@ -175,11 +198,16 @@ export class ChatMarkdownSerializer {
         const toolCallJson = toolCallMatch[1]?.trim();
         if (!toolCallJson) return { success: false, messages: [] };
         try {
-          const toolCallsArray = JSON.parse(toolCallJson);
-          if (!Array.isArray(toolCallsArray)) return { success: false, messages: [] };
+          const toolCallsValue: unknown = JSON.parse(toolCallJson);
+          if (
+            !Array.isArray(toolCallsValue)
+            || !toolCallsValue.every((value) => value && typeof value === "object" && !Array.isArray(value))
+          ) {
+            return { success: false, messages: [] };
+          }
           extractedBlocks.push({
             type: "tool_calls",
-            data: toolCallsArray,
+            data: toolCallsValue as ToolCall[],
             start: toolCallMatch.index,
             end: toolCallMatch.index + toolCallMatch[0].length,
           });
@@ -218,8 +246,8 @@ export class ChatMarkdownSerializer {
         if (block.type === "reasoning") {
           parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
         } else {
-          for (const toolCall of block.data as any[]) {
-            const toolId = (toolCall && typeof toolCall.id === "string") ? toolCall.id : String(ts);
+          for (const toolCall of block.data) {
+            const toolId = typeof toolCall.id === "string" ? toolCall.id : String(ts);
             const partId = toolId ? `tool_call_part-${toolId}` : `tool_call-${ts}`;
             parts.push({ id: partId, type: "tool_call", data: toolCall, timestamp: ts++ });
           }
@@ -229,8 +257,11 @@ export class ChatMarkdownSerializer {
       }
 
       if (cursor < body.length) {
+        // With no blocks the chunk still begins with the newline the writer
+        // puts after the START marker. Keeping it prepended one newline to
+        // the message on every load and save.
         pushContentChunk(body.slice(cursor), {
-          trimLeadingBoundary: cursor > 0,
+          trimLeadingBoundary: true,
           trimTrailingBoundary: true,
         });
       } else if (parts.length === 0) {
@@ -259,15 +290,14 @@ export class ChatMarkdownSerializer {
   }
 
   private static reconstructMessageFromParts(role: ChatRole, message_id: string, messageParts: MessagePart[]): ChatMessage {
-    const list = new MessagePartList(messageParts);
-    return {
-      role,
-      message_id,
-      content: list.contentMarkdown(""),
-      reasoning: list.reasoningMarkdown(),
-      tool_calls: list.toolCalls,
-      messageParts,
-    };
+    let content = "", reasoning = "";
+    const tool_calls: ToolCall[] = [];
+    for (const part of messageParts) {
+      if (part.type === "content") content += String(part.data ?? "");
+      else if (part.type === "reasoning") reasoning += String(part.data ?? "");
+      else if (part.type === "tool_call") tool_calls.push(part.data);
+    }
+    return { role, message_id, content, reasoning, tool_calls, messageParts };
   }
 
   private static parseFramedMessagePayload(
@@ -469,7 +499,7 @@ export class ChatMarkdownSerializer {
       if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((part) => this.isStoredContentPart(part))) {
         return { state: "invalid", body, content: null };
       }
-      return { state: "valid", body: body.replace(match[0], ""), content: parsed as MultiPartContent[] };
+      return { state: "valid", body: body.replace(match[0], ""), content: parsed };
     } catch {
       return { state: "invalid", body, content: null };
     }
@@ -492,19 +522,11 @@ export class ChatMarkdownSerializer {
   }
 
   private static encodeBase64Json(value: unknown): string {
-    const bytes = new TextEncoder().encode(JSON.stringify(value));
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)));
-    }
-    return btoa(binary);
+    return utf8ToBase64(JSON.stringify(value));
   }
 
   private static decodeBase64Json(value: string): unknown {
-    const binary = atob(value);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    return JSON.parse(base64ToUtf8(value)) as unknown;
   }
 
   private static extractAttachmentMetadata(
@@ -597,14 +619,18 @@ export class ChatMarkdownSerializer {
     const versionRaw = parsed.version ?? 0;
 
     const processedContextFiles = Array.isArray(context_files)
-      ? context_files.map((file: any): NonNullable<ChatMetadata["context_files"]>[number] => {
+      ? context_files.map((file: unknown): NonNullable<ChatMetadata["context_files"]>[number] => {
           if (typeof file === "string") {
             const isExtraction = file.includes("/Extractions/");
             return { path: file, type: isExtraction ? "extraction" : "source" };
-          } else if (file && typeof file === "object" && file.path) {
+          } else if (file && typeof file === "object" && !Array.isArray(file)) {
+            const fileRecord = file as Record<string, unknown>;
+            if (typeof fileRecord.path !== "string" || !fileRecord.path) {
+              return { path: "", type: "source" };
+            }
             return {
-              path: file.path,
-              type: file.type || "source",
+              path: fileRecord.path,
+              type: fileRecord.type === "extraction" ? "extraction" : "source",
             };
           } else {
             return { path: "", type: "source" };
@@ -641,6 +667,7 @@ export class ChatMarkdownSerializer {
 
   private static messageToMarkdown(msg: ChatMessage): string {
     let messageBody = "";
+    let escapesReasoning = false;
 
     if (msg.messageParts && msg.messageParts.length > 0) {
       // New format – iterate through parts in order.
@@ -651,14 +678,21 @@ export class ChatMarkdownSerializer {
             break;
           case "reasoning":
             if (typeof part.data === "string") {
-              // Preserve reasoning verbatim without trimming or normalization
-              messageBody += `\n<!-- REASONING\n${part.data as string}\n-->\n`;
+              // Preserve reasoning without trimming or normalization. The
+              // only change is the reversible comment-closer escape.
+              const escaped = this.escapeReasoning(part.data);
+              if (escaped !== part.data) escapesReasoning = true;
+              messageBody += `\n<!-- REASONING\n${escaped}\n-->\n`;
             }
             break;
-          case "tool_call":
+          case "tool_call": {
             const toolCallArray = [part.data];
-            messageBody += `\n<!-- TOOL-CALLS\n${JSON.stringify(toolCallArray, null, 2)}\n-->\n`;
+            // `>` only occurs inside JSON strings, where \u003e is the same
+            // character, so the comment can never be closed early.
+            const toolCallJson = JSON.stringify(toolCallArray, null, 2).replace(/>/gu, "\\u003e");
+            messageBody += `\n<!-- TOOL-CALLS\n${toolCallJson}\n-->\n`;
             break;
+          }
         }
       });
     } else {
@@ -718,6 +752,8 @@ export class ChatMarkdownSerializer {
     if (this.needsFramedPayload(msg)) {
       attributes += ` payload-format="${FRAMED_PAYLOAD_FORMAT}"`;
       messageBody = this.encodeBase64Json(this.createFramedMessagePayload(msg));
+    } else if (escapesReasoning) {
+      attributes += ` ${REASONING_ESCAPE_ATTRIBUTE}="${REASONING_ESCAPE_VERSION}"`;
     }
 
     const messageStart = `<!-- SYSTEMSCULPT-MESSAGE-START ${attributes} -->`;
@@ -734,10 +770,7 @@ export class ChatMarkdownSerializer {
 
   private static containsReservedFraming(value: unknown, seen = new Set<object>()): boolean {
     if (typeof value === "string") {
-      return value.includes("<!-- SYSTEMSCULPT-")
-        || value.includes("<!-- REASONING")
-        || value.includes("<!-- TOOL-CALLS")
-        || /--!?>/u.test(value);
+      return RESERVED_MARKERS.some((marker) => value.includes(marker));
     }
     if (!value || typeof value !== "object") return false;
     if (seen.has(value)) return false;
@@ -745,6 +778,31 @@ export class ChatMarkdownSerializer {
     return Array.isArray(value)
       ? value.some((item) => this.containsReservedFraming(item, seen))
       : Object.values(value).some((item) => this.containsReservedFraming(item, seen));
+  }
+
+  private static escapeReasoning(text: string): string {
+    return text.replace(
+      REASONING_CLOSER_RUN,
+      (_run, backslashes: string, bang: string) => `--${backslashes}\\${bang}>`,
+    );
+  }
+
+  private static unescapeReasoning(text: string): string {
+    return text.replace(
+      ESCAPED_REASONING_CLOSER_RUN,
+      (_run, backslashes: string, bang: string) => `--${backslashes}${bang}>`,
+    );
+  }
+
+  /** Unknown or repeated escape declarations fail closed. */
+  private static reasoningEscape(attributes: string): "verbatim" | "escaped" | "invalid" {
+    const declarations = [...attributes.matchAll(
+      new RegExp(`(?:^|\\s)${REASONING_ESCAPE_ATTRIBUTE}="([^"]*)"(?=\\s|$)`, "gu"),
+    )];
+    if (declarations.length === 0) return "verbatim";
+    return declarations.length === 1 && declarations[0][1] === REASONING_ESCAPE_VERSION
+      ? "escaped"
+      : "invalid";
   }
 
   private static createFramedMessagePayload(message: ChatMessage): FramedMessagePayload {

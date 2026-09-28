@@ -9,19 +9,19 @@ import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
 import type {
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
-} from "./graph-v3/StudioGraphNodeCardTypes";
+} from "./canvas/StudioGraphNodeCardTypes";
 import {
   resolveStudioGraphResizeZoneLayout,
   STUDIO_GRAPH_RESIZE_ZONES,
   type StudioGraphResizeZone,
-} from "./graph-v3/StudioGraphNodeResizeFrame";
+} from "./canvas/StudioGraphNodeResizeFrame";
 import {
   computeStudioSelectionBounds,
   resolveStudioSelectionResizePatches,
   type StudioSelectionRect,
   type StudioSelectionResizeNodeSnapshot,
   type StudioSelectionResizePatchEntry,
-} from "./graph-v3/StudioGraphSelectionTransform";
+} from "./canvas/StudioGraphSelectionTransform";
 import { getStudioOwnerWindow } from "./StudioDomContext";
 
 export type StudioGraphSelectionResizePatchEntry = StudioSelectionResizePatchEntry;
@@ -113,7 +113,7 @@ export class StudioGraphSelectionResizeController {
         zoneEl.style.setProperty(property, value);
       }
       zoneEl.addEventListener("pointerdown", (event) => {
-        this.startGesture(zone, zoneEl, event as PointerEvent);
+        this.startGesture(zone, zoneEl, event);
       });
     }
     this.frameEl = frameEl;

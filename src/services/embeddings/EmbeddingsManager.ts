@@ -6,6 +6,7 @@ import type {
   EmbeddingsManagerConfig,
   FailedProcessingDetail,
   ProcessingProgress,
+  ProcessingResult,
   SearchResult,
 } from "./types";
 import {
@@ -14,10 +15,11 @@ import {
   type ManagedEmbeddingsIndexAdapter,
 } from "./gateway/ManagedEmbeddingsIndexAdapter";
 import {
+  BULK_INDEX_CONCURRENCY,
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
-import { VectorSearch } from "./search/VectorSearch";
+import { toSearchResult } from "./search/VectorSearch";
 import { EmbeddingsStorage } from "./storage/EmbeddingsStorage";
 import { EmbeddingsIndexFile } from "./storage/EmbeddingsIndexFile";
 import {
@@ -28,12 +30,13 @@ import {
   isManagedNamespace,
   parseManagedNamespace,
   parseNamespaceDimension,
-  MANAGED_EMBEDDING_FAMILY_PREFIX,
 } from "./utils/namespace";
 import { buildVectorId } from "./utils/vectorId";
+import { dot } from "./utils/vector";
 import {
   isCurrentLocalEmptyEmbeddingMarker,
   isLocalEmptyEmbeddingMarker,
+  LOCAL_EMPTY_EMBEDDING_NAMESPACE,
   localEmptyEmbeddingMarkerId,
 } from "./LocalEmptyEmbeddingMarker";
 import {
@@ -44,9 +47,9 @@ import {
 import {
   SemanticWorkQueue,
   type SemanticWorkItem,
-  type SemanticWorkStore,
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
+import { resolveVaultExclusions, type VaultExclusions } from "../search/VaultExclusions";
 
 export type EmbeddingsRunStatus = "complete" | "aborted";
 
@@ -94,6 +97,16 @@ interface CommittedNamespaceState {
 }
 
 const QUEUED_WORK_MUTEX_BACKOFF_MS = 75;
+const LIFECYCLE_REFRESH_COALESCE_MS = 1_000;
+const SIMILAR_RESULTS_CACHE_SIZE = 32;
+/**
+ * A query's vector depends only on its text and the generation, which is
+ * checked on every reuse. Similar Notes re-runs chat queries after index
+ * runs, so the vector stays cached long enough to make those local scans.
+ */
+const QUERY_VECTOR_TTL_MS = 15 * 60_000;
+/** Final Float32 scores at or below this are not similar enough to show. */
+const MIN_SIMILARITY = 0.1;
 const COMMITTED_NAMESPACE_STATE_KEY = "semantic-committed-namespace-v1";
 
 type FileState = {
@@ -111,6 +124,20 @@ const FATAL_MANAGED_ERROR_CODES = new Set<ManagedEmbeddingsErrorCode>([
   "capability_unavailable",
 ]);
 const FATAL_SUSPENSION_STATE_KEY = "semantic-fatal-suspension-v1";
+/**
+ * Stored vectors are validated once per vector format, not at every launch:
+ * the managed gateway validates what it writes. A restored portable index is
+ * revalidated because its bytes come from outside this store (#343).
+ */
+const VECTOR_VALIDATION_STATE_KEY = "semantic-vector-validation";
+const VECTOR_VALIDATION_VERSION = 1;
+type StoredVectorRepair = Awaited<ReturnType<EmbeddingsStorage["purgeCorruptedVectors"]>>;
+const NO_VECTOR_REPAIR: StoredVectorRepair = Object.freeze({
+  removedCount: 0,
+  correctedCount: 0,
+  removedPaths: [],
+  correctedPaths: [],
+});
 
 type PersistedFatalSuspension = Readonly<{
   version: 1;
@@ -140,18 +167,18 @@ function fatalManagedErrorMessage(code: ManagedEmbeddingsErrorCode): string {
  * Managed-only embeddings coordinator.
  *
  * Endpoint configuration, retries, cooldowns, and entitlement decisions do not
- * exist here. Admission and transport ownership live in ManagedCapabilityClient.
+ * exist here. The plugin composition owner provides the managed index gateway.
  */
 export class EmbeddingsManager {
   private readonly storage: EmbeddingsStorage;
   private readonly gateway: ManagedEmbeddingsIndexAdapter;
   private readonly processor: EmbeddingsProcessor;
-  private readonly search = new VectorSearch();
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
+  /** Recent Similar Notes answers, least recently used first. */
+  private readonly similarCache = new Map<string, SearchResult[]>();
   private readonly lifecycle = new SemanticIndexLifecycle();
-  private readonly stateStore: SemanticWorkStore;
   private readonly workQueue: SemanticWorkQueue;
   private config: EmbeddingsManagerConfig;
   private initializationPromise: Promise<void> | null = null;
@@ -166,6 +193,8 @@ export class EmbeddingsManager {
   private portableCheckpoint: PortableCheckpointCoordinator | null = null;
   private workTimer: number | null = null;
   private workTimerDueAt: number | null = null;
+  private lifecycleRefreshTimer: number | null = null;
+  private enabledAtLastSync: boolean;
 
   constructor(
     private readonly app: App,
@@ -173,26 +202,12 @@ export class EmbeddingsManager {
     config?: Partial<EmbeddingsManagerConfig>,
   ) {
     this.config = this.buildConfig(config);
+    this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
     this.storage = new EmbeddingsStorage(
       EmbeddingsStorage.buildDbName(this.plugin.settings.vaultInstanceId || ""),
     );
-    this.gateway = this.plugin.getManagedCapabilityClient().getEmbeddingsIndex();
-    const stateStorage = this.storage as EmbeddingsStorage & Partial<Pick<
-      EmbeddingsStorage,
-      "readState" | "writeState" | "deleteState"
-    >>;
-    this.stateStore = {
-      readState: <T>(key: string) => typeof stateStorage.readState === "function"
-        ? stateStorage.readState<T>(key)
-        : Promise.resolve(null),
-      writeState: <T>(key: string, value: T) => typeof stateStorage.writeState === "function"
-        ? stateStorage.writeState(key, value)
-        : Promise.resolve(),
-      deleteState: (key: string) => typeof stateStorage.deleteState === "function"
-        ? stateStorage.deleteState(key)
-        : Promise.resolve(),
-    };
-    this.workQueue = new SemanticWorkQueue(this.stateStore);
+    this.gateway = this.plugin.getManagedCapabilityGraph().embeddingsIndex;
+    this.workQueue = new SemanticWorkQueue(this.storage);
     this.processor = new EmbeddingsProcessor(
       this.gateway,
       this.storage,
@@ -215,24 +230,23 @@ export class EmbeddingsManager {
     await this.workQueue.restore();
     this.hydrateFailuresFromWorkQueue();
     await this.restoreFatalSuspension();
-    await this.restorePortableIndexIfEmpty();
+    const restored = await this.restorePortableIndexIfEmpty();
     await this.storage.loadEmbeddings();
     await this.migrateToManagedNamespaceContract();
-    const repair = await this.storage.purgeCorruptedVectors();
+    const repair = await this.validateStoredVectors(restored);
     await this.hydrateManagedIdentityFromStorage();
-    for (const path of repair.removedPaths) {
+    if (repair.removedPaths.length > 0) {
       const failedAt = Date.now();
       const error = { code: "invalid_response", message: "Stored vector was invalid." };
-      const abstract = this.app.vault.getAbstractFileByPath(path);
-      const claim = await this.workQueue.enqueueImmediate(
-        path,
-        "reconcile",
-        abstract instanceof TFile ? this.sourceMtime(abstract) : null,
+      const claims = await this.workQueue.enqueueManyImmediate(repair.removedPaths.map((path) => {
+        const abstract = this.app.vault.getAbstractFileByPath(path);
+        return { path, sourceMtime: abstract instanceof TFile ? this.sourceMtime(abstract) : null };
+      }), "reconcile", failedAt);
+      const recorded = await this.workQueue.failMany(
+        [...claims.values()].map((claim) => ({ claim, failure: error })),
         failedAt,
       );
-      if (claim && await this.workQueue.fail(claim, error, failedAt)) {
-        this.failedFiles.set(path, { path, error, failedAt });
-      }
+      for (const path of recorded) this.failedFiles.set(path, { path, error, failedAt });
     }
     this.setupFileWatchers();
     this.initialized = true;
@@ -275,8 +289,8 @@ export class EmbeddingsManager {
       if (this.processingSuspended) {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
       }
-      await this.setRebuildPending(true);
-      const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !this.isFileExcluded(file));
+      const exclusions = this.exclusions();
+      const eligibleFiles = this.app.vault.getMarkdownFiles().filter((file) => !exclusions.isExcluded(file.path));
       this.refreshLifecycle({
         phase: "reconciling",
         total: eligibleFiles.length,
@@ -284,19 +298,25 @@ export class EmbeddingsManager {
         currentPath: null,
         lastError: null,
       });
+      // Empty notes have nothing to index. Only a note that still had records
+      // changes the store; notes that are already absent must not count as a
+      // destructive change on every pass.
       const emptyFiles = eligibleFiles.filter((file) => this.isLocallyEmpty(file));
-      const emptyClaims = await this.captureWorkClaims(emptyFiles, "reconcile");
-      for (const file of emptyFiles) {
-        await this.storage.removeByPath(file.path);
-        this.failedFiles.delete(file.path);
+      let emptiedRecords = 0;
+      if (emptyFiles.length > 0) {
+        const emptyClaims = await this.captureWorkClaims(emptyFiles, "reconcile");
+        for (const file of emptyFiles) {
+          emptiedRecords += await this.storage.removeByPath(file.path) ?? 0;
+          this.failedFiles.delete(file.path);
+        }
+        await this.workQueue.complete(emptyClaims.values());
       }
-      await this.workQueue.complete(emptyClaims.values());
       const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessFile(file));
       if (files.length === 0) {
-        await this.setRebuildPending(false);
-        if (emptyFiles.length > 0) await this.commitPortableDestructiveMutation();
-        const committed = await this.commitSearchNamespaceIfComplete();
-        if (committed) await this.pruneInactiveManagedNamespaces();
+        await this.commitSearchNamespaceIfComplete();
+        const pruned = await this.pruneSupersededNamespaces();
+        if (emptiedRecords > 0 || pruned > 0) this.markPortableIndexDestructive();
+        await this.reconcilePortableIndexFormat();
         this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
         return { status: "complete", processed: 0 };
       }
@@ -311,21 +331,20 @@ export class EmbeddingsManager {
           current: progress.current,
           batch: progress.batchProgress,
         });
-        this.refreshLifecycle({
-          phase: "reconciling",
-          total: progress.total,
-          completed: progress.current,
-          currentPath: progress.currentFile ?? null,
-        });
+        this.refreshProgress(progress);
         onProgress?.(progress);
       }, {
         sourceRevisions,
         preflight: () => this.preflightCredits(),
+        reuseNamespace: this.getIndexingNamespace(),
+        concurrency: BULK_INDEX_CONCURRENCY,
       });
-      await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      const failedPathList = await this.requeueChangedSources(result, workClaims);
+      await this.recordFailures(failedPathList, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
-      const failedPaths = new Set(result.failedPaths);
+      const failedPaths = new Set(failedPathList);
+      const failedCount = failedPathList.length;
       for (const path of completedPaths) this.failedFiles.delete(path);
       await this.workQueue.complete(
         [...completedPaths]
@@ -336,27 +355,24 @@ export class EmbeddingsManager {
       const unfinishedCount = files.reduce((count, file) => (
         completedPaths.has(file.path) || failedPaths.has(file.path) ? count : count + 1
       ), 0);
-      await this.setRebuildPending(
-        Boolean(result.fatalError) || result.cancelled || result.failed > 0 || unfinishedCount > 0,
-      );
       const completedCleanly = !result.fatalError
         && !result.cancelled
-        && result.failed === 0
+        && failedCount === 0
         && unfinishedCount === 0;
-      const committed = completedCleanly
-        ? await this.commitSearchNamespaceIfComplete()
-        : false;
-      const pruned = committed ? await this.pruneInactiveManagedNamespaces() : 0;
-      const destructive = emptyFiles.length > 0 || result.failed > 0 || pruned > 0;
-      if (destructive) {
-        await this.commitPortableDestructiveMutation();
-      } else if (completedPaths.size > 0) {
+      if (completedCleanly) await this.commitSearchNamespaceIfComplete();
+      // A single failed note must not keep every older generation alive.
+      const pruned = await this.pruneSupersededNamespaces();
+      // A failed note left its stored records untouched, so only real removals
+      // are destructive; new vectors ride the coalesced checkpoint.
+      if (emptiedRecords > 0 || pruned > 0) {
+        this.markPortableIndexDestructive();
+      } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
-        await this.flushPortableIndex();
       }
-      const firstFailure = result.failedDetails?.[result.failedPaths[0] ?? ""];
+      await this.reconcilePortableIndexFormat();
+      const firstFailure = result.failedDetails?.[failedPathList[0] ?? ""];
       this.refreshLifecycle({
-        phase: result.fatalError || result.failed > 0
+        phase: result.fatalError || failedCount > 0
           ? "error"
           : this.processingSuspended
             ? "paused"
@@ -371,12 +387,12 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-complete", {
         scope: "vault",
         processed: result.completed,
-        failed: result.failed,
+        failed: failedCount,
         status: result.fatalError
           ? "error"
           : result.cancelled
             ? "aborted"
-            : result.failed > 0
+            : failedCount > 0
               ? "partial"
               : "success",
       });
@@ -401,7 +417,7 @@ export class EmbeddingsManager {
       return {
         status: "complete",
         processed: result.completed,
-        partialSuccess: result.failed > 0,
+        partialSuccess: failedCount > 0,
       };
     });
   }
@@ -464,6 +480,16 @@ export class EmbeddingsManager {
     if (!namespace) return [];
     const sourceFile = this.app.vault.getAbstractFileByPath(filePath);
     if (!(sourceFile instanceof TFile) || !this.isFileReadyInNamespace(sourceFile, namespace)) return [];
+    // Same note, same stored revision, same index: same answer. Revisiting a
+    // note, or re-rendering after unrelated events, needs no search.
+    const root = this.storage.getVectorSync(buildVectorId(namespace, filePath, 0));
+    const cacheKey = [namespace, filePath, root?.metadata.mtime ?? 0, this.getIndexRevision(), limit].join("\u0000");
+    const cached = this.similarCache.get(cacheKey);
+    if (cached) {
+      this.similarCache.delete(cacheKey);
+      this.similarCache.set(cacheKey, cached);
+      return cached.map((result) => ({ ...result, metadata: { ...result.metadata } }));
+    }
 
     const storedSourceVectors = await this.storage.getVectorsByPath(filePath);
     if (signal?.aborted) return [];
@@ -481,7 +507,22 @@ export class EmbeddingsManager {
       filePath,
     );
     if (signal?.aborted) return [];
-    return this.mergeChunkResults(sets, limit, filePath);
+    const results = this.mergeChunkResults(sets, limit, filePath);
+    this.similarCache.set(cacheKey, results);
+    while (this.similarCache.size > SIMILAR_RESULTS_CACHE_SIZE) {
+      const oldest = this.similarCache.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.similarCache.delete(oldest);
+    }
+    return results.map((result) => ({ ...result, metadata: { ...result.metadata } }));
+  }
+
+  /**
+   * Changes whenever stored vectors change in a way search results can see.
+   * Callers key caches on it (Similar Notes results, the search indicator).
+   */
+  public getIndexRevision(): number {
+    return typeof this.storage.getRevision === "function" ? this.storage.getRevision() : 0;
   }
 
   getStats(): { total: number; processed: number; present: number; needsProcessing: number; failed: number } {
@@ -643,13 +684,22 @@ export class EmbeddingsManager {
     return this.processingSuspended;
   }
 
+  /**
+   * Every settings save lands here. Only a change that affects which notes are
+   * indexed (enabling, or the exclusion rules) may start a vault pass; license
+   * checks, backups and unrelated toggles must not rescan the vault.
+   */
   public syncFromSettings(): void {
     const previous = this.config;
+    const wasEnabled = this.enabledAtLastSync;
     this.config = this.buildConfig();
-    if (JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions)) {
+    this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
+    const exclusionsChanged = JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions);
+    if (exclusionsChanged) {
+      this.similarCache.clear();
       void this.cleanupExcludedEmbeddings().catch(() => undefined);
     }
-    if (this.plugin.settings.embeddingsEnabled) {
+    if (this.enabledAtLastSync && (!wasEnabled || exclusionsChanged)) {
       this.requestAutomaticProcessing();
     }
   }
@@ -674,9 +724,9 @@ export class EmbeddingsManager {
       await this.workQueue.clear();
       this.failedFiles.clear();
       this.queryCache.clear();
+      this.similarCache.clear();
       this.gateway.activeGeneration = undefined;
       this.searchNamespace = null;
-      await this.setRebuildPending(false);
       await this.deleteCommittedNamespace();
       await this.getPortableCheckpoint()?.clear();
       this.refreshLifecycle({
@@ -702,6 +752,7 @@ export class EmbeddingsManager {
       this.initializationPromise = null;
       this.failedFiles.clear();
       this.queryCache.clear();
+      this.similarCache.clear();
       this.gateway.activeGeneration = undefined;
       this.gateway.metadata = undefined;
       this.searchNamespace = null;
@@ -723,8 +774,9 @@ export class EmbeddingsManager {
         await this.storage.removeCurrentManagedGeneration();
         this.searchNamespace = null;
         this.queryCache.clear();
+        this.similarCache.clear();
         await this.deleteCommittedNamespace();
-        await this.commitPortableDestructiveMutation();
+        this.markPortableIndexDestructive();
       });
     } finally {
       this.processingSuspended = false;
@@ -737,6 +789,7 @@ export class EmbeddingsManager {
     this.processingSuspended = true;
     this.processor.cleanup();
     this.clearWorkTimer();
+    this.clearLifecycleRefresh();
     for (const ref of this.fileWatchers) {
       try { this.app.vault.offref(ref); } catch { /* Obsidian may already have detached it. */ }
     }
@@ -744,6 +797,8 @@ export class EmbeddingsManager {
     await this.processingMutex.runExclusive(() => this.flushPortableIndex());
     this.portableCheckpoint?.cancel();
     this.queryCache.clear();
+    this.similarCache.clear();
+    if (typeof this.storage.releaseSearchMatrices === "function") this.storage.releaseSearchMatrices();
     this.lifecycle.clearListeners();
   }
 
@@ -778,15 +833,15 @@ export class EmbeddingsManager {
     this.fileWatchers.push(this.app.vault.on("rename", (file, oldPath) => {
       if (file instanceof TFile && file.extension === "md") {
         void this.processingMutex.runExclusive(async () => {
-          await this.storage.renameByPath(oldPath, file.path, file.basename);
+          const moved = await this.storage.renameByPath(oldPath, file.path, file.basename);
           await this.workQueue.rename(oldPath, file.path);
           this.failedFiles.delete(oldPath);
-          await this.commitPortableDestructiveMutation();
+          if (moved) this.markPortableIndexDestructive();
           this.requestFileProcessing(file, "rename");
         }).catch(() => undefined);
       } else {
         void this.processingMutex.runExclusive(async () => {
-          await this.storage.renameByDirectory(oldPath, file.path);
+          const moved = await this.storage.renameByDirectory(oldPath, file.path);
           await this.workQueue.renamePrefix(oldPath, file.path);
           const oldPrefix = `${oldPath.replace(/\/$/, "")}/`;
           const newPrefix = `${file.path.replace(/\/$/, "")}/`;
@@ -796,25 +851,27 @@ export class EmbeddingsManager {
             const nextPath = `${newPrefix}${path.slice(oldPrefix.length)}`;
             this.failedFiles.set(nextPath, { ...failure, path: nextPath });
           }
-          await this.commitPortableDestructiveMutation();
+          if (moved) this.markPortableIndexDestructive();
         }).catch(() => undefined);
       }
     }));
     this.fileWatchers.push(this.app.vault.on("delete", (file) => {
       void this.processingMutex.runExclusive(async () => {
+        let removed: number;
         if (file instanceof TFile) {
-          await this.storage.removeByPath(file.path);
+          removed = await this.storage.removeByPath(file.path);
           await this.workQueue.remove(file.path);
           this.failedFiles.delete(file.path);
         } else {
-          await this.storage.removeByDirectory(file.path);
+          removed = await this.storage.removeByDirectory(file.path);
           const prefix = `${file.path.replace(/\/$/, "")}/`;
           await this.workQueue.removePrefix(file.path);
           for (const path of [...this.failedFiles.keys()]) {
             if (path.startsWith(prefix)) this.failedFiles.delete(path);
           }
         }
-        await this.commitPortableDestructiveMutation();
+        // Deleting an unindexed file (an image, a canvas) changes nothing.
+        if (removed) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
       }).catch(() => undefined);
     }));
@@ -824,10 +881,36 @@ export class EmbeddingsManager {
     if (!this.plugin.settings.embeddingsEnabled) return;
     void this.workQueue.enqueue(file.path, reason, this.sourceMtime(file))
       .then(() => {
-        this.refreshLifecycle();
+        // Show the queued edit at once; the full vault recount is coalesced.
+        if (this.initialized && this.workQueue.size > this.lifecycle.getSnapshot().pending) {
+          this.lifecycle.update({ pending: this.workQueue.size });
+        }
+        this.scheduleLifecycleRefresh();
         if (!this.processingSuspended) this.scheduleQueuedWork();
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * File events arrive with every autosave. Recounting the whole vault for
+   * each one is O(notes), so coalesce them into one trailing refresh.
+   */
+  private scheduleLifecycleRefresh(): void {
+    if (this.lifecycleRefreshTimer !== null) return;
+    this.lifecycleRefreshTimer = window.setTimeout(() => {
+      this.lifecycleRefreshTimer = null;
+      this.refreshLifecycle();
+    }, LIFECYCLE_REFRESH_COALESCE_MS);
+  }
+
+  private clearLifecycleRefresh(): void {
+    if (this.lifecycleRefreshTimer !== null) window.clearTimeout(this.lifecycleRefreshTimer);
+    this.lifecycleRefreshTimer = null;
+  }
+
+  /** Paths whose content was re-embedded, as opposed to reused unchanged. */
+  private countReembedded(result: ProcessingResult): number {
+    return result.completedPaths.length - (result.reusedPaths?.length ?? 0);
   }
 
   private scheduleQueuedWork(minimumDelayMs = 0): void {
@@ -879,9 +962,8 @@ export class EmbeddingsManager {
       for (const item of due) {
         const abstract = this.app.vault.getAbstractFileByPath(item.path);
         if (!(abstract instanceof TFile) || abstract.extension !== "md" || this.isFileExcluded(abstract)) {
-          await this.storage.removeByPath(item.path);
+          if (await this.storage.removeByPath(item.path)) destructive = true;
           completedWithoutEmbedding.push(item);
-          destructive = true;
           continue;
         }
         const currentMtime = this.sourceMtime(abstract);
@@ -890,13 +972,16 @@ export class EmbeddingsManager {
           continue;
         }
         if (this.isLocallyEmpty(abstract)) {
-          await this.storage.removeByPath(item.path);
+          if (await this.storage.removeByPath(item.path)) destructive = true;
           completedWithoutEmbedding.push(item);
           this.failedFiles.delete(item.path);
-          destructive = true;
           continue;
         }
-        if (!this.shouldProcessFile(abstract)) {
+        // A modify or create event is evidence of new bytes even when the
+        // mtime did not move, so the processor compares content hashes (and
+        // reuses the stored vectors, with no request, when nothing changed).
+        const eventWithoutNewMtime = item.reason === "modify" || item.reason === "create";
+        if (!this.shouldProcessFile(abstract) && !eventWithoutNewMtime) {
           completedWithoutEmbedding.push(item);
           continue;
         }
@@ -905,7 +990,7 @@ export class EmbeddingsManager {
       }
       await this.workQueue.complete(completedWithoutEmbedding);
       if (files.length === 0) {
-        if (destructive) await this.commitPortableDestructiveMutation();
+        if (destructive) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
         return;
       }
@@ -921,17 +1006,15 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-start", { scope: "queue", total: files.length, reason: "vault-change" });
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       const result = await this.processor.processFiles(files, this.app, (progress) => {
-        this.refreshLifecycle({
-          phase: "reconciling",
-          total: progress.total,
-          completed: progress.current,
-          currentPath: progress.currentFile ?? null,
-        });
+        this.refreshProgress(progress);
       }, {
         sourceRevisions,
         preflight: () => this.preflightCredits(),
+        reuseNamespace: this.getIndexingNamespace(),
+        concurrency: BULK_INDEX_CONCURRENCY,
       });
-      await this.recordFailures(result.failedPaths, workClaims, result.failedDetails, result.fatalError);
+      const failedPaths = await this.requeueChangedSources(result, workClaims);
+      await this.recordFailures(failedPaths, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
       const completedPaths = new Set(result.completedPaths);
       await this.workQueue.complete(
@@ -942,20 +1025,18 @@ export class EmbeddingsManager {
       for (const path of completedPaths) this.failedFiles.delete(path);
       const completedCleanly = !result.fatalError
         && !result.cancelled
-        && result.failed === 0
+        && failedPaths.length === 0
         && result.completedPaths.length === files.length;
-      const committed = completedCleanly
-        ? await this.commitSearchNamespaceIfComplete()
-        : false;
-      const pruned = committed ? await this.pruneInactiveManagedNamespaces() : 0;
-      if (destructive || result.failed > 0 || pruned > 0) {
-        await this.commitPortableDestructiveMutation();
-      } else if (completedPaths.size > 0) {
+      if (completedCleanly) await this.commitSearchNamespaceIfComplete();
+      const pruned = await this.pruneSupersededNamespaces();
+      if (destructive || pruned > 0) {
+        this.markPortableIndexDestructive();
+      } else if (this.countReembedded(result) > 0) {
         this.markPortableIndexChanged();
       }
-      const firstFailure = result.failedDetails?.[result.failedPaths[0] ?? ""];
+      const firstFailure = result.failedDetails?.[failedPaths[0] ?? ""];
       this.refreshLifecycle({
-        phase: result.fatalError || result.failed > 0
+        phase: result.fatalError || failedPaths.length > 0
           ? "error"
           : this.processingSuspended
             ? "paused"
@@ -970,12 +1051,12 @@ export class EmbeddingsManager {
       this.emit("embeddings:processing-complete", {
         scope: "queue",
         processed: result.completed,
-        failed: result.failed,
+        failed: failedPaths.length,
         status: result.fatalError
           ? "error"
           : result.cancelled
             ? "aborted"
-            : result.failed > 0
+            : failedPaths.length > 0
               ? "partial"
               : "success",
       });
@@ -986,7 +1067,7 @@ export class EmbeddingsManager {
   private async preflightCredits(): Promise<void> {
     let balance;
     try {
-      balance = await this.plugin.aiService.getCreditsBalance();
+      balance = await this.plugin.aiService.readCreditsBalance();
     } catch {
       // The managed route remains authoritative when balance lookup is unavailable.
       return;
@@ -1002,6 +1083,31 @@ export class EmbeddingsManager {
     );
   }
 
+  /**
+   * A note edited while its request was in flight is newer work, not a
+   * failure: queue it again (the edit's own event usually already has) and
+   * leave it out of failure accounting. Returns the genuinely failed paths.
+   */
+  private async requeueChangedSources(
+    result: ProcessingResult,
+    workClaims: ReadonlyMap<string, SemanticWorkItem>,
+  ): Promise<string[]> {
+    const failed: string[] = [];
+    for (const path of result.failedPaths) {
+      if (result.failedDetails?.[path]?.code !== "source_changed") {
+        failed.push(path);
+        continue;
+      }
+      const claim = workClaims.get(path);
+      const current = this.workQueue.get(path);
+      if (claim && current && current.revision === claim.revision) {
+        const abstract = this.app.vault.getAbstractFileByPath(path);
+        await this.workQueue.enqueue(path, "modify", abstract instanceof TFile ? this.sourceMtime(abstract) : null);
+      }
+    }
+    return failed;
+  }
+
   private async recordFailures(
     paths: string[],
     workClaims: ReadonlyMap<string, SemanticWorkItem>,
@@ -1009,6 +1115,11 @@ export class EmbeddingsManager {
     fatalError: ManagedEmbeddingsError | null,
   ): Promise<void> {
     const failedAt = Date.now();
+    const failures: Array<{
+      claim: SemanticWorkItem;
+      error: FailedEmbeddingFile["error"];
+      failure: FailedProcessingDetail;
+    }> = [];
     for (const path of paths) {
       const detail = details?.[path];
       const error = {
@@ -1017,14 +1128,21 @@ export class EmbeddingsManager {
       };
       const claim = workClaims.get(path);
       if (!claim) continue;
-      const recorded = await this.workQueue.fail(claim, {
-        ...error,
-        ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
-        ...(detail?.requestId ? { requestId: detail.requestId } : {}),
-      }, failedAt);
-      if (!recorded) continue;
-      this.failedFiles.set(path, {
-        path,
+      failures.push({
+        claim,
+        error,
+        failure: {
+          ...error,
+          ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
+          ...(detail?.requestId ? { requestId: detail.requestId } : {}),
+        },
+      });
+    }
+    const recorded = await this.workQueue.failMany(failures, failedAt);
+    for (const { claim, error } of failures) {
+      if (!recorded.has(claim.path)) continue;
+      this.failedFiles.set(claim.path, {
+        path: claim.path,
         error,
         failedAt,
       });
@@ -1036,6 +1154,7 @@ export class EmbeddingsManager {
     reason: SemanticWorkReason,
   ): Promise<Map<string, SemanticWorkItem>> {
     const claims = new Map<string, SemanticWorkItem>();
+    const unclaimed: Array<{ path: string; sourceMtime: number | null }> = [];
     for (const file of files) {
       const sourceMtime = this.sourceMtime(file);
       const existing = this.workQueue.get(file.path);
@@ -1043,9 +1162,12 @@ export class EmbeddingsManager {
         claims.set(file.path, existing);
         continue;
       }
-      const claim = await this.workQueue.enqueueImmediate(file.path, reason, sourceMtime);
-      if (claim) claims.set(file.path, claim);
+      unclaimed.push({ path: file.path, sourceMtime });
     }
+    // One durable write for the whole batch: a full reindex used to rewrite
+    // the entire queue once per file.
+    const enqueued = await this.workQueue.enqueueManyImmediate(unclaimed, reason);
+    for (const [path, claim] of enqueued) claims.set(path, claim);
     return claims;
   }
 
@@ -1144,11 +1266,11 @@ export class EmbeddingsManager {
 
   private async hydrateManagedIdentityFromStorage(): Promise<void> {
     const inferred = this.storage.peekCurrentManagedNamespace();
-    const listNamespaces = (this.storage as EmbeddingsStorage & {
+    const storage = this.storage as EmbeddingsStorage & {
       listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
-    }).listManagedRootNamespaces;
-    const available = typeof listNamespaces === "function"
-      ? listNamespaces.call(this.storage).filter(isManagedNamespace)
+    };
+    const available = typeof storage.listManagedRootNamespaces === "function"
+      ? storage.listManagedRootNamespaces().filter(isManagedNamespace)
       : inferred && isManagedNamespace(inferred)
         ? [inferred]
         : [];
@@ -1165,11 +1287,12 @@ export class EmbeddingsManager {
       if (searchNamespace) await this.writeCommittedNamespace(searchNamespace);
     }
     this.searchNamespace = searchNamespace;
+    const current = await this.compactStoredGenerations(searchNamespace ?? inferred) ?? inferred;
 
     // The indexing generation may be partial; it is never queryable until the
     // durable commit above exists (or full corpus coverage was revalidated).
-    const namespace = inferred && isManagedNamespace(inferred)
-      ? inferred
+    const namespace = current && isManagedNamespace(current)
+      ? current
       : searchNamespace ?? candidates[0] ?? null;
     if (!namespace) return;
     const identity = parseManagedNamespace(namespace);
@@ -1182,42 +1305,58 @@ export class EmbeddingsManager {
     };
   }
 
+  /**
+   * Existing vaults can hold every generation they ever used (#324). On load
+   * the published generation is not known yet, so keep the committed one and
+   * the most recently written one (where a server generation bump sends every
+   * new note). Returns the most complete surviving generation when anything
+   * was removed, so the indexing identity never names a deleted generation.
+   */
+  private async compactStoredGenerations(committed: string | null): Promise<string | null> {
+    const storage = this.storage as EmbeddingsStorage & {
+      peekLatestManagedNamespace?: EmbeddingsStorage["peekLatestManagedNamespace"];
+    };
+    const latest = typeof storage.peekLatestManagedNamespace === "function"
+      ? storage.peekLatestManagedNamespace()
+      : null;
+    try {
+      const pruned = await this.pruneSupersededNamespaces([committed, latest], { verifyStore: true });
+      if (pruned === 0) return null;
+      this.markPortableIndexChanged();
+      return this.storage.peekCurrentManagedNamespace();
+    } catch {
+      // Compaction is an optimization; the next completed run retries it.
+      return null;
+    }
+  }
+
   private namespaceCoversEligibleCorpus(namespace: string): boolean {
     const files = this.eligibleFiles().filter((file) => !this.isLocallyEmpty(file));
     return files.length > 0 && files.every((file) => this.isFileCoveredByNamespace(file, namespace));
   }
 
   private async readCommittedNamespace(): Promise<string | null> {
-    const readState = (this.storage as EmbeddingsStorage & {
-      readState?: EmbeddingsStorage["readState"];
-    }).readState;
-    if (typeof readState !== "function") return null;
-    const stored = await readState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY) as CommittedNamespaceState | null;
-    return stored?.version === 1 && isManagedNamespace(stored.namespace)
-      ? stored.namespace
+    const stored: unknown = await this.storage.readState(COMMITTED_NAMESPACE_STATE_KEY);
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+    const candidate = stored as Record<string, unknown>;
+    return candidate.version === 1
+      && typeof candidate.namespace === "string"
+      && isManagedNamespace(candidate.namespace)
+      ? candidate.namespace
       : null;
   }
 
   private async writeCommittedNamespace(namespace: string): Promise<void> {
-    const writeState = (this.storage as EmbeddingsStorage & {
-      writeState?: EmbeddingsStorage["writeState"];
-    }).writeState;
-    if (typeof writeState !== "function") return;
     const state: CommittedNamespaceState = {
       version: 1,
       namespace,
       committedAt: Date.now(),
     };
-    await writeState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY, state);
+    await this.storage.writeState(COMMITTED_NAMESPACE_STATE_KEY, state);
   }
 
   private async deleteCommittedNamespace(): Promise<void> {
-    const deleteState = (this.storage as EmbeddingsStorage & {
-      deleteState?: EmbeddingsStorage["deleteState"];
-    }).deleteState;
-    if (typeof deleteState === "function") {
-      await deleteState.call(this.storage, COMMITTED_NAMESPACE_STATE_KEY);
-    }
+    await this.storage.deleteState(COMMITTED_NAMESPACE_STATE_KEY);
   }
 
   private shouldProcessFile(file: TFile): boolean {
@@ -1301,7 +1440,8 @@ export class EmbeddingsManager {
   private eligibleFiles(): TFile[] {
     const cached = this.plugin.vaultFileCache?.getMarkdownFiles();
     const files = Array.isArray(cached) ? cached : this.app.vault.getMarkdownFiles();
-    return files.filter((file): file is TFile => file instanceof TFile && !this.isFileExcluded(file));
+    const exclusions = this.exclusions();
+    return files.filter((file): file is TFile => file instanceof TFile && !exclusions.isExcluded(file.path));
   }
 
   private isFileExcluded(file: TFile): boolean {
@@ -1313,87 +1453,93 @@ export class EmbeddingsManager {
   }
 
   private isPathExcluded(path: string): boolean {
-    const normalizedPath = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    if (!normalizedPath) return false;
-    for (const folder of this.config.exclusions.folders) {
-      const prefix = String(folder || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/?$/, "/");
-      if (prefix && normalizedPath.startsWith(prefix)) return true;
-    }
-    const basename = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
-    for (const pattern of this.config.exclusions.patterns) {
-      if (this.matchesGlob(pattern.includes("/") ? normalizedPath : basename, pattern)) return true;
-    }
-    if (this.config.exclusions.ignoreChatHistory) {
-      const chatDirectories = [this.plugin.settings.chatsDirectory, this.plugin.settings.savedChatsDirectory]
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .map((value) => value.replace(/^\/+/, "").replace(/\/?$/, "/").toLowerCase());
-      const lower = normalizedPath.toLowerCase();
-      if (chatDirectories.some((directory) => lower.startsWith(directory))) return true;
-      if (lower.includes("systemsculpt") && (lower.includes("/saved chats/") || lower.includes("/chats/"))) return true;
-    }
-    if (this.config.exclusions.respectObsidianExclusions !== false) {
-      const vault = this.app.vault as unknown as { getConfig?: (key: string) => unknown };
-      const filters = vault.getConfig?.("userIgnoreFilters");
-      if (Array.isArray(filters) && filters.some((filter) => typeof filter === "string" && normalizedPath.includes(filter))) {
-        return true;
-      }
-    }
-    return false;
+    return this.exclusions().isExcluded(path);
   }
 
-  private matchesGlob(target: string, pattern: string): boolean {
-    if (!pattern) return false;
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    try {
-      return new RegExp(`^${escaped.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*").replace(/\?/g, ".")}$`, "i").test(target);
-    } catch {
-      return false;
-    }
+  /** Shared vault exclusion rules, compiled once per settings revision. */
+  private exclusions(): VaultExclusions {
+    return resolveVaultExclusions({
+      exclusions: this.config.exclusions,
+      settings: this.plugin.settings,
+      vault: this.app.vault,
+    }, "embeddings");
   }
 
   private async cleanupExcludedEmbeddings(): Promise<void> {
     await this.awaitReady();
     await this.processingMutex.runExclusive(async () => {
       let changed = false;
+      const exclusions = this.exclusions();
       for (const path of this.storage.getDistinctPaths()) {
-        if (this.isPathExcluded(path)) {
-          await this.storage.removeByPath(path);
+        if (exclusions.isExcluded(path)) {
+          if (await this.storage.removeByPath(path)) changed = true;
           await this.workQueue.remove(path);
           this.failedFiles.delete(path);
-          changed = true;
         }
       }
-      if (changed) await this.commitPortableDestructiveMutation();
+      if (changed) this.markPortableIndexDestructive();
       this.refreshLifecycle();
     });
   }
 
-  private async pruneInactiveManagedNamespaces(): Promise<number> {
-    const namespace = this.getSearchNamespace();
-    if (!namespace) return 0;
-    const prune = (this.storage as EmbeddingsStorage & {
-      removeNamespacesExcept?: EmbeddingsStorage["removeNamespacesExcept"];
-    }).removeNamespacesExcept;
-    return typeof prune === "function"
-      ? prune.call(this.storage, MANAGED_EMBEDDING_FAMILY_PREFIX, namespace)
-      : 0;
-  }
-
-  private collectSearchableRootPaths(vectors: EmbeddingVector[]): Set<string> {
-    const paths = new Set<string>();
-    for (const vector of vectors) {
-      if (vector.chunkId !== 0 || vector.metadata.isEmpty === true || vector.metadata.complete === false) continue;
-      const file = this.app.vault.getAbstractFileByPath(vector.path);
-      if (
-        file instanceof TFile
-        && this.isFileReadyInNamespace(file, vector.metadata.namespace)
-      ) {
-        paths.add(vector.path);
-      }
+  /**
+   * Keep only the committed (searchable) generation and the in-progress one.
+   * Anything else is a superseded generation or a pre-managed provider
+   * namespace that can never be queried again (#324). After a run the
+   * published generation is known, so the in-progress generation is exactly
+   * the indexing namespace; at load it is the most recently written one.
+   */
+  private async pruneSupersededNamespaces(
+    candidates: ReadonlyArray<string | null> = this.liveGenerationCandidates(),
+    options: { verifyStore?: boolean } = {},
+  ): Promise<number> {
+    const storage = this.storage as EmbeddingsStorage & {
+      retainNamespaces?: EmbeddingsStorage["retainNamespaces"];
+      listRootNamespaces?: EmbeddingsStorage["listRootNamespaces"];
+    };
+    if (typeof storage.retainNamespaces !== "function") return 0;
+    const keep = new Set(candidates.filter((namespace): namespace is string => (
+      Boolean(namespace && isManagedNamespace(namespace))
+    )));
+    // Cached roots name every namespace a finished run can leave behind, so
+    // routine runs skip the store walk when nothing outside `keep` remains.
+    if (
+      !options.verifyStore
+      && typeof storage.listRootNamespaces === "function"
+      && storage.listRootNamespaces().every((namespace) => (
+        namespace === LOCAL_EMPTY_EMBEDDING_NAMESPACE || keep.has(namespace)
+      ))
+    ) {
+      return 0;
     }
-    return paths;
+    // With no trusted generation yet, drop only namespaces that are not managed.
+    return storage.retainNamespaces(keep.size > 0 ? keep : null);
   }
 
+  /**
+   * The committed generation plus every stored generation the server still
+   * publishes. The indexing identity can lag behind a generation bump until the
+   * first note of the run is written, so published-generation roots count too.
+   */
+  private liveGenerationCandidates(): Array<string | null> {
+    const candidates = [this.getSearchNamespace(), this.getIndexingNamespace()];
+    const storage = this.storage as EmbeddingsStorage & {
+      listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
+    };
+    if (this.gateway.metadata?.generation && typeof storage.listManagedRootNamespaces === "function") {
+      candidates.push(...storage.listManagedRootNamespaces().filter((namespace) => (
+        this.namespaceMatchesPublishedGeneration(namespace)
+      )));
+    }
+    return candidates;
+  }
+
+  /**
+   * Score queries against the generation's packed in-memory matrix, deciding
+   * eligibility once per note, then rescore the few winners in Float32 from
+   * their stored records. The matrix is built on first use and kept current
+   * by storage, so a query no longer streams the whole store.
+   */
   private async searchIndexedNamespace(
     namespace: string,
     queries: Float32Array[],
@@ -1401,53 +1547,32 @@ export class EmbeddingsManager {
     signal?: AbortSignal,
     excludedPath?: string,
   ): Promise<SearchResult[][]> {
-    const storage = this.storage as EmbeddingsStorage & {
-      scanVectorsByNamespace?: EmbeddingsStorage["scanVectorsByNamespace"];
+    const empty = () => queries.map(() => [] as SearchResult[]);
+    const matrix = await this.storage.getSearchMatrix(namespace);
+    if (!matrix || signal?.aborted) return empty();
+    const exclusions = this.exclusions();
+    const isEligible = (path: string): boolean => {
+      if (path === excludedPath || exclusions.isExcluded(path)) return false;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile && this.isFileReadyInNamespace(file, namespace);
     };
-    const scan = storage.scanVectorsByNamespace;
-    if (typeof scan !== "function") {
-      const vectors = await this.storage.getVectorsByNamespace(namespace);
-      if (signal?.aborted) return queries.map(() => []);
-      const eligiblePaths = this.collectSearchableRootPaths(vectors);
-      const candidates = vectors.filter((vector) => (
-        vector.path !== excludedPath
-        && vector.metadata.isEmpty !== true
-        && eligiblePaths.has(vector.path)
-        && !this.isPathExcluded(vector.path)
-      ));
-      const sets: SearchResult[][] = [];
-      for (const query of queries) {
-        if (signal?.aborted) return queries.map(() => []);
-        sets.push(await this.search.findSimilarAsync(query, candidates, limit, { signal }));
+    const candidateSets = await matrix.search(queries, limit, isEligible, { signal });
+    if (signal?.aborted) return empty();
+    const ids = [...new Set(candidateSets.flat().map((candidate) => (
+      buildVectorId(namespace, candidate.path, candidate.chunkId)
+    )))];
+    const records = new Map((await this.storage.readRecords(ids)).map((record) => [record.id, record]));
+    if (signal?.aborted) return empty();
+    return candidateSets.map((candidates, index) => {
+      const results: SearchResult[] = [];
+      for (const candidate of candidates) {
+        const record = records.get(buildVectorId(namespace, candidate.path, candidate.chunkId));
+        if (!record || record.path !== candidate.path || !isEligible(record.path)) continue;
+        const score = dot(queries[index], record.vector);
+        if (score > MIN_SIMILARITY) results.push(toSearchResult(record, score));
       }
-      return sets;
-    }
-
-    const eligiblePaths = new Set(
-      this.storage.getDistinctPaths().filter((path) => (
-        path !== excludedPath
-        && (() => {
-          const file = this.app.vault.getAbstractFileByPath(path);
-          return file instanceof TFile && this.isFileReadyInNamespace(file, namespace);
-        })()
-      )),
-    );
-    const sets = queries.map(() => [] as SearchResult[]);
-    await scan.call(this.storage, namespace, (batch: EmbeddingVector[]) => {
-      if (signal?.aborted) return;
-      const candidates = batch.filter((vector) => (
-        vector.metadata.isEmpty !== true
-        && eligiblePaths.has(vector.path)
-        && !this.isPathExcluded(vector.path)
-      ));
-      queries.forEach((query, index) => {
-        const additions = this.search.findSimilar(query, candidates, limit);
-        sets[index] = [...sets[index], ...additions]
-          .sort((left, right) => right.score - left.score)
-          .slice(0, limit);
-      });
-    }, { batchSize: 250, signal });
-    return signal?.aborted ? queries.map(() => []) : sets;
+      return results.sort((left, right) => right.score - left.score);
+    });
   }
 
   private selectQueryVectors(vectors: EmbeddingVector[]): EmbeddingVector[] {
@@ -1520,7 +1645,7 @@ export class EmbeddingsManager {
       const oldest = this.queryCache.keys().next().value;
       if (typeof oldest === "string") this.queryCache.delete(oldest);
     }
-    this.queryCache.set(key, { vector, namespace, expiresAt: Date.now() + 60_000 });
+    this.queryCache.set(key, { vector, namespace, expiresAt: Date.now() + QUERY_VECTOR_TTL_MS });
   }
 
   private buildConfig(overrides?: Partial<EmbeddingsManagerConfig>): EmbeddingsManagerConfig {
@@ -1555,7 +1680,7 @@ export class EmbeddingsManager {
       .map((vector) => vector.id);
     if (legacyIds.length > 0) {
       await this.storage.removeIds(legacyIds);
-      await this.commitPortableDestructiveMutation();
+      this.markPortableIndexDestructive();
     }
     const committed = await this.readCommittedNamespace();
     if (committed && parseManagedNamespace(committed)?.indexSchemaVersion === 2) {
@@ -1576,19 +1701,72 @@ export class EmbeddingsManager {
     return this.portableIndexFile;
   }
 
-  private async restorePortableIndexIfEmpty(): Promise<void> {
+  private async restorePortableIndexIfEmpty(): Promise<boolean> {
     const file = this.getPortableIndexFile();
-    if (!file) return;
-    try { await restoreEmbeddingsIndexIfEmpty({ store: this.storage, file }); } catch { /* best effort */ }
+    if (!file) return false;
+    try {
+      return (await restoreEmbeddingsIndexIfEmpty({
+        store: this.storage,
+        file,
+        isRestorable: this.restorablePathFilter(),
+      })).restored === true;
+    } catch {
+      return false; /* best effort */
+    }
+  }
+
+  /**
+   * A snapshot can hold notes this vault has since deleted or now excludes;
+   * restoring them would bring them back. Checks existence only once the
+   * vault reports its notes, so a vault still loading does not drop everything.
+   */
+  private restorablePathFilter(): (path: string) => boolean {
+    const exclusions = this.exclusions();
+    const vaultListed = this.app.vault.getMarkdownFiles().length > 0;
+    return (path) => {
+      if (exclusions.isExcluded(path)) return false;
+      if (!vaultListed) return true;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile && file.extension === "md";
+    };
+  }
+
+  private async validateStoredVectors(restoredPortableIndex: boolean): Promise<StoredVectorRepair> {
+    const marker = await this.storage.readState<{ version?: unknown }>(VECTOR_VALIDATION_STATE_KEY);
+    if (!restoredPortableIndex && marker?.version === VECTOR_VALIDATION_VERSION) return NO_VECTOR_REPAIR;
+    const repair = await this.storage.purgeCorruptedVectors();
+    await this.storage.writeState(VECTOR_VALIDATION_STATE_KEY, {
+      version: VECTOR_VALIDATION_VERSION,
+      validatedAt: Date.now(),
+    });
+    return repair;
   }
 
   private getPortableCheckpoint(): PortableCheckpointCoordinator | null {
     const file = this.getPortableIndexFile();
     if (!file) return null;
-    this.portableCheckpoint ??= new PortableCheckpointCoordinator({ store: this.storage, file });
+    this.portableCheckpoint ??= new PortableCheckpointCoordinator({
+      store: this.storage,
+      file,
+      committedNamespace: () => this.getSearchNamespace(),
+      onError: (_error, destructive) => {
+        // An ordinary snapshot write failure is harmless: IndexedDB stays
+        // authoritative and the next change retries. A failed removal write
+        // deleted the snapshot, which the user should know about.
+        if (!destructive) return;
+        this.refreshLifecycle({
+          phase: "error",
+          lastError: {
+            code: "checkpoint_failed",
+            message: "The portable semantic index could not be updated.",
+          },
+        });
+      },
+    });
     return this.portableCheckpoint;
   }
 
+  /** New vectors: coalesced into a later snapshot write. */
   private markPortableIndexChanged(): void {
     this.getPortableCheckpoint()?.markChanged();
   }
@@ -1597,19 +1775,18 @@ export class EmbeddingsManager {
     try { await this.getPortableCheckpoint()?.flush(); } catch { /* local index remains authoritative */ }
   }
 
-  private async commitPortableDestructiveMutation(): Promise<void> {
-    try {
-      await this.getPortableCheckpoint()?.commitDestructiveMutation();
-    } catch (error) {
-      this.refreshLifecycle({
-        phase: "error",
-        lastError: {
-          code: "checkpoint_failed",
-          message: "The portable semantic index could not be updated.",
-        },
-      });
-      throw error;
-    }
+  /** Records were removed: the snapshot is rewritten after a short quiet period. */
+  private markPortableIndexDestructive(): void {
+    this.getPortableCheckpoint()?.markDestructive();
+  }
+
+  /**
+   * After a vault pass, schedule the one-time rewrite of an older release's
+   * single-file snapshot, or of shards missing from disk. A current snapshot
+   * costs a stat and a directory listing, and no write.
+   */
+  private async reconcilePortableIndexFormat(): Promise<void> {
+    try { await this.getPortableCheckpoint()?.reconcileFormat(); } catch { /* retried after the next pass */ }
   }
 
   private hydrateFailuresFromWorkQueue(): void {
@@ -1632,7 +1809,7 @@ export class EmbeddingsManager {
   }
 
   private async restoreFatalSuspension(): Promise<void> {
-    const stored = await this.stateStore.readState<unknown>(FATAL_SUSPENSION_STATE_KEY);
+    const stored = await this.storage.readState<unknown>(FATAL_SUSPENSION_STATE_KEY);
     if (stored === null) return;
     if (
       typeof stored === "object"
@@ -1691,7 +1868,7 @@ export class EmbeddingsManager {
         : {}),
       recordedAt: Date.now(),
     };
-    await this.stateStore.writeState(FATAL_SUSPENSION_STATE_KEY, state);
+    await this.storage.writeState(FATAL_SUSPENSION_STATE_KEY, state);
     this.refreshLifecycle({
       phase: "error",
       currentPath: null,
@@ -1700,7 +1877,7 @@ export class EmbeddingsManager {
   }
 
   private clearFatalSuspension(): Promise<void> {
-    return this.stateStore.deleteState(FATAL_SUSPENSION_STATE_KEY);
+    return this.storage.deleteState(FATAL_SUSPENSION_STATE_KEY);
   }
 
   private generationSnapshotForNamespace(namespace: string): SemanticIndexSnapshot["generation"] {
@@ -1780,9 +1957,26 @@ export class EmbeddingsManager {
     };
   }
 
+  /**
+   * Per-note progress during a run. The run's own counters are exact, so this
+   * skips the vault-wide stats walk that refreshLifecycle performs; the run's
+   * final refresh recomputes them.
+   */
+  private refreshProgress(progress: ProcessingProgress): void {
+    this.lifecycle.update({
+      phase: "reconciling",
+      total: progress.total,
+      completed: progress.current,
+      pending: Math.max(0, progress.total - progress.current),
+      failed: this.failedFiles.size,
+      currentPath: progress.currentFile ?? null,
+    });
+  }
+
   private refreshLifecycle(
     patch: Partial<Omit<SemanticIndexSnapshot, "updatedAt">> = {},
   ): void {
+    this.clearLifecycleRefresh();
     const searchNamespace = this.getSearchNamespace();
     let total = 0;
     let completed = 0;
@@ -1804,15 +1998,6 @@ export class EmbeddingsManager {
       failed: this.failedFiles.size,
       ...patch,
     });
-  }
-
-  private async setRebuildPending(pending: boolean): Promise<void> {
-    if (this.plugin.settings.embeddingsRebuildPending === pending) return;
-    try {
-      await this.plugin.getSettingsManager().updateSettings({ embeddingsRebuildPending: pending });
-    } catch {
-      this.plugin.settings.embeddingsRebuildPending = pending;
-    }
   }
 
   private emit(event: string, payload: Record<string, unknown>): void {

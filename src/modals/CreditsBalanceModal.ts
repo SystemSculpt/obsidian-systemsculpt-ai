@@ -52,8 +52,7 @@ export class CreditsBalanceModal extends StandardModal {
   private refreshButton: HTMLButtonElement | null = null;
   private purchaseButton: HTMLButtonElement | null = null;
   private isRefreshingBalance: boolean = false;
-  private isRefreshingUsage: boolean = false;
-  private isLoadingMoreUsage: boolean = false;
+  private usageRequest: "refresh" | "more" | null = null;
 
   constructor(app: App, options: CreditsBalanceModalOptions) {
     super(app);
@@ -71,8 +70,7 @@ export class CreditsBalanceModal extends StandardModal {
     super.onOpen();
 
     this.isRefreshingBalance = false;
-    this.isRefreshingUsage = false;
-    this.isLoadingMoreUsage = false;
+    this.usageRequest = null;
 
     this.addTitle(
       "Credits & Usage",
@@ -100,19 +98,19 @@ export class CreditsBalanceModal extends StandardModal {
     });
     this.usageLoadMoreButton.addClass("ss-credits-usage__load-more");
     this.registerDomEvent(this.usageLoadMoreButton, "click", () => {
-      void this.loadMoreUsage();
+      void this.loadUsage("more");
     });
 
     this.tabsHandle = createUiTabs(this.tabBarEl, [
       {
         id: "balance",
-        button: this.balanceTabButton!,
-        panel: this.balancePanelEl!,
+        button: this.balanceTabButton,
+        panel: this.balancePanelEl,
       },
       {
         id: "usage",
-        button: this.usageTabButton!,
-        panel: this.usagePanelEl!,
+        button: this.usageTabButton,
+        panel: this.usagePanelEl,
       },
     ], {
       activeId: this.activeTab,
@@ -126,14 +124,14 @@ export class CreditsBalanceModal extends StandardModal {
       "Refresh",
       () => {
         if (this.activeTab === "usage") {
-          void this.refreshUsage();
+          void this.loadUsage();
           return;
         }
         void this.refreshBalance();
       },
       false,
       "refresh-cw"
-    ) as HTMLButtonElement;
+    );
 
     this.purchaseButton = this.addActionButton(
       "credits.buy",
@@ -141,7 +139,7 @@ export class CreditsBalanceModal extends StandardModal {
       () => this.openPurchasePage(),
       true,
       "external-link"
-    ) as HTMLButtonElement;
+    );
 
     this.addActionButton(
       "credits.open-account",
@@ -179,7 +177,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.updateUsageLoadMoreButton();
 
     if (tab === "usage" && !this.usageLoaded) {
-      await this.refreshUsage(true);
+      await this.loadUsage("refresh", true);
     }
   }
 
@@ -187,8 +185,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.tabsHandle?.destroy();
     this.tabsHandle = null;
     this.isRefreshingBalance = false;
-    this.isRefreshingUsage = false;
-    this.isLoadingMoreUsage = false;
+    this.usageRequest = null;
     super.onClose();
   }
 
@@ -238,14 +235,14 @@ export class CreditsBalanceModal extends StandardModal {
     });
     heroContent.createDiv({
       cls: "ss-credits-balance__hero-value",
-      text: `${this.formatCredits(availableUnreserved)} credits`,
+      text: `${this.formatNumber(availableUnreserved)} credits`,
     });
 
     const includedMeter = this.summaryEl.createDiv({ cls: "ss-credits-balance__meter" });
     const meterLabel = includedMeter.createDiv({ cls: "ss-credits-balance__meter-label" });
     if (metrics.hasMonthlyAllowance) {
       meterLabel.setText(
-        `Included remaining this cycle: ${this.formatCredits(metrics.includedRemainingForMeter)} of ${this.formatCredits(metrics.includedPerMonth)}`
+        `Included remaining this cycle: ${this.formatNumber(metrics.includedRemainingForMeter)} of ${this.formatNumber(metrics.includedPerMonth)}`
       );
     } else {
       meterLabel.setText("Included monthly allowance unavailable.");
@@ -260,27 +257,27 @@ export class CreditsBalanceModal extends StandardModal {
 
     this.createStatCard(
       "Total balance",
-      `${this.formatCredits(metrics.conservativeTotalRemaining)} credits`
+      `${this.formatNumber(metrics.conservativeTotalRemaining)} credits`
     );
     this.createStatCard(
       "Held in flight",
-      `${this.formatCredits(heldInFlight)} credits`
+      `${this.formatNumber(heldInFlight)} credits`
     );
     this.createStatCard(
       "Available now",
-      `${this.formatCredits(availableUnreserved)} credits`
+      `${this.formatNumber(availableUnreserved)} credits`
     );
     this.createStatCard(
       "Included left",
-      `${this.formatCredits(this.balance.includedRemaining)} credits`
+      `${this.formatNumber(this.balance.includedRemaining)} credits`
     );
     this.createStatCard(
       "Add-on left",
-      `${this.formatCredits(this.balance.addOnRemaining)} credits`
+      `${this.formatNumber(this.balance.addOnRemaining)} credits`
     );
     this.createStatCard(
       "Monthly included",
-      `${this.formatCredits(this.balance.includedPerMonth)} credits`
+      `${this.formatNumber(this.balance.includedPerMonth)} credits`
     );
 
     this.createTimelineRow("Cycle started", this.formatDate(this.balance.cycleStartedAt));
@@ -296,7 +293,7 @@ export class CreditsBalanceModal extends StandardModal {
 
     if (metrics.totalsMismatch) {
       this.hintEl.setText(
-        `Balance sources disagree (reported ${this.formatCredits(metrics.reportedTotalRemaining)} vs breakdown ${this.formatCredits(metrics.derivedTotalRemaining)}). Showing the conservative total to avoid overestimating available credits.`
+        `Balance sources disagree (reported ${this.formatNumber(metrics.reportedTotalRemaining)} vs breakdown ${this.formatNumber(metrics.derivedTotalRemaining)}). Showing the conservative total to avoid overestimating available credits.`
       );
       this.hintEl.addClass("is-warning");
     } else if (isOutOfCredits) {
@@ -304,7 +301,7 @@ export class CreditsBalanceModal extends StandardModal {
       this.hintEl.addClass("is-warning");
     } else if (isUnavailable) {
       this.hintEl.setText(
-        `${this.formatCredits(heldInFlight)} credits are held for in-flight work. Add credits or wait for that work to settle.`,
+        `${this.formatNumber(heldInFlight)} credits are held for in-flight work. Add credits or wait for that work to settle.`,
       );
       this.hintEl.addClass("is-warning");
     } else if (isLowBalance) {
@@ -386,7 +383,7 @@ export class CreditsBalanceModal extends StandardModal {
       });
       header.createDiv({
         cls: "ss-credits-usage__item-credits",
-        text: `${this.formatCredits(item.creditsCharged)} credits`,
+        text: `${this.formatNumber(item.creditsCharged)} credits`,
       });
 
       const meta = row.createDiv({ cls: "ss-credits-usage__item-meta" });
@@ -399,13 +396,13 @@ export class CreditsBalanceModal extends StandardModal {
       const details = row.createDiv({ cls: "ss-credits-usage__item-details" });
       const detailParts: string[] = [];
       if (item.durationSeconds > 0) {
-        detailParts.push(`${this.formatCompactNumber(item.durationSeconds)}s audio`);
+        detailParts.push(`${this.formatNumber(item.durationSeconds, 1)}s audio`);
       }
       if (item.totalTokens > 0) {
-        detailParts.push(`${this.formatCompactNumber(item.totalTokens)} tokens`);
+        detailParts.push(`${this.formatNumber(item.totalTokens, 1)} tokens`);
       }
       if (item.pageCount > 0) {
-        detailParts.push(`${this.formatCompactNumber(item.pageCount)} pages`);
+        detailParts.push(`${this.formatNumber(item.pageCount, 1)} pages`);
       }
       details.setText(detailParts.length > 0 ? detailParts.join("  •  ") : this.formatUsageKind(item.usageKind));
 
@@ -427,7 +424,7 @@ export class CreditsBalanceModal extends StandardModal {
 
       const balanceTrail = row.createDiv({ cls: "ss-credits-usage__item-balance-trail" });
       balanceTrail.setText(
-        `Balance: ${this.formatCredits(item.totalBefore)} → ${this.formatCredits(item.totalAfter)}`
+        `Balance: ${this.formatNumber(item.totalBefore)} → ${this.formatNumber(item.totalAfter)}`
       );
     }
 
@@ -514,92 +511,44 @@ export class CreditsBalanceModal extends StandardModal {
     }
   }
 
-  private async refreshUsage(silent: boolean = false): Promise<void> {
-    if (!this.options.loadUsage || this.isRefreshingUsage) {
-      return;
-    }
-
+  private async loadUsage(mode: "refresh" | "more" = "refresh", silent = false): Promise<void> {
+    if (!this.options.loadUsage || this.usageRequest || (mode === "more" && !this.usage.nextBefore)) return;
     const task = this.beginAsyncTask("credits-usage");
-    this.isLoadingMoreUsage = false;
-    this.isRefreshingUsage = true;
-    this.setRefreshBusyState();
-    if (!silent) {
-      this.setStatusMessage("Refreshing usage history…");
-    }
-
-    try {
-      const page = await this.options.loadUsage({ limit: 50 });
-      if (!task.isCurrent()) return;
-      this.usage = {
-        items: Array.isArray(page?.items) ? page.items : [],
-        nextBefore: typeof page?.nextBefore === "string" ? page.nextBefore : null,
-      };
-      this.usageLoaded = true;
-      this.renderUsage();
-      const updatedAt = this.formatDate(new Date().toISOString(), true);
-      this.setStatusMessage(`Usage updated ${updatedAt}.`);
-    } catch (error) {
-      if (!task.isCurrent()) return;
-      const message = error instanceof Error && error.message ? error.message : "Unknown error";
-      this.setStatusMessage(`Unable to refresh usage (${message}).`, "error");
-      new Notice("Unable to refresh usage history.", 5000);
-    } finally {
-      if (task.isCurrent()) {
-        this.isRefreshingUsage = false;
-        this.setRefreshBusyState();
-      }
-    }
-  }
-
-  private async loadMoreUsage(): Promise<void> {
-    if (
-      !this.options.loadUsage ||
-      this.isLoadingMoreUsage ||
-      !this.usage.nextBefore
-    ) {
-      return;
-    }
-
-    const task = this.beginAsyncTask("credits-usage");
-    this.isRefreshingUsage = false;
-    this.isLoadingMoreUsage = true;
+    this.usageRequest = mode;
     this.updateUsageLoadMoreButton();
     this.setRefreshBusyState();
-    this.setStatusMessage("Loading older usage records…");
+    if (!silent) this.setStatusMessage(mode === "more" ? "Loading older usage records…" : "Refreshing usage history…");
 
     try {
       const page = await this.options.loadUsage({
         limit: 50,
-        before: this.usage.nextBefore,
+        ...(mode === "more" ? { before: this.usage.nextBefore! } : {}),
       });
       if (!task.isCurrent()) return;
-
-      const appended = Array.isArray(page?.items) ? page.items : [];
-      const seen = new Set(this.usage.items.map((entry) => entry.id));
-      const merged = [...this.usage.items];
-      for (const entry of appended) {
-        if (!entry?.id || seen.has(entry.id)) {
-          continue;
-        }
+      const items = mode === "more" ? [...this.usage.items] : [];
+      const seen = new Set(items.map((entry) => entry.id));
+      for (const entry of Array.isArray(page?.items) ? page.items : []) {
+        if (!entry?.id || seen.has(entry.id)) continue;
         seen.add(entry.id);
-        merged.push(entry);
+        items.push(entry);
       }
-
       this.usage = {
-        items: merged,
+        items,
         nextBefore: typeof page?.nextBefore === "string" ? page.nextBefore : null,
       };
       this.usageLoaded = true;
       this.renderUsage();
-      this.setStatusMessage("Loaded older usage records.");
+      this.setStatusMessage(mode === "more"
+        ? "Loaded older usage records."
+        : `Usage updated ${this.formatDate(new Date().toISOString(), true)}.`);
     } catch (error) {
       if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
-      this.setStatusMessage(`Unable to load older usage (${message}).`, "error");
-      new Notice("Unable to load older usage records.", 5000);
+      this.setStatusMessage(`Unable to ${mode === "more" ? "load older" : "refresh"} usage (${message}).`, "error");
+      new Notice(mode === "more" ? "Unable to load older usage records." : "Unable to refresh usage history.", 5000);
     } finally {
       if (task.isCurrent()) {
-        this.isLoadingMoreUsage = false;
+        this.usageRequest = null;
         this.updateUsageLoadMoreButton();
         this.setRefreshBusyState();
       }
@@ -618,11 +567,11 @@ export class CreditsBalanceModal extends StandardModal {
       this.usage.nextBefore.length > 0;
 
     this.usageLoadMoreButton.style.display = shouldShow ? "" : "none";
-    this.usageLoadMoreButton.disabled = this.isLoadingMoreUsage;
-    this.usageLoadMoreButton.classList.toggle("is-busy", this.isLoadingMoreUsage);
+    this.usageLoadMoreButton.disabled = this.usageRequest !== null;
+    this.usageLoadMoreButton.classList.toggle("is-busy", this.usageRequest !== null);
     this.usageLoadMoreButton.setAttr(
       "aria-busy",
-      String(this.isLoadingMoreUsage),
+      String(this.usageRequest !== null),
     );
   }
 
@@ -631,7 +580,7 @@ export class CreditsBalanceModal extends StandardModal {
       return;
     }
 
-    const isBusy = this.isRefreshingBalance || this.isRefreshingUsage || this.isLoadingMoreUsage;
+    const isBusy = this.isRefreshingBalance || this.usageRequest !== null;
     this.refreshButton.disabled = isBusy;
     this.refreshButton.classList.toggle("is-busy", isBusy);
     this.refreshButton.setAttr("aria-busy", isBusy ? "true" : "false");
@@ -679,19 +628,10 @@ export class CreditsBalanceModal extends StandardModal {
     }
   }
 
-  private formatCompactNumber(value: number): string {
+  private formatNumber(value: number, maximumFractionDigits = 0): string {
     const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
     try {
-      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(safeValue);
-    } catch {
-      return String(safeValue);
-    }
-  }
-
-  private formatCredits(value: number): string {
-    const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
-    try {
-      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(safeValue);
+      return new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(safeValue);
     } catch {
       return String(safeValue);
     }
@@ -712,7 +652,7 @@ export class CreditsBalanceModal extends StandardModal {
     const epsilon = 0.000001;
 
     if (charged - exact > epsilon) {
-      return `You used ${this.formatExactCredits(exact)} credits; billed ${this.formatCredits(charged)} because billing rounds up each request.`;
+      return `You used ${this.formatExactCredits(exact)} credits; billed ${this.formatNumber(charged)} because billing rounds up each request.`;
     }
 
     return `You used ${this.formatExactCredits(exact)} credits for this request.`;
@@ -740,13 +680,13 @@ export class CreditsBalanceModal extends StandardModal {
     }
 
     if (readTokens > 0 && writeTokens > 0) {
-      return `Prompt cache: reused ${this.formatCompactNumber(readTokens)} tokens from earlier context and wrote ${this.formatCompactNumber(writeTokens)} tokens for future turns.`;
+      return `Prompt cache: reused ${this.formatNumber(readTokens, 1)} tokens from earlier context and wrote ${this.formatNumber(writeTokens, 1)} tokens for future turns.`;
     }
     if (readTokens > 0) {
-      return `Prompt cache: reused ${this.formatCompactNumber(readTokens)} tokens from earlier context.`;
+      return `Prompt cache: reused ${this.formatNumber(readTokens, 1)} tokens from earlier context.`;
     }
 
-    return `Prompt cache: wrote ${this.formatCompactNumber(writeTokens)} tokens for future turns.`;
+    return `Prompt cache: wrote ${this.formatNumber(writeTokens, 1)} tokens for future turns.`;
   }
 
   private asSafeCredit(value: unknown): number {

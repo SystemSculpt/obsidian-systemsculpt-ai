@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
-import SystemSculptPlugin from '../main';
+import type SystemSculptPlugin from '../main';
 import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
@@ -43,8 +43,16 @@ export class EmbeddingsView extends ItemView {
   private unsubscribeIndexLifecycle: (() => void) | null = null;
   private lastIndexSnapshot: Readonly<SemanticIndexSnapshot> | null = null;
   private deletedSourcePath: string | null = null;
+  /** The semantic query of the last completed chat search. */
+  private lastChatQueryHash: string | null = null;
   private readonly searchRuns: SimilaritySearchRunCoordinator;
   private readonly SEARCH_DELAY = 300; // 300ms delay
+  /**
+   * Any finished index run may have produced a better match for the current
+   * note. Re-querying is an in-memory scan, so it follows every run, once
+   * a burst of runs has settled.
+   */
+  private readonly INDEX_SETTLED_REFRESH_DELAY = 2_000;
   
   constructor(leaf: WorkspaceLeaf, plugin: SystemSculptPlugin) {
     super(leaf);
@@ -66,7 +74,7 @@ export class EmbeddingsView extends ItemView {
   }
 
   private getActiveChatView(): AgentChatView | null {
-    const activeLeaf = this.app.workspace.activeLeaf;
+    const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const activeView = activeLeaf?.view as AgentChatView | undefined;
     if (activeView?.getViewType?.() !== CHAT_VIEW_TYPE) {
       return null;
@@ -150,7 +158,6 @@ export class EmbeddingsView extends ItemView {
     
     // Also listen for direct file-open events which can fire without a leaf switch
     this.registerEvent(
-      // @ts-ignore - 'file-open' exists on workspace event bus
       this.app.workspace.on('file-open', (file) => {
         if (file instanceof TFile && file.path === this.deletedSourcePath) {
           this.deletedSourcePath = null;
@@ -181,19 +188,15 @@ export class EmbeddingsView extends ItemView {
       })
     );
     
-    // Listen for file modifications
-    this.registerEvent(
-      this.app.vault.on('modify', (file) => {
-        if (file instanceof TFile && file === this.currentFile) {
-          this.debouncedSearchCurrentFile();
-        }
-      })
-    );
+    // Edits to the open note keep the current results on screen. Its
+    // re-embed finishes an index run, and that run re-queries (see
+    // bindIndexLifecycle), so typing never sends a query per autosave.
 
-    // Refresh Similar Notes when files are renamed/deleted (links + embeddings paths can change)
+    // A rename matters only when it moves the current note or one of its results.
     this.registerEvent(
-      this.app.vault.on("rename", (_file) => {
+      this.app.vault.on("rename", (file, oldPath: string) => {
         if (this.isDragging) return;
+        if (file !== this.currentFile && !this.touchesCurrentContext([oldPath, file?.path ?? ""])) return;
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
       })
@@ -205,7 +208,7 @@ export class EmbeddingsView extends ItemView {
     
     // Listen for chat updates
     this.registerEvent(
-      (this.app.workspace as any).on('systemsculpt:chat-loaded', (chatId: string) => {
+      this.app.workspace.on('systemsculpt:chat-loaded', (chatId: string) => {
         // When a chat is loaded or updated, refresh if it's the current chat
         if (this.currentChatView && this.currentChatView.chatId === chatId) {
           this.debouncedSearchCurrentChat();
@@ -215,7 +218,7 @@ export class EmbeddingsView extends ItemView {
     
     // Durable transcript changes are emitted only after the vault write commits.
     this.registerEvent(
-      (this.app.workspace as any).on(CHAT_TRANSCRIPT_COMMITTED_EVENT, (event: ChatTranscriptCommittedEvent) => {
+      this.app.workspace.on(CHAT_TRANSCRIPT_COMMITTED_EVENT, (event: ChatTranscriptCommittedEvent) => {
         if (this.currentChatView && this.currentChatView.chatId === event?.chatId) {
           this.debouncedSearchCurrentChat();
         }
@@ -225,7 +228,7 @@ export class EmbeddingsView extends ItemView {
     // File context is plugin state, not document state. The workspace event
     // bus keeps this synchronized even when either view lives in a popout.
     this.registerEvent(
-      (this.app.workspace as any).on(
+      this.app.workspace.on(
         FILE_CONTEXT_STATE_CHANGED_EVENT,
         (event: FileContextStateChangedEvent) => {
           if (
@@ -260,9 +263,13 @@ export class EmbeddingsView extends ItemView {
       );
       const reconciliationSettled = previous?.phase === "reconciling"
         && snapshot.phase !== "reconciling";
-      if (generationChanged || reconciliationSettled) {
+      if (generationChanged) {
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
+      } else if (reconciliationSettled) {
+        // Hidden views defer the search until they are shown again.
+        this.forceRefreshNextCheck = true;
+        this.searchRuns.scheduleTask(() => this.checkActiveFile(), this.INDEX_SETTLED_REFRESH_DELAY);
       }
     });
   }
@@ -271,25 +278,32 @@ export class EmbeddingsView extends ItemView {
     this.searchRuns.scheduleTask(() => this.checkActiveFile(), this.SEARCH_DELAY);
   }
   
-  private debouncedSearchCurrentFile(): void {
-    if (this.currentFile) {
-      this.searchRuns.schedule(fileSimilaritySource(this.currentFile), this.SEARCH_DELAY * 2);
-    }
+  private debouncedSearchCurrentChat(): void {
+    if (!this.currentChatView) return;
+    // A chat save fires more than once per turn; only a changed query needs a search.
+    if (this.hashContent(this.extractChatContent(this.currentChatView)) === this.lastChatQueryHash) return;
+    this.searchRuns.schedule(chatSimilaritySource(this.currentChatView), this.SEARCH_DELAY * 2);
   }
 
-  private debouncedSearchCurrentChat(): void {
-    if (this.currentChatView) {
-      this.searchRuns.schedule(chatSimilaritySource(this.currentChatView), this.SEARCH_DELAY * 2);
-    }
+  /** True when any path is the current note, one of its results, or a folder holding one. */
+  private touchesCurrentContext(paths: readonly string[]): boolean {
+    return paths.some((path) => {
+      if (!path) return false;
+      const folder = `${path.replace(/\/$/, "")}/`;
+      const matches = (candidate: string | undefined) => (
+        Boolean(candidate) && (candidate === path || candidate!.startsWith(folder))
+      );
+      return matches(this.currentFile?.path) || this.currentResults.some((result) => matches(result.path));
+    });
   }
 
   private handleVaultDelete(file: { path?: string }): void {
     if (this.isDragging) return;
-    this.searchRuns.cancel();
     const deletedPath = typeof file?.path === "string" ? file.path : "";
     if (!deletedPath) return;
 
     if (deletedPath === this.currentFile?.path) {
+      this.searchRuns.cancel();
       this.deletedSourcePath = deletedPath;
       this.lastFileHash = "";
       this.forceRefreshNextCheck = false;
@@ -297,8 +311,13 @@ export class EmbeddingsView extends ItemView {
       return;
     }
 
-    if (this.currentResults.some((result) => result.path === deletedPath)) {
-      const filtered = this.currentResults.filter((result) => result.path !== deletedPath);
+    // Deletes elsewhere matter only when they remove a shown result.
+    if (!this.touchesCurrentContext([deletedPath])) return;
+    this.searchRuns.cancel();
+    const folder = `${deletedPath.replace(/\/$/, "")}/`;
+    const removed = (path: string) => path === deletedPath || path.startsWith(folder);
+    if (this.currentResults.some((result) => removed(result.path))) {
+      const filtered = this.currentResults.filter((result) => !removed(result.path));
       this.currentResults = filtered;
       if (this.currentFile) {
         void this.updateResults(filtered, this.currentFile).catch(() => undefined);
@@ -346,7 +365,7 @@ export class EmbeddingsView extends ItemView {
     // Consider the view visible if its leaf exists, is connected, not hidden,
     // and has non-zero dimensions. This catches cases where the tab exists but
     // is not the front tab in the ribbon.
-    const leafEl = this.containerEl?.closest?.('.workspace-leaf') as HTMLElement | null;
+    const leafEl = this.containerEl?.closest?.('.workspace-leaf');
     if (!leafEl) return false;
     const isHidden = leafEl.classList.contains('is-hidden');
     const isConnected = leafEl.isConnected;
@@ -378,7 +397,7 @@ export class EmbeddingsView extends ItemView {
 
     // If this Similar Notes view is the active leaf, keep the current context even when
     // Obsidian reports no active file/chat (prevents stale results on deletes/renames).
-    const activeLeaf = this.app.workspace.activeLeaf;
+    const activeLeaf = this.app.workspace.getMostRecentLeaf();
     const isEmbeddingsViewActive = activeLeaf?.view?.getViewType?.() === EMBEDDINGS_VIEW_TYPE;
     if (isEmbeddingsViewActive) {
       if (!activeChatView && this.currentChatView) {
@@ -400,9 +419,6 @@ export class EmbeddingsView extends ItemView {
     if (hasNewFile) {
       if (!activeFile) return;
       // Switch to a different file
-      // Only log if it's actually a different file or first time
-      if (this.currentFile?.path !== activeFile.path) {
-      }
       this.currentFile = activeFile;
       this.currentChatView = null; // Clear chat since we're now on a file
       this.updateFileName(activeFile.basename);
@@ -412,9 +428,6 @@ export class EmbeddingsView extends ItemView {
       if (!activeChatView) return;
       // Switch to a different chat
       const chatTitle = activeChatView.getChatTitle();
-      // Only log if it's actually a different chat or first time
-      if (this.currentChatView?.chatId !== activeChatView.chatId) {
-      }
       this.currentChatView = activeChatView;
       this.currentFile = null; // Clear file since we're now on a chat
       this.updateFileName(chatTitle || 'Chat');
@@ -547,7 +560,9 @@ export class EmbeddingsView extends ItemView {
       this.showQuickLoading(chatTitle);
     }
     const results = await manager.searchSimilar(chatContent, 15, run.signal);
-    if (run.isCurrent()) await this.updateResults(results, null, chatTitle);
+    if (!run.isCurrent()) return;
+    await this.updateResults(results, null, chatTitle);
+    this.lastChatQueryHash = contentHash;
   }
 
   private extractChatContent(chatView: AgentChatView): string {

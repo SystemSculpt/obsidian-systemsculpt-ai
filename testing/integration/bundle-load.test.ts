@@ -17,7 +17,6 @@ import {
   captureStartupIdentity,
   expectProductionStartupIdentity,
 } from "./startup-identity-assertions";
-import { exerciseBuiltStudioGenerations } from "./studio-generation-bundle-harness";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
@@ -58,7 +57,7 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(13);
+    expect(plugin.settings.schemaVersion).toBe(14);
     expect(plugin.settings).not.toHaveProperty("webSearchEnabledByDefault");
     expect(plugin.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(plugin.settings.licenseKey).toBe("");
@@ -108,12 +107,6 @@ describe("built bundle (main.js)", () => {
     expect(() => require(BUNDLE_PATH)).not.toThrow();
   });
 
-  it("executes immutable Studio create/commit/restart/binary recovery through the built production adapter seam", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const bundleModule = require(BUNDLE_PATH);
-    await exerciseBuiltStudioGenerations(bundleModule);
-  });
-
   it("ships the executable minimal text-node output contract", async () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const bundleModule = require(BUNDLE_PATH);
@@ -153,7 +146,7 @@ describe("built bundle (main.js)", () => {
       /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible;/s
     );
     expect(styles).toMatch(
-      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*var\(--ss-space-1\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible;/s
+      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*calc\(var\(--ss-studio-port-size,\s*10px\)\s*\*\s*-0\.5\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible;/s
     );
     expect(styles).toMatch(
       /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1;/s
@@ -161,13 +154,6 @@ describe("built bundle (main.js)", () => {
     expect(styles).toMatch(
       /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\);/
     );
-  });
-
-  it("does not ship the retired Readwise integration", () => {
-    const code = readFileSync(BUNDLE_PATH, "utf8");
-
-    expect(code).not.toContain("ReadwiseService");
-    expect(code).not.toContain("ReadwiseSyncWidget");
   });
 
   it("ships the exact Audio Processor output presets in the built artifact", () => {

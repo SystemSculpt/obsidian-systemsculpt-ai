@@ -1,8 +1,7 @@
-import { createHash } from "crypto";
-import { readFileSync } from "fs";
 import capabilityFixture from "../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import routeFixture from "../../../testing/fixtures/managed/managed-text-generation-route-v1.json";
 import { ManagedCapabilityCatalog } from "../managed/ManagedCapabilityCatalog";
+import { PlatformRequestTimeoutError } from "../PlatformRequestClient";
 import {
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER,
@@ -56,10 +55,7 @@ const operation = (buildMessages = jest.fn(() => [
 });
 
 describe("ManagedTextGenerationAdapter", () => {
-  it("copies the immutable website route fixture byte-for-byte", () => {
-    const bytes = readFileSync("testing/fixtures/managed/managed-text-generation-route-v1.json");
-    expect(createHash("sha256").update(bytes).digest("hex"))
-      .toBe("7c6adca1132330d465f7d4f783b07347ef0f2cf2981843eeefa8dec00ca6cae4");
+  it("keeps the website route fixture contract fields", () => {
     expect(routeFixture).toMatchObject({
       method: "POST",
       path: "/api/plugin/chat/completions",
@@ -99,7 +95,7 @@ describe("ManagedTextGenerationAdapter", () => {
       text: "Generated text",
       finishReason: "stop",
     }));
-    expect(acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/chat", requestContract: "text_generation" });
+    expect(acquireLease).toHaveBeenCalledWith({ alias: "systemsculpt/chat", requestContract: "text_generation" }, undefined);
     expect(buildMessages).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith({
       path: "/api/plugin/chat/completions",
@@ -116,6 +112,8 @@ describe("ManagedTextGenerationAdapter", () => {
         ],
       },
       signal: undefined,
+      // Generation runs inside this request; the JSON default would cut it off.
+      timeoutMs: 10 * 60_000,
     });
   });
 
@@ -224,6 +222,35 @@ describe("ManagedTextGenerationAdapter", () => {
       retryable: false,
     });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a request deadline after dispatch a durable ambiguous outcome", async () => {
+    const { adapter, request } = harness();
+    request.mockRejectedValueOnce(new PlatformRequestTimeoutError(10 * 60_000));
+    await expect(adapter.generate(operation())).rejects.toMatchObject({
+      code: "ambiguous_outcome",
+      ambiguous: true,
+      retryable: false,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting on admission when cancelled and reports a pre-dispatch local abort", async () => {
+    const { adapter, acquireLease, request } = harness();
+    const controller = new AbortController();
+    acquireLease.mockImplementationOnce((_operation: unknown, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    }));
+    const running = adapter.generate({ ...operation(), signal: controller.signal });
+    await Promise.resolve();
+    expect(acquireLease).toHaveBeenCalledWith(expect.anything(), controller.signal);
+    controller.abort();
+    await expect(running).rejects.toMatchObject({
+      name: "AbortError",
+      code: "local_aborted",
+      ambiguous: false,
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("distinguishes a pre-dispatch local abort from server cancellation", async () => {

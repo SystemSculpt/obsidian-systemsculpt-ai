@@ -22,6 +22,7 @@ import {
   normalizePreferredMicrophoneId,
   seedCurrentHostPreferredMicrophoneId,
 } from "../../services/recorder/RecorderPreferenceStore";
+import { createVaultFolder } from "../../utils/vaultFolders";
 
 const DEVICE_LOCAL_RECORDER_PREFERENCE_SCHEMA_VERSION = 10;
 const AUDIO_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
@@ -180,6 +181,11 @@ export class SettingsManager {
   // failing saves in quick succession) shows one Notice, not one per keystroke.
   private lastSaveFailureNoticeAt = 0;
   private static readonly SAVE_FAILURE_NOTICE_DEDUPE_MS = 5000;
+  // Every load, save, and update runs through this promise tail. Calls apply in
+  // order and each merge sees the previous result, so the ~100 fire-and-forget
+  // updateSettings callers cannot interleave a read-modify-write across awaits
+  // and drop keys. A rejected task never poisons the tail for the next caller.
+  private persistenceQueue: Promise<void> = Promise.resolve();
 
 
   constructor(plugin: SystemSculptPlugin) {
@@ -188,16 +194,29 @@ export class SettingsManager {
     this.automaticBackupService = new AutomaticBackupService(plugin);
   }
 
+  private enqueuePersistence<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.persistenceQueue.then(task, task);
+    this.persistenceQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   // Migrate settings to ensure all fields are properly initialized
-  private migrateSettings(settingsToMigrate: any): SystemSculptSettings {
+  private migrateSettings(settingsToMigrate: unknown): SystemSculptSettings {
     // Settings migration - silent process
     // Deep merge with defaults to ensure nested objects are properly initialized
-    const migratedSettings = { ...settingsToMigrate };
+    const sourceSettings: Record<string, unknown> = settingsToMigrate
+      && typeof settingsToMigrate === "object"
+      && !Array.isArray(settingsToMigrate)
+      ? { ...settingsToMigrate as Record<string, unknown> }
+      : {};
+    const migratedSettings = {
+      ...DEFAULT_SETTINGS,
+      ...sourceSettings,
+    };
     const generateVaultInstanceId = (): string => {
-      try {
-        const globalCrypto: any = (window as any).crypto;
-        if (globalCrypto?.randomUUID) return globalCrypto.randomUUID();
-      } catch {}
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
       return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -237,7 +256,6 @@ export class SettingsManager {
     // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
     // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
 
-    migratedSettings.workflowEngine = normalizeWorkflowEngineSettings(migratedSettings.workflowEngine);
     
     if (typeof migratedSettings.debugMode !== "boolean") {
       migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
@@ -249,13 +267,6 @@ export class SettingsManager {
       migratedSettings.logLevel = LogLevel.WARNING;
     }
 
-    if (!Array.isArray(migratedSettings.favoriteChats)) {
-      migratedSettings.favoriteChats = DEFAULT_SETTINGS.favoriteChats;
-    }
-
-    if (!Array.isArray(migratedSettings.favoriteStudioSessions)) {
-      migratedSettings.favoriteStudioSessions = DEFAULT_SETTINGS.favoriteStudioSessions;
-    }
     
     // Ensure automatic backup settings are properly initialized (migration for existing users)
     if (typeof migratedSettings.automaticBackupsEnabled !== 'boolean') {
@@ -276,10 +287,6 @@ export class SettingsManager {
       migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
     }
 
-    if (typeof migratedSettings.defaultChatTag !== "string") {
-      migratedSettings.defaultChatTag = DEFAULT_SETTINGS.defaultChatTag;
-    }
-
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
       migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
     }
@@ -292,14 +299,8 @@ export class SettingsManager {
       migratedSettings.studioRunRetentionMaxArtifactsMb = DEFAULT_SETTINGS.studioRunRetentionMaxArtifactsMb;
     }
 
-    if (
-      migratedSettings.studioJsonEditorDefaultMode !== "composer" &&
-      migratedSettings.studioJsonEditorDefaultMode !== "raw"
-    ) {
-      migratedSettings.studioJsonEditorDefaultMode = DEFAULT_SETTINGS.studioJsonEditorDefaultMode;
-    }
     
-    return migratedSettings as SystemSculptSettings;
+    return migratedSettings;
   }
 
   /**
@@ -312,107 +313,113 @@ export class SettingsManager {
    * Checks both the new vault-based location and the old plugin directory location
    * @returns The restored settings or null if restoration failed
    */
-  private async restoreFromBackup(): Promise<any | null> {
-    try {
-      const hydrateBackup = (candidate: unknown): Record<string, unknown> | null => {
-        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-          return null;
-        }
+  private async restoreFromBackup(): Promise<Record<string, unknown> | null> {
+    const readBackup = async (read: () => Promise<unknown>): Promise<Record<string, unknown> | null> => {
+      try {
+        const candidate = await read();
+        if (!this.isNonEmptyRecord(candidate)) return null;
         return applyCurrentSecretsToBackup(
-          candidate as Record<string, unknown>,
+          candidate,
           this.settings as unknown as Record<string, unknown>,
         );
-      };
-
-      // First try to restore from the new vault-based location if storage manager is available
-      if (this.plugin.storage) {
-        try {
-          // Try to get the latest backup from the vault storage
-          const latestBackup = await this.plugin.storage.readFile('settings', 'backups/settings-backup-latest.json', true);
-          const hydratedLatestBackup = hydrateBackup(latestBackup);
-          if (hydratedLatestBackup) {
-            return hydratedLatestBackup;
-          }
-
-          // If no latest backup, try to find the most recent daily backup
-          const backupFiles = await this.plugin.storage.listFiles('settings', 'backups');
-          const dailyBackups = backupFiles
-            .filter(f => f.match(/settings-backup-\d{4}-\d{2}-\d{2}\.json$/))
-            .sort()
-            .reverse();
-
-          if (dailyBackups.length > 0) {
-            const newestBackup = await this.plugin.storage.readFile('settings', `backups/${dailyBackups[0]}`, true);
-            const hydratedNewestBackup = hydrateBackup(newestBackup);
-            if (hydratedNewestBackup) {
-              return hydratedNewestBackup;
-            }
-          }
-        } catch (e) {
-        }
+      } catch {
+        // One damaged backup must not hide older recoverable settings.
+        return null;
       }
+    };
+    const datedBackups = (paths: string[]) => paths
+      .filter(path => /settings-backup-\d{4}-\d{2}-\d{2}\.json$/.test(path))
+      .sort()
+      .reverse();
 
-      // If we get here, try the vault root location as fallback
-      const backupDir = ".systemsculpt/settings-backups";
-      const latestBackupPath = ".systemsculpt/settings-backups/settings-backup-latest.json";
-
-      // Check if the latest backup exists
-      const exists = await this.plugin.app.vault.adapter.exists(latestBackupPath);
-      if (exists) {
-        // Read the latest backup file
-        const backupData = await this.plugin.app.vault.adapter.read(latestBackupPath);
-        const backupSettings = JSON.parse(backupData);
-        const hydratedBackup = hydrateBackup(backupSettings);
-        if (hydratedBackup) {
-          return hydratedBackup;
-        }
-      }
-
-      // If no latest backup, try to find the most recent daily backup
+    const storage = this.plugin.storage;
+    if (storage) {
+      const latest = await readBackup(() => storage.readFile("settings", "backups/settings-backup-latest.json", true));
+      if (latest) return latest;
       try {
-        const files = await this.plugin.app.vault.adapter.list(backupDir);
-        const backupFiles = files.files
-          .filter(f => f.match(/settings-backup-\d{4}-\d{2}-\d{2}\.json$/))
-          .sort()
-          .reverse();
-
-        if (backupFiles.length > 0) {
-          const newestBackup = backupFiles[0];
-          const backupData = await this.plugin.app.vault.adapter.read(newestBackup);
-          const backupSettings = JSON.parse(backupData);
-          const hydratedBackup = hydrateBackup(backupSettings);
-          if (hydratedBackup) {
-            return hydratedBackup;
-          }
+        for (const name of datedBackups(await storage.listFiles("settings", "backups"))) {
+          const backup = await readBackup(() => storage.readFile("settings", `backups/${name}`, true));
+          if (backup) return backup;
         }
-      } catch (e) {
+      } catch {
+        // Continue with the legacy vault-root backup directory.
       }
-
-      return null;
-    } catch (error) {
-      return null;
     }
+
+    const adapter = this.plugin.app.vault.adapter;
+    const directory = ".systemsculpt/settings-backups";
+    const readVaultBackup = (path: string) => readBackup(async () => {
+      if (!(await adapter.exists(path))) return null;
+      return JSON.parse(await adapter.read(path)) as unknown;
+    });
+    const latest = await readVaultBackup(`${directory}/settings-backup-latest.json`);
+    if (latest) return latest;
+    try {
+      for (const path of datedBackups((await adapter.list(directory)).files)) {
+        const backup = await readVaultBackup(path);
+        if (backup) return backup;
+      }
+    } catch {
+      // No readable vault-root backup directory is available.
+    }
+    return null;
   }
 
   async loadSettings(): Promise<void> {
-    let raw: Record<string, unknown> = {};
-    try {
-      const loadedData = await this.plugin.loadData();
-      raw = this.asSettingsRecord(loadedData);
-    } catch (loadError) {
+    return this.enqueuePersistence(() => this.loadSettingsNow());
+  }
+
+  private async loadSettingsNow(): Promise<void> {
+    let raw = await this.readPersistedSettings();
+    if (raw === null) {
+      // data.json is missing, unreadable, empty, or not an object. Consult the
+      // backup BEFORE defaults: the save below persists whatever we load, so
+      // defaulting here would overwrite the user's file with a blank config.
       const backupSettings = await this.restoreFromBackup();
       raw = this.asSettingsRecord(backupSettings);
+      if (backupSettings) this.logRestoredFromBackup();
     }
 
     this.settings = await this.migrateValidateWithRollback(raw);
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
     this.isInitialized = true;
-    await this.saveSettings();
+    await this.saveSettingsNow();
 
     this.plugin.app.workspace.trigger("systemsculpt:settings-loaded", this.settings);
 
     // Start automatic backup service after settings are loaded
     this.automaticBackupService.start();
+  }
+
+  /**
+   * The persisted settings record, or null when data.json cannot be loaded or
+   * does not hold a non-empty object (null, an array, `{}`, a scalar).
+   */
+  private async readPersistedSettings(): Promise<Record<string, unknown> | null> {
+    try {
+      const loadedData = await this.plugin.loadData();
+      return this.isNonEmptyRecord(loadedData) ? loadedData : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
+    return !!value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && Object.keys(value).length > 0;
+  }
+
+  private logRestoredFromBackup(): void {
+    try {
+      this.plugin.getLogger().warn(
+        "Restored SystemSculpt settings from backup because data.json was empty or unreadable",
+        { source: "SettingsManager", method: "loadSettings" },
+      );
+    } catch {
+      // Logging must never block settings load.
+    }
   }
 
   private asSettingsRecord(value: unknown): Record<string, unknown> {
@@ -442,19 +449,19 @@ export class SettingsManager {
       if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
         await this.writePreMigrationBackup(raw, fromVersion);
       }
-      const migrated = await this.validateSettingsAsync(this.migrateSettings(result.settings));
+      const migrated = this.validateSettings(this.migrateSettings(result.settings));
       if (!result.future) {
         this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
       }
       return migrated;
-    } catch (migrationError) {
-      await this.writePreMigrationBackup(raw, fromVersion).catch(() => {});
+    } catch {
+      await this.writePreMigrationBackup(raw, fromVersion).catch(() => undefined);
       try {
         // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
         // The user's original data is preserved both here (raw wins) and in the
         // pre-migration backup written above.
-        return await this.validateSettingsAsync(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
-      } catch (fallbackError) {
+        return this.validateSettings(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
+      } catch {
         // Last resort: pure defaults. Data is safe in the pre-migration backup.
         return { ...DEFAULT_SETTINGS };
       }
@@ -561,6 +568,12 @@ export class SettingsManager {
       validatedSettings.chatsDirectory = defaultSettings.chatsDirectory;
     }
 
+    // Chats saved before this list existed are in the folder configured now.
+    validatedSettings.knownChatsDirectories = Array.isArray(validatedSettings.knownChatsDirectories)
+      ? [...new Set(validatedSettings.knownChatsDirectories
+        .filter((directory): directory is string => typeof directory === "string"))]
+      : [validatedSettings.chatsDirectory];
+
     if (typeof validatedSettings.recordingsDirectory !== 'string') {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
@@ -608,7 +621,7 @@ export class SettingsManager {
             && Number.isFinite(entry.durationMs)
             && entry.durationMs >= 0
             && Number.isFinite(entry.sizeBytes)
-            && entry.sizeBytes > 0
+            && (entry.sizeBytes > 0 || entry.discarded === true)
             && ["manual", "background-hidden", "background-pagehide", "interrupted", "size-limit"].includes(entry.stopReason)
             && ["note", "chat"].includes(entry.destination)
             && (entry.transcriptionIntent === undefined
@@ -633,6 +646,8 @@ export class SettingsManager {
           ...(entry.recoveryBlocked === "conflicting-operation-ids"
             ? { recoveryBlocked: entry.recoveryBlocked }
             : {}),
+          ...(entry.captureInProgress === true ? { captureInProgress: true as const } : {}),
+          ...(entry.discarded === true ? { discarded: true as const } : {}),
         }));
       const pendingByPath = new Map<string, PendingRecorderCapture>();
       for (const entry of validPendingCaptures) {
@@ -748,6 +763,14 @@ export class SettingsManager {
       validatedSettings.favoriteStudioSessions = defaultSettings.favoriteStudioSessions;
     }
 
+    if (!Array.isArray(validatedSettings.favoriteImageModels)) {
+      validatedSettings.favoriteImageModels = defaultSettings.favoriteImageModels;
+    }
+
+    if (!Array.isArray(validatedSettings.favoriteVideoModels)) {
+      validatedSettings.favoriteVideoModels = defaultSettings.favoriteVideoModels;
+    }
+
     // Legacy/dead keys (cachedEmbeddingStats, selectedProvider, systemPrompt*, …)
     // are pruned once by the versioned migrator's v0→v1 step, not on every
     // validate pass. See SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1.
@@ -772,10 +795,11 @@ export class SettingsManager {
       const backupDir = ".systemsculpt/settings-backups";
       const backupPath = ".systemsculpt/settings-backups/settings-backup-latest.json";
       
-      // Ensure the backup directory exists before writing
+      // Ensure the backup directory exists before writing. Concurrent saves
+      // can race this create, so an existing folder counts as success.
       const dirExists = await this.plugin.app.vault.adapter.exists(backupDir);
       if (!dirExists) {
-        await this.plugin.app.vault.createFolder(backupDir);
+        await createVaultFolder(this.plugin.app, backupDir);
       }
       
       await this.plugin.app.vault.adapter.write(backupPath, backupData);
@@ -802,8 +826,8 @@ export class SettingsManager {
    * storm. We log + notify rather than rethrow: `saveSettings` is invoked from the
    * load path and from ~100 fire-and-forget `updateSettings(...)` callers, so
    * rethrowing would convert disk-full/permission errors into uncaught rejections
-   * and could break plugin load. Observability is the fix here; serializing writes
-   * is tracked separately (BUG-09).
+   * and could break plugin load. Observability is the fix here; writes are
+   * serialized through the persistence queue.
    */
   private surfaceSaveFailure(error: unknown): void {
     try {
@@ -835,6 +859,10 @@ export class SettingsManager {
    * This ensures settings are properly saved with fallback options
    */
   async saveSettings(): Promise<void> {
+    return this.enqueuePersistence(() => this.saveSettingsNow());
+  }
+
+  private async saveSettingsNow(): Promise<void> {
     if (!this.isInitialized) {
       return;
     }
@@ -842,9 +870,9 @@ export class SettingsManager {
     try {
       const oldSettings = { ...(this.plugin._internal_settings_systemsculpt_plugin || DEFAULT_SETTINGS) }; 
       // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
-      const persistedSettings = await this.validateSettingsAsync({
+      const persistedSettings = this.validateSettings({
         ...this.plugin._internal_settings_systemsculpt_plugin,
-      } as SystemSculptSettings);
+      });
       this.settings = persistedSettings;
       this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
       await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);
@@ -871,22 +899,36 @@ export class SettingsManager {
    * Update settings with partial changes
    */
   async updateSettings(newSettings: Partial<SystemSculptSettings>): Promise<void> {
+    return this.enqueuePersistence(() => this.updateSettingsNow(newSettings));
+  }
+
+  private async updateSettingsNow(newSettings: Partial<SystemSculptSettings>): Promise<void> {
     if (!this.isInitialized) {
-      await this.loadSettings(); // Ensure settings are loaded before update
+      await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
+    // The chats-folder list only grows. Chats stay in the folder they were
+    // created in and attachment cleanup scans every listed folder, so neither
+    // a concurrent append nor a restored backup may drop an entry.
+    if (Array.isArray(newSettings.knownChatsDirectories)) {
+      updatedSettings.knownChatsDirectories = [
+        ...(this.settings.knownChatsDirectories ?? []),
+        ...newSettings.knownChatsDirectories,
+      ];
+    }
     
     // Validate the merged settings before persistence.
-    this.settings = await this.validateSettingsAsync(updatedSettings);
+    this.settings = this.validateSettings(updatedSettings);
 
     // Synchronize the plugin's internal settings representation BEFORE persisting.
     // This ensures that saveSettings() – which relies on `_internal_settings_systemsculpt_plugin`
     // – persists the latest in-memory changes rather than stale data.
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
 
-    // Call saveSettings to persist, update plugin._settings, and dispatch event
-    await this.saveSettings();
+    // Persist, update plugin._settings, and dispatch the event. This already
+    // runs inside the persistence queue, so call the unqueued variant.
+    await this.saveSettingsNow();
     // Settings updated and saved - silent operation
   }
 
@@ -900,13 +942,6 @@ export class SettingsManager {
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
     const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
     await this.updateSettings(migrated);
-  }
-
-  /**
-   * Perform async validation.
-   */
-  private async validateSettingsAsync(settings: SystemSculptSettings): Promise<SystemSculptSettings> {
-    return this.validateSettings(settings);
   }
 
   /**

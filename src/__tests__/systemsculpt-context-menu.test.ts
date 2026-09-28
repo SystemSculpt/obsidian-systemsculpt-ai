@@ -149,10 +149,14 @@ const createPluginStub = () => {
       cleanTranscriptionOutput: true,
     },
     pluginLogger: {
+      debug: jest.fn(),
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn(),
     },
+    getPluginLogger: jest.fn(function () {
+      return this.pluginLogger;
+    }),
     getStudioService: jest.fn(() => ({ createProjectFile })),
     getViewManager: jest.fn(() => ({ activateSystemSculptStudioView })),
   } as unknown as SystemSculptPlugin & { pluginLogger: any };

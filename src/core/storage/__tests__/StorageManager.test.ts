@@ -3,10 +3,10 @@
  */
 import { StorageManager, StorageLocationType } from "../StorageManager";
 import { StorageManager as StorageManagerExport } from "../index";
-import { App, TFolder } from "obsidian";
+import { App, FileSystemAdapter, TFolder } from "obsidian";
 
 // Create mock vault adapter
-const createMockAdapter = () => ({
+const createMockAdapter = () => Object.assign(new FileSystemAdapter("/vault"), {
   exists: jest.fn().mockResolvedValue(false),
   read: jest.fn().mockResolvedValue(""),
   write: jest.fn().mockResolvedValue(undefined),
@@ -85,6 +85,34 @@ describe("StorageManager", () => {
       await Promise.all([p1, p2, p3]);
 
       expect(storage.isInitialized()).toBe(true);
+    });
+
+    it("does not create the diagnostics directory until something is written there", async () => {
+      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt");
+      await storage.initialize();
+
+      const createdFolders = mockApp.vault.createFolder.mock.calls.map(([path]) => path);
+      expect(createdFolders).toContain(".systemsculpt/settings");
+      expect(createdFolders).not.toContain(".systemsculpt/diagnostics");
+      expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
+
+      await storage.appendToFile("diagnostics", "log.txt", "line");
+      await storage.writeFile("diagnostics", "report.json", { ok: true });
+
+      expect(mockApp.vault.createFolder.mock.calls.filter(([path]) => path === ".systemsculpt/diagnostics")).toHaveLength(1);
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
+        ".systemsculpt/diagnostics/.folder",
+        "This file helps Obsidian recognize the directory.",
+      );
+    });
+
+    it("ensures one location on demand", async () => {
+      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt");
+      await storage.ensureLocation("diagnostics");
+      await storage.ensureLocation("diagnostics");
+
+      expect(storage.isInitialized()).toBe(true);
+      expect(mockApp.vault.createFolder.mock.calls.filter(([path]) => path === ".systemsculpt/diagnostics")).toHaveLength(1);
     });
 
     it("reinitializes when the vault base path changes", async () => {
@@ -254,25 +282,6 @@ describe("StorageManager", () => {
       expect(mockApp.vault.adapter.append).toHaveBeenCalledWith(
         ".systemsculpt/diagnostics/log.txt",
         "line2\n"
-      );
-    });
-
-    it("falls back to read+write when append is not available", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
-      mockApp.vault.adapter.append = undefined;
-      mockApp.vault.adapter.read.mockResolvedValue("existing\n");
-
-      const result = await storage.appendToFile(
-        "diagnostics",
-        "log.txt",
-        "new line"
-      );
-
-      expect(result.success).toBe(true);
-      expect(mockApp.vault.adapter.read).toHaveBeenCalled();
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
-        ".systemsculpt/diagnostics/log.txt",
-        "existing\nnew line\n"
       );
     });
 
@@ -512,5 +521,50 @@ describe("StorageManager", () => {
       expect(app.vault.adapter.write).not.toHaveBeenCalled();
       expect(app.vault.adapter.append).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("StorageManager diagnostics write gate", () => {
+  it("archives the diagnostics session before the first diagnostics write only", async () => {
+    const adapter = createMockAdapter();
+    const storage = new StorageManager(createMockApp(createMockVault(adapter)) as any, {} as any);
+    const order: string[] = [];
+    let release!: () => void;
+    const archived = new Promise<void>((resolve) => { release = resolve; });
+    const gate = jest.fn(async () => {
+      order.push("gate");
+      await archived;
+      order.push("archived");
+    });
+    adapter.write.mockImplementation(async (path: string) => {
+      order.push(`write:${path}`);
+    });
+    storage.setDiagnosticsWriteGate(gate);
+
+    await storage.writeFile("settings", "backups/latest.json", "{}");
+    expect(gate).not.toHaveBeenCalled();
+
+    const append = storage.appendToFile("diagnostics", "systemsculpt-latest.log", "line");
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    expect(order.some((entry) => entry.includes("systemsculpt-latest.log"))).toBe(false);
+    expect(order.slice(-1)).toEqual(["gate"]);
+    release();
+    await expect(append).resolves.toMatchObject({ success: true });
+
+    const archivedAt = order.indexOf("archived");
+    const logWriteAt = order.findIndex((entry) => entry.endsWith("systemsculpt-latest.log"));
+    expect(archivedAt).toBeGreaterThan(-1);
+    expect(logWriteAt).toBeGreaterThan(archivedAt);
+  });
+
+  it("still writes diagnostics when the archive fails", async () => {
+    const adapter = createMockAdapter();
+    const storage = new StorageManager(createMockApp(createMockVault(adapter)) as any, {} as any);
+    storage.setDiagnosticsWriteGate(async () => {
+      throw new Error("archive failed");
+    });
+
+    await expect(storage.writeFile("diagnostics", "report.txt", "data")).resolves.toMatchObject({ success: true });
+    expect(adapter.write).toHaveBeenCalledWith(expect.stringMatching(/report\.txt$/u), "data");
   });
 });

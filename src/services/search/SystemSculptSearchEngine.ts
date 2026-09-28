@@ -1,7 +1,12 @@
 import { App, EventRef, TFile } from "obsidian";
-import SystemSculptPlugin from "../../main";
-import { shouldExcludeFromSearch, fuzzyMatchScore } from "../../tools/vault/searchUtils";
+import type SystemSculptPlugin from "../../main";
+import { fuzzyMatchScore } from "../../tools/vault/searchUtils";
+import { containsNonAscii } from "../../utils/characterValidation";
 import { extractCanvasText } from "./canvasTextExtractor";
+import { extractStudioText } from "./studioTextExtractor";
+import { resolveStudioEntry } from "../../studio/StudioEntry";
+import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
+import { searchVaultExclusions, type VaultExclusions } from "./VaultExclusions";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
 export type SortMode = "relevance" | "recency";
@@ -95,6 +100,9 @@ interface SearchableEmbeddingsManager {
   }>>;
   isReady?: () => boolean;
   hasAnyEmbeddings?: () => boolean;
+  /** Changes whenever indexed vectors change. */
+  getIndexRevision?: () => number;
+  getLifecycleSnapshot?: () => { updatedAt: number };
   getStats?: () => {
     total?: number;
     processed?: number;
@@ -117,6 +125,8 @@ export class SystemSculptSearchEngine {
   private metadataTokenCache: Map<string, MetadataTokenSnapshot> = new Map();
   private recentHitsCache: { limit: number; hits: SearchHit[] } | null = null;
   private recentPreviewCache: Map<string, CachedPreview> = new Map();
+  private studioDocuments = new Map<string, { text: string; mtime: number; size: number }>();
+  private studioGeneration = 0;
   private indexPromise: Promise<void> | null = null;
   private contentIndexReady = false;
   private indexGeneration = 0;
@@ -124,7 +134,7 @@ export class SystemSculptSearchEngine {
   private dirtyPaths: Set<string> = new Set();
   private eventRefs: EventRef[] = [];
   private workspaceEventRefs: EventRef[] = [];
-  private readonly INDEXABLE_EXTENSIONS = new Set(["md", "markdown", "canvas"]);
+  private readonly INDEXABLE_EXTENSIONS = new Set(["md", "markdown", "canvas", STUDIO_PROJECT_EXTENSION.slice(1)]);
   private readonly MAX_INDEX_CHARS = 6500;
   private readonly MAX_EXCERPT_SOURCE_CHARS = 2200;
   private readonly PREVIEW_CHARS = 240;
@@ -136,6 +146,9 @@ export class SystemSculptSearchEngine {
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
   private readonly SEMANTIC_TIMEOUT_MS = 1500;
+  /** Smart mode skips semantic search for one- and two-character prefixes. */
+  private readonly MIN_SEMANTIC_QUERY_CHARS = 3;
+  private embeddingsIndicatorCache: { key: string; indicator: EmbeddingsIndicator } | null = null;
   private readonly UNICODE_TOKEN_PATTERN = /[\p{L}\p{N}\p{M}]+/gu;
   private lastLexicalInspect = 0;
 
@@ -148,7 +161,15 @@ export class SystemSculptSearchEngine {
   /**
    * Run a search across the vault
    */
-  async search(query: string, options?: { mode?: SearchMode; sort?: SortMode; limit?: number; signal?: AbortSignal }): Promise<SearchResponse> {
+  /**
+   * Run a search across the vault. `semantic: false` keeps a smart search
+   * lexical-only; the search modal uses it for fast per-keystroke results
+   * and adds semantic hits once typing pauses.
+   */
+  async search(
+    query: string,
+    options?: { mode?: SearchMode; sort?: SortMode; limit?: number; signal?: AbortSignal; semantic?: boolean },
+  ): Promise<SearchResponse> {
     const mode: SearchMode = options?.mode ?? "smart";
     const sort: SortMode = options?.sort ?? "relevance";
     const limit = options?.limit ?? 80;
@@ -176,6 +197,12 @@ export class SystemSculptSearchEngine {
       };
     }
 
+    if (signal?.aborted) {
+      throw new DOMException("Search aborted", "AbortError");
+    }
+
+    this.refreshEligibilityIfChanged();
+    await this.prepareStudioDocuments();
     if (signal?.aborted) {
       throw new DOMException("Search aborted", "AbortError");
     }
@@ -232,7 +259,8 @@ export class SystemSculptSearchEngine {
       this.ensureEmbeddingsManager();
       embeddingsIndicator = this.getEmbeddingsIndicator();
     }
-    const embeddingsEligible = this.shouldUseEmbeddings(mode, embeddingsIndicator, terms);
+    const embeddingsEligible = options?.semantic !== false
+      && this.shouldUseEmbeddings(mode, embeddingsIndicator, terms, normalizedQuery);
 
     if (embeddingsEligible) {
       const semStart = performance.now();
@@ -243,7 +271,7 @@ export class SystemSculptSearchEngine {
       // Explicit semantic request but embeddings not ready; keep usedEmbeddings false and rely on lexical fallback
     }
 
-    const results = this.mergeResults(lexicalHits, semanticHits, limit);
+    const results = this.mergeResults(lexicalHits, semanticHits, limit, sort);
 
     const totalMs = performance.now() - searchStart;
 
@@ -269,6 +297,7 @@ export class SystemSculptSearchEngine {
    */
   async getRecent(limit = 25): Promise<SearchHit[]> {
     this.refreshEligibilityIfChanged();
+    await this.prepareStudioDocuments();
     // Reuse indexed previews below requires the index to match on-disk state.
     // When the content index is already built, flush any modify/create events
     // that set dirtyPaths so we don't serve stale snippets for modified
@@ -289,8 +318,8 @@ export class SystemSculptSearchEngine {
             excerpt: indexed?.preview,
             score: 0.5,
             origin: "recent" as const,
-            updatedAt: file.stat?.mtime || 0,
-            size: file.stat?.size || 0,
+            updatedAt: this.modifiedTime(file),
+            size: this.fileSize(file),
           };
         }),
       };
@@ -300,6 +329,8 @@ export class SystemSculptSearchEngine {
   }
 
   async getRecentPreviews(paths: string[], limit = 25, signal?: AbortSignal): Promise<Map<string, string>> {
+    this.refreshEligibilityIfChanged();
+    await this.prepareStudioDocuments();
     const previews = new Map<string, string>();
     const uniquePaths = Array.from(new Set(paths)).slice(0, limit);
     const tasks = uniquePaths.map((path) => async () => {
@@ -313,12 +344,12 @@ export class SystemSculptSearchEngine {
         return;
       }
 
-      if ((file.stat?.size || 0) > this.MAX_RECENT_PREVIEW_FILE_BYTES) {
+      if (this.fileSize(file) > this.MAX_RECENT_PREVIEW_FILE_BYTES && !this.isStudioFile(file)) {
         return;
       }
 
       try {
-        const content = await this.safeRead(file);
+        const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
         if (signal?.aborted) return;
         const preview = this.buildPreviewFromText(this.getIndexText(file, content));
         if (preview) {
@@ -345,35 +376,17 @@ export class SystemSculptSearchEngine {
   destroy(): void {
     this.eventRefs.forEach((ref) => this.app.vault.offref(ref));
     this.eventRefs = [];
-    const workspace = this.app.workspace as any;
     this.workspaceEventRefs.forEach((ref) => {
-      if (typeof workspace.offref === "function") {
-        workspace.offref(ref);
-      } else if (typeof (ref as any)?.unload === "function") {
-        (ref as any).unload();
-      }
+      this.app.workspace.offref(ref);
     });
     this.workspaceEventRefs = [];
-    this.clearScheduledIndexing();
-    this.index.clear();
-    this.tokenIndex.clear();
-    this.tokenVocabulary.clear();
-    this.sortedTokenVocabulary = [];
-    this.tokenLengthBuckets.clear();
-    this.tokenLookupsDirty = true;
-    this.eligibleFilesCache = null;
-    this.eligibleFilesCacheSignature = null;
-    this.metadataTokenCache.clear();
-    this.recentHitsCache = null;
-    this.recentPreviewCache.clear();
-    this.dirtyPaths.clear();
-    this.indexPromise = null;
-    this.contentIndexReady = false;
+    this.clearIndexes();
   }
 
   private registerVaultWatchers() {
     this.eventRefs.push(
       this.app.vault.on("modify", (file) => {
+        this.invalidateStudioDocuments(file);
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
           this.recentHitsCache = null;
@@ -384,6 +397,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("create", (file) => {
+        this.invalidateStudioDocuments(file);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
         if (file instanceof TFile) {
@@ -399,6 +413,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("delete", (file) => {
+        this.invalidateStudioDocuments(file);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
         if (file instanceof TFile) {
@@ -417,6 +432,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("rename", (file, oldPath) => {
+        this.invalidateStudioDocuments(file, oldPath);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
         if (!(file instanceof TFile)) return;
@@ -454,6 +470,7 @@ export class SystemSculptSearchEngine {
 
     const generation = this.indexGeneration;
     this.indexPromise = (async () => {
+      await this.prepareStudioDocuments();
       const files = this.getEligibleFiles();
       const built = await this.buildIndex(files, false, generation);
       if (built && generation === this.indexGeneration) {
@@ -484,6 +501,8 @@ export class SystemSculptSearchEngine {
     this.metadataTokenCache.clear();
     this.recentHitsCache = null;
     this.recentPreviewCache.clear();
+    this.studioGeneration += 1;
+    this.studioDocuments.clear();
     this.dirtyPaths.clear();
     this.indexPromise = null;
     this.contentIndexReady = false;
@@ -575,7 +594,13 @@ export class SystemSculptSearchEngine {
   }
 
   private async indexFile(file: TFile): Promise<IndexedDocument | null> {
-    const content = await this.safeRead(file);
+    if (this.isStudioFile(file) && !this.studioDocuments.has(file.path)) {
+      // A vault event invalidated a source while it was being read. Retry it on
+      // the next refresh instead of committing an empty content snapshot.
+      this.dirtyPaths.add(file.path);
+      return null;
+    }
+    const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
     const extracted = this.getIndexText(file, content);
     const metadata = this.getMetadataTokenSnapshot(file);
     const rawBody = extracted.slice(0, this.MAX_EXCERPT_SOURCE_CHARS);
@@ -596,8 +621,8 @@ export class SystemSculptSearchEngine {
       body,
       rawBody,
       preview,
-      mtime: file.stat?.mtime || 0,
-      size: file.stat?.size || 0,
+      mtime: this.modifiedTime(file),
+      size: this.fileSize(file),
     };
   }
 
@@ -609,52 +634,92 @@ export class SystemSculptSearchEngine {
     }
   }
 
+  private isStudioFile(file: TFile): boolean {
+    return file.extension.toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1);
+  }
+
+  private modifiedTime(file: TFile): number {
+    return this.studioDocuments.get(file.path)?.mtime ?? file.stat?.mtime ?? 0;
+  }
+
+  private fileSize(file: TFile): number {
+    return this.studioDocuments.get(file.path)?.size ?? file.stat?.size ?? 0;
+  }
+
+  /** Resolve stable Studio links before ranking, without building the note index. */
+  private async prepareStudioDocuments(): Promise<void> {
+    const generation = this.studioGeneration;
+    const files = this.getEligibleFiles().filter((file) => this.isStudioFile(file) && !this.studioDocuments.has(file.path));
+    const tasks = files.map((file) => async () => {
+      let text = "";
+      let source = file;
+      try {
+        const resolved = await resolveStudioEntry({ read: async (path) => {
+          const target = this.app.vault.getAbstractFileByPath(path);
+          if (!(target instanceof TFile) || searchVaultExclusions(this.plugin).isExcluded(target.path)) {
+            throw new Error("Studio search source unavailable");
+          }
+          return this.app.vault.cachedRead(target);
+        } }, file.path);
+        const target = this.app.vault.getAbstractFileByPath(resolved.path);
+        if (target instanceof TFile) source = target;
+        text = extractStudioText(resolved.raw, { maxChars: this.MAX_INDEX_CHARS });
+      } catch {
+        // Broken entries remain searchable by filename, without indexing raw JSON.
+      }
+      if (generation !== this.studioGeneration) return;
+      this.studioDocuments.set(file.path, {
+        text,
+        mtime: Math.max(file.stat?.mtime || 0, source.stat?.mtime || 0),
+        size: source.stat?.size || 0,
+      });
+    });
+    await this.runLimited(tasks, this.CONTENT_CONCURRENCY, this.INDEX_BUILD_YIELD_EVERY);
+  }
+
+  private invalidateStudioDocuments(file: { path: string }, oldPath?: string): void {
+    // A projection can change without touching its public entry. Invalidate before
+    // filtering out internal Studio files so linked content and recency stay fresh.
+    if (![file.path, oldPath].some((path) => path?.toLowerCase().endsWith(STUDIO_PROJECT_EXTENSION))) return;
+    for (const entry of this.getEligibleFiles()) {
+      if (!this.isStudioFile(entry)) continue;
+      this.dirtyPaths.add(entry.path);
+      this.recentPreviewCache.delete(entry.path);
+    }
+    this.studioGeneration += 1;
+    this.studioDocuments.clear();
+    this.recentHitsCache = null;
+  }
+
   private getEligibleFiles(): TFile[] {
-    const signature = this.computeEligibilitySignature();
-    if (this.eligibleFilesCache && this.eligibleFilesCacheSignature === signature) {
+    const exclusions = searchVaultExclusions(this.plugin);
+    if (this.eligibleFilesCache && this.eligibleFilesCacheSignature === exclusions.signature) {
       return this.eligibleFilesCache;
     }
 
     const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
     const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
-    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f));
-    this.eligibleFilesCacheSignature = signature;
+    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f, exclusions));
+    this.eligibleFilesCacheSignature = exclusions.signature;
     return this.eligibleFilesCache;
   }
 
   /**
-   * If the user's "Excluded files" filters changed since the last search,
-   * blow away the content/token indexes so the next search sees newly-included
-   * files and forgets newly-excluded ones. Track the new signature so
-   * subsequent changes are still detected — nulling it here previously let the
-   * guard short-circuit later edits until an unrelated event repopulated it.
+   * If the exclusion rules changed since the last search, blow away the
+   * content/token indexes so the next search sees newly-included files and
+   * forgets newly-excluded ones. The shared exclusion signature covers
+   * Obsidian's "Excluded files", which change without a plugin settings event.
+   * Track the new signature so subsequent changes are still detected — nulling
+   * it here previously let the guard short-circuit later edits until an
+   * unrelated event repopulated it.
    */
   private refreshEligibilityIfChanged(): void {
-    const signature = this.computeEligibilitySignature();
+    const signature = searchVaultExclusions(this.plugin).signature;
     if (this.eligibleFilesCacheSignature === null || this.eligibleFilesCacheSignature === signature) {
       return;
     }
     this.clearIndexes();
     this.eligibleFilesCacheSignature = signature;
-  }
-
-  /**
-   * Produce a cheap signature of the inputs that `isEligible` reads from outside
-   * our own settings. We snapshot Obsidian's `userIgnoreFilters` so the cached
-   * eligible-files list refreshes when the user edits core "Excluded files"
-   * without needing a plugin settings event.
-   */
-  private computeEligibilitySignature(): string {
-    try {
-      const vault = this.app.vault as unknown as { getConfig?: (key: string) => unknown };
-      const filters = typeof vault.getConfig === "function" ? vault.getConfig("userIgnoreFilters") : null;
-      if (Array.isArray(filters) && filters.length > 0) {
-        return filters.map((value) => String(value)).join("\u0000");
-      }
-    } catch {
-      // Vault config lookup may throw on some platforms; treat as "no filters".
-    }
-    return "";
   }
 
   private getMetadataTokenSnapshot(file: TFile): MetadataTokenSnapshot {
@@ -675,13 +740,13 @@ export class SystemSculptSearchEngine {
     if (limit <= 0) return [];
     const top: TFile[] = [];
     for (const file of files) {
-      const mtime = file.stat?.mtime || 0;
+      const mtime = this.modifiedTime(file);
       if (top.length === 0) {
         top.push(file);
         continue;
       }
 
-      let insertAt = top.findIndex((candidate) => mtime > (candidate.stat?.mtime || 0));
+      let insertAt = top.findIndex((candidate) => mtime > this.modifiedTime(candidate));
       if (insertAt === -1) insertAt = top.length;
 
       if (insertAt < limit) {
@@ -695,12 +760,17 @@ export class SystemSculptSearchEngine {
   }
 
   private previewCacheKey(file: TFile): string {
-    return `${file.path}:${file.stat?.mtime || 0}:${file.stat?.size || 0}`;
+    return `${file.path}:${this.modifiedTime(file)}:${this.fileSize(file)}`;
   }
 
-  private isEligible(file: TFile): boolean {
+  private isEligible(file: TFile, exclusions: VaultExclusions = searchVaultExclusions(this.plugin)): boolean {
     if (!this.INDEXABLE_EXTENSIONS.has((file.extension ?? "").toLowerCase())) return false;
-    return !shouldExcludeFromSearch(file, this.plugin);
+    if (this.isStudioFile(file) && (
+      file.path.startsWith(".systemsculpt/studio/projects/") ||
+      /\.studio\/views\//u.test(file.path) ||
+      /\.systemsculpt-assets\//u.test(file.path)
+    )) return false;
+    return !exclusions.isExcluded(file.path);
   }
 
   private stripFrontmatter(content: string): string {
@@ -712,6 +782,7 @@ export class SystemSculptSearchEngine {
     if (ext === "canvas") {
       return extractCanvasText(content, { maxChars: this.MAX_INDEX_CHARS });
     }
+    if (this.isStudioFile(file)) return this.studioDocuments.get(file.path)?.text ?? "";
 
     return this.stripFrontmatter(content);
   }
@@ -724,14 +795,14 @@ export class SystemSculptSearchEngine {
 
   private runLexicalSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {
     const queryTerms = this.buildQueryTerms(terms);
-    const candidates = this.collectCandidateDocs(queryTerms, limit);
+    const candidates = this.collectCandidateDocs(queryTerms, limit, sort);
     const candidateMap = new Map<string, IndexedDocument>();
 
     for (const doc of candidates) {
       candidateMap.set(doc.path, doc);
     }
     if (this.shouldUseSubstringCandidateFallback(queryTerms, phrase, candidateMap.size)) {
-      for (const doc of this.collectSubstringCandidateDocs(terms, phrase, limit)) {
+      for (const doc of this.collectSubstringCandidateDocs(terms, phrase, limit, sort)) {
         candidateMap.set(doc.path, doc);
       }
     }
@@ -742,12 +813,8 @@ export class SystemSculptSearchEngine {
     const scored = pool
       .map((doc) => this.scoreDocument(doc, queryTerms, phrase))
       .filter((r): r is SearchHit => r !== null)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => this.compareHits(a, b, sort))
       .slice(0, limit * 2); // keep extra for merge step
-
-    if (sort === "recency") {
-      scored.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.score - a.score);
-    }
 
     return scored;
   }
@@ -1011,7 +1078,7 @@ export class SystemSculptSearchEngine {
     }
   }
 
-  private collectCandidateDocs(queryTerms: QueryTerm[], limit: number): IndexedDocument[] {
+  private collectCandidateDocs(queryTerms: QueryTerm[], limit: number, sort: SortMode): IndexedDocument[] {
     const counts = new Map<string, number>();
     for (const term of queryTerms) {
       const termPaths = this.pathsForQueryTerm(term);
@@ -1028,9 +1095,9 @@ export class SystemSculptSearchEngine {
       ? Math.max(2, queryTerms.length - 1)
       : 1;
 
-    let candidates = this.docsForPathCounts(counts, targetMatches, limit);
+    let candidates = this.docsForPathCounts(counts, targetMatches, limit, sort);
     if (candidates.length < limit) {
-      candidates = this.docsForPathCounts(counts, Math.max(1, targetMatches - 1), limit);
+      candidates = this.docsForPathCounts(counts, Math.max(1, targetMatches - 1), limit, sort);
     }
 
     return candidates.slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT));
@@ -1038,7 +1105,7 @@ export class SystemSculptSearchEngine {
 
   private shouldUseSubstringCandidateFallback(queryTerms: QueryTerm[], phrase: string, candidateCount: number): boolean {
     if (!phrase) return false;
-    if (candidateCount === 0 && (/[^\x00-\x7F]/.test(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
+    if (candidateCount === 0 && (containsNonAscii(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
       return true;
     }
     return queryTerms.some((term) => this.needsSubstringFallback(term.value) && this.pathsForQueryTerm(term).size === 0);
@@ -1057,10 +1124,10 @@ export class SystemSculptSearchEngine {
     // token index directly — the body still contains the substring, so fall
     // back to the substring scan to recover the match.
     if (/[^\p{L}\p{N}\p{M}]/u.test(value)) return true;
-    return /[^\x00-\x7F]/.test(value) || this.tokenizeSearchText(value).size === 0;
+    return containsNonAscii(value) || this.tokenizeSearchText(value).size === 0;
   }
 
-  private collectSubstringCandidateDocs(terms: string[], phrase: string, limit: number): IndexedDocument[] {
+  private collectSubstringCandidateDocs(terms: string[], phrase: string, limit: number, sort: SortMode): IndexedDocument[] {
     const matches: IndexedDocument[] = [];
     const cap = Math.max(limit * 8, this.CANDIDATE_LIMIT);
     const searchableTerms = terms.filter(Boolean);
@@ -1071,11 +1138,12 @@ export class SystemSculptSearchEngine {
         searchableTerms.some((term) => this.documentContainsSubstring(doc, term))
       ) {
         matches.push(doc);
-        if (matches.length >= cap) break;
+        if (sort !== "recency" && matches.length >= cap) break;
       }
     }
 
-    return matches;
+    if (sort === "recency") matches.sort((a, b) => b.mtime - a.mtime);
+    return matches.slice(0, cap);
   }
 
   private documentContainsSubstring(doc: IndexedDocument, value: string): boolean {
@@ -1094,12 +1162,8 @@ export class SystemSculptSearchEngine {
     const hits = this.getEligibleFiles()
       .map((file) => this.scoreMetadataFile(file, queryTerms, phrase))
       .filter((hit): hit is SearchHit => hit !== null)
-      .sort((a, b) => b.score - a.score || (b.updatedAt || 0) - (a.updatedAt || 0))
+      .sort((a, b) => this.compareHits(a, b, sort))
       .slice(0, limit);
-
-    if (sort === "recency") {
-      hits.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || b.score - a.score);
-    }
 
     return hits;
   }
@@ -1120,8 +1184,8 @@ export class SystemSculptSearchEngine {
       body: "",
       rawBody: "",
       preview: "",
-      mtime: file.stat?.mtime || 0,
-      size: file.stat?.size || 0,
+      mtime: this.modifiedTime(file),
+      size: this.fileSize(file),
     };
     const metadataScore = this.scoreMetadata(doc, queryTerms, phrase);
     if (metadataScore <= 0) return null;
@@ -1134,8 +1198,8 @@ export class SystemSculptSearchEngine {
       score,
       lexScore: score,
       origin: "lexical",
-      updatedAt: file.stat?.mtime || 0,
-      size: file.stat?.size || 0,
+      updatedAt: this.modifiedTime(file),
+      size: this.fileSize(file),
     };
   }
 
@@ -1210,10 +1274,12 @@ export class SystemSculptSearchEngine {
     return paths;
   }
 
-  private docsForPathCounts(counts: Map<string, number>, minCount: number, limit: number): IndexedDocument[] {
+  private docsForPathCounts(counts: Map<string, number>, minCount: number, limit: number, sort: SortMode): IndexedDocument[] {
     return Array.from(counts.entries())
       .filter(([, count]) => count >= minCount)
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => sort === "recency"
+        ? (this.index.get(b[0])?.mtime || 0) - (this.index.get(a[0])?.mtime || 0) || b[1] - a[1]
+        : b[1] - a[1])
       .slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT))
       .map(([path]) => this.index.get(path))
       .filter((doc): doc is IndexedDocument => doc !== undefined);
@@ -1261,16 +1327,23 @@ export class SystemSculptSearchEngine {
   }
 
   private async runSemanticSearch(query: string, limit: number, signal?: AbortSignal): Promise<SearchHit[]> {
+    const manager = this.getExistingEmbeddingsManager();
+    if (!manager || signal?.aborted) return [];
+    // One controller for the whole semantic leg: the caller's cancellation and
+    // the timeout both abort the managed query and the vector scan behind it,
+    // instead of leaving them running after the results were dropped.
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = window.setTimeout(() => controller.abort(), this.SEMANTIC_TIMEOUT_MS);
     try {
-      const manager = this.getExistingEmbeddingsManager();
-      if (!manager || signal?.aborted) return [];
-      const semanticPromise = (async () => {
+      const semantic = (async (): Promise<SearchHit[]> => {
         if (typeof manager.awaitReady === "function") {
           await manager.awaitReady();
         }
-        if (signal?.aborted) return [];
-        const rawResults = await manager.searchSimilar(query, limit, signal);
-        if (signal?.aborted) return [];
+        if (controller.signal.aborted) return [];
+        const rawResults = await manager.searchSimilar(query, limit, controller.signal);
+        if (controller.signal.aborted) return [];
         return rawResults
           .map((item) => {
             const file = this.app.vault.getAbstractFileByPath(item.path);
@@ -1285,48 +1358,33 @@ export class SystemSculptSearchEngine {
               origin: "semantic",
               updatedAt: item?.metadata?.lastModified ?? file.stat?.mtime ?? 0,
               size: file.stat?.size || 0,
-            } as SearchHit;
+            } satisfies SearchHit;
           })
-          .filter((hit: SearchHit | null): hit is SearchHit => hit !== null);
+          .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
       })();
-
-      // Avoid long stalls; apply a timeout without leaking a dangling timer.
-      return await new Promise<SearchHit[]>((resolve, reject) => {
-        let settled = false;
-        const cleanup = () => {
-          window.clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-        };
-        const finish = (results: SearchHit[]) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolve(results);
-        };
-        const fail = (error: unknown) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(error);
-        };
-        const onAbort = () => finish([]);
-        const timer = window.setTimeout(() => finish([]), this.SEMANTIC_TIMEOUT_MS);
-        signal?.addEventListener("abort", onAbort, { once: true });
-        semanticPromise.then(
-          (results) => finish(results),
-          (error) => fail(error)
-        );
+      const aborted = new Promise<SearchHit[]>((resolve) => {
+        if (controller.signal.aborted) resolve([]);
+        controller.signal.addEventListener("abort", () => resolve([]), { once: true });
       });
+      return await Promise.race([semantic, aborted]);
     } catch {
       return [];
+    } finally {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 
-  private shouldUseEmbeddings(mode: SearchMode, indicator: EmbeddingsIndicator, terms: string[]): boolean {
+  private shouldUseEmbeddings(
+    mode: SearchMode,
+    indicator: EmbeddingsIndicator,
+    terms: string[],
+    query: string,
+  ): boolean {
     if (mode === "lexical") return false;
     if (!indicator.enabled || !indicator.ready || !indicator.available) return false;
     if (mode === "semantic") return true;
-    if (terms.length === 0) return false;
+    if (terms.length === 0 || query.length < this.MIN_SEMANTIC_QUERY_CHARS) return false;
 
     const total = indicator.total ?? 0;
     const processed = indicator.processed ?? 0;
@@ -1335,7 +1393,13 @@ export class SystemSculptSearchEngine {
     return processed / total >= 0.75;
   }
 
-  private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number): SearchHit[] {
+  private compareHits(a: SearchHit, b: SearchHit, sort: SortMode): number {
+    const recency = (b.updatedAt || 0) - (a.updatedAt || 0);
+    const relevance = b.score - a.score;
+    return sort === "recency" ? recency || relevance : relevance || recency;
+  }
+
+  private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number, sort: SortMode): SearchHit[] {
     const K = 60;
     const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit; rrfLex: number; rrfSem: number }>();
 
@@ -1381,13 +1445,18 @@ export class SystemSculptSearchEngine {
       });
     }
 
-    merged.sort((a, b) => b.score - a.score || (b.updatedAt || 0) - (a.updatedAt || 0));
+    merged.sort((a, b) => this.compareHits(a, b, sort));
 
     const sliced = merged.slice(0, limit);
 
     return sliced;
   }
 
+  /**
+   * Readiness summary shown with results. Counting indexed notes walks every
+   * eligible file, so the answer is cached until the index revision or the
+   * lifecycle snapshot changes.
+   */
   public getEmbeddingsIndicator(): EmbeddingsIndicator {
     const enabled = this.plugin.settings.embeddingsEnabled === true;
     if (!enabled) {
@@ -1400,16 +1469,24 @@ export class SystemSculptSearchEngine {
         return { enabled, ready: false, available: false, reason: "Embeddings not initialized" };
       }
       const ready = typeof manager.isReady === "function" ? manager.isReady() : true;
+      const key = typeof manager.getIndexRevision === "function" && typeof manager.getLifecycleSnapshot === "function"
+        ? `${ready}:${manager.getIndexRevision()}:${manager.getLifecycleSnapshot().updatedAt}`
+        : null;
+      if (key !== null && this.embeddingsIndicatorCache?.key === key) {
+        return { ...this.embeddingsIndicatorCache.indicator };
+      }
       const stats = typeof manager.getStats === "function" ? manager.getStats() : { total: 0, processed: 0, present: 0, needsProcessing: 0 };
       const available = typeof manager.hasAnyEmbeddings === "function" ? manager.hasAnyEmbeddings() : (stats.present ?? 0) > 0;
 
-      return {
+      const indicator: EmbeddingsIndicator = {
         enabled,
         ready,
         available,
         processed: stats.processed ?? stats.present ?? 0,
         total: stats.total,
       };
+      this.embeddingsIndicatorCache = key === null ? null : { key, indicator: { ...indicator } };
+      return indicator;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Embeddings unavailable";
       return { enabled, ready: false, available: false, reason: message };

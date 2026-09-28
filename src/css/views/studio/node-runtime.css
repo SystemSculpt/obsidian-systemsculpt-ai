@@ -1,69 +1,6 @@
 /* ------------------------------------------------------------------ *
- * Run status
+ * Node notes (the run status row itself lives in activity.css)
  * ------------------------------------------------------------------ */
-.ss-studio-node-run-status-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--ss-space-1);
-  padding: 0 var(--ss-space-2) var(--ss-space-1);
-}
-
-.ss-studio-node-run-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ss-space-1);
-  padding: 0 var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-}
-
-.ss-studio-node-run-status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: var(--ss-radius-round);
-  background-color: currentColor;
-}
-
-.ss-studio-node-run-status.is-pending {
-  color: var(--ss-ink-faint);
-}
-
-.ss-studio-node-run-status.is-running {
-  color: var(--ss-info);
-  border-color: var(--ss-info-line);
-}
-
-.ss-studio-node-run-status.is-cached {
-  color: var(--ss-studio-accent-mid);
-  border-color: var(--ss-line-accent);
-}
-
-.ss-studio-node-run-status.is-succeeded {
-  color: var(--ss-success);
-  border-color: var(--ss-success-line);
-}
-
-.ss-studio-node-run-status.is-failed {
-  color: var(--ss-danger);
-  border-color: var(--ss-danger-line);
-}
-
-.ss-studio-node-run-message {
-  min-width: 0;
-  padding: 0 var(--ss-space-2);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
-  font-size: var(--ss-text-xs);
-  color: var(--ss-ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .ss-studio-node-badge {
   padding: 0 var(--ss-space-2);
   border-radius: var(--ss-radius-full);
@@ -78,34 +15,39 @@
 }
 
 /* ------------------------------------------------------------------ *
- * Ports
+ * Ports — stacked rows. Inputs run down the left edge, outputs down the
+ * right. Each pin straddles the card border so a cable meets the card at
+ * its edge, and the label sits inside beside the pin.
  * ------------------------------------------------------------------ */
 .ss-studio-node-ports {
+  --ss-studio-port-size: 10px;
   position: relative;
   /* Above the resize frame's edge strips (z-index 3) so a port pin's hit
    * area keeps winning connection drags along the card border. */
   z-index: 4;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--ss-space-1);
-  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-2);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 0 var(--ss-space-2);
+  padding: var(--ss-space-1) 0 var(--ss-space-2);
 }
 
 .ss-studio-node-ports.is-single-col {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .ss-studio-node-ports-col {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-1);
+  gap: var(--ss-space-0);
   min-width: 0;
 }
 
 .ss-studio-port-row {
   display: flex;
   align-items: center;
-  gap: var(--ss-space-1);
+  gap: var(--ss-space-2);
+  min-height: 22px;
   min-width: 0;
 }
 
@@ -115,20 +57,31 @@
 
 .ss-studio-port-pin {
   position: relative;
-  width: 8px;
-  height: 8px;
+  width: var(--ss-studio-port-size);
+  height: var(--ss-studio-port-size);
   flex-shrink: 0;
   border-radius: var(--ss-radius-round);
-  border: 1.5px solid var(--ss-line-strong);
+  border: 2px solid var(--ss-line-strong);
   background-color: var(--ss-surface-0);
+  /* A surface-colored halo lifts the pin off the border it straddles. */
+  box-shadow: 0 0 0 2px var(--ss-surface-0);
   cursor: crosshair;
-  transition: transform var(--ss-dur-fast) var(--ss-ease-spring), border-color var(--ss-dur-fast) var(--ss-ease);
+  transition: transform var(--ss-dur-fast) var(--ss-ease-spring), border-color var(--ss-dur-fast) var(--ss-ease), background-color var(--ss-dur-fast) var(--ss-ease), box-shadow var(--ss-dur-fast) var(--ss-ease);
+}
+
+/* Compact chrome cards hang half the pin outside the hairline. */
+.ss-studio-surface-card .ss-studio-port-row:not(.is-output) .ss-studio-port-pin {
+  margin-left: calc(var(--ss-studio-port-size) * -0.5 - 1px);
+}
+
+.ss-studio-surface-card .ss-studio-port-row.is-output .ss-studio-port-pin {
+  margin-right: calc(var(--ss-studio-port-size) * -0.5 - 1px);
 }
 
 .ss-studio-port-pin::before {
   content: "";
   position: absolute;
-  inset: calc((var(--ss-studio-port-hit-size) - 8px) / -2);
+  inset: calc((var(--ss-studio-port-hit-size) - var(--ss-studio-port-size)) / -2);
   border-radius: var(--ss-radius-round);
 }
 
@@ -143,8 +96,8 @@
 .ss-studio-port-pin:hover,
 .ss-studio-port-pin:focus-visible,
 .ss-studio-port-pin.is-active {
-  transform: scale(1.25);
-  box-shadow: var(--ss-ring);
+  transform: scale(1.3);
+  box-shadow: 0 0 0 2px var(--ss-surface-0), var(--ss-ring);
 }
 
 .ss-studio-port-pin:focus-visible {
@@ -164,7 +117,7 @@
 }
 
 .ss-studio-port-pin.is-drop-target {
-  box-shadow: var(--ss-ring);
+  box-shadow: 0 0 0 2px var(--ss-surface-0), var(--ss-ring);
 }
 
 .ss-studio-port-pin.is-drop-target.is-input {
@@ -180,10 +133,26 @@
   min-width: 0;
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-xs);
+  line-height: 1;
   color: var(--ss-ink-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ss-studio-port-row.is-output .ss-studio-port-label {
+  text-align: right;
+}
+
+/* A wired input the selected model does not accept stays visible so the
+   edge has somewhere to land, but reads as inert until the model changes. */
+.ss-studio-port-row.is-unsupported .ss-studio-port-label {
+  color: var(--ss-ink-faint);
+  text-decoration: line-through;
+}
+
+.ss-studio-port-row.is-unsupported .ss-studio-port-pin {
+  opacity: 0.35;
 }
 
 /* Text stays chromeless while using the shared typed port interaction.
@@ -197,7 +166,7 @@
 .ss-studio-text-node-card .ss-studio-node-ports {
   position: absolute;
   top: 50%;
-  right: var(--ss-space-1);
+  right: calc(var(--ss-studio-port-size, 10px) * -0.5);
   transform: translateY(-50%);
   display: block;
   width: max-content;
@@ -222,4 +191,13 @@
   .ss-studio-text-node-card .ss-studio-port-pin {
     --ss-studio-port-hit-size: var(--ss-touch-target);
   }
+}
+
+/* A wired input the selected model cannot use stays visible but reads as inert. */
+.ss-studio-port-row.is-unsupported {
+  opacity: 0.55;
+}
+
+.ss-studio-port-row.is-unsupported .ss-studio-port-label {
+  text-decoration: line-through;
 }

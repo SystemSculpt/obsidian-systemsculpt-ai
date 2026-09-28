@@ -51,9 +51,31 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
     app.vault.read.mockImplementation(app.vault.cachedRead);
     app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    app.workspace.offref = jest.fn();
 
     return { app, files };
   };
+
+  it("invalidates pending index reads when destroyed", async () => {
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+    let releaseRead!: (text: string) => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    const pendingRead = new Promise<string>((resolve) => { releaseRead = resolve; });
+    (app.vault.cachedRead as jest.Mock).mockImplementation(() => {
+      readStarted();
+      return pendingRead;
+    });
+    const indexing = engine.startIndexing();
+    await started;
+    engine.destroy();
+    releaseRead("late orange content");
+    await indexing;
+    expect((engine as any).index.size).toBe(0);
+    expect((engine as any).tokenIndex.size).toBe(0);
+    expect((engine as any).contentIndexReady).toBe(false);
+  });
 
   it("returns matches in Fast (lexical) mode for body content", async () => {
     const { app } = buildFixture();
@@ -298,7 +320,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     // User edits Obsidian's "Excluded files". Without eligibility refresh in
     // getRecent, the cached recents would still include the excluded note
     // until a non-empty search or vault event invalidates the cache.
-    ignoreFilters = ["orange-juice"];
+    ignoreFilters = ["notes/orange-juice"];
 
     const after = await engine.getRecent(10);
     expect(after.map((r) => r.path)).not.toContain("notes/orange-juice.md");
@@ -317,7 +339,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const before = await engine.search("orange", { mode: "lexical", limit: 10 });
     expect(before.results.map((r) => r.path)).toContain("notes/orange-juice.md");
 
-    ignoreFilters = ["orange-juice"];
+    ignoreFilters = ["/orange-juice/"];
 
     const after = await engine.search("orange", { mode: "lexical", limit: 10 });
     expect(after.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
@@ -334,12 +356,12 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
     await engine.search("orange", { mode: "lexical", limit: 10 });
 
-    ignoreFilters = ["orange-juice"];
+    ignoreFilters = ["notes/orange-juice"];
     const afterFirst = await engine.search("orange", { mode: "lexical", limit: 10 });
     expect(afterFirst.results.map((r) => r.path)).not.toContain("notes/orange-juice.md");
     expect(afterFirst.results.map((r) => r.path)).toContain("notes/fresh-orange.md");
 
-    ignoreFilters = ["fresh-orange"];
+    ignoreFilters = ["notes/fresh-orange"];
     const afterSecond = await engine.search("orange", { mode: "lexical", limit: 10 });
     expect(afterSecond.results.map((r) => r.path)).not.toContain("notes/fresh-orange.md");
     // Removing the previous filter should let orange-juice.md become searchable again.
@@ -384,7 +406,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(clearSpy).not.toHaveBeenCalled();
 
     // Simulate the user editing Obsidian's "Excluded files" between searches.
-    ignoreFilters = ["orange-juice"];
+    ignoreFilters = ["/orange-juice/"];
 
     // Second smart search, still cold → metadata fast path again. Without the
     // refresh-before-metadata call, the signature would be updated silently and

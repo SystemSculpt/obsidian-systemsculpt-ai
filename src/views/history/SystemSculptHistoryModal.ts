@@ -32,7 +32,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.modalEl.addClass("systemsculpt-history-modal");
   }
 
-  async onOpen(): Promise<void> {
+  onOpen(): void {
     super.onOpen();
 
     this.addTitle("Open history", "Search chats and Studio sessions in one place.");
@@ -45,7 +45,7 @@ export class SystemSculptHistoryModal extends StandardModal {
       this.handleModalKeydown(event as KeyboardEvent);
     });
 
-    await this.reloadEntries();
+    void this.reloadEntries();
   }
 
   private renderSearchBar(): void {
@@ -172,13 +172,14 @@ export class SystemSculptHistoryModal extends StandardModal {
         favoriteButton.addClass("is-favorite");
       }
 
-      this.registerDomEvent(favoriteButton, "click", async (event: Event) => {
+      this.registerDomEvent(favoriteButton, "click", (event: Event) => {
         event.preventDefault();
         event.stopPropagation();
         if (!entry.toggleFavorite) return;
-        const nextState = await entry.toggleFavorite();
-        entry.isFavorite = nextState;
-        this.combobox?.refresh();
+        void entry.toggleFavorite().then((nextState) => {
+          entry.isFavorite = nextState;
+          this.combobox?.refresh();
+        });
       });
     }
 

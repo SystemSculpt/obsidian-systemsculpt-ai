@@ -1,6 +1,6 @@
 import type { StudioNodeInstance, StudioProjectV1 } from "./types";
 
-export type DeepReadonly<T> = T extends (...args: any[]) => any
+export type DeepReadonly<T> = T extends (...args: unknown[]) => unknown
   ? T
   : T extends readonly (infer U)[]
     ? readonly DeepReadonly<U>[]
@@ -16,7 +16,7 @@ export function cloneStudioProjectSnapshot(project: StudioProjectV1): StudioProj
 }
 
 export function readonlyStudioProjectSnapshot(project: StudioProjectV1): ReadonlyStudioProjectSnapshot {
-  return cloneStudioProjectSnapshot(project) as ReadonlyStudioProjectSnapshot;
+  return cloneStudioProjectSnapshot(project);
 }
 
 export function serializeStudioProjectSnapshot(project: StudioProjectV1): string {

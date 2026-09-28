@@ -17,13 +17,39 @@ export interface ScoredResult {
     keywordsMissing: string[];
     matchLocations: ('filename' | 'path' | 'content' | 'metadata' | 'graph')[];
     reasoning: string;
-    entityMatches?: any[];
+    entityMatches?: unknown[];
     semanticSimilarity?: number;
   };
-  contexts?: any[];
+  contexts?: unknown[];
   created?: string;
   modified?: string;
   fileSize?: number;
+}
+
+export interface FormattedScoredResult {
+  file: string;
+  path: string;
+  score: number;
+  reasoning: string;
+  keywordsFound: string[];
+  keywordsMissing: string[];
+  contexts?: unknown[];
+  created?: string;
+  modified?: string;
+  fileSize?: number;
+}
+
+export interface FormattedScoredResults {
+  results: FormattedScoredResult[];
+  totalFound: number;
+  searchSummary: {
+    topScore: number;
+    averageScore: number;
+    confidenceLevel: "high" | "medium" | "low";
+  };
+  metaInfo?: unknown[];
+  truncated?: boolean;
+  notice?: string;
 }
 
 /**
@@ -146,28 +172,6 @@ export function calculateScore(
     reasons.push(`Exact phrase match (+20)`);
   }
   
-  // Context bonus for relevant directories
-  const relevantPaths = ['email', 'campaign', 'marketing', 'draft', 'template', 'brand'];
-  const pathBonus = relevantPaths.filter(rp => 
-    pathParts.some(part => part.includes(rp))
-  ).length * 5;
-  
-  if (pathBonus > 0) {
-    score += pathBonus;
-    reasons.push(`Relevant directory (+${pathBonus})`);
-  }
-  
-  // Penalty for being in archive/backup/old directories
-  const penaltyPaths = ['archive', 'backup', 'old', 'legacy', 'deprecated'];
-  const pathPenalty = penaltyPaths.filter(pp =>
-    pathParts.some(part => part.includes(pp))
-  ).length * 10;
-  
-  if (pathPenalty > 0) {
-    score -= pathPenalty;
-    reasons.push(`Archive/backup directory (-${pathPenalty})`);
-  }
-  
   // Cap score at 100
   score = Math.min(100, Math.max(0, score));
   
@@ -202,7 +206,7 @@ export function sortByScore(results: ScoredResult[]): ScoredResult[] {
 export function formatScoredResults(
   results: ScoredResult[],
   maxResults: number = 25
-): any {
+): FormattedScoredResults {
   const topResults = results.slice(0, maxResults);
   
   return {

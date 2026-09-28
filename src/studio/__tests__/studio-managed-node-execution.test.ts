@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import { migrateStudioProjectToPathOnlyPorts } from "../StudioGraphMigrations";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
@@ -55,13 +53,14 @@ function services(api: Record<string, unknown>) {
 }
 
 describe("managed-only Studio remote nodes", () => {
-  it("registers exactly three remote executors and keeps retired HTTP hidden and inert", async () => {
+  it("registers exactly four remote executors and keeps retired HTTP hidden and inert", async () => {
     const registry = new StudioNodeRegistry();
     registerBuiltInStudioNodes(registry);
     expect(registry.list().filter(definition => definition.capabilityClass === "api").map(definition => definition.kind).sort()).toEqual([
       "studio.image_generation",
       "studio.text_generation",
       "studio.transcription",
+      "studio.video_generation",
     ]);
     expect(registry.get("studio.http_request", "1.0.0")).toBeNull();
     const retired = registry.get("studio.retired_http_request", "1.0.0");
@@ -243,13 +242,7 @@ describe("managed-only Studio remote nodes", () => {
     expect(readLocalFileBinary).not.toHaveBeenCalled();
   });
 
-  it("contains no Studio generic stream, provider, model, credit, or arbitrary network path", () => {
-    const root = join(__dirname, "../..");
-    const adapter = readFileSync(join(root, "studio/StudioApiExecutionAdapter.ts"), "utf8");
-    const runtime = readFileSync(join(root, "studio/StudioRuntime.ts"), "utf8");
-    const builtIns = readFileSync(join(root, "studio/StudioBuiltInNodes.ts"), "utf8");
-    expect(`${adapter}\n${runtime}`).not.toMatch(/streamMessage|modelService|getCreditsBalance|requestUrl|\bfetch\b|estimateRunCredits/);
-    expect(builtIns).not.toContain("httpRequestNode");
+  it("never caches managed node outputs", () => {
     for (const definition of [textGenerationNode, imageGenerationNode, transcriptionNode]) {
       expect(definition.cachePolicy).toBe("never");
     }

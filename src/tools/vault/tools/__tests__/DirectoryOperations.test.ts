@@ -37,7 +37,6 @@ jest.mock("../../utils", () => ({
     }
     return results;
   }),
-  shouldExcludeFromSearch: jest.fn(() => false),
   isHiddenSystemPath: jest.fn((path) => String(path ?? "").replace(/^\/+/, "").startsWith(".systemsculpt/")),
   ensureAdapterFolder: jest.fn(async () => {}),
   ensureVaultFolder: jest.fn(async () => {}),
@@ -45,6 +44,8 @@ jest.mock("../../utils", () => ({
   resolveAdapterPath: jest.fn(() => null),
   statAdapterPath: jest.fn(async () => null),
   renameAdapterPath: jest.fn(async () => {}),
+  resolvePortableVaultPath: jest.requireActual("../../utils").resolvePortableVaultPath,
+  portableVaultPathNotice: jest.requireActual("../../utils").portableVaultPathNotice,
 }));
 
 // Mock constants
@@ -233,6 +234,124 @@ describe("DirectoryOperations", () => {
       expect(result.results[0].files?.length).toBe(1);
       expect(result.results[0].directories?.length).toBe(1);
       expect(result.results[0].summary).toContain("2 items");
+    });
+
+    it("hides files excluded by the shared vault exclusions", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: [],
+        patterns: ["*.PNG", "**/Archive/*"],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const folder = new TFolder({
+        path: "test",
+        children: [
+          new TFile({ path: "test/file.md", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFile({ path: "test/photo.png", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFolder({
+            path: "test/Archive",
+            children: [new TFile({ path: "test/Archive/old.md", stat: { ctime: 1000, mtime: 2000, size: 100 } })],
+          }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["test"], recursive: true, filter: "files" } as any);
+
+      expect(result.results[0].files?.map((file: any) => file.path)).toEqual(["test/file.md"]);
+    });
+
+    it("hides excluded folders and counts only visible entries", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: ["test/Private"],
+        patterns: ["*.PNG", "test/Daily/**"],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      mockPlugin.app = { vault: { configDir: ".obsidian", getConfig: jest.fn(() => ["test/Templates/"]) } };
+      const stat = { ctime: 1000, mtime: 2000, size: 100 };
+      const folder = new TFolder({
+        path: "test",
+        children: [
+          new TFile({ path: "test/file.md", stat }),
+          new TFolder({
+            path: "test/Notes",
+            children: [
+              new TFile({ path: "test/Notes/a.md", stat }),
+              new TFile({ path: "test/Notes/photo.png", stat }),
+              new TFolder({ path: "test/Notes/Private", children: [] }),
+            ],
+          }),
+          new TFolder({ path: "test/Private", children: [new TFolder({ path: "test/Private/Sub", children: [] })] }),
+          new TFolder({ path: "test/Daily", children: [new TFile({ path: "test/Daily/today.md", stat })] }),
+          new TFolder({ path: "test/Templates", children: [new TFile({ path: "test/Templates/t.md", stat })] }),
+          new TFolder({ path: "test/SystemSculpt/Chats", children: [new TFile({ path: "test/SystemSculpt/Chats/c.md", stat })] }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["test"], recursive: true, sort: "name" });
+
+      expect(result.results[0].directories).toEqual([
+        expect.objectContaining({ path: "test/Notes", itemCount: 2 }),
+        expect.objectContaining({ path: "test/Notes/Private", itemCount: 0 }),
+      ]);
+      expect(result.results[0].files?.map((file: any) => file.path)).toEqual(["test/file.md", "test/Notes/a.md"]);
+      expect(result.results[0].totalItems).toBe(4);
+    });
+
+    it("lists nothing inside a requested folder that is itself excluded", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: ["Private"],
+        patterns: [],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const folder = new TFolder({
+        path: "Private",
+        children: [
+          new TFile({ path: "Private/secret.md", stat: { ctime: 1000, mtime: 2000, size: 100 } }),
+          new TFolder({ path: "Private/Sub", children: [] }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["Private"], recursive: true });
+
+      expect(result.results[0]).toEqual({
+        path: "Private",
+        offset: 0,
+        totalItems: 0,
+        nextOffset: null,
+        files: [],
+        directories: [],
+        notice: expect.stringContaining("Private is excluded"),
+      });
+      expect(app.vault.cachedRead).not.toHaveBeenCalled();
+    });
+
+    it("still lists a requested folder whose rule leaves deeper notes eligible", async () => {
+      mockPlugin.settings.embeddingsExclusions = {
+        folders: [],
+        patterns: ["Daily/*"],
+        ignoreChatHistory: true,
+        respectObsidianExclusions: true,
+      };
+      const stat = { ctime: 1000, mtime: 2000, size: 100 };
+      const folder = new TFolder({
+        path: "Daily",
+        children: [
+          new TFile({ path: "Daily/today.md", stat }),
+          new TFolder({ path: "Daily/sub", children: [new TFile({ path: "Daily/sub/deep.md", stat })] }),
+        ],
+      });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(folder);
+
+      const result = await dirOps.listDirectories({ paths: ["Daily"], recursive: true, sort: "name" });
+
+      expect(result.results[0].notice).toBeUndefined();
+      expect(result.results[0].files?.map((file: any) => file.path)).toEqual(["Daily/sub/deep.md"]);
+      expect(result.results[0].directories?.map((entry: any) => entry.path)).toEqual(["Daily/sub"]);
     });
 
     it("filters to only files when filter is files", async () => {

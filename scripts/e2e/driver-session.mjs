@@ -795,7 +795,8 @@ export class DriverSession {
         this.connectionWaiters.delete(waiter);
         reject(new Error(
           `No driver connected within ${timeoutMs}ms. Is Obsidian running with a `
-            + "development or staging build of SystemSculpt AI (the release build excludes the driver)?",
+            + "development, staging, or E2E watcher build of SystemSculpt AI? Release and default "
+            + "production-watch builds exclude the driver; use npm run dev:watch:install:e2e.",
         ));
       }, timeoutMs);
       this.connectionWaiters.add(waiter);

@@ -40,6 +40,99 @@ function createViewport(): HTMLElement {
   } as unknown as HTMLElement;
 }
 
+describe("StudioGraphSelectionController hidden viewport restoration", () => {
+  let resize: () => void;
+  let disconnect: jest.Mock;
+  const originalObserver = window.ResizeObserver;
+
+  beforeEach(() => {
+    disconnect = jest.fn();
+    window.ResizeObserver = class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => { window.ResizeObserver = originalObserver; });
+
+  function mount(controller: StudioGraphSelectionController, initiallyVisible: boolean) {
+    let visible = initiallyVisible;
+    let left = 0;
+    let top = 0;
+    // Hidden Chromium elements expose zero scroll offsets and ignore writes.
+    const viewport = document.createElement("div");
+    Object.defineProperties(viewport, {
+      clientWidth: { get: () => visible ? 1000 : 0 },
+      clientHeight: { get: () => visible ? 600 : 0 },
+      scrollLeft: { get: () => visible ? left : 0, set: (value: number) => { if (visible) left = value; } },
+      scrollTop: { get: () => visible ? top : 0, set: (value: number) => { if (visible) top = value; } },
+    });
+    controller.registerViewportElement(viewport);
+    controller.registerSurfaceElement(createElementStub());
+    controller.registerCanvasElement(createElementStub(), createElementStub());
+    return {
+      viewport,
+      setVisible(value: boolean) { visible = value; resize?.(); },
+    };
+  }
+
+  it.each([1, 0.74455, 0.0308])("preserves a hidden saved viewport through repeated remounts at zoom %s", (zoom) => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const saved = { x: -206.25, y: 4.125 };
+    let mounted: ReturnType<typeof mount>;
+    for (let reload = 0; reload < 4; reload++) {
+      mounted = mount(controller, false);
+      controller.setGraphZoom(zoom);
+      controller.setViewportWorldTopLeft(saved.x, saved.y);
+      expect(controller.getViewportWorldTopLeft()).toEqual(saved);
+      controller.ensureWorldCoverage();
+      expect(controller.getViewportWorldTopLeft()).toEqual(saved);
+      if (reload < 3) controller.clearRenderBindings();
+    }
+    mounted!.setVisible(true);
+    expect(controller.getGraphZoom()).toBe(zoom);
+    expect(controller.getViewportWorldTopLeft()!.x).toBeCloseTo(saved.x);
+    expect(controller.getViewportWorldTopLeft()!.y).toBeCloseTo(saved.y);
+    const position = [mounted!.viewport.scrollLeft, mounted!.viewport.scrollTop];
+    resize();
+    expect([mounted!.viewport.scrollLeft, mounted!.viewport.scrollTop]).toEqual(position);
+    controller.clearRenderBindings();
+    expect(disconnect).toHaveBeenCalledTimes(4);
+  });
+
+  it("retains the last visible pan while hidden and restores it when shown", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const mounted = mount(controller, true);
+    controller.setViewportWorldTopLeft(-320, 280);
+    mounted.viewport.scrollLeft += 125;
+    mounted.viewport.scrollTop += 75;
+    const position = controller.getViewportWorldTopLeft();
+    mounted.setVisible(false);
+    expect(controller.getViewportWorldTopLeft()).toEqual(position);
+    controller.ensureWorldCoverage();
+    mounted.setVisible(true);
+    expect(controller.getViewportWorldTopLeft()).toEqual(position);
+    controller.clearRenderBindings();
+  });
+
+  it("retains a wheel pan when hidden before the deferred scroll capture", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const mounted = mount(controller, true);
+    controller.setViewportWorldTopLeft(250, -75);
+    controller.handleGraphViewportWheel(new WheelEvent("wheel", {
+      deltaX: 32,
+      deltaY: 64,
+      cancelable: true,
+    }));
+    mounted.setVisible(false);
+    expect(controller.getViewportWorldTopLeft()).toEqual({ x: 282, y: -11 });
+    mounted.setVisible(true);
+    expect(controller.getViewportWorldTopLeft()).toEqual({ x: 282, y: -11 });
+    controller.clearRenderBindings();
+  });
+});
+
 describe("StudioGraphSelectionController wheel behavior", () => {
   it("filters unknown node IDs when setting explicit selection", () => {
     const host = createHost();
@@ -139,6 +232,40 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(282);
   });
 
+  it.each([
+    { deltaX: 0, deltaY: 64, deltaMode: 0, expectedX: 184 },
+    { deltaX: 0, deltaY: -64, deltaMode: 0, expectedX: 56 },
+    { deltaX: 48, deltaY: 0, deltaMode: 0, expectedX: 168 },
+    { deltaX: 48, deltaY: 64, deltaMode: 0, expectedX: 168 },
+    { deltaX: 0, deltaY: 3, deltaMode: 1, expectedX: 168 },
+    { deltaX: 0, deltaY: 1, deltaMode: 2, expectedX: 1520 },
+  ])("pans only horizontally with Shift+wheel: %j", ({ expectedX, ...deltas }) => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+    const event = new WheelEvent("wheel", { ...deltas, shiftKey: true, cancelable: true });
+
+    controller.handleGraphViewportWheel(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(viewport.scrollLeft).toBe(expectedX);
+    expect(viewport.scrollTop).toBe(240);
+    expect(controller.getGraphZoom()).toBe(1);
+  });
+
+  it("leaves a wheel event consumed by a child control alone", () => {
+    const controller = new StudioGraphSelectionController(createHost());
+    const viewport = createViewport();
+    controller.registerViewportElement(viewport);
+    const event = new WheelEvent("wheel", { deltaY: 64, shiftKey: true, cancelable: true });
+    event.preventDefault();
+
+    controller.handleGraphViewportWheel(event);
+
+    expect(viewport.scrollLeft).toBe(120);
+    expect(viewport.scrollTop).toBe(240);
+  });
+
   it("pans the canvas for wheel events over unfocused editable form controls", () => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
@@ -201,7 +328,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(336);
   });
 
-  it("keeps native scrolling for wheel events inside focused editable form controls", () => {
+  it.each([false, true])("keeps native scrolling in focused fields (Shift: %s)", (shiftKey) => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -216,6 +343,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
       },
       ctrlKey: false,
       metaKey: false,
+      shiftKey,
       deltaX: 0,
       deltaY: 84,
       deltaMode: 0,
@@ -231,7 +359,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     expect(viewport.scrollTop).toBe(240);
   });
 
-  it("zooms the canvas for ctrl+wheel events inside editable form controls", () => {
+  it.each([false, true])("preserves ctrl+wheel zoom inside editable fields (Shift: %s)", (shiftKey) => {
     const controller = new StudioGraphSelectionController(createHost());
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
@@ -244,6 +372,7 @@ describe("StudioGraphSelectionController wheel behavior", () => {
       },
       ctrlKey: true,
       metaKey: false,
+      shiftKey,
       deltaX: 0,
       deltaY: -80,
       deltaMode: 0,
@@ -404,9 +533,13 @@ describe("StudioGraphSelectionController fit selection", () => {
     const fitted = controller.fitSelectionInViewport({ paddingPx: 25 });
 
     expect(fitted).toBe(true);
-    expect(controller.getGraphZoom()).toBeCloseTo(950 / 700, 5);
-    expect(viewport.scrollLeft).toBeCloseTo(110.7142857, 5);
-    expect(viewport.scrollTop).toBeCloseTo(242.8571429, 5);
+    const zoom = controller.getGraphZoom();
+    expect(zoom).toBeCloseTo(950 / 700, 5);
+    // The canvas has no corner, so assert the world coordinate under the
+    // viewport's top-left: the selection centre (450, 400) minus half a viewport.
+    const topLeft = controller.getViewportWorldTopLeft()!;
+    expect(topLeft.x).toBeCloseTo(450 - 500 / zoom, 5);
+    expect(topLeft.y).toBeCloseTo(400 - 300 / zoom, 5);
   });
 
   it("returns false and keeps viewport state when nothing is selected", () => {
@@ -544,12 +677,57 @@ describe("StudioGraphSelectionController fit selection", () => {
 
     expect(controller.fitGraphInViewport({ paddingPx: 25 })).toBe(true);
     expect(controller.getGraphZoom()).toBe(1);
-    expect(viewport.scrollLeft).toBe(0);
-    expect(viewport.scrollTop).toBe(0);
+    // Centred at natural scale: the node's centre sits at the viewport centre.
+    const node = host.getCurrentProject()!.graph.nodes[0];
+    const topLeft = controller.getViewportWorldTopLeft()!;
+    expect(topLeft.x).toBeCloseTo(node.position.x + 120 - 500, 5);
+    expect(topLeft.y).toBeCloseTo(node.position.y + 80 - 300, 5);
   });
 });
 
 describe("StudioGraphSelectionController drag behavior", () => {
+  it.each(["pan", "marquee", "node"] as const)("cancels %s listeners and queued movement when the canvas is replaced", (gesture) => {
+    const host = createHost();
+    const project = { graph: { nodes: [{ id: "node_1", position: { x: 40, y: 50 }, kind: "studio.input", config: {} }] } } as any;
+    host.getCurrentProject = () => project;
+    const commit = jest.fn((_reason, mutator) => mutator(project) !== false);
+    host.commitProjectMutation = commit;
+    const controller = new StudioGraphSelectionController(host);
+    const viewport = createViewport();
+    const nodeEl = createElementStub();
+    controller.registerViewportElement(viewport);
+    controller.registerMarqueeElement(createElementStub());
+    controller.registerNodeElement("node_1", nodeEl);
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    const request = jest.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    const cancel = jest.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { frames.delete(id); });
+    const harness = installWindowPointerListenerHarness();
+    const start = { button: 0, pointerId: 7, clientX: 100, clientY: 120, preventDefault: jest.fn() } as unknown as PointerEvent;
+    try {
+      if (gesture === "pan") controller.startCanvasPan(start);
+      else if (gesture === "marquee") controller.startMarqueeSelection(start);
+      else controller.startNodeDrag("node_1", start, nodeEl);
+      harness.emit("pointermove", { pointerId: 7, clientX: 300, clientY: 320, preventDefault: jest.fn() } as unknown as PointerEvent);
+      expect(frames.size).toBe(1);
+      controller.clearRenderBindings();
+      expect(frames.size).toBe(0);
+      expect(harness.has("pointermove")).toBe(false);
+      expect(harness.has("pointerup")).toBe(false);
+      expect(harness.has("pointercancel")).toBe(false);
+      expect(commit).not.toHaveBeenCalled();
+      expect(project.graph.nodes[0].position).toEqual({ x: 40, y: 50 });
+    } finally {
+      controller.clearRenderBindings();
+      harness.restore();
+      request.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   it("allows dragging regular nodes while busy so layout can be reorganized during runs", () => {
     const host = createHost();
     const renderEdgeLayer = jest.fn();
@@ -740,6 +918,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
 
     const harness = installWindowPointerListenerHarness();
     const movePreventDefault = jest.fn();
+    const before = controller.getViewportWorldTopLeft()!;
     try {
       controller.startCanvasPan(startEvent);
       harness.emit(
@@ -765,8 +944,11 @@ describe("StudioGraphSelectionController drag behavior", () => {
 
     expect(startEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(movePreventDefault).toHaveBeenCalledTimes(1);
-    expect(viewport.scrollLeft).toBe(180);
-    expect(viewport.scrollTop).toBe(300);
+    // Dragging the canvas 60px up-left reveals 60 world px more on the right
+    // and bottom, whatever the elastic box did to the raw scroll offsets.
+    const after = controller.getViewportWorldTopLeft()!;
+    expect(after.x - before.x).toBeCloseTo(60, 5);
+    expect(after.y - before.y).toBeCloseTo(60, 5);
     expect(controller.consumeSuppressedCanvasClick()).toBe(true);
   });
 });

@@ -28,6 +28,20 @@ describe("StudioPermissionManager", () => {
     expect(() => manager.assertFilesystemPath("Other/file.md")).toThrow("Filesystem permission denied");
   });
 
+  it("does not let parent traversal escape a filesystem grant", () => {
+    const policy = createPolicy();
+    policy.grants.push({
+      id: "scope", capability: "filesystem", scope: { allowedPaths: ["/vault/approved"] },
+      grantedAt: new Date().toISOString(), grantedByUser: true,
+    });
+    const manager = new StudioPermissionManager(policy);
+    expect(() => manager.assertFilesystemPath("/vault/approved/../private/key")).toThrow("Filesystem permission denied");
+    expect(() => manager.assertFilesystemPath("/vault/approved/sub/../../private/key")).toThrow("Filesystem permission denied");
+    expect(() => manager.assertFilesystemPath("/vault/approved/sub/../note.md")).toThrow("parent traversal");
+    expect(() => manager.assertFilesystemPath("/vault/approved/sub/note.md")).not.toThrow();
+    expect(() => manager.assertFilesystemPath("/vault/approved-extra/note.md")).toThrow("Filesystem permission denied");
+  });
+
   it("matches CLI allowlist wildcard patterns", () => {
     const policy = createPolicy();
     policy.grants.push({

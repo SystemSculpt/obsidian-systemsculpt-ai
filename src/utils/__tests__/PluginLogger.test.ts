@@ -3,7 +3,7 @@
  */
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
-import { THIN_AGENT_LIFECYCLE_CODES } from "../../views/chatview/agent/Lifecycle";
+import { THIN_AGENT_LIFECYCLE_CODES } from "../../chat/managed/Lifecycle";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -38,7 +38,6 @@ describe("PluginLogger", () => {
           },
         },
       },
-      getErrorCollector: jest.fn(() => null),
     };
 
     consoleSpy = {
@@ -157,7 +156,8 @@ describe("PluginLogger", () => {
       expect(consoleSpy.warn).toHaveBeenCalled();
     });
 
-    it("persists sanitized lifecycle info while ordinary info remains filtered", async () => {
+    it("persists sanitized lifecycle info while diagnostics recording is on and ordinary info remains filtered", async () => {
+      mockPlugin.settings.showDiagnostics = true;
       logger.info("ordinary info");
       const lifecycle = logger.lifecycle({
         sequence: 7,
@@ -265,6 +265,71 @@ describe("PluginLogger", () => {
       expect(persistedText).toContain("incident_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
       expect(persistedText).toContain("c".repeat(32));
       expect(consoleSpy.debug).not.toHaveBeenCalled();
+    });
+
+    it("keeps lifecycle info in the in-memory ring without a flush timer while diagnostics recording is off", async () => {
+      const event = logger.lifecycle({ code: "run_started", phase: "response", runId: "run-local-safe" });
+
+      expect(event).toEqual(expect.objectContaining({ code: "run_started", run_id: "run-local-safe" }));
+      expect(logger.getRecentEntries()).toHaveLength(1);
+      expect(logger.getSupportDiagnostics()).toEqual([
+        expect.objectContaining({ code: "run_started", phase: "response" }),
+      ]);
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(60_000);
+      await logger.flushNow();
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["debug mode", { debugMode: true }],
+      ["an info log level", { logLevel: LogLevel.INFO }],
+    ])("persists lifecycle info when %s asks for it", async (_label, settings) => {
+      Object.assign(mockPlugin.settings, settings);
+
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("thin-agent:lifecycle");
+    });
+
+    it("still persists warnings while diagnostics recording is off", async () => {
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.warn("Visible warning");
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("Visible warning");
+      expect(mockStorage.appendToFile.mock.calls[0][2]).not.toContain("thin-agent:lifecycle");
+    });
+
+    it("leaves unpersisted lifecycle entries out of the size-cap rewrite", async () => {
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.warn("Retained warning");
+
+      await logger.flushNow();
+
+      const rewritten = mockPlugin.app.vault.adapter.write.mock.calls[0][1];
+      expect(rewritten).toContain("Retained warning");
+      expect(rewritten).not.toContain("thin-agent:lifecycle");
+    });
+
+    it("keeps entries captured while recording was off out of a later size-cap rewrite (#416)", async () => {
+      logger.lifecycle({ code: "run_started", phase: "response", runId: "run-while-off" });
+      mockPlugin.settings.showDiagnostics = true;
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
+      logger.lifecycle({ code: "run_finished_completed", phase: "response", runId: "run-while-on" });
+
+      await logger.flushNow();
+
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).not.toContain("run-while-off");
+      const rewritten = mockPlugin.app.vault.adapter.write.mock.calls[0][1];
+      expect(rewritten).toContain("run-while-on");
+      expect(rewritten).not.toContain("run-while-off");
+      expect(logger.getRecentEntries()).toHaveLength(2);
     });
 
     it.each([
@@ -659,6 +724,46 @@ describe("PluginLogger", () => {
       expect(JSON.stringify(projected)).not.toContain("QA-CANARY-7421");
     });
 
+    it("contains hostile buffered metadata and copies safe scalars only once", () => {
+      logger.lifecycle({ code: "run_started", phase: "response" });
+      logger.lifecycle({ code: "phase_working", phase: "response" });
+      logger.lifecycle({ code: "run_finished_completed", phase: "response" });
+      const buffered = logger.getRecentEntries();
+      const revoked = Proxy.revocable({}, {});
+      revoked.revoke();
+      buffered[0].context!.metadata = revoked.proxy;
+      buffered[1].context!.metadata = {
+        code: "phase_working",
+        phase: "response",
+        get status(): number { throw new Error("hostile getter"); },
+      };
+      const reads = new Set<PropertyKey>();
+      buffered[2].context!.metadata = new Proxy({
+        code: "run_finished_completed",
+        phase: "response",
+        serverTimingAppMs: 42,
+        prompt: "private prompt",
+      }, {
+        ownKeys() { throw new Error("must not enumerate input"); },
+        get(target, key, receiver) {
+          if (reads.has(key)) throw new Error(`duplicate read: ${String(key)}`);
+          if (key === "prompt") throw new Error("private property read");
+          reads.add(key);
+          return Reflect.get(target, key, receiver);
+        },
+      });
+
+      expect(logger.getSupportDiagnostics()).toEqual([{
+        timestamp: expect.any(String),
+        severity: "info",
+        code: "run_finished_completed",
+        phase: "response",
+        server_timing_app_ms: 42,
+        server_timing_clock_domain: "server_response_headers_monotonic_duration",
+      }]);
+      expect(reads.has("prompt")).toBe(false);
+    });
+
     it("applies the support limit after excluding unrelated log entries", () => {
       logger.lifecycle({ code: "run_started", phase: "response" });
       mockPlugin.settings.debugMode = true;
@@ -776,9 +881,7 @@ describe("PluginLogger", () => {
       expect(entries[0].error).toEqual({ message: "String error" });
     });
 
-    it("persists one bounded thin-agent failure without raw error or collector fanout", async () => {
-      const mockCollector = { captureLog: jest.fn() };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
+    it("persists one bounded thin-agent failure without raw error or console fanout", async () => {
       const hostileCanaries = [
         "PROMPT_CANARY_01",
         "CONTENT_CANARY_02",
@@ -836,7 +939,6 @@ describe("PluginLogger", () => {
         error: undefined,
       }]);
       expect(consoleSpy.error).not.toHaveBeenCalled();
-      expect(mockCollector.captureLog).not.toHaveBeenCalled();
 
       await logger.flushNow();
       const persisted = mockStorage.appendToFile.mock.calls[0][2];
@@ -860,7 +962,6 @@ describe("PluginLogger", () => {
       const surfaces = [
         persisted,
         JSON.stringify(logger.getRecentEntries()),
-        JSON.stringify(mockCollector.captureLog.mock.calls),
         JSON.stringify(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)),
       ].join("\n");
       for (const canary of hostileCanaries) {
@@ -868,9 +969,41 @@ describe("PluginLogger", () => {
       }
     });
 
+    it("snapshots changing failure getters once before applying the privacy allowlist", async () => {
+      let reads = 0;
+      const error = {
+        get code() {
+          reads += 1;
+          return reads <= 2 ? "response_failed" : "private-error-canary";
+        },
+      };
+      logger.error("ChatView agent session failed", error, {
+        source: "AgentChatView", method: "agentSession",
+      });
+      await logger.flushNow();
+      expect(reads).toBe(1);
+      expect(logger.getRecentEntries()[0].context?.metadata?.code).toBe("response_failed");
+      expect(JSON.stringify(mockStorage.appendToFile.mock.calls)).not.toContain("private-error-canary");
+    });
+
+    it("keeps throwing and revoked failure objects content-free without blocking error handling", async () => {
+      const revoked = Proxy.revocable({}, {});
+      revoked.revoke();
+      for (const error of [revoked.proxy, { get code() { throw new Error("private-getter-canary"); } }]) {
+        expect(() => logger.error("ChatView agent session failed", error, {
+          source: "AgentChatView", method: "agentSession",
+        })).not.toThrow();
+      }
+      await logger.flushNow();
+      expect(logger.getRecentEntries()[0]).toMatchObject({
+        message: "thin-agent:failure",
+        context: { metadata: { code: "client_failure", cause: "object_error" } },
+      });
+      expect(JSON.stringify(mockStorage.appendToFile.mock.calls)).not.toContain("private-getter-canary");
+      expect(consoleSpy.error).not.toHaveBeenCalled();
+    });
+
     it("bounds a hostile plain-object failure across every diagnostic surface", async () => {
-      const mockCollector = { captureLog: jest.fn() };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
       const hostileCanaries = [
         "PLAIN_PROMPT_CANARY_11",
         "PLAIN_CONTENT_CANARY_12",
@@ -922,7 +1055,6 @@ describe("PluginLogger", () => {
         },
         error: undefined,
       })]);
-      expect(mockCollector.captureLog).not.toHaveBeenCalled();
       expect(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)).toEqual([]);
 
       await logger.flushNow();
@@ -945,7 +1077,6 @@ describe("PluginLogger", () => {
       const surfaces = [
         persisted,
         JSON.stringify(logger.getRecentEntries()),
-        JSON.stringify(mockCollector.captureLog.mock.calls),
         JSON.stringify(Object.values(consoleSpy).flatMap((spy) => spy.mock.calls)),
       ].join("\n");
       for (const canary of hostileCanaries) {
@@ -1149,30 +1280,6 @@ describe("PluginLogger", () => {
 
       const entries = logger.getRecentEntries();
       expect(entries[0].context?.metadata).toEqual({ note: "metadata_unserializable" });
-    });
-  });
-
-  describe("error collector forwarding", () => {
-    it("forwards logs to error collector when available", () => {
-      const mockCollector = {
-        captureLog: jest.fn(),
-      };
-      mockPlugin.getErrorCollector = jest.fn(() => mockCollector);
-
-      logger.error("Test error", new Error("Test"));
-
-      expect(mockCollector.captureLog).toHaveBeenCalledWith(
-        "error",
-        expect.any(String),
-        "Test error",
-        expect.any(String)
-      );
-    });
-
-    it("handles missing error collector", () => {
-      mockPlugin.getErrorCollector = jest.fn(() => null);
-
-      expect(() => logger.error("Test")).not.toThrow();
     });
   });
 

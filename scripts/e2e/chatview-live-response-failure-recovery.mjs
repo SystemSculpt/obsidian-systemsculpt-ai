@@ -1,6 +1,7 @@
 /**
- * Visible local-fixture acceptance for response failure, Retry, canonical
- * incident copying, successful recovery, and exact durability across reload.
+ * Visible local-fixture acceptance for response failure, Retry, incident
+ * report ID copying resolved to the persisted report, successful recovery,
+ * and exact durability across reload.
  */
 
 import {
@@ -15,6 +16,9 @@ export const RESPONSE_FAILURE_RECOVERY_MARKER =
   "RESPONSE-FAILURE-RECOVERED-V1";
 export const RESPONSE_FAILURE_VISIBLE_MESSAGE =
   "SystemSculpt could not complete the response.";
+export const COPY_REPORT_ID_LABEL = "Copy report ID";
+export const COPYING_REPORT_ID_LABEL = "Copying…";
+export const REPORT_ID_COPIED_LABEL = "Report ID copied";
 
 const RUN_TIMEOUT_MS = 180000;
 const RELOAD_TIMEOUT_MS = 60000;
@@ -167,35 +171,35 @@ export function makeChatLiveResponseFailureRecovery(now = Date.now()) {
     },
     ...failureTerminalSteps("retried failed response"),
     {
-      label: "local incident report action becomes available",
+      label: "local incident report ID action becomes available",
       action: "waitFor",
       params: {
         target: "chat.turn.copy-incident-report",
         state: "textEquals",
-        text: "Copy report",
+        text: COPY_REPORT_ID_LABEL,
         timeoutMs: 15000,
       },
     },
     {
-      label: "copy report enters its preparing state immediately",
+      label: "copy report ID enters its copying state immediately",
       action: "click",
       params: {
         target: "chat.turn.copy-incident-report",
-        immediateTextEquals: "Preparing…",
+        immediateTextEquals: COPYING_REPORT_ID_LABEL,
       },
     },
     {
-      label: "copy report reaches its ready state",
+      label: "copy report ID reaches its copied state",
       action: "waitFor",
       params: {
         target: "chat.turn.copy-incident-report",
         state: "textEquals",
-        text: "Copied",
+        text: REPORT_ID_COPIED_LABEL,
         timeoutMs: 15000,
       },
     },
     {
-      label: "copied report is canonical, private, rendered, painted, and persisted",
+      label: "copied report ID names a canonical, private, rendered, painted, persisted report",
       action: "e2e.incident.captureCopiedReport",
       params: { forbiddenStrings: canaries },
     },
@@ -277,35 +281,35 @@ export function makeChatLiveResponseFailureRecovery(now = Date.now()) {
       },
     },
     {
-      label: "reload restores the failed report action",
+      label: "reload restores the failed report ID action",
       action: "waitFor",
       params: {
         target: "chat.turn.copy-incident-report",
         state: "textEquals",
-        text: "Copy report",
+        text: COPY_REPORT_ID_LABEL,
         timeoutMs: 15000,
       },
     },
     {
-      label: "reloaded report copy enters its preparing state immediately",
+      label: "reloaded report ID copy enters its copying state immediately",
       action: "click",
       params: {
         target: "chat.turn.copy-incident-report",
-        immediateTextEquals: "Preparing…",
+        immediateTextEquals: COPYING_REPORT_ID_LABEL,
       },
     },
     {
-      label: "reloaded report copy reaches its ready state",
+      label: "reloaded report ID copy reaches its copied state",
       action: "waitFor",
       params: {
         target: "chat.turn.copy-incident-report",
         state: "textEquals",
-        text: "Copied",
+        text: REPORT_ID_COPIED_LABEL,
         timeoutMs: 15000,
       },
     },
     {
-      label: "reload preserves the exact canonical copied report bytes",
+      label: "reload preserves the exact canonical persisted report bytes",
       action: "e2e.incident.assertCopiedReportExact",
       params: { forbiddenStrings: canaries },
     },

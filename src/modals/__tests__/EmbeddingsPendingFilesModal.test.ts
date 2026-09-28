@@ -74,6 +74,11 @@ describe("EmbeddingsPendingFilesModal", () => {
     mockManager = createMockManager();
     plugin = createMockPlugin(mockManager);
     modal = new EmbeddingsPendingFilesModal(plugin.app, plugin);
+    const hostOnOpen = modal.onOpen.bind(modal);
+    (modal as any).onOpen = () => {
+      hostOnOpen();
+      return (modal as any).pendingLoad;
+    };
   });
 
   describe("initialization", () => {

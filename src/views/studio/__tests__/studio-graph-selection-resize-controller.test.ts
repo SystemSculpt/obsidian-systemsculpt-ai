@@ -7,7 +7,7 @@ import {
   MANAGED_TEXT_OWNER_KEY,
 } from "../../../studio/StudioManagedOutputNodes";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
-import type { StudioGraphNodeMutationOptions } from "../graph-v3/StudioGraphNodeCardTypes";
+import type { StudioGraphNodeMutationOptions } from "../canvas/StudioGraphNodeCardTypes";
 import {
   StudioGraphSelectionResizeController,
   type StudioGraphSelectionResizePatchEntry,

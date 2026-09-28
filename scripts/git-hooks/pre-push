@@ -13,5 +13,21 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Git exports repository routing to hooks. From a linked worktree GIT_DIR is
+# absolute, so script tests that create temp repositories would otherwise run
+# their git commands against this repository. Keep in sync with
+# REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES in scripts/repository-git.mjs.
+for name in $(compgen -e); do
+  case "$name" in
+    GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_COMMON_DIR|GIT_CONFIG|GIT_CONFIG_COUNT|\
+    GIT_CONFIG_PARAMETERS|GIT_DIR|GIT_DISCOVERY_ACROSS_FILESYSTEM|GIT_GRAFT_FILE|\
+    GIT_IMPLICIT_WORK_TREE|GIT_INDEX_FILE|GIT_INTERNAL_SUPER_PREFIX|GIT_NAMESPACE|\
+    GIT_NO_REPLACE_OBJECTS|GIT_OBJECT_DIRECTORY|GIT_PREFIX|GIT_QUARANTINE_PATH|\
+    GIT_REPLACE_REF_BASE|GIT_SHALLOW_FILE|GIT_WORK_TREE|GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*)
+      unset "$name"
+      ;;
+  esac
+done
+
 echo "[pre-push] Running the exact local and hosted CI contract..."
 npm run check:ci

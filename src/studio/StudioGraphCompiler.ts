@@ -2,8 +2,11 @@ import type {
   StudioEdge,
   StudioNodeDefinition,
   StudioNodeInstance,
+  StudioNodeInputMap,
+  StudioNodeOutputMap,
   StudioProjectV1,
 } from "./types";
+import { planStudioRun } from "./StudioRunScope";
 import { validateNodeConfig } from "./StudioNodeConfigValidation";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { resolveNodeDefinitionPorts } from "./StudioNodePortResolution";
@@ -14,12 +17,20 @@ export type StudioCompiledNode = {
   inboundEdges: StudioEdge[];
   outboundEdges: StudioEdge[];
   dependencyNodeIds: string[];
+  dependentNodeIds: string[];
 };
 
 export type StudioCompiledGraph = {
   project: StudioProjectV1;
   nodesById: Map<string, StudioCompiledNode>;
   executionOrder: string[];
+};
+
+export type StudioCompiledRun = StudioCompiledGraph & {
+  executeNodeIds: string[];
+  providedNodeIds: ReadonlySet<string>;
+  inputNodeId?: string;
+  resolveInputs: (nodeId: string, outputs: ReadonlyMap<string, StudioNodeOutputMap>) => StudioNodeInputMap;
 };
 
 export type StudioGraphCompileOptions = {
@@ -32,6 +43,8 @@ export type StudioGraphCompileOptions = {
    * states, so persistence and agent-edit gates use this mode.
    */
   validation?: "run" | "document";
+  /** Recorded-output boundaries participate in structure but will not execute. */
+  providedNodeIds?: ReadonlySet<string>;
 };
 
 function typeCompatible(source: string, target: string): boolean {
@@ -40,6 +53,40 @@ function typeCompatible(source: string, target: string): boolean {
 }
 
 export class StudioGraphCompiler {
+  compileRun(project: StudioProjectV1, registry: StudioNodeRegistry, options?: { entryNodeIds?: string[]; prepareInputsFor?: string }): StudioCompiledRun {
+    const inputNodeId = options?.prepareInputsFor;
+    const plan = planStudioRun(project, inputNodeId ? [inputNodeId] : options?.entryNodeIds, node => registry.get(node.kind, node.version)?.cachePolicy);
+    const providedNodeIds = new Set(plan.providedNodeIds);
+    const compiled = this.compile(plan.project, registry, {
+      providedNodeIds: inputNodeId ? new Set([...providedNodeIds, inputNodeId]) : providedNodeIds,
+    });
+    return {
+      ...compiled, inputNodeId, providedNodeIds,
+      executeNodeIds: plan.executeNodeIds.filter(id => id !== inputNodeId),
+      resolveInputs: (nodeId, outputs) => {
+        const node = compiled.nodesById.get(nodeId);
+        if (!node) throw new Error(`Unknown Studio node "${nodeId}".`);
+        const valuesByPort = new Map<string, StudioNodeInputMap[string][]>();
+        for (const edge of node.inboundEdges) {
+          if (providedNodeIds.has(edge.fromNodeId) && !outputs.has(edge.fromNodeId)) {
+            const upstream = compiled.nodesById.get(edge.fromNodeId)?.node;
+            throw new Error(`Run "${upstream?.title || edge.fromNodeId}" first. It has no output yet, and Studio does not rerun it on your behalf.`);
+          }
+          const value = outputs.get(edge.fromNodeId)?.[edge.fromPortId];
+          if (value === undefined) continue;
+          const values = valuesByPort.get(edge.toPortId) || [];
+          values.push(value);
+          valuesByPort.set(edge.toPortId, values);
+        }
+        for (const port of node.definition.inputPorts) {
+          if (port.required && !valuesByPort.has(port.id)) throw new Error(`Required input "${port.id}" has no output for node "${node.node.title || nodeId}".`);
+        }
+        // Array-valued outputs remain one producer's value, never a mutable accumulator.
+        return Object.fromEntries([...valuesByPort].map(([port, values]) => [port, values.length === 1 ? values[0] : values]));
+      },
+    };
+  }
+
   compile(
     project: StudioProjectV1,
     registry: StudioNodeRegistry,
@@ -61,7 +108,7 @@ export class StudioGraphCompiler {
         );
       }
 
-      if (enforceRunReadiness) {
+      if (enforceRunReadiness && !options?.providedNodeIds?.has(node.id)) {
         const configValidation = validateNodeConfig(baseDefinition, node.config);
         if (!configValidation.isValid) {
           const firstError = configValidation.errors[0];
@@ -78,6 +125,7 @@ export class StudioGraphCompiler {
         inboundEdges: [],
         outboundEdges: [],
         dependencyNodeIds: [],
+        dependentNodeIds: [],
       });
     }
 
@@ -120,11 +168,13 @@ export class StudioGraphCompiler {
       toNode.inboundEdges.push(edge);
       if (!toNode.dependencyNodeIds.includes(fromNode.node.id)) {
         toNode.dependencyNodeIds.push(fromNode.node.id);
+        fromNode.dependentNodeIds.push(toNode.node.id);
       }
     }
 
     if (enforceRunReadiness) {
       for (const compiled of nodesById.values()) {
+        if (options?.providedNodeIds?.has(compiled.node.id)) continue;
         for (const port of compiled.definition.inputPorts) {
           if (port.required !== true) continue;
           const hasIncoming = compiled.inboundEdges.some((edge) => edge.toPortId === port.id);
@@ -151,11 +201,12 @@ export class StudioGraphCompiler {
       const nodeId = ready.shift()!;
       order.push(nodeId);
       const node = nodesById.get(nodeId)!;
-      for (const edge of node.outboundEdges) {
-        const nextDegree = (inDegree.get(edge.toNodeId) || 0) - 1;
-        inDegree.set(edge.toNodeId, nextDegree);
+      // In-degree counts predecessor nodes, not individual port connections.
+      for (const dependentId of node.dependentNodeIds) {
+        const nextDegree = (inDegree.get(dependentId) || 0) - 1;
+        inDegree.set(dependentId, nextDegree);
         if (nextDegree === 0) {
-          ready.push(edge.toNodeId);
+          ready.push(dependentId);
         }
       }
     }

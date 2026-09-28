@@ -260,6 +260,23 @@ describe("AccountConnectModal", () => {
     expect(onRetrySignIn).toHaveBeenCalledTimes(1);
   });
 
+  it("says a sign-in may have gone through, instead of blaming the code, and offers a restart", async () => {
+    const onRetrySignIn = jest.fn();
+    const modal = new AccountConnectModal(
+      {} as any,
+      async () => ({ kind: "error" as const, reason: "unconfirmed" as const }),
+      { onRetrySignIn },
+    );
+
+    modal.onOpen();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("may have gone through");
+    expect(modal.modalEl.textContent).not.toContain("invalid");
+    findButtonByText(modal.modalEl, "Start sign-in again").click();
+    expect(onRetrySignIn).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the error state for a failed exchange", async () => {
     const modal = new AccountConnectModal({} as any, async () => ({
       kind: "error" as const,

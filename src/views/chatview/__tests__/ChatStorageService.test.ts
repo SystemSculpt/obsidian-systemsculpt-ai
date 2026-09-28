@@ -2,7 +2,12 @@
  * @jest-environment jsdom
  */
 import { App, Platform, TFile } from "obsidian";
-import { ChatStorageService, SavedChatCorruptedError } from "../ChatStorageService";
+import {
+  ChatStorageService,
+  isPathInDirectory,
+  resolveChatsDirectory,
+  SavedChatCorruptedError,
+} from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
 // Mock parseYaml and stringifyYaml
@@ -94,6 +99,47 @@ describe("ChatStorageService", () => {
       expect((service as any).chatDirectory).toBe("SystemSculpt/Chats");
     });
 
+    it("resolves a live directory for every operation", async () => {
+      let directory = "SystemSculpt/Chats";
+      const live = new ChatStorageService(mockApp, () => directory);
+
+      await live.saveChat("chat-live", []);
+      directory = "Archive/Chats";
+      await live.saveChat("chat-live", []);
+      await live.createChatExclusive("chat-new", []);
+      mockVault.getAbstractFileByPath.mockClear();
+      await live.loadChat("chat-live");
+
+      expect(mockVault.create.mock.calls.map(([path]: [string]) => path)).toEqual([
+        "SystemSculpt/Chats/chat-live.md",
+        "Archive/Chats/chat-live.md",
+        "Archive/Chats/chat-new.md",
+      ]);
+      // The live folder is searched first; a chat that stayed in an earlier
+      // chats folder is still found there.
+      expect(mockVault.getAbstractFileByPath.mock.calls).toEqual([
+        ["Archive/Chats/chat-live.md"],
+        ["SystemSculpt/Chats/chat-live.md"],
+      ]);
+    });
+  });
+
+  describe("chats directory helpers", () => {
+    it("normalizes the configured folder and falls back to the default", () => {
+      expect(resolveChatsDirectory({ chatsDirectory: "Archive/Chats" })).toBe("Archive/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "Archive/Chats//" })).toBe("Archive/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "" })).toBe("SystemSculpt/Chats");
+      expect(resolveChatsDirectory({ chatsDirectory: "/" })).toBe("SystemSculpt/Chats");
+      expect(resolveChatsDirectory({})).toBe("SystemSculpt/Chats");
+    });
+
+    it("checks containment on a path boundary", () => {
+      expect(isPathInDirectory("Chats/a.md", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats/Nested/a.md", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats", "Chats")).toBe(true);
+      expect(isPathInDirectory("Chats-old/a.md", "Chats")).toBe(false);
+      expect(isPathInDirectory("Chatsa.md", "Chats")).toBe(false);
+    });
   });
 
   describe("saveChat", () => {
@@ -183,11 +229,13 @@ describe("ChatStorageService", () => {
     });
 
     it("adds default chat tag to new history files", async () => {
-      (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
-        settings: { defaultChatTag: "#project" },
-      };
+      const tagged = new ChatStorageService(
+        mockApp,
+        "SystemSculpt/Chats",
+        { settings: { defaultChatTag: "#project" } } as any,
+      );
 
-      await service.saveChat("tagged-chat", testMessages);
+      await tagged.saveChat("tagged-chat", testMessages);
 
       const createdContent = mockVault.create.mock.calls[0][1] as string;
       expect(createdContent).toContain('tags: ["project"]');
@@ -207,9 +255,11 @@ tags: ["existing", "#keep"]
 
 Content here`);
 
-      (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
-        settings: { defaultChatTag: "new" },
-      };
+      const merging = new ChatStorageService(
+        mockApp,
+        "SystemSculpt/Chats",
+        { settings: { defaultChatTag: "new" } } as any,
+      );
       const { ChatMarkdownSerializer } = jest.requireMock("../storage/ChatMarkdownSerializer") as {
         ChatMarkdownSerializer: { parseMetadata: jest.Mock };
       };
@@ -222,7 +272,7 @@ Content here`);
         tags: ["existing", "keep"],
       });
 
-      await service.saveChat("test-chat", testMessages);
+      await merging.saveChat("test-chat", testMessages);
 
       const modifiedContent = mockVault.modify.mock.calls[0][1] as string;
       expect(modifiedContent).toContain('tags: ["existing","keep","new"]');
@@ -248,11 +298,13 @@ Content here`);
       const mockDirManager = {
         ensureDirectoryByPath: jest.fn().mockResolvedValue(undefined),
       };
-      (mockApp as any).plugins.plugins["systemsculpt-ai"] = {
-        directoryManager: mockDirManager,
-      };
+      const withDirManager = new ChatStorageService(
+        mockApp,
+        "SystemSculpt/Chats",
+        { directoryManager: mockDirManager } as any,
+      );
 
-      await service.saveChat("test-chat", testMessages);
+      await withDirManager.saveChat("test-chat", testMessages);
 
       expect(mockDirManager.ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Chats");
     });
@@ -275,7 +327,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("returns a minimal managed resume descriptor", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockResolvedValue({
       id: "chat-9",
       messages: [{ role: "user" as ChatRole, content: "Hello" }],
@@ -294,7 +346,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("falls back to null when the saved chat note is corrupted", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockRejectedValue(
       new SavedChatCorruptedError("SystemSculpt/Chats/corrupt.md"),
     );
@@ -303,7 +355,7 @@ describe("ChatStorageService resume descriptor contract", () => {
   });
 
   it("does not hide an unexpected resume read failure as a missing chat", async () => {
-    const service = new ChatStorageService({} as App, "SystemSculpt/Chats");
+    const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockRejectedValue(new Error("vault unavailable"));
 
     await expect(service.getChatResumeDescriptor("unavailable"))

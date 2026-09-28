@@ -66,7 +66,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
 
       await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
 
-      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
+      expect(mockManager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, expect.any(AbortSignal));
     });
 
     it("returns results with origin='semantic'", async () => {
@@ -83,6 +83,26 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(res.results.length).toBeGreaterThan(0);
       const semanticResult = res.results.find((r) => r.path === "notes/machine-learning.md");
       expect(semanticResult?.origin).toBe("semantic");
+    });
+
+    it("aborts the semantic query when it times out instead of letting it run on", async () => {
+      jest.useFakeTimers();
+      let received: AbortSignal | undefined;
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockImplementation((_query: string, _limit: number, signal: AbortSignal) => {
+          received = signal;
+          return new Promise(() => {});
+        }),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+      const searchPromise = engine.search("test query", { mode: "semantic", limit: 10 });
+      await jest.advanceTimersByTimeAsync(1600);
+      await searchPromise;
+
+      expect(received?.aborted).toBe(true);
+      jest.useRealTimers();
     });
 
     it("times out after 1.5s and returns empty array for semantic", async () => {
@@ -223,6 +243,42 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(mockManager.searchSimilar).toHaveBeenCalled();
       expect(res.stats.usedEmbeddings).toBe(true);
       expect(res.stats.embeddingsEligible).toBe(true);
+    });
+
+    it("keeps one- and two-character prefixes and lexical-only passes off the semantic path", async () => {
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.95, metadata: { title: "Machine Learning" } },
+        ]),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
+
+      await engine.search("ma", { mode: "smart", limit: 10 });
+      await engine.search("machine", { mode: "smart", limit: 10, semantic: false });
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
+
+      await engine.search("mac", { mode: "smart", limit: 10 });
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(1);
+    });
+
+    it("counts indexed notes once per index revision instead of on every search", async () => {
+      let revision = 1;
+      const mockManager = createMockManager({
+        getIndexRevision: jest.fn(() => revision),
+        getLifecycleSnapshot: jest.fn(() => ({ updatedAt: 5 })),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+      engine.getEmbeddingsIndicator();
+      engine.getEmbeddingsIndicator();
+      expect(mockManager.getStats).toHaveBeenCalledTimes(1);
+
+      revision = 2;
+      expect(engine.getEmbeddingsIndicator()).toMatchObject({ available: true, processed: 80, total: 100 });
+      expect(mockManager.getStats).toHaveBeenCalledTimes(2);
     });
 
     it("deduplicates results by path", async () => {
@@ -384,7 +440,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const res = await engine.search("artificial intelligence", { mode: "semantic", limit: 10 });
 
       expect(plugin.getOrCreateEmbeddingsManager).toHaveBeenCalled();
-      expect(manager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, undefined);
+      expect(manager.searchSimilar).toHaveBeenCalledWith("artificial intelligence", 10, expect.any(AbortSignal));
       expect(res.results.map((r) => r.path)).toContain("notes/machine-learning.md");
     });
   });

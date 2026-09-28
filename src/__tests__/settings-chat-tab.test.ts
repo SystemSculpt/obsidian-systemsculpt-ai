@@ -13,6 +13,7 @@ const createPluginStub = (app: App) => {
     emitter: { emit: jest.fn() },
     settings: {
       chatFontSize: "medium",
+      textExecutionBackend: "systemsculpt",
       settingsMode: "standard",
       defaultChatTag: "",
       respectReducedMotion: true,
@@ -37,6 +38,7 @@ describe("Chat tab native layout", () => {
       app,
       plugin,
       display: jest.fn(),
+      registerRenderCleanup: jest.fn(() => () => {}),
     };
     const container = document.createElement("div");
 
@@ -47,7 +49,7 @@ describe("Chat tab native layout", () => {
     expect(names).not.toContain("Web search by default");
     expect(names).toContain("Default chat font size");
     expect(names).not.toContain("Hide SystemSculpt system & tool messages");
-    expect(names).toContain("Honor OS reduced motion");
+    expect(names).toContain("Honor reduced motion");
     expect(names).not.toContain("Default system prompt");
     expect(names).not.toContain("Favorite models");
     expect(container.textContent).toContain("Chat settings");

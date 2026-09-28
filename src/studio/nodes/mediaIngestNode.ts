@@ -1,6 +1,5 @@
 import type {
   StudioAssetRef,
-  StudioJsonValue,
   StudioNodeDefinition,
   StudioNodeExecutionContext,
 } from "../types";
@@ -33,7 +32,7 @@ function pathFromAssetLike(value: unknown): string {
 function resolvePathFromMediaInput(context: StudioNodeExecutionContext): string {
   const mediaInput = context.inputs.media;
   const sourceIndexRaw = Number(
-    context.node.config.__studio_source_output_index as StudioJsonValue
+    context.node.config.__studio_source_output_index
   );
   const sourceIndex = Number.isInteger(sourceIndexRaw) && sourceIndexRaw >= 0 ? sourceIndexRaw : 0;
 
@@ -59,7 +58,7 @@ function resolvePathFromMediaInput(context: StudioNodeExecutionContext): string 
 }
 
 function isPinnedGeneratedMediaNode(context: StudioNodeExecutionContext): boolean {
-  const owner = getText(context.node.config[MANAGED_MEDIA_OWNER_KEY] as StudioJsonValue).trim();
+  const owner = getText(context.node.config[MANAGED_MEDIA_OWNER_KEY]).trim();
   return owner === MANAGED_MEDIA_OWNER;
 }
 
@@ -139,7 +138,7 @@ export const mediaIngestNode: StudioNodeDefinition = {
         // persisted with an empty sourcePath while a run is in flight).
         // execute() enforces the real contract: media input OR sourcePath.
         key: "sourcePath",
-        label: "Source Path",
+        label: "Source path",
         type: "media_path",
         allowOutsideVault: true,
         mediaKinds: ["image", "video", "audio"],
@@ -150,8 +149,8 @@ export const mediaIngestNode: StudioNodeDefinition = {
   async execute(context) {
     const pathFromInput = resolvePathFromMediaInput(context);
     const configuredPath =
-      getText(context.node.config.sourcePath as StudioJsonValue).trim() ||
-      getText(context.node.config.vaultPath as StudioJsonValue).trim();
+      getText(context.node.config.sourcePath).trim() ||
+      getText(context.node.config.vaultPath).trim();
     const sourcePath = isPinnedGeneratedMediaNode(context)
       ? configuredPath || pathFromInput
       : pathFromInput || configuredPath;
@@ -183,12 +182,12 @@ export const mediaIngestNode: StudioNodeDefinition = {
 
     return {
       outputs: {
-        path: (finalAsset?.path || sourcePath) as StudioJsonValue,
-        preview_path: (finalAsset?.path || previewPath) as StudioJsonValue,
-        preview_error: previewError as StudioJsonValue,
-        source_preview_path: previewPath as StudioJsonValue,
-        preview_asset: (finalAsset || previewAsset) as StudioJsonValue,
-        source_preview_asset: previewAsset as StudioJsonValue,
+        path: (finalAsset?.path || sourcePath),
+        preview_path: (finalAsset?.path || previewPath),
+        preview_error: previewError,
+        source_preview_path: previewPath,
+        preview_asset: (finalAsset || previewAsset),
+        source_preview_asset: previewAsset,
       },
       artifacts: finalAsset ? [finalAsset] : undefined,
     };

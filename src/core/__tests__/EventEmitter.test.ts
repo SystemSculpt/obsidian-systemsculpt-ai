@@ -10,6 +10,37 @@ describe("EventEmitter", () => {
     emitter = new EventEmitter();
   });
 
+  it.each(["off", "clear", "clearNamespace"] as const)("keeps unsubscribe safe after %s and reports only live namespaced events", (operation) => {
+    const unsubscribe = emitter.on("test:event", jest.fn());
+    if (operation === "off") emitter.off("test:event");
+    else if (operation === "clear") emitter.clear();
+    else emitter.clearNamespace("test");
+    expect(emitter.getNamespaceEvents("test")).toEqual([]);
+    expect(unsubscribe).not.toThrow();
+    expect(unsubscribe).not.toThrow();
+  });
+
+  it("treats prototype names as ordinary events and namespaces", () => {
+    const listener = jest.fn();
+    emitter.on("__proto__", listener);
+    emitter.on("constructor:event", listener);
+    emitter.emit("__proto__", "plain");
+    emitter.emit("constructor:event", "namespaced");
+    expect(listener.mock.calls).toEqual([["plain"], ["namespaced"]]);
+    expect(emitter.getNamespaceEvents("constructor")).toEqual(["constructor:event"]);
+    emitter.clearNamespace("constructor");
+    expect(emitter.getNamespaceEvents("constructor")).toEqual([]);
+  });
+
+  it("keeps in-flight emission order when a callback removes another listener", () => {
+    const calls: string[] = [];
+    emitter.on("test", () => { calls.push("first"); unsubscribe(); });
+    const unsubscribe = emitter.on("test", () => { calls.push("second"); });
+    emitter.emit("test");
+    emitter.emit("test");
+    expect(calls).toEqual(["first", "second", "first"]);
+  });
+
   describe("on", () => {
     it("registers an event listener", () => {
       const listener = jest.fn();

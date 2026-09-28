@@ -9,6 +9,7 @@ import {
   isAuthFailureMessage,
   isManagedLicenseFailure,
   isContextOverflowErrorMessage,
+  isCreditsRequiredError,
   isPlanAccessError,
   planRequiredError,
   PLAN_REQUIRED_MESSAGE,
@@ -166,6 +167,33 @@ describe("errors", () => {
       expect(isPlanAccessError(new Error("license mention only"))).toBe(false);
       expect(isPlanAccessError({ code: "out_of_credits" })).toBe(false);
       expect(isPlanAccessError({ code: "temporarily_unavailable" })).toBe(false);
+    });
+  });
+
+  describe("credits classification (#300)", () => {
+    it("classifies structured credit codes and HTTP 402", () => {
+      expect(isCreditsRequiredError({ code: "payment_required" })).toBe(true);
+      expect(isCreditsRequiredError({ code: "insufficient_credits" })).toBe(true);
+      expect(isCreditsRequiredError({ code: "out_of_credits" })).toBe(true);
+      expect(isCreditsRequiredError(new SystemSculptError("x", ERROR_CODES.INSUFFICIENT_CREDITS, 402))).toBe(true);
+      expect(isCreditsRequiredError({ code: "request_failed", status: 402 })).toBe(true);
+    });
+
+    it("follows bounded originalError and cause wrappers", () => {
+      const wrapped = { name: "ManagedTranscriptionRetryError", originalError: { code: "payment_required", status: 402 } };
+      expect(isCreditsRequiredError(wrapped)).toBe(true);
+      expect(isCreditsRequiredError({ cause: { cause: { status: 402 } } })).toBe(true);
+      const cyclic: { cause?: unknown } = {};
+      cyclic.cause = cyclic;
+      expect(isCreditsRequiredError(cyclic)).toBe(false);
+    });
+
+    it("rejects plan, availability, and string-status errors", () => {
+      expect(isCreditsRequiredError(null)).toBe(false);
+      expect(isCreditsRequiredError(new Error("Managed job request failed (402)."))).toBe(false);
+      expect(isCreditsRequiredError({ code: "license_required", status: 401 })).toBe(false);
+      expect(isCreditsRequiredError({ code: "temporarily_unavailable", status: 503 })).toBe(false);
+      expect(isCreditsRequiredError({ status: "402" })).toBe(false);
     });
   });
 

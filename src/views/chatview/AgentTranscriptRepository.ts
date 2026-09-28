@@ -322,12 +322,19 @@ function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly T
  */
 export class AgentTranscriptRepository {
   private chatId = "";
+  /**
+   * The folder the transcript was loaded from or created in. Saves return to
+   * that file even if the chats folder setting changes while the chat is
+   * open; otherwise the chat would fork into a second file.
+   */
+  private chatDirectory: string | undefined;
   private title = "New chat";
   private version = 0;
   private agentConversationId: string | undefined;
   private messages: ChatMessage[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private generation = 0;
+  private loadGeneration = 0;
   private readonly commitListeners = new Set<(commit: AgentTranscriptCommit) => void>();
 
   constructor(
@@ -345,6 +352,13 @@ export class AgentTranscriptRepository {
     });
   }
 
+  /** The vault path of `chatId`'s transcript when it is the one held here. */
+  public chatPath(chatId: string): string | null {
+    return chatId && chatId === this.chatId && this.chatDirectory !== undefined
+      ? `${this.chatDirectory}/${chatId}.md`
+      : null;
+  }
+
   public subscribeToCommits(listener: (commit: AgentTranscriptCommit) => void): () => void {
     this.commitListeners.add(listener);
     return () => this.commitListeners.delete(listener);
@@ -352,14 +366,19 @@ export class AgentTranscriptRepository {
 
   public load(chatId: string): Promise<AgentLoadedTranscript | null> {
     const generation = this.generation;
+    const loadGeneration = ++this.loadGeneration;
     return this.serializeForGeneration(generation, async () => {
       const loaded = await this.storage.loadChat(chatId);
+      if (loadGeneration !== this.loadGeneration) {
+        throw new AgentTranscriptConflictError("A newer saved chat was selected while loading the transcript.");
+      }
       if (!loaded) return null;
       this.assertGeneration(
         generation,
         "The active chat changed while loading the transcript.",
       );
       this.chatId = loaded.id;
+      this.chatDirectory = loaded.chatDirectory;
       this.title = loaded.title || "New chat";
       this.version = loaded.version || 0;
       // Saved messages are a presentation cache until the server session has
@@ -379,6 +398,7 @@ export class AgentTranscriptRepository {
 
   public reset(input: Readonly<{ title?: string }> = {}): AgentTranscriptSnapshot {
     this.chatId = "";
+    this.chatDirectory = undefined;
     this.title = input.title?.trim() || "New chat";
     this.version = 0;
     this.agentConversationId = undefined;
@@ -543,7 +563,7 @@ export class AgentTranscriptRepository {
       const saved = await this.storage.saveChat(
         this.chatId,
         cloneMessages(this.messages),
-        this.options(),
+        { ...this.options(), ...this.location() },
       );
       this.assertGeneration(
         generation,
@@ -613,6 +633,7 @@ export class AgentTranscriptRepository {
         "The active chat changed while creating the transcript.",
       );
       this.chatId = allocated.chatId;
+      this.chatDirectory = allocated.value.chatDirectory;
       this.version = allocated.value.version;
       this.messages = next;
       return;
@@ -622,6 +643,7 @@ export class AgentTranscriptRepository {
       cloneMessages(next),
       {
         ...this.options(),
+        ...this.location(),
         ...(source === "authoritative-server-history"
           ? { authoritativeServerHistoryReconciliation: true }
           : {}),
@@ -641,6 +663,10 @@ export class AgentTranscriptRepository {
       title: this.title,
       ...(this.agentConversationId ? { agentConversationId: this.agentConversationId } : {}),
     };
+  }
+
+  private location(): Readonly<{ chatDirectory?: string }> {
+    return this.chatDirectory === undefined ? {} : { chatDirectory: this.chatDirectory };
   }
 
   private emitCommit(commit: AgentTranscriptCommit): void {

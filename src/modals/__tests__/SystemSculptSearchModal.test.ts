@@ -1,7 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-import { readFileSync } from "node:fs";
 import { App } from "obsidian";
 import { SystemSculptSearchModal } from "../SystemSculptSearchModal";
 import { SearchResponse } from "../../services/search/SystemSculptSearchEngine";
@@ -145,7 +144,7 @@ describe("SystemSculptSearchModal", () => {
 
       const state = (modal as any).listEl?.querySelector(".ss-ui-state.is-error");
       expect(state?.getAttribute("role")).toBe("alert");
-      expect(state?.textContent).toContain("Could not load recent notes");
+      expect(state?.textContent).toContain("Could not load recent files");
       expect(state?.querySelector("button")?.textContent).toBe("Retry");
       expect((modal as any).listEl?.getAttribute("role")).toBeNull();
     });
@@ -161,14 +160,6 @@ describe("SystemSculptSearchModal", () => {
 
       modal.onClose();
       expect(popupDocument.body.className).toBe("theme-dark native-host-state");
-    });
-
-    it("preserves the StandardModal full-screen geometry on mobile", () => {
-      const css = readFileSync("src/css/modals/search.css", "utf8");
-
-      expect(css).toMatch(
-        /\.ss-mobile-layout \.ss-modal\.ss-search-modal\s*\{[^}]*width:\s*100vw;[^}]*max-width:\s*100vw;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;/s,
-      );
     });
   });
 
@@ -251,7 +242,43 @@ describe("SystemSculptSearchModal", () => {
         sort: "relevance",
         limit: 30,
         signal: expect.any(AbortSignal),
+        semantic: false,
       });
+    });
+
+    it("adds semantic results only after typing pauses for about 400 ms", async () => {
+      modal.onOpen();
+      const searchInput = (modal as any).searchInputEl as HTMLInputElement;
+      plugin._testEngine.search.mockImplementation(async (_query: string, options: { semantic?: boolean }) => (
+        createMockSearchResponse({
+          stats: { ...createMockSearchResponse().stats, usedEmbeddings: options.semantic !== false },
+        })
+      ));
+
+      for (const value of ["t", "te", "tes", "test"]) {
+        searchInput.value = value;
+        searchInput.dispatchEvent(new Event("input"));
+        await jest.advanceTimersByTimeAsync(190);
+      }
+      const semanticCalls = () => plugin._testEngine.search.mock.calls.filter(
+        ([, options]: [string, { semantic?: boolean }]) => options.semantic !== false,
+      );
+      expect(semanticCalls()).toHaveLength(0);
+
+      await jest.advanceTimersByTimeAsync(400);
+      expect(semanticCalls()).toEqual([["test", expect.objectContaining({ mode: "smart" })]]);
+    });
+
+    it("never runs a semantic pass for a query shorter than three characters", async () => {
+      modal.onOpen();
+      const searchInput = (modal as any).searchInputEl as HTMLInputElement;
+
+      searchInput.value = "ai";
+      searchInput.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(2_000);
+
+      expect(plugin._testEngine.search).toHaveBeenCalledTimes(1);
+      expect(plugin._testEngine.search.mock.calls[0][1]).toMatchObject({ semantic: false });
     });
 
     it("clears the active query and returns to recents with the clear button", async () => {

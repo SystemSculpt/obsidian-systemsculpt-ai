@@ -3,6 +3,13 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 
+function makePlugin(settingsApi: unknown) {
+  const app = new App();
+  Object.defineProperty(app, "setting", { configurable: true, value: settingsApi });
+  const plugin = new SystemSculptPlugin(app, { id: "systemsculpt-ai", version: "1.0.0" } as any);
+  return { plugin, trigger: jest.spyOn(app.workspace, "trigger") };
+}
+
 describe("SystemSculptPlugin.openSettingsTab", () => {
   beforeEach(() => {
     jest.useFakeTimers();
@@ -11,87 +18,115 @@ describe("SystemSculptPlugin.openSettingsTab", () => {
   });
 
   afterEach(() => {
-    jest.runOnlyPendingTimers();
+    jest.clearAllTimers();
+    jest.restoreAllMocks();
     jest.useRealTimers();
   });
 
-  it("queues the requested tab before the settings modal finishes mounting", () => {
-    const app = new App();
-    const plugin = new SystemSculptPlugin(app, {
-      id: "systemsculpt-ai",
-      version: "1.0.0",
-    } as any);
+  it("selects the plugin in a detached settings window without a main-window modal", () => {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const ownerWindow = frame.contentWindow!;
+    const containerEl = ownerWindow.document.createElement("div");
+    ownerWindow.document.body.appendChild(containerEl);
+    const timer = jest.spyOn(ownerWindow, "setTimeout").mockImplementation((handler, delay) => window.setTimeout(handler, delay));
+    const settingsApi = {
+      activeTab: { id: "general", containerEl },
+      open: jest.fn(),
+      openTabById: jest.fn((id: string) => { settingsApi.activeTab = { id, containerEl }; }),
+    };
+    const { plugin, trigger } = makePlugin(settingsApi);
 
-    const open = jest.fn();
-    const openTabById = jest.fn();
-    Object.defineProperty(app, "setting", {
-      configurable: true,
-      value: {
-        open,
-        openTabById,
-        activeTab: { id: "community-plugins" },
-      },
-    });
+    plugin.openSettingsTab("providers");
+    jest.runOnlyPendingTimers();
 
-    const workspaceTriggerSpy = jest.spyOn(app.workspace, "trigger");
+    expect(document.querySelector(".modal.mod-settings")).toBeNull();
+    expect(settingsApi.open).not.toHaveBeenCalled();
+    expect(settingsApi.openTabById).toHaveBeenCalledWith("systemsculpt-ai");
+    expect(timer).toHaveBeenCalled();
+    expect(trigger).toHaveBeenCalledWith("systemsculpt:settings-focus-tab", "providers");
+  });
+
+  it("retries a legacy API that throws until settings finishes mounting", () => {
+    let ready = false;
+    const settingsApi = {
+      activeTab: { id: "community-plugins" },
+      open: jest.fn(() => { window.setTimeout(() => { ready = true; }, 50); }),
+      openTabById: jest.fn((id: string) => {
+        if (!ready) throw new Error("Settings not mounted yet");
+        settingsApi.activeTab = { id };
+      }),
+    };
+    const { plugin, trigger } = makePlugin(settingsApi);
 
     plugin.openSettingsTab("providers");
 
     expect(plugin.peekPendingSettingsFocusTab()).toBe("providers");
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(openTabById).not.toHaveBeenCalled();
-
+    expect(settingsApi.open).toHaveBeenCalledTimes(1);
+    expect(trigger).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(50);
     jest.runOnlyPendingTimers();
-
-    expect(openTabById).not.toHaveBeenCalled();
-    expect(workspaceTriggerSpy).not.toHaveBeenCalled();
+    expect(settingsApi.activeTab.id).toBe("systemsculpt-ai");
+    expect(trigger).toHaveBeenCalledWith("systemsculpt:settings-focus-tab", "providers");
   });
 
-  it("waits for the settings modal to mount before switching to the plugin tab", () => {
-    const app = new App();
-    const plugin = new SystemSculptPlugin(app, {
-      id: "systemsculpt-ai",
-      version: "1.0.0",
-    } as any);
-
-    let modalMounted = false;
+  it("does not report focus before a no-op API has actually selected the plugin", () => {
     const settingsApi = {
-      activeTab: { id: "community-plugins" as string },
-      open: jest.fn(() => {
-        window.setTimeout(() => {
-          const modal = document.createElement("div");
-          modal.className = "modal mod-settings";
-          document.body.appendChild(modal);
-          modalMounted = true;
-        }, 50);
-      }),
-      openTabById: jest.fn((id: string) => {
-        if (!modalMounted) {
-          throw new Error("Settings modal not mounted yet");
-        }
-        settingsApi.activeTab = { id };
-      }),
+      activeTab: { id: "general" },
+      open: jest.fn(),
+      openTabById: jest.fn(),
     };
-    Object.defineProperty(app, "setting", {
-      configurable: true,
-      value: settingsApi,
-    });
-
-    const workspaceTriggerSpy = jest.spyOn(app.workspace, "trigger");
+    const { plugin, trigger } = makePlugin(settingsApi);
 
     plugin.openSettingsTab("providers");
-
-    expect(settingsApi.open).toHaveBeenCalledTimes(1);
-    expect(settingsApi.openTabById).not.toHaveBeenCalled();
-
+    jest.advanceTimersByTime(100);
+    expect(trigger).not.toHaveBeenCalled();
+    settingsApi.activeTab = { id: "systemsculpt-ai" };
     jest.advanceTimersByTime(50);
-    expect(settingsApi.openTabById).toHaveBeenCalledWith("systemsculpt-ai");
-
     jest.runOnlyPendingTimers();
+    expect(trigger).toHaveBeenCalledWith("systemsculpt:settings-focus-tab", "providers");
+  });
 
-    expect(workspaceTriggerSpy).toHaveBeenCalledWith(
-      "systemsculpt:settings-focus-tab",
-      "providers",
-    );
+  it("bounds retries when settings never becomes ready", () => {
+    const settingsApi = { activeTab: { id: "general" }, open: jest.fn(), openTabById: jest.fn() };
+    const { plugin, trigger } = makePlugin(settingsApi);
+
+    plugin.openSettingsTab("providers");
+    jest.runAllTimers();
+
+    expect(settingsApi.openTabById.mock.calls.length).toBeLessThanOrEqual(21);
+    expect(trigger).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("cancels a superseded focus request", () => {
+    const settingsApi = { activeTab: { id: "general" }, open: jest.fn(), openTabById: jest.fn() };
+    const { plugin, trigger } = makePlugin(settingsApi);
+    plugin.openSettingsTab("providers");
+    settingsApi.openTabById.mockImplementation((id: string) => { settingsApi.activeTab = { id }; });
+
+    plugin.openSettingsTab("account");
+    jest.runAllTimers();
+
+    expect(trigger.mock.calls).toEqual([["systemsculpt:settings-focus-tab", "account"]]);
+  });
+
+  it("cancels pending retry timers when Obsidian disposes the plugin", () => {
+    const settingsApi = { activeTab: { id: "general" }, open: jest.fn(), openTabById: jest.fn() };
+    const { plugin, trigger } = makePlugin(settingsApi);
+    const cleanups: Array<() => void> = [];
+    jest.spyOn(plugin, "register").mockImplementation((cleanup) => { cleanups.push(cleanup); });
+    plugin.openSettingsTab("providers");
+    const attempts = settingsApi.openTabById.mock.calls.length;
+    expect(cleanups).toHaveLength(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    cleanups.forEach((cleanup) => cleanup());
+    expect(jest.getTimerCount()).toBe(0);
+    jest.runAllTimers();
+
+    expect(settingsApi.openTabById).toHaveBeenCalledTimes(attempts);
+    expect(trigger).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

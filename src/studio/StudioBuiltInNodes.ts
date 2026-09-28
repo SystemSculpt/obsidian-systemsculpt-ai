@@ -1,9 +1,16 @@
+import { buttonNode } from "./nodes/buttonNode";
+import { commandCenterNode } from "./nodes/commandCenterNode";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { audioExtractNode } from "./nodes/audioExtractNode";
 import { cliCommandNode } from "./nodes/cliCommandNode";
 import { datasetNode } from "./nodes/datasetNode";
 import { imageGenerationNode } from "./nodes/imageGenerationNode";
+import { videoGenerationNode } from "./nodes/videoGenerationNode";
 import { inputNode } from "./nodes/inputNode";
+import { runCollectionNode } from './nodes/runCollectionNode';
+import { collectionNode } from "./nodes/collectionNode";
+import { codexNode } from './nodes/codexNode';
+import { workflowNode } from './nodes/workflowNode';
 import { jsonNode } from "./nodes/jsonNode";
 import { mediaIngestNode } from "./nodes/mediaIngestNode";
 import { noteNode } from "./nodes/noteNode";
@@ -13,17 +20,26 @@ import { textOutputNode } from "./nodes/textOutputNode";
 import { textGenerationNode } from "./nodes/textGenerationNode";
 import { transcriptionNode } from "./nodes/transcriptionNode";
 import { terminalNode } from "./nodes/terminalNode";
+import { scriptNode } from "./nodes/scriptNode";
+import { processNode } from "./nodes/processNode";
 import { valueNode } from "./nodes/valueNode";
 
 export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(inputNode);
   registry.register(jsonNode);
+  registry.register(collectionNode);
+  registry.register(commandCenterNode);
+  registry.register(buttonNode);
+  registry.register(runCollectionNode);
+  registry.register(workflowNode);
+  registry.register(codexNode);
   registry.register(noteNode);
   registry.register(textNode);
   registry.register(textOutputNode);
   registry.register(valueNode);
   registry.register(textGenerationNode);
   registry.register(imageGenerationNode);
+  registry.register(videoGenerationNode);
   registry.register(mediaIngestNode);
   registry.register(audioExtractNode);
   registry.register(transcriptionNode);
@@ -31,4 +47,6 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(retiredHttpRequestNode);
   registry.register(cliCommandNode);
   registry.register(terminalNode);
+  registry.register(processNode);
+  registry.register(scriptNode);
 }

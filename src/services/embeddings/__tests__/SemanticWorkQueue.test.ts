@@ -141,4 +141,65 @@ describe("SemanticWorkQueue", () => {
     await queue.complete([second!]);
     expect(queue.get("Race.md")).toBeNull();
   });
+
+  it("claims and fails a whole reindex batch with one durable write each", async () => {
+    const state = new Map<string, unknown>();
+    const store = durableStore(state);
+    const write = jest.spyOn(store, "writeState");
+    const queue = new SemanticWorkQueue(store, 350);
+    const entries = Array.from({ length: 500 }, (_, index) => ({ path: `Note-${index}.md`, sourceMtime: index }));
+
+    const claims = await queue.enqueueManyImmediate(entries, "reconcile", 10_000);
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(claims.size).toBe(500);
+    expect(claims.get("Note-7.md")).toEqual(expect.objectContaining({
+      path: "Note-7.md",
+      sourceMtime: 7,
+      reason: "reconcile",
+      requestedAt: 9_650,
+      readyAt: 10_000,
+      failure: null,
+    }));
+    expect(queue.due(10_000, 1_000)).toHaveLength(500);
+
+    const failed = [...claims.values()].slice(0, 200);
+    const recorded = await queue.failMany(failed.map((claim) => ({
+      claim,
+      failure: { code: "temporarily_unavailable", message: "Try again." },
+    })), 10_100);
+
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(recorded.size).toBe(200);
+    expect(queue.failureCount).toBe(200);
+
+    // Every claim was durable before the batch resolved, so a crash here
+    // restores the same pending and failed work.
+    const restarted = new SemanticWorkQueue(durableStore(state), 350);
+    await restarted.restore();
+    expect(restarted.size).toBe(500);
+    expect(restarted.failureCount).toBe(200);
+    expect(restarted.get("Note-0.md")?.failure).toEqual(expect.objectContaining({ failedAt: 10_100 }));
+    expect(restarted.get("Note-499.md")).toEqual(expect.objectContaining({ revision: claims.get("Note-499.md")?.revision }));
+  });
+
+  it("skips empty batches and stale claims without writing", async () => {
+    const store = durableStore();
+    const write = jest.spyOn(store, "writeState");
+    const queue = new SemanticWorkQueue(store, 0);
+
+    await expect(queue.enqueueManyImmediate([], "reconcile", 1)).resolves.toEqual(new Map());
+    await expect(queue.enqueueManyImmediate([{ path: "", sourceMtime: 1 }], "reconcile", 1)).resolves.toEqual(new Map());
+    expect(write).not.toHaveBeenCalled();
+
+    const [stale] = (await queue.enqueueManyImmediate([{ path: "Race.md", sourceMtime: 1 }], "reconcile", 1)).values();
+    await queue.enqueueImmediate("Race.md", "modify", 2, 2);
+    write.mockClear();
+
+    const recorded = await queue.failMany([{ claim: stale, failure: { code: "invalid_response", message: "Old." } }], 3);
+
+    expect(recorded.size).toBe(0);
+    expect(write).not.toHaveBeenCalled();
+    expect(queue.get("Race.md")).toEqual(expect.objectContaining({ sourceMtime: 2, failure: null }));
+  });
 });

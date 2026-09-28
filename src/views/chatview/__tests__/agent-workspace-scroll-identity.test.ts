@@ -4,7 +4,7 @@
 
 import { App, MarkdownRenderer } from "obsidian";
 import type { ChatMessage } from "../../../types";
-import type { AgentConversationSnapshot } from "../AgentConversation";
+import type { AgentConversationSnapshot } from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 
 type Deferred = Readonly<{
@@ -414,7 +414,7 @@ describe("AgentWorkspace response scroll identity", () => {
       workspace.viewport.dispatchEvent(new Event("scroll"));
     }) as typeof workspace.viewport.scrollTo;
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const originalRenderHistory = workspace.renderer.renderHistory.bind(workspace.renderer);
     jest.spyOn(workspace.renderer, "renderHistory").mockImplementation(async (messages) => {
@@ -442,7 +442,7 @@ describe("AgentWorkspace response scroll identity", () => {
       top: 570,
       behavior: "auto",
     }));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     workspace.unload();
   });
 
@@ -478,7 +478,7 @@ describe("AgentWorkspace response scroll identity", () => {
       deltaY: -120,
     }));
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const beginLayoutMutation = jest.spyOn(
       (workspace as any).scroller,
@@ -491,7 +491,7 @@ describe("AgentWorkspace response scroll identity", () => {
     expect(beginLayoutMutation).toHaveBeenCalledTimes(1);
     expect(part.textContent).toBe("Delayed Markdown");
     expect(viewportState.scrollTop).toBe(650);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     workspace.unload();
   });
 
@@ -585,7 +585,7 @@ describe("AgentWorkspace response scroll identity", () => {
       deltaY: -120,
     }));
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const beginLayoutMutation = jest.spyOn(
       (workspace as any).scroller,
@@ -599,7 +599,7 @@ describe("AgentWorkspace response scroll identity", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(part);
     expect(historyGeometryReads).toBe(0);
     expect(viewportState.scrollTop).toBe(500);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     workspace.unload();
   });
 
@@ -624,7 +624,7 @@ describe("AgentWorkspace response scroll identity", () => {
       workspace.viewport.dispatchEvent(new Event("scroll"));
     }) as typeof workspace.viewport.scrollTo;
     (workspace as any).scroller.scrollToEnd({ smooth: false });
-    expect((workspace as any).scroller.getMode()).toBe("end");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("end");
 
     const beginLayoutMutation = jest.spyOn(
       (workspace as any).scroller,
@@ -637,7 +637,7 @@ describe("AgentWorkspace response scroll identity", () => {
     expect(beginLayoutMutation).toHaveBeenCalledTimes(1);
     expect(part.textContent).toBe("Delayed Markdown");
     expect(viewportState.scrollTop).toBe(1_300);
-    expect((workspace as any).scroller.getMode()).toBe("end");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("end");
     workspace.unload();
   });
 
@@ -708,7 +708,7 @@ describe("AgentWorkspace response scroll identity", () => {
         };
       };
       workspace.viewport.dispatchEvent(new Event("scroll"));
-      expect((workspace as any).scroller.getMode()).toBe("manual");
+      expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
       if (activation === "click") {
         summary.dispatchEvent(new MouseEvent("click", {
@@ -734,7 +734,7 @@ describe("AgentWorkspace response scroll identity", () => {
 
       expect(viewportState.scrollTop).toBe(500);
       expect(summary.getBoundingClientRect().top).toBe(50);
-      expect((workspace as any).scroller.getMode()).toBe("manual");
+      expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
       workspace.unload();
     },
   );
@@ -798,7 +798,7 @@ describe("AgentWorkspace response scroll identity", () => {
     expect(overflow.getAttribute("aria-expanded")).toBe("true");
     expect(viewportState.scrollTop).toBe(600);
     expect(overflow.getBoundingClientRect().top).toBe(250);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     overflow.click();
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
@@ -1108,7 +1108,7 @@ describe("AgentWorkspace response scroll identity", () => {
       deltaY: -120,
     }));
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     jest.spyOn(workspace.renderer, "renderActive").mockResolvedValue();
 
     const completion = workspace.setAgentSnapshot({
@@ -1124,7 +1124,7 @@ describe("AgentWorkspace response scroll identity", () => {
 
     expect(historyGeometryReads).toBe(0);
     expect(viewportState.scrollTop).toBe(500);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     workspace.unload();
   });
 
@@ -1232,7 +1232,7 @@ describe("AgentWorkspace response scroll identity", () => {
       deltaY: -120,
     }));
     workspace.viewport.dispatchEvent(new Event("scroll"));
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     jest.spyOn(workspace.renderer, "renderActive").mockImplementation(async () => {
       partTop = 350;
     });
@@ -1251,7 +1251,7 @@ describe("AgentWorkspace response scroll identity", () => {
     expect(historyGeometryReads).toBe(0);
     expect(viewportState.scrollTop).toBe(250);
     expect(part.getBoundingClientRect().top).toBe(100);
-    expect((workspace as any).scroller.getMode()).toBe("manual");
+    expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
     workspace.unload();
   });
 
