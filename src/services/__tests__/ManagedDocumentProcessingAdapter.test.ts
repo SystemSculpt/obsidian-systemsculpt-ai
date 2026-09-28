@@ -2,7 +2,7 @@ import { App, TFile, requestUrl } from "obsidian";
 import { DocumentProcessingService } from "../DocumentProcessingService";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import fixture from "../../../testing/fixtures/managed/managed-job-protocol-v1.json";
-import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
+import { ManagedJobClient, ManagedJobError, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed/ManagedJobRecoveryStore";
 import { ManagedDocumentProcessingAdapter } from "../managed/ManagedDocumentProcessingAdapter";
 import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
@@ -51,11 +51,12 @@ function managedHarness() {
     download: jest.fn(async () => { events.push("download"); return { result: downloaded }; }),
   };
   const admission = { acquireLease: jest.fn(async () => { events.push("admission"); return { outcome: "allowed" as const }; }) };
+  let operations = 0;
   const adapter = new ManagedDocumentProcessingAdapter({
     admission,
     jobs,
     recovery,
-    createOperationId: () => "document-op-1",
+    createOperationId: () => `document-op-${++operations}`,
     wait: async () => undefined,
   });
   return { adapter, admission, events, jobs, recovery, storage };
@@ -121,7 +122,7 @@ describe("managed document processing adapter contract", () => {
     expect(h.jobs.create).toHaveBeenCalledTimes(2);
   });
 
-  it("fails closed before admission when several preserved operations hold the selected bytes", async () => {
+  it("retires several operations holding the selected bytes, with a notice, and converts them once", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
@@ -129,26 +130,79 @@ describe("managed document processing adapter contract", () => {
       await h.recovery.createAdmitted({ capability: "document_processing", operationId,
         source: { identity: source.identity, fingerprint: source.fingerprint() } });
     }
-    await expect(h.adapter.process(source)).rejects.toThrow(/Multiple preserved document operations/);
-    expect(h.admission.acquireLease).not.toHaveBeenCalled();
-    expect(h.jobs.create).not.toHaveBeenCalled();
+    const onNotice = jest.fn();
+    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(onNotice).toHaveBeenCalledTimes(1);
+    expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/^Several unfinished conversions/));
+    for (const operationId of ["duplicate-op-1", "duplicate-op-2"]) {
+      await expect(h.recovery.readOptional("document_processing", operationId)).resolves.toBeNull();
+    }
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+
+    // The replacement is now the only match: selecting the file again resumes it.
+    await expect(h.adapter.process(source, { onNotice })).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(onNotice).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed for a legacy path-only fingerprint instead of admitting a replacement", async () => {
+  it("retires a legacy path-only operation on a new selection, with a notice; an explicit resume still fails closed", async () => {
     const h = managedHarness();
     const identity = "vault:report.pdf";
     const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
-    const source = { identity,
+    // 6.x fingerprinted the path, not the bytes.
+    const legacy = { identity,
       fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
     h.jobs.download.mockRejectedValueOnce(new Error("Legacy transfer interrupted"));
-    await expect(h.adapter.process(source)).rejects.toThrow("Legacy transfer interrupted");
-    await expect(h.adapter.process({ ...source,
-      fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}`,
-    })).rejects.toThrow(/cannot be verified/);
+    await expect(h.adapter.process(legacy)).rejects.toThrow("Legacy transfer interrupted");
+    const current = { ...legacy, fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}` };
+
+    await expect(h.adapter.resume("document-op-1", { source: current })).rejects.toThrow(/cannot be verified/);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+
+    const onNotice = jest.fn();
+    await expect(h.adapter.process(current, { onNotice })).resolves.toMatchObject({ operationId: "document-op-2" });
+    expect(onNotice).toHaveBeenCalledTimes(1);
+    expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/earlier SystemSculpt version/));
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["reports the conversion failed", "status", () => new ManagedJobError("document_processing_failed", "The PDF could not be read.")],
+    ["no longer has the document", "status", () => new ManagedJobError("managed_job_error", "Managed job request failed (404).", 404)],
+    ["no longer has the result", "download", () => new ManagedJobError("managed_job_error", "Managed job request failed (404).", 404)],
+  ] as const)("retires the operation when the service %s, so selecting the file again converts it anew", async (_case, call, failure) => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    // The first document stays failed or gone for good, as it does on the service.
+    const healthy = h.jobs[call].getMockImplementation()!;
+    h.jobs[call].mockImplementation((async (...args: never[]) => {
+      if (h.jobs.create.mock.calls.length < 2) throw failure();
+      return (healthy as (...values: never[]) => Promise<unknown>)(...args);
+    }) as never);
+
+    await expect(h.adapter.process(source)).rejects.toMatchObject({ code: failure().code, status: failure().status });
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-2", result: downloaded });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(2);
+    expect(h.jobs.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the operation when the service refuses a status read for another reason", async () => {
+    const h = managedHarness();
+    const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    h.jobs.status.mockRejectedValueOnce(new ManagedJobError("license_required", "A valid license is required.", 401));
+    await expect(h.adapter.process(source)).rejects.toMatchObject({ code: "license_required" });
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "processing" });
+    await expect(h.adapter.process(source)).resolves.toMatchObject({ operationId: "document-op-1" });
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
     expect(h.jobs.create).toHaveBeenCalledTimes(1);
-    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
   });
 
   it("fails closed when an acknowledged upload has no persisted multipart descriptor", async () => {
@@ -187,7 +241,8 @@ describe("managed document processing adapter contract", () => {
   });
 
   it("pin retry resumes the original operation after the result transfer deadline", async () => {
-    jest.useFakeTimers();
+    // WebCrypto fingerprints the PDF on a real thread, outside the fake clock.
+    jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask", "setImmediate"] });
     const h = managedHarness();
     const app = new App();
     const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
@@ -221,6 +276,9 @@ describe("managed document processing adapter contract", () => {
       (requestUrl as jest.Mock).mockImplementation(() => new Promise(() => undefined));
       h.jobs.download.mockImplementationOnce(((id: string, signal?: AbortSignal) => documents.download(id, signal)) as never);
       const failed = makeService().processDocumentWithReceipt(file, options).catch((error: unknown) => error);
+      for (let turn = 0; turn < 1_000 && !request.mock.calls.some(([value]) => value.url.endsWith("/download")); turn++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
       await jest.advanceTimersByTimeAsync(600_000);
       expect(request).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600_000 }));
       await expect(failed).resolves.toMatchObject({ code: "request_timeout" });

@@ -7,7 +7,7 @@ import type {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
-import { sha256HexFromBytesPortable } from "../utils/sha256";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
@@ -165,10 +165,13 @@ export class DocumentProcessingService {
       })();
       const remote = await this.adapter().process({
         identity,
-        fingerprint: async () => `sha256:${sha256HexFromBytesPortable(new Uint8Array((await load()).bytes))}`,
+        fingerprint: async () => `sha256:${await sha256HexFromArrayBuffer((await load()).bytes)}`,
         load,
       }, {
         signal,
+        // A replacement conversion is a new server job: say so even when the
+        // caller shows its own progress instead of notices.
+        onNotice: (message) => new Notice(`${file.name}: ${message}`, 10_000),
         onProgress: (progress, status) => {
           if (signal.aborted) return;
           const stage: DocumentProcessingStage = progress < 70 ? "uploading" : "processing";

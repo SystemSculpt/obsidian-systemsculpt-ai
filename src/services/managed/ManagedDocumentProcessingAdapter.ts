@@ -1,7 +1,7 @@
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ManagedAdmission } from "./ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "./ManagedJobClient";
-import { ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
+import { isRetiredManagedRecoveryRecord, ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
 import type {
   ManagedJobRecoveryRecord,
   ManagedJobStatus,
@@ -17,11 +17,15 @@ import {
 const CAPABILITY = "document_processing" as const;
 const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 const UNVERIFIABLE_SOURCE_MESSAGE = "The document changed or its preserved source cannot be verified; automatic retry is unavailable.";
+const LEGACY_OPERATION_NOTICE = "An unfinished conversion from an earlier SystemSculpt version could not be checked against this file, so a new conversion was started.";
+const DUPLICATE_OPERATIONS_NOTICE = "Several unfinished conversions matched this file, so they were set aside and a new conversion was started.";
 
 export type ManagedDocumentProcessingContext = Readonly<{
   operationId?: string;
   signal?: AbortSignal;
   onProgress?: (progress: number, status: string) => void;
+  /** Explains a recovery decision the caller did not request, such as a replacement conversion. */
+  onNotice?: (message: string) => void;
 }>;
 
 export type ManagedDocumentSource = Readonly<{
@@ -50,9 +54,9 @@ export type ManagedDocumentProcessingResult = Readonly<{
 
 type DocumentJobs = Pick<ManagedJobClient["documents"], "create" | "uploadPart" | "complete" | "start" | "status" | "download">;
 type DocumentRecovery = Pick<ManagedJobRecoveryStore,
-  "createAdmitted" | "read" | "findSourceIdentityMatches" | "markContentReady" | "markLocalCommitPending" | "completeLocalCommit" |
-  "beginDispatch" | "acknowledgeCreated" | "acknowledgePart" | "acknowledgeComplete" | "acknowledgeStarted" |
-  "applyReconciliation"
+  "createAdmitted" | "read" | "findSourceIdentityMatches" | "findExactSourceMatches" | "markContentReady" |
+  "markLocalCommitPending" | "completeLocalCommit" | "beginDispatch" | "acknowledgeCreated" | "acknowledgePart" |
+  "acknowledgeComplete" | "acknowledgeStarted" | "applyReconciliation" | "abandon" | "delete"
 >;
 
 export type ManagedDocumentProcessingDependencies = Readonly<{
@@ -128,17 +132,25 @@ export class ManagedDocumentProcessingAdapter {
     // starts its own operation and leaves earlier ones for their own bytes.
     let fingerprint: string | undefined;
     if (!context.operationId) {
-      const matches = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
-        .filter((record) => !["completed", "abandoned", "upload_aborted"].includes(record.phase));
+      const retained = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
+        .filter((record) => !isRetiredManagedRecoveryRecord(record));
       throwIfAborted(signal);
-      if (matches.length) {
+      if (retained.length) {
         fingerprint = await this.readFingerprint(source, signal);
-        const exact = matches.filter((record) => record.source.fingerprint === fingerprint);
-        if (exact.length > 1) {
-          throw new Error("Multiple preserved document operations match this file; automatic resume is unavailable.");
-        }
+        const exact = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, { identity: source.identity, fingerprint }))
+          .filter((record) => !isRetiredManagedRecoveryRecord(record));
+        throwIfAborted(signal);
         if (exact.length === 1) return this.continueRecord(exact[0], source, context, signal);
-        if (matches.some(hasPathOnlyFingerprint)) throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
+        // Neither duplicates nor a record fingerprinted by its path alone can
+        // show which operation holds these bytes. They must not lock the file:
+        // retire them and convert the selected bytes as a new operation.
+        const unverifiable = new Map([...(exact.length > 1 ? exact : []), ...retained.filter(hasPathOnlyFingerprint)]
+          .map((record) => [record.operationId, record]));
+        if (unverifiable.size) {
+          for (const record of unverifiable.values()) await this.retire(record);
+          throwIfAborted(signal);
+          context.onNotice?.(exact.length > 1 ? DUPLICATE_OPERATIONS_NOTICE : LEGACY_OPERATION_NOTICE);
+        }
       }
     }
 
@@ -185,6 +197,12 @@ export class ManagedDocumentProcessingAdapter {
     return this.continueRecord(record, context.source, context, signal);
   }
 
+  /** An abandoned record that could not be deleted is already ignored, and pruned at startup. */
+  private async retire(record: ManagedJobRecoveryRecord): Promise<void> {
+    const abandoned = await this.dependencies.recovery.abandon(CAPABILITY, record.operationId, record.revision);
+    await this.dependencies.recovery.delete(CAPABILITY, abandoned.operationId, abandoned.revision).catch(() => undefined);
+  }
+
   private async readFingerprint(source: ManagedDocumentSource, signal: AbortSignal): Promise<string> {
     const fingerprint = await source.fingerprint();
     throwIfAborted(signal);
@@ -193,6 +211,30 @@ export class ManagedDocumentProcessingAdapter {
   }
 
   private async continueRecord(
+    record: ManagedJobRecoveryRecord,
+    source: ManagedDocumentSource | undefined,
+    context: ManagedDocumentProcessingContext,
+    signal: AbortSignal,
+  ): Promise<ManagedDocumentProcessingResult> {
+    try {
+      return await this.advance(record, source, context, signal);
+    } catch (error) {
+      // A document the service failed, or no longer has, can never finish.
+      // Retiring it lets the next selection of these bytes start a new
+      // conversion instead of replaying the same failure.
+      if (error instanceof ManagedJobError) await this.retireTerminal(record.operationId, error).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async retireTerminal(operationId: string, error: ManagedJobError): Promise<void> {
+    const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
+    // A 404 ends only a document the service acknowledged creating.
+    const terminal = error.code === "document_processing_failed" || (error.status === 404 && Boolean(record.jobId));
+    if (terminal && !isRetiredManagedRecoveryRecord(record)) await this.retire(record);
+  }
+
+  private async advance(
     record: ManagedJobRecoveryRecord,
     source: ManagedDocumentSource | undefined,
     context: ManagedDocumentProcessingContext,
@@ -368,9 +410,6 @@ export class ManagedDocumentProcessingAdapter {
         if (record.phase !== "processing") throw new Error("Managed document resume cannot dispatch missing upload or start work.");
       }
     } catch (error) {
-      if (error instanceof ManagedJobError && error.code === "document_processing_failed" && record.phase === "processing") {
-        await this.dependencies.recovery.applyReconciliation(CAPABILITY, record.operationId, record.revision, "failed");
-      }
       throwIfAborted(signal);
       throw error;
     }

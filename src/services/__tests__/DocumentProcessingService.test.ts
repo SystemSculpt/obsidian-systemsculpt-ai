@@ -116,6 +116,21 @@ describe("DocumentProcessingService managed local effects", () => {
     );
   });
 
+  it("shows a recovery notice for the selected file even when progress notices are off", async () => {
+    const { app, dependencies, managed, plugin } = harness();
+    const convert = managed.process.getMockImplementation()!;
+    managed.process.mockImplementationOnce(async (source: any, context: any) => {
+      context.onNotice?.("A new conversion was started.");
+      return convert(source, context);
+    });
+    const service = new DocumentProcessingService(app, plugin, dependencies);
+
+    await service.processDocument(file(), { showNotices: false });
+
+    expect(Notice).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledWith("report.pdf: A new conversion was started.", expect.any(Number));
+  });
+
   it("stops all later local effects when abort wins an image write", async () => {
     const { app, dependencies, managed, plugin } = harness({ images: true });
     const service = new DocumentProcessingService(app, plugin, dependencies);
