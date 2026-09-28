@@ -287,7 +287,7 @@ export class SystemSculptHistoryModal extends StandardModal {
     }
 
     const historyProviders = await import("./historyProviders");
-    return historyProviders.loadSystemSculptHistoryEntries(this.plugin, signal);
+    return historyProviders.loadSystemSculptHistoryEntries(this.plugin);
   }
 
   private renderEntry(entry: SystemSculptHistoryEntry): HTMLElement {

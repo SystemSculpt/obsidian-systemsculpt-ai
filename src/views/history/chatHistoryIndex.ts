@@ -90,12 +90,18 @@ export class ChatHistoryIndex {
     register(this.app.metadataCache.on("changed", (file) => changed(file)));
   }
 
+  /**
+   * One record per chat id. A chat copied into a second chats folder, or
+   * duplicated beside itself, is listed once, from the file that opening the
+   * chat loads: the first folder, in the order `loadChat` searches, that
+   * holds `<id>.md`.
+   */
   public list(): readonly ChatHistoryRecord[] {
     const directories = this.directories();
     const key = directories.join("\n");
     if (this.records?.key === key) return this.records.value;
     const seen = new Set<string>();
-    const records: ChatHistoryRecord[] = [];
+    const records = new Map<string, Readonly<{ record: ChatHistoryRecord; opened: boolean }>>();
     for (const directory of directories) {
       const folder = this.app.vault.getAbstractFileByPath(directory);
       if (!(folder instanceof TFolder)) continue;
@@ -103,10 +109,13 @@ export class ChatHistoryIndex {
         if (!(child instanceof TFile) || child.extension !== "md" || seen.has(child.path)) continue;
         seen.add(child.path);
         const record = this.record(child);
-        if (record) records.push(record);
+        if (!record) continue;
+        const opened = child.basename === record.chatId;
+        const kept = records.get(record.chatId);
+        if (!kept || (opened && !kept.opened)) records.set(record.chatId, { record, opened });
       }
     }
-    const value = Object.freeze(records);
+    const value = Object.freeze([...records.values()].map(({ record }) => record));
     if (this.watching) this.records = { key, value };
     return value;
   }

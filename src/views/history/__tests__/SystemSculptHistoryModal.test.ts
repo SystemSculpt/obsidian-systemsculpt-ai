@@ -210,6 +210,39 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     }
   });
 
+  it("reads at most eight chats at once for text search on a desktop host", async () => {
+    jest.useFakeTimers();
+    try {
+      let reading = 0, mostAtOnce = 0;
+      const entries = Array.from({ length: 24 }, (_, index) => ({
+        ...entry(`chat-${index}`, `Chat ${index}`),
+        loadSearchText: jest.fn(async () => {
+          reading += 1;
+          mostAtOnce = Math.max(mostAtOnce, reading);
+          await Promise.resolve();
+          reading -= 1;
+          return index % 2 === 0 ? "the quarterly plan" : "unrelated";
+        }),
+      }));
+      const modal = new SystemSculptHistoryModal({ app: new App() } as any, { loadEntries: jest.fn().mockResolvedValue(entries) });
+      modal.open();
+      await flush();
+      const input = modal.modalEl.querySelector<HTMLInputElement>("input[type=search]")!;
+      input.value = "quarterly";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await jest.advanceTimersByTimeAsync(300);
+      for (let turn = 0; turn < 20; turn++) await flush();
+
+      expect(entries.every((item) => item.loadSearchText.mock.calls.length === 1)).toBe(true);
+      expect(mostAtOnce).toBeLessThanOrEqual(8);
+      expect(mostAtOnce).toBeGreaterThan(1);
+      expect(modal.modalEl.querySelectorAll(".systemsculpt-history-list [role=option]")).toHaveLength(12);
+      modal.close();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("renders a page of rows at a time and handles row controls without per-row listeners", async () => {
     const entries = Array.from({ length: 230 }, (_, index) => ({
       ...entry(`chat-${index}`, `Chat ${index}`),

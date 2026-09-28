@@ -25,8 +25,10 @@ const LEASED_STREAM_MARKDOWN_SELECTOR = [
   "select",
   "textarea",
 ].join(",");
-const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})(.*)$/;
-const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSE = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/;
+/** CommonMark: a closing fence is indented at most three spaces. */
+const FENCE_CLOSE_MAX_INDENT = 3;
 const LIST_ITEM_LINE = /^[ \t]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
 const PARTIAL_LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)]?)$/;
 
@@ -204,6 +206,15 @@ function isDomInstance<T extends Element>(
     : Object.prototype.isPrototypeOf.call(constructor.prototype, node);
 }
 
+/** The width of leading indentation, with tab stops every four columns. */
+function indentColumns(indent: string): number {
+  let columns = 0;
+  for (const character of indent) {
+    columns = character === "\t" ? columns + 4 - (columns % 4) : columns + 1;
+  }
+  return columns;
+}
+
 function countOccurrences(line: string, token: string): number {
   let count = 0;
   for (
@@ -222,10 +233,14 @@ function countOccurrences(line: string, token: string): number {
  * spans the boundary. Unknown shapes keep more text in the open tail, which
  * costs time but never changes what is shown. The final render always parses
  * the whole message, so reference links and footnotes resolve on settlement.
+ *
+ * A closing fence may be indented at most three spaces, or as deep as its
+ * opening fence when that fence sits in a list item; a deeper fence line,
+ * such as one inside a docstring, is code.
  */
 export function stableMarkdownBoundary(markdown: string, start = 0): number {
   let boundary = start;
-  let fence: Readonly<{ char: string; length: number }> | null = null;
+  let fence: Readonly<{ char: string; length: number; indent: number }> | null = null;
   let math = false;
   let obsidianComment = false;
   let htmlComment = false;
@@ -241,8 +256,9 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
       const close = FENCE_CLOSE.exec(line);
       if (
         close
-        && close[1][0] === fence.char
-        && close[1].length >= fence.length
+        && close[2][0] === fence.char
+        && close[2].length >= fence.length
+        && indentColumns(close[1]) <= Math.max(FENCE_CLOSE_MAX_INDENT, fence.indent)
       ) fence = null;
     } else if (math) {
       if (countOccurrences(line, "$$") % 2 === 1) math = false;
@@ -267,8 +283,8 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
       sawContent = true;
       if (listItem) blockHasListItem = true;
       const open = FENCE_OPEN.exec(line);
-      if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
-        fence = { char: open[1][0], length: open[1].length };
+      if (open && !(open[2][0] === "`" && open[3].includes("`"))) {
+        fence = { char: open[2][0], length: open[2].length, indent: indentColumns(open[1]) };
       } else if (countOccurrences(line, "$$") % 2 === 1) {
         math = true;
       } else if (countOccurrences(line, "%%") % 2 === 1) {

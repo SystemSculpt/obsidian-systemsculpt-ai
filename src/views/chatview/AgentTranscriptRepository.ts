@@ -1,3 +1,4 @@
+import { withDurableToolResults } from "../../chat/managed/DurableToolResult";
 import type { ChatMessage } from "../../types";
 import type { ToolCall } from "../../types/toolCalls";
 import {
@@ -13,6 +14,7 @@ import {
   type NormalizedFailedTerminalReceipt,
 } from "./FailedTerminalReceipt";
 import { ChatIdAllocator } from "./persistence/ChatIdAllocator";
+import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import {
   parseAgentConversationId,
   type ChatApprovalMode,
@@ -112,12 +114,50 @@ function isSameProjectedMessage(left: ChatMessage, right: ChatMessage): boolean 
   );
 }
 
-function isSameProjectedServerHistory(
-  left: readonly ChatMessage[],
-  right: readonly ChatMessage[],
-): boolean {
-  return left.length === right.length
-    && left.every((message, index) => isSameProjectedMessage(message, right[index]));
+/** What a saved chat keeps of a message: no part ids and no clocks. */
+function savedContent(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    ...(message.tool_calls ? {
+      tool_calls: message.tool_calls.map((call) => ({ ...call, timestamp: 0 })),
+    } : {}),
+    ...(message.messageParts ? {
+      messageParts: message.messageParts.map((part) => part.type === "tool_call"
+        ? { ...part, id: "", timestamp: 0, data: { ...part.data, timestamp: 0 } }
+        : { ...part, id: "", timestamp: 0 }),
+    } : {}),
+  };
+}
+
+// A message loaded from its note has the reader's shape: part ids and part
+// timestamps the reader assigned, and `reasoning` and `tool_calls` rebuilt
+// from its parts. It never equals the projected message by value, so opening
+// a chat would rewrite its note. The projected message is the same history
+// when it reads back from a saved note as the loaded one did.
+function readsBackAs(projected: ChatMessage, loaded: ChatMessage): boolean {
+  if (projected.message_id !== loaded.message_id) return false;
+  const saved = ChatMarkdownSerializer.readBack([projected]);
+  return saved?.length === 1
+    && sameJsonValue(savedContent(saved[0]), savedContent(loaded));
+}
+
+/**
+ * How server history compares with the local transcript: the same by value,
+ * the same once saved (a local message read from the note differs only in
+ * the reader's shape), or changed.
+ */
+function matchProjectedServerHistory(
+  projected: readonly ChatMessage[],
+  local: readonly ChatMessage[],
+): "same" | "saved" | "changed" {
+  if (projected.length !== local.length) return "changed";
+  let match: "same" | "saved" = "same";
+  for (let index = 0; index < projected.length; index += 1) {
+    if (isSameProjectedMessage(projected[index], local[index])) continue;
+    if (!readsBackAs(projected[index], local[index])) return "changed";
+    match = "saved";
+  }
+  return match;
 }
 
 function hasUniqueIds(values: readonly string[]): boolean {
@@ -365,20 +405,6 @@ export class AgentTranscriptRepository {
     });
   }
 
-  /** The routing pointer to the server conversation, when one is recorded. */
-  public get conversationId(): string | undefined {
-    return this.agentConversationId;
-  }
-
-  /** The current durable messages, deeply frozen. */
-  public get currentMessages(): readonly Readonly<ChatMessage>[] {
-    return this.messages;
-  }
-
-  public has(messageId: string): boolean {
-    return this.messages.some((message) => message.message_id === messageId);
-  }
-
   /** The vault path of `chatId`'s transcript when it is the one held here. */
   public chatPath(chatId: string): string | null {
     return chatId && chatId === this.chatId && this.chatDirectory !== undefined
@@ -411,8 +437,11 @@ export class AgentTranscriptRepository {
       // Saved messages are a presentation cache until the server session has
       // hydrated. Never invent a terminal tool outcome from cached execution
       // state because the authoritative session may already have completed it.
-      // A freshly parsed transcript belongs to this repository alone.
-      this.messages = deepFreeze(loaded.messages || []);
+      // A freshly parsed transcript belongs to this repository alone. Tool
+      // results are held in their saved, bounded form: a chat saved before
+      // results were bounded then matches the server's history, so opening it
+      // leaves the note alone, and its next save stores the bounded form.
+      this.messages = deepFreeze((loaded.messages || []).map(withDurableToolResults));
       this.agentConversationId = parseAgentConversationId(loaded.agentConversationId);
       this.generation += 1;
       return Object.freeze({
@@ -578,7 +607,14 @@ export class AgentTranscriptRepository {
       // history revision, so a reconnect must not rewrite an otherwise
       // identical transcript. Array order and every other field remain part
       // of the durable equality check.
-      if (isSameProjectedServerHistory(next, this.messages)) return this.snapshot();
+      const match = matchProjectedServerHistory(next, this.messages);
+      if (match === "saved") {
+        // The note already holds this history, so it is not rewritten. The
+        // server's form is held from here on, so later comparisons take the
+        // fast path instead of reading every message back again.
+        this.messages = Object.freeze(next);
+      }
+      if (match !== "changed") return this.snapshot();
       await this.persist(
         next,
         true,

@@ -39,9 +39,6 @@ jest.mock("obsidian", () => {
 jest.mock("../storage/ChatMarkdownSerializer", () => ({
   ChatMarkdownSerializer: {
     serializeMessages: jest.fn().mockReturnValue("## Messages\n\nSerialized content here"),
-    normalizeTags: jest.fn((value: unknown) => (Array.isArray(value) ? value : [value])
-      .filter((tag): tag is string => typeof tag === "string")
-      .map((tag) => tag.replace(/^#+/, ""))),
     parseMetadata: jest.fn().mockReturnValue({
       id: "test-chat",
       title: "Test Chat",
@@ -283,73 +280,104 @@ Content here`);
       expect(modifiedContent).toContain('tags: ["existing","keep","new"]');
     });
 
-    it("carries frontmatter forward from the metadata cache without reading the chat", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/cached-chat.md" });
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      const getFileCache = jest.fn(() => ({
-        frontmatter: {
-          id: "cached-chat",
-          title: "Cached title",
-          created: "2024-01-01T00:00:00.000Z",
-          version: 4,
-          tags: ["existing", "#keep"],
-        },
-      }));
-      (mockApp as any).metadataCache = { getFileCache };
-      const cached = new ChatStorageService(
-        mockApp,
-        "SystemSculpt/Chats",
-        { settings: { defaultChatTag: "new" } } as any,
-      );
+    describe("carrying frontmatter forward", () => {
+      const serializer = () => jest.requireMock("../storage/ChatMarkdownSerializer")
+        .ChatMarkdownSerializer as { parseMetadata: jest.Mock };
 
-      const result = await cached.saveChat("cached-chat", testMessages);
+      /** A note whose stat changes on every write, as in Obsidian's vault. */
+      function note(path: string) {
+        let clock = 1;
+        const file = new TFile({ path, stat: { ctime: clock, mtime: clock, size: 10 } });
+        const touch = (size: number) => {
+          clock += 1;
+          file.stat = { ...file.stat, mtime: clock, size };
+        };
+        mockVault.create.mockResolvedValue(file);
+        mockVault.modify.mockImplementation(async (_file: TFile, content: string) => {
+          touch(content.length);
+        });
+        return { file, touch };
+      }
 
-      expect(getFileCache).toHaveBeenCalledWith(mockFile);
-      expect(mockVault.read).not.toHaveBeenCalled();
-      expect(result.version).toBe(5);
-      const content = mockVault.modify.mock.calls[0][1] as string;
-      expect(content).toContain('created: "2024-01-01T00:00:00.000Z"');
-      expect(content).toContain("version: 5");
-      expect(content).toContain('tags: ["existing","keep","new"]');
-      expect(content).toContain('title: "Cached title"');
-    });
+      it("saves again without reading the chat while it is still this service's own write", async () => {
+        const { file } = note("SystemSculpt/Chats/fresh-chat.md");
+        const first = await service.saveChat("fresh-chat", testMessages);
+        const created = /created: "([^"]+)"/.exec(mockVault.create.mock.calls[0][1])?.[1];
+        mockVault.getAbstractFileByPath.mockReturnValue(file);
 
-    it("uses its own last write until the metadata cache indexes the chat", async () => {
-      (mockApp as any).metadataCache = { getFileCache: jest.fn(() => null) };
-      const first = await service.saveChat("fresh-chat", testMessages);
-      const created = /created: "([^"]+)"/.exec(mockVault.create.mock.calls[0][1])?.[1];
-      mockVault.getAbstractFileByPath.mockReturnValue(
-        new TFile({ path: "SystemSculpt/Chats/fresh-chat.md" }),
-      );
+        const second = await service.saveChat("fresh-chat", testMessages);
+        const third = await service.saveChat("fresh-chat", testMessages);
 
-      const second = await service.saveChat("fresh-chat", testMessages);
-      const third = await service.saveChat("fresh-chat", testMessages);
+        expect(mockVault.read).not.toHaveBeenCalled();
+        expect([first.version, second.version, third.version]).toEqual([1, 2, 3]);
+        expect(mockVault.modify.mock.calls[1][1]).toContain(`created: "${created}"`);
+      });
 
-      expect(mockVault.read).not.toHaveBeenCalled();
-      expect([first.version, second.version, third.version]).toEqual([1, 2, 3]);
-      expect(mockVault.modify.mock.calls[1][1]).toContain(`created: "${created}"`);
-    });
+      it("keeps a tag the user added just before a save, although the metadata cache is stale", async () => {
+        const { file, touch } = note("SystemSculpt/Chats/kept-chat.md");
+        const tagged = new ChatStorageService(
+          mockApp,
+          "SystemSculpt/Chats",
+          { settings: { defaultChatTag: "project" } } as any,
+        );
+        await tagged.saveChat("kept-chat", testMessages);
+        mockVault.getAbstractFileByPath.mockReturnValue(file);
 
-    it("prefers the newer version when the metadata cache still shows an older write", async () => {
-      const mockFile = new TFile({ path: "SystemSculpt/Chats/stale-chat.md" });
-      (mockApp as any).metadataCache = {
-        getFileCache: jest.fn(() => ({ frontmatter: { id: "stale-chat", version: 1 } })),
-      };
-      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
-      await service.saveChat("stale-chat", testMessages);
-      const again = await service.saveChat("stale-chat", testMessages);
-      expect(again.version).toBe(3);
-      expect(mockVault.read).not.toHaveBeenCalled();
-    });
+        // The user adds a tag and backdates `created`; Obsidian's metadata
+        // cache has not indexed the edit yet.
+        touch(512);
+        (mockApp as any).metadataCache = {
+          getFileCache: jest.fn(() => ({ frontmatter: { id: "kept-chat", version: 1, tags: ["project"] } })),
+        };
+        serializer().parseMetadata.mockReturnValueOnce({
+          id: "kept-chat",
+          title: "Untitled Chat",
+          created: "2020-05-05T00:00:00.000Z",
+          lastModified: "2020-05-05T00:00:00.000Z",
+          version: 1,
+          tags: ["project", "reading-list"],
+        });
+        const saved = await tagged.saveChat("kept-chat", testMessages);
 
-    it("reads an existing chat only when neither the cache nor a previous write knows it", async () => {
-      (mockApp as any).metadataCache = { getFileCache: jest.fn(() => null) };
-      mockVault.getAbstractFileByPath.mockReturnValue(
-        new TFile({ path: "SystemSculpt/Chats/test-chat.md" }),
-      );
-      const result = await service.saveChat("test-chat", testMessages);
-      expect(mockVault.read).toHaveBeenCalledTimes(1);
-      expect(result.version).toBe(2);
+        expect(mockVault.read).toHaveBeenCalledTimes(1);
+        expect(saved.version).toBe(2);
+        const content = mockVault.modify.mock.calls[0][1] as string;
+        expect(content).toContain('tags: ["project","reading-list"]');
+        expect(content).toContain('created: "2020-05-05T00:00:00.000Z"');
+      });
+
+      it("carries the frontmatter read while loading a chat into its first save", async () => {
+        const { file } = note("SystemSculpt/Chats/test-chat.md");
+        mockVault.getAbstractFileByPath.mockReturnValue(file);
+        mockVault.read.mockResolvedValue("---\nid: test-chat\n---");
+        serializer().parseMetadata.mockReturnValueOnce({
+          id: "test-chat",
+          title: "Loaded",
+          created: "2024-02-02T00:00:00.000Z",
+          lastModified: "2024-02-02T00:00:00.000Z",
+          version: 7,
+          tags: ["kept"],
+        });
+
+        await service.loadChat("test-chat");
+        const result = await service.saveChat("test-chat", testMessages);
+
+        // Only the load read the note.
+        expect(mockVault.read).toHaveBeenCalledTimes(1);
+        expect(result.version).toBe(8);
+        const content = mockVault.modify.mock.calls[0][1] as string;
+        expect(content).toContain('tags: ["kept"]');
+        expect(content).toContain('created: "2024-02-02T00:00:00.000Z"');
+      });
+
+      it("reads a chat before saving it when this service has not read or written it", async () => {
+        mockVault.getAbstractFileByPath.mockReturnValue(
+          new TFile({ path: "SystemSculpt/Chats/test-chat.md" }),
+        );
+        const result = await service.saveChat("test-chat", testMessages);
+        expect(mockVault.read).toHaveBeenCalledTimes(1);
+        expect(result.version).toBe(2);
+      });
     });
 
     it("throws error on save failure", async () => {

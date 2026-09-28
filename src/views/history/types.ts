@@ -34,5 +34,5 @@ export type StudioSessionRecord = {
 
 export interface SystemSculptHistoryProvider {
   id: string;
-  loadEntries: (signal?: AbortSignal) => Promise<SystemSculptHistoryEntry[]>;
+  loadEntries: () => Promise<SystemSculptHistoryEntry[]>;
 }

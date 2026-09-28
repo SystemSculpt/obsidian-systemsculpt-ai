@@ -55,11 +55,22 @@ type ExistingChatMetadata = Readonly<{
   title?: string;
 }>;
 
-function frontmatterTimestamp(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  return value instanceof Date && Number.isFinite(value.getTime())
-    ? value.toISOString()
-    : undefined;
+/** A chat note's frontmatter with the file stat it was read or written at. */
+type KnownChatMetadata = Readonly<{
+  metadata: ExistingChatMetadata;
+  mtime: number;
+  size: number;
+}>;
+
+function carriedMetadata(parsed: ChatMetadata | null): ExistingChatMetadata | null {
+  return parsed
+    ? {
+        created: parsed.created,
+        tags: parsed.tags ?? [],
+        version: Number(parsed.version) || 0,
+        title: parsed.title,
+      }
+    : null;
 }
 
 export class SavedChatCorruptedError extends Error {
@@ -185,11 +196,14 @@ export class ChatStorageService {
   private readonly attachmentStore: ChatAttachmentVaultStore | null;
   private readonly plugin: SystemSculptPlugin | null;
   /**
-   * What this service last wrote per file. Saves read the carried-forward
-   * frontmatter from here and from Obsidian's metadata cache, which may not
-   * have indexed the previous write yet, instead of rereading the file.
+   * Each chat note's frontmatter as this service last read or wrote it. While
+   * the note's stat is unchanged the note is still that version, so a save
+   * carries its created date, tags and version forward without reading the
+   * transcript. Any other writer, such as the user adding a tag or sync,
+   * changes the stat, and the next save reads the note so those edits are
+   * kept. Obsidian's metadata cache is not used: it can lag behind an edit.
    */
-  private readonly writtenMetadata = new Map<string, ExistingChatMetadata>();
+  private readonly knownMetadata = new Map<string, KnownChatMetadata>();
 
   /**
    * `plugin` is optional only because tests construct this service against a
@@ -394,53 +408,50 @@ export class ChatStorageService {
         }
       }
 
+      let written: TFile | null;
       if (!exclusiveCreate && fileExists && file instanceof TFile) {
         await vault.modify(file, fullContent);
+        written = file;
       } else {
-        await vault.create(filePath, fullContent);
+        written = await vault.create(filePath, fullContent);
       }
-      this.writtenMetadata.set(filePath, {
+      this.rememberMetadata(filePath, {
         created: creationDate,
         tags: mergedTags,
         version: newVersion,
         title: metadata.title,
-      });
-      
+      }, written?.stat);
+
       return { filePath, version: newVersion };
   }
 
   /**
-   * The existing file's created date, tags, version and title without
-   * reading its transcript. Obsidian's metadata cache reflects the user's own
-   * frontmatter edits; this service's last write covers the window before the
-   * cache indexes it. Only a file neither source knows yet is read.
+   * The created date, tags, version and title the save of `file` carries
+   * forward. The note is read, as every save once did, unless it is still
+   * exactly the version this service last read or wrote.
    */
   private async existingChatMetadata(
     file: TFile,
     filePath: string,
   ): Promise<ExistingChatMetadata | null> {
-    const cache = this.app.metadataCache?.getFileCache(file);
-    const written = this.writtenMetadata.get(filePath);
-    if (!cache && !written) {
-      const parsed = ChatMarkdownSerializer.parseMetadata(await this.app.vault.read(file));
-      return parsed
-        ? {
-            created: parsed.created,
-            tags: parsed.tags ?? [],
-            version: Number(parsed.version) || 0,
-            title: parsed.title,
-          }
-        : null;
+    const known = this.knownMetadata.get(filePath);
+    if (known && known.mtime === file.stat.mtime && known.size === file.stat.size) {
+      return known.metadata;
     }
-    const frontmatter: Readonly<Record<string, unknown>> | undefined = cache?.frontmatter;
-    const cached = typeof frontmatter?.id === "string" ? frontmatter : null;
-    if (!cached && !written) return null;
-    return {
-      created: frontmatterTimestamp(cached?.created) ?? written?.created,
-      tags: cached ? ChatMarkdownSerializer.normalizeTags(cached.tags) : written?.tags ?? [],
-      version: Math.max(Number(cached?.version) || 0, written?.version ?? 0),
-      title: typeof cached?.title === "string" ? cached.title : written?.title,
-    };
+    return carriedMetadata(ChatMarkdownSerializer.parseMetadata(await this.app.vault.read(file)));
+  }
+
+  /** Records a note's frontmatter with the stat of the version it describes. */
+  private rememberMetadata(
+    filePath: string,
+    metadata: ExistingChatMetadata | null,
+    stat: Readonly<{ mtime: number; size: number }> | undefined,
+  ): void {
+    if (metadata && stat) {
+      this.knownMetadata.set(filePath, { metadata, mtime: stat.mtime, size: stat.size });
+    } else {
+      this.knownMetadata.delete(filePath);
+    }
   }
 
   /**
@@ -514,9 +525,17 @@ export class ChatStorageService {
       }
 
       const filePath = `${chatDirectory}/${chatId}.md`;
+      // The stat is taken before reading, so a change made during the read
+      // still makes the next save read the note again.
+      const stat = { mtime: file.stat.mtime, size: file.stat.size };
       const content = await this.app.vault.read(file);
       const parsed = this.parseDirectChatLoad(content, filePath);
       if (!parsed) return null;
+      this.rememberMetadata(
+        filePath,
+        carriedMetadata(ChatMarkdownSerializer.parseMetadata(content)),
+        stat,
+      );
       this.attachmentStore?.claimMessageReferences(parsed.messages);
       return {
         ...parsed,

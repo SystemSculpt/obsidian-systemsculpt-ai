@@ -109,7 +109,7 @@ Web search is server policy and a server-side tool. It is not a plugin capabilit
 
 ## Resume and historical edit
 
-Opening a saved chat reuses its persisted conversation ID. The server snapshot replaces stale local cache state.
+Opening a saved chat reuses its persisted conversation ID. The server snapshot replaces stale local cache state. The note is rewritten only when the server history differs from what the note already holds, with tool results compared in their bounded form. Opening an unchanged chat, including one saved before tool results were bounded, leaves the note untouched; an older chat stores bounded results on its next save.
 
 Editing an earlier user turn creates a new conversation ID and sends:
 

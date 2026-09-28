@@ -1597,6 +1597,29 @@ describe("LiveMarkdownRenderer", () => {
     expect(stableMarkdownBoundary(text, 15)).toBe(15);
   });
 
+  it("treats a fence line indented four columns or more as code, not as the closing fence", () => {
+    // CommonMark lets a closing fence be indented at most three spaces.
+    const docstring = [
+      "Intro",
+      "",
+      "```python",
+      "def f():",
+      "    \"\"\"",
+      "    ```",
+      "    \"\"\"",
+      "    return 1",
+      "",
+      "print(f())",
+    ].join("\n");
+    expect(stableMarkdownBoundary(docstring)).toBe(7);
+    expect(stableMarkdownBoundary(docstring.replace("    ```", "\t```"))).toBe(7);
+    expect(stableMarkdownBoundary(`${docstring}\n   \`\`\`\n\nAfter`)).toBe(docstring.length + 9);
+
+    // A fence nested in a list item closes at its own indentation.
+    const nested = "- a\n  - b\n\n    ```js\n    x\n\n        ```\n\n    y\n    ```\n\nAfter";
+    expect(stableMarkdownBoundary(nested)).toBe(nested.length - "After".length);
+  });
+
   it("keeps render work linear in the length of a long streamed response", async () => {
     const markdown = longStreamedResponse(240);
     const target = document.body.createDiv();

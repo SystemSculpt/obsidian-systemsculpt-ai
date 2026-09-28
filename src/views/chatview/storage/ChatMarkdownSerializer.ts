@@ -125,6 +125,20 @@ export class ChatMarkdownSerializer {
     return { metadata, messages: sequential.messages };
   }
 
+  /**
+   * The messages as a saved chat would read them back: what loading the note
+   * returns after they are written. The reader assigns its own part ids and
+   * part timestamps. Null when the messages cannot be saved.
+   */
+  public static readBack(messages: readonly ChatMessage[]): ChatMessage[] | null {
+    try {
+      const parsed = this.parseSequentialFormat(this.serializeMessages(messages));
+      return parsed.success ? parsed.messages : null;
+    } catch {
+      return null;
+    }
+  }
+
   // ───────────────────────── Internal parsing helpers ─────────────────────────
 
   private static parseSequentialFormat(content: string): { success: boolean; messages: ChatMessage[] } {
@@ -653,7 +667,7 @@ export class ChatMarkdownSerializer {
     };
   }
 
-  public static normalizeTags(value: unknown): string[] {
+  private static normalizeTags(value: unknown): string[] {
     const candidates = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
     return [...new Set(candidates
       .filter((tag): tag is string => typeof tag === "string")

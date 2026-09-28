@@ -107,6 +107,28 @@ describe("chatHistoryProvider", () => {
     expect(vault.adapter.list).not.toHaveBeenCalled();
   });
 
+  it("lists a copied chat once, from the file that opening the chat loads", async () => {
+    const { plugin, frontmatter, current, older } = vaultHarness();
+    // A chat copied into the configured chats folder, and a copy made beside
+    // a chat and listed before it. History keys are `chat:<id>`, and a
+    // repeated key would stop the History list from rendering.
+    const moved = chatFile("New/Chats/chat-old.md", Date.parse("2026-03-11T10:00:00.000Z"));
+    const beside = chatFile("New/Chats/chat-new 1.md", Date.parse("2026-03-12T10:00:00.000Z"));
+    frontmatter.set(moved.path, { ...frontmatter.get(older.path), title: "Moved chat" });
+    frontmatter.set(beside.path, { ...frontmatter.get(current.path), title: "Copied chat" });
+    const folder = plugin.app.vault.getAbstractFileByPath("New/Chats") as TFolder;
+    folder.children.unshift(beside);
+    folder.children.push(moved);
+
+    const entries = await createChatHistoryProvider(plugin).loadEntries();
+
+    // `loadChat` opens `<id>.md` from the first chats folder that holds it.
+    expect(entries.map((entry) => [entry.id, entry.metadataPath, entry.title])).toEqual([
+      ["chat:chat-new", current.path, "Current chat"],
+      ["chat:chat-old", moved.path, "Moved chat"],
+    ]);
+  });
+
   it("opens chat history entries through the minimal managed resume descriptor", async () => {
     const { plugin } = vaultHarness();
     const [entry] = await createChatHistoryProvider(plugin).loadEntries();
