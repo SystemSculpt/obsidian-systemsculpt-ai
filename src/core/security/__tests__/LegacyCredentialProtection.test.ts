@@ -115,6 +115,31 @@ describe("protectLegacyCredentials", () => {
     expect(target.files.get(IGNORE_FILE)).toBe(IGNORE_RULES);
   });
 
+  it("adds the rules when storage makes the plugin folder at the same moment", async () => {
+    const target = adapter();
+    target.mkdir.mockImplementationOnce(async (path: string) => {
+      target.files.set(`${path}/settings/.keep`, "");
+      throw new Error("Directory exists");
+    });
+
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "protected",
+      credentialFiles: [],
+    });
+    expect(target.files.get(IGNORE_FILE)).toBe(IGNORE_RULES);
+  });
+
+  it("reports a plugin folder that cannot be made", async () => {
+    const target = adapter();
+    target.mkdir.mockRejectedValueOnce(new Error("read only"));
+
+    await expect(protectLegacyCredentials(target)).resolves.toMatchObject({
+      status: "unprotected",
+      error: "read only",
+      credentialFiles: [],
+    });
+  });
+
   it("does not remake a plugin folder that exists", async () => {
     const target = adapter({ [BACKUP]: "{}" });
 

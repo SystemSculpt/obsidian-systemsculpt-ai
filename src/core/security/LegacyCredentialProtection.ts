@@ -98,8 +98,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function ensurePluginFolder(adapter: ProtectionAdapter): Promise<void> {
+  if (await adapter.exists(PLUGIN_FOLDER_PATH)) return;
+  try {
+    await adapter.mkdir(PLUGIN_FOLDER_PATH);
+  } catch (error) {
+    // Storage initialization makes the same folder at startup, and may win.
+    if (!(await adapter.exists(PLUGIN_FOLDER_PATH))) throw error;
+  }
+}
+
 async function ensureIgnoreRules(adapter: ProtectionAdapter): Promise<void> {
-  if (!(await adapter.exists(PLUGIN_FOLDER_PATH))) await adapter.mkdir(PLUGIN_FOLDER_PATH);
+  await ensurePluginFolder(adapter);
   if (!(await adapter.exists(GITIGNORE_PATH))) {
     await adapter.write(GITIGNORE_PATH, [IGNORE_COMMENT, ...CREDENTIAL_FILE_NAMES, ""].join("\n"));
     return;
