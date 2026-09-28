@@ -30,6 +30,7 @@ const FENCE_CLOSE = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/;
 /** CommonMark: a closing fence is indented at most three spaces. */
 const FENCE_CLOSE_MAX_INDENT = 3;
 const LIST_ITEM_LINE = /^[ \t]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+const LIST_ITEM_PARTS = /^([ \t]{0,3})([-*+]|\d{1,9}[.)])([ \t]*)(.*)$/;
 const PARTIAL_LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)]?)$/;
 
 type SelectionPoint = Readonly<{
@@ -215,6 +216,17 @@ function indentColumns(indent: string): number {
   return columns;
 }
 
+/**
+ * The column where a list item's content starts: after its marker and one to
+ * four spaces, or one space when the item is blank or starts with indented code.
+ */
+function listContentColumn(line: string): number {
+  const [, lead = "", marker = "", gap = "", rest = ""] = LIST_ITEM_PARTS.exec(line) ?? [];
+  const markerEnd = indentColumns(lead) + marker.length;
+  const gapColumns = indentColumns(`${" ".repeat(markerEnd)}${gap}`) - markerEnd;
+  return rest.length === 0 || gapColumns > 4 ? markerEnd + 1 : markerEnd + gapColumns;
+}
+
 function countOccurrences(line: string, token: string): number {
   let count = 0;
   for (
@@ -234,17 +246,19 @@ function countOccurrences(line: string, token: string): number {
  * costs time but never changes what is shown. The final render always parses
  * the whole message, so reference links and footnotes resolve on settlement.
  *
- * A closing fence may be indented at most three spaces, or as deep as its
- * opening fence when that fence sits in a list item; a deeper fence line,
- * such as one inside a docstring, is code.
+ * A closing fence may be indented at most three columns past the content of
+ * the list item that holds its opening fence, or three spaces outside a list;
+ * a deeper fence line, such as one inside a docstring, is code.
  */
 export function stableMarkdownBoundary(markdown: string, start = 0): number {
   let boundary = start;
-  let fence: Readonly<{ char: string; length: number; indent: number }> | null = null;
+  let fence: Readonly<{ char: string; length: number; maxCloseIndent: number }> | null = null;
   let math = false;
   let obsidianComment = false;
   let htmlComment = false;
   let blockHasListItem = false;
+  // Content columns of the list items still open in this block, outermost first.
+  let listColumns: number[] = [];
   let blankAfterContent = false;
   let sawContent = false;
   let lineStart = start;
@@ -258,7 +272,7 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
         close
         && close[2][0] === fence.char
         && close[2].length >= fence.length
-        && indentColumns(close[1]) <= Math.max(FENCE_CLOSE_MAX_INDENT, fence.indent)
+        && indentColumns(close[1]) <= fence.maxCloseIndent
       ) fence = null;
     } else if (math) {
       if (countOccurrences(line, "$$") % 2 === 1) math = false;
@@ -278,13 +292,25 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
       ) {
         boundary = lineStart;
         blockHasListItem = false;
+        listColumns = [];
       }
       blankAfterContent = false;
       sawContent = true;
-      if (listItem) blockHasListItem = true;
+      const indent = indentColumns(/^[ \t]*/.exec(line)?.[0] ?? "");
+      if (listItem) {
+        blockHasListItem = true;
+        listColumns = listColumns.filter((column) => column <= indent);
+        if (LIST_ITEM_LINE.test(line)) listColumns.push(listContentColumn(line));
+      }
       const open = FENCE_OPEN.exec(line);
       if (open && !(open[2][0] === "`" && open[3].includes("`"))) {
-        fence = { char: open[2][0], length: open[2].length, indent: indentColumns(open[1]) };
+        let container = 0;
+        for (const column of listColumns) if (column <= indent) container = column;
+        fence = {
+          char: open[2][0],
+          length: open[2].length,
+          maxCloseIndent: container + FENCE_CLOSE_MAX_INDENT,
+        };
       } else if (countOccurrences(line, "$$") % 2 === 1) {
         math = true;
       } else if (countOccurrences(line, "%%") % 2 === 1) {

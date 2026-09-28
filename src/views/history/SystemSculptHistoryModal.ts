@@ -18,15 +18,18 @@ const CONTENT_SEARCH_MIN_CHARACTERS = 2;
 const CONTENT_SEARCH_DEBOUNCE_MS = 250;
 const DESKTOP_CONTENT_SEARCH_CONCURRENCY = 8;
 const PORTABLE_CONTENT_SEARCH_CONCURRENCY = 1;
+/** A running text search shows the matches it has found at most this often. */
+const CONTENT_SEARCH_REFRESH_MS = 150;
 
 function normalizeQuery(query: string): string {
   return query.trim().toLowerCase();
 }
 
-type ContentSearch = Readonly<{
-  query: string;
-  matches: ReadonlySet<SystemSculptHistoryEntry>;
-}>;
+type ContentSearch = {
+  readonly query: string;
+  readonly matches: Set<SystemSculptHistoryEntry>;
+  complete: boolean;
+};
 
 interface SystemSculptHistoryModalOptions {
   loadEntries?: (signal?: AbortSignal) => Promise<SystemSculptHistoryEntry[]>;
@@ -48,6 +51,7 @@ export class SystemSculptHistoryModal extends StandardModal {
   private contentSearch: ContentSearch | null = null;
   private pendingContentQuery: string | null = null;
   private contentSearchTimer: number | null = null;
+  private contentRefreshTimer: number | null = null;
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -120,10 +124,14 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.cancelContentSearchTimer();
     if (
       query.length < CONTENT_SEARCH_MIN_CHARACTERS
-      || this.contentSearch?.query === query
       || !this.entries.some((entry) => entry.loadSearchText)
     ) {
       this.pendingContentQuery = null;
+      return;
+    }
+    if (this.contentSearch?.query === query) {
+      // Searched already, or its search is still running.
+      this.pendingContentQuery = this.contentSearch.complete ? null : query;
       return;
     }
     this.pendingContentQuery = query;
@@ -141,10 +149,16 @@ export class SystemSculptHistoryModal extends StandardModal {
     this.contentSearchTimer = null;
   }
 
+  /**
+   * Matches show as they are found, so a slow or timed-out read never holds
+   * back the chats already matched.
+   */
   private async searchContent(query: string): Promise<void> {
     const task = this.beginAsyncTask("history-content-search");
+    this.cancelContentRefresh();
     const searchable = this.entries.filter((entry) => entry.loadSearchText);
-    const matches = new Set<SystemSculptHistoryEntry>();
+    const search: ContentSearch = { query, matches: new Set(), complete: false };
+    this.contentSearch = search;
     let next = 0;
     const concurrency = hasHostCapability("local-filesystem")
       ? DESKTOP_CONTENT_SEARCH_CONCURRENCY
@@ -155,7 +169,10 @@ export class SystemSculptHistoryModal extends StandardModal {
         while (next < searchable.length && task.isCurrent()) {
           const entry = searchable[next++];
           try {
-            if ((await entry.loadSearchText!()).includes(query)) matches.add(entry);
+            if ((await entry.loadSearchText!()).includes(query) && task.isCurrent()) {
+              search.matches.add(entry);
+              this.scheduleContentRefresh();
+            }
           } catch {
             // An unreadable chat simply does not match.
           }
@@ -163,9 +180,26 @@ export class SystemSculptHistoryModal extends StandardModal {
       },
     ));
     if (!task.isCurrent()) return;
-    this.contentSearch = { query, matches };
+    search.complete = true;
+    this.cancelContentRefresh();
     if (this.pendingContentQuery === query) this.pendingContentQuery = null;
     this.combobox?.refresh();
+  }
+
+  private scheduleContentRefresh(): void {
+    if (this.contentRefreshTimer !== null) return;
+    const ownerWindow = this.modalEl.ownerDocument.defaultView ?? window;
+    this.contentRefreshTimer = ownerWindow.setTimeout(() => {
+      this.contentRefreshTimer = null;
+      this.combobox?.refresh();
+    }, CONTENT_SEARCH_REFRESH_MS);
+  }
+
+  private cancelContentRefresh(): void {
+    if (this.contentRefreshTimer === null) return;
+    const ownerWindow = this.modalEl.ownerDocument.defaultView ?? window;
+    ownerWindow.clearTimeout(this.contentRefreshTimer);
+    this.contentRefreshTimer = null;
   }
 
   private initializeCombobox(): void {
@@ -370,6 +404,7 @@ export class SystemSculptHistoryModal extends StandardModal {
 
   onClose(): void {
     this.cancelContentSearchTimer();
+    this.cancelContentRefresh();
     this.pendingContentQuery = null;
     this.contentSearch = null;
     this.combobox?.destroy();

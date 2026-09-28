@@ -243,6 +243,52 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     }
   });
 
+  it("shows text matches as they are found while a slow chat is still being read", async () => {
+    jest.useFakeTimers();
+    mockHost.localFilesystem = false;
+    try {
+      let finishSlowRead!: (text: string) => void;
+      const entries = [
+        { ...entry("a", "First"), loadSearchText: jest.fn(async () => "the quarterly plan") },
+        { ...entry("b", "Slow"), loadSearchText: jest.fn(() => new Promise<string>((resolve) => { finishSlowRead = resolve; })) },
+        { ...entry("c", "Third"), loadSearchText: jest.fn(async () => "quarterly review") },
+      ];
+      const modal = new SystemSculptHistoryModal({ app: new App() } as any, { loadEntries: jest.fn().mockResolvedValue(entries) });
+      modal.open();
+      await flush();
+      const input = modal.modalEl.querySelector<HTMLInputElement>("input[type=search]")!;
+      const type = (value: string) => {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const shown = () => [...modal.modalEl.querySelectorAll(".systemsculpt-history-list [role=option]")]
+        .map((option) => option.querySelector(".systemsculpt-history-item-title")?.textContent);
+
+      type("quarterly");
+      await jest.advanceTimersByTimeAsync(300);
+      await flush();
+      await jest.advanceTimersByTimeAsync(150);
+      expect(entries[1].loadSearchText).toHaveBeenCalledTimes(1);
+      expect(entries[2].loadSearchText).not.toHaveBeenCalled();
+      expect(shown()).toEqual(["First"]);
+
+      // Leaving and returning to the query keeps its running search.
+      type("quarterlyx");
+      type("quarterly");
+      await jest.advanceTimersByTimeAsync(300);
+      expect(entries[0].loadSearchText).toHaveBeenCalledTimes(1);
+      expect(shown()).toEqual(["First"]);
+
+      finishSlowRead("unrelated");
+      for (let turn = 0; turn < 5; turn++) await flush();
+      expect(shown()).toEqual(["First", "Third"]);
+      modal.close();
+    } finally {
+      mockHost.localFilesystem = true;
+      jest.useRealTimers();
+    }
+  });
+
   it("renders a page of rows at a time and handles row controls without per-row listeners", async () => {
     const entries = Array.from({ length: 230 }, (_, index) => ({
       ...entry(`chat-${index}`, `Chat ${index}`),

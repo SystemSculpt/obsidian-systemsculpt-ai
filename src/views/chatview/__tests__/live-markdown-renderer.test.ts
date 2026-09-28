@@ -1620,6 +1620,21 @@ describe("LiveMarkdownRenderer", () => {
     expect(stableMarkdownBoundary(nested)).toBe(nested.length - "After".length);
   });
 
+  it("closes a list item's fence up to three columns past the item's content", () => {
+    // The closer sits one column deeper than its fence, which CommonMark allows
+    // inside the item; the top-level fence after it must open, not close.
+    const step = "1. Step:\n   ```bash\n   npm i\n    ```\n\n```\nplain\n\ntext\n```\n\nAfter";
+    expect(stableMarkdownBoundary(step)).toBe(step.length - "After".length);
+
+    // Four columns past the item's content is code, not the closer.
+    const deep = "1. Step:\n   ```bash\n       ```\n\ntext";
+    expect(stableMarkdownBoundary(deep)).toBe(0);
+
+    // A fence back in the outer item closes relative to that item.
+    const outer = "- a\n  - b\n\n  ```\n  x\n     ```\n\nAfter";
+    expect(stableMarkdownBoundary(outer)).toBe(outer.length - "After".length);
+  });
+
   it("keeps render work linear in the length of a long streamed response", async () => {
     const markdown = longStreamedResponse(240);
     const target = document.body.createDiv();
