@@ -1071,7 +1071,7 @@ export default class SystemSculptPlugin extends Plugin {
         metadata: { error: result.error },
       });
     }
-    if (result.status !== "no-plugin-folder" && result.searchError) {
+    if (result.searchError) {
       this.getLogger().warn("Could not search all of the plugin folder for retired credential files", {
         source: "SystemSculptPlugin",
         metadata: { error: result.searchError },

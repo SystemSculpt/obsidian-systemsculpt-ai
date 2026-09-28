@@ -14,13 +14,16 @@ const IGNORE_RULES = [
   "",
 ].join("\n");
 
-/** An in-memory vault adapter whose folders are implied by its file paths. */
+/** An in-memory vault adapter whose folders are made or implied by its file paths. */
 function adapter(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial));
-  const isFolder = (path: string) => [...files.keys()].some((file) => file.startsWith(`${path}/`));
+  const folders = new Set<string>();
+  const isFolder = (path: string) =>
+    folders.has(path) || [...files.keys()].some((file) => file.startsWith(`${path}/`));
   return {
     files,
     exists: jest.fn(async (path: string) => files.has(path) || isFolder(path)),
+    mkdir: jest.fn(async (path: string) => { folders.add(path); }),
     list: jest.fn(async (path: string) => {
       const children = [...files.keys()]
         .filter((file) => file.startsWith(`${path}/`))
@@ -101,13 +104,23 @@ describe("protectLegacyCredentials", () => {
     );
   });
 
-  it("leaves a vault without the plugin folder untouched", async () => {
+  it("gives a new vault the plugin folder with its rules, and looks nowhere else", async () => {
     const target = adapter({ "Notes/auth.json": "{}" });
 
-    await expect(protectLegacyCredentials(target)).resolves.toEqual({ status: "no-plugin-folder" });
-    expect(target.list).not.toHaveBeenCalled();
-    expect(target.write).not.toHaveBeenCalled();
-    expect(target.append).not.toHaveBeenCalled();
+    await expect(protectLegacyCredentials(target)).resolves.toEqual({
+      status: "protected",
+      credentialFiles: [],
+    });
+    expect(target.mkdir).toHaveBeenCalledWith(".systemsculpt");
+    expect(target.files.get(IGNORE_FILE)).toBe(IGNORE_RULES);
+  });
+
+  it("does not remake a plugin folder that exists", async () => {
+    const target = adapter({ [BACKUP]: "{}" });
+
+    await protectLegacyCredentials(target);
+
+    expect(target.mkdir).not.toHaveBeenCalled();
   });
 
   it("adds the rules and reports what it could search when the plugin folder cannot be listed", async () => {
@@ -136,8 +149,8 @@ describe("protectLegacyCredentials", () => {
 
 describe("legacyCredentialNotice", () => {
   it("stays quiet when no credential file was found", () => {
-    expect(legacyCredentialNotice({ status: "no-plugin-folder" })).toBeNull();
     expect(legacyCredentialNotice({ status: "protected", credentialFiles: [] })).toBeNull();
+    expect(legacyCredentialNotice({ status: "unprotected", credentialFiles: [], error: "read only" })).toBeNull();
   });
 
   it("names the file, covers sign-in tokens and states what the ignore rule cannot do", () => {

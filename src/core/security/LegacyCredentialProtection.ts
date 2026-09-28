@@ -18,19 +18,19 @@ type CredentialSearch = Readonly<{
 }>;
 
 export type LegacyCredentialProtectionResult = Readonly<
-  | { status: "no-plugin-folder" }
   | ({ status: "protected" } & CredentialSearch)
   | ({ status: "unprotected"; error: string } & CredentialSearch)
 >;
 
-type ProtectionAdapter = Pick<DataAdapter, "append" | "exists" | "list" | "read" | "write">;
+type ProtectionAdapter = Pick<DataAdapter, "append" | "exists" | "list" | "mkdir" | "read" | "write">;
 
 /**
  * Keeps credential files in the plugin folder out of new Git commits, and
- * finds any that a retired feature left there. The ignore rules go into every
- * existing plugin folder before such a file appears, so a copy that arrives
- * later through sync or a restore is covered too. A vault without the plugin
- * folder is left untouched. Credential files are never read.
+ * finds any that a retired feature left there. The ignore rules go into the
+ * plugin folder before such a file appears, so a copy that arrives later
+ * through sync or a restore is covered too. A new vault gets the folder with
+ * its rules, as the plugin keeps its own storage there anyway. Credential
+ * files are never read.
  *
  * This cannot remove a file that Git already tracks and it does not protect
  * cloud-sync or backup copies, so the notice for a found file says so.
@@ -38,7 +38,6 @@ type ProtectionAdapter = Pick<DataAdapter, "append" | "exists" | "list" | "read"
 export async function protectLegacyCredentials(
   adapter: ProtectionAdapter,
 ): Promise<LegacyCredentialProtectionResult> {
-  if (!(await adapter.exists(PLUGIN_FOLDER_PATH))) return { status: "no-plugin-folder" };
   // The rules go in first: they protect every copy, found or not.
   let ignoreError: string | null = null;
   try {
@@ -54,7 +53,7 @@ export async function protectLegacyCredentials(
 
 /** The warning for credential files found in the plugin folder, or null when there are none. */
 export function legacyCredentialNotice(result: LegacyCredentialProtectionResult): string | null {
-  if (result.status === "no-plugin-folder" || result.credentialFiles.length === 0) return null;
+  if (result.credentialFiles.length === 0) return null;
   const files = result.credentialFiles;
   const one = files.length === 1;
   const protection = result.status === "protected"
@@ -100,6 +99,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function ensureIgnoreRules(adapter: ProtectionAdapter): Promise<void> {
+  if (!(await adapter.exists(PLUGIN_FOLDER_PATH))) await adapter.mkdir(PLUGIN_FOLDER_PATH);
   if (!(await adapter.exists(GITIGNORE_PATH))) {
     await adapter.write(GITIGNORE_PATH, [IGNORE_COMMENT, ...CREDENTIAL_FILE_NAMES, ""].join("\n"));
     return;
