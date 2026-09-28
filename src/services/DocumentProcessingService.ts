@@ -67,7 +67,7 @@ export interface DocumentProcessingReceiptOptions extends DocumentProcessingOpti
 }
 
 type ManagedDocumentAdapterPort = Pick<ManagedDocumentProcessingAdapter,
-  "process" | "resume" | "beginLocalCommit" | "completeLocalCommit"
+  "processAndCommit" | "resume" | "beginLocalCommit" | "completeLocalCommit"
 >;
 type ManagedDocumentStagingPort = Pick<ManagedDocumentLocalStaging, "stage" | "readVerified" | "cleanup">;
 
@@ -163,7 +163,9 @@ export class DocumentProcessingService {
         throwIfAborted(signal);
         return { filename: file.name, contentType, bytes };
       })();
-      const remote = await this.adapter().process({
+      // Conversions of one file take turns through their local commit, so a
+      // second one of the same bytes commits the result the first delivered.
+      const receipt = await this.adapter().processAndCommit({
         identity,
         fingerprint: async () => `sha256:${await sha256HexFromArrayBuffer((await load()).bytes)}`,
         load,
@@ -182,18 +184,18 @@ export class DocumentProcessingService {
             icon: STAGE_ICONS[stage],
           }, meta, flow);
         },
+      }, async (remote) => {
+        throwIfAborted(signal);
+        meta.documentId = remote.documentId;
+        this.emitProgress(options.onProgress, {
+          stage: "downloading",
+          progress: 96,
+          label: "Verifying converted document…",
+          icon: STAGE_ICONS.downloading,
+          documentId: remote.documentId,
+        }, meta, flow);
+        return this.commitLocalEffects(file, remote, options, signal);
       });
-      throwIfAborted(signal);
-      meta.documentId = remote.documentId;
-      this.emitProgress(options.onProgress, {
-        stage: "downloading",
-        progress: 96,
-        label: "Verifying converted document…",
-        icon: STAGE_ICONS.downloading,
-        documentId: remote.documentId,
-      }, meta, flow);
-
-      const receipt = await this.commitLocalEffects(file, remote, options, signal);
       throwIfAborted(signal);
       meta.durationMs = Date.now() - startedAt;
       this.emitProgress(options.onProgress, {
@@ -201,7 +203,7 @@ export class DocumentProcessingService {
         progress: 100,
         label: "Document ready",
         icon: STAGE_ICONS.ready,
-        documentId: remote.documentId,
+        documentId: meta.documentId,
       }, meta, flow);
       if (showNotices) new Notice("Document successfully converted to Markdown");
       return receipt;

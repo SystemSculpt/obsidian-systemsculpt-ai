@@ -43,12 +43,12 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
     metadata: { title: "Managed" },
   };
   const managed = {
-    process: jest.fn(async (source: any, context: any) => {
+    processAndCommit: jest.fn(async (source: any, context: any, commit: (value: any) => Promise<unknown>) => {
       events.push("managed");
       await source.fingerprint();
       await source.load();
       context.onProgress?.(50, "Uploading document…");
-      return { operationId: "document-op-1", documentId: "document-1", result };
+      return commit({ operationId: "document-op-1", documentId: "document-1", result });
     }),
     resume: jest.fn(),
     beginLocalCommit: jest.fn(async () => { events.push("local-pending"); return {} as any; }),
@@ -107,7 +107,7 @@ describe("DocumentProcessingService managed local effects", () => {
     expect(events.indexOf("markdown-effect")).toBeLessThan(events.indexOf("context-effect"));
     expect(events.indexOf("context-effect")).toBeLessThan(events.indexOf("local-complete"));
     expect(events.at(-1)).toBe("cleanup");
-    expect(managed.process.mock.calls[0][1].signal).toBe(controller.signal);
+    expect(managed.processAndCommit.mock.calls[0][1].signal).toBe(controller.signal);
     expect(staging.stage.mock.calls[0][2]).toBe(controller.signal);
     expect(context.mock.calls[0][1]).toBe(controller.signal);
     expect(app.vault.create).toHaveBeenCalledWith(
@@ -131,10 +131,10 @@ describe("DocumentProcessingService managed local effects", () => {
 
   it("shows a recovery notice for the selected file even when progress notices are off", async () => {
     const { app, dependencies, managed, plugin } = harness();
-    const convert = managed.process.getMockImplementation()!;
-    managed.process.mockImplementationOnce(async (source: any, context: any) => {
+    const convert = managed.processAndCommit.getMockImplementation()!;
+    managed.processAndCommit.mockImplementationOnce(async (source: any, context: any, commit: (value: any) => Promise<unknown>) => {
       context.onNotice?.("A new conversion was started.");
-      return convert(source, context);
+      return convert(source, context, commit);
     });
     const service = new DocumentProcessingService(app, plugin, dependencies);
 

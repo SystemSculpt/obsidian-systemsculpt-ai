@@ -54,7 +54,8 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
   }
 
   public async complete(operationId: string): Promise<void> {
-    await this.managed.completeLocalCommit(operationId);
+    await this.managed.completeLocalCommit(operationId)
+      .catch((error: unknown) => this.settledElsewhere(operationId, error));
   }
 
   public async discard(fingerprint: `sha256:${string}`): Promise<void> {
@@ -62,22 +63,32 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
     await this.managed.discard(sourceIdentity(fingerprint));
   }
 
-  private async convert(input: Parameters<ChatDocumentAttachmentProcessor["prepare"]>[0], signal: AbortSignal) {
-    const converted = await this.managed.process({
+  private convert(input: Parameters<ChatDocumentAttachmentProcessor["prepare"]>[0], signal: AbortSignal) {
+    return this.managed.processAndCommit({
       identity: sourceIdentity(input.fingerprint),
       fingerprint: () => input.fingerprint,
       load: async () => ({ filename: input.name, contentType: input.mimeType, bytes: input.bytes }),
     }, {
       signal,
       onNotice: (message) => new Notice(`${input.name}: ${message}`, 10_000),
+    }, async (converted) => {
+      const markdown = typeof converted.result.markdown === "string" && converted.result.markdown.trim()
+        ? converted.result.markdown
+        : converted.result.text;
+      if (typeof markdown !== "string" || !markdown.trim()) {
+        throw new Error("Document processing returned no readable text.");
+      }
+      await this.managed.beginLocalCommit(converted.operationId, signal)
+        .catch((error: unknown) => this.settledElsewhere(converted.operationId, error, signal));
+      return Object.freeze({ operationId: converted.operationId, markdown });
     });
-    const markdown = typeof converted.result.markdown === "string" && converted.result.markdown.trim()
-      ? converted.result.markdown
-      : converted.result.text;
-    if (typeof markdown !== "string" || !markdown.trim()) {
-      throw new Error("Document processing returned no readable text.");
-    }
-    await this.managed.beginLocalCommit(converted.operationId, signal);
-    return Object.freeze({ operationId: converted.operationId, markdown });
+  }
+
+  /**
+   * The text is the operation's whole local effect, so an operation another
+   * chat retired meanwhile, by giving up the same PDF, is settled for this one.
+   */
+  private async settledElsewhere(operationId: string, error: unknown, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted || !await this.managed.isRetired(operationId).catch(() => false)) throw error;
   }
 }

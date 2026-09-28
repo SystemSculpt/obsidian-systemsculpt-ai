@@ -58,7 +58,7 @@ export type ManagedDocumentProcessingResult = Readonly<{
 
 type DocumentJobs = Pick<ManagedJobClient["documents"], "create" | "uploadPart" | "complete" | "start" | "status" | "download">;
 type DocumentRecovery = Pick<ManagedJobRecoveryStore,
-  "createAdmitted" | "read" | "findSourceIdentityMatches" | "findExactSourceMatches" | "markContentReady" |
+  "createAdmitted" | "read" | "readOptional" | "findSourceIdentityMatches" | "markContentReady" |
   "markLocalCommitPending" | "completeLocalCommit" | "beginDispatch" | "acknowledgeCreated" | "acknowledgePart" |
   "acknowledgeComplete" | "acknowledgeStarted" | "applyReconciliation" | "abandon" | "delete"
 >;
@@ -97,11 +97,20 @@ function hasPathOnlyFingerprint(record: ManagedJobRecoveryRecord): boolean {
   return record.source.fingerprint === `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(record.source.identity))}`;
 }
 
+/** The selections of one source that run or wait now, one at a time. */
+type SourceQueue = {
+  tail: Promise<void>;
+  /** Selections running or waiting their turn. The queue ends when none are left. */
+  active: number;
+  /** The last result a selection of the source delivered, for the selections behind it. */
+  delivered?: Readonly<{ fingerprint: string; result: ManagedDocumentProcessingResult }>;
+};
+
 /**
- * The selection of each source that runs now, per recovery ledger. Adapters
- * are made per chat view, but they share the plugin's one ledger.
+ * Source queues per recovery ledger. Adapters are made per chat view, but they
+ * share the plugin's one ledger.
  */
-const sourceTurns = new WeakMap<object, Map<string, Promise<void>>>();
+const sourceQueues = new WeakMap<object, Map<string, SourceQueue>>();
 
 function waitForTurn(previous: Promise<void>, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -153,9 +162,37 @@ export class ManagedDocumentProcessingAdapter {
   }
 
   async process(source: ManagedDocumentSource, context: ManagedDocumentProcessingContext = {}): Promise<ManagedDocumentProcessingResult> {
+    return this.processAndCommit(source, context, async (result) => result);
+  }
+
+  /**
+   * Selects the conversion of the source's bytes and runs `commit` with its
+   * result, both in the source's turn: one selection of a source runs at a
+   * time in this Obsidian session. A selection that waited behind one that
+   * delivered a result for the same bytes commits that result too, instead of
+   * converting again; to find it, that selection reads its fingerprint before
+   * any admission. `commit` must not select the same source, since that
+   * selection would wait for the turn it runs in.
+   */
+  async processAndCommit<T>(
+    source: ManagedDocumentSource,
+    context: ManagedDocumentProcessingContext,
+    commit: (result: ManagedDocumentProcessingResult) => Promise<T>,
+  ): Promise<T> {
     const signal = context.signal ?? new AbortController().signal;
     throwIfAborted(signal);
-    return this.inSourceTurn(source.identity, context, signal, () => this.select(source, context, signal));
+    return this.inSourceTurn(source.identity, context, signal, async (queue) => {
+      const delivered = queue.delivered;
+      const fingerprint = delivered ? await this.readFingerprint(source, signal) : undefined;
+      let result = delivered && delivered.fingerprint === fingerprint ? delivered.result : undefined;
+      if (!result) {
+        const selected = await this.select(source, context, signal, fingerprint);
+        queue.delivered = selected;
+        result = selected.result;
+      }
+      throwIfAborted(signal);
+      return commit(result);
+    });
   }
 
   async resume(
@@ -184,42 +221,48 @@ export class ManagedDocumentProcessingAdapter {
   /**
    * Drops every operation retained for a source its owner discarded, such as a
    * removed chat attachment. The next selection of those bytes starts over.
-   * A selection of the source that is running or waiting keeps them to use.
+   * While a selection of the source runs or waits, including its commit, the
+   * operations stay for it.
    */
   async discard(identity: string): Promise<void> {
-    if (sourceTurns.get(this.dependencies.recovery)?.has(identity)) return;
+    if (sourceQueues.get(this.dependencies.recovery)?.has(identity)) return;
     for (const record of await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, identity)) {
       if (!isRetiredManagedRecoveryRecord(record)) await this.retire(record);
     }
   }
 
   /**
-   * Runs one selection of a source at a time in this Obsidian session. A chat
-   * that selects a PDF another chat is converting waits, then continues the
-   * operation the first one kept, instead of starting or advancing its own.
+   * Runs `run` in the source's turn. A chat that selects a PDF another chat is
+   * converting waits, then uses what the first one delivered or kept, instead
+   * of starting or advancing its own operation. A selection that stops while
+   * waiting leaves at once, and the ones behind it still wait their turn.
    */
   private async inSourceTurn<T>(
     identity: string,
     context: ManagedDocumentProcessingContext,
     signal: AbortSignal,
-    select: () => Promise<T>,
+    run: (queue: SourceQueue) => Promise<T>,
   ): Promise<T> {
-    let turns = sourceTurns.get(this.dependencies.recovery);
-    if (!turns) sourceTurns.set(this.dependencies.recovery, turns = new Map());
-    const previous = turns.get(identity);
+    let queues = sourceQueues.get(this.dependencies.recovery);
+    if (!queues) sourceQueues.set(this.dependencies.recovery, queues = new Map());
+    let queue = queues.get(identity);
+    const waits = Boolean(queue);
+    if (!queue) queues.set(identity, queue = { tail: Promise.resolve(), active: 0 });
+    const previous = queue.tail;
     let finish!: () => void;
     const finished = new Promise<void>((resolve) => { finish = resolve; });
-    const turn = (previous ?? Promise.resolve()).then(() => finished);
-    turns.set(identity, turn);
+    queue.tail = previous.then(() => finished);
+    queue.active += 1;
     try {
-      if (previous) {
+      if (waits) {
         context.onProgress?.(0, "This document is already being converted. Waiting…");
         await waitForTurn(previous, signal);
       }
-      return await select();
+      return await run(queue);
     } finally {
       finish();
-      if (turns.get(identity) === turn) turns.delete(identity);
+      queue.active -= 1;
+      if (queue.active === 0 && queues.get(identity) === queue) queues.delete(identity);
     }
   }
 
@@ -231,16 +274,15 @@ export class ManagedDocumentProcessingAdapter {
     source: ManagedDocumentSource,
     context: ManagedDocumentProcessingContext,
     signal: AbortSignal,
-  ): Promise<ManagedDocumentProcessingResult> {
-    let fingerprint: string | undefined;
+    knownFingerprint?: string,
+  ): Promise<{ fingerprint: string; result: ManagedDocumentProcessingResult }> {
+    let fingerprint = knownFingerprint;
     const retained = (await this.dependencies.recovery.findSourceIdentityMatches(CAPABILITY, source.identity))
       .filter((record) => !isRetiredManagedRecoveryRecord(record));
     throwIfAborted(signal);
     if (retained.length) {
-      fingerprint = await this.readFingerprint(source, signal);
-      const exact = (await this.dependencies.recovery.findExactSourceMatches(CAPABILITY, { identity: source.identity, fingerprint }))
-        .filter((record) => !isRetiredManagedRecoveryRecord(record));
-      throwIfAborted(signal);
+      fingerprint ??= await this.readFingerprint(source, signal);
+      const exact = retained.filter((record) => record.source.fingerprint === fingerprint);
       if (exact.length) {
         // Several operations can hold the same bytes, such as ones kept by an
         // earlier version or by another device through sync. The one that got
@@ -250,7 +292,7 @@ export class ManagedDocumentProcessingAdapter {
         const [furthest, ...repeats] = [...exact].sort(furthestFirst);
         for (const record of repeats) await this.retire(record).catch(() => undefined);
         throwIfAborted(signal);
-        return this.continueRecord(furthest, source, context, signal);
+        return { fingerprint, result: await this.continueRecord(furthest, source, context, signal) };
       }
       // A record fingerprinted by its path alone cannot show which bytes its
       // operation uploaded. It must not lock the file: retire it and convert
@@ -285,7 +327,16 @@ export class ManagedDocumentProcessingAdapter {
     });
     throwIfAborted(signal);
 
-    return this.continueRecord(record, source, context, signal);
+    return { fingerprint, result: await this.continueRecord(record, source, context, signal) };
+  }
+
+  /**
+   * Whether no selection can continue the operation any more, because it was
+   * retired or removed, for example by another chat that gave up the same PDF.
+   */
+  async isRetired(operationId: string): Promise<boolean> {
+    const record = await this.dependencies.recovery.readOptional(CAPABILITY, operationId);
+    return !record || isRetiredManagedRecoveryRecord(record);
   }
 
   /** An abandoned record that could not be deleted is already ignored, and pruned at startup. */
@@ -447,9 +498,9 @@ export class ManagedDocumentProcessingAdapter {
   }
 
   /**
-   * Selections of the same bytes take turns and continue one operation, but
-   * each commits the result locally after its turn. The first to commit
-   * advances the operation, and the others find it there.
+   * Selections of the same bytes commit one delivered result, each in its own
+   * turn, and a caller can finish its commit after its turn. The first to
+   * commit advances the operation, and the others find it there.
    */
   private async advanceLocalCommit(
     operationId: string,

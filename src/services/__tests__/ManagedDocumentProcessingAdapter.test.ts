@@ -175,7 +175,38 @@ describe("managed document processing adapter contract", () => {
     expect(results.map((result) => result.operationId)).toEqual(["document-op-1", "document-op-1"]);
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
     expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
     expect(progress).toHaveBeenCalledWith(0, "This document is already being converted. Waiting…");
+  });
+
+  it("lets a selection that waited commit the result the one before it delivered", async () => {
+    const h = managedHarness();
+    const otherChat = new ManagedDocumentProcessingAdapter({
+      admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
+    });
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    const commits: string[] = [];
+    // The first commit finishes the operation before the waiting selection runs.
+    const commit = (adapter: ManagedDocumentProcessingAdapter, chat: string) => async (result: { operationId: string }) => {
+      commits.push(`${chat}:begin`);
+      await adapter.beginLocalCommit(result.operationId);
+      await adapter.completeLocalCommit(result.operationId);
+      commits.push(`${chat}:end`);
+      return result.operationId;
+    };
+
+    const committed = await Promise.all([
+      h.adapter.processAndCommit(source, {}, commit(h.adapter, "first")),
+      otherChat.processAndCommit(source, {}, commit(otherChat, "second")),
+    ]);
+
+    expect(committed).toEqual(["document-op-1", "document-op-1"]);
+    expect(commits).toEqual(["first:begin", "first:end", "second:begin", "second:end"]);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "completed" });
   });
 
   it("lets two chats that retry one retained operation at once both finish it", async () => {
@@ -214,11 +245,91 @@ describe("managed document processing adapter contract", () => {
 
     controller.abort();
     await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+    for (let turn = 0; turn < 100; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(h.jobs.status).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
     release!();
 
     await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
     await expect(next).resolves.toMatchObject({ operationId: "document-op-1" });
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps later selections and the operation waiting for a running selection after a waiting one stops", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+
+    // The first selection still runs: its operation stays, and the next waits.
+    await h.adapter.discard(source.identity);
+    const next = h.adapter.process(source);
+    for (let turn = 0; turn < 100; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(h.jobs.status).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "result_ready" });
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(next).resolves.toMatchObject({ operationId: "document-op-1" });
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires the operation on a discard once the running selection finishes, with only a stopped one left", async () => {
+    const h = managedHarness();
+    const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(source);
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    const controller = new AbortController();
+    const stopped = h.adapter.process(source, { signal: controller.signal });
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" });
+    release!();
+
+    // The caller gives the result up at once, as a chat does with text too large to attach.
+    await first.then(() => h.adapter.discard(source.identity));
+
+    await expect(h.recovery.readOptional("document_processing", "document-op-1")).resolves.toBeNull();
+  });
+
+  it("reads a waiting selection's fingerprint before admission only to look for a delivered result", async () => {
+    const h = managedHarness();
+    const version = (hex: string) => ({ identity: "vault:documents/report.pdf",
+      fingerprint: () => { h.events.push(`fingerprint:${hex}`); return `sha256:${hex.repeat(64)}`; },
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) });
+    let release: (() => void) | undefined;
+    h.jobs.download.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { result: downloaded };
+    });
+    const first = h.adapter.process(version("a"));
+    for (let turn = 0; turn < 1_000 && !release; turn++) await new Promise((resolve) => setImmediate(resolve));
+    // The file is edited while its earlier bytes convert.
+    const edited = h.adapter.process(version("b"));
+    release!();
+
+    await expect(first).resolves.toMatchObject({ operationId: "document-op-1" });
+    await expect(edited).resolves.toMatchObject({ operationId: "document-op-2" });
+    expect(h.events.filter((event) => event === "admission" || event.startsWith("fingerprint:")))
+      .toEqual(["admission", "fingerprint:a", "fingerprint:b", "admission"]);
   });
 
   it.each(["create", "part"] as const)("continues an interrupted %s upload when the same bytes come back under another name", async (interrupted) => {
@@ -385,6 +496,52 @@ describe("managed document processing adapter contract", () => {
       expect(h.jobs.download).toHaveBeenCalledTimes(2);
       await expect(h.recovery.read("document_processing", "pin-retry-1")).resolves.toMatchObject({ phase: "completed" });
     } finally { jest.useRealTimers(); jest.restoreAllMocks(); }
+  });
+
+  it("commits two pins of one file one after the other, with one conversion", async () => {
+    const h = managedHarness();
+    const app = new App();
+    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    const notes = new Map<string, string>();
+    app.vault.adapter.exists = jest.fn(async (path: string) => notes.has(path));
+    app.vault.adapter.read = jest.fn(async (path: string) => notes.get(path)!);
+    app.vault.create = jest.fn(async (path: string, text: string) => { notes.set(path, text); return new TFile({ path }); });
+    const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const events: string[] = [];
+    let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
+    // The context tool pins through the plugin's one service.
+    const service = new DocumentProcessingService(app, plugin, {
+      managed: new ManagedDocumentProcessingAdapter({ ...h, createOperationId: () => "pin-1" }),
+      staging: {
+        stage: async (id, artifacts) => {
+          events.push(`stage:${id}`);
+          staged = [...artifacts];
+          await new Promise((resolve) => setImmediate(resolve));
+          return artifacts.map((artifact, index) => ({
+            id: String(index), kind: artifact.kind, byteLength: artifact.bytes.byteLength,
+            sha256: sha256HexFromBytesPortable(new Uint8Array(artifact.bytes)),
+          }));
+        },
+        readVerified: async (id) => { events.push(`read:${id}`); return staged.map((artifact) => artifact.bytes); },
+        cleanup: async (id) => { events.push(`cleanup:${id}`); },
+      },
+    });
+
+    const receipts = await Promise.all([
+      service.processDocumentWithReceipt(file, { showNotices: false }),
+      service.processDocumentWithReceipt(file, { showNotices: false }),
+    ]);
+
+    expect(receipts.map((receipt) => receipt.operationId)).toEqual(["pin-1", "pin-1"]);
+    expect(receipts[1].extractionPath).toBe(receipts[0].extractionPath);
+    expect(events).toEqual(["stage:pin-1", "read:pin-1", "cleanup:pin-1", "stage:pin-1", "read:pin-1", "cleanup:pin-1"]);
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
+    expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+    expect(h.jobs.download).toHaveBeenCalledTimes(1);
+    await expect(h.recovery.read("document_processing", "pin-1")).resolves.toMatchObject({ phase: "completed" });
   });
 
   it("matches the immutable Plan 019 document descriptor without an expired status", () => {

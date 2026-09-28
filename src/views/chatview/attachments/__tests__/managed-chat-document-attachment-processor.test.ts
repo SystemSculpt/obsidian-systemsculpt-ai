@@ -169,6 +169,12 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
     const h = harness();
     const other = h.otherChat();
     try {
+      // Other conversions in the shared ledger slow every lookup of it.
+      for (let index = 0; index < 20; index++) {
+        const hex = String(index).padStart(64, "0");
+        await h.recovery.createAdmitted({ capability: "document_processing", operationId: `unrelated-${index}`,
+          source: { identity: `chat-pdf:${hex}`, fingerprint: `sha256:${hex}` } });
+      }
       h.state.downloadReady = true;
       const attached = await Promise.all([h.collection.addFiles([pdf]), other.collection.addFiles([pdf])]);
 
@@ -213,6 +219,41 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
       expect(h.state.creates).toHaveLength(1);
       expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
       await expect(h.recovery.read("document_processing", h.operationId())).resolves.toMatchObject({ phase: "completed" });
+    } finally { h.collection.dispose(); other.collection.dispose(); h.restore(); }
+  });
+
+  it("attaches a PDF whose conversion another chat gives up just as this one finishes", async () => {
+    const h = harness();
+    const other = h.otherChat();
+    try {
+      const first = h.collection.addFiles([pdf]);
+      await until(() => Boolean(h.download()));
+      await jest.advanceTimersByTimeAsync(h.download()!.timeoutMs as number);
+      expect((await first).issues).toHaveLength(1);
+      h.state.downloadReady = true;
+      // Hold the other chat after its turn, as it settles the operation.
+      const settle = h.recovery.completeLocalCommit.bind(h.recovery);
+      let proceed: (() => void) | undefined;
+      jest.spyOn(h.recovery, "completeLocalCommit").mockImplementationOnce(async (...args) => {
+        await new Promise<void>((resolve) => { proceed = resolve; });
+        return settle(...args);
+      });
+      const second = other.collection.addFiles([pdf]);
+      await until(() => Boolean(proceed));
+
+      // The first chat gives up its failed copy of the same PDF.
+      h.collection.remove(h.collection.displaySnapshot()[0].id);
+      for (let index = 0; index < 20; index++) {
+        if (!(await h.recovery.readOptional("document_processing", h.operationId()))) break;
+      }
+      await expect(h.recovery.readOptional("document_processing", h.operationId())).resolves.toBeNull();
+      proceed!();
+
+      const attached = await second;
+      expect(attached.issues).toEqual([]);
+      expect(attached.accepted[0].contentPart).toMatchObject({ type: "text", text: expect.stringContaining("# Converted") });
+      expect(h.state.creates).toHaveLength(1);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
     } finally { h.collection.dispose(); other.collection.dispose(); h.restore(); }
   });
 
