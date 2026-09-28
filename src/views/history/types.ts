@@ -8,7 +8,13 @@ export type SystemSculptHistoryEntry = {
   title: string;
   subtitle?: string;
   timestampMs: number;
+  /** Lowercased metadata text that filtering matches on every keystroke. */
   searchText: string;
+  /**
+   * Lowercased full text, read on demand by the debounced full-text search.
+   * Entries without it are matched by `searchText` alone.
+   */
+  loadSearchText?: () => Promise<string>;
   badge?: string;
   metadataPath?: string;
   isFavorite?: boolean;

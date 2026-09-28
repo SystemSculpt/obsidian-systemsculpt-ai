@@ -67,7 +67,7 @@ A blank new chat creates only local state. The first user submission starts serv
 9. The plugin sends the approval or tool result with the same request and tool-call IDs.
 10. The server continues from durable state and streams authoritative updates.
 11. One `data-systemsculpt-run-terminal` part identifies success, cancellation, or correlated failure.
-12. On success, the plugin persists the assistant presentation and refreshes credits.
+12. On success, the plugin writes the reconciled turn to the saved chat once and refreshes credits. The saved chat keeps a bounded summary of each tool result; the server holds the full result.
 
 The transport reuses a valid bootstrap for identity, context staging, synchronization, and turns. Token expiry causes a new bootstrap. Durable history remains the recovery source. Concurrent server commands keep separate response streams, and each stream receives events for only its request.
 
@@ -109,7 +109,7 @@ Web search is server policy and a server-side tool. It is not a plugin capabilit
 
 ## Resume and historical edit
 
-Opening a saved chat reuses its persisted conversation ID. The server snapshot replaces stale local cache state.
+Opening a saved chat reuses its persisted conversation ID. The server snapshot replaces stale local cache state. The note is rewritten only when the server history differs from what the note reads back as, with tool results compared in their bounded form. Opening an unchanged chat, including one saved before tool results were bounded, leaves the note untouched. A note that this version would write differently, such as one with attachments or one written by an older version, can still be rewritten when it is opened. An older chat stores bounded results on its next save.
 
 Editing an earlier user turn creates a new conversation ID and sends:
 

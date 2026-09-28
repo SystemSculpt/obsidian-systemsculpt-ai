@@ -233,6 +233,30 @@ describe("AgentSession server authority", () => {
     session.dispose();
   });
 
+  it("keeps parsed authoritative messages by reference instead of cloning them again", () => {
+    const { connection, session } = createSession();
+    const clone = jest.spyOn(globalThis, "structuredClone");
+    try {
+      connection.emit(event("session_snapshot", {
+        messages: [message("user_active", "user", "Hi")],
+        run_state: active(1, "running"),
+      }));
+      connection.emit(event("assistant_snapshot", {
+        request_id: "request_active",
+        message: message("assistant_active", "assistant", "Hello"),
+      }));
+      expect(clone).not.toHaveBeenCalled();
+      const [user, reply] = session.current.messages;
+      expect(reply?.parts[0]?.text).toBe("Hello");
+      for (const value of [user, user?.parts, user?.parts[0], reply, reply?.parts]) {
+        expect(Object.isFrozen(value)).toBe(true);
+      }
+    } finally {
+      clone.mockRestore();
+      session.dispose();
+    }
+  });
+
   it("projects bounded queued and cancelled request receipts from snapshots", () => {
     const { connection, session } = createSession();
 

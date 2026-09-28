@@ -227,6 +227,74 @@ it('keeps the loaded runs bounded when the board pages past the cap, keeping liv
   expect(runs.list('project').length).toBeLessThanOrEqual(MAX_LOADED_AGENT_RUNS);
   await runs.dispose();
 });
+it('notifies every open board affected by the shared run cap', async () => {
+  const { runs, files } = fixture();
+  const firstFolder = agentRunFolder('project.systemsculpt');
+  for (let index = 0; index < MAX_LOADED_AGENT_RUNS; index++) {
+    const run = savedRun(index); files.set(`${firstFolder}/${run.id}.json`, run.content);
+  }
+  await runs.load('project.systemsculpt', 'project');
+  while (runs.hasOlder('project.systemsculpt')) await runs.loadOlder('project.systemsculpt', 'project');
+  expect(runs.list('project')).toHaveLength(MAX_LOADED_AGENT_RUNS);
+  const updates: { projectId: string; count: number; capped: boolean }[] = [];
+  runs.subscribe(projectId => updates.push({ projectId, count: runs.list(projectId).length, capped: runs.isCapped(`${projectId}.systemsculpt`) }));
+  const secondFolder = agentRunFolder('other.systemsculpt');
+  for (let index = MAX_LOADED_AGENT_RUNS; index < MAX_LOADED_AGENT_RUNS + 50; index++) {
+    const run = savedRun(index, { projectId: 'other', projectPath: 'other.systemsculpt' });
+    files.set(`${secondFolder}/${run.id}.json`, run.content);
+  }
+  await runs.load('other.systemsculpt', 'other');
+  expect(updates).toEqual(expect.arrayContaining([
+    { projectId: 'project', count: MAX_LOADED_AGENT_RUNS - 50, capped: true },
+    { projectId: 'other', count: 50, capped: false },
+  ]));
+  expect(updates.filter(update => update.projectId === 'project')).toHaveLength(1);
+  await runs.dispose();
+});
+it.each([160, MAX_LOADED_AGENT_RUNS + 200])('restarts paging immediately after the refreshed newest page (%i saved runs)', async total => {
+  const { runs, files, adapter } = fixture();
+  const folder = agentRunFolder('project.systemsculpt');
+  for (let index = 0; index < total; index++) {
+    const run = savedRun(index); files.set(`${folder}/${run.id}.json`, run.content);
+  }
+  await runs.load('project.systemsculpt', 'project');
+  if (total > MAX_LOADED_AGENT_RUNS) {
+    while (runs.hasOlder('project.systemsculpt')) await runs.loadOlder('project.systemsculpt', 'project');
+    expect(runs.isCapped('project.systemsculpt')).toBe(true);
+  } else await runs.loadOlder('project.systemsculpt', 'project');
+  await runs.refresh('project.systemsculpt', 'project');
+  adapter.read.mockClear();
+  await runs.loadOlder('project.systemsculpt', 'project');
+  const expected = Array.from({ length: 50 }, (_, offset) => `${folder}/${savedRun(total - 100 + offset).id}.json`);
+  expect(adapter.read.mock.calls.map(([path]) => path)).toEqual(expected);
+  await runs.dispose();
+});
+it.each([160, MAX_LOADED_AGENT_RUNS + 200])('ignores an older page that finishes after Refresh (%i saved runs)', async total => {
+  const { runs, files, adapter } = fixture();
+  const folder = agentRunFolder('project.systemsculpt');
+  for (let index = 0; index < total; index++) {
+    const run = savedRun(index); files.set(`${folder}/${run.id}.json`, run.content);
+  }
+  await runs.load('project.systemsculpt', 'project');
+  await runs.loadOlder('project.systemsculpt', 'project');
+  if (total > MAX_LOADED_AGENT_RUNS) {
+    while (runs.list('project').length < MAX_LOADED_AGENT_RUNS) await runs.loadOlder('project.systemsculpt', 'project');
+  }
+  let release!: () => void;
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  let blocked = false;
+  adapter.read.mockImplementationOnce(async path => { blocked = true; await paused; return files.get(path); });
+  const oldPage = runs.loadOlder('project.systemsculpt', 'project');
+  await tick(); expect(blocked).toBe(true);
+  await runs.refresh('project.systemsculpt', 'project');
+  release(); await oldPage;
+  expect(runs.isCapped('project.systemsculpt')).toBe(false);
+  adapter.read.mockClear();
+  await runs.loadOlder('project.systemsculpt', 'project');
+  const expected = Array.from({ length: 50 }, (_, offset) => `${folder}/${savedRun(total - 100 + offset).id}.json`);
+  expect(adapter.read.mock.calls.map(([path]) => path)).toEqual(expected);
+  await runs.dispose();
+});
 it('recovers an old open workflow after reload when the run index is missing', async () => {
   const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
   await runs.dispose();
