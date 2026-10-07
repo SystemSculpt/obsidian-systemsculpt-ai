@@ -1,7 +1,6 @@
 # SystemSculpt AI Obsidian Plugin
 
-Canonical repository guidance for the SystemSculpt Obsidian client. CLAUDE.md
-is a symlink to this file; edit this file only.
+Canonical repository guidance for every coding agent working on the SystemSculpt Obsidian client. Edit `AGENTS.md` directly.
 
 ## Repository boundary
 
