@@ -95,8 +95,18 @@
 }
 
 .ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label {
-  /* The widest rectangle that fits inside a diamond is half its width. */
+  /* The largest rectangle that fits inside a diamond is half its width and
+   * half its height. A diamond narrows above and below its centre, so a label
+   * taller than that would cross the slanted edges: it is clipped instead. */
   max-width: 50%;
+  max-height: 50%;
+  overflow: hidden;
+}
+
+/* While editing, the whole text stays reachable: it scrolls inside the
+ * diamond instead of being clipped, and the caret scrolls with it. */
+.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label.is-editing {
+  overflow-y: auto;
 }
 
 .ss-studio-shape[data-shape="hexagon"] .ss-studio-shape-label {

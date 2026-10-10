@@ -87,7 +87,13 @@ test("Studio shape labels paint above their outline and inset against the shape"
   // Percentage padding on the shape resolves against the shapes layer, not
   // the shape, so proportional label insets belong on the label itself.
   assert.doesNotMatch(shapesCss, /\.ss-studio-shape(?:\[[^\]]*\])*\s*\{[^}]*padding[a-z-]*:[^;}]*%/);
-  assert.match(ruleBody('.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label'), /max-width:\s*50%;/);
+  const diamondLabel = ruleBody('.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label');
+  assert.match(diamondLabel, /max-width:\s*50%;/);
+  // A diamond narrows above and below its centre: multiline labels must stop
+  // at its inscribed rectangle, and scroll rather than clip while editing.
+  assert.match(diamondLabel, /max-height:\s*50%;/);
+  assert.match(diamondLabel, /overflow:\s*hidden;/);
+  assert.match(ruleBody('.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label.is-editing'), /overflow-y:\s*auto;/);
   assert.match(ruleBody('.ss-studio-shape[data-shape="hexagon"] .ss-studio-shape-label'), /max-width:\s*56%;/);
 });
 
