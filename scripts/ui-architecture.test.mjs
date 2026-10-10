@@ -69,6 +69,27 @@ test("Studio CSS stays feature-owned under views/studio", () => {
   }
 });
 
+test("Studio shape labels paint above their outline and inset against the shape", () => {
+  const shapesCss = read("src/css/views/studio/shapes.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const ruleBody = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(shapesCss)?.[1] ?? "";
+  };
+
+  // The outline is an absolutely positioned SVG with an opaque fill, and the
+  // label is in-flow, so the label needs its own stacking lift to be visible.
+  assert.match(ruleBody(".ss-studio-shape-outline"), /position:\s*absolute;/);
+  assert.match(ruleBody(".ss-studio-shape-label"), /position:\s*relative;[^}]*z-index:\s*1;/s);
+  assert.match(ruleBody(".ss-studio-shape"), /isolation:\s*isolate;/);
+  assert.match(ruleBody(".ss-studio-shape-handle"), /z-index:\s*2;/);
+
+  // Percentage padding on the shape resolves against the shapes layer, not
+  // the shape, so proportional label insets belong on the label itself.
+  assert.doesNotMatch(shapesCss, /\.ss-studio-shape(?:\[[^\]]*\])*\s*\{[^}]*padding[a-z-]*:[^;}]*%/);
+  assert.match(ruleBody('.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label'), /max-width:\s*50%;/);
+  assert.match(ruleBody('.ss-studio-shape[data-shape="hexagon"] .ss-studio-shape-label'), /max-width:\s*56%;/);
+});
+
 test("Studio built-ins declare host capabilities explicitly", () => {
   const types = read("src/studio/types.ts");
   const hostPolicy = read("src/studio/StudioHostCapabilities.ts");

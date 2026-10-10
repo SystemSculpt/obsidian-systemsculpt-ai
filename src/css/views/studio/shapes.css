@@ -34,6 +34,9 @@
   padding: var(--ss-space-2);
   cursor: grab;
   pointer-events: auto;
+  /* Scopes the label's stacking lift to this shape, so a label can only cover
+   * its own outline and never an overlapping neighbour's. */
+  isolation: isolate;
 }
 
 /* The outline is painted behind the label and never takes the pointer: the
@@ -77,20 +80,36 @@
 }
 
 /* Label inset per kind: a diamond and a hexagon lose their corners, and a
- * cylinder loses the band its rim occupies. */
-.ss-studio-shape[data-shape="diamond"] {
-  padding: 18%;
-}
-
-.ss-studio-shape[data-shape="hexagon"] {
-  padding-inline: 20%;
-}
-
+ * cylinder loses the band its rim occupies.
+ *
+ * Never express these as percentage padding on the shape. Percentage padding
+ * resolves against the containing block's inline size, and a shape is
+ * absolutely positioned inside .ss-studio-shapes-layer, whose size has
+ * nothing to do with the shape (inside the zero-sized graph world it is 0px,
+ * so the inset vanished). A percentage on the label resolves against the
+ * shape's content box, so it does mean "a fraction of the shape". */
 .ss-studio-shape[data-shape="cylinder"] {
+  /* Fixed, because the rim is a fixed-height band: cylinderOutline caps its
+   * ry at 26px however tall the shape gets. */
   padding-block: var(--ss-space-5) var(--ss-space-3);
 }
 
+.ss-studio-shape[data-shape="diamond"] .ss-studio-shape-label {
+  /* The widest rectangle that fits inside a diamond is half its width. */
+  max-width: 50%;
+}
+
+.ss-studio-shape[data-shape="hexagon"] .ss-studio-shape-label {
+  /* hexagonOutline cuts 22% off each side, leaving a 56% flat top and bottom. */
+  max-width: 56%;
+}
+
 .ss-studio-shape-label {
+  /* The outline is absolutely positioned, so it paints after the label's
+   * in-flow content no matter which one the DOM builds first. Its body fill is
+   * opaque, so without a stacking lift here every shape hides its own text. */
+  position: relative;
+  z-index: 1;
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -117,6 +136,8 @@
 /* Corner handles, rendered only while the shape is selected. */
 .ss-studio-shape-handle {
   position: absolute;
+  /* Above the label, so a handle is never buried under long text. */
+  z-index: 2;
   width: 10px;
   height: 10px;
   background-color: var(--ss-surface-1);
