@@ -79,7 +79,8 @@ test("Studio shape labels paint above their outline and inset against the shape"
   // The outline is an absolutely positioned SVG with an opaque fill, and the
   // label is in-flow, so the label needs its own stacking lift to be visible.
   assert.match(ruleBody(".ss-studio-shape-outline"), /position:\s*absolute;/);
-  assert.match(ruleBody(".ss-studio-shape-label"), /position:\s*relative;[^}]*z-index:\s*1;/s);
+  assert.match(ruleBody(".ss-studio-shape-label"), /position:\s*relative;/);
+  assert.match(ruleBody(".ss-studio-shape-label"), /z-index:\s*1;/);
   assert.match(ruleBody(".ss-studio-shape"), /isolation:\s*isolate;/);
   assert.match(ruleBody(".ss-studio-shape-handle"), /z-index:\s*2;/);
 
