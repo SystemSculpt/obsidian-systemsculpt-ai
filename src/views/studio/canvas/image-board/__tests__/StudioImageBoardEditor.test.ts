@@ -1,5 +1,11 @@
 /** @jest-environment jsdom */
-import type { App } from "obsidian";
+
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("../../../../../tests/mocks/obsidian.js");
+  return { ...actual, Notice: jest.fn() };
+});
+
+import { Notice, type App } from "obsidian";
 import {
   readStudioImageBoard,
   type StudioImageBoardLayer,
@@ -588,6 +594,17 @@ describe("in-place image editor", () => {
 
     expect(tryCopyImageBytesToClipboard).toHaveBeenCalledTimes(1);
     expect(tryCopyImageBytesToClipboard).toHaveBeenCalledWith(encoded, "image/png", stage);
+    expect(Notice).toHaveBeenCalledWith("Image copied to clipboard.");
+  });
+
+  it("says so when the clipboard refuses the image", async () => {
+    const { button } = await mount();
+    (tryCopyImageBytesToClipboard as jest.Mock).mockResolvedValueOnce(false);
+
+    button("studio.image.copy").click();
+    await flushImageBoard();
+
+    expect(Notice).toHaveBeenCalledWith("The image could not be copied to the clipboard.");
   });
 
   it("adds pasted and picked images as layers on the same board", async () => {
