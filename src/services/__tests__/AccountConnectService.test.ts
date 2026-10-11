@@ -743,6 +743,49 @@ describe("AccountConnectService abandoned sign-in", () => {
     expect([...values.values()].every((value) => value === null)).toBe(true);
   });
 
+  it("recovers after restart when an interrupted poll may have consumed the code", async () => {
+    let stored: unknown;
+    const app = {
+      loadLocalStorage: () => stored,
+      saveLocalStorage: (_key: string, value: unknown) => { stored = value; },
+    };
+    const firstPlugin = createPlugin();
+    firstPlugin.app = app;
+    const first = createService(firstPlugin);
+    let finishPoll!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishPoll = resolve; }));
+
+    await first.service.begin("sign-in");
+    const originalRequest = parseConnectUrl(first.openedUrls[0]);
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(request).toHaveBeenCalledTimes(1);
+    firstPlugin.register.mock.calls[0][0]();
+
+    const nextPlugin = createPlugin();
+    nextPlugin.app = app;
+    const next = createService(nextPlugin);
+    request.mockResolvedValueOnce(jsonResponse(401, { error: "invalid_code" }));
+    await expect(next.service.handleProtocolCallback({ code: "consumed-code", state: originalRequest.state }))
+      .resolves.toEqual({ kind: "error", reason: "unconfirmed" });
+    expect(next.service.hasPendingRequest()).toBe(true);
+    expect(stored).not.toBeNull();
+
+    // An answer delivered to the unloaded instance must not complete either sign-in.
+    finishPoll(jsonResponse(200, successPayload));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(firstPlugin.updateSettings).not.toHaveBeenCalled();
+    expect(nextPlugin.updateSettings).not.toHaveBeenCalled();
+
+    expect(await next.service.reopen()).toBe(true);
+    expect(parseConnectUrl(next.openedUrls[0])).toEqual(originalRequest);
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(next.service.handleProtocolCallback({ code: "fresh-code", state: originalRequest.state }))
+      .resolves.toMatchObject({ kind: "signed-in" });
+    expect(nextPlugin.updateSettings).toHaveBeenCalledTimes(1);
+    expect(next.service.hasPendingRequest()).toBe(false);
+    expect(stored).toBeNull();
+  });
+
   it.each(["invalid", {}, { state: "bad", verifier: "bad", createdAt: Date.now(), mode: "sign-in" }])(
     "discards malformed persisted requests without contacting the server: %j", (stored) => {
       const plugin = createPlugin();

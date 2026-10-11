@@ -310,7 +310,10 @@ export class AccountConnectService {
       createdAt: value.createdAt,
       controller: new AbortController(),
       unsettled: new Set(),
-      unanswered: false,
+      // The previous host may have sent a request that consumed the code
+      // without receiving its answer. Keep a rejected code recoverable by
+      // reopening this same pending sign-in for a fresh one.
+      unanswered: true,
     };
     this.pollInBackground();
   }
