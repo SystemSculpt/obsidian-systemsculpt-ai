@@ -100,7 +100,7 @@ export function boxSizePx(box: StudioImageBoardFrame, base: StudioImageBoardSize
   };
 }
 
-export function boxCenterPx(box: StudioImageBoardFrame, base: StudioImageBoardSize): StudioImageBoardPoint {
+function boxCenterPx(box: StudioImageBoardFrame, base: StudioImageBoardSize): StudioImageBoardPoint {
   return {
     x: (box.x + box.width / 2) * base.width,
     y: (box.y + box.height / 2) * base.height,
@@ -131,7 +131,7 @@ export function viewTransform(
 }
 
 /** The four corners in normalized board units, clockwise from top-left. */
-export function boxCorners(
+function boxCorners(
   box: StudioImageBoardBox,
   base: StudioImageBoardSize
 ): StudioImageBoardPoint[] {

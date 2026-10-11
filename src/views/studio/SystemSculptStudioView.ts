@@ -79,10 +79,13 @@ import type { StudioEditingSnapshot } from "../../core/plugin/StudioReloadState"
 import { captureStudioSourceReloadState, restoreStudioSourceReloadState } from "./canvas/StudioNodeSourceBody";
 import type { StudioImageBoardEditorHandle } from "./canvas/image-board/StudioImageBoardEditor";
 import { composeStudioImageBoardAsset } from "../../studio/StudioImageBoardRenderer";
+import { resolveStudioImageBoardBaseAsset } from "./canvas/image-board/StudioImageBoardImages";
 import {
+  normalizeStudioAssetRef,
   readStudioImageBoard,
   resolveStudioImageBoardRenderedAsset,
   studioImageBoardHasEdits,
+  studioImageBoardWithRender,
   writeStudioImageBoard,
 } from "../../studio/StudioImageBoard";
 import {
@@ -1495,8 +1498,9 @@ export class SystemSculptStudioView extends ItemView {
     const currentNode = this.currentProject
       ? this.findNode(this.currentProject, nodeId)
       : null;
+    // Everything done to a text node while it is being typed into, its style
+    // included, is one edit: one step to undo, and none if the box is left empty.
     const isActiveTextEdit =
-      key === "value" &&
       currentNode?.kind === "studio.text" &&
       this.textEdits.isEditing(nodeId);
     const changed = this.commitCurrentProjectMutation(
@@ -1662,7 +1666,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   /** The pencil on an image node toggles editing that image right where it sits. */
-  private openImageEditorForNode(node: StudioNodeInstance): void {
+  private toggleImageEditForNode(node: StudioNodeInstance): void {
     if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
       return;
     }
@@ -1684,13 +1688,15 @@ export class SystemSculptStudioView extends ItemView {
 
   /** Saves the flattened image and returns the card to its normal state. */
   private async finishImageEdit(): Promise<void> {
-    if (!this.imageEditNodeId) {
+    const nodeId = this.imageEditNodeId;
+    if (!nodeId) {
       return;
     }
     if (this.imageEditor) {
       await this.imageEditor.finish();
     }
-    this.endImageEdit(this.imageEditNodeId);
+    // Ends the edit that was finished, not one begun while it was saving.
+    this.endImageEdit(nodeId);
   }
 
   private endImageEdit(nodeId: string | null): void {
@@ -1840,88 +1846,68 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
-  private normalizeStudioAssetRefLike(value: unknown): StudioAssetRef | null {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return null;
-    }
-    const record = value as Record<string, unknown>;
-    const hash = typeof record.hash === "string" ? record.hash.trim() : "";
-    const path = typeof record.path === "string" ? record.path.trim() : "";
-    const mimeType =
-      typeof record.mimeType === "string"
-        ? record.mimeType.trim()
-        : typeof record.mime_type === "string"
-          ? record.mime_type.trim()
-          : "";
-    const sizeBytes = Number(record.sizeBytes ?? record.size_bytes);
-    if (!hash || !path || !mimeType || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-      return null;
-    }
-    return {
-      hash,
-      path,
-      mimeType,
-      sizeBytes: Math.floor(sizeBytes),
-    };
-  }
-
+  /**
+   * The picture an image node shows, as a project asset: its edits flattened
+   * when it has any, otherwise its own image. A node that has not run is
+   * staged from its source, as it is for editing. Null when that picture
+   * cannot be produced; an edited image is never stood in for by its source.
+   */
   private async ensureRenderedImageAssetForNode(node: StudioNodeInstance): Promise<StudioAssetRef | null> {
     if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
       return null;
     }
-
+    const projectPath = this.currentProjectPath;
+    const studio = this.plugin.getStudioService();
     const nodeRunState = this.runPresentation.getNodeState(node.id);
-    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-    const sourcePreviewAsset = this.normalizeStudioAssetRefLike(outputs.source_preview_asset);
-    const previewAsset = this.normalizeStudioAssetRefLike(outputs.preview_asset);
-    const configuredSourcePath = typeof node.config.sourcePath === "string" ? node.config.sourcePath.trim() : "";
+    const sourceAsset = await resolveStudioImageBoardBaseAsset({
+      app: this.app,
+      node,
+      nodeRunState,
+      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
+    }).catch(() => null);
     const board = readStudioImageBoard(node.config);
-    const existingRenderedAsset = resolveStudioImageBoardRenderedAsset(
-      node.config,
-      sourcePreviewAsset?.path || configuredSourcePath
-    );
-
+    if (!studioImageBoardHasEdits(board)) {
+      const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
+      return sourceAsset ?? normalizeStudioAssetRef(outputs.preview_asset);
+    }
+    if (!sourceAsset) {
+      return null;
+    }
+    const existingRenderedAsset = resolveStudioImageBoardRenderedAsset(node.config, sourceAsset.path);
     if (existingRenderedAsset) {
       return existingRenderedAsset;
     }
 
-    if (studioImageBoardHasEdits(board) && sourcePreviewAsset) {
-      const studio = this.plugin.getStudioService();
-      const renderedAsset = await composeStudioImageBoardAsset({
-        baseImage: sourcePreviewAsset,
-        board,
-        readAsset: (asset) => studio.readAsset(asset),
-        storeAsset: (bytes, mimeType) => studio.storeAsset(this.currentProjectPath!, bytes, mimeType),
-      });
-      const changed = await this.commitCurrentProjectMutationAsync(
-        "media.editor",
-        async (project) => {
-          const targetNode = this.findNode(project, node.id);
-          if (!targetNode || targetNode.kind !== "studio.media_ingest") {
-            return false;
-          }
-          writeStudioImageBoard(targetNode, {
-            ...board,
-            sourceAssetPath: sourcePreviewAsset.path,
-            lastRenderedAsset: renderedAsset,
-            updatedAt: new Date().toISOString(),
-          });
-          return true;
-        },
-        { captureHistory: false }
-      );
-      if (!changed) {
-        return renderedAsset;
-      }
+    const renderedAsset = await composeStudioImageBoardAsset({
+      baseImage: sourceAsset,
+      board,
+      readAsset: (asset) => studio.readAsset(asset),
+      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
+    });
+    const changed = await this.commitCurrentProjectMutationAsync(
+      "media.editor",
+      async (project) => {
+        const targetNode = this.findNode(project, node.id);
+        if (!targetNode || targetNode.kind !== "studio.media_ingest") {
+          return false;
+        }
+        // The node keeps whatever was done to it meanwhile; the picture is recorded as being of `board`.
+        writeStudioImageBoard(
+          targetNode,
+          studioImageBoardWithRender(readStudioImageBoard(targetNode.config), board, sourceAsset.path, renderedAsset)
+        );
+        return true;
+      },
+      { captureHistory: false }
+    );
+    if (changed) {
       this.render();
-      return renderedAsset;
     }
-
-    return previewAsset || sourcePreviewAsset;
+    return renderedAsset;
   }
 
   private async copyImageForNodeToClipboard(node: StudioNodeInstance): Promise<void> {
-    const asset = await this.ensureRenderedImageAssetForNode(node);
+    const asset = await this.ensureRenderedImageAssetForNode(node).catch(() => null);
     if (!asset) {
       new Notice("Run this image node once before copying the image.");
       return;
@@ -3263,7 +3249,7 @@ export class SystemSculptStudioView extends ItemView {
       onNodeResize: (nodeId, patch, options) => {
         this.handleNodeResize(nodeId, patch, options);
       },
-      onOpenImageEditor: (node) => this.openImageEditorForNode(node),
+      onOpenImageEditor: (node) => this.toggleImageEditForNode(node),
       imageBoard: this.imageBoardOptions(),
       isImageNodeEditing: (nodeId) => this.imageEditNodeId === nodeId,
       onEditImageWithAi: (node) => {

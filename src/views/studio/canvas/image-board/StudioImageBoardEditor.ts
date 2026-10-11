@@ -3,6 +3,7 @@ import {
   resolveStudioImageBoardRenderedAsset,
   STUDIO_IMAGE_BOARD_CONFIG_KEY,
   serializeStudioImageBoard,
+  studioImageBoardArrowThicknessPx,
   studioImageBoardHasBase,
   studioImageBoardHasEdits,
   studioImageBoardKeepLensInside,
@@ -18,6 +19,7 @@ import {
 } from "../../../../studio/StudioImageBoardRenderer";
 import type { StudioAssetRef, StudioJsonValue, StudioNodeInstance } from "../../../../studio/types";
 import { tryCopyImageBytesToClipboard } from "../../../../utils/clipboard";
+import { isStudioGraphEditableTarget } from "../../StudioGraphDomTargeting";
 import type { StudioNodeRunDisplayState } from "../../StudioRunPresentationState";
 import {
   extractClipboardMediaFiles,
@@ -29,9 +31,9 @@ import {
   StudioImageBoardImageCache,
   type StudioImageBoardAssetIo,
 } from "./StudioImageBoardImages";
-import { StudioImageBoardSession, type StudioImageBoardTool } from "./StudioImageBoardSession";
+import { StudioImageBoardSession } from "./StudioImageBoardSession";
 import { StudioImageBoardStage } from "./StudioImageBoardStage";
-import { StudioImageBoardToolbar } from "./StudioImageBoardToolbar";
+import { STUDIO_IMAGE_BOARD_TOOL_KEYS, StudioImageBoardToolbar } from "./StudioImageBoardToolbar";
 
 export type StudioImageBoardEditorOptions = StudioImageBoardAssetIo & {
   app: App;
@@ -66,18 +68,6 @@ export type StudioImageBoardEditorHandle = {
   dispose: () => void;
 };
 
-const TOOL_KEYS: Record<string, StudioImageBoardTool> = {
-  v: "select",
-  t: "text",
-  r: "rect",
-  o: "ellipse",
-  a: "arrow",
-  h: "highlight",
-  b: "redact",
-  m: "magnify",
-  c: "crop",
-};
-const ARROW_HEAD_PER_STROKE = 4.5;
 const NEW_IMAGE_SHARE = 0.6;
 const NEW_IMAGE_MIN_SHARE = 0.3;
 const PASTED_TEXT_LIMIT = 400;
@@ -86,13 +76,6 @@ const NUDGE_LARGE = 0.03;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isFieldTarget(target: EventTarget | null): boolean {
-  return (
-    typeof (target as { closest?: unknown } | null)?.closest === "function" &&
-    (target as Element).closest("input, textarea, select, [contenteditable='true']") !== null
-  );
 }
 
 /**
@@ -136,9 +119,9 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
       addImage: () => this.fileInput.click(),
       copy: () => void this.copy(),
       done: () => void this.finish(),
-      patchSelected: (patch) => {
+      patchSelected: (patch, options) => {
         const id = this.session.selectedId;
-        if (id) this.session.patchLayer(id, patch);
+        if (id) this.session.patchLayer(id, patch, options);
       },
       setWeight: (strokeWidth) => this.setWeight(strokeWidth),
       setZoom: (zoom) => this.setZoom(zoom),
@@ -177,12 +160,12 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
 
   syncNode(node: StudioNodeInstance): void {
     if (!this.disposed) {
-      this.session.sync(node.config);
+      this.session.sync(node.config, this.stage.typingLayerId);
     }
   }
 
   handleKeyDown(event: KeyboardEvent): boolean {
-    if (this.disposed || isFieldTarget(event.target)) {
+    if (this.disposed || isStudioGraphEditableTarget(event.target)) {
       return false;
     }
     const key = String(event.key || "");
@@ -244,7 +227,7 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
         return consume();
     }
     if (key.length === 1) {
-      const tool = this.base && !event.shiftKey ? TOOL_KEYS[lower] : undefined;
+      const tool = this.base && !event.shiftKey ? STUDIO_IMAGE_BOARD_TOOL_KEYS[lower] : undefined;
       if (tool) this.session.setTool(tool);
       // Plain keys never fall through to the canvas shortcuts underneath.
       return consume();
@@ -253,7 +236,7 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
   }
 
   handlePaste(event: ClipboardEvent): boolean {
-    if (this.disposed || isFieldTarget(event.target)) {
+    if (this.disposed || isStudioGraphEditableTarget(event.target)) {
       return false;
     }
     event.preventDefault();
@@ -388,8 +371,7 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
       return;
     }
     // An arrow's box is the arrow, so its weight is the box height.
-    const height =
-      (strokeWidth * Math.min(this.base.width, this.base.height) * ARROW_HEAD_PER_STROKE) / this.base.height;
+    const height = studioImageBoardArrowThicknessPx(strokeWidth, this.base) / this.base.height;
     this.session.patchLayer(layer.id, {
       strokeWidth,
       height,
@@ -484,9 +466,10 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
         baseAsset?.path ?? ""
       );
       if (baseAsset && !cached && studioImageBoardHasEdits(board)) {
-        const rendered = await renderStudioImageBoardScene(await this.completeScene());
+        const scene = await this.completeScene();
+        const rendered = await renderStudioImageBoardScene(scene);
         const asset = await this.options.storeAsset(rendered.bytes, rendered.mimeType);
-        this.session.recordRender(baseAsset.path, asset);
+        this.session.recordRender(scene.board, baseAsset.path, asset);
       }
     } catch (error) {
       // The edits themselves are already saved; only the flattened copy is missing.

@@ -2,6 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
+import {
+  createEmptyStudioImageBoard,
+  createStudioImageBoardLayer,
+  serializeStudioImageBoard,
+  studioImageBoardWithRender,
+} from "../StudioImageBoard";
 import { composeStudioImageBoardAsset } from "../StudioImageBoardRenderer";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import type { StudioNodeExecutionContext, StudioJsonValue } from "../types";
@@ -659,19 +665,15 @@ describe("Studio built-in text/image node execution", () => {
       path: "Studio/Test.systemsculpt-assets/assets/sha256/cd/flattened.png",
     };
     jest.mocked(composeStudioImageBoardAsset).mockClear();
+    const cropped = { ...createEmptyStudioImageBoard(), crop: { x: 0, y: 0, width: 0.5, height: 0.5 } };
     const context = createContext({
       nodeId: "media-node",
       kind: "studio.media_ingest",
       config: {
         sourcePath: "Assets/source.png",
-        captionBoard: {
-          version: 2,
-          layers: [{ id: "base", kind: "base", x: 0, y: 0, width: 1, height: 1, rotation: 0 }],
-          crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
-          sourceAssetPath: previewAsset.path,
-          lastRenderedAsset: flattenedAsset,
-          updatedAt: "2026-10-10T00:00:00.000Z",
-        },
+        captionBoard: serializeStudioImageBoard(
+          studioImageBoardWithRender(cropped, cropped, previewAsset.path, flattenedAsset)
+        ),
       },
       storeAssetMock: jest.fn().mockResolvedValueOnce(previewAsset),
     });
@@ -681,6 +683,45 @@ describe("Studio built-in text/image node execution", () => {
     expect(composeStudioImageBoardAsset).not.toHaveBeenCalled();
     expect(result.outputs.path).toBe(flattenedAsset.path);
     expect(result.artifacts).toEqual([flattenedAsset]);
+  });
+
+  it("media ingest flattens again rather than pass on a render of other layers", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    const previewAsset = {
+      hash: "base-hash",
+      mimeType: "image/png",
+      sizeBytes: 8,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.png",
+    };
+    const staleAsset = { ...previewAsset, hash: "stale-hash", path: "Studio/Test.systemsculpt-assets/assets/sha256/ef/stale.png" };
+    const freshAsset = { ...previewAsset, hash: "fresh-hash", path: "Studio/Test.systemsculpt-assets/assets/sha256/01/fresh.png" };
+    jest.mocked(composeStudioImageBoardAsset).mockClear();
+    jest.mocked(composeStudioImageBoardAsset).mockResolvedValueOnce(freshAsset);
+    // The picture on record was made before the blur was on the board, as an undo leaves it.
+    const unblurred = createEmptyStudioImageBoard();
+    const blurred = { ...unblurred, layers: [...unblurred.layers, createStudioImageBoardLayer({ kind: "redact", id: "hide" })] };
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/source.png",
+        captionBoard: serializeStudioImageBoard(
+          studioImageBoardWithRender(blurred, unblurred, previewAsset.path, staleAsset)
+        ),
+      },
+      storeAssetMock: jest.fn().mockResolvedValueOnce(previewAsset),
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(composeStudioImageBoardAsset).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(composeStudioImageBoardAsset).mock.calls[0][0].board.layers.map((layer) => layer.id)).toEqual([
+      "base",
+      "hide",
+    ]);
+    expect(result.outputs.path).toBe(freshAsset.path);
+    expect(result.outputs.preview_asset).toEqual(freshAsset);
+    expect(result.artifacts).toEqual([freshAsset]);
   });
 
   it("media ingest refuses to output an edited image it cannot flatten", async () => {

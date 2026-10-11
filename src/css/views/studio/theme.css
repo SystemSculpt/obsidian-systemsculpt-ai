@@ -6,7 +6,6 @@
  *   --ss-studio-group-accent, --ss-studio-chip-color, --ss-studio-swatch-color,
  *   --ss-studio-simple-context-menu-scale, --ss-studio-node-context-menu-scale,
  *   --ss-studio-inspector-scale, --ss-studio-text-node-font-size,
- *   --ss-studio-annotation-color, --ss-studio-annotation-stroke,
  *   --ss-activity-progress (determinate node progress, see activity.css).
  *
  * The base edge stroke is applied inline by StudioEdgeRenderer.ts through

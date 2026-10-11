@@ -61,7 +61,7 @@ describe("StudioImageBoardSession", () => {
   it("invalidates the flattened image on any edit", () => {
     const { session, saved } = harness();
     session.addLayer({ kind: "redact" });
-    session.recordRender("assets/source.png", RENDERED);
+    session.recordRender(session.board, "assets/source.png", RENDERED);
     expect(saved().lastRenderedAsset).toEqual(RENDERED);
 
     session.patchLayer(session.selectedId!, { style: "solid" });
@@ -75,11 +75,66 @@ describe("StudioImageBoardSession", () => {
     session.addLayer({ kind: "redact" });
     onChange.mockClear();
 
-    session.recordRender("assets/source.png", RENDERED);
+    session.recordRender(session.board, "assets/source.png", RENDERED);
 
     expect(commits[commits.length - 1].options).toEqual({ mode: "discrete", captureHistory: false });
     expect(onChange).not.toHaveBeenCalled();
     expect(session.board.lastRenderedAsset).toEqual(RENDERED);
+  });
+
+  it("does not take a picture of an earlier state as the picture of this one", () => {
+    const { session, saved } = harness();
+    session.addLayer({ kind: "highlight" });
+    const drawn = session.board;
+    // Edited while the picture was still being produced.
+    session.addLayer({ kind: "redact" });
+
+    session.recordRender(drawn, "assets/source.png", RENDERED);
+
+    expect(session.board.layers.map((layer) => layer.kind)).toEqual(["base", "highlight", "redact"]);
+    expect(session.board.lastRenderedAsset).toBeNull();
+    expect(saved().lastRenderedAsset).toBeNull();
+  });
+
+  it("drops the flattened image when an undo puts other layers under it", () => {
+    const { session, store } = harness();
+    session.addLayer({ kind: "redact" });
+    const withBlur = (store[STUDIO_IMAGE_BOARD_CONFIG_KEY] as Record<string, StudioJsonValue>).layers;
+    session.removeLayer(session.selectedId!);
+    session.addLayer({ kind: "shape", shape: "arrow" });
+    session.recordRender(session.board, "assets/source.png", RENDERED);
+
+    // Studio's undo merges field by field: the layers go back, the render recorded since stays.
+    const undone = {
+      [STUDIO_IMAGE_BOARD_CONFIG_KEY]: {
+        ...(store[STUDIO_IMAGE_BOARD_CONFIG_KEY] as Record<string, StudioJsonValue>),
+        layers: withBlur,
+      },
+    };
+    session.sync(undone);
+
+    expect(session.board.layers.map((layer) => layer.kind)).toEqual(["base", "redact"]);
+    expect(session.board.lastRenderedAsset).toBeNull();
+  });
+
+  it("leaves out an empty caption nobody is typing into", () => {
+    const { session, store, commits } = harness();
+    const caption = session.addLayer({ kind: "text", text: "" }, { mode: "discrete", captureHistory: false });
+    expect(commits[commits.length - 1].options).toEqual({ mode: "discrete", captureHistory: false });
+    const withEmptyCaption = { ...store };
+
+    // Being typed into, it is a layer like any other.
+    session.sync(withEmptyCaption, caption.id);
+    expect(session.board.layers.map((layer) => layer.kind)).toEqual(["base", "text"]);
+
+    // Brought back by an undo with nobody typing, it is not.
+    session.removeLayer(caption.id, { mode: "discrete", captureHistory: false });
+    expect(commits[commits.length - 1].options).toEqual({ mode: "discrete", captureHistory: false });
+    session.sync(withEmptyCaption);
+    expect(session.board.layers.map((layer) => layer.kind)).toEqual(["base"]);
+
+    // Nor when the editor opens on a board that was left with one.
+    expect(harness(withEmptyCaption).session.board.layers.map((layer) => layer.kind)).toEqual(["base"]);
   });
 
   it("duplicates beside the original and reorders within the stack", () => {
@@ -158,7 +213,7 @@ describe("StudioImageBoardSession", () => {
   it("does not redraw when only the render cache moved", () => {
     const { session, store, onChange } = harness();
     session.addLayer({ kind: "highlight" });
-    session.recordRender("assets/source.png", RENDERED);
+    session.recordRender(session.board, "assets/source.png", RENDERED);
     onChange.mockClear();
 
     session.sync(store);

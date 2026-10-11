@@ -79,15 +79,3 @@
 .ss-studio-fill-text-card > .ss-studio-fill-text.is-placeholder {
   opacity: 0.45;
 }
-
-/* The style bar reuses the image editor's toolbar; away from a workspace
- * to dock in, it hangs under the text it styles. */
-.ss-studio-fill-text-card > .ss-studio-image-board-toolbar {
-  position: absolute;
-  top: calc(100% + var(--ss-space-2));
-  left: 50%;
-  width: max-content;
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-lg);
-  transform: translateX(-50%);
-}

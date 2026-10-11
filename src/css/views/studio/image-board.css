@@ -387,6 +387,18 @@
   bottom: calc(var(--ss-space-4) + var(--ss-mobile-bottom-clearance));
 }
 
+/* The same bar styles text typed on the canvas (StudioFillTextToolbar.ts).
+ * Away from a workspace to dock in, it hangs under the text it styles. */
+.ss-studio-fill-text-card > .ss-studio-image-board-toolbar {
+  position: absolute;
+  top: calc(100% + var(--ss-space-2));
+  left: 50%;
+  width: max-content;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  transform: translateX(-50%);
+}
+
 .ss-studio-image-board-toolbar__row {
   display: flex;
   align-items: center;

@@ -1,6 +1,7 @@
 import {
   findStudioImageBoardLayer,
   STUDIO_IMAGE_BOARD_DEFAULT_STROKE_WIDTH,
+  studioImageBoardArrowThicknessPx,
   studioImageBoardKeepLensInside,
   studioImageBoardLayerIsVisible,
   studioImageBoardLensForArea,
@@ -45,7 +46,13 @@ import {
   requestStudioAnimationFrame,
 } from "../../StudioDomContext";
 import { latestStudioPointerEvent, startStudioPointerGesture } from "../../StudioPointerGesture";
-import { fitStudioFillText, STUDIO_FILL_TEXT_CLASS, STUDIO_FILL_TEXT_PLACEHOLDER } from "../StudioFillTextSurface";
+import {
+  createStudioFillTextMeasure,
+  fitStudioFillText,
+  STUDIO_FILL_TEXT_CLASS,
+  STUDIO_FILL_TEXT_PLACEHOLDER,
+  type StudioFillTextMeasure,
+} from "../StudioFillTextSurface";
 import { markStudioNodeCardInteractive } from "../StudioGraphNodeCardPointer";
 import type { StudioGraphNodeMutationOptions } from "../StudioGraphNodeCardTypes";
 import type { StudioImageBoardSession, StudioImageBoardTool } from "./StudioImageBoardSession";
@@ -90,7 +97,8 @@ const CLICK_SIZE: Record<CreateTool, { width: number; height: number }> = {
   redact: { width: 0.32, height: 0.1 },
   magnify: { width: 0.16, height: 0.16 },
 };
-const ARROW_HEAD_PER_STROKE = 4.5;
+/** Saved without a history step of its own: there is nothing here for an undo to take back. */
+const UNRECORDED: StudioGraphNodeMutationOptions = { mode: "discrete", captureHistory: false };
 
 function layerDescriptionFor(tool: CreateTool): { kind: StudioImageBoardLayerKind } & Record<string, unknown> {
   switch (tool) {
@@ -131,6 +139,7 @@ export class StudioImageBoardStage {
   private readonly scratch = new StudioImageBoardScratch();
   private textInput: HTMLTextAreaElement | null = null;
   private editingTextId: string | null = null;
+  private measureText: StudioFillTextMeasure | null = null;
   private textHistoryCaptured = false;
   private cropWorkspace: StudioImageBoardFrame | null = null;
   private cancelGesture: (() => void) | null = null;
@@ -164,6 +173,11 @@ export class StudioImageBoardStage {
 
   get isEditingText(): boolean {
     return this.editingTextId !== null;
+  }
+
+  /** The caption being typed into, if there is one. */
+  get typingLayerId(): string | null {
+    return this.editingTextId;
   }
 
   /** Normalized region the stage currently shows. */
@@ -222,8 +236,9 @@ export class StudioImageBoardStage {
     this.textInput = null;
     const layer = findStudioImageBoardLayer(this.host.session.board, id);
     if (layer?.kind === "text" && !layer.text.trim()) {
-      // Nothing was typed: an empty caption is not a layer.
-      this.host.session.removeLayer(id);
+      // Nothing was typed: an empty caption is not a layer. Whatever was
+      // typed and then cleared is already a step of its own.
+      this.host.session.removeLayer(id, UNRECORDED);
       return;
     }
     this.render();
@@ -248,6 +263,10 @@ export class StudioImageBoardStage {
       return;
     }
     this.disposed = true;
+    // Taking the stage down is not the end of an edit: removing a focused
+    // field blurs it, and nothing may be saved from here on.
+    this.editingTextId = null;
+    this.textInput = null;
     this.cancelGesture?.();
     this.cancelGesture = null;
     if (this.frame !== null) {
@@ -736,8 +755,7 @@ export class StudioImageBoardStage {
   }
 
   private arrowThicknessPx(): number {
-    const base = this.baseSize;
-    return STUDIO_IMAGE_BOARD_DEFAULT_STROKE_WIDTH * Math.min(base.width, base.height) * ARROW_HEAD_PER_STROKE;
+    return studioImageBoardArrowThicknessPx(STUDIO_IMAGE_BOARD_DEFAULT_STROKE_WIDTH, this.baseSize);
   }
 
   private dragBox(
@@ -773,11 +791,16 @@ export class StudioImageBoardStage {
   }
 
   private createLayer(tool: CreateTool, box: StudioImageBoardBox): void {
-    const layer = this.host.session.addLayer({
-      ...layerDescriptionFor(tool),
-      // What is drawn with the magnifier is what to enlarge, not where the lens goes.
-      ...(tool === "magnify" ? this.lensOver(box) : box),
-    });
+    const layer = this.host.session.addLayer(
+      {
+        ...layerDescriptionFor(tool),
+        // What is drawn with the magnifier is what to enlarge, not where the lens goes.
+        ...(tool === "magnify" ? this.lensOver(box) : box),
+      },
+      // A caption counts once something is typed into it: the first keystroke
+      // is the step an undo takes back, and a box left empty leaves none.
+      tool === "text" ? UNRECORDED : undefined
+    );
     if (layer.kind === "text") {
       this.beginTextEdit(layer.id);
     }
@@ -913,6 +936,9 @@ export class StudioImageBoardStage {
       this.textHistoryCaptured = true;
     });
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing) {
+        return;
+      }
       if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
         event.preventDefault();
         event.stopPropagation();
@@ -923,7 +949,12 @@ export class StudioImageBoardStage {
       // Deferred: a toolbar press keeps focus here, and removal mid-blur re-enters.
       const id = this.editingTextId;
       getStudioOwnerWindow(this.element).setTimeout(() => {
-        if (this.editingTextId === id && this.textInput && this.textInput.ownerDocument.activeElement !== this.textInput) {
+        if (
+          !this.disposed &&
+          this.editingTextId === id &&
+          this.textInput &&
+          this.textInput.ownerDocument.activeElement !== this.textInput
+        ) {
           this.endTextEdit();
         }
       }, 0);
@@ -981,23 +1012,13 @@ export class StudioImageBoardStage {
       return;
     }
     const size = boxSizePx(layer, scene.baseSize);
-    const context = this.canvas.getContext("2d");
     // CSS pixels per base pixel inside the (possibly zoomed) card.
     const cssScale = this.element.clientWidth > 0
       ? this.element.clientWidth / Math.max(1, this.view.width * scene.baseSize.width)
       : 1;
     this.placeBox(input, layer);
-    fitStudioFillText(
-      input,
-      layer,
-      size,
-      (font, text) => {
-        if (!context) return text.length * 50;
-        context.font = font;
-        return context.measureText(text).width;
-      },
-      cssScale
-    );
+    this.measureText ??= createStudioFillTextMeasure(this.element);
+    fitStudioFillText(input, layer, size, this.measureText, cssScale);
   }
 
   // ── Painting ────────────────────────────────────────────────────────────

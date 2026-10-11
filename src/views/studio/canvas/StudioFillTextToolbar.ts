@@ -1,11 +1,10 @@
 import { updateUiAction } from "../../../core/ui/surface";
 import type { StudioFillTextAlign, StudioFillTextStyle } from "../../../studio/StudioFillText";
+import type { StudioFillTextLook } from "../../../studio/StudioFillTextNode";
 import { createStudioAction } from "../StudioAction";
-import type { StudioFillTextAppearance } from "./StudioFillTextSurface";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import { STUDIO_IMAGE_BOARD_SWATCHES } from "./image-board/StudioImageBoardToolbar";
-
-export type StudioFillTextLook = Pick<StudioFillTextAppearance, "style" | "align" | "color">;
 
 const STYLES: Array<{ style: StudioFillTextStyle; label: string }> = [
   { style: "plain", label: "Plain" },
@@ -21,10 +20,7 @@ const ALIGNS: Array<{ align: StudioFillTextAlign; icon: string; label: string }>
   { align: "right", icon: "align-right", label: "Align right" },
 ];
 
-/** How a change is saved: a drag through the colour picker is one undo step, not one per shade. */
-export type StudioFillTextLookChange = { mode: "discrete" | "continuous"; captureHistory: boolean };
-
-const CHOSEN: StudioFillTextLookChange = { mode: "discrete", captureHistory: true };
+const CHOSEN: StudioGraphNodeMutationOptions = { mode: "discrete", captureHistory: true };
 
 export type StudioFillTextToolbar = {
   element: HTMLElement;
@@ -45,7 +41,8 @@ export function mountStudioFillTextToolbar(options: {
   host: HTMLElement;
   docked: boolean;
   look: StudioFillTextLook;
-  onChange: (patch: Partial<StudioFillTextLook>, change: StudioFillTextLookChange) => void;
+  /** `how` says how the change is saved: a drag through the colour picker is one undo step, not one per shade. */
+  onChange: (change: Partial<StudioFillTextLook>, how: StudioGraphNodeMutationOptions) => void;
   /** Hands focus back to the text once the colour picker is finished with. */
   returnFocus: () => void;
   onFocusLeft: (next: EventTarget | null) => void;

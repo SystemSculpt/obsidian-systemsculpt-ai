@@ -99,6 +99,11 @@ export type StudioImageBoard = {
   /** Source the cached render below was made from. */
   sourceAssetPath: string;
   lastRenderedAsset: StudioAssetRef | null;
+  /**
+   * What the cached render is a picture of: the drawing key of the layers
+   * and crop it was made from. A render of anything else is not kept.
+   */
+  lastRenderedOf: string;
   updatedAt: string;
 };
 
@@ -108,14 +113,14 @@ export type StudioImageBoard = {
  * image.
  */
 export const STUDIO_IMAGE_BOARD_CONFIG_KEY = "captionBoard";
-export const STUDIO_IMAGE_BOARD_BASE_LAYER_ID = "base";
+const STUDIO_IMAGE_BOARD_BASE_LAYER_ID = "base";
 
-export const STUDIO_IMAGE_BOARD_DEFAULT_SHAPE_COLOR = "#ff3b30";
-export const STUDIO_IMAGE_BOARD_DEFAULT_HIGHLIGHT_COLOR = "#ffe600";
-export const STUDIO_IMAGE_BOARD_DEFAULT_TEXT_COLOR = "#ffffff";
+const STUDIO_IMAGE_BOARD_DEFAULT_SHAPE_COLOR = "#ff3b30";
+const STUDIO_IMAGE_BOARD_DEFAULT_HIGHLIGHT_COLOR = "#ffe600";
+const STUDIO_IMAGE_BOARD_DEFAULT_TEXT_COLOR = "#ffffff";
 export const STUDIO_IMAGE_BOARD_DEFAULT_STROKE_WIDTH = 0.008;
-export const STUDIO_IMAGE_BOARD_DEFAULT_LENS_COLOR = "#ffe600";
-export const STUDIO_IMAGE_BOARD_DEFAULT_ZOOM = 2;
+const STUDIO_IMAGE_BOARD_DEFAULT_LENS_COLOR = "#ffe600";
+const STUDIO_IMAGE_BOARD_DEFAULT_ZOOM = 2;
 /** The zooms offered for a lens, gentlest first. */
 export const STUDIO_IMAGE_BOARD_ZOOM_STEPS: readonly number[] = [1.5, 2, 3, 4];
 
@@ -181,7 +186,8 @@ function normalizeColor(value: unknown, fallback: string): string {
   return /^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(candidate) ? candidate : fallback;
 }
 
-function normalizeAssetRef(value: unknown): StudioAssetRef | null {
+/** A project asset reference as saved by any version, or null when it is not a usable one. */
+export function normalizeStudioAssetRef(value: unknown): StudioAssetRef | null {
   const record = asRecord(value);
   if (!record) {
     return null;
@@ -260,7 +266,7 @@ function normalizeLayer(value: unknown, fallbackId: string): StudioImageBoardLay
     case "base":
       return { ...box, id: STUDIO_IMAGE_BOARD_BASE_LAYER_ID, kind };
     case "image": {
-      const asset = normalizeAssetRef(record.asset);
+      const asset = normalizeStudioAssetRef(record.asset);
       return asset ? { ...box, id, kind, asset } : null;
     }
     case "text":
@@ -358,6 +364,7 @@ export function createEmptyStudioImageBoard(): StudioImageBoard {
     crop: null,
     sourceAssetPath: "",
     lastRenderedAsset: null,
+    lastRenderedOf: "",
     updatedAt: DEFAULT_UPDATED_AT,
   };
 }
@@ -441,12 +448,22 @@ export function readStudioImageBoard(config: Record<string, StudioJsonValue>): S
     return caption ? { ...board, layers: [...board.layers, caption] } : board;
   }
   const current = Number(record.version) === BOARD_VERSION && Array.isArray(record.layers);
+  const layers = current ? normalizeLayers(record.layers as unknown[]) : migrateLegacyBoard(record);
+  const crop = normalizeCrop(record.crop);
+  // The saved render is kept only while it is a picture of exactly these
+  // layers and this crop. One left behind by an undo, by an edit made while
+  // it was being produced, or by an earlier editor is of something else.
+  const renderedOf = readString(record.lastRenderedOf).trim();
+  const rendered = renderedOf !== "" && renderedOf === studioImageBoardDrawingKey({ layers, crop })
+    ? normalizeStudioAssetRef(record.lastRenderedAsset)
+    : null;
   return {
     version: BOARD_VERSION,
-    layers: current ? normalizeLayers(record.layers as unknown[]) : migrateLegacyBoard(record),
-    crop: normalizeCrop(record.crop),
-    sourceAssetPath: readString(record.sourceAssetPath).trim(),
-    lastRenderedAsset: normalizeAssetRef(record.lastRenderedAsset),
+    layers,
+    crop,
+    sourceAssetPath: rendered ? readString(record.sourceAssetPath).trim() : "",
+    lastRenderedAsset: rendered,
+    lastRenderedOf: rendered ? renderedOf : "",
     updatedAt: readString(record.updatedAt).trim() || DEFAULT_UPDATED_AT,
   };
 }
@@ -479,15 +496,79 @@ function serializeLayer(layer: StudioImageBoardLayer): StudioJsonValue {
   }
 }
 
+type StudioImageBoardDrawing = Pick<StudioImageBoard, "layers" | "crop">;
+
+/** The persisted form of what a board draws, re-validated so nothing malformed is ever saved. */
+function serializeDrawing(board: StudioImageBoardDrawing): { layers: StudioJsonValue[]; crop: StudioJsonValue } {
+  return {
+    layers: normalizeLayers(board.layers).map(serializeLayer),
+    crop: board.crop ? { ...(normalizeCrop(board.crop) ?? STUDIO_IMAGE_BOARD_UNIT_FRAME) } : null,
+  };
+}
+
+/** A 64-bit digest as hex: enough to tell two drawings apart, and no secret. */
+function digest(text: string): string {
+  let low = 0xdeadbeef;
+  let high = 0x41c6ce57;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    low = Math.imul(low ^ code, 2654435761);
+    high = Math.imul(high ^ code, 1597334677);
+  }
+  low = Math.imul(low ^ (low >>> 16), 2246822507) ^ Math.imul(high ^ (high >>> 13), 3266489909);
+  high = Math.imul(high ^ (high >>> 16), 2246822507) ^ Math.imul(low ^ (low >>> 13), 3266489909);
+  return (high >>> 0).toString(16).padStart(8, "0") + (low >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Identifies what a board draws: its layers and crop, and nothing else. Two
+ * boards with the same key flatten to the same picture from the same source.
+ */
+export function studioImageBoardDrawingKey(board: StudioImageBoardDrawing): string {
+  return digest(JSON.stringify(serializeDrawing(board)));
+}
+
+/**
+ * `board` holding `asset` as the flattened picture of `drawn`, the board as
+ * it was when the picture was made from the source at `sourceAssetPath`. If
+ * `board` has moved on from `drawn`, the picture is not of it and is dropped
+ * the next time the board is read.
+ */
+export function studioImageBoardWithRender(
+  board: StudioImageBoard,
+  drawn: StudioImageBoardDrawing,
+  sourceAssetPath: string,
+  asset: StudioAssetRef
+): StudioImageBoard {
+  return {
+    ...board,
+    sourceAssetPath,
+    lastRenderedAsset: asset,
+    lastRenderedOf: studioImageBoardDrawingKey(drawn),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** `board` with no cached render, as after any change to what it draws. */
+export function studioImageBoardWithoutRender(board: StudioImageBoard): StudioImageBoard {
+  return {
+    ...board,
+    sourceAssetPath: "",
+    lastRenderedAsset: null,
+    lastRenderedOf: "",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 /** The persisted form of `board`, re-validated so nothing malformed is ever saved. */
 export function serializeStudioImageBoard(board: StudioImageBoard): StudioJsonValue {
-  const layers = normalizeLayers(board.layers);
+  const rendered = board.lastRenderedAsset && board.lastRenderedOf ? board.lastRenderedAsset : null;
   return {
     version: BOARD_VERSION,
-    layers: layers.map(serializeLayer),
-    crop: board.crop ? { ...(normalizeCrop(board.crop) ?? STUDIO_IMAGE_BOARD_UNIT_FRAME) } : null,
-    sourceAssetPath: readString(board.sourceAssetPath).trim(),
-    lastRenderedAsset: board.lastRenderedAsset ? { ...board.lastRenderedAsset } : null,
+    ...serializeDrawing(board),
+    sourceAssetPath: rendered ? readString(board.sourceAssetPath).trim() : "",
+    lastRenderedAsset: rendered ? { ...rendered } : null,
+    lastRenderedOf: rendered ? board.lastRenderedOf : "",
     updatedAt: readString(board.updatedAt).trim() || new Date().toISOString(),
   };
 }
@@ -514,6 +595,14 @@ export function studioImageBoardHasBase(board: StudioImageBoard): boolean {
   return board.layers.some((layer) => layer.kind === "base");
 }
 
+/** An arrow's head is what sets how thick its box is: this many stroke widths. */
+const ARROW_HEAD_PER_STROKE = 4.5;
+
+/** The thickness, in pixels of the base image, of the box of an arrow drawn with `strokeWidth`. */
+export function studioImageBoardArrowThicknessPx(strokeWidth: number, base: StudioImageBoardSize): number {
+  return strokeWidth * Math.min(base.width, base.height) * ARROW_HEAD_PER_STROKE;
+}
+
 export function studioImageBoardOutputFrame(board: StudioImageBoard): StudioImageBoardFrame {
   return board.crop ? { ...board.crop } : { ...STUDIO_IMAGE_BOARD_UNIT_FRAME };
 }
@@ -531,14 +620,19 @@ function isPristineBase(layer: StudioImageBoardLayer): boolean {
 
 type StudioImageBoardLens = StudioImageBoardFrame & { source: StudioImageBoardFrame };
 
-/** How many times larger a lens shows its area. */
+/**
+ * How many times larger a lens shows its area. A lens stretched to another
+ * shape than its area is as strong as its tighter side allows, so that the
+ * whole area is always in it.
+ */
 export function studioImageBoardLensZoom(lens: StudioImageBoardLens): number {
-  return Math.max(lens.width / lens.source.width, lens.height / lens.source.height);
+  return Math.min(lens.width / lens.source.width, lens.height / lens.source.height);
 }
 
 /**
  * The part of the picture that fills a lens: its area, widened one way when
- * the lens was stretched to another shape, so the picture is never distorted.
+ * the lens was stretched to another shape, so the picture is never distorted
+ * and nothing that was marked is left out.
  */
 export function studioImageBoardLensView(lens: StudioImageBoardLens): StudioImageBoardFrame {
   const zoom = studioImageBoardLensZoom(lens);
@@ -694,7 +788,10 @@ export function studioImageBoardHasEdits(board: StudioImageBoard): boolean {
   return !(visible.length === 1 && isPristineBase(visible[0]));
 }
 
-/** The cached render, unless it was made from a different source image. */
+/**
+ * The cached render, unless it was made from a different source image. One
+ * made from different layers or another crop never survives the read.
+ */
 export function resolveStudioImageBoardRenderedAsset(
   config: Record<string, StudioJsonValue>,
   sourcePathHint: string

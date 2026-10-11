@@ -8,6 +8,7 @@ jest.mock("obsidian", () => {
 import { Notice, type App } from "obsidian";
 import {
   readStudioImageBoard,
+  studioImageBoardDrawingKey,
   type StudioImageBoardLayer,
 } from "../../../../../studio/StudioImageBoard";
 import type { StudioJsonValue, StudioNodeInstance } from "../../../../../studio/types";
@@ -138,8 +139,8 @@ describe("in-place image editor", () => {
     expect(text.y + text.height / 2).toBeCloseTo(0.15, 6);
   });
 
-  it("drops a caption nobody typed into", async () => {
-    const { stage, button, layers } = await mount();
+  it("drops a caption nobody typed into, leaving nothing to undo", async () => {
+    const { stage, button, layers, commits } = await mount();
     button("studio.image.tool.text").click();
     drag(stage, [200, 30]);
     expect(layers()).toHaveLength(2);
@@ -148,6 +149,90 @@ describe("in-place image editor", () => {
 
     expect(layers().map((layer) => layer.kind)).toEqual(["base"]);
     expect(stage.querySelector("textarea")).toBeNull();
+    // Neither the empty box nor its removal is a step of its own.
+    expect(commits).toEqual([
+      { mode: "discrete", captureHistory: false },
+      { mode: "discrete", captureHistory: false },
+    ]);
+  });
+
+  it("makes a new caption one step to undo: its first keystroke", async () => {
+    const { stage, button, commits } = await mount();
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+
+    for (const value of ["t", "to", "top"]) {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    expect(commits.filter((commit) => commit?.captureHistory !== false)).toHaveLength(1);
+    expect(commits[1]).toEqual({ mode: "continuous", captureHistory: true });
+  });
+
+  it("leaves out an empty caption that an undo brings back, but not the one being typed into", async () => {
+    const { editor, stage, button, layers, store } = await mount();
+    const nodeWith = (config: Record<string, StudioJsonValue>): StudioNodeInstance => ({
+      id: "node_media", kind: "studio.media_ingest", version: "1.0.0", title: "Media",
+      position: { x: 0, y: 0 }, config, continueOnError: false, disabled: false,
+    });
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const withEmptyCaption = JSON.parse(JSON.stringify(store)) as Record<string, StudioJsonValue>;
+
+    // Something else changes while the caption is still being typed into: it stays.
+    editor.syncNode(nodeWith(withEmptyCaption));
+    expect(stage.querySelector("textarea")).not.toBeNull();
+    expect(stage.querySelector(".ss-studio-image-board__selection")!.classList.contains("is-visible")).toBe(true);
+
+    // Typed into, then undone back to the empty box with nobody typing.
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+    input.value = "top";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    drag(stage, [200, 150]);
+    expect(layers().map((layer) => layer.kind)).toEqual(["base", "text"]);
+    Object.assign(store, withEmptyCaption);
+    editor.syncNode(nodeWith(store));
+
+    // Nothing invisible is left selected or open, and the next edit saves the board without it.
+    expect(stage.querySelector("textarea")).toBeNull();
+    expect(stage.querySelector(".ss-studio-image-board__selection")!.classList.contains("is-visible")).toBe(false);
+    button("studio.image.tool.rect").click();
+    drag(stage, [100, 50], [300, 150]);
+    expect(layers().map((layer) => layer.kind)).toEqual(["base", "shape"]);
+  });
+
+  it("lets an input method finish a word before Escape or Enter end the caption", async () => {
+    const { stage, button } = await mount();
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+    input.value = "ka";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const composing = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true });
+    input.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(stage.querySelector("textarea")).not.toBeNull();
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(stage.querySelector("textarea")).toBeNull();
+  });
+
+  it("saves nothing once it has been taken down, even with a caption still open", async () => {
+    const { editor, stage, button, commits } = await mount();
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+    const before = commits.length;
+
+    editor.dispose();
+    // Removing a focused field blurs it; the caption's deferred clean-up must not run.
+    input.dispatchEvent(new FocusEvent("blur"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(commits).toHaveLength(before);
   });
 
   it("draws a box exactly where it is dragged, then goes back to selecting", async () => {
@@ -494,6 +579,32 @@ describe("in-place image editor", () => {
     expect(layers()).toHaveLength(2);
   });
 
+  it("makes a drag through the colour picker one step to undo", async () => {
+    const { stage, button, toolbar, layers, commits } = await mount();
+    button("studio.image.tool.rect").click();
+    drag(stage, [100, 50], [300, 150]);
+    const picker = toolbar.querySelector<HTMLInputElement>('[data-testid="studio.image.color.custom"]')!;
+    const before = commits.length;
+
+    for (const value of ["#111111", "#222222", "#333333"]) {
+      picker.value = value;
+      picker.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(layers()[1]).toMatchObject({ color: "#333333" });
+    expect(commits.slice(before)).toEqual([
+      { mode: "continuous", captureHistory: true },
+      { mode: "continuous", captureHistory: false },
+      { mode: "continuous", captureHistory: false },
+    ]);
+
+    // The next drag is a step of its own.
+    picker.value = "#444444";
+    picker.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(commits[commits.length - 1]).toEqual({ mode: "continuous", captureHistory: true });
+  });
+
   it("crops by dragging the frame, past the image for transparent space, and resets", async () => {
     const { stage, button, store } = await mount();
 
@@ -665,6 +776,8 @@ describe("in-place image editor", () => {
     const board = readStudioImageBoard(store);
     expect(board.lastRenderedAsset).toMatchObject({ path: "Studio/assets/stored-1.png" });
     expect(board.sourceAssetPath).toBe(SOURCE.path);
+    // The picture is on record as being of exactly these layers.
+    expect(board.lastRenderedOf).toBe(studioImageBoardDrawingKey(board));
     // Recording the render is bookkeeping, not an edit to undo.
     expect(commits[commits.length - 1]).toEqual({ mode: "discrete", captureHistory: false });
     expect(onClose).toHaveBeenCalledWith("node_media");

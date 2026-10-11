@@ -238,6 +238,44 @@ describe("SystemSculptStudioView empty text node cleanup (tldraw parity)", () =>
     expect(harness.context.undoGraphHistory()).toBe(false);
   });
 
+  it("does not leave undo steps for a box that was styled and then left empty", () => {
+    const harness = createEditEndHarness({ nodes: [] });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+
+    const createdNode = harness.context.createNodeFromDefinition(
+      createTextNodeDefinition(),
+      { position: { x: 80, y: 120 }, autoEditText: true }
+    );
+    // Picked from the style bar while the box was still empty.
+    harness.context.handleNodeConfigValueChange(createdNode.id, "textStyle", "meme", { mode: "discrete", captureHistory: true });
+    harness.context.handleNodeConfigValueChange(createdNode.id, "textColor", "#ff3b30", { mode: "discrete", captureHistory: true });
+    harness.context.stopTextNodeEdit(createdNode.id);
+
+    expect(harness.nodeIds()).toEqual([]);
+    expect(harness.context.undoGraphHistory()).toBe(false);
+  });
+
+  it("undoes typing and styling done in one edit as one step", () => {
+    const harness = createEditEndHarness({
+      nodes: [createTextNode("existing", "before")],
+      editingNodeIds: ["existing"],
+    });
+    harness.context.resetProjectHistory(harness.context.currentProject);
+
+    harness.context.handleNodeConfigValueChange("existing", "value", "after", { mode: "continuous", captureHistory: false });
+    harness.context.handleNodeConfigValueChange("existing", "textStyle", "meme", { mode: "discrete", captureHistory: true });
+    harness.context.handleNodeConfigValueChange("existing", "value", "after all", { mode: "continuous", captureHistory: false });
+    harness.context.stopTextNodeEdit("existing");
+
+    const style = (): unknown =>
+      harness.context.currentProject.graph.nodes.find((node: StudioNodeInstance) => node.id === "existing")?.config.textStyle;
+    expect(style()).toBe("meme");
+    expect(harness.context.undoGraphHistory()).toBe(true);
+    expect(harness.findValue("existing")).toBe("before");
+    expect(style()).toBeUndefined();
+    expect(harness.context.undoGraphHistory()).toBe(false);
+  });
+
   it("keeps the previous meaningful undo after an empty create-and-blur cycle", () => {
     const harness = createEditEndHarness({
       nodes: [createTextNode("existing", "before")],

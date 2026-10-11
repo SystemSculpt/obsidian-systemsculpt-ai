@@ -1,11 +1,6 @@
-import {
-  STUDIO_FILL_TEXT_ALIGNS,
-  STUDIO_FILL_TEXT_STYLES,
-  type StudioFillTextAlign,
-  type StudioFillTextStyle,
-} from "../../../studio/StudioFillText";
+import { readStudioFillTextLook, studioFillTextLookConfig } from "../../../studio/StudioFillTextNode";
 import { resolveStudioFillTextNodeSize } from "../../../studio/StudioNodeGeometry";
-import type { StudioNodeInstance } from "../../../studio/types";
+import type { StudioJsonValue } from "../../../studio/types";
 import { getStudioOwnerWindow, requestStudioAnimationFrame } from "../StudioDomContext";
 import { STUDIO_GRAPH_EDITOR_SURFACE_ATTR } from "../StudioGraphDomTargeting";
 import {
@@ -14,30 +9,17 @@ import {
   STUDIO_FILL_TEXT_CLASS,
   STUDIO_FILL_TEXT_PLACEHOLDER,
   type StudioFillTextAppearance,
-  type StudioFillTextMeasure,
 } from "./StudioFillTextSurface";
-import {
-  mountStudioFillTextToolbar,
-  type StudioFillTextLook,
-  type StudioFillTextToolbar,
-} from "./StudioFillTextToolbar";
+import { mountStudioFillTextToolbar, type StudioFillTextToolbar } from "./StudioFillTextToolbar";
+import { commitInlineConfigValueChange } from "./StudioGraphInlineConfigPanel";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
+import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
 import {
   bindStudioTextNodeDisplayGestures,
   readStudioTextNodeValue,
   type RenderTextNodeCardOptions,
 } from "./StudioGraphTextNodeCard";
-
-export const STUDIO_FILL_TEXT_STYLE_KEY = "textStyle";
-export const STUDIO_FILL_TEXT_ALIGN_KEY = "textAlign";
-export const STUDIO_FILL_TEXT_COLOR_KEY = "textColor";
-
-const LOOK_KEYS: Record<keyof StudioFillTextLook, string> = {
-  style: STUDIO_FILL_TEXT_STYLE_KEY,
-  align: STUDIO_FILL_TEXT_ALIGN_KEY,
-  color: STUDIO_FILL_TEXT_COLOR_KEY,
-};
 
 type RenderFillTextNodeCardOptions = Pick<
   RenderTextNodeCardOptions,
@@ -55,25 +37,7 @@ type RenderFillTextNodeCardOptions = Pick<
   | "onRequestTextNodeEdit"
   | "onStopTextNodeEdit"
   | "registerEditorTeardown"
-> & {
-  /** Text measurement; defaults to the canvas-backed measure for the card's document. */
-  measureText?: StudioFillTextMeasure;
-};
-
-function readChoice<T extends string>(value: unknown, choices: readonly T[], fallback: T): T {
-  return typeof value === "string" && (choices as readonly string[]).includes(value) ? (value as T) : fallback;
-}
-
-/** How a fill text node looks, apart from its box: plain, centred, in the canvas's own ink unless it says otherwise. */
-export function readStudioFillTextAppearance(node: StudioNodeInstance): StudioFillTextAppearance {
-  const color = node.config[STUDIO_FILL_TEXT_COLOR_KEY];
-  return {
-    text: readStudioTextNodeValue(node),
-    style: readChoice<StudioFillTextStyle>(node.config[STUDIO_FILL_TEXT_STYLE_KEY], STUDIO_FILL_TEXT_STYLES, "plain"),
-    align: readChoice<StudioFillTextAlign>(node.config[STUDIO_FILL_TEXT_ALIGN_KEY], STUDIO_FILL_TEXT_ALIGNS, "center"),
-    color: typeof color === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color.trim()) ? color.trim() : null,
-  };
-}
+>;
 
 /**
  * A text node whose text fills its box, the way a caption fills its box on
@@ -95,8 +59,13 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
   } = options;
   nodeEl.addClass("ss-studio-text-node-card");
   nodeEl.addClass("ss-studio-fill-text-card");
-  const measure = options.measureText ?? createStudioFillTextMeasure(nodeEl);
-  const appearance = readStudioFillTextAppearance(node);
+  const measure = createStudioFillTextMeasure(nodeEl);
+  const appearance: StudioFillTextAppearance = {
+    text: readStudioTextNodeValue(node),
+    ...readStudioFillTextLook(node.config),
+  };
+  const save = (key: string, value: StudioJsonValue, mutationOptions: StudioGraphNodeMutationOptions): void =>
+    commitInlineConfigValueChange({ node, key, value, onNodeConfigValueChange, onNodeConfigMutated, mutationOptions });
   let box = resolveStudioFillTextNodeSize(node);
   let surface: HTMLElement | null = null;
   let toolbar: StudioFillTextToolbar | null = null;
@@ -136,12 +105,7 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
     field.addEventListener("input", () => {
       appearance.text = field.value;
       fit();
-      if (onNodeConfigValueChange) {
-        onNodeConfigValueChange(node.id, "value", field.value, { mode: "continuous", captureHistory: false });
-        return;
-      }
-      node.config.value = field.value;
-      onNodeConfigMutated(node);
+      save("value", field.value, { mode: "continuous", captureHistory: false });
     });
     field.addEventListener("keydown", (event) => {
       if (event.isComposing) {
@@ -174,19 +138,12 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
       host: workspaceEl ?? nodeEl,
       docked: workspaceEl !== null,
       look: appearance,
-      onChange: (patch, change) => {
-        Object.assign(appearance, patch);
+      onChange: (change, how) => {
+        Object.assign(appearance, change);
         fit();
         toolbar?.sync(appearance);
-        for (const key of Object.keys(patch) as Array<keyof StudioFillTextLook>) {
-          // No colour of its own is stored as an empty value.
-          const value = patch[key] ?? "";
-          if (onNodeConfigValueChange) {
-            onNodeConfigValueChange(node.id, LOOK_KEYS[key], value, change);
-            continue;
-          }
-          node.config[LOOK_KEYS[key]] = value;
-          onNodeConfigMutated(node);
+        for (const [key, value] of studioFillTextLookConfig(change)) {
+          save(key, value, how);
         }
       },
       returnFocus: () => field.focus({ preventScroll: true }),

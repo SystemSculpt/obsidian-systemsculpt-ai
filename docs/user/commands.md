@@ -106,7 +106,7 @@ Text cards made before this, and long or Markdown text you paste, are Markdown c
 
 **Done** or a click elsewhere on the canvas finishes the edit. Escape steps back: it puts down the current tool, then clears the selection, then finishes. Cmd/Ctrl+Z undoes one step at a time, during the edit and after it. The card then shows the edited picture, and that flattened PNG is what connected cards receive.
 
-Copying one selected image card (Cmd/Ctrl+C) puts the picture itself on the clipboard, edits included, so it pastes as an image in any other app. Pasted back into Studio it brings back the card as it was, still editable. Any other selection copies as Studio cards.
+Copying one selected image card (Cmd/Ctrl+C) puts the picture itself on the clipboard, edits included, so it pastes as an image in any other app. Pasted back onto the same canvas it brings back the card as it was, still editable; anywhere else, another Studio window included, it is a picture. Any other selection copies as Studio cards.
 
 Adding a node with the **Add** button places it to the right of the selected node, or in the centre of the current view when nothing is selected, and never on top of an existing card. Right-click on the canvas still adds the node where you clicked. Ordinary cards stay where you place them, including after content edits and resizing. Generated image/video cards collect in their producer’s **Outputs** container, initially to its right. Each run adds cards to a three-column grid; only the contents of that container arrange automatically. Move the container as a unit to keep later results in the same place.
 

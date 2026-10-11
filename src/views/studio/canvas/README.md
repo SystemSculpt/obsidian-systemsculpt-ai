@@ -48,6 +48,8 @@ This directory owns graph rendering and inline node editing.
   edit sessions.
 - studio/StudioFillText.ts is the one layout for text that fills a box, used
   by the canvas card and by captions in the image editor.
+  studio/StudioFillTextNode.ts owns how a text node's style, alignment and
+  colour are saved.
   StudioFillTextSurface.ts applies it to a DOM field or block, and
   StudioFillTextToolbar.ts is the style bar shown while canvas text is typed.
 

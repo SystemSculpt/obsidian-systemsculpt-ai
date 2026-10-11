@@ -2,11 +2,10 @@ import {
   estimateStudioFillTextMeasure,
   layoutStudioFillText,
   studioFillTextFont,
-  type StudioFillTextAlign,
   type StudioFillTextLayout,
   type StudioFillTextMeasure,
-  type StudioFillTextStyle,
 } from "../../../studio/StudioFillText";
+import type { StudioFillTextLook } from "../../../studio/StudioFillTextNode";
 
 export type { StudioFillTextMeasure };
 
@@ -17,13 +16,7 @@ export type { StudioFillTextMeasure };
  * that does not depend on the box lives with the `ss-studio-fill-text` class.
  */
 
-export type StudioFillTextAppearance = {
-  text: string;
-  style: StudioFillTextStyle;
-  align: StudioFillTextAlign;
-  /** Null takes the colour of the surface the text sits on. */
-  color: string | null;
-};
+export type StudioFillTextAppearance = StudioFillTextLook & { text: string };
 
 export const STUDIO_FILL_TEXT_CLASS = "ss-studio-fill-text";
 export const STUDIO_FILL_TEXT_PLACEHOLDER = "Text";

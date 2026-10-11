@@ -2,10 +2,7 @@
  * @jest-environment jsdom
  */
 import type { StudioNodeInstance } from "../../../../studio/types";
-import {
-  readStudioFillTextAppearance,
-  renderFillTextNodeCard,
-} from "../StudioGraphFillTextNodeCard";
+import { renderFillTextNodeCard } from "../StudioGraphFillTextNodeCard";
 
 function createFillTextNode(value: string, overrides: Partial<StudioNodeInstance> = {}): StudioNodeInstance {
   return {
@@ -71,8 +68,6 @@ function renderHarness(options: HarnessOptions = {}) {
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
     registerEditorTeardown: options.registerEditorTeardown,
-    // Half an em a character at any size, so sizes below are exact.
-    measureText: (font, text) => text.length * Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1]) * 0.5,
   });
   const surface = (): HTMLElement => {
     const el = nodeEl.querySelector<HTMLElement>(".ss-studio-fill-text");
@@ -116,29 +111,8 @@ function type(field: HTMLTextAreaElement, value: string): void {
   field.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-describe("readStudioFillTextAppearance", () => {
-  it("is plain, centred and uncoloured until the node says otherwise", () => {
-    expect(readStudioFillTextAppearance(createFillTextNode("Hi"))).toEqual({
-      text: "Hi",
-      style: "plain",
-      align: "center",
-      color: null,
-    });
-  });
-
-  it("reads a stored style, alignment and colour, and ignores values it does not know", () => {
-    const styled = createFillTextNode("Hi", {
-      config: { layout: "fill", value: "Hi", textStyle: "meme", textAlign: "left", textColor: "#FF3B30" },
-    });
-    expect(readStudioFillTextAppearance(styled)).toMatchObject({ style: "meme", align: "left", color: "#FF3B30" });
-
-    const broken = createFillTextNode("Hi", {
-      config: { layout: "fill", value: "Hi", textStyle: "comic", textAlign: "justify", textColor: "red" },
-    });
-    expect(readStudioFillTextAppearance(broken)).toMatchObject({ style: "plain", align: "center", color: null });
-  });
-});
-
+// Where there is no canvas to measure with, as here, a character is half an
+// em wide at any size, so the sizes below are exact.
 describe("renderFillTextNodeCard", () => {
   beforeEach(() => {
     jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {

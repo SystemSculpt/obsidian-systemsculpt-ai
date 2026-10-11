@@ -10,6 +10,7 @@ import {
 } from "../../../../studio/StudioImageBoard";
 import { createStudioAction } from "../../StudioAction";
 import { markStudioNodeCardInteractive } from "../StudioGraphNodeCardPointer";
+import type { StudioGraphNodeMutationOptions } from "../StudioGraphNodeCardTypes";
 import type { StudioImageBoardReorder, StudioImageBoardTool } from "./StudioImageBoardSession";
 
 export type StudioImageBoardToolbarState = {
@@ -27,7 +28,7 @@ export type StudioImageBoardToolbarActions = {
   addImage: () => void;
   copy: () => void;
   done: () => void;
-  patchSelected: (patch: Record<string, unknown>) => void;
+  patchSelected: (patch: Record<string, unknown>, options?: StudioGraphNodeMutationOptions) => void;
   setWeight: (strokeWidth: number) => void;
   setZoom: (zoom: number) => void;
   reorder: (direction: StudioImageBoardReorder) => void;
@@ -50,6 +51,11 @@ const TOOLS: Array<{ tool: StudioImageBoardTool; icon: string; label: string; ke
   { tool: "magnify", icon: "zoom-in", label: "Magnify", key: "M" },
   { tool: "crop", icon: "crop", label: "Crop", key: "C" },
 ];
+
+/** The single-key shortcut of each tool, lower case, exactly as its button names it. */
+export const STUDIO_IMAGE_BOARD_TOOL_KEYS: Readonly<Record<string, StudioImageBoardTool>> = Object.fromEntries(
+  TOOLS.map(({ tool, key }) => [key.toLowerCase(), tool])
+);
 
 const TOOL_HINTS: Partial<Record<StudioImageBoardTool, string>> = {
   text: "Click where the caption goes, or drag a box for it.",
@@ -102,7 +108,7 @@ const LENS_SHAPES: Array<{ shape: StudioImageBoardLensShape; icon: string; label
   { shape: "ellipse", icon: "circle", label: "Round lens" },
 ];
 
-export const STUDIO_IMAGE_BOARD_WEIGHTS: Array<{ id: string; label: string; strokeWidth: number }> = [
+const WEIGHTS: Array<{ id: string; label: string; strokeWidth: number }> = [
   { id: "thin", label: "Thin", strokeWidth: 0.004 },
   { id: "medium", label: "Medium", strokeWidth: 0.008 },
   { id: "bold", label: "Bold", strokeWidth: 0.016 },
@@ -257,7 +263,7 @@ export class StudioImageBoardToolbar {
       case "shape":
         this.swatches();
         this.choiceGroup(
-          STUDIO_IMAGE_BOARD_WEIGHTS.map(({ id, label, strokeWidth }) => ({
+          WEIGHTS.map(({ id, label, strokeWidth }) => ({
             testId: `studio.image.weight.${id}`,
             label,
             isSelected: (selected) =>
@@ -403,7 +409,15 @@ export class StudioImageBoardToolbar {
       type: "color",
       attr: { "data-testid": "studio.image.color.custom", "aria-label": "Custom color" },
     });
-    custom.addEventListener("input", () => this.actions.patchSelected({ color: custom.value }));
+    // A drag through the picker is one step to undo, not one for every shade it passes.
+    let picking = false;
+    custom.addEventListener("input", () => {
+      this.actions.patchSelected({ color: custom.value }, { mode: "continuous", captureHistory: !picking });
+      picking = true;
+    });
+    custom.addEventListener("change", () => {
+      picking = false;
+    });
     this.contextUpdaters.push((state) => {
       const color = currentColor(state);
       // Leave the native picker alone while it is open and driving the value.

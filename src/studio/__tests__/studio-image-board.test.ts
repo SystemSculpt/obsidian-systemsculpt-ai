@@ -5,6 +5,8 @@ import {
   resolveStudioImageBoardRenderedAsset,
   serializeStudioImageBoard,
   STUDIO_IMAGE_BOARD_CONFIG_KEY,
+  studioImageBoardArrowThicknessPx,
+  studioImageBoardDrawingKey,
   studioImageBoardHasBase,
   studioImageBoardHasEdits,
   studioImageBoardLensAtZoom,
@@ -13,6 +15,8 @@ import {
   studioImageBoardLensView,
   studioImageBoardLensZoom,
   studioImageBoardOutputFrame,
+  studioImageBoardWithoutRender,
+  studioImageBoardWithRender,
   writeStudioImageBoard,
 } from "../StudioImageBoard";
 import {
@@ -152,15 +156,30 @@ describe("image board state", () => {
     expect(taller.y + taller.height).toBeCloseTo(0.3, 9);
   });
 
-  it("widens what a stretched lens shows rather than distorting it", () => {
+  it("widens what a stretched lens shows rather than distorting it or leaving any of the area out", () => {
     // Twice as wide as its area needs at 3×: it shows twice the width, around the same middle.
     const lens = { x: 0.2, y: 0.1, width: 0.6, height: 0.3, source: { x: 0.1, y: 0.7, width: 0.1, height: 0.1 } };
 
     const view = studioImageBoardLensView(lens);
-    expect(studioImageBoardLensZoom(lens)).toBeCloseTo(6, 9);
-    expect(view.width).toBeCloseTo(0.1, 9);
-    expect(view.height).toBeCloseTo(0.05, 9);
+    expect(studioImageBoardLensZoom(lens)).toBeCloseTo(3, 9);
+    expect(view.width).toBeCloseTo(0.2, 9);
+    expect(view.height).toBeCloseTo(0.1, 9);
+    expect(view.x + view.width / 2).toBeCloseTo(0.15, 9);
     expect(view.y + view.height / 2).toBeCloseTo(0.75, 9);
+    // Everything that was marked is inside what the lens shows.
+    expect(view.x).toBeLessThanOrEqual(lens.source.x);
+    expect(view.x + view.width).toBeGreaterThanOrEqual(lens.source.x + lens.source.width);
+    expect(view.y).toBeCloseTo(lens.source.y, 9);
+
+    // Stretched the other way, it is the height that gains.
+    const tall = studioImageBoardLensView({ ...lens, width: 0.2, height: 0.6, source: lens.source });
+    expect(tall.width).toBeCloseTo(0.1, 9);
+    expect(tall.height).toBeCloseTo(0.3, 9);
+  });
+
+  it("sizes an arrow's box from its stroke and the picture's short side", () => {
+    expect(studioImageBoardArrowThicknessPx(0.008, { width: 2000, height: 1000 })).toBeCloseTo(36, 9);
+    expect(studioImageBoardArrowThicknessPx(0.016, { width: 500, height: 1000 })).toBeCloseTo(36, 9);
   });
 
   it("lands a new lens beside the area it enlarges, on the nearest side with room", () => {
@@ -250,18 +269,128 @@ describe("image board state", () => {
   });
 
   it("keeps a cached render only for the source it was made from", () => {
+    const board = createEmptyStudioImageBoard();
     const config = {
-      [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard({
-        ...createEmptyStudioImageBoard(),
-        sourceAssetPath: "assets/source.png",
-        lastRenderedAsset: RENDERED,
-      }),
+      [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+        studioImageBoardWithRender(board, board, "assets/source.png", RENDERED)
+      ),
     };
 
     expect(resolveStudioImageBoardRenderedAsset(config, "assets/source.png")).toEqual(RENDERED);
     expect(resolveStudioImageBoardRenderedAsset(config, "")).toEqual(RENDERED);
     expect(resolveStudioImageBoardRenderedAsset(config, "assets/other.png")).toBeNull();
     expect(resolveStudioImageBoardRenderedAsset({}, "assets/source.png")).toBeNull();
+  });
+});
+
+describe("image board cached render", () => {
+  const save = (board: Parameters<typeof serializeStudioImageBoard>[0]) => ({
+    [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(board),
+  });
+
+  /** One of every kind of layer, each away from its defaults, under a crop. */
+  function busyBoard() {
+    const board = createEmptyStudioImageBoard();
+    board.layers.push(
+      createStudioImageBoardLayer({ kind: "image", asset: STICKER, x: 0.11, y: 0.22, width: 0.31, height: 0.17, rotation: 12.5 }),
+      createStudioImageBoardLayer({ kind: "text", text: "Top\ntext", style: "banner", align: "right", color: "#0A84FF", x: 0.05, y: 0.6, width: 0.9, height: 0.15 }),
+      createStudioImageBoardLayer({ kind: "shape", shape: "arrow", color: "#34c759", strokeWidth: 0.016, x: 0.3, y: 0.3, width: 0.2, height: 0.05, rotation: 33 }),
+      createStudioImageBoardLayer({ kind: "highlight", color: "#ffe600", x: 0.1, y: 0.4, width: 0.3, height: 0.07 }),
+      createStudioImageBoardLayer({ kind: "redact", style: "pixelate", x: 0.5, y: 0.5, width: 0.2, height: 0.1 }),
+      createStudioImageBoardLayer({ kind: "magnify", shape: "ellipse", color: "#ff3b30", x: 0.6, y: 0.1, width: 0.3, height: 0.2, source: { x: 0.2, y: 0.2, width: 0.1, height: 0.0666 } })
+    );
+    board.crop = { x: -0.1, y: 0.05, width: 1.2, height: 0.9 };
+    return board;
+  }
+
+  it("survives being saved and read back, whatever the board holds", () => {
+    const board = busyBoard();
+    const config = save(studioImageBoardWithRender(board, board, "assets/source.png", RENDERED));
+
+    const read = readStudioImageBoard(config);
+    expect(read.lastRenderedAsset).toEqual(RENDERED);
+    expect(read.sourceAssetPath).toBe("assets/source.png");
+    expect(read.lastRenderedOf).toBe(studioImageBoardDrawingKey(board));
+    // And again: nothing drifts on the way through.
+    expect(readStudioImageBoard(save(read)).lastRenderedAsset).toEqual(RENDERED);
+  });
+
+  it("names a drawing by its layers and crop, and by nothing else", () => {
+    const board = busyBoard();
+    const key = studioImageBoardDrawingKey(board);
+
+    expect(key).toMatch(/^[0-9a-f]{16}$/);
+    expect(studioImageBoardDrawingKey({ ...board, updatedAt: "2030-01-01T00:00:00.000Z" } as never)).toBe(key);
+    expect(studioImageBoardDrawingKey(studioImageBoardWithRender(board, board, "assets/source.png", RENDERED))).toBe(key);
+    expect(studioImageBoardDrawingKey(readStudioImageBoard(save(board)))).toBe(key);
+
+    expect(studioImageBoardDrawingKey({ ...board, crop: null })).not.toBe(key);
+    expect(studioImageBoardDrawingKey({ ...board, layers: board.layers.slice(0, -1) })).not.toBe(key);
+    expect(studioImageBoardDrawingKey({ ...board, layers: [...board.layers].reverse() })).not.toBe(key);
+    const nudged = board.layers.map((layer) => (layer.kind === "redact" ? { ...layer, x: layer.x + 0.001 } : layer));
+    expect(studioImageBoardDrawingKey({ ...board, layers: nudged })).not.toBe(key);
+  });
+
+  it("is dropped when the layers it shows are not the layers the board has", () => {
+    // An undo puts the layers back but leaves the render recorded since: a
+    // picture without the blur must not stand for a board that has one.
+    const blurred = createEmptyStudioImageBoard();
+    blurred.layers.push(createStudioImageBoardLayer({ kind: "redact", id: "blur" }));
+    const unblurred = createEmptyStudioImageBoard();
+    unblurred.layers.push(createStudioImageBoardLayer({ kind: "shape", shape: "arrow", id: "arrow" }));
+    const saved = save(studioImageBoardWithRender(unblurred, unblurred, "assets/source.png", RENDERED));
+    const record = saved[STUDIO_IMAGE_BOARD_CONFIG_KEY] as Record<string, StudioJsonValue>;
+    const afterUndo = {
+      [STUDIO_IMAGE_BOARD_CONFIG_KEY]: {
+        ...record,
+        layers: (serializeStudioImageBoard(blurred) as Record<string, StudioJsonValue>).layers,
+      },
+    };
+
+    const board = readStudioImageBoard(afterUndo);
+    expect(board.layers.map((layer) => layer.id)).toEqual(["base", "blur"]);
+    expect(board.lastRenderedAsset).toBeNull();
+    expect(board.sourceAssetPath).toBe("");
+    expect(board.lastRenderedOf).toBe("");
+    expect(resolveStudioImageBoardRenderedAsset(afterUndo, "assets/source.png")).toBeNull();
+    // Saving it again does not bring the stale picture back.
+    expect((serializeStudioImageBoard(board) as Record<string, StudioJsonValue>).lastRenderedAsset).toBeNull();
+  });
+
+  it("is not adopted by a board that moved on while the picture was being made", () => {
+    const rendered = createEmptyStudioImageBoard();
+    rendered.layers.push(createStudioImageBoardLayer({ kind: "highlight", id: "mark" }));
+    const edited = { ...rendered, layers: [...rendered.layers, createStudioImageBoardLayer({ kind: "redact", id: "blur" })] };
+
+    const config = save(studioImageBoardWithRender(edited, rendered, "assets/source.png", RENDERED));
+
+    expect(readStudioImageBoard(config).layers.map((layer) => layer.id)).toEqual(["base", "mark", "blur"]);
+    expect(readStudioImageBoard(config).lastRenderedAsset).toBeNull();
+  });
+
+  it("is never taken on trust: a render with no record of what it shows is dropped", () => {
+    const board = busyBoard();
+    const record = serializeStudioImageBoard(board) as Record<string, StudioJsonValue>;
+
+    expect(
+      readStudioImageBoard({
+        [STUDIO_IMAGE_BOARD_CONFIG_KEY]: { ...record, sourceAssetPath: "assets/source.png", lastRenderedAsset: RENDERED },
+      }).lastRenderedAsset
+    ).toBeNull();
+    expect(
+      (serializeStudioImageBoard({ ...board, sourceAssetPath: "assets/source.png", lastRenderedAsset: RENDERED }) as Record<
+        string,
+        StudioJsonValue
+      >).lastRenderedAsset
+    ).toBeNull();
+  });
+
+  it("goes when the render is cleared", () => {
+    const board = busyBoard();
+    const cleared = studioImageBoardWithoutRender(studioImageBoardWithRender(board, board, "assets/source.png", RENDERED));
+
+    expect(cleared).toMatchObject({ lastRenderedAsset: null, lastRenderedOf: "", sourceAssetPath: "" });
+    expect(cleared.layers).toEqual(board.layers);
   });
 });
 
@@ -304,11 +433,18 @@ describe("image board migration", () => {
     expect(board.crop).toEqual(legacy.crop);
   });
 
-  it("keeps the already baked image so an untouched project looks the same", () => {
+  it("does not keep the image the first editor baked", () => {
+    // That image was an SVG carrying the whole source picture under a blur
+    // filter, so what a blur hid could be read back out of it. The board is
+    // flattened afresh, and until then nothing stands in for it.
     const board = readStudioImageBoard({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: legacy });
 
-    expect(board.lastRenderedAsset).toEqual(RENDERED);
-    expect(board.sourceAssetPath).toBe("assets/source.png");
+    expect(board.layers.some((layer) => layer.kind === "redact")).toBe(true);
+    expect(board.lastRenderedAsset).toBeNull();
+    expect(board.sourceAssetPath).toBe("");
+    expect(
+      resolveStudioImageBoardRenderedAsset({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: legacy }, "assets/source.png")
+    ).toBeNull();
   });
 
   it("adopts the single caption that predates boards and clears its keys on save", () => {

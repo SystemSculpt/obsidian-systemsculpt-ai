@@ -5,7 +5,10 @@ import {
   readStudioImageBoard,
   serializeStudioImageBoard,
   STUDIO_IMAGE_BOARD_CONFIG_KEY,
+  studioImageBoardDrawingKey,
   studioImageBoardHasBase,
+  studioImageBoardWithoutRender,
+  studioImageBoardWithRender,
   type StudioImageBoard,
   type StudioImageBoardLayer,
   type StudioImageBoardLayerKind,
@@ -41,7 +44,7 @@ export class StudioImageBoardSession {
   private current: StudioImageBoard;
   private selected: string | null = null;
   private activeTool: StudioImageBoardTool = "select";
-  private serialized: string;
+  private drawing: string;
 
   constructor(
     config: Record<string, StudioJsonValue>,
@@ -52,8 +55,8 @@ export class StudioImageBoardSession {
     ) => void,
     private readonly onChange: () => void
   ) {
-    this.current = readStudioImageBoard(config);
-    this.serialized = signature(this.current);
+    this.current = withoutEmptyCaptions(readStudioImageBoard(config), null);
+    this.drawing = studioImageBoardDrawingKey(this.current);
   }
 
   get board(): StudioImageBoard {
@@ -92,17 +95,19 @@ export class StudioImageBoardSession {
     this.onChange();
   }
 
-  /** Adopts a config changed elsewhere, such as an undo or a synced edit. */
-  sync(config: Record<string, StudioJsonValue>): void {
-    const next = readStudioImageBoard(config);
-    const nextSignature = signature(next);
-    if (nextSignature === this.serialized) {
-      // Only the render cache moved; keep it without disturbing the editor.
-      this.current = { ...this.current, ...renderCache(next) };
+  /**
+   * Adopts a config changed elsewhere, such as an undo or a synced edit.
+   * `typingId` is the caption being typed into, if there is one.
+   */
+  sync(config: Record<string, StudioJsonValue>, typingId: string | null = null): void {
+    const next = withoutEmptyCaptions(readStudioImageBoard(config), typingId);
+    const drawing = studioImageBoardDrawingKey(next);
+    this.current = next;
+    if (drawing === this.drawing) {
+      // Only the render cache moved; nothing the editor shows has changed.
       return;
     }
-    this.current = next;
-    this.serialized = nextSignature;
+    this.drawing = drawing;
     this.selected = findStudioImageBoardLayer(next, this.selected)?.id ?? null;
     this.onChange();
   }
@@ -134,17 +139,20 @@ export class StudioImageBoardSession {
     );
   }
 
-  removeLayer(id: string): void {
+  removeLayer(id: string, options?: StudioGraphNodeMutationOptions): void {
     if (!findStudioImageBoardLayer(this.current, id)) {
       return;
     }
     if (this.selected === id) {
       this.selected = null;
     }
-    this.commit({
-      ...this.current,
-      layers: this.current.layers.filter((layer) => layer.id !== id),
-    });
+    this.commit(
+      {
+        ...this.current,
+        layers: this.current.layers.filter((layer) => layer.id !== id),
+      },
+      options
+    );
   }
 
   duplicateLayer(id: string): StudioImageBoardLayer | null {
@@ -186,14 +194,17 @@ export class StudioImageBoardSession {
     });
   }
 
-  /** Records the flattened render of the current board without adding history. */
-  recordRender(sourceAssetPath: string, asset: StudioAssetRef | null): void {
-    this.current = {
-      ...this.current,
-      sourceAssetPath,
-      lastRenderedAsset: asset,
-      updatedAt: new Date().toISOString(),
-    };
+  /**
+   * Records `asset` as the flattened picture of `drawn`, the board as it was
+   * when the picture was made, without adding history. A board edited since
+   * then keeps its edits and does not take the picture as its own.
+   */
+  recordRender(drawn: StudioImageBoard, sourceAssetPath: string, asset: StudioAssetRef): void {
+    this.current = readStudioImageBoard({
+      [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+        studioImageBoardWithRender(this.current, drawn, sourceAssetPath, asset)
+      ),
+    });
     this.commitConfig(STUDIO_IMAGE_BOARD_CONFIG_KEY, serializeStudioImageBoard(this.current), {
       mode: "discrete",
       captureHistory: false,
@@ -205,32 +216,23 @@ export class StudioImageBoardSession {
     options: StudioGraphNodeMutationOptions = { mode: "discrete" }
   ): void {
     // Any edit invalidates the cached render.
-    const board: StudioImageBoard = {
-      ...next,
-      sourceAssetPath: "",
-      lastRenderedAsset: null,
-      updatedAt: new Date().toISOString(),
-    };
-    const value = serializeStudioImageBoard(board);
+    const value = serializeStudioImageBoard(studioImageBoardWithoutRender(next));
     this.current = readStudioImageBoard({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: value });
-    this.serialized = signature(this.current);
+    this.drawing = studioImageBoardDrawingKey(this.current);
     this.selected = findStudioImageBoardLayer(this.current, this.selected)?.id ?? null;
     this.commitConfig(STUDIO_IMAGE_BOARD_CONFIG_KEY, value, options);
     this.onChange();
   }
 }
 
-function renderCache(
-  board: StudioImageBoard
-): Pick<StudioImageBoard, "sourceAssetPath" | "lastRenderedAsset" | "updatedAt"> {
-  return {
-    sourceAssetPath: board.sourceAssetPath,
-    lastRenderedAsset: board.lastRenderedAsset,
-    updatedAt: board.updatedAt,
-  };
-}
-
-/** What the board draws, ignoring the render cache and timestamp. */
-function signature(board: StudioImageBoard): string {
-  return JSON.stringify({ layers: board.layers, crop: board.crop });
+/**
+ * An empty caption is a layer only while it is being typed into. Undoing the
+ * first words typed into a new caption brings one back with nobody typing;
+ * it draws nothing and cannot be picked up, so it is left out.
+ */
+function withoutEmptyCaptions(board: StudioImageBoard, typingId: string | null): StudioImageBoard {
+  const layers = board.layers.filter(
+    (layer) => layer.kind !== "text" || layer.id === typingId || layer.text.trim().length > 0
+  );
+  return layers.length === board.layers.length ? board : { ...board, layers };
 }

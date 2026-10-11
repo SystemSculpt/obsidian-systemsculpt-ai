@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
 import { desktopHost } from "../../../../platform/desktopOnly";
-import type { StudioImageBoard } from "../../../../studio/StudioImageBoard";
+import { normalizeStudioAssetRef, type StudioImageBoard } from "../../../../studio/StudioImageBoard";
 import {
   decodeStudioImageBoardImage,
   type StudioImageBoardDecodedImage,
@@ -15,29 +15,8 @@ export type StudioImageBoardAssetIo = {
   storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeAssetRef(value: unknown): StudioAssetRef | null {
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-  const hash = readString(record.hash);
-  const path = readString(record.path);
-  const mimeType = readString(record.mimeType) || readString(record.mime_type);
-  const size = Number(record.sizeBytes ?? record.size_bytes);
-  if (!hash || !path || !mimeType || !Number.isFinite(size) || size <= 0) {
-    return null;
-  }
-  return { hash, path, mimeType, sizeBytes: Math.floor(size) };
 }
 
 /**
@@ -50,8 +29,8 @@ export async function resolveStudioImageBoardBaseAsset(options: {
   nodeRunState: StudioNodeRunDisplayState;
   storeAsset: StudioImageBoardAssetIo["storeAsset"];
 }): Promise<StudioAssetRef> {
-  const outputs = asRecord(options.nodeRunState.outputs);
-  const staged = normalizeAssetRef(outputs?.source_preview_asset);
+  const outputs = (options.nodeRunState.outputs ?? null) as Record<string, unknown> | null;
+  const staged = normalizeStudioAssetRef(outputs?.source_preview_asset);
   if (staged) {
     return staged;
   }

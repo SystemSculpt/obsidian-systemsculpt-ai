@@ -5,6 +5,7 @@ import {
   createStudioImageBoardLayer,
   serializeStudioImageBoard,
   STUDIO_IMAGE_BOARD_CONFIG_KEY,
+  studioImageBoardWithRender,
 } from "../../../../studio/StudioImageBoard";
 import type { StudioNodeDefinition, StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
 import type { StudioImageBoardEditorHandle } from "../image-board/StudioImageBoardEditor";
@@ -201,19 +202,37 @@ describe("image node edited on the canvas", () => {
     edited.layers.push(createStudioImageBoardLayer({ kind: "redact" }));
     const baked = harness(
       mediaNode({
-        [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard({ ...edited, sourceAssetPath: SOURCE.path, lastRenderedAsset: RENDERED }),
+        [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+          studioImageBoardWithRender(edited, edited, SOURCE.path, RENDERED)
+        ),
       })
     );
     expect(baked.card().querySelector("img")!.getAttribute("data-studio-asset-path")).toBe(RENDERED.path);
     expect(baked.card().querySelector("canvas")).toBeNull();
     document.body.empty();
 
-    // After an undo the cached render is gone: the card must not fall back to the unedited source.
+    // With no flattened image the card must not fall back to the unedited source.
     const unbaked = harness(mediaNode({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(edited) }));
     await flushImageBoard();
 
     expect(unbaked.card().querySelector("img")).toBeNull();
     expect(unbaked.card().querySelector("canvas.ss-studio-image-board__canvas.is-preview")).not.toBeNull();
+    document.body.empty();
+
+    // Nor to a flattened image of other layers, which is what an undo leaves
+    // behind: here a picture made before the blur was there.
+    const before = createEmptyStudioImageBoard();
+    const stale = harness(
+      mediaNode({
+        [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+          studioImageBoardWithRender(edited, before, SOURCE.path, RENDERED)
+        ),
+      })
+    );
+    await flushImageBoard();
+
+    expect(stale.card().querySelector("img")).toBeNull();
+    expect(stale.card().querySelector("canvas.ss-studio-image-board__canvas.is-preview")).not.toBeNull();
   });
 
   it("turns into the image card when its preview resolves after the first paint", () => {

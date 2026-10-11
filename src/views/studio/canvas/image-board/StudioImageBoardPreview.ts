@@ -61,8 +61,9 @@ export function mountStudioImageBoardPreview(
   })()
     .catch(() => {
       if (!disposed) {
+        // Made by the card, so it belongs to the window the card is in.
         canvas.replaceWith(
-          createDiv({ cls: "ss-studio-source-empty", text: "This edited image is not available on this device yet." })
+          parent.createDiv({ cls: "ss-studio-source-empty", text: "This edited image is not available on this device yet." })
         );
       }
     })
