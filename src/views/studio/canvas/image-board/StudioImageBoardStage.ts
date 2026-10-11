@@ -196,6 +196,7 @@ export class StudioImageBoardStage {
     if (this.disposed) {
       return;
     }
+    this.adoptTypedCaption();
     const scene = this.host.scene();
     this.statusEl.setText(scene ? "" : this.host.status());
     this.element.toggleClass("is-unavailable", !scene);
@@ -1003,6 +1004,33 @@ export class StudioImageBoardStage {
       this.placeBox(this.cropEl, { ...studioImageBoardOutputFrame(session.board), rotation: 0 });
     }
     this.syncTextInput(scene);
+  }
+
+  /**
+   * Keeps the open caption field in step with a board changed elsewhere, such
+   * as in another window on the same project. What is typed here is saved on
+   * every keystroke, so the field and its layer only ever differ when the
+   * layer moved on without it.
+   */
+  private adoptTypedCaption(): void {
+    const input = this.textInput;
+    if (!input) {
+      return;
+    }
+    const layer = findStudioImageBoardLayer(this.host.session.board, this.editingTextId);
+    if (layer?.kind !== "text") {
+      // Removed elsewhere: there is nothing left to type into.
+      this.editingTextId = null;
+      this.textInput = null;
+      input.remove();
+      return;
+    }
+    if (input.value !== layer.text) {
+      const start = Math.min(input.selectionStart, layer.text.length);
+      const end = Math.min(input.selectionEnd, layer.text.length);
+      input.value = layer.text;
+      input.setSelectionRange(start, end);
+    }
   }
 
   private syncTextInput(scene: StudioImageBoardScene): void {

@@ -13,7 +13,7 @@ import {
   StudioClipboardAndDropController,
   type StudioClipboardAndDropHost,
 } from "../systemsculpt-studio-view/StudioClipboardAndDropController";
-import { isSameClipboardImage } from "../systemsculpt-studio-view/StudioClipboardData";
+import { isSameClipboardImage, isSameClipboardPixels } from "../systemsculpt-studio-view/StudioClipboardData";
 
 function projectWithNodes(
   nodes: StudioNodeInstance[] = [],
@@ -67,7 +67,7 @@ type Harness = {
     setError: jest.Mock;
   };
   copyText: jest.Mock;
-  fingerprintImage: jest.Mock;
+  isSameImage: jest.Mock;
   getProject(): StudioProjectV1 | null;
   setProject(project: StudioProjectV1 | null, path?: string | null): void;
 };
@@ -85,8 +85,9 @@ function createHarness(options?: {
   let projectPath: string | null = project ? "Studio/Clipboard.systemsculpt" : null;
   let id = 0;
   const copyText = jest.fn(async () => true);
-  // A picture's fingerprint here is simply the numbers its fake file carries.
-  const fingerprintImage = jest.fn(async (image: Blob) => (image as unknown as { looksLike?: number[] }).looksLike ?? null);
+  // A fake picture file carries its pixels as plain numbers.
+  const pixelsOf = (image: Blob): number[] => (image as unknown as { looksLike?: number[] }).looksLike ?? [];
+  const isSameImage = jest.fn(async (first: Blob, second: Blob) => isSameClipboardPixels(pixelsOf(first), pixelsOf(second)));
   let boundViewport: HTMLElement | null = null;
   const host: Harness["host"] = {
     ownsEventTarget: jest.fn(() => true),
@@ -130,7 +131,7 @@ function createHarness(options?: {
   const controller = new StudioClipboardAndDropController(app, host, {
     createId: (prefix) => `${prefix}_${++id}`,
     copyText,
-    fingerprintImage,
+    isSameImage,
   });
   const bindViewport = controller.bindViewport.bind(controller);
   controller.bindViewport = (viewport) => {
@@ -142,7 +143,7 @@ function createHarness(options?: {
     controller,
     host,
     copyText,
-    fingerprintImage,
+    isSameImage,
     getProject: () => project,
     setProject: (nextProject, nextPath = nextProject ? "Studio/Next.systemsculpt" : null) => {
       project = nextProject;
@@ -319,7 +320,7 @@ describe("StudioClipboardAndDropController", () => {
       disabled: false,
     });
     const looksLike = (...pixels: number[]): File =>
-      ({ type: "image/png", looksLike: [640, 480, ...pixels], arrayBuffer: async () => new ArrayBuffer(3) }) as unknown as File;
+      ({ type: "image/png", looksLike: pixels, arrayBuffer: async () => new ArrayBuffer(3) }) as unknown as File;
     const settle = async (): Promise<void> => {
       for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
     };
@@ -354,7 +355,7 @@ describe("StudioClipboardAndDropController", () => {
     });
 
     it("still copies nodes as nodes for anything but one picture", async () => {
-      const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(1) as Blob) : null));
+      const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(1, 2, 3, 255) as Blob) : null));
       const both = createHarness({
         project: projectWithNodes([picture("photo"), textInstance("note")]),
         selectedNodeIds: ["photo", "note"],
@@ -413,13 +414,32 @@ describe("StudioClipboardAndDropController", () => {
       expect(nodes[1].config.captionBoard).toBeUndefined();
     });
 
-    it("tells one picture from another by size and by pixels, allowing for a re-encode", () => {
-      const copied = [640, 480, 10, 20, 30, 255, 200, 100, 0, 128];
+    it.each([
+      ["the copied picture", true],
+      ["another picture", false],
+    ])("pastes nothing when the project changes while %s is being told apart", async (_which, same) => {
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
+      });
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+      let answer: (same: boolean) => void = () => undefined;
+      harness.isSameImage.mockImplementationOnce(() => new Promise<boolean>((resolve) => { answer = resolve; }));
 
-      expect(isSameClipboardImage(copied, [640, 480, 14, 16, 30, 255, 198, 104, 3, 126])).toBe(true);
-      expect(isSameClipboardImage(copied, [640, 481, 10, 20, 30, 255, 200, 100, 0, 128])).toBe(false);
-      expect(isSameClipboardImage(copied, [640, 480, 10, 20, 60, 255, 200, 100, 0, 128])).toBe(false);
-      expect(isSameClipboardImage(copied, [640, 480, 10, 20, 30, 255])).toBe(false);
+      const pasted = harness.controller.handlePaste(clipboardEvent({ files: [looksLike(10, 20, 30, 255)] }));
+      await settle();
+      const first = harness.getProject();
+      const next = projectWithNodes();
+      harness.setProject(next);
+      answer(same);
+      await pasted;
+
+      expect(first?.graph.nodes).toHaveLength(1);
+      expect(next.graph.nodes).toEqual([]);
+      expect(harness.host.storeAsset).not.toHaveBeenCalled();
+      expect(harness.host.finalizeCreatedNodes).not.toHaveBeenCalled();
     });
 
     it("forgets the picture once something else is copied", async () => {
@@ -760,5 +780,88 @@ describe("StudioClipboardAndDropController", () => {
       "drop",
       expect.any(Function),
     );
+  });
+});
+
+describe("telling a pasted picture from the one that was copied", () => {
+  it("allows for the rounding of a re-encode, and nothing more", () => {
+    const copied = [10, 20, 30, 255, 200, 100, 0, 128];
+
+    expect(isSameClipboardPixels(copied, [12, 19, 31, 255, 201, 99, 1, 127])).toBe(true);
+    expect(isSameClipboardPixels(copied, [10, 20, 60, 255, 200, 100, 0, 128])).toBe(false);
+    expect(isSameClipboardPixels(copied, [10, 20, 30, 215, 200, 100, 0, 128])).toBe(false);
+    expect(isSameClipboardPixels(copied, [10, 20, 30, 255])).toBe(false);
+    // Colour under no alpha is not part of the picture.
+    expect(isSameClipboardPixels([255, 0, 0, 0], [0, 0, 255, 0])).toBe(true);
+  });
+
+  describe("whole pictures", () => {
+    type FakeBitmap = { width: number; height: number; pixels: Uint8ClampedArray; close: jest.Mock };
+    const bitmap = (width: number, height: number): FakeBitmap => ({
+      width,
+      height,
+      pixels: new Uint8ClampedArray(width * height * 4).fill(200),
+      close: jest.fn(),
+    });
+    const file = (decoded: FakeBitmap | null): Blob => ({ decoded }) as unknown as Blob;
+    let getContext: jest.SpyInstance;
+
+    beforeEach(() => {
+      (globalThis as { createImageBitmap?: unknown }).createImageBitmap = jest.fn(async (source: Blob) => {
+        const decoded = (source as unknown as { decoded: FakeBitmap | null }).decoded;
+        if (!decoded) throw new Error("not a picture");
+        return decoded;
+      });
+      // A canvas that hands back the rows it was asked to draw.
+      getContext = jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+        let drawn = new Uint8ClampedArray(0);
+        return {
+          drawImage: (source: FakeBitmap, _sx: number, sy: number, sw: number, sh: number) => {
+            drawn = source.pixels.subarray(sy * sw * 4, (sy + sh) * sw * 4);
+          },
+          getImageData: (_x: number, _y: number, width: number, height: number) => ({
+            data: drawn.subarray(0, width * height * 4),
+          }),
+        } as unknown as CanvasRenderingContext2D;
+      });
+    });
+
+    afterEach(() => {
+      delete (globalThis as { createImageBitmap?: unknown }).createImageBitmap;
+      getContext.mockRestore();
+    });
+
+    it("knows its own picture again", async () => {
+      const ours = bitmap(4096, 300);
+      const theirs = bitmap(4096, 300);
+
+      await expect(isSameClipboardImage(file(ours), file(theirs))).resolves.toBe(true);
+      expect(ours.close).toHaveBeenCalledTimes(1);
+      expect(theirs.close).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["first", 0],
+      ["middle", 4096 * 150 + 17],
+      ["last", 4096 * 300 - 1],
+    ])("finds one pixel changed elsewhere, here the %s of a large picture", async (_where, pixel) => {
+      const ours = bitmap(4096, 300);
+      const theirs = bitmap(4096, 300);
+      theirs.pixels[pixel * 4] = 0;
+
+      await expect(isSameClipboardImage(file(ours), file(theirs))).resolves.toBe(false);
+    });
+
+    it("takes a picture of another size for another picture without reading it", async () => {
+      await expect(isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 49)))).resolves.toBe(false);
+      expect(getContext).not.toHaveBeenCalled();
+    });
+
+    it("matches nothing it cannot decode, and lets go of what it did decode", async () => {
+      const ours = bitmap(64, 48);
+
+      await expect(isSameClipboardImage(file(ours), file(null))).resolves.toBe(false);
+      expect(ours.close).toHaveBeenCalledTimes(1);
+    });
   });
 });

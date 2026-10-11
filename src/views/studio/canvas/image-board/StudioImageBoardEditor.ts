@@ -454,6 +454,10 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
     }
   }
 
+  /**
+   * An editor taken down while it flattens saves nothing more: by then the
+   * node of that name may belong to another project, or to a later edit.
+   */
   private async saveAndClose(): Promise<void> {
     this.stage.endTextEdit();
     this.busy = "done";
@@ -469,9 +473,15 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
         const scene = await this.completeScene();
         const rendered = await renderStudioImageBoardScene(scene);
         const asset = await this.options.storeAsset(rendered.bytes, rendered.mimeType);
+        if (this.disposed) {
+          return;
+        }
         this.session.recordRender(scene.board, baseAsset.path, asset);
       }
     } catch (error) {
+      if (this.disposed) {
+        return;
+      }
       // The edits themselves are already saved; only the flattened copy is missing.
       new Notice(`Your edits are saved, but the finished image could not be produced. ${messageOf(error)}`);
     }

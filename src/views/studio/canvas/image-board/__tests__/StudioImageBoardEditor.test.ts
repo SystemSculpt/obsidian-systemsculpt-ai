@@ -203,6 +203,56 @@ describe("in-place image editor", () => {
     expect(layers().map((layer) => layer.kind)).toEqual(["base", "shape"]);
   });
 
+  it("shows a caption changed elsewhere in the open field, so typing adds to it", async () => {
+    const { editor, stage, button, layers, store } = await mount();
+    const nodeWith = (config: Record<string, StudioJsonValue>): StudioNodeInstance => ({
+      id: "node_media", kind: "studio.media_ingest", version: "1.0.0", title: "Media",
+      position: { x: 0, y: 0 }, config, continueOnError: false, disabled: false,
+    });
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+    input.value = "top";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.setSelectionRange(3, 3);
+
+    // Another window on the same project rewrites the caption.
+    const elsewhere = JSON.parse(JSON.stringify(store).replace('"top"', '"top text, edited"')) as Record<string, StudioJsonValue>;
+    Object.assign(store, elsewhere);
+    editor.syncNode(nodeWith(store));
+
+    expect(input.isConnected).toBe(true);
+    expect(input.value).toBe("top text, edited");
+    expect(input.selectionStart).toBe(3);
+
+    input.value = "top text, edited!";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(layers()[1]).toMatchObject({ kind: "text", text: "top text, edited!" });
+  });
+
+  it("closes the caption field when its layer is removed elsewhere, saving nothing", async () => {
+    const { editor, stage, button, layers, store, commits } = await mount();
+    const withoutCaption = JSON.parse(JSON.stringify(store)) as Record<string, StudioJsonValue>;
+    button("studio.image.tool.text").click();
+    drag(stage, [200, 30]);
+    const input = stage.querySelector<HTMLTextAreaElement>('[data-testid="studio.image.text-input"]')!;
+    input.value = "top";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const before = commits.length;
+
+    for (const key of Object.keys(store)) delete store[key];
+    Object.assign(store, withoutCaption);
+    editor.syncNode({
+      id: "node_media", kind: "studio.media_ingest", version: "1.0.0", title: "Media",
+      position: { x: 0, y: 0 }, config: store, continueOnError: false, disabled: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stage.querySelector("textarea")).toBeNull();
+    expect(layers().map((layer) => layer.kind)).toEqual(["base"]);
+    expect(commits).toHaveLength(before);
+  });
+
   it("lets an input method finish a word before Escape or Enter end the caption", async () => {
     const { stage, button } = await mount();
     button("studio.image.tool.text").click();
@@ -781,6 +831,27 @@ describe("in-place image editor", () => {
     // Recording the render is bookkeeping, not an edit to undo.
     expect(commits[commits.length - 1]).toEqual({ mode: "discrete", captureHistory: false });
     expect(onClose).toHaveBeenCalledWith("node_media");
+  });
+
+  it("records and closes nothing when it is taken down while flattening", async () => {
+    const { editor, stage, button, storeAsset, onClose, commits } = await mount();
+    button("studio.image.tool.redact").click();
+    drag(stage, [40, 80], [240, 120]);
+    let store: (asset: { hash: string; path: string; mimeType: string; sizeBytes: number }) => void = () => undefined;
+    storeAsset.mockImplementationOnce(() => new Promise((resolve) => { store = resolve; }));
+    const before = commits.length;
+
+    const finished = editor.finish();
+    await flushImageBoard();
+    expect(storeAsset).toHaveBeenCalledTimes(1);
+    // The card goes away mid-save: another project may hold a node of this name by now.
+    editor.dispose();
+    store({ hash: "late", path: "Studio/assets/late.png", mimeType: "image/png", sizeBytes: 4 });
+    await finished;
+
+    expect(commits).toHaveLength(before);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("closes without producing anything when nothing was edited", async () => {

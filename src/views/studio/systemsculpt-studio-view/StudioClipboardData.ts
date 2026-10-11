@@ -111,60 +111,84 @@ export function extractClipboardMediaFiles(event: ClipboardEvent): File[] {
   return files;
 }
 
-const FINGERPRINT_SIDE = 8;
-const FINGERPRINT_TOLERANCE = 10;
+/** How far a channel may move through the clipboard: rounding, never an edit. */
+const PICTURE_TOLERANCE = 4;
+/** Pixels read back at a time, so a large picture is never held twice over. */
+const PICTURE_BAND_PIXELS = 1 << 20;
 
 /**
- * A coarse thumbnail of a picture: its size, then 8 × 8 premultiplied pixels.
- * The system clipboard re-encodes whatever is written to it, so bytes cannot
- * tell whether a pasted picture is one this view copied; its pixels can.
+ * Whether two rows of RGBA pixels show the same thing. Colour is weighed by
+ * its alpha: what lies under near-zero alpha does not survive a round trip.
  */
-export async function fingerprintClipboardImage(source: Blob): Promise<number[] | null> {
-  if (typeof createImageBitmap !== "function") {
-    return null;
-  }
-  let bitmap: ImageBitmap | null = null;
-  try {
-    bitmap = await createImageBitmap(source);
-    const canvas = createEl("canvas");
-    canvas.width = FINGERPRINT_SIDE;
-    canvas.height = FINGERPRINT_SIDE;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) {
-      return null;
-    }
-    context.drawImage(bitmap, 0, 0, FINGERPRINT_SIDE, FINGERPRINT_SIDE);
-    const pixels = context.getImageData(0, 0, FINGERPRINT_SIDE, FINGERPRINT_SIDE).data;
-    const fingerprint = [bitmap.width, bitmap.height];
-    for (let offset = 0; offset < pixels.length; offset += 4) {
-      const alpha = pixels[offset + 3];
-      // Colour under near-zero alpha does not survive a round trip; weigh it out.
-      fingerprint.push(
-        Math.round((pixels[offset] * alpha) / 255),
-        Math.round((pixels[offset + 1] * alpha) / 255),
-        Math.round((pixels[offset + 2] * alpha) / 255),
-        alpha
-      );
-    }
-    return fingerprint;
-  } catch {
-    return null;
-  } finally {
-    bitmap?.close();
-  }
-}
-
-/** Same size, and the same picture to within what a re-encode may shift. */
-export function isSameClipboardImage(first: readonly number[], second: readonly number[]): boolean {
-  if (first.length !== second.length || first[0] !== second[0] || first[1] !== second[1]) {
+export function isSameClipboardPixels(first: ArrayLike<number>, second: ArrayLike<number>): boolean {
+  if (first.length !== second.length) {
     return false;
   }
-  for (let index = 2; index < first.length; index += 1) {
-    if (Math.abs(first[index] - second[index]) > FINGERPRINT_TOLERANCE) {
+  const colourTolerance = PICTURE_TOLERANCE * 255;
+  for (let offset = 0; offset < first.length; offset += 4) {
+    const firstAlpha = first[offset + 3];
+    const secondAlpha = second[offset + 3];
+    if (Math.abs(firstAlpha - secondAlpha) > PICTURE_TOLERANCE) {
       return false;
+    }
+    for (let channel = offset; channel < offset + 3; channel += 1) {
+      if (Math.abs(first[channel] * firstAlpha - second[channel] * secondAlpha) > colourTolerance) {
+        return false;
+      }
     }
   }
   return true;
+}
+
+/**
+ * Whether two pictures are the same size and alike in every pixel. The system
+ * clipboard re-encodes whatever is written to it, so bytes cannot tell whether
+ * a pasted picture is one this view copied; its pixels can. All of them are
+ * compared: a picture touched up elsewhere is another picture, however small
+ * the change.
+ */
+export async function isSameClipboardImage(first: Blob, second: Blob): Promise<boolean> {
+  if (typeof createImageBitmap !== "function") {
+    return false;
+  }
+  const decoded = await Promise.allSettled([createImageBitmap(first), createImageBitmap(second)]);
+  const bitmaps = decoded.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  try {
+    if (bitmaps.length !== 2) {
+      return false;
+    }
+    const [ours, theirs] = bitmaps;
+    const { width, height } = ours;
+    if (width < 1 || height < 1 || theirs.width !== width || theirs.height !== height) {
+      return false;
+    }
+    const band = Math.min(height, Math.max(1, Math.floor(PICTURE_BAND_PIXELS / width)));
+    const canvas = createEl("canvas");
+    canvas.width = width;
+    canvas.height = band;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return false;
+    }
+    context.globalCompositeOperation = "copy";
+    for (let top = 0; top < height; top += band) {
+      const rows = Math.min(band, height - top);
+      const read = (bitmap: ImageBitmap): Uint8ClampedArray => {
+        context.drawImage(bitmap, 0, top, width, rows, 0, 0, width, rows);
+        return context.getImageData(0, 0, width, rows).data;
+      };
+      if (!isSameClipboardPixels(read(ours), read(theirs))) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    for (const bitmap of bitmaps) {
+      bitmap.close();
+    }
+  }
 }
 
 export function extractClipboardText(event: ClipboardEvent): string {
