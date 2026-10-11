@@ -146,13 +146,20 @@ export function isSameClipboardPixels(first: ArrayLike<number>, second: ArrayLik
  * clipboard re-encodes whatever is written to it, so bytes cannot tell whether
  * a pasted picture is one this view copied; its pixels can. All of them are
  * compared: a picture touched up elsewhere is another picture, however small
- * the change.
+ * the change. The work is done in `ownerWindow`, the window of the paste.
  */
-export async function isSameClipboardImage(first: Blob, second: Blob): Promise<boolean> {
-  if (typeof createImageBitmap !== "function") {
+export async function isSameClipboardImage(
+  first: Blob,
+  second: Blob,
+  ownerWindow: Window
+): Promise<boolean> {
+  if (typeof ownerWindow.createImageBitmap !== "function") {
     return false;
   }
-  const decoded = await Promise.allSettled([createImageBitmap(first), createImageBitmap(second)]);
+  const decoded = await Promise.allSettled([
+    ownerWindow.createImageBitmap(first),
+    ownerWindow.createImageBitmap(second),
+  ]);
   const bitmaps = decoded.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
   try {
     if (bitmaps.length !== 2) {
@@ -164,7 +171,10 @@ export async function isSameClipboardImage(first: Blob, second: Blob): Promise<b
       return false;
     }
     const band = Math.min(height, Math.max(1, Math.floor(PICTURE_BAND_PIXELS / width)));
-    const canvas = createEl("canvas");
+    const canvas = ownerWindow.document.defaultView?.createEl("canvas");
+    if (!canvas) {
+      return false;
+    }
     canvas.width = width;
     canvas.height = band;
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -175,7 +185,7 @@ export async function isSameClipboardImage(first: Blob, second: Blob): Promise<b
     for (let top = 0; top < height; top += band) {
       if (top > 0) {
         // A large picture is many bands; the canvas stays responsive between them.
-        await yieldToEventLoop();
+        await yieldToEventLoop(0, ownerWindow);
       }
       const rows = Math.min(band, height - top);
       const read = (bitmap: ImageBitmap): Uint8ClampedArray => {

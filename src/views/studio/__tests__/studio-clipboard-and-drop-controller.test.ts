@@ -329,10 +329,16 @@ describe("StudioClipboardAndDropController", () => {
     const settle = async (): Promise<void> => {
       for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
     };
+    // Pastes reach the controller through the window it is bound to.
+    const pictureHarness = (options: Parameters<typeof createHarness>[0], ownerWindow: Window = window): Harness => {
+      const harness = createHarness(options);
+      harness.controller.bindOwnerWindow(ownerWindow);
+      return harness;
+    };
 
     it("puts the picture itself on the clipboard, not a description of the node", async () => {
       const copyNodeImage = jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob));
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo")]),
         selectedNodeIds: ["photo"],
         copyNodeImage,
@@ -347,7 +353,7 @@ describe("StudioClipboardAndDropController", () => {
     });
 
     it("copies the node after all when its picture cannot be put on the clipboard", async () => {
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo")]),
         selectedNodeIds: ["photo"],
         copyNodeImage: jest.fn(() => Promise.resolve(null)),
@@ -356,12 +362,15 @@ describe("StudioClipboardAndDropController", () => {
       harness.controller.copySelectedGraphNodes();
       await settle();
 
-      expect(harness.copyText).toHaveBeenCalledWith(expect.stringContaining("systemsculpt.studio.clipboard.v1"));
+      expect(harness.copyText).toHaveBeenCalledWith(
+        expect.stringContaining("systemsculpt.studio.clipboard.v1"),
+        document.body,
+      );
     });
 
     it("still copies nodes as nodes for anything but one picture", async () => {
       const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(1, 2, 3, 255) as Blob) : null));
-      const both = createHarness({
+      const both = pictureHarness({
         project: projectWithNodes([picture("photo"), textInstance("note")]),
         selectedNodeIds: ["photo", "note"],
         copyNodeImage,
@@ -371,7 +380,7 @@ describe("StudioClipboardAndDropController", () => {
       expect(copyNodeImage).not.toHaveBeenCalled();
       expect(both.copyText).toHaveBeenCalledTimes(1);
 
-      const text = createHarness({
+      const text = pictureHarness({
         project: projectWithNodes([textInstance("note")]),
         selectedNodeIds: ["note"],
         copyNodeImage,
@@ -383,7 +392,7 @@ describe("StudioClipboardAndDropController", () => {
     });
 
     it("brings the node back, edits and all, when that picture is pasted here again", async () => {
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo")]),
         selectedNodeIds: ["photo"],
         copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
@@ -401,8 +410,26 @@ describe("StudioClipboardAndDropController", () => {
       expect(harness.host.storeAsset).not.toHaveBeenCalled();
     });
 
+    it("tells the pictures apart in the window the paste arrived in, such as a pop-out", async () => {
+      const popout = { addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as Window;
+      const copied = looksLike(10, 20, 30, 255);
+      const pasted = looksLike(10, 20, 30, 255);
+      const harness = pictureHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage: jest.fn(() => Promise.resolve(copied as Blob)),
+      }, popout);
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+
+      await harness.controller.handlePaste(clipboardEvent({ files: [pasted] }));
+
+      expect(harness.isSameImage).toHaveBeenCalledWith(copied, pasted, popout);
+      expect(harness.getProject()?.graph.nodes).toHaveLength(2);
+    });
+
     it("makes a new media node from any other picture pasted afterwards", async () => {
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo")]),
         selectedNodeIds: ["photo"],
         copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
@@ -423,7 +450,7 @@ describe("StudioClipboardAndDropController", () => {
       ["the copied picture", true],
       ["another picture", false],
     ])("pastes nothing when the project changes while %s is being told apart", async (_which, same) => {
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo")]),
         selectedNodeIds: ["photo"],
         copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
@@ -450,7 +477,7 @@ describe("StudioClipboardAndDropController", () => {
     it("forgets the picture once something else is copied", async () => {
       const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(10, 20, 30, 255) as Blob) : null));
       let selection = ["photo"];
-      const harness = createHarness({
+      const harness = pictureHarness({
         project: projectWithNodes([picture("photo"), textInstance("note")]),
         copyNodeImage,
       });
@@ -809,15 +836,19 @@ describe("telling a pasted picture from the one that was copied", () => {
       close: jest.fn(),
     });
     const file = (decoded: FakeBitmap | null): Blob => ({ decoded }) as unknown as Blob;
+    // The window of the paste: pictures are decoded, drawn and paced there.
+    const ownerWindow = {
+      createImageBitmap: async (source: Blob) => {
+        const decoded = (source as unknown as { decoded: FakeBitmap | null }).decoded;
+        if (!decoded) throw new Error("not a picture");
+        return decoded;
+      },
+      document: { defaultView: { createEl: (tag: string) => document.createElement(tag) } },
+    } as unknown as Window;
     let getContext: jest.SpyInstance;
 
     beforeEach(() => {
       (yieldToEventLoop as jest.Mock).mockClear();
-      (globalThis as { createImageBitmap?: unknown }).createImageBitmap = jest.fn(async (source: Blob) => {
-        const decoded = (source as unknown as { decoded: FakeBitmap | null }).decoded;
-        if (!decoded) throw new Error("not a picture");
-        return decoded;
-      });
       // A canvas that hands back the rows it was asked to draw.
       getContext = jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
         let drawn = new Uint8ClampedArray(0);
@@ -833,7 +864,6 @@ describe("telling a pasted picture from the one that was copied", () => {
     });
 
     afterEach(() => {
-      delete (globalThis as { createImageBitmap?: unknown }).createImageBitmap;
       getContext.mockRestore();
     });
 
@@ -841,17 +871,18 @@ describe("telling a pasted picture from the one that was copied", () => {
       const ours = bitmap(4096, 300);
       const theirs = bitmap(4096, 300);
 
-      await expect(isSameClipboardImage(file(ours), file(theirs))).resolves.toBe(true);
+      await expect(isSameClipboardImage(file(ours), file(theirs), ownerWindow)).resolves.toBe(true);
       expect(ours.close).toHaveBeenCalledTimes(1);
       expect(theirs.close).toHaveBeenCalledTimes(1);
     });
 
     it("lets the canvas breathe between the bands of a large picture, and only then", async () => {
-      // Two bands: one pause between them.
-      await isSameClipboardImage(file(bitmap(4096, 300)), file(bitmap(4096, 300)));
+      // Two bands: one pause between them, on the timer of the paste's own window.
+      await isSameClipboardImage(file(bitmap(4096, 300)), file(bitmap(4096, 300)), ownerWindow);
       expect(yieldToEventLoop).toHaveBeenCalledTimes(1);
+      expect(yieldToEventLoop).toHaveBeenCalledWith(0, ownerWindow);
 
-      await isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 48)));
+      await isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 48)), ownerWindow);
       expect(yieldToEventLoop).toHaveBeenCalledTimes(1);
     });
 
@@ -864,18 +895,24 @@ describe("telling a pasted picture from the one that was copied", () => {
       const theirs = bitmap(4096, 300);
       theirs.pixels[pixel * 4] = 0;
 
-      await expect(isSameClipboardImage(file(ours), file(theirs))).resolves.toBe(false);
+      await expect(isSameClipboardImage(file(ours), file(theirs), ownerWindow)).resolves.toBe(false);
     });
 
     it("takes a picture of another size for another picture without reading it", async () => {
-      await expect(isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 49)))).resolves.toBe(false);
+      await expect(isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 49)), ownerWindow)).resolves.toBe(false);
       expect(getContext).not.toHaveBeenCalled();
+    });
+
+    it("matches nothing where pictures cannot be decoded at all", async () => {
+      const bare = { document: ownerWindow.document } as unknown as Window;
+
+      await expect(isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 48)), bare)).resolves.toBe(false);
     });
 
     it("matches nothing it cannot decode, and lets go of what it did decode", async () => {
       const ours = bitmap(64, 48);
 
-      await expect(isSameClipboardImage(file(ours), file(null))).resolves.toBe(false);
+      await expect(isSameClipboardImage(file(ours), file(null), ownerWindow)).resolves.toBe(false);
       expect(ours.close).toHaveBeenCalledTimes(1);
     });
   });

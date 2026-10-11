@@ -94,7 +94,7 @@ export interface StudioClipboardAndDropHost {
 type StudioClipboardAndDropDependencies = {
   createId(prefix: string): string;
   copyText(text: string, host?: Node): Promise<boolean>;
-  isSameImage(first: Blob, second: Blob): Promise<boolean>;
+  isSameImage(first: Blob, second: Blob, ownerWindow: Window): Promise<boolean>;
 };
 
 type ProjectOperationScope = {
@@ -111,7 +111,7 @@ function describeClipboardCount(verb: string, count: number): string {
 const DEFAULT_DEPENDENCIES: StudioClipboardAndDropDependencies = {
   createId: (prefix) => randomId(prefix),
   copyText: (text, host) => tryCopyToClipboard(text, host),
-  isSameImage: (first, second) => isSameClipboardImage(first, second),
+  isSameImage: (first, second, ownerWindow) => isSameClipboardImage(first, second, ownerWindow),
 };
 
 /**
@@ -617,10 +617,12 @@ export class StudioClipboardAndDropController {
   ): Promise<StudioGraphClipboardPayload | null> {
     const payload = this.graphClipboardPayload;
     const copied = this.graphClipboardImage;
-    if (!payload || !copied || mediaFiles.length !== 1) return null;
+    // Pastes arrive through the window this is bound to; the pictures are compared there.
+    const ownerWindow = this.listenerWindow;
+    if (!payload || !copied || !ownerWindow || mediaFiles.length !== 1) return null;
     const ours = await copied;
     const same = ours !== null &&
-      (await this.dependencies.isSameImage(ours, mediaFiles[0]).catch(() => false));
+      (await this.dependencies.isSameImage(ours, mediaFiles[0], ownerWindow).catch(() => false));
     return same && this.graphClipboardPayload === payload ? payload : null;
   }
 

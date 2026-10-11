@@ -1,10 +1,11 @@
 /**
  * Yield execution to the next macrotask to let pending timers and UI work run.
  * This helps avoid long-running synchronous blocks that delay scheduled startup phases.
+ * Work begun in a pop-out passes that window, so the pause runs on its timer.
  */
-export async function yieldToEventLoop(delayMs = 0): Promise<void> {
+export async function yieldToEventLoop(delayMs = 0, ownerWindow: Window = window): Promise<void> {
   await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, delayMs);
+    ownerWindow.setTimeout(resolve, delayMs);
   });
 }
 
