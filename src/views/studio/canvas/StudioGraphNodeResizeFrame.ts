@@ -5,6 +5,7 @@ import type {
 } from "./StudioGraphNodeCardTypes";
 import {
   clampStudioNodeDimension,
+  isStudioFillTextNode,
   resolveStudioCanvasDelta,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeResizeBounds,
@@ -234,6 +235,7 @@ export function mountStudioGraphNodeResizeFrame(
 
   const semanticsMode: StudioNodeResizeMode = resolveStudioNodeResizeSemantics(node.kind, {
     hasAspectMediaContent: options.hasAspectMediaContent,
+    textFillsBox: isStudioFillTextNode(node),
   });
 
   let activePointerId: number | null = null;

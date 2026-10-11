@@ -9,6 +9,19 @@ describe("yieldToEventLoop", () => {
     jest.useRealTimers();
   });
 
+  it("pauses on the timer of the window it is given", async () => {
+    const popout = {
+      setTimeout: jest.fn((resume: () => void) => {
+        resume();
+        return 1;
+      }),
+    } as unknown as Window;
+
+    await yieldToEventLoop(25, popout);
+
+    expect(popout.setTimeout).toHaveBeenCalledWith(expect.any(Function), 25);
+  });
+
   it("waits for the next macrotask before continuing", async () => {
     let firstTimerRan = false;
 

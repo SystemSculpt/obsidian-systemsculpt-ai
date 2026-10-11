@@ -17,6 +17,5 @@
   "src/views/studio/canvas/StudioGraphNodeCardSections.ts": 3,
   "src/views/studio/canvas/StudioGraphNodeInlineEditors.ts": 1,
   "src/views/studio/canvas/StudioGraphTextInlineEditor.ts": 1,
-  "src/views/studio/canvas/StudioGraphTextNodeCard.ts": 1,
-  "src/views/studio/canvas/studio-image-editor/StudioImageEditorInspector.ts": 3
+  "src/views/studio/canvas/StudioGraphTextNodeCard.ts": 1
 }

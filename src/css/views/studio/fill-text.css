@@ -1,0 +1,81 @@
+/* ------------------------------------------------------------------ *
+ * Fill text — text that fills its box, on an image and on the canvas.
+ *
+ * One class for the field being typed into and for the block showing
+ * the finished text. Size, line height, padding, alignment, colour and
+ * outline width are written by StudioFillTextSurface.ts; this sheet
+ * owns what does not depend on the box.
+ * ------------------------------------------------------------------ */
+.ss-studio-image-board .ss-studio-fill-text,
+.ss-studio-node-card .ss-studio-fill-text {
+  box-sizing: border-box;
+  min-height: 0;
+  margin: 0;
+  padding-bottom: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  outline: 0;
+  overflow: hidden;
+  resize: none;
+  white-space: pre;
+  paint-order: stroke fill;
+  caret-color: var(--ss-accent);
+}
+
+.ss-studio-image-board .ss-studio-fill-text:focus,
+.ss-studio-image-board .ss-studio-fill-text:hover,
+.ss-studio-node-card .ss-studio-fill-text:focus,
+.ss-studio-node-card .ss-studio-fill-text:hover {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.ss-studio-fill-text[data-style="meme"] {
+  text-transform: uppercase;
+}
+
+.ss-studio-image-board .ss-studio-fill-text[data-style="banner"],
+.ss-studio-node-card .ss-studio-fill-text[data-style="banner"] {
+  background-color: var(--ss-media-scrim);
+}
+
+.ss-studio-fill-text[data-style="shadow"] {
+  text-shadow: 0 0.07em 0.22em var(--ss-media-scrim);
+}
+
+.ss-studio-fill-text::placeholder {
+  color: inherit;
+  opacity: 0.45;
+}
+
+/* ------------------------------------------------------------------ *
+ * On the canvas the card is the box: the text covers it edge to edge,
+ * and the card's width and height are the only sizes there are.
+ * ------------------------------------------------------------------ */
+.ss-studio-fill-text-card > .ss-studio-fill-text {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--ss-ink);
+  cursor: grab;
+}
+
+.ss-studio-fill-text-card > textarea.ss-studio-fill-text {
+  cursor: text;
+  user-select: text;
+}
+
+/* Outlined and banner text carry their own contrast, so until a colour
+ * is picked they take the light ink captions use on images. */
+.ss-studio-fill-text-card > .ss-studio-fill-text:is([data-style="meme"], [data-style="outline"], [data-style="banner"]) {
+  color: var(--ss-ink-on-media);
+}
+
+.ss-studio-fill-text-card > .ss-studio-fill-text.is-placeholder {
+  opacity: 0.45;
+}

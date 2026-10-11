@@ -3,6 +3,7 @@ import {
   resolveMeasuredStudioNodeHeight,
   resolveMeasuredStudioNodeWidth,
   resolveStudioCanvasDelta,
+  isStudioFillTextNode,
   resolveStudioTextNodeFontSize,
 } from "../../studio/StudioNodeGeometry";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../studio/types";
@@ -199,6 +200,7 @@ export class StudioGraphSelectionResizeController {
         hasAspectMediaContent: Boolean(
           nodeEl?.querySelector(".ss-studio-node-media-preview")
         ),
+        textFillsBox: isStudioFillTextNode(node),
         interactionLocked: isManagedOutputPlaceholderNode(node),
       });
       nodesById.set(node.id, node);

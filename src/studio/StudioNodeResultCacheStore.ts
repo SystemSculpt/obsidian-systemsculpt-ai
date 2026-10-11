@@ -14,7 +14,7 @@ function normalizeNodeConfigForFingerprint(node: StudioNodeInstance): StudioNode
   const config = { ...(node.config) }; const kind = String(node.kind || "").trim();
   if (kind === "studio.text_generation") { if (config.lockOutput !== true) { delete config.value; delete config.lockOutput; } delete config.textDisplayMode; }
   if (kind === "studio.transcription") { delete config.value; delete config.textDisplayMode; }
-  if (kind === "studio.media_ingest" && isRecord(config.captionBoard)) { const board = { ...(config.captionBoard as Record<string, StudioJsonValue>) }; delete board.lastRenderedAsset; delete board.updatedAt; delete board.sourceAssetPath; config.captionBoard = board; }
+  if (kind === "studio.media_ingest" && isRecord(config.captionBoard)) { const board = { ...(config.captionBoard as Record<string, StudioJsonValue>) }; delete board.lastRenderedAsset; delete board.lastRenderedOf; delete board.updatedAt; delete board.sourceAssetPath; config.captionBoard = board; }
   return config;
 }
 function stableStringify(value: unknown): string {

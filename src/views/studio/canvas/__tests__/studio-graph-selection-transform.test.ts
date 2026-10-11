@@ -317,6 +317,49 @@ describe("resolveStudioSelectionResizePatches", () => {
     });
   });
 
+  describe("fill text", () => {
+    it("resizes as a box on both axes, with no font size to scale", () => {
+      const result = resolveStudioSelectionResizePatches({
+        zone: "se",
+        deltaX: 300,
+        deltaY: 200,
+        startBounds: { left: 100, top: 100, width: 300, height: 200 },
+        nodes: [
+          snapshot({
+            nodeId: "fill",
+            kind: "studio.text",
+            textFillsBox: true,
+            rect: { left: 100, top: 100, width: 300, height: 200 },
+          }),
+        ],
+      });
+
+      expect(patchFor(result, "fill")).toEqual({
+        size: { width: 600, height: 400 },
+        position: { x: 100, y: 100 },
+      });
+    });
+
+    it("shrinks below what a Markdown text card allows", () => {
+      const result = resolveStudioSelectionResizePatches({
+        zone: "se",
+        deltaX: -260,
+        deltaY: -170,
+        startBounds: { left: 100, top: 100, width: 300, height: 200 },
+        nodes: [
+          snapshot({
+            nodeId: "fill",
+            kind: "studio.text",
+            textFillsBox: true,
+            rect: { left: 100, top: 100, width: 300, height: 200 },
+          }),
+        ],
+      });
+
+      expect(patchFor(result, "fill")?.size).toEqual({ width: 40, height: 30 });
+    });
+  });
+
   describe("aspect-width semantics", () => {
     const nodes: StudioSelectionResizeNodeSnapshot[] = [
       snapshot({

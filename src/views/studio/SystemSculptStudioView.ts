@@ -77,14 +77,17 @@ import { bindStudioVaultEvents } from "./StudioVaultEventBindings";
 import { StudioAssetPreviewController } from "./StudioAssetPreviewController";
 import type { StudioEditingSnapshot } from "../../core/plugin/StudioReloadState";
 import { captureStudioSourceReloadState, restoreStudioSourceReloadState } from "./canvas/StudioNodeSourceBody";
-import { openStudioImageEditorModal } from "./canvas/StudioGraphImageEditorModal";
-import { composeStudioCaptionBoardImage } from "../../studio/StudioCaptionBoardComposition";
+import type { StudioImageBoardEditorHandle } from "./canvas/image-board/StudioImageBoardEditor";
+import { composeStudioImageBoardAsset } from "../../studio/StudioImageBoardRenderer";
+import { resolveStudioImageBoardBaseAsset } from "./canvas/image-board/StudioImageBoardImages";
 import {
-  boardStateHasRenderableEdits,
-  readStudioCaptionBoardState,
-  resolveStudioCaptionBoardRenderedAsset,
-  writeStudioCaptionBoardState,
-} from "../../studio/StudioCaptionBoardState";
+  normalizeStudioAssetRef,
+  readStudioImageBoard,
+  resolveStudioImageBoardRenderedAsset,
+  studioImageBoardHasEdits,
+  studioImageBoardWithRender,
+  writeStudioImageBoard,
+} from "../../studio/StudioImageBoard";
 import {
   normalizeGraphCoordinate,
   normalizeWorldCoordinate,
@@ -94,13 +97,21 @@ import {
   STUDIO_NODE_COLLAPSED_VISIBILITY_CONFIG_KEY,
   type StudioNodeDetailMode,
 } from "./canvas/StudioGraphNodeDetailMode";
-import type { StudioGraphNodeResizePatch } from "./canvas/StudioGraphNodeCardTypes";
+import type {
+  StudioGraphNodeImageBoardOptions,
+  StudioGraphNodeResizePatch,
+} from "./canvas/StudioGraphNodeCardTypes";
 import { readStudioTextNodeValue } from "./canvas/StudioGraphTextNodeCard";
 import {
   clampStudioNodeDimension,
+  isStudioFillTextNode,
   resolveStudioGraphNodeWidth,
+  STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT,
+  STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH,
   STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
+  STUDIO_TEXT_NODE_FILL_LAYOUT,
+  STUDIO_TEXT_NODE_LAYOUT_KEY,
   STUDIO_TEXT_NODE_WIDTH_MODE_KEY,
 } from "../../studio/StudioNodeGeometry";
 import { computeStudioNewNodePosition } from "./canvas/StudioGraphNodePlacement";
@@ -129,7 +140,8 @@ import {
   getStudioOwnerWindow,
   requestStudioAnimationFrame,
 } from "./StudioDomContext";
-import { tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
+import { tryCopyImageBytesToClipboard, tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
+import { resolveNodeMediaPreview } from "./canvas/StudioGraphMediaPreview";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
 import {
@@ -228,6 +240,9 @@ export class SystemSculptStudioView extends ItemView {
     positionsChanged: () => this.graphInteraction.notifyNodePositionsChanged(),
   });
   private readonly textEdits = new StudioTextEditSessions();
+  /** The one image node being edited in place, and the editor its card mounted for it. */
+  private imageEditNodeId: string | null = null;
+  private imageEditor: StudioImageBoardEditorHandle | null = null;
   private graphWorkspace: StudioGraphWorkspaceRenderResult | null = null;
   /** Armed diagram tool from the tools row; "select" is the normal pointer. */
   private activeCanvasTool: StudioCanvasTool = "select";
@@ -376,6 +391,8 @@ export class SystemSculptStudioView extends ItemView {
     });
     this.clipboardAndDropController = new StudioClipboardAndDropController(this.app, {
       ownsEventTarget: (target) => this.isActiveStudioView() && this.ownsKeyboardTarget(target),
+      interceptPaste: (event) => this.imageEditor?.handlePaste(event) === true,
+      copyNodeImage: (nodeId) => this.copyNodePictureToClipboard(nodeId),
       isBusy: () => this.busy,
       isEditableTarget: (target) => this.isEditableKeyboardTarget(target),
       getCurrentProject: () => this.currentProject,
@@ -549,6 +566,7 @@ export class SystemSculptStudioView extends ItemView {
   private clearProjectEditorState(): void {
     this.shapeController.clearSelection();
     this.textEdits.clear();
+    this.imageEditNodeId = null;
   }
 
   private applyHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot | null {
@@ -737,6 +755,10 @@ export class SystemSculptStudioView extends ItemView {
     }
     if (!this.ownsKeyboardTarget(event.target)) {
       return false;
+    }
+    // An image being edited in place takes its keys before the canvas does.
+    if (this.imageEditor?.handleKeyDown(event)) {
+      return true;
     }
     const normalizedKey = String(event.key || "").toLowerCase();
     const normalizedCode = String(event.code || "").toLowerCase();
@@ -1476,8 +1498,9 @@ export class SystemSculptStudioView extends ItemView {
     const currentNode = this.currentProject
       ? this.findNode(this.currentProject, nodeId)
       : null;
+    // Everything done to a text node while it is being typed into, its style
+    // included, is one edit: one step to undo, and none if the box is left empty.
     const isActiveTextEdit =
-      key === "value" &&
       currentNode?.kind === "studio.text" &&
       this.textEdits.isEditing(nodeId);
     const changed = this.commitCurrentProjectMutation(
@@ -1614,7 +1637,7 @@ export class SystemSculptStudioView extends ItemView {
         mutated = true;
       }
       // A dragged width ends a text card's auto sizing (tldraw parity).
-      if (target.kind === "studio.text" && patch.size.width !== undefined && target.config[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] !== "fixed") {
+      if (target.kind === "studio.text" && !isStudioFillTextNode(target) && patch.size.width !== undefined && target.config[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] !== "fixed") {
         target.config[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] = "fixed";
         mutated = true;
       }
@@ -1642,30 +1665,67 @@ export class SystemSculptStudioView extends ItemView {
     return mutated;
   }
 
-  private openImageEditorForNode(node: StudioNodeInstance): void {
+  /** The pencil on an image node toggles editing that image right where it sits. */
+  private toggleImageEditForNode(node: StudioNodeInstance): void {
     if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
       return;
     }
+    if (this.imageEditNodeId === node.id) {
+      void this.finishImageEdit();
+      return;
+    }
+    void this.finishImageEdit().then(() => {
+      if (!this.currentProject || !this.findNode(this.currentProject, node.id)) {
+        return;
+      }
+      this.imageEditNodeId = node.id;
+      // Canvas drawing tools would otherwise claim the drags meant for the image.
+      this.selectCanvasTool("select");
+      this.graphInteraction.selectOnlyNode(node.id);
+      this.render();
+    });
+  }
+
+  /** Saves the flattened image and returns the card to its normal state. */
+  private async finishImageEdit(): Promise<void> {
+    const nodeId = this.imageEditNodeId;
+    if (!nodeId) {
+      return;
+    }
+    if (this.imageEditor) {
+      await this.imageEditor.finish();
+    }
+    // Ends the edit that was finished, not one begun while it was saving.
+    this.endImageEdit(nodeId);
+  }
+
+  private endImageEdit(nodeId: string | null): void {
+    if (!nodeId || this.imageEditNodeId !== nodeId) {
+      return;
+    }
+    this.imageEditNodeId = null;
+    this.render();
+  }
+
+  private imageBoardOptions(): StudioGraphNodeImageBoardOptions | undefined {
     const projectPath = this.currentProjectPath;
+    if (!projectPath) {
+      return undefined;
+    }
     const studio = this.plugin.getStudioService();
-    openStudioImageEditorModal({
+    return {
       app: this.app,
-      node,
-      nodeRunState: this.runPresentation.getNodeState(node.id),
-      projectPath,
-      resolveAssetPreviewSrc: (assetPath) => this.assetPreviews.resolve(assetPath),
       readAsset: (asset) => studio.readAsset(asset),
       storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
-      onNodeConfigMutated: (nextNode) => {
-        this.handleNodeConfigMutated(nextNode);
+      isEditing: (nodeId) => this.imageEditNodeId === nodeId,
+      onEditorMounted: (_nodeId, editor) => {
+        this.imageEditor = editor;
       },
-      onNodeConfigValueChange: (nodeId, key, value, options) => {
-        this.handleNodeConfigValueChange(nodeId, key, value, options);
+      onEditorUnmounted: (_nodeId, editor) => {
+        if (this.imageEditor === editor) this.imageEditor = null;
       },
-      onRenderedAssetCommitted: () => {
-        this.render();
-      },
-    });
+      onClose: (nodeId) => this.endImageEdit(nodeId),
+    };
   }
 
   private async editImageWithAiForNode(node: StudioNodeInstance): Promise<void> {
@@ -1786,88 +1846,68 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
-  private normalizeStudioAssetRefLike(value: unknown): StudioAssetRef | null {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return null;
-    }
-    const record = value as Record<string, unknown>;
-    const hash = typeof record.hash === "string" ? record.hash.trim() : "";
-    const path = typeof record.path === "string" ? record.path.trim() : "";
-    const mimeType =
-      typeof record.mimeType === "string"
-        ? record.mimeType.trim()
-        : typeof record.mime_type === "string"
-          ? record.mime_type.trim()
-          : "";
-    const sizeBytes = Number(record.sizeBytes ?? record.size_bytes);
-    if (!hash || !path || !mimeType || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-      return null;
-    }
-    return {
-      hash,
-      path,
-      mimeType,
-      sizeBytes: Math.floor(sizeBytes),
-    };
-  }
-
+  /**
+   * The picture an image node shows, as a project asset: its edits flattened
+   * when it has any, otherwise its own image. A node that has not run is
+   * staged from its source, as it is for editing. Null when that picture
+   * cannot be produced; an edited image is never stood in for by its source.
+   */
   private async ensureRenderedImageAssetForNode(node: StudioNodeInstance): Promise<StudioAssetRef | null> {
     if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
       return null;
     }
-
+    const projectPath = this.currentProjectPath;
+    const studio = this.plugin.getStudioService();
     const nodeRunState = this.runPresentation.getNodeState(node.id);
-    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-    const sourcePreviewAsset = this.normalizeStudioAssetRefLike(outputs.source_preview_asset);
-    const previewAsset = this.normalizeStudioAssetRefLike(outputs.preview_asset);
-    const configuredSourcePath = typeof node.config.sourcePath === "string" ? node.config.sourcePath.trim() : "";
-    const boardState = readStudioCaptionBoardState(node.config);
-    const existingRenderedAsset = resolveStudioCaptionBoardRenderedAsset(
-      node.config,
-      sourcePreviewAsset?.path || configuredSourcePath
-    );
-
+    const sourceAsset = await resolveStudioImageBoardBaseAsset({
+      app: this.app,
+      node,
+      nodeRunState,
+      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
+    }).catch(() => null);
+    const board = readStudioImageBoard(node.config);
+    if (!studioImageBoardHasEdits(board)) {
+      const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
+      return sourceAsset ?? normalizeStudioAssetRef(outputs.preview_asset);
+    }
+    if (!sourceAsset) {
+      return null;
+    }
+    const existingRenderedAsset = resolveStudioImageBoardRenderedAsset(node.config, sourceAsset.path);
     if (existingRenderedAsset) {
       return existingRenderedAsset;
     }
 
-    if (boardStateHasRenderableEdits(boardState) && sourcePreviewAsset) {
-      const studio = this.plugin.getStudioService();
-      const renderedAsset = await composeStudioCaptionBoardImage({
-        baseImage: sourcePreviewAsset,
-        boardState,
-        readAsset: (asset) => studio.readAsset(asset),
-        storeAsset: (bytes, mimeType) => studio.storeAsset(this.currentProjectPath!, bytes, mimeType),
-      });
-      const changed = await this.commitCurrentProjectMutationAsync(
-        "media.editor",
-        async (project) => {
-          const targetNode = this.findNode(project, node.id);
-          if (!targetNode || targetNode.kind !== "studio.media_ingest") {
-            return false;
-          }
-          writeStudioCaptionBoardState(targetNode, {
-            ...boardState,
-            sourceAssetPath: sourcePreviewAsset.path,
-            lastRenderedAsset: renderedAsset,
-            updatedAt: new Date().toISOString(),
-          });
-          return true;
-        },
-        { captureHistory: false }
-      );
-      if (!changed) {
-        return renderedAsset;
-      }
+    const renderedAsset = await composeStudioImageBoardAsset({
+      baseImage: sourceAsset,
+      board,
+      readAsset: (asset) => studio.readAsset(asset),
+      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
+    });
+    const changed = await this.commitCurrentProjectMutationAsync(
+      "media.editor",
+      async (project) => {
+        const targetNode = this.findNode(project, node.id);
+        if (!targetNode || targetNode.kind !== "studio.media_ingest") {
+          return false;
+        }
+        // The node keeps whatever was done to it meanwhile; the picture is recorded as being of `board`.
+        writeStudioImageBoard(
+          targetNode,
+          studioImageBoardWithRender(readStudioImageBoard(targetNode.config), board, sourceAsset.path, renderedAsset)
+        );
+        return true;
+      },
+      { captureHistory: false }
+    );
+    if (changed) {
       this.render();
-      return renderedAsset;
     }
-
-    return previewAsset || sourcePreviewAsset;
+    return renderedAsset;
   }
 
   private async copyImageForNodeToClipboard(node: StudioNodeInstance): Promise<void> {
-    const asset = await this.ensureRenderedImageAssetForNode(node);
+    const asset = await this.ensureRenderedImageAssetForNode(node).catch(() => null);
     if (!asset) {
       new Notice("Run this image node once before copying the image.");
       return;
@@ -1883,6 +1923,32 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     new Notice("Image copied to clipboard.");
+  }
+
+  /**
+   * Copying one image card copies the picture as it looks, edits included.
+   * Null when the node is not a picture; resolves to null when the picture
+   * could not be read or copied, so the node itself is copied instead.
+   */
+  private copyNodePictureToClipboard(nodeId: string): Promise<Blob | null> | null {
+    const node = this.currentProject ? this.findNode(this.currentProject, nodeId) : null;
+    if (!node || node.kind !== "studio.media_ingest") {
+      return null;
+    }
+    const outputs = (this.runPresentation.getNodeState(node.id).outputs || null) as Record<string, unknown> | null;
+    if (resolveNodeMediaPreview(node, outputs)?.kind !== "image") {
+      return null;
+    }
+    return (async () => {
+      const asset = await this.ensureRenderedImageAssetForNode(node);
+      const file = asset ? this.app.vault.getAbstractFileByPath(asset.path) : null;
+      if (!asset || !(file instanceof TFile)) {
+        return null;
+      }
+      const bytes = await this.app.vault.readBinary(file);
+      const copied = await tryCopyImageBytesToClipboard(bytes, asset.mimeType, this.containerEl);
+      return copied ? new Blob([bytes], { type: asset.mimeType }) : null;
+    })();
   }
 
   private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
@@ -2420,14 +2486,23 @@ export class SystemSculptStudioView extends ItemView {
     const position = options?.position
       ? this.normalizeNodePosition(options.position)
       : this.computeDefaultNodePosition(project, definition);
+    // Text made by hand is a box its type fills, unless the caller asks for another layout.
+    const fillText = definition.kind === "studio.text" && options?.config?.[STUDIO_TEXT_NODE_LAYOUT_KEY] === undefined;
+    const size = options?.size ?? (fillText
+      ? { width: STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH, height: STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT }
+      : undefined);
     const node: StudioNodeInstance = {
       id: randomId("node"),
       kind: definition.kind,
       version: definition.version,
       title: prettifyNodeKind(definition.kind),
       position,
-      ...(options?.size ? { size: options.size } : {}),
-      config: { ...cloneConfigDefaults(definition), ...(options?.config || {}) },
+      ...(size ? { size } : {}),
+      config: {
+        ...cloneConfigDefaults(definition),
+        ...(fillText ? { [STUDIO_TEXT_NODE_LAYOUT_KEY]: STUDIO_TEXT_NODE_FILL_LAYOUT } : {}),
+        ...(options?.config || {}),
+      },
       continueOnError: false,
       disabled: false,
     };
@@ -2459,8 +2534,12 @@ export class SystemSculptStudioView extends ItemView {
       this.setError('Missing node definition for "studio.text@1.0.0".');
       return;
     }
+    // The box lands around the point that was double-clicked, the way a caption lands on an image.
     this.createNodeFromDefinition(definition, {
-      position,
+      position: {
+        x: position.x - STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH / 2,
+        y: position.y - STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT / 2,
+      },
       autoEditText: true,
     });
   }
@@ -2973,6 +3052,15 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphViewportPointerDown(event: PointerEvent): void {
+    if (this.imageEditNodeId) {
+      const editingEl = this.graphInteraction.getNodeElement(this.imageEditNodeId);
+      if (editingEl?.contains(event.target as Node | null)) {
+        // The image being edited owns every press that lands on its card.
+        return;
+      }
+      // Pressing anywhere else finishes the edit, like clicking away from text.
+      void this.finishImageEdit();
+    }
     if (this.activeCanvasTool === "arrow" && event.button === 0) {
       if (this.shapeController.startArrowGesture(event)) {
         event.preventDefault();
@@ -3161,7 +3249,9 @@ export class SystemSculptStudioView extends ItemView {
       onNodeResize: (nodeId, patch, options) => {
         this.handleNodeResize(nodeId, patch, options);
       },
-      onOpenImageEditor: (node) => this.openImageEditorForNode(node),
+      onOpenImageEditor: (node) => this.toggleImageEditForNode(node),
+      imageBoard: this.imageBoardOptions(),
+      isImageNodeEditing: (nodeId) => this.imageEditNodeId === nodeId,
       onEditImageWithAi: (node) => {
         void this.editImageWithAiForNode(node);
       },
@@ -3266,6 +3356,10 @@ export class SystemSculptStudioView extends ItemView {
 
   private render(): void {
     if (this.closed) return;
+    if (this.imageEditNodeId && !(this.currentProject && this.findNode(this.currentProject, this.imageEditNodeId))) {
+      // The edited node is gone, e.g. an undo reached before it existed.
+      this.imageEditNodeId = null;
+    }
     const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
     if (mountedRoot && this.graphWorkspace?.refresh(this.createGraphWorkspaceOptions(mountedRoot))) {
       refreshStudioMessages(mountedRoot, this.lastError, this.projectFileWarning);

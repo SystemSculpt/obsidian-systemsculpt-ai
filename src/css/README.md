@@ -25,9 +25,9 @@ The manifest imports its modules directly because the build expands direct
 imports only, and their order is the Studio cascade contract:
 
 1. Canvas: `theme`, `workspace`, `connections`, `node-chrome`, `media-nodes`,
-   `node-runtime`, `groups`, `text-nodes`, `inspector`, `menus`.
+   `node-runtime`, `groups`, `fill-text`, `text-nodes`, `inspector`, `menus`.
 2. Editors: `editor-preview`, `editor-text`, `editor-notes`,
-   `editor-dropdowns`, `editor-media`, `caption-board`, `editor-responsive`,
+   `editor-dropdowns`, `editor-media`, `image-board`, `editor-responsive`,
    `inline-config`, `node-details`.
 
 Keep a rule with the component that owns it. Cross-component narrow-layout
@@ -81,7 +81,7 @@ states in `states.css`, and every narrow-surface adjustment in `composer.css`.
 
 - `--ss-studio-group-accent`, `--ss-studio-chip-color`,
   `--ss-studio-swatch-color`, `--ss-studio-*-scale`,
-  `--ss-studio-text-node-font-size`, `--ss-studio-annotation-color/-stroke`,
+  `--ss-studio-text-node-font-size`, `--ss-studio-board-ui-scale`,
   `--ss-activity-progress` — Studio runtime
 - `data-activity` / `data-activity-pulse` / `data-activity-progress` —
   the Studio run-state grammar written by `src/views/studio/activity` and

@@ -1,5 +1,11 @@
 import type { StudioNodeInstance } from "../../../studio/types";
-import { resolveStudioCaptionBoardRenderedAsset } from "../../../studio/StudioCaptionBoardState";
+import {
+  readStudioImageBoard,
+  resolveStudioImageBoardRenderedAsset,
+  studioImageBoardHasEdits,
+} from "../../../studio/StudioImageBoard";
+import { mountStudioImageBoardPreview } from "./image-board/StudioImageBoardPreview";
+import type { StudioGraphNodeImageBoardOptions } from "./StudioGraphNodeCardTypes";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 import { shouldSuppressNodeOutputPreview } from "./StudioGraphNodeInlineEditors";
 import {
@@ -20,7 +26,7 @@ export function resolveMediaIngestRevealPath(
   const config = (node.config || {}) as Record<string, unknown>;
   const sourcePreviewPath = typeof outputs?.source_preview_path === "string" ? outputs.source_preview_path.trim() : "";
   const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
-  const renderedAsset = resolveStudioCaptionBoardRenderedAsset(
+  const renderedAsset = resolveStudioImageBoardRenderedAsset(
     node.config,
     sourcePreviewPath || configuredPath
   );
@@ -36,6 +42,19 @@ export function resolveMediaIngestRevealPath(
     return configuredPath;
   }
   return String(fallbackPath || "").trim();
+}
+
+/** An edited board whose flattened image has not been produced, or is stale. */
+function hasUnrenderedImageBoard(
+  node: StudioNodeInstance,
+  outputs: Record<string, unknown> | null
+): boolean {
+  if (!studioImageBoardHasEdits(readStudioImageBoard(node.config))) {
+    return false;
+  }
+  const sourcePreviewPath = typeof outputs?.source_preview_path === "string" ? outputs.source_preview_path.trim() : "";
+  const configuredPath = typeof node.config.sourcePath === "string" ? node.config.sourcePath.trim() : "";
+  return resolveStudioImageBoardRenderedAsset(node.config, sourcePreviewPath || configuredPath) === null;
 }
 
 export function renderNodeOutputPreview(options: {
@@ -88,7 +107,8 @@ export function renderNodeMediaPreview(options: {
     src: string;
     title: string;
   }) => void;
-}): void {
+  imageBoard?: StudioGraphNodeImageBoardOptions;
+}): (() => void) | void {
   const {
     nodeEl,
     node,
@@ -96,6 +116,7 @@ export function renderNodeMediaPreview(options: {
     resolveAssetPreviewSrc,
     onRevealPathInFinder,
     onOpenMediaPreview,
+    imageBoard,
   } = options;
 
   const mediaPreview = resolveNodeMediaPreview(
@@ -146,6 +167,16 @@ export function renderNodeMediaPreview(options: {
   });
 
   if (mediaPreview.kind === "image") {
+    if (imageBoard && node.kind === "studio.media_ingest" && hasUnrenderedImageBoard(node, nodeRunState.outputs)) {
+      return mountStudioImageBoardPreview(previewEl, {
+        app: imageBoard.app,
+        readAsset: imageBoard.readAsset,
+        storeAsset: imageBoard.storeAsset,
+        node,
+        nodeRunState,
+        label: `${node.title || node.kind} edited image`,
+      });
+    }
     const imageEl = previewEl.createEl("img", {
       cls: "ss-studio-node-media-preview-img",
     });

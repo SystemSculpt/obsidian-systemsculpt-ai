@@ -1,5 +1,5 @@
 import type { StudioNodeInstance } from "../../../studio/types";
-import { resolveStudioCaptionBoardRenderedAsset } from "../../../studio/StudioCaptionBoardState";
+import { resolveStudioImageBoardRenderedAsset } from "../../../studio/StudioImageBoard";
 
 export type StudioNodeMediaPreview = {
   kind: "image" | "video";
@@ -78,7 +78,7 @@ export function resolveNodeMediaPreview(
     const previewPath = typeof outputs?.preview_path === "string" ? outputs.preview_path.trim() : "";
     const configuredPath = typeof config.sourcePath === "string" ? config.sourcePath.trim() : "";
     const outputPath = typeof outputs?.path === "string" ? outputs.path.trim() : "";
-    const renderedAsset = resolveStudioCaptionBoardRenderedAsset(
+    const renderedAsset = resolveStudioImageBoardRenderedAsset(
       node.config,
       sourcePreviewPath || configuredPath
     );

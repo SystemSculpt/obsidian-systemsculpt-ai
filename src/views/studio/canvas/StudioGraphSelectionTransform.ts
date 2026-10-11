@@ -57,6 +57,8 @@ export type StudioSelectionResizeNodeSnapshot = {
   /** Start fontSize (text nodes; ignored elsewhere). */
   fontSize: number;
   hasAspectMediaContent?: boolean;
+  /** Text that fills its box resizes as a box; its type follows. */
+  textFillsBox?: boolean;
   interactionLocked?: boolean;
 };
 
@@ -178,8 +180,9 @@ export function resolveStudioSelectionResizePatches(params: {
 
     const mode = resolveStudioNodeResizeSemantics(node.kind, {
       hasAspectMediaContent: node.hasAspectMediaContent,
+      textFillsBox: node.textFillsBox,
     });
-    const bounds = resolveStudioGraphNodeResizeBounds({ kind: node.kind });
+    const bounds = resolveStudioGraphNodeResizeBounds({ kind: node.kind }, { textFillsBox: node.textFillsBox });
     const patch: StudioGraphNodeResizePatch = {};
 
     if (mode === "text") {

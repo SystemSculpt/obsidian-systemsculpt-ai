@@ -17,6 +17,7 @@ import {
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
 import { resolveStudioGraphNodeWidth, resolveStudioGraphNodeMinHeight, resolveStudioGraphSafeZoom } from "../../../studio/StudioNodeGeometry";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
+import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 
 type StudioWorkspaceControlOptions = Readonly<{
   label: string;
@@ -89,6 +90,8 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   shouldPreserveNodeElement?: (nodeId: string) => boolean;
   /** Text cards mount their editor; entering or leaving edit mode is a card transition. */
   isTextNodeEditing?: (nodeId: string) => boolean;
+  /** Image cards mount their editor in place; the card stays mounted for the whole edit. */
+  isImageNodeEditing?: (nodeId: string) => boolean;
 };
 
 export type StudioGraphWorkspaceRenderResult = {
@@ -106,14 +109,22 @@ function studioNodeContentSignature(
 ): string {
   const { position: _position, size: _size, ...content } = node;
   const inboundEdges = options.currentProject?.graph.edges.filter(edge => edge.toNodeId === node.id) ?? [];
+  const outputs = options.getNodeRunState(node.id).outputs;
+  // A preview resolves after its bytes are confirmed; the card it turns into is different content.
+  const media = resolveNodeMediaPreview(node, outputs);
   return JSON.stringify({
     content,
     inboundEdges,
-    outputs: options.getNodeRunState(node.id).outputs,
+    outputs,
+    mediaSrc: media ? options.resolveAssetPreviewSrc?.(media.path) ?? null : null,
     busy: options.busy,
     nodeDetailMode: options.nodeDetailMode,
-    editing: options.isTextNodeEditing?.(node.id) === true,
+    editing: studioNodeIsEditing(node.id, options),
   });
+}
+
+function studioNodeIsEditing(nodeId: string, options: StudioGraphWorkspaceRendererOptions): boolean {
+  return options.isTextNodeEditing?.(nodeId) === true || options.isImageNodeEditing?.(nodeId) === true;
 }
 
 function studioNodeStructureSignature(
@@ -521,7 +532,7 @@ export function renderStudioGraphWorkspace(
       nodeActivity: renderOptions.getNodeActivity?.(node.id),
     });
     cardHandles.set(node.id, handle);
-    nodeEditing.set(node.id, renderOptions.isTextNodeEditing?.(node.id) === true);
+    nodeEditing.set(node.id, studioNodeIsEditing(node.id, renderOptions));
     nodeSignatures.set(node.id, studioNodeContentSignature(node, renderOptions));
     nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, renderOptions));
     return handle;
@@ -589,9 +600,16 @@ export function renderStudioGraphWorkspace(
       }
       const signature = studioNodeContentSignature(node, next);
       if (nodeSignatures.get(node.id) === signature) continue;
-      // Entering or leaving text editing swaps preview for editor: remount even while focused or dragging.
-      const editing = next.isTextNodeEditing?.(node.id) === true;
+      // Entering or leaving an edit swaps preview for editor: remount even while focused or dragging.
+      const editing = studioNodeIsEditing(node.id, next);
       const editingChanged = nodeEditing.get(node.id) !== editing;
+      if (!editingChanged && existing.syncNode) {
+        // An in-place editor owns its card: hand it the change (e.g. an undo) instead of remounting.
+        existing.syncNode(node);
+        nodeSignatures.set(node.id, signature);
+        nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, next));
+        continue;
+      }
       const active = existing.element.ownerDocument.activeElement;
       const titleInput = existing.element.querySelector<HTMLInputElement>(".ss-studio-node-title-input");
       if (titleInput && active !== titleInput) { titleInput.value = node.title; cardEditors.get(node.id)?.display("title", node.title); }

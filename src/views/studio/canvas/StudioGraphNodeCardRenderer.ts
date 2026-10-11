@@ -10,13 +10,20 @@ import { commitInlineConfigValueChange } from './StudioGraphInlineConfigPanel';
 import { renderStudioNodeInlineEditor, shouldSuppressNodeOutputPreview } from './StudioGraphNodeInlineEditors';
 import { resolveStudioNodeDetailSectionVisibility } from './StudioGraphNodeDetailMode';
 import { renderTextNodeCard } from './StudioGraphTextNodeCard';
+import { renderFillTextNodeCard } from './StudioGraphFillTextNodeCard';
 import { isManagedOutputPlaceholderNode, readManagedPendingMediaKind } from '../../../studio/StudioManagedOutputNodes';
 import { renderNodeHeader, renderNodePorts, renderNodeStatusRow } from './StudioGraphNodeCardSections';
 import { bindNodeCardPointerDown, isStudioNodeCardInteractiveTarget } from './StudioGraphNodeCardPointer';
 import { renderNodeMediaPreview, renderNodeOutputPreview, resolveMediaIngestRevealPath } from './StudioGraphNodeCardPreviews';
 import type { RenderStudioGraphNodeCardOptions } from './StudioGraphNodeCardTypes';
 import { renderStudioMediaNodeActionBar } from './StudioMediaNodeActionBar';
-import { isStudioExpandedTextNodeKind, resolveStudioGraphNodeMinHeight, resolveStudioGraphNodeWidth } from '../../../studio/StudioNodeGeometry';
+import { mountStudioImageBoardEditor } from './image-board/StudioImageBoardEditor';
+import {
+  isStudioExpandedTextNodeKind,
+  isStudioFillTextNode,
+  resolveStudioGraphNodeMinHeight,
+  resolveStudioGraphNodeWidth,
+} from '../../../studio/StudioNodeGeometry';
 import { resolveNodeMediaPreview } from './StudioGraphMediaPreview';
 import { mountStudioGraphNodeResizeFrame } from './StudioGraphNodeResizeFrame';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
@@ -31,6 +38,8 @@ import { applyStudioNodeActivity } from '../activity/StudioActivityDomApplier';
 export type StudioGraphNodeCardHandle = {
   element: HTMLElement;
   updateGeometry: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
+  /** Present while the card hosts an editor that must follow outside changes instead of remounting. */
+  syncNode?: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
   dispose: () => void;
 };
 
@@ -113,6 +122,16 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
           options.registerTextNodeEditorTeardown?.(nodeId, guarded);
         }
       : undefined;
+    if (isStudioFillTextNode(node)) {
+      teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
+        onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
+        onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
+        ...options.takeTextNodeEditorMountState(node.id),
+        onRequestTextNodeEdit: options.onRequestTextNodeEdit, onStopTextNodeEdit: options.onStopTextNodeEdit,
+        registerEditorTeardown }));
+      renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
+      return finish();
+    }
     renderTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
       onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
       onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
@@ -130,17 +149,34 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     const content = nodeEl.createDiv({ cls: 'ss-studio-media-content' });
     renderNodeStatusRow({ nodeEl: content, node, activity, resolveNodeBadge: options.resolveNodeBadge });
     renderNodePorts({ nodeEl: content, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
-    renderNodeMediaPreview({ nodeEl: content, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc,
-      onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
-    mountResizeFrame(content);
-    renderStudioMediaNodeActionBar({ nodeEl: media.kind === 'video' ? content : nodeEl, node, definition, mediaKind: media.kind, interactionLocked: locked,
-      onRunNode: options.onRunNode, onRemoveNode: options.onRemoveNode, onNodeConfigValueChange: options.onNodeConfigValueChange,
-      onOpenImageEditor: options.onOpenImageEditor, onEditImageWithAi: options.onEditImageWithAi, onCopyNodeImageToClipboard: options.onCopyNodeImageToClipboard, pathBrowseOptions: options.pathBrowseOptions });
-    if (hasHostCapability('file-manager-reveal', nodeEl)) nodeEl.addEventListener('dblclick', event => {
-      if (isStudioNodeCardInteractiveTarget(event.target)) return;
-      const path = resolveMediaIngestRevealPath(node, outputs, '');
-      if (path) { event.stopPropagation(); options.onRevealPathInFinder(path); }
-    });
+    const imageBoard = options.imageBoard;
+    if (imageBoard && media.kind === 'image' && node.kind === 'studio.media_ingest' && imageBoard.isEditing(node.id)) {
+      // Edited in place: the stage takes the picture's spot and the editor's toolbar stands in for the card actions.
+      nodeEl.addClass('is-image-editing');
+      const workspaceEl = nodeEl.closest<HTMLElement>('.ss-studio-graph-workspace');
+      const editor = mountStudioImageBoardEditor({ app: imageBoard.app, readAsset: imageBoard.readAsset, storeAsset: imageBoard.storeAsset,
+        contentEl: content, toolbarHost: workspaceEl ?? nodeEl, toolbarDocked: workspaceEl !== null, node, nodeRunState,
+        getGraphZoom: () => graphInteraction.getGraphZoom(),
+        onNodeConfigValueChange: (nodeId, key, value, changeOptions) => options.onNodeConfigValueChange?.(nodeId, key, value, changeOptions),
+        onClose: imageBoard.onClose });
+      imageBoard.onEditorMounted(node.id, editor);
+      teardowns.push(() => { imageBoard.onEditorUnmounted(node.id, editor); editor.dispose(); });
+      handle.syncNode = nextNode => editor.syncNode(nextNode);
+      mountResizeFrame(content);
+    } else {
+      const disposePreview = renderNodeMediaPreview({ nodeEl: content, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc,
+        onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview, imageBoard });
+      if (disposePreview) teardowns.push(disposePreview);
+      mountResizeFrame(content);
+      renderStudioMediaNodeActionBar({ nodeEl: media.kind === 'video' ? content : nodeEl, node, definition, mediaKind: media.kind, interactionLocked: locked,
+        onRunNode: options.onRunNode, onRemoveNode: options.onRemoveNode, onNodeConfigValueChange: options.onNodeConfigValueChange,
+        onOpenImageEditor: options.onOpenImageEditor, onEditImageWithAi: options.onEditImageWithAi, onCopyNodeImageToClipboard: options.onCopyNodeImageToClipboard, pathBrowseOptions: options.pathBrowseOptions });
+      if (hasHostCapability('file-manager-reveal', nodeEl)) nodeEl.addEventListener('dblclick', event => {
+        if (isStudioNodeCardInteractiveTarget(event.target)) return;
+        const path = resolveMediaIngestRevealPath(node, outputs, '');
+        if (path) { event.stopPropagation(); options.onRevealPathInFinder(path); }
+      });
+    }
     // The activity chip lives inside the media content for this layout.
     const chip = content.querySelector<HTMLElement>(':scope > .ss-studio-node-activity');
     if (chip) nodeEl.appendChild(chip);

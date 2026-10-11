@@ -2,8 +2,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
+import {
+  createEmptyStudioImageBoard,
+  createStudioImageBoardLayer,
+  serializeStudioImageBoard,
+  studioImageBoardWithRender,
+} from "../StudioImageBoard";
+import { composeStudioImageBoardAsset } from "../StudioImageBoardRenderer";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import type { StudioNodeExecutionContext, StudioJsonValue } from "../types";
+
+// Flattening needs a canvas, which this environment lacks. The real composer
+// runs unless a test supplies a result, so its fail-closed behaviour stays under test.
+jest.mock("../StudioImageBoardRenderer", () => {
+  const actual = jest.requireActual("../StudioImageBoardRenderer");
+  return { ...actual, composeStudioImageBoardAsset: jest.fn(actual.composeStudioImageBoardAsset) };
+});
 
 function createContext(options: {
   nodeId: string;
@@ -563,7 +577,7 @@ describe("Studio built-in text/image node execution", () => {
     });
   });
 
-  it("media ingest composes captioned image outputs for ingested images", async () => {
+  it("media ingest outputs the flattened render of an edited image, never its source", async () => {
     const definition = registry.get("studio.media_ingest", "1.0.0");
     expect(definition).toBeDefined();
     const previewAsset = {
@@ -572,21 +586,20 @@ describe("Studio built-in text/image node execution", () => {
       sizeBytes: captionBoardBaseSvgBytes().byteLength,
       path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.svg",
     };
-    const captionedAsset = {
-      hash: "caption-hash",
-      mimeType: "image/svg+xml",
+    const flattenedAsset = {
+      hash: "flattened-hash",
+      mimeType: "image/png",
       sizeBytes: 512,
-      path: "Studio/Test.systemsculpt-assets/assets/sha256/cd/captioned.svg",
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/cd/flattened.png",
     };
-    const storeAssetMock = jest
-      .fn()
-      .mockResolvedValueOnce(previewAsset)
-      .mockResolvedValueOnce(captionedAsset);
+    jest.mocked(composeStudioImageBoardAsset).mockResolvedValueOnce(flattenedAsset);
+    const storeAssetMock = jest.fn().mockResolvedValueOnce(previewAsset);
     const context = createContext({
       nodeId: "media-node",
       kind: "studio.media_ingest",
       config: {
         sourcePath: "Assets/source.svg",
+        // A board saved by the first editor: it is migrated on the way in.
         captionBoard: {
           version: 1,
           labels: [
@@ -617,19 +630,101 @@ describe("Studio built-in text/image node execution", () => {
     const result = await definition!.execute(context);
 
     expect(context.services.readVaultBinary).toHaveBeenCalledWith("Assets/source.svg");
-    expect(storeAssetMock).toHaveBeenNthCalledWith(1, expect.any(ArrayBuffer), "image/svg+xml");
-    expect(storeAssetMock).toHaveBeenNthCalledWith(2, expect.any(ArrayBuffer), "image/svg+xml");
-    const svg = new TextDecoder().decode(storeAssetMock.mock.calls[1][0]);
-    expect(svg).toContain("Quarterly update");
-    expect(result.outputs.path).toBe(captionedAsset.path);
-    expect(result.outputs.preview_path).toBe(captionedAsset.path);
+    expect(composeStudioImageBoardAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseImage: previewAsset,
+        board: expect.objectContaining({
+          version: 2,
+          layers: [
+            expect.objectContaining({ kind: "base" }),
+            expect.objectContaining({ kind: "text", text: "Quarterly update", style: "banner" }),
+          ],
+        }),
+      })
+    );
+    expect(result.outputs.path).toBe(flattenedAsset.path);
+    expect(result.outputs.preview_path).toBe(flattenedAsset.path);
     expect(result.outputs.source_preview_path).toBe(previewAsset.path);
-    expect(result.outputs.preview_asset).toEqual(captionedAsset);
+    expect(result.outputs.preview_asset).toEqual(flattenedAsset);
     expect(result.outputs.source_preview_asset).toEqual(previewAsset);
-    expect(result.artifacts).toEqual([captionedAsset]);
+    expect(result.artifacts).toEqual([flattenedAsset]);
   });
 
-  it("media ingest rejects crop and blur output when raster rendering is unavailable", async () => {
+  it("media ingest reuses the render already flattened for the same source", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    const previewAsset = {
+      hash: "base-hash",
+      mimeType: "image/png",
+      sizeBytes: 8,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.png",
+    };
+    const flattenedAsset = {
+      hash: "flattened-hash",
+      mimeType: "image/png",
+      sizeBytes: 512,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/cd/flattened.png",
+    };
+    jest.mocked(composeStudioImageBoardAsset).mockClear();
+    const cropped = { ...createEmptyStudioImageBoard(), crop: { x: 0, y: 0, width: 0.5, height: 0.5 } };
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/source.png",
+        captionBoard: serializeStudioImageBoard(
+          studioImageBoardWithRender(cropped, cropped, previewAsset.path, flattenedAsset)
+        ),
+      },
+      storeAssetMock: jest.fn().mockResolvedValueOnce(previewAsset),
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(composeStudioImageBoardAsset).not.toHaveBeenCalled();
+    expect(result.outputs.path).toBe(flattenedAsset.path);
+    expect(result.artifacts).toEqual([flattenedAsset]);
+  });
+
+  it("media ingest flattens again rather than pass on a render of other layers", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    const previewAsset = {
+      hash: "base-hash",
+      mimeType: "image/png",
+      sizeBytes: 8,
+      path: "Studio/Test.systemsculpt-assets/assets/sha256/ab/base.png",
+    };
+    const staleAsset = { ...previewAsset, hash: "stale-hash", path: "Studio/Test.systemsculpt-assets/assets/sha256/ef/stale.png" };
+    const freshAsset = { ...previewAsset, hash: "fresh-hash", path: "Studio/Test.systemsculpt-assets/assets/sha256/01/fresh.png" };
+    jest.mocked(composeStudioImageBoardAsset).mockClear();
+    jest.mocked(composeStudioImageBoardAsset).mockResolvedValueOnce(freshAsset);
+    // The picture on record was made before the blur was on the board, as an undo leaves it.
+    const unblurred = createEmptyStudioImageBoard();
+    const blurred = { ...unblurred, layers: [...unblurred.layers, createStudioImageBoardLayer({ kind: "redact", id: "hide" })] };
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/source.png",
+        captionBoard: serializeStudioImageBoard(
+          studioImageBoardWithRender(blurred, unblurred, previewAsset.path, staleAsset)
+        ),
+      },
+      storeAssetMock: jest.fn().mockResolvedValueOnce(previewAsset),
+    });
+
+    const result = await definition!.execute(context);
+
+    expect(composeStudioImageBoardAsset).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(composeStudioImageBoardAsset).mock.calls[0][0].board.layers.map((layer) => layer.id)).toEqual([
+      "base",
+      "hide",
+    ]);
+    expect(result.outputs.path).toBe(freshAsset.path);
+    expect(result.outputs.preview_asset).toEqual(freshAsset);
+    expect(result.artifacts).toEqual([freshAsset]);
+  });
+
+  it("media ingest refuses to output an edited image it cannot flatten", async () => {
     const definition = registry.get("studio.media_ingest", "1.0.0");
     expect(definition).toBeDefined();
     const previewAsset = {
@@ -645,43 +740,15 @@ describe("Studio built-in text/image node execution", () => {
       config: {
         sourcePath: "Assets/source.svg",
         captionBoard: {
-          version: 1,
-          labels: [],
-          annotations: [
-            {
-              id: "annotation-circle",
-              kind: "highlight_circle",
-              x: 0.22,
-              y: 0.18,
-              width: 0.28,
-              height: 0.22,
-              color: "#ff4d4f",
-              strokeWidth: 8,
-              blurRadius: 16,
-              zIndex: 0,
-            },
-            {
-              id: "annotation-blur",
-              kind: "blur_rect",
-              x: 0.54,
-              y: 0.24,
-              width: 0.22,
-              height: 0.2,
-              color: "#ff4d4f",
-              strokeWidth: 8,
-              blurRadius: 20,
-              zIndex: 1,
-            },
+          version: 2,
+          layers: [
+            { id: "base", kind: "base", x: 0, y: 0, width: 1, height: 1, rotation: 0 },
+            { id: "hide", kind: "redact", style: "blur", x: 0.54, y: 0.24, width: 0.22, height: 0.2, rotation: 0 },
           ],
-          crop: {
-            x: 0.1,
-            y: 0.1,
-            width: 0.6,
-            height: 0.5,
-          },
+          crop: { x: 0.1, y: 0.1, width: 0.6, height: 0.5 },
           sourceAssetPath: "",
           lastRenderedAsset: null,
-          updatedAt: "2026-03-22T00:00:00.000Z",
+          updatedAt: "2026-10-10T00:00:00.000Z",
         },
       },
       storeAssetMock,
@@ -689,12 +756,40 @@ describe("Studio built-in text/image node execution", () => {
       readAssetMock: jest.fn(async () => captionBoardBaseSvgBytes()),
     });
 
-    await expect(definition!.execute(context)).rejects.toThrow("raster rendering is unavailable");
+    // No canvas here: the node must fail rather than hand on anything recoverable.
+    await expect(definition!.execute(context)).rejects.toThrow(/unavailable/i);
 
     expect(context.services.readVaultBinary).toHaveBeenCalledWith("Assets/source.svg");
     // The source may be staged, but no misleading edited artifact is published.
     expect(storeAssetMock).toHaveBeenCalledTimes(1);
     expect(storeAssetMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), "image/svg+xml");
+  });
+
+  it("media ingest never passes the unedited source on when an edited image cannot be staged", async () => {
+    const definition = registry.get("studio.media_ingest", "1.0.0");
+    const context = createContext({
+      nodeId: "media-node",
+      kind: "studio.media_ingest",
+      config: {
+        sourcePath: "Assets/secret-screenshot.png",
+        captionBoard: {
+          version: 2,
+          layers: [
+            { id: "base", kind: "base", x: 0, y: 0, width: 1, height: 1, rotation: 0 },
+            { id: "hide", kind: "redact", style: "solid", x: 0.1, y: 0.1, width: 0.5, height: 0.2, rotation: 0 },
+          ],
+          crop: null,
+          sourceAssetPath: "",
+          lastRenderedAsset: null,
+          updatedAt: "2026-10-10T00:00:00.000Z",
+        },
+      },
+      readVaultBinaryMock: jest.fn(async () => {
+        throw new Error("file is still syncing");
+      }),
+    });
+
+    await expect(definition!.execute(context)).rejects.toThrow("has image edits");
   });
 
   it("media ingest stages preview assets for absolute local videos", async () => {

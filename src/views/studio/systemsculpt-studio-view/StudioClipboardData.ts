@@ -1,4 +1,5 @@
 import { TFile, TFolder, type TAbstractFile } from "obsidian";
+import { yieldToEventLoop } from "../../../utils/yieldToEventLoop";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
@@ -109,6 +110,100 @@ export function extractClipboardMediaFiles(event: ClipboardEvent): File[] {
   }
 
   return files;
+}
+
+/** How far a channel may move through the clipboard: rounding, never an edit. */
+const PICTURE_TOLERANCE = 4;
+/** Pixels read back at a time: a large picture is never held twice over, nor compared in one go. */
+const PICTURE_BAND_PIXELS = 1 << 20;
+
+/**
+ * Whether two rows of RGBA pixels show the same thing. Colour is weighed by
+ * its alpha: what lies under near-zero alpha does not survive a round trip.
+ */
+export function isSameClipboardPixels(first: ArrayLike<number>, second: ArrayLike<number>): boolean {
+  if (first.length !== second.length) {
+    return false;
+  }
+  const colourTolerance = PICTURE_TOLERANCE * 255;
+  for (let offset = 0; offset < first.length; offset += 4) {
+    const firstAlpha = first[offset + 3];
+    const secondAlpha = second[offset + 3];
+    if (Math.abs(firstAlpha - secondAlpha) > PICTURE_TOLERANCE) {
+      return false;
+    }
+    for (let channel = offset; channel < offset + 3; channel += 1) {
+      if (Math.abs(first[channel] * firstAlpha - second[channel] * secondAlpha) > colourTolerance) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether two pictures are the same size and alike in every pixel. The system
+ * clipboard re-encodes whatever is written to it, so bytes cannot tell whether
+ * a pasted picture is one this view copied; its pixels can. All of them are
+ * compared: a picture touched up elsewhere is another picture, however small
+ * the change. The work is done in `ownerWindow`, the window of the paste.
+ */
+export async function isSameClipboardImage(
+  first: Blob,
+  second: Blob,
+  ownerWindow: Window
+): Promise<boolean> {
+  if (typeof ownerWindow.createImageBitmap !== "function") {
+    return false;
+  }
+  const decoded = await Promise.allSettled([
+    ownerWindow.createImageBitmap(first),
+    ownerWindow.createImageBitmap(second),
+  ]);
+  const bitmaps = decoded.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  try {
+    if (bitmaps.length !== 2) {
+      return false;
+    }
+    const [ours, theirs] = bitmaps;
+    const { width, height } = ours;
+    if (width < 1 || height < 1 || theirs.width !== width || theirs.height !== height) {
+      return false;
+    }
+    const band = Math.min(height, Math.max(1, Math.floor(PICTURE_BAND_PIXELS / width)));
+    const canvas = ownerWindow.document.defaultView?.createEl("canvas");
+    if (!canvas) {
+      return false;
+    }
+    canvas.width = width;
+    canvas.height = band;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return false;
+    }
+    context.globalCompositeOperation = "copy";
+    for (let top = 0; top < height; top += band) {
+      if (top > 0) {
+        // A large picture is many bands; the canvas stays responsive between them.
+        await yieldToEventLoop(0, ownerWindow);
+      }
+      const rows = Math.min(band, height - top);
+      const read = (bitmap: ImageBitmap): Uint8ClampedArray => {
+        context.drawImage(bitmap, 0, top, width, rows, 0, 0, width, rows);
+        return context.getImageData(0, 0, width, rows).data;
+      };
+      if (!isSameClipboardPixels(read(ours), read(theirs))) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    for (const bitmap of bitmaps) {
+      bitmap.close();
+    }
+  }
 }
 
 export function extractClipboardText(event: ClipboardEvent): string {

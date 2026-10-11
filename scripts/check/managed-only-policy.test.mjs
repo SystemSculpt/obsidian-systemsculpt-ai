@@ -542,7 +542,7 @@ test("encoded identifier policy sanctions only the retired credential key in Set
   assert.deepEqual(
     encodedIdentifierViolations(
       "const header = String.fromCharCode(...bytes.slice(0, 4));",
-      "src/studio/StudioCaptionBoardComposition.ts",
+      "src/studio/StudioImageBoardRenderer.ts",
     ),
     [],
     "dynamic decoding of a byte view is not an encoded literal",

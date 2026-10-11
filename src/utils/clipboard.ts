@@ -156,7 +156,19 @@ export async function tryCopyImageFileToClipboard(
   }
 
   try {
-    const bytes = await app.vault.readBinary(file);
+    return await tryCopyImageBytesToClipboard(await app.vault.readBinary(file), mime, host);
+  } catch {
+    return false;
+  }
+}
+
+/** Copies already encoded image bytes, e.g. a freshly rendered PNG. */
+export async function tryCopyImageBytesToClipboard(
+  bytes: ArrayBuffer,
+  mime: string,
+  host?: Node,
+): Promise<boolean> {
+  try {
     const hostWindow = resolveClipboardWindow(host);
     if (await tryWebClipboardImageWrite(bytes, mime, hostWindow)) {
       return true;

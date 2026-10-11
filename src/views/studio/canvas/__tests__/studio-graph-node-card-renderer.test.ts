@@ -268,6 +268,21 @@ describe("content-aware Studio cards", () => {
     expect(nodeEl.querySelector(".ss-studio-source-code")).toBeNull();
     expect(nodeEl.querySelector(".ss-studio-port-pin.is-output")).not.toBeNull();
   });
+  it("gives fill text the box card, and leaves Markdown text on its own card", () => {
+    const fill = renderNodeCard({ kind: "studio.text", config: { layout: "fill", value: "Hello" } });
+    expect(fill.dataset.surface).toBe("text");
+    expect(fill.classList.contains("ss-studio-fill-text-card")).toBe(true);
+    expect(fill.querySelector(".ss-studio-fill-text")?.textContent).toBe("Hello");
+    expect(fill.querySelector(".ss-studio-text-node-display")).toBeNull();
+    expect(fill.style.width).toBe("320px");
+    expect(fill.style.minHeight).toBe("72px");
+    expect(fill.querySelector(".ss-studio-port-pin.is-output")).not.toBeNull();
+    expect(fill.querySelector(".ss-studio-node-header")).toBeNull();
+
+    const markdown = renderNodeCard({ kind: "studio.text", config: { value: "Hello" } });
+    expect(markdown.classList.contains("ss-studio-fill-text-card")).toBe(false);
+    expect(markdown.querySelector(".ss-studio-text-node-display")).not.toBeNull();
+  });
   it("opens panels on their content with one Source toggle in the header", () => {
     const nodeEl = renderNodeCard({ kind: "studio.workflow" });
     expect(nodeEl.dataset.surface).toBe("panel");
