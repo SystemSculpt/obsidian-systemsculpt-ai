@@ -1,6 +1,6 @@
 import { Notice, Setting, TextComponent } from "obsidian";
 import { SystemSculptService } from "../../services/SystemSculptService";
-import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
+import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
@@ -33,7 +33,7 @@ export function renderAccountSection(
       button.setDisabled(true);
       const opened = await connectService.begin(mode, ownerWindow);
       if (!opened) {
-        new Notice("Couldn't open your browser. Visit systemsculpt.com/sign-in on this device, then paste the connection code below.");
+        new Notice("Couldn't open your browser. Reopen the sign-in page below, then paste the connection code shown there.");
       }
     } finally {
       button.setDisabled(false);
@@ -100,7 +100,7 @@ export function renderAccountSection(
       button
         .setIcon("external-link")
         .setTooltip("Manage account")
-        .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow));
+        .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.BILLING, ownerWindow));
     });
   } else if (signedInWithoutPlan) {
     statusSetting.addButton((button) => {
@@ -162,11 +162,30 @@ export function renderAccountSection(
     statusSetting.addButton((button) => {
       button
         .setButtonText("View plans")
-        .onClick(() => void openExternalUrl(SYSTEMSCULPT_WEBSITE.LIFETIME, ownerWindow));
+        .onClick(() => void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "account"), ownerWindow));
     });
   }
 
   if (pendingSignIn) {
+    new Setting(root)
+      .setName("Browser sign-in")
+      .setDesc("Open the same sign-in request again to get a connection code.")
+      .addButton((button) => {
+        button.setButtonText("Open the sign-in page again").onClick(async () => {
+          button.setDisabled(true);
+          try {
+            if (connectService.hasPendingRequest()) {
+              if (!await connectService.reopen(ownerWindow)) {
+                new Notice("Couldn't open your browser. Your existing connection code still works.");
+              }
+            } else {
+              await beginConnect(button, "sign-in");
+            }
+          } finally {
+            button.setDisabled(false);
+          }
+        });
+      });
     const codeSetting = new Setting(root)
       .setName("Connection code")
       .setDesc("If Obsidian did not open automatically, paste the code shown in your browser.");
@@ -418,7 +437,7 @@ export function renderAccountSection(
           new Notice("Annual upgrade offer is currently unavailable for this account.");
           return;
         }
-        void openExternalUrl(annualUpgradeOffer.checkoutUrl, ownerWindow);
+        void openExternalUrl(withPluginAttribution(annualUpgradeOffer.checkoutUrl, "account"), ownerWindow);
       });
       applyState();
     });
@@ -433,7 +452,7 @@ export function renderAccountSection(
         .setButtonText("Buy credits")
         .onClick(() => {
           if (internalQa) return;
-          void openExternalUrl(purchaseUrl || SYSTEMSCULPT_WEBSITE.LICENSE, ownerWindow);
+          void openExternalUrl(withPluginAttribution(purchaseUrl || SYSTEMSCULPT_WEBSITE.LICENSE, "account"), ownerWindow);
         });
       applyState();
     });

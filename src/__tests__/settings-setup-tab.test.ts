@@ -38,6 +38,7 @@ const createPluginStub = () => {
   const accountConnectService = {
     hasPendingRequest: jest.fn(() => false),
     cancelPending: jest.fn(),
+    reopen: jest.fn().mockResolvedValue(true),
     begin: jest.fn().mockResolvedValue(undefined),
     submitManualCode: jest.fn().mockResolvedValue({ kind: "error", reason: "expired" }),
   };
@@ -105,7 +106,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
         percentSaved: 57,
         annualPriceCents: 9900,
         monthlyEquivalentAnnualCents: 22800,
-        checkoutUrl: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+        checkoutUrl: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&utm_source=obsidian-plugin&utm_medium=account&utm_campaign=upgrade",
       },
     });
   });
@@ -113,6 +114,51 @@ describe("Setup tab SystemSculpt-only layout", () => {
   afterEach(() => {
     windowOpenSpy.mockRestore();
     anchorClickSpy.mockRestore();
+  });
+
+  it("opens comparison pricing from View plans and billing from Manage account", () => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    displaySetupTabContent(container, tab, false);
+    Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "View plans")!.click();
+    expect(new URL(anchorHrefs[0]).pathname).toBe("/pricing");
+    expect(new URL(anchorHrefs[0]).searchParams.get("utm_source")).toBe("obsidian-plugin");
+
+    plugin.settings.licenseKey = "skss-test";
+    plugin.settings.licenseValid = true;
+    container.replaceChildren();
+    displaySetupTabContent(container, tab, true);
+    container.querySelector<HTMLElement>('[aria-label="Manage account"]')!.click();
+    expect(new URL(anchorHrefs[1]).pathname).toBe("/dashboard/billing");
+  });
+
+  it("reopens the pending browser request from the manual-code fallback", async () => {
+    const plugin = createPluginStub();
+    plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    displaySetupTabContent(container, tab, false);
+    Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Open the sign-in page again")!.click();
+    await flushSetupSectionRender();
+    expect(plugin.accountConnectService.reopen).toHaveBeenCalledTimes(1);
+    expect(plugin.accountConnectService.begin).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing connection code valid when the browser cannot reopen", async () => {
+    const plugin = createPluginStub();
+    plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
+    plugin.accountConnectService.reopen.mockResolvedValue(false);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    displaySetupTabContent(container, tab, false);
+    Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Open the sign-in page again")!.click();
+    await flushSetupSectionRender();
+    expect(plugin.accountConnectService.begin).not.toHaveBeenCalled();
+    expect(mockedNotice).toHaveBeenCalledWith(expect.stringContaining("existing connection code still works"));
   });
 
   it("renders account, license, and help surfaces without local Pi setup", () => {
@@ -397,7 +443,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     (annualSwitchButton as HTMLButtonElement).click();
 
     expect(anchorHrefs).toEqual([
-      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&utm_source=obsidian-plugin&utm_medium=account&utm_campaign=upgrade",
     ]);
   });
 
@@ -437,7 +483,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     (buyCreditsButton as HTMLButtonElement).click();
 
     // Only the safe fallback opens — the rejected URL never surfaces.
-    expect(anchorHrefs).toEqual(["https://systemsculpt.com/pricing"]);
+    expect(anchorHrefs).toEqual(["https://systemsculpt.com/pricing?utm_source=obsidian-plugin&utm_medium=account&utm_campaign=upgrade"]);
     expect(window.open).not.toHaveBeenCalled();
   });
 });

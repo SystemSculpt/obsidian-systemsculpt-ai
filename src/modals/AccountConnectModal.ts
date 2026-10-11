@@ -1,7 +1,7 @@
 import { App, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
-import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
+import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import type { ConnectErrorReason, ConnectOutcome } from "../services/AccountConnectService";
 import { openExternalUrl } from "../utils/externalUrl";
 
@@ -140,7 +140,7 @@ export class AccountConnectModal extends StandardModal {
         if (choosePlan) {
           choosePlan();
         } else {
-          void openExternalUrl(SYSTEMSCULPT_WEBSITE.LICENSE, getSurfaceOwnerWindow(this.modalEl));
+          void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "account-connect"), getSurfaceOwnerWindow(this.modalEl));
         }
       },
       true,

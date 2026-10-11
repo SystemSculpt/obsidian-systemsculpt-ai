@@ -16,12 +16,14 @@ Source of truth:
 | Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
 | Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
+| Sign in |  | `sign-in` | Opens browser sign-in and Account settings |
+| View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
 | Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault, with a success notice; assign a shortcut in Obsidian Hotkeys |
 
 ## Chat and writing
 
-Chat always runs through SystemSculpt. There are no separate chat-model commands in the plugin.
+Chat uses the selected SystemSculpt API or on-machine Codex backend. Choose the execution backend and model in the chat controls.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |

@@ -182,7 +182,7 @@ describe("AccountConnectModal", () => {
 
     const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Choose a plan").click();
-    expect(hrefs).toEqual(["https://systemsculpt.com/pricing"]);
+    expect(hrefs).toEqual(["https://systemsculpt.com/pricing?utm_source=obsidian-plugin&utm_medium=account-connect&utm_campaign=upgrade"]);
     spy.mockRestore();
   });
 

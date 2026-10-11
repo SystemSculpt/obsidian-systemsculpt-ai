@@ -174,7 +174,7 @@ describe("CreditsBalanceModal", () => {
 
     const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect(hrefs).toEqual(["https://systemsculpt.com/buy-credits"]);
+    expect(hrefs).toEqual(["https://systemsculpt.com/buy-credits?utm_source=obsidian-plugin&utm_medium=credits&utm_campaign=upgrade"]);
     spy.mockRestore();
 
     findButtonByText(modal.modalEl, "Open Account").click();
@@ -313,7 +313,7 @@ describe("CreditsBalanceModal", () => {
 
     const { hrefs, spy } = spyOnAnchorClicks();
     findButtonByText(modal.modalEl, "Buy Credits").click();
-    expect(hrefs).toEqual([LICENSE_URL]);
+    expect(hrefs).toEqual([`${LICENSE_URL}?utm_source=obsidian-plugin&utm_medium=credits&utm_campaign=upgrade`]);
     spy.mockRestore();
   });
 

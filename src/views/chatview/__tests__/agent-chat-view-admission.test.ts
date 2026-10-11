@@ -170,6 +170,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     composer.restoreRejectedSubmission(submission);
   });
   const workspace = {
+    setPlanOfferVisible: jest.fn(),
     setHistory: jest.fn(async () => {
       setHistoryCalls += 1;
       // Call order: (1) baseline history, (2) optimistic user bubble at
@@ -311,6 +312,7 @@ function createHistoricalResubmitHarness(
   const logger = { warn: jest.fn(), error: jest.fn() };
   const recordLifecycle = jest.fn();
   const workspace = {
+    setPlanOfferVisible: jest.fn(),
     setHistory: jest.fn(async () => undefined),
     setAgentSnapshot: jest.fn(async () => undefined),
     setRunPending: jest.fn(),
@@ -461,6 +463,7 @@ async function createPersistentHistoricalResubmitHarness(
 
   const logger = { warn: jest.fn(), error: jest.fn() };
   const workspace = {
+    setPlanOfferVisible: jest.fn(),
     setHistory: jest.fn(async () => undefined),
     setAgentSnapshot: jest.fn(async () => undefined),
     setRunPending: jest.fn(),
@@ -612,6 +615,7 @@ function createSavedChatLoadHarness(
       : {}),
   };
   const workspace = {
+    setPlanOfferVisible: jest.fn(),
     setRunPending: jest.fn(),
     setBanner: jest.fn(),
     resetMessageEditor: jest.fn(),
@@ -799,7 +803,7 @@ describe("AgentChatView composer admission", () => {
         settings: { licenseKey: "test-license" },
       },
       aiService: { readCreditsBalance: getCreditsBalance },
-      workspace: { setCreditsBalance },
+      workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance },
       creditsPromise: null,
       creditsBalance: null,
     });
@@ -850,7 +854,7 @@ describe("AgentChatView composer admission", () => {
       plugin: { settings: { licenseKey: "test-license" } },
       aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordClientRequestLifecycle },
-      workspace: { setCreditsBalance: jest.fn() },
+      workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() },
       creditsPromise: null,
       creditsBalance: null,
       creditsRefreshSequence: 0,
@@ -992,7 +996,7 @@ describe("AgentChatView composer admission", () => {
     Object.assign(view, {
       activeSubmissionOperation: null,
       agent,
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setRunPending,
         setBanner: jest.fn(),
       },
@@ -1130,7 +1134,7 @@ describe("AgentChatView composer admission", () => {
       plugin: { settings: { licenseKey: "test-license" } },
       aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
-      workspace: { setCreditsBalance },
+      workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance },
       creditsPromise: null,
       creditsBalance: null,
       creditsRefreshSequence: 0,
@@ -1173,7 +1177,7 @@ describe("AgentChatView composer admission", () => {
       plugin: { settings: { licenseKey: "test-license" } },
       aiService: { readCreditsBalance: getCreditsBalance },
       agent: { recordLifecycle },
-      workspace: { setCreditsBalance: jest.fn() },
+      workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() },
       creditsPromise: null,
       creditsBalance: null,
       creditsRefreshSequence: 0,
@@ -1219,7 +1223,7 @@ describe("AgentChatView composer admission", () => {
     const setBanner = jest.fn();
     Object.assign(view, {
       refreshCreditsBalance,
-      workspace: { setBanner },
+      workspace: { setPlanOfferVisible: jest.fn(), setBanner },
     });
 
     await view.handleError({
@@ -1570,7 +1574,7 @@ describe("AgentChatView composer admission", () => {
         queuedFollowUps: [],
         queueHydrated: false,
         queuePersistence: Promise.resolve(),
-        workspace: { setRunPending: jest.fn(), setBanner: jest.fn() },
+        workspace: { setPlanOfferVisible: jest.fn(), setRunPending: jest.fn(), setBanner: jest.fn() },
       });
       const result = failedRun(
         "agent_provider_failed",
@@ -1631,7 +1635,7 @@ describe("AgentChatView composer admission", () => {
         queuePersistence: Promise.resolve(),
         chatId: "durable-chat",
         draftKey: "durable-chat",
-        workspace: { setRunPending: jest.fn(), setBanner: jest.fn() },
+        workspace: { setPlanOfferVisible: jest.fn(), setRunPending: jest.fn(), setBanner: jest.fn() },
         transcriptCommitUnsubscribe,
         agentUnsubscribe,
       });
@@ -1887,6 +1891,7 @@ describe("AgentChatView composer admission", () => {
       unpinFile: jest.fn(),
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setAgentSnapshot: jest.fn(async () => undefined),
     };
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -1949,6 +1954,7 @@ describe("AgentChatView composer admission", () => {
     const needsClientRenderMilestone = jest.fn(() => true);
     const agent = { recordClientRenderMilestone, needsClientRenderMilestone };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       element: host,
       setAgentSnapshot: jest.fn(() => render.promise),
     };
@@ -2058,6 +2064,7 @@ describe("AgentChatView composer admission", () => {
     const recordFailureSurfaceRendering = jest.fn(() => diagnosticsNeverSettle);
     const agent = {};
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       element: host,
       setAgentSnapshot: jest.fn(() => render.promise),
       captureIncidentRenderingSnapshot,
@@ -2149,6 +2156,7 @@ describe("AgentChatView composer admission", () => {
       });
     const agent = {};
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       element: host,
       setAgentSnapshot: jest.fn(async () => undefined),
       captureIncidentRenderingSnapshot,
@@ -2233,6 +2241,7 @@ describe("AgentChatView composer admission", () => {
       recordClientToolRenderMilestone,
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       element: host,
       setAgentSnapshot: jest.fn(() => render.promise),
     };
@@ -2337,7 +2346,7 @@ describe("AgentChatView composer admission", () => {
       now: { configurable: true, value: () => 20 },
     });
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
-    Object.assign(view, { workspace: { element: firstHost } });
+    Object.assign(view, { workspace: { setPlanOfferVisible: jest.fn(), element: firstHost } });
 
     try {
       expect((view as any).clientMonotonicNow()).toBe(1_100);
@@ -2370,7 +2379,7 @@ describe("AgentChatView composer admission", () => {
           attachments: [ORIGINAL_ATTACHMENT],
         },
       },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         getMessageAttachments: jest.fn(() => messageAttachments),
         setMessageAttachments: jest.fn((attachments: readonly ChatMessageAttachment[]) => {
           messageAttachments = [...attachments];
@@ -2483,7 +2492,7 @@ describe("AgentChatView composer admission", () => {
           mode: "send",
         },
       },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         getMessageAttachments: jest.fn(() => []),
         setMessageAttachments: jest.fn(),
         restoreRejectedSubmission: jest.fn(),
@@ -2679,7 +2688,7 @@ describe("AgentChatView composer admission", () => {
       queuedFollowUps: [],
       prepareSubmission: jest.fn(() => preparation.promise),
       executeSubmission,
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         restoreRejectedSubmission,
         setRunPending: jest.fn(),
         setBanner: jest.fn(),
@@ -2723,7 +2732,7 @@ describe("AgentChatView composer admission", () => {
       queuedFollowUps: [],
       prepareSubmission: jest.fn(() => preparation.promise),
       executeSubmission,
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         restoreRejectedSubmission,
         setRunPending,
         setBanner: jest.fn(),
@@ -2795,6 +2804,7 @@ describe("AgentChatView composer admission", () => {
       }),
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setHistory: jest.fn(async () => undefined),
       setAgentSnapshot: jest.fn(async () => undefined),
       setRunPending: jest.fn(),
@@ -2922,6 +2932,7 @@ describe("AgentChatView composer admission", () => {
       }),
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setHistory: jest.fn(async () => undefined),
       setAgentSnapshot: jest.fn(async () => undefined),
       setRunPending: jest.fn(),
@@ -3025,6 +3036,7 @@ describe("AgentChatView composer admission", () => {
       }),
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setHistory: jest.fn(async () => undefined),
       setAgentSnapshot: jest.fn(async () => undefined),
       setRunPending: jest.fn(),
@@ -3221,7 +3233,7 @@ describe("AgentChatView composer admission", () => {
         }),
       },
       agent: { getSnapshot: jest.fn(() => ({ status: "idle" })) },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         showMessageEditor,
         setRunPending,
         setBanner: jest.fn(),
@@ -3251,7 +3263,7 @@ describe("AgentChatView composer admission", () => {
       conversationOriginToken: "origin-same",
       queuedFollowUps: [],
       agent: { getSnapshot: jest.fn(() => ({ status: "idle" })) },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setRunPending,
         setBanner: jest.fn(),
         restoreRejectedSubmission: jest.fn(),
@@ -3813,7 +3825,7 @@ describe("AgentChatView controls", () => {
       prepareSubmission: jest.fn(() => preparation.promise),
       executeSubmission,
       agent: { getSnapshot: jest.fn(() => ({ status: "idle" })) },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setRunPending: jest.fn(),
         setBanner: jest.fn(),
         setQueue: jest.fn(),
@@ -3949,7 +3961,7 @@ describe("AgentChatView controls", () => {
           await releaseRemovalSave.promise;
         }),
       },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setQueue: jest.fn(),
         restoreRejectedSubmission: jest.fn(),
       },
@@ -4400,7 +4412,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
         })),
         commitUser,
       },
-      workspace: { restoreRejectedSubmission },
+      workspace: { setPlanOfferVisible: jest.fn(), restoreRejectedSubmission },
       prepareSubmission,
       executeSubmission,
       handleError,
@@ -4558,6 +4570,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       }),
     };
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setHistory: jest.fn(async () => undefined),
       setBanner: jest.fn(),
     };
@@ -4626,7 +4639,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       prepareSubmission: jest.fn(() => preparation.promise),
       executeSubmission,
       handleError: jest.fn(),
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setRunPending,
         setBanner: jest.fn(),
         restoreRejectedSubmission,
@@ -5079,7 +5092,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       attachmentStore: {
         hydrateMessage: jest.fn(async (message: ChatMessage) => message),
       },
-      workspace: { showMessageEditor },
+      workspace: { setPlanOfferVisible: jest.fn(), showMessageEditor },
     });
 
     await (view as any).prepareRetry("user-original");
@@ -5131,6 +5144,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     const app = new App();
     const setRunPending = jest.fn();
     const workspace = {
+    setPlanOfferVisible: jest.fn(),
       setRunPending,
       setBanner: jest.fn(),
       resetMessageEditor: jest.fn(),
@@ -5425,7 +5439,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       agent: {
         getSnapshot: jest.fn(() => ({ status: "completed" })),
       },
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setAgentSnapshot: jest.fn(async () => undefined),
         setRunPending,
         setBanner: jest.fn(),
@@ -5478,7 +5492,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
         conversationOriginToken: "origin-recovered",
         queuedFollowUps: [queued],
         runConversationOrigins: new Map<string, string>(),
-        workspace: {
+        workspace: { setPlanOfferVisible: jest.fn(),
           setAgentSnapshot: jest.fn(async () => undefined),
         },
         executeSubmission,
@@ -5513,7 +5527,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       plugin: { getLogger: () => logger },
       chatId: "chat-1",
       agent: { getSnapshot: () => ({ status: "running" }) },
-      workspace: { setBanner },
+      workspace: { setPlanOfferVisible: jest.fn(), setBanner },
       handleError,
       updateViewState: jest.fn(),
     });
@@ -5554,7 +5568,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
     Object.assign(view, {
       plugin: { getLogger: () => logger },
       chatId: "chat-render-rejection",
-      workspace: {
+      workspace: { setPlanOfferVisible: jest.fn(),
         setAgentSnapshot: jest.fn(async () => {
           throw renderError;
         }),
@@ -5595,7 +5609,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       chatId: "",
       chatTitle: "Live draft",
       draftKey: "draft-live",
-      workspace: { setTitle },
+      workspace: { setPlanOfferVisible: jest.fn(), setTitle },
       startNewChat,
     });
 
@@ -5714,7 +5728,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       transcriptCommitUnsubscribe: null,
       recorderToggleUnsubscribe: null,
       recorderTranscriptUnsubscribe: null,
-      workspace: { setRunPending, restoreRejectedSubmission, setBanner: jest.fn() },
+      workspace: { setPlanOfferVisible: jest.fn(), setRunPending, restoreRejectedSubmission, setBanner: jest.fn() },
       activeSubmissionOperation: null,
       conversationOriginToken: "origin-close",
       syncQueue: jest.fn(),

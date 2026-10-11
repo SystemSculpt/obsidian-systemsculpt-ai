@@ -7,7 +7,7 @@ function createView(readCreditsBalance: jest.Mock): AgentChatView & Record<strin
   Object.assign(view, {
     plugin: { settings: { licenseKey: "test-license" } },
     aiService: { readCreditsBalance },
-    workspace: { setCreditsBalance: jest.fn() },
+    workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() },
     creditsPromise: null,
     creditsBalance: null,
   });

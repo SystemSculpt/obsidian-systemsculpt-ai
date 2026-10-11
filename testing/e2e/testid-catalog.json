@@ -51,6 +51,7 @@
     "chat.editor.cancel",
     "chat.editor.input",
     "chat.editor.save-resubmit",
+    "chat.empty.view-plans",
     "chat.header.credits",
     "chat.header.history",
     "chat.header.new",

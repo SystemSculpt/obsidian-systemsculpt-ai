@@ -19,6 +19,8 @@ import type {
   AudioProcessorOutputPreset,
 } from "../../features/audio-processor/types";
 import { AgentChatView } from "../../views/chatview/AgentChatView";
+import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
+import { openExternalUrl } from "../../utils/externalUrl";
 
 type ActiveAudioArtifactReference = {
   artifactJobId: string;
@@ -91,6 +93,7 @@ export class CommandManager {
     this.registerOpenSystemSculptSearch();
     this.registerReloadObsidian();
     this.registerOpenSettings();
+    this.registerAccountCommands();
     this.registerOpenCreditsBalance();
     this.registerChatWithFile();
     this.registerResumeChat();
@@ -325,6 +328,24 @@ export class CommandManager {
         await this.plugin.openCreditsBalanceModal({
           settingsTab: "account",
         });
+      },
+    });
+  }
+
+  private registerAccountCommands(): void {
+    this.plugin.addCommand({
+      id: "sign-in",
+      name: "Sign in",
+      callback: () => {
+        this.plugin.openSettingsTab("account");
+        void this.plugin.getAccountConnectService().begin("sign-in", resolveSurfaceDomContext().window);
+      },
+    });
+    this.plugin.addCommand({
+      id: "view-plans",
+      name: "View plans / buy credits",
+      callback: () => {
+        void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "command"), resolveSurfaceDomContext().window);
       },
     });
   }

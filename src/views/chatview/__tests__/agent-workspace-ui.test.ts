@@ -939,6 +939,7 @@ describe("AgentWorkspace", () => {
 
   it("mounts the canonical view surface and shared action grammar", () => {
     const parent = document.body.createDiv();
+    const onViewPlans = jest.fn();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
       sourcePath: () => "SystemSculpt/Chats/chat.md",
@@ -953,10 +954,19 @@ describe("AgentWorkspace", () => {
       onOpenHistory: jest.fn(),
       onOpenSettings: jest.fn(),
       onOpenCredits: jest.fn(),
+      onViewPlans,
+      showPlanOffer: true,
       onCancelQueued: jest.fn(),
       onRunQueuedNow: jest.fn(),
     });
     workspace.load();
+
+    const plans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.empty.view-plans"]')!;
+    expect(plans.closest("[hidden]")).toBeNull();
+    plans.click();
+    expect(onViewPlans).toHaveBeenCalledTimes(1);
+    workspace.setPlanOfferVisible(false);
+    expect(plans.closest("[hidden]")).not.toBeNull();
 
     expect(workspace.element.matches('.ss-surface[data-ss-surface="view"]')).toBe(true);
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
