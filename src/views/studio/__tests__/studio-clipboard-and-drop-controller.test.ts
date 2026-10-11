@@ -5,6 +5,10 @@ jest.mock("obsidian", () => {
   return { ...actual, Notice: jest.fn() };
 });
 
+jest.mock("../../../utils/yieldToEventLoop", () => ({
+  yieldToEventLoop: jest.fn(async () => undefined),
+}));
+
 import { App, Notice, TFile, TFolder } from "obsidian";
 import { mediaIngestNode } from "../../../studio/nodes/mediaIngestNode";
 import { textNode } from "../../../studio/nodes/textNode";
@@ -14,6 +18,7 @@ import {
   type StudioClipboardAndDropHost,
 } from "../systemsculpt-studio-view/StudioClipboardAndDropController";
 import { isSameClipboardImage, isSameClipboardPixels } from "../systemsculpt-studio-view/StudioClipboardData";
+import { yieldToEventLoop } from "../../../utils/yieldToEventLoop";
 
 function projectWithNodes(
   nodes: StudioNodeInstance[] = [],
@@ -807,6 +812,7 @@ describe("telling a pasted picture from the one that was copied", () => {
     let getContext: jest.SpyInstance;
 
     beforeEach(() => {
+      (yieldToEventLoop as jest.Mock).mockClear();
       (globalThis as { createImageBitmap?: unknown }).createImageBitmap = jest.fn(async (source: Blob) => {
         const decoded = (source as unknown as { decoded: FakeBitmap | null }).decoded;
         if (!decoded) throw new Error("not a picture");
@@ -838,6 +844,15 @@ describe("telling a pasted picture from the one that was copied", () => {
       await expect(isSameClipboardImage(file(ours), file(theirs))).resolves.toBe(true);
       expect(ours.close).toHaveBeenCalledTimes(1);
       expect(theirs.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets the canvas breathe between the bands of a large picture, and only then", async () => {
+      // Two bands: one pause between them.
+      await isSameClipboardImage(file(bitmap(4096, 300)), file(bitmap(4096, 300)));
+      expect(yieldToEventLoop).toHaveBeenCalledTimes(1);
+
+      await isSameClipboardImage(file(bitmap(64, 48)), file(bitmap(64, 48)));
+      expect(yieldToEventLoop).toHaveBeenCalledTimes(1);
     });
 
     it.each([

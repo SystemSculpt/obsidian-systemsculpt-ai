@@ -1,4 +1,5 @@
 import { TFile, TFolder, type TAbstractFile } from "obsidian";
+import { yieldToEventLoop } from "../../../utils/yieldToEventLoop";
 import {
   parsePathReferencesFromText,
   resolveVaultItemFromReference,
@@ -113,7 +114,7 @@ export function extractClipboardMediaFiles(event: ClipboardEvent): File[] {
 
 /** How far a channel may move through the clipboard: rounding, never an edit. */
 const PICTURE_TOLERANCE = 4;
-/** Pixels read back at a time, so a large picture is never held twice over. */
+/** Pixels read back at a time: a large picture is never held twice over, nor compared in one go. */
 const PICTURE_BAND_PIXELS = 1 << 20;
 
 /**
@@ -172,6 +173,10 @@ export async function isSameClipboardImage(first: Blob, second: Blob): Promise<b
     }
     context.globalCompositeOperation = "copy";
     for (let top = 0; top < height; top += band) {
+      if (top > 0) {
+        // A large picture is many bands; the canvas stays responsive between them.
+        await yieldToEventLoop();
+      }
       const rows = Math.min(band, height - top);
       const read = (bitmap: ImageBitmap): Uint8ClampedArray => {
         context.drawImage(bitmap, 0, top, width, rows, 0, 0, width, rows);
