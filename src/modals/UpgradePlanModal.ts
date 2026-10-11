@@ -1,7 +1,7 @@
 import { setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
-import { SYSTEMSCULPT_WEBSITE } from "../constants/externalServices";
+import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
 import { AccountConnectModal, type AccountConnectActions } from "./AccountConnectModal";
@@ -45,12 +45,6 @@ export function defaultAccountConnectActions(plugin: SystemSculptPlugin): Accoun
       void plugin.getAccountConnectService().begin("sign-in");
     },
   };
-}
-
-const UTM_SUFFIX = "utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade";
-
-function withUtm(url: string): string {
-  return `${url}${url.includes("?") ? "&" : "?"}${UTM_SUFFIX}`;
 }
 
 /**
@@ -135,7 +129,8 @@ export class UpgradePlanModal extends StandardModal {
       "AI chat, transcription, and document intelligence — right inside your vault.",
     );
     this.renderIcon("sparkles");
-    this.addDetail("Sign in to connect your account, or create one free in seconds.");
+    this.addDetail("Sign in to connect your account. View paid plans and credit packs for hosted AI features.");
+    this.addLink("upgrade-plan.pricing", "View plans", SYSTEMSCULPT_WEBSITE.LICENSE);
     this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
     this.addActionButton("upgrade-plan.create-account", "Create free account", () => this.beginConnect("sign-up"));
     this.addActionButton("upgrade-plan.explore", "Explore on my own", () => this.close());
@@ -178,14 +173,14 @@ export class UpgradePlanModal extends StandardModal {
       "external-link",
     );
     this.addActionButton("upgrade-plan.pricing", "Compare plans", () => {
-      void openExternalUrl(withUtm(SYSTEMSCULPT_WEBSITE.LICENSE), getSurfaceOwnerWindow(this.modalEl));
+      void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "modal"), getSurfaceOwnerWindow(this.modalEl));
     });
   }
 
   /** Opens checkout, then keeps guiding: purchase completes in the browser,
    * so the modal switches to the "come back and activate" state. */
   private openPurchase(url: string): void {
-    void openExternalUrl(withUtm(url), getSurfaceOwnerWindow(this.modalEl));
+    void openExternalUrl(withPluginAttribution(url, "modal"), getSurfaceOwnerWindow(this.modalEl));
     this.renderAfterPurchase();
   }
 
@@ -239,9 +234,11 @@ export class UpgradePlanModal extends StandardModal {
     this.addLink("upgrade-plan.reopen", "Open the sign-in page again", () => {
       const ownerWindow = getSurfaceOwnerWindow(this.modalEl);
       const service = this.plugin.getAccountConnectService();
-      void service.reopen(ownerWindow).then((reopened) => {
-        if (!reopened) void service.begin(mode, ownerWindow);
-      });
+      if (service.hasPendingRequest()) {
+        void service.reopen(ownerWindow);
+      } else {
+        void service.begin(mode, ownerWindow);
+      }
     });
     this.addActionButton(
       "upgrade-plan.complete-code",
@@ -260,7 +257,7 @@ export class UpgradePlanModal extends StandardModal {
         status.empty();
         status.createDiv({
           cls: "ss-upgrade-plan__status-text",
-          text: "Couldn't open your browser. Visit systemsculpt.com/sign-in on this device, then paste the connection code here.",
+          text: "Couldn't open your browser. Reopen the sign-in page, then paste the connection code shown there.",
         });
       });
   }
@@ -302,7 +299,7 @@ export class UpgradePlanModal extends StandardModal {
       if (typeof target === "function") {
         target();
       } else {
-        void openExternalUrl(withUtm(target), getSurfaceOwnerWindow(this.modalEl));
+        void openExternalUrl(withPluginAttribution(target, "modal"), getSurfaceOwnerWindow(this.modalEl));
       }
     });
   }

@@ -8,7 +8,7 @@ const prototype = AgentChatView.prototype as any;
 function view(backend: 'codex' | 'systemsculpt' = 'codex') {
   return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
-    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setCreditsBalance: jest.fn() } } as any;
+    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() } } as any;
 }
 it('creates native sessions for the selected backend and retains saved-chat routing over the default', () => {
   const native = view(); native.agent = prototype.createAgentSession.call(native);
@@ -28,6 +28,10 @@ it('does not block native chat on SystemSculpt credits or show a subscription re
   expect(prototype.planReminderBanner.call(native)).toBeNull();
   await prototype.refreshCreditsBalance.call(native);
   expect(native.creditsBalance).toBeNull(); expect(native.workspace.setCreditsBalance).toHaveBeenCalledWith(null);
+  expect(native.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(true);
+  native.plugin.settings.licenseKey = 'test-license';
+  await prototype.refreshCreditsBalance.call(native);
+  expect(native.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(false);
 });
 
 it('mounts the active provider after session replacement and opens provider changes in a fresh tab', async () => {

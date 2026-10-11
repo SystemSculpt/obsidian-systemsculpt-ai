@@ -65,6 +65,8 @@ export type AgentWorkspaceOptions = Readonly<{
   onOpenHistory: () => void | Promise<void>;
   onOpenSettings: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
+  onViewPlans?: () => void | Promise<void>;
+  showPlanOffer?: boolean;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
   onApprovalModeChange?: (mode: "ask" | "full-access") => void;
@@ -151,6 +153,7 @@ export class AgentWorkspace extends Component {
   private readonly titleElement: HTMLElement;
   private readonly creditsButton: HTMLButtonElement | null;
   private readonly emptyState: HTMLElement;
+  private readonly planOffer: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
@@ -238,6 +241,17 @@ export class AgentWorkspace extends Component {
     this.emptyState = this.viewport.createDiv({ cls: "systemsculpt-agent-empty" });
     this.emptyState.createEl("strong", { text: "What should we work on?" });
     this.emptyState.createDiv({ text: "Ask about your notes or give SystemSculpt a task." });
+    this.planOffer = this.emptyState.createDiv({ cls: "systemsculpt-agent-plan-offer" });
+    this.planOffer.toggleAttribute("hidden", !options.showPlanOffer || !options.onViewPlans);
+    if (options.onViewPlans) {
+      this.planOffer.createDiv({ text: "Explore hosted AI chat, semantic search, and transcription." });
+      const plans = createUiAction(this.planOffer, {
+        label: "View plans",
+        testId: "chat.empty.view-plans",
+        size: "small",
+      });
+      this.registerDomEvent(plans, "click", () => void this.options.onViewPlans?.());
+    }
 
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
@@ -439,6 +453,10 @@ export class AgentWorkspace extends Component {
     this.banner.setAttribute("role", kind === "error" ? "alert" : "status");
     this.banner.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
     this.banner.setText(message ?? "");
+  }
+
+  public setPlanOfferVisible(visible: boolean): void {
+    this.planOffer.toggleAttribute("hidden", !visible || !this.options.onViewPlans);
   }
 
   public setAttachments(attachments: readonly AgentComposerAttachment[]): void {

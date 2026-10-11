@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { requestUrl } from "obsidian";
+import { requestUrl, requireApiVersion } from "obsidian";
 import { API_BASE_URL } from "../../constants/api";
 import { AccountConnectService, type ConnectOutcome } from "../AccountConnectService";
 import { PlatformRequestClient } from "../PlatformRequestClient";
@@ -664,6 +664,7 @@ describe("AccountConnectService abandoned sign-in", () => {
   let restoreHost: () => void = () => undefined;
 
   beforeEach(() => {
+    jest.mocked(requireApiVersion).mockReturnValue(true);
     jest.clearAllMocks();
     request.mockReset();
     jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
@@ -692,6 +693,78 @@ describe("AccountConnectService abandoned sign-in", () => {
     restoreHost();
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it("resumes the same pending sign-in after unload without storing a license or syncing the verifier", async () => {
+    const values = new Map<string, unknown>();
+    const app = {
+      loadLocalStorage: (key: string) => values.get(key),
+      saveLocalStorage: (key: string, value: unknown) => values.set(key, value),
+    };
+    const firstPlugin = createPlugin();
+    firstPlugin.app = app;
+    const first = createService(firstPlugin);
+    await first.service.begin("sign-up");
+    const requestBeforeRestart = parseConnectUrl(first.openedUrls[0]);
+    firstPlugin.register.mock.calls[0][0]();
+
+    const nextPlugin = createPlugin();
+    nextPlugin.app = app;
+    const next = createService(nextPlugin);
+    expect(next.service.hasPendingRequest()).toBe(true);
+    await next.service.reopen();
+    expect(parseConnectUrl(next.openedUrls[0])).toEqual(requestBeforeRestart);
+    expect(firstPlugin.updateSettings).not.toHaveBeenCalled();
+    expect(JSON.stringify([...values.values()])).not.toContain("license");
+
+    request.mockResolvedValue(jsonResponse(200, successPayload));
+    expect(await next.service.handleProtocolCallback({ code: "code", state: requestBeforeRestart.state }))
+      .toEqual(expect.objectContaining({ kind: "signed-in" }));
+    expect([...values.values()].every((value) => value === null)).toBe(true);
+  });
+
+  it("removes expired pending sign-in state on restart", async () => {
+    let now = 1_700_000_000_000;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    const values = new Map<string, unknown>();
+    const app = {
+      loadLocalStorage: (key: string) => values.get(key),
+      saveLocalStorage: (key: string, value: unknown) => values.set(key, value),
+    };
+    const plugin = createPlugin();
+    plugin.app = app;
+    const first = createService(plugin);
+    await first.service.begin("sign-in");
+    plugin.register.mock.calls[0][0]();
+    now += 10 * 60_000;
+    const next = createService(plugin);
+    expect(next.service.hasPendingRequest()).toBe(false);
+    expect(await next.service.reopen()).toBe(false);
+    expect([...values.values()].every((value) => value === null)).toBe(true);
+  });
+
+  it.each(["invalid", {}, { state: "bad", verifier: "bad", createdAt: Date.now(), mode: "sign-in" }])(
+    "discards malformed persisted requests without contacting the server: %j", (stored) => {
+      const plugin = createPlugin();
+      plugin.app = { loadLocalStorage: () => stored, saveLocalStorage: jest.fn() };
+      const { service } = createService(plugin);
+      expect(service.hasPendingRequest()).toBe(false);
+      expect(plugin.app.saveLocalStorage).toHaveBeenCalledWith(expect.any(String), null);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps cancellation final across a restart", async () => {
+    let stored: unknown;
+    const plugin = createPlugin();
+    plugin.app = {
+      loadLocalStorage: () => stored,
+      saveLocalStorage: (_key: string, value: unknown) => { stored = value; },
+    };
+    const first = createService(plugin);
+    await first.service.begin("sign-in");
+    first.service.cancelPending();
+    expect(createService(plugin).service.hasPendingRequest()).toBe(false);
   });
 
   function createPollingService() {

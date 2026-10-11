@@ -24,8 +24,9 @@ npm run build
 
 1. Open `Settings -> SystemSculpt AI -> Account`.
 2. Use `Sign in` (or `Sign up`) to connect your SystemSculpt account in the browser, or enter and activate a license key manually.
-3. Review credits and account status.
-4. Open docs or support links if you need help.
+3. Choose **View plans** to compare monthly, lifetime, and credit packs. If you already purchased, sign in with the same email or activate the key from your receipt.
+4. Review credits and account status. **Manage account** opens billing controls. You can also find **Sign in** and **View plans / buy credits** in the command palette.
+5. Open docs or support links if you need help. If the browser does not return automatically, use **Open the sign-in page again** and paste the connection code. On Obsidian 1.8.7 or newer, a pending sign-in survives an app restart for up to ten minutes on the same device.
 
 ## Start chatting
 

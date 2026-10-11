@@ -12,6 +12,7 @@ import type {
   CreditsUsageSnapshot,
 } from "../services/SystemSculptService";
 import { LICENSE_URL } from "../types";
+import { withPluginAttribution } from "../constants/externalServices";
 import { openExternalUrl } from "../utils/externalUrl";
 
 type CreditsTabId = "balance" | "usage";
@@ -604,7 +605,7 @@ export class CreditsBalanceModal extends StandardModal {
   private openPurchasePage(): void {
     const purchaseUrl = this.balance?.purchaseUrl || this.options.fallbackPurchaseUrl || LICENSE_URL;
     if (purchaseUrl) {
-      void openExternalUrl(purchaseUrl, getSurfaceOwnerWindow(this.modalEl)).then((opened) => {
+      void openExternalUrl(withPluginAttribution(purchaseUrl, "credits"), getSurfaceOwnerWindow(this.modalEl)).then((opened) => {
         if (!opened) this.options.onOpenSetup();
       });
       return;

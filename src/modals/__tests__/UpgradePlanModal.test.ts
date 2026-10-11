@@ -110,15 +110,17 @@ function createPlugin(settings: Record<string, unknown> = {}) {
   const reopen = jest.fn().mockResolvedValue(true);
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
   const pollInBackground = jest.fn();
+  const hasPendingRequest = jest.fn(() => true);
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
-    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground }),
+    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
     openNewChat: jest.fn(),
     begin,
     reopen,
     submitManualCode,
     pollInBackground,
+    hasPendingRequest,
   } as any;
 }
 
@@ -224,6 +226,11 @@ describe("UpgradePlanModal", () => {
     plugin.reopen.mockResolvedValue(false);
     reopenLink!.click();
     await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledTimes(1);
+
+    plugin.hasPendingRequest.mockReturnValue(false);
+    reopenLink!.click();
+    await flushPromises();
     expect(plugin.begin).toHaveBeenCalledTimes(2);
     expect(plugin.begin).toHaveBeenLastCalledWith("sign-in", expect.anything());
     modal.onClose();
@@ -283,12 +290,17 @@ describe("UpgradePlanModal", () => {
   });
 
   it("renders the soft onboarding welcome with an explore escape hatch", () => {
+    const { hrefs, spy } = spyOnAnchorClicks();
     const modal = new UpgradePlanModal(createPlugin(), { context: "onboarding" });
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Welcome to SystemSculpt AI");
     expect(modal.modalEl.textContent).not.toContain(PLAN_REQUIRED_MESSAGE);
     expect(findButtonByText(modal.modalEl, "Explore on my own")).toBeTruthy();
+    findButtonByText(modal.modalEl, "View plans").click();
+    expect(new URL(hrefs[0]).pathname).toBe("/pricing");
+    expect(new URL(hrefs[0]).searchParams.get("utm_source")).toBe("obsidian-plugin");
+    spy.mockRestore();
     modal.onClose();
   });
 

@@ -3,6 +3,7 @@ import SystemSculptPlugin from "../main";
 import { PLATFORM_REQUEST_TIMEOUT_MS, PlatformRequestClient } from "./PlatformRequestClient";
 import { openExternalUrl } from "../utils/externalUrl";
 import { bytesToBase64 } from "../utils/base64";
+import { requireApiVersion } from "obsidian";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
 
@@ -52,6 +53,8 @@ export type ConnectOutcome =
 
 /** Pending browser sign-in requests expire after ten minutes. */
 const PENDING_CONNECT_TTL_MS = 10 * 60_000;
+const PENDING_CONNECT_STORAGE_KEY = "systemsculpt-ai:pending-account-connect-v1";
+const PKCE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 /**
  * While a sign-in is pending the plugin polls the server for completion.
@@ -93,11 +96,12 @@ function base64UrlEncode(bytes: Uint8Array): string {
 /**
  * Browser-based "Sign in with SystemSculpt" for the plugin.
  *
- * Owns the in-memory PKCE-style pending request (state + verifier), opens the
+ * Owns the PKCE-style pending request (state + verifier), opens the
  * website sign-in flow, receives the obsidian://systemsculpt-connect deep link
  * (or a manually pasted code), and exchanges the one-time code for the
- * account's license key. The verifier and state live only in this service and
- * are never persisted to settings or data.json.
+ * account's license key. The pending request survives a host restart for at
+ * most ten minutes in Obsidian's vault-scoped device-local storage. It is
+ * never written to synced settings or data.json.
  *
  * Polls and exchanges race for the same single-use code, and the one answer
  * that carries the license key cannot be fetched again. So each sign-in has
@@ -129,8 +133,9 @@ export class AccountConnectService {
   ) {
     this.requestClient = requestClient;
     this.openUrl = openUrl;
-    // Unloading ends any pending sign-in: its timer, listeners, and requests.
-    this.plugin.register(() => this.endPending());
+    // Stop live work on unload but keep the bounded request for a restart.
+    this.plugin.register(() => this.endPending(false));
+    this.restorePending();
   }
 
   public hasPendingRequest(): boolean {
@@ -195,6 +200,7 @@ export class AccountConnectService {
       unsettled: new Set(),
       unanswered: false,
     };
+    this.savePending();
     this.startPolling();
 
     const opened = await this.openUrl(await this.connectUrl(this.pending), ownerWindow);
@@ -249,13 +255,64 @@ export class AccountConnectService {
    * Ends the pending sign-in, whether it completed, failed, was cancelled,
    * superseded, or expired: stops polling and aborts its requests in flight.
    */
-  private endPending(): void {
+  private endPending(clearStored = true): void {
     const pending = this.pending;
     this.pending = null;
     this.pollSlot = null;
     this.stopPolling();
     this.stopReturnPoll();
     pending?.controller.abort();
+    if (clearStored) this.clearStoredPending();
+  }
+
+  private savePending(): void {
+    if (!this.pending) return;
+    const { state, verifier, mode, createdAt } = this.pending;
+    try {
+      if (requireApiVersion("1.8.7")) {
+        this.plugin.app?.saveLocalStorage?.(PENDING_CONNECT_STORAGE_KEY, { state, verifier, mode, createdAt });
+      }
+    } catch {
+      // Hosts without device storage keep the current in-memory flow.
+    }
+  }
+
+  private clearStoredPending(): void {
+    try {
+      if (requireApiVersion("1.8.7")) this.plugin.app?.saveLocalStorage?.(PENDING_CONNECT_STORAGE_KEY, null);
+    } catch {
+      // Storage failure must not prevent cancellation or completion.
+    }
+  }
+
+  private restorePending(): void {
+    let stored: unknown;
+    try {
+      if (requireApiVersion("1.8.7")) stored = this.plugin.app?.loadLocalStorage?.(PENDING_CONNECT_STORAGE_KEY);
+    } catch {
+      return;
+    }
+    if (stored == null) return;
+    const value = stored as Partial<Pick<PendingConnectRequest, "state" | "verifier" | "mode" | "createdAt">>;
+    if (typeof value !== "object"
+      || typeof value.state !== "string" || !PKCE_TOKEN.test(value.state)
+      || typeof value.verifier !== "string" || !PKCE_TOKEN.test(value.verifier)
+      || (value.mode !== "sign-in" && value.mode !== "sign-up")
+      || typeof value.createdAt !== "number" || !Number.isFinite(value.createdAt)
+      || value.createdAt > Date.now() || Date.now() - value.createdAt >= PENDING_CONNECT_TTL_MS) {
+      this.clearStoredPending();
+      return;
+    }
+    this.pending = {
+      state: value.state,
+      verifier: value.verifier,
+      mode: value.mode,
+      createdAt: value.createdAt,
+      controller: new AbortController(),
+      unsettled: new Set(),
+      unanswered: false,
+    };
+    this.pollInBackground();
   }
 
   private async pollOnce(): Promise<void> {
@@ -468,7 +525,7 @@ export class AccountConnectService {
 
   private activePending(): PendingConnectRequest | null {
     if (!this.pending) return null;
-    if (Date.now() - this.pending.createdAt > PENDING_CONNECT_TTL_MS) {
+    if (Date.now() - this.pending.createdAt >= PENDING_CONNECT_TTL_MS) {
       this.endPending();
       return null;
     }

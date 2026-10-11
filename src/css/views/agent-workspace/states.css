@@ -21,6 +21,18 @@
   font-size: var(--ss-text-xl);
 }
 
+.systemsculpt-agent-plan-offer {
+  display: grid;
+  justify-items: center;
+  gap: var(--ss-space-2);
+  max-width: 36ch;
+  margin: var(--ss-space-2) auto 0;
+}
+
+.systemsculpt-agent-plan-offer .ss-button {
+  pointer-events: auto;
+}
+
 .systemsculpt-agent-jump {
   position: absolute;
   right: var(--ss-space-5);

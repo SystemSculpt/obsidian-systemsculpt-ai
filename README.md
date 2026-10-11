@@ -2,6 +2,8 @@
 
 SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex.
 
+**Pricing:** Hosted AI has paid plans and credit packs. [Compare monthly ($19), lifetime ($149), and credit packs](https://systemsculpt.com/pricing?utm_source=obsidian-plugin&utm_medium=readme&utm_campaign=upgrade). Your own on-machine Codex remains available without a SystemSculpt plan.
+
 ## What it does
 
 - Chat with notes, documents, images, and built-in vault tools.

@@ -20,6 +20,8 @@ import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
+import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
+import { openExternalUrl } from "../../utils/externalUrl";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
@@ -760,6 +762,11 @@ export class AgentChatView extends ItemView {
       onOpenHistory: () => this.openHistory(),
       onOpenSettings: () => this.openChatSettings(),
       onOpenCredits: () => this.openCreditsBalanceModal(),
+      showPlanOffer: !this.plugin.settings.licenseKey?.trim(),
+      onViewPlans: () => openExternalUrl(
+        withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "chat"),
+        this.containerEl.ownerDocument.defaultView ?? undefined,
+      ).then(() => undefined),
       onCancelQueued: async (id) => { await this.cancelQueuedFollowUp(id); },
       onRunQueuedNow: (id) => this.runQueuedFollowUpNow(id),
       onApprovalModeChange: (mode) => {
@@ -1143,6 +1150,7 @@ export class AgentChatView extends ItemView {
     options: CreditsRefreshOptions = {},
   ): Promise<void> {
     const licenseKey = this.plugin.settings.licenseKey?.trim() ?? "";
+    this.workspace?.setPlanOfferVisible(!licenseKey);
     const licenseChanged = this.creditsDisplayLicenseKey !== undefined
       && this.creditsDisplayLicenseKey !== licenseKey;
     this.creditsDisplayLicenseKey = licenseKey;
