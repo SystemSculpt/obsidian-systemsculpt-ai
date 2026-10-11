@@ -111,6 +111,62 @@ export function extractClipboardMediaFiles(event: ClipboardEvent): File[] {
   return files;
 }
 
+const FINGERPRINT_SIDE = 8;
+const FINGERPRINT_TOLERANCE = 10;
+
+/**
+ * A coarse thumbnail of a picture: its size, then 8 × 8 premultiplied pixels.
+ * The system clipboard re-encodes whatever is written to it, so bytes cannot
+ * tell whether a pasted picture is one this view copied; its pixels can.
+ */
+export async function fingerprintClipboardImage(source: Blob): Promise<number[] | null> {
+  if (typeof createImageBitmap !== "function") {
+    return null;
+  }
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(source);
+    const canvas = createEl("canvas");
+    canvas.width = FINGERPRINT_SIDE;
+    canvas.height = FINGERPRINT_SIDE;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return null;
+    }
+    context.drawImage(bitmap, 0, 0, FINGERPRINT_SIDE, FINGERPRINT_SIDE);
+    const pixels = context.getImageData(0, 0, FINGERPRINT_SIDE, FINGERPRINT_SIDE).data;
+    const fingerprint = [bitmap.width, bitmap.height];
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+      const alpha = pixels[offset + 3];
+      // Colour under near-zero alpha does not survive a round trip; weigh it out.
+      fingerprint.push(
+        Math.round((pixels[offset] * alpha) / 255),
+        Math.round((pixels[offset + 1] * alpha) / 255),
+        Math.round((pixels[offset + 2] * alpha) / 255),
+        alpha
+      );
+    }
+    return fingerprint;
+  } catch {
+    return null;
+  } finally {
+    bitmap?.close();
+  }
+}
+
+/** Same size, and the same picture to within what a re-encode may shift. */
+export function isSameClipboardImage(first: readonly number[], second: readonly number[]): boolean {
+  if (first.length !== second.length || first[0] !== second[0] || first[1] !== second[1]) {
+    return false;
+  }
+  for (let index = 2; index < first.length; index += 1) {
+    if (Math.abs(first[index] - second[index]) > FINGERPRINT_TOLERANCE) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function extractClipboardText(event: ClipboardEvent): string {
   const clipboard = event.clipboardData;
   if (!clipboard) {

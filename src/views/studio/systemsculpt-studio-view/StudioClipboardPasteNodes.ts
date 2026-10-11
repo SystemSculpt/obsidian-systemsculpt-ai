@@ -2,7 +2,34 @@ import type {
   StudioNodeDefinition,
   StudioNodeInstance,
 } from "../../../studio/types";
-import { STUDIO_GRAPH_DEFAULT_NODE_WIDTH } from "../../../studio/StudioNodeGeometry";
+import { estimateStudioFillTextMeasure, studioFillTextBoxAt } from "../../../studio/StudioFillText";
+import {
+  STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
+  STUDIO_TEXT_NODE_FILL_LAYOUT,
+  STUDIO_TEXT_NODE_LAYOUT_KEY,
+} from "../../../studio/StudioNodeGeometry";
+
+const LABEL_MAX_LINES = 6;
+const LABEL_MAX_LINE_LENGTH = 48;
+const LABEL_FONT_PX = 24;
+const MARKDOWN_BLOCK = /^ {0,3}(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|\|)/m;
+// Nothing is laid out yet, so the box allows a generous width for each character.
+const estimateWidth = estimateStudioFillTextMeasure(0.6);
+
+/**
+ * A few short lines are a label: they paste as text that fills its box. A
+ * passage needs to wrap, and Markdown needs rendering, so both paste as a
+ * Markdown text card. Returns the label as it will be stored, or null.
+ */
+function readPastedLabel(text: string): string | null {
+  const label = text.replace(/\r\n?/g, "\n").replace(/^\n+|\s+$/g, "");
+  const lines = label.split("\n");
+  const fits = label.length > 0
+    && lines.length <= LABEL_MAX_LINES
+    && lines.every((line) => line.length <= LABEL_MAX_LINE_LENGTH)
+    && !MARKDOWN_BLOCK.test(label);
+  return fits ? label : null;
+}
 
 export function buildPastedTextNode(options: {
   textNodeDefinition: StudioNodeDefinition;
@@ -22,6 +49,25 @@ export function buildPastedTextNode(options: {
     cloneConfigDefaults,
     normalizeNodePosition,
   } = options;
+  const label = readPastedLabel(text);
+  if (label !== null) {
+    const box = studioFillTextBoxAt(estimateWidth, { text: label, style: "plain" }, LABEL_FONT_PX);
+    return {
+      id: nextNodeId(),
+      kind: textNodeDefinition.kind,
+      version: textNodeDefinition.version,
+      title: prettifyNodeKind(textNodeDefinition.kind),
+      position: normalizeNodePosition(position),
+      size: { width: Math.ceil(box.width), height: Math.ceil(box.height) },
+      config: {
+        ...cloneConfigDefaults(textNodeDefinition),
+        [STUDIO_TEXT_NODE_LAYOUT_KEY]: STUDIO_TEXT_NODE_FILL_LAYOUT,
+        value: label,
+      },
+      continueOnError: false,
+      disabled: false,
+    };
+  }
   return {
     id: nextNodeId(),
     kind: textNodeDefinition.kind,

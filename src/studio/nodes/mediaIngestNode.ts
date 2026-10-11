@@ -3,12 +3,12 @@ import type {
   StudioNodeDefinition,
   StudioNodeExecutionContext,
 } from "../types";
-import { composeStudioCaptionBoardImage } from "../StudioCaptionBoardComposition";
+import { composeStudioImageBoardAsset } from "../StudioImageBoardRenderer";
 import {
-  boardStateHasRenderableEdits,
-  readStudioCaptionBoardState,
-  resolveStudioCaptionBoardRenderedAsset,
-} from "../StudioCaptionBoardState";
+  readStudioImageBoard,
+  resolveStudioImageBoardRenderedAsset,
+  studioImageBoardHasEdits,
+} from "../StudioImageBoard";
 import { extensionFromPath, getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
 
 const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
@@ -161,19 +161,26 @@ export const mediaIngestNode: StudioNodeDefinition = {
     }
     context.services.assertFilesystemPath(sourcePath);
     const { previewAsset, previewPath, previewError } = await buildPreviewAssetPath(context, sourcePath);
-    const boardState = readStudioCaptionBoardState(context.node.config);
-    const shouldComposeBoard = boardStateHasRenderableEdits(boardState);
+    const board = readStudioImageBoard(context.node.config);
     let finalAsset: StudioAssetRef | null = null;
 
-    if (shouldComposeBoard && previewAsset?.mimeType.startsWith("image/")) {
-      finalAsset = resolveStudioCaptionBoardRenderedAsset(
+    // An edited image leaves this node as its flattened render, never as the
+    // source: a crop or redaction must hold for everything downstream.
+    const edited = studioImageBoardHasEdits(board);
+    if (edited && !previewAsset && inferPreviewMimeType(sourcePath).startsWith("image/")) {
+      throw new Error(
+        `Media ingest node "${context.node.id}" has image edits but its source could not be staged, so the edited image cannot be produced. ${previewError}`.trim()
+      );
+    }
+    if (edited && previewAsset?.mimeType.startsWith("image/")) {
+      finalAsset = resolveStudioImageBoardRenderedAsset(
         context.node.config,
         previewAsset.path || sourcePath
       );
       if (!finalAsset) {
-        finalAsset = await composeStudioCaptionBoardImage({
+        finalAsset = await composeStudioImageBoardAsset({
           baseImage: previewAsset,
-          boardState,
+          board,
           readAsset: context.services.readAsset,
           storeAsset: context.services.storeAsset,
         });

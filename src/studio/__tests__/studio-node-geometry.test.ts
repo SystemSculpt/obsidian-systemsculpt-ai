@@ -27,7 +27,14 @@ import {
   STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT,
   STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH,
 } from "../StudioNodeGeometry";
-import { isStudioTextNodeAutoWidth, STUDIO_TEXT_NODE_WIDTH_MODE_KEY } from "../StudioNodeGeometry";
+import {
+  isStudioFillTextNode,
+  isStudioTextNodeAutoWidth,
+  resolveStudioFillTextNodeSize,
+  STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT,
+  STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH,
+  STUDIO_TEXT_NODE_WIDTH_MODE_KEY,
+} from "../StudioNodeGeometry";
 
 function createNode(
   kind: string,
@@ -332,5 +339,49 @@ describe("isStudioTextNodeAutoWidth", () => {
 
   it("never applies to other kinds", () => {
     expect(isStudioTextNodeAutoWidth({ kind: "studio.json", config: {} })).toBe(false);
+  });
+});
+
+describe("fill text nodes", () => {
+  const fill = (size?: { width: number; height: number }) =>
+    createNode("studio.text", { config: { layout: "fill", value: "Hello" }, size });
+
+  it("are text nodes that ask for the fill layout, and nothing else", () => {
+    expect(isStudioFillTextNode(fill())).toBe(true);
+    expect(isStudioFillTextNode(createNode("studio.text", { config: { value: "Hello" } }))).toBe(false);
+    expect(isStudioFillTextNode(createNode("studio.text", { config: { layout: "document" } }))).toBe(false);
+    expect(isStudioFillTextNode(createNode("studio.json", { config: { layout: "fill" } }))).toBe(false);
+  });
+
+  it("have a box: the stored size, or the default box before one is drawn", () => {
+    expect(resolveStudioFillTextNodeSize(fill())).toEqual({
+      width: STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH,
+      height: STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT,
+    });
+    expect(resolveStudioFillTextNodeSize(fill({ width: 900, height: 40 }))).toEqual({ width: 900, height: 40 });
+  });
+
+  it("can be as small as a word or as large as a poster", () => {
+    expect(resolveStudioFillTextNodeSize(fill({ width: 2, height: 2 }))).toEqual({ width: 24, height: 16 });
+    expect(resolveStudioFillTextNodeSize(fill({ width: 99999, height: 99999 }))).toEqual({
+      width: 4000,
+      height: STUDIO_GRAPH_TEXT_NODE_MAX_HEIGHT,
+    });
+    expect(resolveStudioGraphNodeResizeBounds(fill())).toMatchObject({ minWidth: 24, minHeight: 16 });
+  });
+
+  it("take their card size from the box, never from the content", () => {
+    const node = fill({ width: 500, height: 120 });
+
+    expect(resolveStudioGraphNodeWidth(node)).toBe(500);
+    expect(resolveStudioTextNodeWidth(node)).toBe(500);
+    expect(resolveStudioGraphNodeMinHeight(node)).toBe(120);
+    expect(resolveStudioTextNodeHeight(node, { offsetHeight: 999 })).toBe(120);
+    expect(isStudioTextNodeAutoWidth(node)).toBe(false);
+  });
+
+  it("resize as a plain box, where a Markdown text card scales its type", () => {
+    expect(resolveStudioNodeResizeSemantics("studio.text", { textFillsBox: true })).toBe("box");
+    expect(resolveStudioNodeResizeSemantics("studio.text", { textFillsBox: false })).toBe("text");
   });
 });

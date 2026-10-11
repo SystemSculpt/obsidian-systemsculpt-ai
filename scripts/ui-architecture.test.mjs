@@ -505,31 +505,46 @@ test("Studio project and live-sync ownership stays behind one typed controller",
   assert.doesNotMatch(view, /projectSessionController\?:|self\.currentProject\s*=/);
 });
 
-test("Studio image editing stays split into feature-owned modules", () => {
-  const coordinatorPath = "src/views/studio/canvas/StudioGraphImageEditorModal.ts";
+test("Studio image editing stays in place and split into feature-owned modules", () => {
+  const coordinatorPath = "src/views/studio/canvas/image-board/StudioImageBoardEditor.ts";
   const composedModules = [
-    "StudioImageEditorAssets",
-    "StudioImageEditorCanvas",
-    "StudioImageEditorInspector",
-    "StudioImageEditorModel",
-    "StudioImageEditorToolbar",
-    "StudioImageEditorTypes",
+    "StudioImageBoardImages",
+    "StudioImageBoardSession",
+    "StudioImageBoardStage",
+    "StudioImageBoardToolbar",
   ];
   const coordinator = read(coordinatorPath);
 
   for (const module of composedModules) {
     assert.match(
       coordinator,
-      new RegExp(`studio-image-editor/${module}`),
+      new RegExp(`from "\\./${module}"`),
       `${coordinatorPath} must compose ${module}`,
     );
   }
 
-  // The modal is a lifecycle coordinator; pointer, inspector, and numeric
-  // input ownership belong to the composed modules.
+  // The editor is a lifecycle coordinator mounted on the image card. Pointer
+  // gestures belong to the stage, layer state to the session, and painting to
+  // the shared renderer, so a modal or a second painter cannot return here.
   assert.doesNotMatch(
     coordinator,
-    /private (?:handlePointerMove|renderLabelInspector|patchSelectedLabel|createNumberInput)|from "node:fs/,
+    /extends Modal|startStudioPointerGesture|getContext\(|getImageData|from "node:fs/,
+  );
+  assert.match(coordinator, /renderStudioImageBoardScene/);
+
+  const renderer = read("src/studio/StudioImageBoardRenderer.ts");
+  const redaction = read("src/studio/StudioImageBoardRedaction.ts");
+  // Hidden pixels are erased before the surroundings are sampled, and the
+  // fill is synthesized without touching a canvas.
+  assert.match(renderer, /destination-out/);
+  assert.doesNotMatch(redaction, /getContext\(|getImageData|document\.|window\./);
+
+  // Port pins leave the picture while it is edited, but keep their boxes:
+  // cables resolve their anchors from each pin's bounding rect.
+  const boardCss = read("src/css/views/studio/image-board.css");
+  assert.match(
+    boardCss,
+    /\.ss-studio-node-card\.is-image-editing \.ss-studio-node-ports\s*\{\s*visibility:\s*hidden;\s*\}/,
   );
 });
 

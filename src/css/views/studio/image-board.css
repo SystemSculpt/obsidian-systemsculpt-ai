@@ -1,0 +1,485 @@
+/* ------------------------------------------------------------------ *
+ * Image board — an image node edited where it sits on the canvas.
+ *
+ * The stage takes the picture's place inside the media card, so it
+ * zooms with the graph; the toolbar floats over the workspace, so it
+ * keeps its size at any zoom. Geometry (box placement, aspect ratio,
+ * text metrics, --ss-studio-board-ui-scale) is written by
+ * StudioImageBoardStage.ts; this sheet owns appearance only.
+ * ------------------------------------------------------------------ */
+.ss-studio-node-card.is-image-editing {
+  box-shadow: var(--ss-ring);
+  cursor: default;
+}
+
+/* Wiring is not part of editing a picture, and the pins sit on the edge
+ * handles. Hidden rather than removed: cables anchor to each pin's box. */
+.ss-studio-node-card.is-image-editing .ss-studio-node-ports {
+  visibility: hidden;
+}
+
+.ss-studio-image-board {
+  /* 1 / graph zoom: keeps handles a constant size on screen. */
+  --ss-studio-board-ui-scale: 1;
+
+  position: relative;
+  width: 100%;
+  /* Transparent output reads as a checkerboard. */
+  background-color: var(--ss-surface-sunken);
+  background-image: conic-gradient(
+    var(--ss-surface-2) 25%,
+    transparent 0 50%,
+    var(--ss-surface-2) 0 75%,
+    transparent 0
+  );
+  background-size: 16px 16px;
+  border-radius: calc(var(--ss-radius-lg) - 1px);
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+
+.ss-studio-image-board[data-tool="text"] {
+  cursor: text;
+}
+
+.ss-studio-image-board[data-tool="rect"],
+.ss-studio-image-board[data-tool="ellipse"],
+.ss-studio-image-board[data-tool="arrow"],
+.ss-studio-image-board[data-tool="highlight"],
+.ss-studio-image-board[data-tool="redact"],
+.ss-studio-image-board[data-tool="magnify"],
+.ss-studio-image-board[data-tool="crop"] {
+  cursor: crosshair;
+}
+
+.ss-studio-image-board.is-gesturing {
+  cursor: grabbing;
+}
+
+.ss-studio-image-board.is-unavailable {
+  min-height: 120px;
+}
+
+.ss-studio-image-board__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+/* The read-only render a card shows for an edited image with no flattened copy yet. */
+.ss-studio-image-board__canvas.is-preview {
+  height: auto;
+}
+
+.ss-studio-image-board.is-unavailable .ss-studio-image-board__canvas,
+.ss-studio-image-board.is-unavailable .ss-studio-image-board__overlay {
+  visibility: hidden;
+}
+
+.ss-studio-image-board__status {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: var(--ss-space-4);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  text-align: center;
+  pointer-events: none;
+}
+
+.ss-studio-image-board.is-unavailable .ss-studio-image-board__status {
+  display: grid;
+}
+
+.ss-studio-image-board__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+/* Frames: selection, crop, and the box being drawn. */
+.ss-studio-image-board__selection,
+.ss-studio-image-board__crop,
+.ss-studio-image-board__draft {
+  position: absolute;
+  display: none;
+  box-sizing: border-box;
+}
+
+.ss-studio-image-board__selection.is-visible,
+.ss-studio-image-board__crop.is-visible,
+.ss-studio-image-board__draft.is-visible {
+  display: block;
+}
+
+.ss-studio-image-board__selection {
+  outline: calc(1.5px * var(--ss-studio-board-ui-scale)) solid var(--ss-accent);
+}
+
+.ss-studio-image-board__crop {
+  outline: calc(2px * var(--ss-studio-board-ui-scale)) solid var(--ss-ink-on-media);
+}
+
+.ss-studio-image-board__draft {
+  outline: calc(1.5px * var(--ss-studio-board-ui-scale)) dashed var(--ss-accent);
+  background-color: var(--ss-accent-tint);
+}
+
+.ss-studio-image-board__draft[data-tool="ellipse"] {
+  border-radius: var(--ss-radius-round);
+}
+
+/* The area the selected lens enlarges: drag it to magnify somewhere else,
+ * or drag its handles to adjust exactly what is marked. */
+.ss-studio-image-board__lens-area {
+  position: absolute;
+  display: none;
+  box-sizing: border-box;
+  outline: calc(1.5px * var(--ss-studio-board-ui-scale)) dashed var(--ss-accent);
+  cursor: move;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.ss-studio-image-board__lens-area.is-visible {
+  display: block;
+}
+
+.ss-studio-image-board__lens-area[data-shape="ellipse"] {
+  border-radius: var(--ss-radius-round);
+}
+
+/* Its corners are round dots, to tell them from the lens's own. Its edges
+ * are grabbed anywhere along their length: each edge handle is an unseen
+ * strip lying mostly outside the area, so even a sliver of an area keeps
+ * its middle free for moving it. */
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle {
+  z-index: 1;
+  border-radius: var(--ss-radius-round);
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-n,
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-e,
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-s,
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-w {
+  --ss-studio-board-edge-out: calc(-6px * var(--ss-studio-board-ui-scale));
+  --ss-studio-board-edge-grip: calc(8px * var(--ss-studio-board-ui-scale));
+
+  z-index: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-n,
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-s {
+  left: 0;
+  width: 100%;
+  height: var(--ss-studio-board-edge-grip);
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-e,
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-w {
+  top: 0;
+  width: var(--ss-studio-board-edge-grip);
+  height: 100%;
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-n {
+  top: var(--ss-studio-board-edge-out);
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-s {
+  top: auto;
+  bottom: var(--ss-studio-board-edge-out);
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-w {
+  left: var(--ss-studio-board-edge-out);
+}
+
+.ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-e {
+  left: auto;
+  right: var(--ss-studio-board-edge-out);
+}
+
+/* Alignment guides: the line a blur box has locked onto. */
+.ss-studio-image-board__guide {
+  position: absolute;
+  display: none;
+  background-color: var(--ss-accent);
+}
+
+.ss-studio-image-board__guide.is-visible {
+  display: block;
+}
+
+.ss-studio-image-board__guide.is-vertical {
+  top: 0;
+  bottom: 0;
+  width: calc(1px * var(--ss-studio-board-ui-scale));
+  transform: translateX(-50%);
+}
+
+.ss-studio-image-board__guide.is-horizontal {
+  left: 0;
+  right: 0;
+  height: calc(1px * var(--ss-studio-board-ui-scale));
+  transform: translateY(-50%);
+}
+
+/* Handles */
+.ss-studio-image-board__handle,
+.ss-studio-image-board__rotate {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px;
+  background-color: var(--ss-surface-0);
+  border: 1.5px solid var(--ss-accent);
+  border-radius: var(--ss-radius-xs);
+  box-shadow: var(--ss-elevation-1);
+  transform: scale(var(--ss-studio-board-ui-scale));
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.ss-studio-image-board__handle.is-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.ss-studio-image-board__handle.is-n {
+  top: 0;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.ss-studio-image-board__handle.is-ne {
+  top: 0;
+  left: 100%;
+  cursor: nesw-resize;
+}
+
+.ss-studio-image-board__handle.is-e {
+  top: 50%;
+  left: 100%;
+  cursor: ew-resize;
+}
+
+.ss-studio-image-board__handle.is-se {
+  top: 100%;
+  left: 100%;
+  cursor: nwse-resize;
+}
+
+.ss-studio-image-board__handle.is-s {
+  top: 100%;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.ss-studio-image-board__handle.is-sw {
+  top: 100%;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.ss-studio-image-board__handle.is-w {
+  top: 50%;
+  left: 0;
+  cursor: ew-resize;
+}
+
+.ss-studio-image-board__rotate {
+  top: calc(-28px * var(--ss-studio-board-ui-scale));
+  left: 50%;
+  border-radius: var(--ss-radius-round);
+  cursor: grab;
+}
+
+/* Pictures and lenses resize from their corners only, so they never stretch by accident. */
+.ss-studio-image-board__selection[data-kind="magnify"] .ss-studio-image-board__handle.is-n,
+.ss-studio-image-board__selection[data-kind="magnify"] .ss-studio-image-board__handle.is-e,
+.ss-studio-image-board__selection[data-kind="magnify"] .ss-studio-image-board__handle.is-s,
+.ss-studio-image-board__selection[data-kind="magnify"] .ss-studio-image-board__handle.is-w,
+.ss-studio-image-board__selection[data-kind="image"] .ss-studio-image-board__handle.is-n,
+.ss-studio-image-board__selection[data-kind="image"] .ss-studio-image-board__handle.is-e,
+.ss-studio-image-board__selection[data-kind="image"] .ss-studio-image-board__handle.is-s,
+.ss-studio-image-board__selection[data-kind="image"] .ss-studio-image-board__handle.is-w,
+.ss-studio-image-board__selection[data-kind="base"] .ss-studio-image-board__handle.is-n,
+.ss-studio-image-board__selection[data-kind="base"] .ss-studio-image-board__handle.is-e,
+.ss-studio-image-board__selection[data-kind="base"] .ss-studio-image-board__handle.is-s,
+.ss-studio-image-board__selection[data-kind="base"] .ss-studio-image-board__handle.is-w,
+.ss-studio-image-board__selection.is-typing .ss-studio-image-board__handle,
+.ss-studio-image-board__selection.is-typing .ss-studio-image-board__rotate {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .ss-studio-image-board__handle,
+  .ss-studio-image-board__rotate {
+    width: 22px;
+    height: 22px;
+    margin: -11px;
+  }
+
+  .ss-studio-image-board__rotate {
+    top: calc(-40px * var(--ss-studio-board-ui-scale));
+  }
+
+  .ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-n,
+  .ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-e,
+  .ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-s,
+  .ss-studio-image-board__lens-area .ss-studio-image-board__handle.is-w {
+    --ss-studio-board-edge-out: calc(-12px * var(--ss-studio-board-ui-scale));
+    --ss-studio-board-edge-grip: calc(16px * var(--ss-studio-board-ui-scale));
+
+    margin: 0;
+  }
+}
+
+/* Text typed in place: a fill-text field (fill-text.css) laid over its layer. */
+.ss-studio-image-board .ss-studio-image-board__text-input {
+  position: absolute;
+  pointer-events: auto;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ *
+ * Toolbar. In the card (no workspace) it sits under the image; docked,
+ * it floats at the bottom of the Studio workspace.
+ * ------------------------------------------------------------------ */
+.ss-studio-image-board-toolbar {
+  position: relative;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ss-space-0);
+  padding: var(--ss-space-1);
+  background-color: var(--ss-surface-0);
+  border-top: 1px solid var(--ss-line);
+  cursor: default;
+}
+
+.ss-studio-image-board-toolbar.is-docked {
+  position: absolute;
+  bottom: var(--ss-space-4);
+  left: 50%;
+  z-index: 9;
+  max-width: calc(100% - var(--ss-space-6));
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-lg);
+  box-shadow: var(--ss-elevation-3);
+  transform: translateX(-50%);
+}
+
+.ss-mobile-navbar-visible .ss-studio-image-board-toolbar.is-docked {
+  bottom: calc(var(--ss-space-4) + var(--ss-mobile-bottom-clearance));
+}
+
+.ss-studio-image-board-toolbar__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-image-board-toolbar__row.is-context {
+  gap: var(--ss-space-2);
+  width: 100%;
+  padding-top: var(--ss-space-1);
+  border-top: 1px solid var(--ss-line);
+}
+
+.ss-studio-image-board-toolbar__row.is-context.is-empty {
+  display: none;
+}
+
+.ss-studio-image-board-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-0);
+}
+
+.ss-studio-image-board-toolbar__divider {
+  align-self: stretch;
+  width: 1px;
+  margin: var(--ss-space-1);
+  background-color: var(--ss-line);
+}
+
+.ss-studio-image-board-toolbar__tool {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--ss-radius-full);
+  color: var(--ss-ink-muted);
+}
+
+.ss-studio-image-board-toolbar__tool:hover {
+  color: var(--ss-ink);
+}
+
+/* The armed tool and the chosen option are feature state: restate the shared
+ * selected grammar so the transparent tool chrome above cannot mask it. The
+ * shared icon action clears its own fill with a five-class selector
+ * (primitives/surface-primitives.css), so the icon form is spelled out to
+ * sit just above it. */
+.ss-surface .ss-studio-image-board-toolbar .ss-studio-image-board-toolbar__tool.is-selected:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning),
+.ss-studio-image-board-toolbar__choice.is-selected {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+
+.ss-studio-image-board-toolbar__done {
+  margin-left: var(--ss-space-1);
+}
+
+.ss-studio-image-board-toolbar__hint {
+  max-width: 52ch;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-align: center;
+}
+
+/* A swatch is an icon action whose fill is its meaning; see the note on the
+ * armed tool for why the selector is this long. */
+.ss-surface .ss-studio-image-board-toolbar .ss-studio-image-board-toolbar__swatch:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning) {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin: 0 var(--ss-space-0);
+  padding: 0;
+  background: var(--ss-studio-swatch-color, var(--ss-ink-muted));
+  border: 1px solid var(--ss-line-strong);
+  border-radius: var(--ss-radius-round);
+}
+
+.ss-surface .ss-studio-image-board-toolbar .ss-studio-image-board-toolbar__swatch.is-selected:not(.ss-button--primary):not(.ss-button--danger):not(.mod-warning) {
+  box-shadow: var(--ss-ring);
+}
+
+.ss-studio-image-board-toolbar .ss-studio-image-board-toolbar__color {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.ss-studio-image-board-toolbar__file {
+  display: none;
+}

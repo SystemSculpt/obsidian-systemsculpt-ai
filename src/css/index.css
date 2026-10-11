@@ -58,6 +58,7 @@
 @import 'views/studio/media-nodes.css';
 @import 'views/studio/node-runtime.css';
 @import 'views/studio/groups.css';
+@import 'views/studio/fill-text.css';
 @import 'views/studio/text-nodes.css';
 @import 'views/studio/shapes.css';
 @import 'views/studio/menus.css';
@@ -67,7 +68,7 @@
 @import 'views/studio/editor-dropdowns.css';
 @import 'views/studio/editor-model-picker.css';
 @import 'views/studio/editor-media.css';
-@import 'views/studio/caption-board.css';
+@import 'views/studio/image-board.css';
 @import 'views/studio/editor-responsive.css';
 @import 'views/studio/inline-config.css';
 @import 'views/studio/node-details.css';

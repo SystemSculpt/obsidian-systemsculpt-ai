@@ -41,6 +41,20 @@ export const STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE = 512;
 export const STUDIO_GRAPH_TEXT_NODE_DEFAULT_FONT_SIZE = 14;
 
 /**
+ * A text node is laid out one of two ways. "fill" is what new text gets: the
+ * node is a box, and the text is set at whatever size fills it (see
+ * StudioFillText), so resizing the box resizes the type. Without the key the
+ * node is a Markdown document that flows at its font size, as every text
+ * node written before fill text does.
+ */
+export const STUDIO_TEXT_NODE_LAYOUT_KEY = "layout";
+export const STUDIO_TEXT_NODE_FILL_LAYOUT = "fill";
+export const STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH = 320;
+export const STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT = 72;
+const STUDIO_GRAPH_FILL_TEXT_MIN_WIDTH = 24;
+const STUDIO_GRAPH_FILL_TEXT_MIN_HEIGHT = 16;
+
+/**
  * Floors applied to DOM-measured node dimensions (offsetWidth/offsetHeight)
  * before they feed layout math (group bounds, canvas sizing, marquee hit
  * testing). Mid-layout measurements can transiently read tiny/zero values.
@@ -147,8 +161,12 @@ const STUDIO_NODE_RESIZE_MODE_BY_KIND: Readonly<Record<string, StudioNodeResizeM
 
 export function resolveStudioNodeResizeSemantics(
   kind: string,
-  context?: { hasAspectMediaContent?: boolean }
+  context?: { hasAspectMediaContent?: boolean; textFillsBox?: boolean }
 ): StudioNodeResizeMode {
+  // Fill text is a plain box: the type follows from the box, never the reverse.
+  if (context?.textFillsBox === true) {
+    return "box";
+  }
   const normalizedKind = String(kind || "").trim();
   const declared = STUDIO_NODE_RESIZE_MODE_BY_KIND[normalizedKind];
   if (declared) {
@@ -183,6 +201,16 @@ function isStudioTextNode(node: Pick<StudioNodeInstance, "kind">): boolean {
   return String(node.kind || "").trim() === "studio.text";
 }
 
+/** Whether `node` is text that fills its box, rather than a Markdown document. */
+export function isStudioFillTextNode(
+  node: Pick<StudioNodeInstance, "kind"> & Partial<Pick<StudioNodeInstance, "config">>
+): boolean {
+  return (
+    isStudioTextNode(node) &&
+    (node.config as Record<string, unknown> | undefined)?.[STUDIO_TEXT_NODE_LAYOUT_KEY] === STUDIO_TEXT_NODE_FILL_LAYOUT
+  );
+}
+
 export function isStudioExpandedTextNodeKind(kind: string): boolean {
   const normalizedKind = String(kind || "").trim();
   return (
@@ -207,8 +235,18 @@ function isStudioLargeLayoutNodeKind(kind: string): boolean {
 }
 
 export function resolveStudioGraphNodeResizeBounds(
-  node: Pick<StudioNodeInstance, "kind">
+  node: Pick<StudioNodeInstance, "kind"> & Partial<Pick<StudioNodeInstance, "config">>,
+  context?: { textFillsBox?: boolean }
 ): StudioGraphNodeResizeBounds {
+  if (context?.textFillsBox === true || isStudioFillTextNode(node)) {
+    // Fill text may be a single small word or a poster.
+    return {
+      minWidth: STUDIO_GRAPH_FILL_TEXT_MIN_WIDTH,
+      maxWidth: STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH,
+      minHeight: STUDIO_GRAPH_FILL_TEXT_MIN_HEIGHT,
+      maxHeight: STUDIO_GRAPH_TEXT_NODE_MAX_HEIGHT,
+    };
+  }
   if (isStudioTextNode(node)) {
     return {
       minWidth: STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH,
@@ -298,13 +336,30 @@ export const STUDIO_GRAPH_TEXT_NODE_AUTO_MAX_WIDTH = 720;
 export const STUDIO_GRAPH_TEXT_NODE_AUTO_MIN_WIDTH = 24;
 export const STUDIO_TEXT_NODE_WIDTH_MODE_KEY = "__studio_text_width";
 export function isStudioTextNodeAutoWidth(node: StudioNodeGeometrySource): boolean {
-  if (!isStudioTextNode(node)) return false;
+  if (!isStudioTextNode(node) || isStudioFillTextNode(node)) return false;
   return (node.config as Record<string, unknown> | undefined)?.[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] !== "fixed";
+}
+
+/** The box of a fill text node: its stored size, or the default box for text not yet sized. */
+export function resolveStudioFillTextNodeSize(node: StudioNodeGeometrySource): { width: number; height: number } {
+  const width = readStoredNodeDimension(node, "width");
+  const height = readStoredNodeDimension(node, "height");
+  return {
+    width: width === null
+      ? STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH
+      : clampStudioNodeDimension(width, STUDIO_GRAPH_FILL_TEXT_MIN_WIDTH, STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH),
+    height: height === null
+      ? STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT
+      : clampStudioNodeDimension(height, STUDIO_GRAPH_FILL_TEXT_MIN_HEIGHT, STUDIO_GRAPH_TEXT_NODE_MAX_HEIGHT),
+  };
 }
 
 export function resolveStudioTextNodeWidth(node: StudioNodeGeometrySource): number {
   if (!isStudioTextNode(node)) {
     return STUDIO_GRAPH_DEFAULT_NODE_WIDTH;
+  }
+  if (isStudioFillTextNode(node)) {
+    return resolveStudioFillTextNodeSize(node).width;
   }
   const stored = readStoredNodeDimension(node, "width");
   if (stored === null) {
@@ -331,6 +386,10 @@ export function resolveStudioTextNodeHeight(
 ): number {
   if (!isStudioTextNode(node)) {
     return STUDIO_GRAPH_DEFAULT_NODE_HEIGHT;
+  }
+  if (isStudioFillTextNode(node)) {
+    // A fill text node's height is its box, not its content.
+    return resolveStudioFillTextNodeSize(node).height;
   }
   const measured = measuredElement?.offsetHeight;
   if (typeof measured === "number" && Number.isFinite(measured) && measured > 0) {
@@ -373,6 +432,9 @@ export function resolveStudioGraphNodeWidth(node: StudioNodeGeometrySource): num
 }
 
 export function resolveStudioGraphNodeMinHeight(node: StudioNodeGeometrySource): number {
+  if (isStudioFillTextNode(node)) {
+    return resolveStudioFillTextNodeSize(node).height;
+  }
   if (isStudioTextNode(node)) {
     // Text-node height is intrinsic (content reflow) — never force a floor.
     return 0;

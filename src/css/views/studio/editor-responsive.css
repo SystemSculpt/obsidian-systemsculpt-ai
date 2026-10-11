@@ -1,23 +1,15 @@
 /** Narrow-layout contracts shared by Studio editor surfaces. */
 
-@container ss-surface (max-width: 1080px) {
-  .ss-studio-caption-board__body {
-    grid-template-columns: minmax(0, 1fr) 260px;
-  }
-}
-
+/* The docked image toolbar spans a narrow leaf and drops its prose hint. */
 @container ss-surface (max-width: 640px) {
-  .ss-studio-caption-board__body {
-    grid-template-columns: 1fr;
+  .ss-studio-image-board-toolbar.is-docked {
+    bottom: var(--ss-space-2);
+    width: calc(100% - var(--ss-space-3));
+    max-width: none;
   }
 
-  .ss-studio-caption-board__sidebar {
-    border-left: none;
-    border-top: 1px solid var(--ss-line);
-  }
-
-  .ss-studio-caption-board__toolbar {
-    flex-wrap: wrap;
+  .ss-studio-image-board-toolbar__hint {
+    display: none;
   }
 }
 

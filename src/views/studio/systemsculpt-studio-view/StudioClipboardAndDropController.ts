@@ -20,6 +20,8 @@ import {
   collectStudioDroppedItems,
   extractClipboardMediaFiles,
   extractClipboardText,
+  fingerprintClipboardImage,
+  isSameClipboardImage,
   normalizePastedMediaMimeType,
 } from "./StudioClipboardData";
 import {
@@ -47,6 +49,14 @@ export type StudioCreatedNodesFinalization = {
 export interface StudioClipboardAndDropHost {
   /** Whether the active Studio view owns an event aimed at this target, not a modal or other surface. */
   ownsEventTarget(target: EventTarget | null): boolean;
+  /** Lets a surface mounted on the canvas, such as an image being edited, take a paste first. */
+  interceptPaste?(event: ClipboardEvent): boolean;
+  /**
+   * Puts one node's picture on the system clipboard. Null when the node is
+   * not a picture; otherwise resolves to what was copied, or to null if the
+   * picture could not be put there.
+   */
+  copyNodeImage?(nodeId: string): Promise<Blob | null> | null;
   isBusy(): boolean;
   isEditableTarget(target: EventTarget | null): boolean;
   getCurrentProject(): StudioProjectV1 | null;
@@ -85,6 +95,7 @@ export interface StudioClipboardAndDropHost {
 type StudioClipboardAndDropDependencies = {
   createId(prefix: string): string;
   copyText(text: string, host?: Node): Promise<boolean>;
+  fingerprintImage(image: Blob): Promise<number[] | null>;
 };
 
 type ProjectOperationScope = {
@@ -101,6 +112,7 @@ function describeClipboardCount(verb: string, count: number): string {
 const DEFAULT_DEPENDENCIES: StudioClipboardAndDropDependencies = {
   createId: (prefix) => randomId(prefix),
   copyText: (text, host) => tryCopyToClipboard(text, host),
+  fingerprintImage: (image) => fingerprintClipboardImage(image),
 };
 
 /**
@@ -110,6 +122,12 @@ const DEFAULT_DEPENDENCIES: StudioClipboardAndDropDependencies = {
 export class StudioClipboardAndDropController {
   private graphClipboardPayload: StudioGraphClipboardPayload | null = null;
   private graphClipboardPasteCount = 0;
+  /**
+   * Set while the system clipboard holds a copied node's picture in place of
+   * the payload: what that picture looks like, so pasting it back here can be
+   * told apart from pasting some other picture.
+   */
+  private graphClipboardImage: Promise<number[] | null> | null = null;
   private listenerWindow: Window | null = null;
   private viewportEl: HTMLElement | null = null;
   private lastGraphPointerPosition: StudioGraphPoint | null = null;
@@ -187,6 +205,7 @@ export class StudioClipboardAndDropController {
     this.unbindViewport();
     this.graphClipboardPayload = null;
     this.graphClipboardPasteCount = 0;
+    this.graphClipboardImage = null;
   }
 
   copySelectedGraphNodes(options?: { showNotice?: boolean }): boolean {
@@ -202,7 +221,17 @@ export class StudioClipboardAndDropController {
 
     this.graphClipboardPayload = payload;
     this.graphClipboardPasteCount = 0;
-    void this.syncGraphClipboardToSystemClipboard(payload);
+    // One picture on its own goes out as that picture: pasted anywhere else it
+    // is an image, not a description of a node. Everything else is the nodes.
+    const picture = payload.nodes.length === 1 && payload.shapes.length === 0
+      ? this.host.copyNodeImage?.(payload.nodes[0].id) ?? null
+      : null;
+    if (picture) {
+      this.graphClipboardImage = this.copyPictureInPlaceOfPayload(payload, picture);
+    } else {
+      this.graphClipboardImage = null;
+      void this.syncGraphClipboardToSystemClipboard(payload);
+    }
     if (options?.showNotice !== false) {
       new Notice(describeClipboardCount("Copied", payload.nodes.length + payload.shapes.length));
     }
@@ -299,6 +328,7 @@ export class StudioClipboardAndDropController {
     if (
       event.defaultPrevented ||
       !this.host.ownsEventTarget(event.target) ||
+      this.host.interceptPaste?.(event) === true ||
       this.host.isBusy() ||
       !this.host.getCurrentProject() ||
       !this.host.getProjectPath() ||
@@ -326,7 +356,9 @@ export class StudioClipboardAndDropController {
     if (mediaFiles.length > 0) {
       this.consumeEvent(event);
       try {
-        await this.pasteClipboardMedia(mediaFiles);
+        if (!(await this.pasteCopiedPictureNode(mediaFiles))) {
+          await this.pasteClipboardMedia(mediaFiles);
+        }
       } catch (error) {
         this.host.setError(error);
       }
@@ -541,6 +573,45 @@ export class StudioClipboardAndDropController {
         : `Added ${newNodes.length} media files as Media nodes.`,
     );
     return true;
+  }
+
+  /**
+   * Waits for a node's picture to reach the system clipboard and remembers
+   * what it looks like. If it never gets there, the nodes go instead.
+   */
+  private async copyPictureInPlaceOfPayload(
+    payload: StudioGraphClipboardPayload,
+    picture: Promise<Blob | null>,
+  ): Promise<number[] | null> {
+    try {
+      const copied = await picture;
+      if (copied) {
+        return await this.dependencies.fingerprintImage(copied);
+      }
+    } catch {
+      // Falls through to copying the nodes.
+    }
+    if (this.graphClipboardPayload === payload) {
+      await this.syncGraphClipboardToSystemClipboard(payload);
+    }
+    return null;
+  }
+
+  /**
+   * Pasting back the picture this view copied brings back the node it came
+   * from, edits and all, rather than a flat copy of its pixels.
+   */
+  private async pasteCopiedPictureNode(mediaFiles: File[]): Promise<boolean> {
+    const payload = this.graphClipboardPayload;
+    const copied = this.graphClipboardImage;
+    if (!payload || !copied || mediaFiles.length !== 1) return false;
+    const [ours, pasted] = await Promise.all([
+      copied,
+      this.dependencies.fingerprintImage(mediaFiles[0]).catch(() => null),
+    ]);
+    if (!ours || !pasted || !isSameClipboardImage(ours, pasted)) return false;
+    if (this.graphClipboardPayload !== payload) return false;
+    return this.pasteGraphClipboardPayload(payload);
   }
 
   private async syncGraphClipboardToSystemClipboard(

@@ -1,9 +1,12 @@
+import type { App } from "obsidian";
 import type { StudioTextEditorMountState } from "../StudioTextEditSessions";
+import type { StudioImageBoardEditorHandle } from "./image-board/StudioImageBoardEditor";
 import type { StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
 import type { StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
 import type { StudioProjectSessionAutosaveMode } from "../../../studio/StudioProjectSession";
 import type {
+  StudioAssetRef,
   StudioJsonValue,
   StudioNodeConfigDynamicOptionsSource,
   StudioNodeConfigSelectOption,
@@ -37,6 +40,21 @@ export type StudioGraphNodeResizePatch = {
   size?: { width?: number; height?: number };
   position?: { x: number; y: number };
   fontSize?: number;
+};
+
+/**
+ * In-place image editing. `isEditing` names the one node whose image is being
+ * edited: its card mounts the editor where the image sits and announces the
+ * handle so the view can route keys and pastes to it.
+ */
+export type StudioGraphNodeImageBoardOptions = {
+  app: App;
+  readAsset: (asset: StudioAssetRef) => Promise<ArrayBuffer>;
+  storeAsset: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
+  isEditing: (nodeId: string) => boolean;
+  onEditorMounted: (nodeId: string, editor: StudioImageBoardEditorHandle) => void;
+  onEditorUnmounted: (nodeId: string, editor: StudioImageBoardEditorHandle) => void;
+  onClose: (nodeId: string) => void;
 };
 
 export type RenderStudioGraphNodeCardOptions = {
@@ -87,7 +105,9 @@ export type RenderStudioGraphNodeCardOptions = {
     patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions
   ) => void;
+  /** Toggles in-place editing of this node's image. */
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
+  imageBoard?: StudioGraphNodeImageBoardOptions;
   onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   renderMarkdownPreview?: (

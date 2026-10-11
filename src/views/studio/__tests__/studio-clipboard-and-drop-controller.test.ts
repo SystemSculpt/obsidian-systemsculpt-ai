@@ -13,6 +13,7 @@ import {
   StudioClipboardAndDropController,
   type StudioClipboardAndDropHost,
 } from "../systemsculpt-studio-view/StudioClipboardAndDropController";
+import { isSameClipboardImage } from "../systemsculpt-studio-view/StudioClipboardData";
 
 function projectWithNodes(
   nodes: StudioNodeInstance[] = [],
@@ -66,6 +67,7 @@ type Harness = {
     setError: jest.Mock;
   };
   copyText: jest.Mock;
+  fingerprintImage: jest.Mock;
   getProject(): StudioProjectV1 | null;
   setProject(project: StudioProjectV1 | null, path?: string | null): void;
 };
@@ -74,6 +76,7 @@ function createHarness(options?: {
   project?: StudioProjectV1 | null;
   selectedNodeIds?: string[];
   selectedShapeIds?: string[];
+  copyNodeImage?: StudioClipboardAndDropHost["copyNodeImage"];
 }): Harness {
   const app = new App();
   let project = options && "project" in options
@@ -82,6 +85,8 @@ function createHarness(options?: {
   let projectPath: string | null = project ? "Studio/Clipboard.systemsculpt" : null;
   let id = 0;
   const copyText = jest.fn(async () => true);
+  // A picture's fingerprint here is simply the numbers its fake file carries.
+  const fingerprintImage = jest.fn(async (image: Blob) => (image as unknown as { looksLike?: number[] }).looksLike ?? null);
   let boundViewport: HTMLElement | null = null;
   const host: Harness["host"] = {
     ownsEventTarget: jest.fn(() => true),
@@ -92,6 +97,7 @@ function createHarness(options?: {
     getNodeDefinitions: jest.fn(() => [textNode, mediaIngestNode]),
     getSelectedNodeIds: jest.fn(() => options?.selectedNodeIds ?? []),
     getSelectedShapeIds: jest.fn(() => options?.selectedShapeIds ?? []),
+    ...(options?.copyNodeImage ? { copyNodeImage: options.copyNodeImage } : {}),
     removeDiagramSelection: jest.fn(() => true),
     selectPastedShapes: jest.fn(),
     getGraphZoom: jest.fn(() => 1),
@@ -124,6 +130,7 @@ function createHarness(options?: {
   const controller = new StudioClipboardAndDropController(app, host, {
     createId: (prefix) => `${prefix}_${++id}`,
     copyText,
+    fingerprintImage,
   });
   const bindViewport = controller.bindViewport.bind(controller);
   controller.bindViewport = (viewport) => {
@@ -135,6 +142,7 @@ function createHarness(options?: {
     controller,
     host,
     copyText,
+    fingerprintImage,
     getProject: () => project,
     setProject: (nextProject, nextPath = nextProject ? "Studio/Next.systemsculpt" : null) => {
       project = nextProject;
@@ -297,6 +305,143 @@ describe("StudioClipboardAndDropController", () => {
       },
     );
     expect(noticeMessages()).toContain("Pasted 2 media files as Media nodes.");
+  });
+
+  describe("copying a picture node", () => {
+    const picture = (id: string): StudioNodeInstance => ({
+      id,
+      kind: "studio.media_ingest",
+      version: "1.0.0",
+      title: "Media",
+      position: { x: 40, y: 60 },
+      config: { sourcePath: "assets/photo.png", captionBoard: { version: 2, layers: [] } },
+      continueOnError: false,
+      disabled: false,
+    });
+    const looksLike = (...pixels: number[]): File =>
+      ({ type: "image/png", looksLike: [640, 480, ...pixels], arrayBuffer: async () => new ArrayBuffer(3) }) as unknown as File;
+    const settle = async (): Promise<void> => {
+      for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+    };
+
+    it("puts the picture itself on the clipboard, not a description of the node", async () => {
+      const copyNodeImage = jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob));
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage,
+      });
+
+      expect(harness.controller.copySelectedGraphNodes()).toBe(true);
+      await settle();
+
+      expect(copyNodeImage).toHaveBeenCalledWith("photo");
+      expect(harness.copyText).not.toHaveBeenCalled();
+      expect(noticeMessages()).toContain("Copied 1 item.");
+    });
+
+    it("copies the node after all when its picture cannot be put on the clipboard", async () => {
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage: jest.fn(() => Promise.resolve(null)),
+      });
+
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+
+      expect(harness.copyText).toHaveBeenCalledWith(expect.stringContaining("systemsculpt.studio.clipboard.v1"));
+    });
+
+    it("still copies nodes as nodes for anything but one picture", async () => {
+      const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(1) as Blob) : null));
+      const both = createHarness({
+        project: projectWithNodes([picture("photo"), textInstance("note")]),
+        selectedNodeIds: ["photo", "note"],
+        copyNodeImage,
+      });
+      both.controller.copySelectedGraphNodes();
+      await settle();
+      expect(copyNodeImage).not.toHaveBeenCalled();
+      expect(both.copyText).toHaveBeenCalledTimes(1);
+
+      const text = createHarness({
+        project: projectWithNodes([textInstance("note")]),
+        selectedNodeIds: ["note"],
+        copyNodeImage,
+      });
+      text.controller.copySelectedGraphNodes();
+      await settle();
+      expect(copyNodeImage).toHaveBeenCalledWith("note");
+      expect(text.copyText).toHaveBeenCalledTimes(1);
+    });
+
+    it("brings the node back, edits and all, when that picture is pasted here again", async () => {
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
+      });
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+
+      // The clipboard re-encodes: the pasted file is the same picture, a shade off.
+      await harness.controller.handlePaste(clipboardEvent({ files: [looksLike(12, 19, 31, 255)] }));
+
+      const nodes = harness.getProject()?.graph.nodes ?? [];
+      expect(nodes).toHaveLength(2);
+      expect(nodes[1]).toMatchObject({ kind: "studio.media_ingest", config: picture("photo").config });
+      expect(nodes[1].id).not.toBe("photo");
+      expect(harness.host.storeAsset).not.toHaveBeenCalled();
+    });
+
+    it("makes a new media node from any other picture pasted afterwards", async () => {
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo")]),
+        selectedNodeIds: ["photo"],
+        copyNodeImage: jest.fn(() => Promise.resolve(looksLike(10, 20, 30, 255) as Blob)),
+      });
+      harness.host.storeAsset.mockResolvedValue({ path: "assets/other.png" });
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+
+      await harness.controller.handlePaste(clipboardEvent({ files: [looksLike(200, 20, 30, 255)] }));
+
+      const nodes = harness.getProject()?.graph.nodes ?? [];
+      expect(harness.host.storeAsset).toHaveBeenCalledTimes(1);
+      expect(nodes[1].config).toEqual(expect.objectContaining({ sourcePath: "assets/other.png" }));
+      expect(nodes[1].config.captionBoard).toBeUndefined();
+    });
+
+    it("tells one picture from another by size and by pixels, allowing for a re-encode", () => {
+      const copied = [640, 480, 10, 20, 30, 255, 200, 100, 0, 128];
+
+      expect(isSameClipboardImage(copied, [640, 480, 14, 16, 30, 255, 198, 104, 3, 126])).toBe(true);
+      expect(isSameClipboardImage(copied, [640, 481, 10, 20, 30, 255, 200, 100, 0, 128])).toBe(false);
+      expect(isSameClipboardImage(copied, [640, 480, 10, 20, 60, 255, 200, 100, 0, 128])).toBe(false);
+      expect(isSameClipboardImage(copied, [640, 480, 10, 20, 30, 255])).toBe(false);
+    });
+
+    it("forgets the picture once something else is copied", async () => {
+      const copyNodeImage = jest.fn((nodeId: string) => (nodeId === "photo" ? Promise.resolve(looksLike(10, 20, 30, 255) as Blob) : null));
+      let selection = ["photo"];
+      const harness = createHarness({
+        project: projectWithNodes([picture("photo"), textInstance("note")]),
+        copyNodeImage,
+      });
+      harness.host.getSelectedNodeIds.mockImplementation(() => selection);
+      harness.host.storeAsset.mockResolvedValue({ path: "assets/again.png" });
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+      selection = ["note"];
+      harness.controller.copySelectedGraphNodes();
+      await settle();
+
+      // The same picture arriving now is just a picture: the copied node is the text one.
+      await harness.controller.handlePaste(clipboardEvent({ files: [looksLike(10, 20, 30, 255)] }));
+
+      expect(harness.host.storeAsset).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("owns graph copy state, system mirroring, and repeated-paste offsets", async () => {

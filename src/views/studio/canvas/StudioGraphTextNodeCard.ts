@@ -79,7 +79,7 @@ export type StudioTextNodeMarkdownEditorFactory = (
   }
 ) => StudioTextNodeMarkdownEditorHandle | null;
 
-type RenderTextNodeCardOptions = {
+export type RenderTextNodeCardOptions = {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   busy: boolean;
@@ -264,6 +264,66 @@ function requestTextNodeEditAfterPointerRelease(options: {
   ownerWindow.addEventListener("pointerup", finish, { capture: true });
   ownerWindow.addEventListener("pointercancel", finish, { capture: true });
   ownerWindow.addEventListener("blur", cancel);
+}
+
+/**
+ * The pointer contract of a text card at rest, whichever way it lays its
+ * text out: a drag moves the card, a modifier press toggles its selection,
+ * and a double press or double tap starts editing.
+ */
+export function bindStudioTextNodeDisplayGestures(options: {
+  displayEl: HTMLElement;
+  nodeEl: HTMLElement;
+  nodeId: string;
+  graphInteraction: StudioGraphInteractionEngine;
+  resolveFocusTarget: (event: MouseEvent) => StudioTextNodeFocusTarget;
+  onRequestTextNodeEdit: (nodeId: string, focusAt?: StudioTextNodeFocusTarget) => void;
+}): void {
+  const { displayEl, nodeEl, nodeId, graphInteraction, resolveFocusTarget, onRequestTextNodeEdit } = options;
+  displayEl.addEventListener("pointerdown", (event) => {
+    const pointerEvent = event;
+    if (pointerEvent.button !== 0) {
+      return;
+    }
+    // Rendered markdown carries its own controls (links, task checkboxes,
+    // embeds); their pointer gestures belong to the control, not to card
+    // dragging. The card-level pointer policy skips these targets too.
+    if (
+      typeof (event.target as { closest?: unknown } | null)?.closest === "function" &&
+      (event.target as Element).closest("a, input, button, audio, video") !== null
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
+      lastTextNodeTapByNodeId.delete(nodeId);
+      graphInteraction.toggleNodeSelection(nodeId);
+      return;
+    }
+    const now = Date.now();
+    if (isRepeatTextNodeTap(nodeId, pointerEvent, now)) {
+      event.preventDefault();
+      lastTextNodeTapByNodeId.delete(nodeId);
+      requestTextNodeEditAfterPointerRelease({
+        host: displayEl,
+        nodeId,
+        pointerEvent,
+        focusTarget: resolveFocusTarget(pointerEvent),
+        graphInteraction,
+        onRequestTextNodeEdit,
+      });
+      return;
+    }
+    trackPotentialTextNodeTap(nodeId, pointerEvent, now, displayEl);
+    graphInteraction.startNodeDrag(nodeId, pointerEvent, nodeEl);
+  });
+  displayEl.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    lastTextNodeTapByNodeId.delete(nodeId);
+    graphInteraction.ensureSingleSelection(nodeId);
+    onRequestTextNodeEdit(nodeId, resolveFocusTarget(event));
+  });
 }
 
 type MountLiveMarkdownEditorOptions = {
@@ -586,56 +646,13 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     if (hasText) {
       renderTextNodeDisplayContent(displayEl);
     }
-    displayEl.addEventListener("pointerdown", (event) => {
-      const pointerEvent = event;
-      if (pointerEvent.button !== 0) {
-        return;
-      }
-      // Rendered markdown carries its own controls (links, task checkboxes,
-      // embeds); their pointer gestures belong to the control, not to card
-      // dragging. The card-level pointer policy skips these targets too.
-      if (
-        typeof (event.target as { closest?: unknown } | null)?.closest === "function" &&
-        (event.target as Element).closest("a, input, button, audio, video") !== null
-      ) {
-        return;
-      }
-      event.stopPropagation();
-      if (pointerEvent.shiftKey || pointerEvent.metaKey || pointerEvent.ctrlKey) {
-        lastTextNodeTapByNodeId.delete(node.id);
-        graphInteraction.toggleNodeSelection(node.id);
-        return;
-      }
-      const now = Date.now();
-      if (isRepeatTextNodeTap(node.id, pointerEvent, now)) {
-        event.preventDefault();
-        lastTextNodeTapByNodeId.delete(node.id);
-        requestTextNodeEditAfterPointerRelease({
-          host: displayEl,
-          nodeId: node.id,
-          pointerEvent,
-          focusTarget: resolveStudioTextNodeFocusTarget(
-            textValue,
-            displayEl,
-            pointerEvent
-          ),
-          graphInteraction,
-          onRequestTextNodeEdit,
-        });
-        return;
-      }
-      trackPotentialTextNodeTap(node.id, pointerEvent, now, displayEl);
-      graphInteraction.startNodeDrag(node.id, pointerEvent, nodeEl);
-    });
-    displayEl.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      lastTextNodeTapByNodeId.delete(node.id);
-      graphInteraction.ensureSingleSelection(node.id);
-      onRequestTextNodeEdit(
-        node.id,
-        resolveStudioTextNodeFocusTarget(textValue, displayEl, event)
-      );
+    bindStudioTextNodeDisplayGestures({
+      displayEl,
+      nodeEl,
+      nodeId: node.id,
+      graphInteraction,
+      resolveFocusTarget: (event) => resolveStudioTextNodeFocusTarget(textValue, displayEl, event),
+      onRequestTextNodeEdit,
     });
   }
 
