@@ -2,7 +2,7 @@
 
 SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex.
 
-**Pricing:** Hosted AI has paid plans and credit packs. [Compare monthly ($19), lifetime ($149), and credit packs](https://systemsculpt.com/pricing?utm_source=obsidian-plugin&utm_medium=readme&utm_campaign=upgrade). Your own on-machine Codex remains available without a SystemSculpt plan.
+Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex remains available without a SystemSculpt plan.
 
 ## What it does
 
@@ -19,7 +19,7 @@ SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; 
 
 ## Account, payment, and credits
 
-The plugin is free to install, but full access to hosted AI features requires a SystemSculpt account and paid license. Hosted work consumes included or purchased account credits.
+The plugin is free to install. Hosted AI features use a SystemSculpt account; paid plans and credit packs are available. See the plan terms and your account for included usage.
 
 Account, license, billing, and add-credit controls open first-party pages on [systemsculpt.com](https://systemsculpt.com); payments are handled there by Stripe and never occur inside the plugin. The plugin may show first-party license or credit purchase prompts when access or funds are insufficient, but it never purchases anything automatically.
 
