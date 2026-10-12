@@ -2,6 +2,8 @@
 
 SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Hosted chat uses your SystemSculpt account. On desktop, you can instead select your installed, signed-in Codex for chat and Studio text generation.
 
+Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start.
+
 ## Install
 
 ### Community Plugins (recommended)
