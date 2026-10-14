@@ -607,6 +607,18 @@ export class SettingsManager {
       validatedSettings.keepRecordingsAfterTranscription = defaultSettings.keepRecordingsAfterTranscription;
     }
 
+    if (typeof validatedSettings.phoneCapturesEnabled !== 'boolean') {
+      validatedSettings.phoneCapturesEnabled = defaultSettings.phoneCapturesEnabled;
+    }
+
+    if (typeof validatedSettings.phoneCapturesFolder !== 'string') {
+      validatedSettings.phoneCapturesFolder = defaultSettings.phoneCapturesFolder;
+    }
+
+    if (typeof validatedSettings.phoneCapturesAskBeforeSaving !== 'boolean') {
+      validatedSettings.phoneCapturesAskBeforeSaving = defaultSettings.phoneCapturesAskBeforeSaving;
+    }
+
     if (!Array.isArray(validatedSettings.pendingRecorderCaptures)) {
       validatedSettings.pendingRecorderCaptures = [];
     } else {

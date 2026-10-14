@@ -23,6 +23,7 @@ import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
 import { DirectoryManager } from "./core/DirectoryManager";
 import { StorageManager } from "./core/storage";
+import { showConfirm } from "./core/ui/notifications";
 import { legacyCredentialNotice, protectLegacyCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
@@ -47,6 +48,11 @@ import { tryCopyToClipboard } from "./utils/clipboard";
 import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { InboxTranscriptionService } from "./features/inbox-transcription/InboxTranscriptionService";
+import {
+  PHONE_CAPTURE_POLL_INTERVAL_MS,
+  PhoneCaptureInbox,
+  type PhoneCaptureSyncResult,
+} from "./features/phone-captures/PhoneCaptureInbox";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
@@ -177,6 +183,7 @@ export default class SystemSculptPlugin extends Plugin {
   private lifecycleCoordinator: LifecycleCoordinator | null = null;
   private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
   private inboxTranscriptionService: InboxTranscriptionService | null = null;
+  private phoneCaptureInbox: PhoneCaptureInbox | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityGraph | null = null;
@@ -675,6 +682,25 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
+    // iPhone captures wait in the server inbox until a signed-in vault saves
+    // them: at startup, when Obsidian regains focus, and on a timer.
+    coordinator.registerTask("layout", {
+      id: "phoneCaptures.start",
+      label: "iOS captures",
+      optional: true,
+      run: () => {
+        const sync = () => {
+          if (!this.isUnloading) void this.getPhoneCaptureInbox().maybeSync();
+        };
+        this.registerInterval(window.setInterval(sync, PHONE_CAPTURE_POLL_INTERVAL_MS));
+        this.registerDomEvent(window, "focus", sync);
+        this.registerDomEvent(document, "visibilitychange", () => {
+          if (document.visibilityState === "visible") sync();
+        });
+        sync();
+      },
+    });
+
     // The launch update check waits for the workspace instead of competing
     // with startup; the service then checks at most every six hours (#338).
     coordinator.registerTask("layout", {
@@ -2156,6 +2182,37 @@ export default class SystemSculptPlugin extends Plugin {
     }
 
     return this.inboxTranscriptionService;
+  }
+
+  private getPhoneCaptureInbox(): PhoneCaptureInbox {
+    this.phoneCaptureInbox ??= new PhoneCaptureInbox({
+      app: this.app,
+      pluginVersion: this.manifest.version,
+      settings: () => ({
+        licenseKey: this.settings.licenseKey || "",
+        enabled: this.settings.phoneCapturesEnabled,
+        folder: this.settings.phoneCapturesFolder,
+        askBeforeSaving: this.settings.phoneCapturesAskBeforeSaving,
+      }),
+      confirm: async (captures, folder) => (await showConfirm(
+        this.app,
+        captures.length === 1
+          ? `1 capture from the iOS app is waiting. Save it to ${folder}?`
+          : `${captures.length} captures from the iOS app are waiting. Save them to ${folder}?`,
+        { title: "Save iOS captures", primaryButton: "Save", secondaryButton: "Not now", icon: "smartphone" },
+      )).confirmed,
+      notify: (message) => new Notice(message),
+      onError: (message, error) => this.getLogger().warn(message, {
+        source: "PhoneCaptureInbox",
+        metadata: { error: error instanceof Error ? error.message : String(error) },
+      }),
+    });
+    return this.phoneCaptureInbox;
+  }
+
+  /** Saves waiting iPhone captures now; a manual sync asks again about declined ones. */
+  syncPhoneCaptures(options: Readonly<{ manual?: boolean }> = {}): Promise<PhoneCaptureSyncResult> {
+    return this.getPhoneCaptureInbox().sync(options);
   }
 
   getTranscriptionService(): TranscriptionService {

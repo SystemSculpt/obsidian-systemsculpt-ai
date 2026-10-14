@@ -101,6 +101,17 @@ export class CommandManager {
     this.registerOpenEmbeddingsView();
     this.registerEmbeddingsDatabaseCommands();
     this.registerSystemSculptStudioCommands();
+    this.registerSavePhoneCaptures();
+  }
+
+  private registerSavePhoneCaptures() {
+    this.plugin.addCommand({
+      id: "save-ios-captures",
+      name: "Save iOS captures now",
+      callback: () => {
+        void this.plugin.syncPhoneCaptures({ manual: true });
+      },
+    });
   }
 
 

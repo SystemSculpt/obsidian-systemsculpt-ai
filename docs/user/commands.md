@@ -87,6 +87,7 @@ there never change the canvas.
 | --- | --- | --- | --- |
 | Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Reviews cleanup candidates before moving them to Trash |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
+| Save iOS captures now |  | `save-ios-captures` | Saves captures waiting from the SystemSculpt iOS app; asks again about captures you chose not to save |
 
 ### Studio cards
 

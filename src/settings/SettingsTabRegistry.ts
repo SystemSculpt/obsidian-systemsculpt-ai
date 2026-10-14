@@ -3,6 +3,7 @@ import { displaySetupTabContent } from "./SetupTabContent";
 import { displayChatTabContent } from "./ChatTabContent";
 import { displayRecorderTabContent } from "./RecorderTabContent";
 import { displayDirectoriesTabContent } from "./DirectoriesTabContent";
+import { displayPhoneCapturesTabContent } from "./PhoneCapturesTabContent";
 import { displayBackupTabContent } from "./BackupTabContent";
 import { displayEmbeddingsTabContent } from "./EmbeddingsTabContent";
 import { displayImageGenerationTabContent } from "./ImageGenerationTabContent";
@@ -87,11 +88,15 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
         (parent) => {
           const section = parent.createDiv();
+          displayPhoneCapturesTabContent(section, tab);
+        },
+        (parent) => {
+          const section = parent.createDiv();
           displayBackupTabContent(section, tab);
         },
       ],
       anchor: {
-        title: "Directories, Files, Backups, Restore",
+        title: "Directories, Files, iOS Captures, Backups, Restore",
         desc: "Control vault folders, verify or repair the SystemSculpt workspace layout, and manage backups and restores for client-side settings.",
       },
     },

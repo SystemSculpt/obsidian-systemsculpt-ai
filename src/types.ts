@@ -174,6 +174,12 @@ export interface SystemSculptSettings {
   attachmentsDirectory: string;
   extractionsDirectory: string;
   workflowEngine: WorkflowEngineSettings;
+  /** Save captures from the SystemSculpt iPhone app into the vault. */
+  phoneCapturesEnabled: boolean;
+  /** Vault folder for iPhone captures. Empty means SystemSculpt/Inbox. */
+  phoneCapturesFolder: string;
+  /** Ask before saving new iPhone captures. */
+  phoneCapturesAskBeforeSaving: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -287,6 +293,9 @@ Please:
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   workflowEngine: createDefaultWorkflowEngineSettings(),
+  phoneCapturesEnabled: true,
+  phoneCapturesFolder: "SystemSculpt/Inbox",
+  phoneCapturesAskBeforeSaving: false,
 
   skipEmptyNoteWarning: false,
 
