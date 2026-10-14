@@ -10,6 +10,8 @@ function validFolder(path: string): boolean {
 export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
   const { app, plugin } = tabInstance;
+  // Nothing to configure until the account has used the iOS app.
+  if (plugin.settings.phoneCapturesLinked !== true) return;
   const settingsManager = plugin.getSettingsManager();
 
   new Setting(containerEl)

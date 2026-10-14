@@ -51,6 +51,7 @@ import { InboxTranscriptionService } from "./features/inbox-transcription/InboxT
 import {
   PHONE_CAPTURE_POLL_INTERVAL_MS,
   PhoneCaptureInbox,
+  iosAppLinkedFromCapabilities,
   type PhoneCaptureSyncResult,
 } from "./features/phone-captures/PhoneCaptureInbox";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
@@ -683,7 +684,8 @@ export default class SystemSculptPlugin extends Plugin {
 
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
     // iPhone captures wait in the server inbox until a signed-in vault saves
-    // them: at startup, when Obsidian regains focus, and on a timer.
+    // them: at startup, when Obsidian regains focus, and on a timer. Until the
+    // account has used the iOS app, these triggers only ask about the link.
     coordinator.registerTask("layout", {
       id: "phoneCaptures.start",
       label: "iOS captures",
@@ -2193,7 +2195,12 @@ export default class SystemSculptPlugin extends Plugin {
         enabled: this.settings.phoneCapturesEnabled,
         folder: this.settings.phoneCapturesFolder,
         askBeforeSaving: this.settings.phoneCapturesAskBeforeSaving,
+        linked: this.settings.phoneCapturesLinked === true,
       }),
+      checkLinked: async () => iosAppLinkedFromCapabilities(
+        await this.getManagedCapabilityGraph().transport.getPluginConfigCapabilities(),
+      ),
+      onLinked: () => this.getSettingsManager().updateSettings({ phoneCapturesLinked: true }),
       confirm: async (captures, folder) => (await showConfirm(
         this.app,
         captures.length === 1

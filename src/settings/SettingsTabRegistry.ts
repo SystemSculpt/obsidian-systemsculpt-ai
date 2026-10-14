@@ -96,7 +96,9 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
         },
       ],
       anchor: {
-        title: "Directories, Files, iOS Captures, Backups, Restore",
+        title: tab.plugin.settings.phoneCapturesLinked === true
+          ? "Directories, Files, iOS Captures, Backups, Restore"
+          : "Directories, Files, Backups, Restore",
         desc: "Control vault folders, verify or repair the SystemSculpt workspace layout, and manage backups and restores for client-side settings.",
       },
     },

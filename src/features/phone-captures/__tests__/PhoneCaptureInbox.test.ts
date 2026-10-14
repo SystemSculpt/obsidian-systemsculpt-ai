@@ -1,11 +1,14 @@
 import { TFile, TFolder, type App } from "obsidian";
 import YAML from "yaml";
 import {
+  PHONE_CAPTURE_LINK_CHECK_GAP_MS,
   PHONE_CAPTURE_MIN_SYNC_GAP_MS,
   PhoneCaptureInbox,
+  iosAppLinkedFromCapabilities,
   type PhoneCaptureSettings,
 } from "../PhoneCaptureInbox";
 import type { PlatformRequestClient, PlatformRequestInput } from "../../../services/PlatformRequestClient";
+import { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -88,30 +91,39 @@ function setup(options: Readonly<{
   files?: Record<string, string>;
   settings?: Partial<PhoneCaptureSettings>;
   confirm?: jest.Mock;
+  checkLinked?: () => Promise<boolean | null>;
 }> = {}) {
   const { app, files, vault } = fakeVault(options.files);
   const server = fakeServer(options.captures ?? [CAPTURE]);
   let now = 1_000_000;
-  const settings: PhoneCaptureSettings = {
+  let settings: PhoneCaptureSettings = {
     licenseKey: "lic_test",
     enabled: true,
     folder: "",
     askBeforeSaving: false,
+    linked: true,
     ...options.settings,
   };
   const notify = jest.fn();
   const confirm = options.confirm ?? jest.fn(async () => true);
+  const checkLinked = jest.fn(options.checkLinked ?? (async () => true));
+  const onLinked = jest.fn(async () => { settings = { ...settings, linked: true }; });
   const inbox = new PhoneCaptureInbox({
     app,
     settings: () => settings,
     pluginVersion: "6.12.0",
     confirm,
     notify,
+    checkLinked,
+    onLinked,
     requestClient: server.client,
     baseUrl: "https://api.example.test/api/plugin",
     now: () => now,
   });
-  return { inbox, files, vault, server, notify, confirm, advance: (ms: number) => { now += ms; } };
+  return {
+    inbox, files, vault, server, notify, confirm, checkLinked, onLinked,
+    advance: (ms: number) => { now += ms; },
+  };
 }
 
 describe("PhoneCaptureInbox", () => {
@@ -227,6 +239,90 @@ describe("PhoneCaptureInbox", () => {
     const signedOut = setup({ settings: { licenseKey: " " } });
     expect(await signedOut.inbox.sync()).toMatchObject({ skipped: "signed_out" });
     expect(signedOut.server.requests).toHaveLength(0);
+  });
+
+  it("stays dormant until the account has used the iOS app", async () => {
+    const { inbox, server, notify, checkLinked, onLinked, advance } = setup({
+      settings: { linked: false },
+      checkLinked: async () => false,
+    });
+
+    expect(await inbox.maybeSync()).toMatchObject({ saved: [], skipped: "not_linked" });
+    advance(PHONE_CAPTURE_MIN_SYNC_GAP_MS);
+    expect(await inbox.maybeSync()).toMatchObject({ skipped: "not_linked" });
+
+    expect(server.requests).toHaveLength(0);
+    expect(checkLinked).toHaveBeenCalledTimes(1);
+    expect(onLinked).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("stays dormant when the link check fails", async () => {
+    const { inbox, server, notify } = setup({
+      settings: { linked: false },
+      checkLinked: async () => { throw new Error("offline"); },
+    });
+
+    expect(await inbox.sync()).toMatchObject({ skipped: "not_linked" });
+    expect(server.requests).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("starts saving and announces it once when the account becomes linked", async () => {
+    let linkedOnServer = false;
+    const { inbox, server, notify, onLinked, advance } = setup({
+      settings: { linked: false },
+      checkLinked: async () => linkedOnServer,
+    });
+
+    expect(await inbox.maybeSync()).toMatchObject({ skipped: "not_linked" });
+    linkedOnServer = true;
+    advance(PHONE_CAPTURE_LINK_CHECK_GAP_MS);
+
+    const result = await inbox.maybeSync();
+    expect(result?.saved).toEqual(["SystemSculpt/Inbox/Friday oat milk 2026-10-14.md"]);
+    expect(onLinked).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls.map(([message]) => message)).toEqual([
+      "iOS captures will be saved to SystemSculpt/Inbox.",
+      "Saved 1 iOS capture to SystemSculpt/Inbox.",
+    ]);
+
+    advance(PHONE_CAPTURE_MIN_SYNC_GAP_MS);
+    await inbox.maybeSync();
+    expect(onLinked).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(2);
+  });
+
+  it("polls right away without a notice when the account was linked before startup", async () => {
+    const { inbox, server, notify, checkLinked } = setup({ captures: [] });
+
+    expect(await inbox.maybeSync()).toMatchObject({ saved: [], failed: 0 });
+    expect(checkLinked).not.toHaveBeenCalled();
+    expect(server.requests).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("treats a server without ios_app_linked as not linked", async () => {
+    const configBody = (capabilities: Record<string, unknown>) => ({
+      contract: "systemsculpt-plugin-config-v1",
+      capabilities: { hosted_chat: true, hosted_videos: false, ...capabilities },
+    });
+    let body = configBody({});
+    const transport = new HostedTransportAdapter({
+      baseUrl: "https://api.example.test",
+      pluginVersion: "6.13.1",
+      licenseKey: () => "lic_test",
+      requestClient: {
+        request: jest.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+      } as unknown as PlatformRequestClient,
+    });
+    const check = async () => iosAppLinkedFromCapabilities(await transport.getPluginConfigCapabilities());
+
+    expect(await check()).toBe(false);
+    body = configBody({ ios_app_linked: true });
+    expect(await check()).toBe(true);
+    expect(iosAppLinkedFromCapabilities(null)).toBeNull();
   });
 
   it("follows the cursor across pages", async () => {

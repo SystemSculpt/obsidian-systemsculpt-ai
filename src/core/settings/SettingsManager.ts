@@ -619,6 +619,10 @@ export class SettingsManager {
       validatedSettings.phoneCapturesAskBeforeSaving = defaultSettings.phoneCapturesAskBeforeSaving;
     }
 
+    if (typeof validatedSettings.phoneCapturesLinked !== 'boolean') {
+      validatedSettings.phoneCapturesLinked = defaultSettings.phoneCapturesLinked;
+    }
+
     if (!Array.isArray(validatedSettings.pendingRecorderCaptures)) {
       validatedSettings.pendingRecorderCaptures = [];
     } else {

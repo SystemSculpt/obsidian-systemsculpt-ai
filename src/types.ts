@@ -184,6 +184,8 @@ export interface SystemSculptSettings {
   phoneCapturesFolder: string;
   /** Ask before saving new iPhone captures. */
   phoneCapturesAskBeforeSaving: boolean;
+  /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
+  phoneCapturesLinked: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -301,6 +303,7 @@ Please:
   phoneCapturesEnabled: true,
   phoneCapturesFolder: "SystemSculpt/Inbox",
   phoneCapturesAskBeforeSaving: false,
+  phoneCapturesLinked: false,
 
   skipEmptyNoteWarning: false,
 

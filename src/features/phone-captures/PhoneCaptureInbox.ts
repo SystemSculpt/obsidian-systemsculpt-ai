@@ -20,6 +20,8 @@ export type PhoneCaptureSettings = Readonly<{
   enabled: boolean;
   folder: string;
   askBeforeSaving: boolean;
+  /** The account has used the iOS app. Until then the inbox is never polled. */
+  linked: boolean;
 }>;
 
 export type PhoneCaptureSyncResult = Readonly<{
@@ -30,7 +32,7 @@ export type PhoneCaptureSyncResult = Readonly<{
   /** Captures the user chose not to save yet. */
   deferred: number;
   failed: number;
-  skipped?: "disabled" | "signed_out" | "busy" | "unavailable";
+  skipped?: "disabled" | "signed_out" | "not_linked" | "busy" | "unavailable";
 }>;
 
 export type PhoneCaptureInboxOptions = Readonly<{
@@ -40,6 +42,13 @@ export type PhoneCaptureInboxOptions = Readonly<{
   /** Asks whether to save these captures now. Required for "ask before saving". */
   confirm: (captures: readonly PhoneCapture[], folder: string) => Promise<boolean>;
   notify: (message: string) => void;
+  /**
+   * Whether the account has used the iOS app: the server's answer, false when
+   * the server doesn't say, or null when it couldn't be asked.
+   */
+  checkLinked: () => Promise<boolean | null>;
+  /** Remembers the link, so later startups poll the inbox right away. */
+  onLinked: () => Promise<void>;
   onError?: (message: string, error: unknown) => void;
   requestClient?: PlatformRequestClient;
   baseUrl?: string;
@@ -51,6 +60,8 @@ export const DEFAULT_PHONE_CAPTURE_FOLDER = "SystemSculpt/Inbox";
 export const PHONE_CAPTURE_POLL_INTERVAL_MS = 5 * 60_000;
 /** Focus and resume events closer together than this share one sync. */
 export const PHONE_CAPTURE_MIN_SYNC_GAP_MS = 60_000;
+/** Before the account has used the iOS app, background triggers ask about the link this often. */
+export const PHONE_CAPTURE_LINK_CHECK_GAP_MS = 30 * 60_000;
 const PAGE_LIMIT = 50;
 const MAX_PAGES_PER_SYNC = 10;
 const CAPTURE_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -73,6 +84,14 @@ function normalizeTag(tag: unknown): string | null {
   if (typeof tag !== "string") return null;
   const value = tag.trim().replace(/^#+/, "").replace(/\s+/g, "-");
   return value && value.length <= 100 ? value : null;
+}
+
+/**
+ * The account's iOS app link from the plugin-config capabilities: null when
+ * the config couldn't be read, false when an older server doesn't say.
+ */
+export function iosAppLinkedFromCapabilities(capabilities: Record<string, unknown> | null): boolean | null {
+  return capabilities === null ? null : capabilities.ios_app_linked === true;
 }
 
 /** Reads one inbox item; anything malformed is dropped rather than written. */
@@ -136,6 +155,7 @@ export class PhoneCaptureInbox {
   private readonly declined = new Set<string>();
   /** The server rejected this plugin version; stop polling until restart. */
   private upgradeRequired = false;
+  private lastLinkCheckAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly options: PhoneCaptureInboxOptions) {
     this.baseUrl = (options.baseUrl ?? SystemSculptEnvironment.resolveBaseUrl()).replace(/\/+$/, "");
@@ -170,6 +190,7 @@ export class PhoneCaptureInbox {
     if (this.upgradeRequired && !manual) return { ...empty, skipped: "unavailable" };
 
     const folder = normalizePath(settings.folder.trim() || DEFAULT_PHONE_CAPTURE_FOLDER);
+    if (!settings.linked && !(await this.detectLink(manual, folder))) return { ...empty, skipped: "not_linked" };
     const saved: string[] = [];
     let alreadyInVault = 0;
     let deferred = 0;
@@ -233,6 +254,26 @@ export class PhoneCaptureInbox {
       this.options.notify(deferred > 0 ? "iOS captures are waiting to be saved." : "No new iOS captures.");
     }
     return { saved, alreadyInVault, deferred, failed };
+  }
+
+  /**
+   * Until the account has used the iOS app the inbox stays dormant: no
+   * capture requests and no notices. The first time the server reports the
+   * link, it is remembered and announced once.
+   */
+  private async detectLink(manual: boolean, folder: string): Promise<boolean> {
+    const now = (this.options.now ?? Date.now)();
+    if (!manual && now - this.lastLinkCheckAt < PHONE_CAPTURE_LINK_CHECK_GAP_MS) return false;
+    this.lastLinkCheckAt = now;
+    try {
+      if ((await this.options.checkLinked()) !== true) return false;
+      await this.options.onLinked();
+    } catch (error) {
+      this.options.onError?.("Couldn't check whether the iOS app is linked.", error);
+      return false;
+    }
+    this.options.notify(`iOS captures will be saved to ${folder}.`);
+    return true;
   }
 
   private describeFailure(error: unknown): string {

@@ -108,8 +108,11 @@ export class CommandManager {
     this.plugin.addCommand({
       id: "save-ios-captures",
       name: "Save iOS captures now",
-      callback: () => {
-        void this.plugin.syncPhoneCaptures({ manual: true });
+      // Hidden until the account has used the iOS app.
+      checkCallback: (checking: boolean) => {
+        if (this.plugin.settings.phoneCapturesLinked !== true) return false;
+        if (!checking) void this.plugin.syncPhoneCaptures({ manual: true });
+        return true;
       },
     });
   }
