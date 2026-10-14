@@ -490,6 +490,8 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
   // rendered.
   const autoWidth = isStudioTextNodeAutoWidth(node);
   nodeEl.classList.toggle("is-auto-width", autoWidth);
+  // Editing (live editor or textarea fallback) widens an auto-width card.
+  nodeEl.classList.toggle("is-editing-text", Boolean(isEditing));
   if (autoWidth) {
     nodeEl.style.removeProperty("width");
   } else {

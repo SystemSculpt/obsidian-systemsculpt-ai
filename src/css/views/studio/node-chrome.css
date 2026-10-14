@@ -83,8 +83,12 @@
   contain-intrinsic-size: 280px 200px;
 }
 
-.ss-studio-graph-viewport.is-zoomed-micro .ss-studio-node-card > * {
-  display: none !important;
+/* :is() takes its argument's ID specificity, so this beats every class-based
+ * child display rule without an important flag. No element carries the ID. */
+.ss-studio-graph-viewport.is-zoomed-micro
+  :is(.ss-studio-node-card, #ss-specificity-boost)
+  > * {
+  display: none;
 }
 
 .ss-studio-graph-viewport.is-zoomed-extreme .ss-studio-node-card textarea,

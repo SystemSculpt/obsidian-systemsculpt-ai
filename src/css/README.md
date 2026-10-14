@@ -55,9 +55,10 @@ states in `states.css`, and every narrow-surface adjustment in `composer.css`.
 3. **One state grammar.** hover = `--ss-state-hover` tint + stronger
    hairline; active = press; selected = accent tint + accent hairline;
    focus = `--ss-ring`; disabled = 0.5 opacity.
-4. **`!important` is allowlisted.** Only files with a documented,
-   load-bearing reason (see `IMPORTANT_ALLOWLIST` in
-   `scripts/lint-css.mjs`) may use it.
+4. **No `!important` or `:has()`.** The Obsidian community scorecard warns
+   on both, and `scripts/lint-css.mjs` rejects them. Raise specificity with
+   `:is(.ss-x, #ss-specificity-boost)` (no element carries that ID) or set a
+   state class from code.
 5. **Scoping.** Bare element and Obsidian selectors (`button`, `.workspace*`, `.nav-*`,
    `.tree-item*`, non-plugin `[data-type=]`/`[role=]`) are forbidden —
    the lint **errors** on them. Overrides must be scoped to

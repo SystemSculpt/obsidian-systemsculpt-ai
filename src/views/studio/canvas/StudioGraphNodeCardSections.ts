@@ -197,7 +197,7 @@ export function renderNodePorts(options: {
   }
 
   if (outputPorts.length > 0) {
-    const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col" });
+    const outputsCol = ports.createDiv({ cls: "ss-studio-node-ports-col is-outputs" });
     for (const port of outputPorts) {
       const isPendingSource = graphInteraction.isPendingConnectionSource(node.id, port.id);
       const row = outputsCol.createDiv({ cls: "ss-studio-port-row is-output" });

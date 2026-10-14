@@ -274,23 +274,13 @@ function checkSelector(selectorInfo) {
  * The design system (src/css/foundation/tokens.css) is the single source
  * of visual truth. These rules keep component sheets on the tokens:
  * no raw colors, tokenized radii/font-sizes/shadows/transitions, z-index
- * from the layer scale, and `!important` only where a file has a
- * documented, load-bearing reason (allowlist below).
+ * from the layer scale, and none of the selectors or flags the Obsidian
+ * community scorecard warns about (`!important`, `:has()`).
  * ------------------------------------------------------------------ */
 
 /** Files exempt from token rules (they DEFINE the tokens/keyframes). */
 const TOKEN_SOURCE_FILES = new Set(["foundation/tokens.css"]);
 
-/** Files allowed to use !important, each for a documented reason. */
-const IMPORTANT_ALLOWLIST = new Set([
-  "foundation/surface.css", // hidden/reduced-motion contracts must beat feature sheets loaded later
-  "views/studio/connections.css", // edge hover must beat inline SVG strokes
-  "views/studio/node-chrome.css", // zoom-micro mode removes offscreen node chrome
-  // Studio embeds Obsidian's native CodeMirror/table widgets. Their host
-  // declarations include !important, so text-node parity cannot be scoped or
-  // specificity-adjusted into effect without an equally strong override.
-  "views/studio/text-nodes.css",
-]);
 
 /** font-size values allowed besides var(--ss-*)/var(--chat-*)/calc/inherit. */
 const FONT_SIZE_LITERAL_ALLOW = new Set([
@@ -380,11 +370,21 @@ function checkDeclarations(content, relPath) {
     const lineNum = idx + 1;
     const decl = line.match(/^\s*([a-z-]+)\s*:\s*([^;{}]+);?\s*$/);
 
-    if (line.includes("!important") && !IMPORTANT_ALLOWLIST.has(cssPath)) {
+    // The Obsidian community scorecard reports each of these as a warning.
+    // Raise specificity instead, e.g. `:is(.ss-x, #ss-specificity-boost)`.
+    if (line.includes("!important")) {
       issues.push({
         severity: "error",
-        message:
-          "!important is not allowed here — remove it or add this file to IMPORTANT_ALLOWLIST with a documented reason",
+        message: "!important is not allowed — raise selector specificity or use a CSS variable",
+        selector: line.trim(),
+        line: lineNum,
+        file: relPath,
+      });
+    }
+    if (line.includes(":has(")) {
+      issues.push({
+        severity: "error",
+        message: ":has() is not allowed — set a state class from code instead",
         selector: line.trim(),
         line: lineNum,
         file: relPath,

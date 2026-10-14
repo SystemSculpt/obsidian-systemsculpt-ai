@@ -17,12 +17,14 @@
   pointer-events: none;
 }
 
-/* Hover polish must beat the inline SVG stroke/opacity from StudioEdgeRenderer */
-.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-line,
-.ss-studio-edge-group:has(.ss-studio-edge-hit:hover) .ss-studio-edge-arrow {
-  stroke: var(--ss-studio-link-stroke-hover) !important;
-  stroke-width: 2.4 !important;
-  opacity: 1 !important;
+/* Hover polish. The hit path precedes the line and arrow in each group, and
+ * their inline stroke reads --ss-studio-edge-stroke, so the hover color is set
+ * through that variable on the paths themselves. */
+.ss-studio-edge-group > .ss-studio-edge-hit:hover ~ .ss-studio-edge-line,
+.ss-studio-edge-group > .ss-studio-edge-hit:hover ~ .ss-studio-edge-arrow {
+  --ss-studio-edge-stroke: var(--ss-studio-link-stroke-hover);
+  stroke-width: 2.4;
+  opacity: 1;
 }
 
 /* Wide, transparent hit target for hover/right-click selection. */

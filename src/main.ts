@@ -49,6 +49,7 @@ import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifec
 import { InboxTranscriptionService } from "./features/inbox-transcription/InboxTranscriptionService";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
+import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
 import { type Extension } from "@codemirror/state";
 import { StudioService } from "./studio/StudioService";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./core/plugin/viewTypes";
@@ -531,6 +532,7 @@ export default class SystemSculptPlugin extends Plugin {
         // Registered empty; filled in / cleared by syncRelativeLineNumbersExtension()
         // once settings load and whenever the toggle changes.
         this.registerEditorExtension(this.relativeLineNumberExtensions);
+        this.registerEditorExtension(studioTextNodeEmptyLines());
         this.ensureSettingsManagerInstance();
       },
     });

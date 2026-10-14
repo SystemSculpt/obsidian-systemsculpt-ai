@@ -34,8 +34,11 @@
   box-shadow: var(--ss-ring);
 }
 
-.ss-surface :where([hidden]) {
-  display: none !important;
+/* :is() takes its argument's ID specificity, so the hidden and reduced-motion
+ * contracts beat every class-based feature rule without an important flag. No
+ * element carries the ID. */
+:is(.ss-surface, #ss-specificity-boost) [hidden] {
+  display: none;
 }
 
 .ss-surface ::-webkit-scrollbar {
@@ -74,15 +77,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ss-surface,
-  .ss-surface::before,
-  .ss-surface::after,
-  .ss-surface *,
-  .ss-surface *::before,
-  .ss-surface *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+  :is(.ss-surface, #ss-specificity-boost),
+  :is(.ss-surface, #ss-specificity-boost)::before,
+  :is(.ss-surface, #ss-specificity-boost)::after,
+  :is(.ss-surface, #ss-specificity-boost) *,
+  :is(.ss-surface, #ss-specificity-boost) *::before,
+  :is(.ss-surface, #ss-specificity-boost) *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
   }
 }
