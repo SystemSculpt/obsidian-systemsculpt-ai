@@ -332,9 +332,12 @@ export class PhoneCaptureInbox {
       { fallback: "iOS capture", maxBytes: 180 },
     );
     const content = renderPhoneCaptureNote(capture);
+    // macOS, Windows and iOS disks ignore letter case, so a note whose name
+    // differs only in case already holds the path there.
+    const taken = new Set(vault.getMarkdownFiles().map((file) => file.path.toLowerCase()));
     for (let n = 1; n <= MAX_COLLISION_SUFFIX; n += 1) {
       const path = normalizePath(`${folder}/${n === 1 ? stem : `${stem} ${n}`}.md`);
-      if (vault.getAbstractFileByPath(path)) continue;
+      if (vault.getAbstractFileByPath(path) || taken.has(path.toLowerCase())) continue;
       try {
         await vault.create(path, content);
       } catch (error) {

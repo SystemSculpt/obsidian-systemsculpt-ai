@@ -150,6 +150,24 @@ describe("PhoneCaptureInbox", () => {
     expect(result.saved).toEqual(["SystemSculpt/Inbox/Friday oat milk 2026-10-14 2.md"]);
   });
 
+  it("saves a capture whose name differs from an existing note only in letter case", async () => {
+    const existing = "SystemSculpt/Inbox/Friday Oat Milk 2026-10-14.md";
+    const { inbox, files, vault, server } = setup({ files: { [existing]: "mine" } });
+    // A case-insensitive disk (macOS, Windows, iOS) refuses the differently cased name.
+    vault.create.mockImplementation(async (path: string, content: string) => {
+      if ([...files.keys()].some((p) => p.toLowerCase() === path.toLowerCase())) throw new Error("File already exists.");
+      files.set(path, content);
+      return new TFile({ path });
+    });
+
+    const result = await inbox.sync();
+
+    const path = "SystemSculpt/Inbox/Friday oat milk 2026-10-14 2.md";
+    expect(files.get(existing)).toBe("mine");
+    expect(result).toMatchObject({ saved: [path], failed: 0 });
+    expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
+  });
+
   it("acknowledges a re-delivered capture that is already in the vault without writing again", async () => {
     const moved = "Notes/Moved capture.md";
     const { inbox, vault, server } = setup({
