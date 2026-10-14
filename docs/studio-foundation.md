@@ -256,7 +256,7 @@ Older managed documents that omitted coordinates recover missing positions once
 on import. Explicit coordinates are preserved; the next save writes a manual
 canvas. Organizational parents and execution connections do not control placement.
 
-Text execution can instead use the installed Codex app-server on desktop. `services/codex/` contains the thin transport, native approval UI, local thread locator and ChatView presentation adapter. `studio.codex` runs explicit task prompts; the text-generation adapter honors the selected backend without creating managed operation receipts for local runs. Codex owns native sessions and all agent continuation.
+Text execution can instead use the installed Codex app-server or Claude Code CLI on desktop (`services/claude/` holds the Claude Code transport). `services/codex/` contains the thin transport, native approval UI, local thread locator and ChatView presentation adapter. `studio.codex` runs explicit task prompts; the text-generation adapter honors the selected backend without creating managed operation receipts for local runs. Codex owns native sessions and all agent continuation.
 
 
 ### Media model catalog, favorites, and per-model inputs

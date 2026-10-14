@@ -23,7 +23,7 @@ Source of truth:
 
 ## Chat and writing
 
-Chat uses the selected SystemSculpt API or on-machine Codex backend. Choose the execution backend and model in the chat controls.
+Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude Code backend. Choose the execution backend and model in the chat controls.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |

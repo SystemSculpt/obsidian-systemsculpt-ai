@@ -43,7 +43,7 @@ _Avoid_: Workflow engine, Command Center workflow
 ## Conversations and execution
 
 **Execution backend**:
-The selected system that performs a text task: SystemSculpt API or on-machine Codex.
+The selected system that performs a text task: SystemSculpt API or an on-machine agent (Codex or Claude Code).
 _Avoid_: Provider, model
 
 **Managed execution**:
@@ -53,6 +53,10 @@ _Avoid_: Local agent, client agent loop
 **Native Codex execution**:
 Work performed by the installed Codex using the machine's existing login, native threads, tools, and permission policy.
 _Avoid_: Managed execution, plugin agent runtime
+
+**On-machine agent**:
+An installed agent CLI (Codex or Claude Code) that the plugin drives as a local child process. The agent owns its login, tools, permissions and session history; the plugin transports one turn at a time.
+_Avoid_: Local model, plugin agent
 
 **Conversation**:
 An ordered history of user requests and agent activity owned by the selected execution backend.

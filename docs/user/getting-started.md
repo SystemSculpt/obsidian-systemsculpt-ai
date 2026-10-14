@@ -1,6 +1,6 @@
 # Getting started
 
-SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Hosted chat uses your SystemSculpt account. On desktop, you can instead select your installed, signed-in Codex for chat and Studio text generation.
+SystemSculpt AI runs inside Obsidian and connects directly to SystemSculpt. Hosted chat uses your SystemSculpt account. On desktop, you can instead select your installed, signed-in Codex or Claude Code for chat and Studio text generation.
 
 Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start.
 
@@ -41,6 +41,10 @@ Select **On-machine Codex** above the chat composer or in **Settings → SystemS
 
 See [Studio workspaces and native execution](../studio-workspaces.md) for setup and recovery behavior, and [native Codex discovery](../development.md#native-codex-discovery) for custom executable and home settings.
 
+## On-machine Claude Code (desktop)
+
+Select **On-machine Claude Code** above the chat composer or in **Settings → SystemSculpt AI → Chat**. Install Claude Code, run `claude` in a terminal and type `/login` once. Chats run in your vault folder with Claude Code's own login and session history. Claude Code asks before edits by default; approve or decline each request in the dialog. See [On-machine Claude Code](../studio-workspaces.md#on-machine-claude-code).
+
 ## Add context
 
 - Drag files into chat.
@@ -52,7 +56,7 @@ See [Studio workspaces and native execution](../studio-workspaces.md) for setup 
 ## Tool use
 
 - SystemSculpt can use built-in tools automatically when the current flow needs them.
-- Hosted chat uses your SystemSculpt account. Native Codex chat uses your configured Codex authentication and native approval controls.
+- Hosted chat uses your SystemSculpt account. Native Codex chat uses your configured Codex authentication and native approval controls. Claude Code chat uses your Claude Code login and its permission modes.
 
 ## Enable Similar Notes (optional)
 

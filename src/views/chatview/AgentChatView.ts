@@ -2,8 +2,12 @@ import type { ChatSession } from "../../chat/ChatSession";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { mountCodexExecutionControls } from "../../services/codex/CodexExecutionControls";
 import { codexOptionsFromSettings, defaultTextBackend } from "../../services/codex/CodexExecutionSettings";
+import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
+import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
+import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
+import { claudeOptionsFromSettings } from "../../services/claude/LocalClaudeClient";
 import { ItemView, normalizePath, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
@@ -434,6 +438,10 @@ function terminalLiveResubmitConsequences(
   };
 }
 
+function backendOf(agent: unknown): TextExecutionBackend {
+  return agent instanceof LocalAgentChatSession ? agent.agent : "systemsculpt";
+}
+
 /**
  * Lean Chat view coordinator. Durable transcript, active run, native DOM
  * projection, and local vault tools each have one owner.
@@ -588,15 +596,19 @@ export class AgentChatView extends ItemView {
    * lets independent conversations run at the same time.
    */
   private codexControlsCleanup?: () => void;
-  private chatExecutionBackend?: "systemsculpt" | "codex";
+  private chatExecutionBackend?: TextExecutionBackend;
   private createAgentSession(): ChatSession {
     const persistAssistant = async (message: ChatMessage): Promise<void> => {
       const snapshot = await this.transcript.persistAssistant(message);
       this.applyTranscriptIdentity(snapshot);
     };
-    if ((this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings)) === "codex") {
-      return new CodexChatSession(this.app, { persistAssistant },
-        () => this.pendingForkHistory?.prefix ?? [], () => codexOptionsFromSettings(this.plugin.settings));
+    const backend = this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings);
+    const forkHistory = () => this.pendingForkHistory?.prefix ?? [];
+    if (backend === "codex") {
+      return new CodexChatSession(this.app, { persistAssistant }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
+    }
+    if (backend === "claude") {
+      return new ClaudeChatSession(this.app, { persistAssistant }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
     }
     return new AgentChatSession({
       baseUrl: this.agentBaseUrl,
@@ -699,9 +711,9 @@ export class AgentChatView extends ItemView {
     const binding = this.agentSessionBinding;
     if (!binding) throw new Error("The chat session binding is unavailable.");
     const replacement = await binding.replace(() => this.createAgentSession());
-    const wasNative = this.agent instanceof CodexChatSession;
+    const wasNative = this.agent instanceof LocalAgentChatSession;
     this.agent = replacement;
-    if (this.agent instanceof CodexChatSession) {
+    if (this.agent instanceof LocalAgentChatSession) {
       // A managed balance read may still be in flight from opening this view.
       // Retire its display ownership before restoring the native conversation.
       this.creditsDisplayGeneration = (this.creditsDisplayGeneration ?? 0) + 1;
@@ -710,7 +722,7 @@ export class AgentChatView extends ItemView {
     } else if (wasNative) {
       void this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
     }
-    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: this.agent instanceof CodexChatSession ? "codex" : "systemsculpt", onProviderChange: () => this.plugin.openNewChat() }) : undefined;
+    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: backendOf(this.agent), onProviderChange: () => this.plugin.openNewChat() }) : undefined;
   }
 
   public get messages(): ChatMessage[] {
@@ -864,14 +876,14 @@ export class AgentChatView extends ItemView {
       this.setLegacyHistoryViewOnly(false);
       this.workspace?.setBanner("Loading chat…");
       let loaded;
-      let executionBackend: "codex" | "systemsculpt";
+      let executionBackend: TextExecutionBackend = "systemsculpt";
       try {
         loaded = await this.transcript.load(chatId);
         if (this.conversationOriginToken !== loadOriginToken) return;
-        executionBackend = loaded?.agentConversationId
-          && await new CodexThreadLocator(this.app).read(loaded.agentConversationId)
-          ? "codex"
-          : "systemsculpt";
+        for (const agent of Object.keys(LOCAL_AGENTS) as LocalAgentId[]) {
+          if (!loaded?.agentConversationId) break;
+          if (await new CodexThreadLocator(this.app, agent).read(loaded.agentConversationId)) { executionBackend = agent; break; }
+        }
       } catch (error) {
         if (this.conversationOriginToken !== loadOriginToken) return;
         const message = error instanceof SavedChatCorruptedError
@@ -892,7 +904,7 @@ export class AgentChatView extends ItemView {
       }
       if (this.conversationOriginToken !== loadOriginToken) return;
       this.chatExecutionBackend = executionBackend;
-      if ((this.agent instanceof CodexChatSession) !== (this.chatExecutionBackend === "codex")) await this.replaceAgentSession();
+      if (backendOf(this.agent) !== this.chatExecutionBackend) await this.replaceAgentSession();
       if (this.conversationOriginToken !== loadOriginToken) return;
       this.applyTranscriptIdentity(loaded);
       this.draftKey = loaded.chatId;
@@ -912,7 +924,7 @@ export class AgentChatView extends ItemView {
       if (this.conversationOriginToken !== loadOriginToken) return;
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
-      if (this.chatExecutionBackend === "codex" && !hasHostCapability("local-cli")) this.workspace?.setComposerReadOnly?.("Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.");
+      if (this.chatExecutionBackend !== "systemsculpt" && !hasHostCapability("local-cli")) this.workspace?.setComposerReadOnly?.(`Open a new SystemSculpt API chat on this device, or continue this ${LOCAL_AGENTS[this.chatExecutionBackend]} chat on desktop.`);
       let hydrationFailed = false;
       if (loaded.agentConversationId) {
         const conversationId = loaded.agentConversationId;
@@ -1161,7 +1173,7 @@ export class AgentChatView extends ItemView {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
     }
-    if (this.agent instanceof CodexChatSession || !licenseKey) {
+    if (this.agent instanceof LocalAgentChatSession || !licenseKey) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return;
@@ -1193,7 +1205,7 @@ export class AgentChatView extends ItemView {
   }
   private startCreditsRefresh(options: CreditsRefreshOptions): Promise<void> {
     // A fresh request may have queued while a different backend was active.
-    if (this.agent instanceof CodexChatSession || !this.plugin.settings.licenseKey?.trim()) {
+    if (this.agent instanceof LocalAgentChatSession || !this.plugin.settings.licenseKey?.trim()) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
       return Promise.resolve();
@@ -1201,7 +1213,7 @@ export class AgentChatView extends ItemView {
     if (this.creditsPromise) return this.creditsPromise;
     const displayGeneration = this.creditsDisplayGeneration ?? 0;
     const licenseKey = this.plugin.settings.licenseKey.trim();
-    const canPublish = () => !(this.agent instanceof CodexChatSession)
+    const canPublish = () => !(this.agent instanceof LocalAgentChatSession)
       && (this.creditsDisplayGeneration ?? 0) === displayGeneration
       && this.plugin.settings.licenseKey?.trim() === licenseKey;
     const refreshSequence = (this.creditsRefreshSequence ?? 0) + 1;
@@ -1337,7 +1349,7 @@ export class AgentChatView extends ItemView {
    * usable and the first send opens the guided upgrade/sign-in modal.
    */
   private planReminderBanner(): string | null {
-    if (this.agent instanceof CodexChatSession) return null;
+    if (this.agent instanceof LocalAgentChatSession) return null;
     if (hasActivePlan(this.plugin)) return null;
     const email = this.plugin.settings?.userEmail?.trim();
     return email
@@ -1728,7 +1740,7 @@ export class AgentChatView extends ItemView {
   }
 
   private hasAuthoritativeUnavailableBalance(): boolean {
-    if (this.agent instanceof CodexChatSession || !this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
+    if (this.agent instanceof LocalAgentChatSession || !this.creditsBalance || this.creditsBalance.usageClass === "master_auth") return false;
     return (this.creditsBalance.availableUnreserved ?? this.creditsBalance.totalRemaining) <= 0;
   }
 
@@ -2117,7 +2129,7 @@ export class AgentChatView extends ItemView {
               ? new Set<string>()
               : this.sessionTrustedToolNames,
           };
-      if (!(this.agent instanceof CodexChatSession) && !hasActivePlan(this.plugin)) {
+      if (!(this.agent instanceof LocalAgentChatSession) && !hasActivePlan(this.plugin)) {
         throw planRequiredError("Chat");
       }
       const previousConversationId = this.transcript.snapshot().agentConversationId;

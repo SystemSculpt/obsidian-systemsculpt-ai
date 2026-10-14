@@ -1,11 +1,13 @@
 import { codexRunKey, getStudioCodexRun, stopStudioCodexRun } from '../../../services/codex/StudioCodexRuns';
+import { LOCAL_AGENTS } from '../../../services/codex/LocalAgents';
 import type { StudioJsonValue, StudioNodeInstance } from '../../../studio/types';
 import { isRecord } from '../../../studio/utils';
 import { createStudioAction } from '../StudioAction';
 
 export function renderStudioCodexStop(root: HTMLElement, nodeId: string, projectId: string): void {
   const key = codexRunKey(projectId, nodeId);
-  if (getStudioCodexRun(key)) createStudioAction(root, { label: 'Stop Codex', testId: `studio.codex.stop.${nodeId}`, onSelect: () => stopStudioCodexRun(key) });
+  const active = getStudioCodexRun(key);
+  if (active) createStudioAction(root, { label: `Stop ${LOCAL_AGENTS[active.agent]}`, testId: `studio.codex.stop.${nodeId}`, onSelect: () => stopStudioCodexRun(key) });
 }
 
 export function renderStudioCodex(root: HTMLElement, node: StudioNodeInstance, projectId: string, outputs: Record<string, StudioJsonValue>, onChange: (key: string, value: StudioJsonValue) => void): void {

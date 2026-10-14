@@ -9,7 +9,7 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | Tab label | What it covers |
 | --- | --- |
 | `Account` | License activation, credits and usage access, billing details, and SystemSculpt docs/support links |
-| `Chat` | Execution backend, native Codex model/reasoning/speed on desktop, display defaults, accessibility behavior, and history tags |
+| `Chat` | Execution backend, native Codex model/reasoning/speed and Claude Code model/permissions on desktop, display defaults, accessibility behavior, and history tags |
 | `Workflow` | Recording preferences, Audio Processor output, transcription output, and post-processing controls |
 | `Knowledge` | Embeddings, Similar Notes, exclusions, and processing status |
 | `Workspace` | Directory paths, iOS captures, workspace diagnostics, automatic backups, and restore workflow |
@@ -20,6 +20,6 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 
 - The top-level settings tabs are `Account`, `Chat`, `Workflow`, `Knowledge`, `Workspace`, `Studio`, and `Advanced`.
 - `Default output` under Workflow selects the Audio Processor preset used when the modal opens. You can still choose a different preset for one new job.
-- Choose **SystemSculpt API** or **On-machine Codex** for new desktop chats and Studio text generation. Saved chats retain their backend. Codex permission settings remain native to Codex. Hosted media features continue to use SystemSculpt.
+- Choose **SystemSculpt API**, **On-machine Codex** or **On-machine Claude Code** for new desktop chats and Studio text generation. Saved chats retain their backend. Codex permission settings remain native to Codex. Claude Code asks before edits unless you choose another of its permission modes. Hosted media features continue to use SystemSculpt.
 - **iOS captures** under Workspace saves notes and voice memos from the SystemSculpt iOS app into the vault while you are signed in. It checks when Obsidian opens, when it regains focus and every five minutes, on desktop and mobile. Each capture becomes a new note in `SystemSculpt/Inbox` (configurable) with `source`, `captured`, `tags` and `capture_id` frontmatter; existing notes are never overwritten. Turn on **Ask before saving iOS captures** to confirm each batch, or turn the inbox off. The command **Save iOS captures now** checks immediately.
 - Some sections are conditionally visible based on current settings.

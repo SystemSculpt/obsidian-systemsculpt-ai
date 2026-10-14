@@ -49,3 +49,11 @@
   background-color: var(--ss-surface-sunken);
   border-radius: var(--ss-radius-xs);
 }
+
+/* On-machine agent approval details: show long paths and edits without clipping. */
+.ss-native-request-details {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

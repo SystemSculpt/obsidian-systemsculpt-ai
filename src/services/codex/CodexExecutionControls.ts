@@ -1,10 +1,12 @@
 import { hasHostCapability } from '../../platform/hostCapabilities';
 import type SystemSculptPlugin from '../../main';
 import { codexOptionsFromSettings, codexVaultDirectory } from './CodexExecutionSettings';
+import { LOCAL_AGENTS, isLocalAgentId, type TextExecutionBackend } from './LocalAgents';
 import { mountCodexModelControls } from './CodexModelControls';
+import { mountClaudeExecutionControls } from '../claude/ClaudeExecutionControls';
 
 /** Global next-turn settings; existing chats retain their selected backend. */
-export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemSculptPlugin, context?: { backend?: 'systemsculpt' | 'codex'; onProviderChange?: () => Promise<void> }): () => void {
+export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemSculptPlugin, context?: { backend?: TextExecutionBackend; onProviderChange?: () => Promise<void> }): () => void {
   const root = parent.createDiv({ cls: 'ss-codex-controls', attr: { role: 'group', 'aria-label': 'Text execution' } }); parent.prepend(root);
   const provider = context ? root.createEl('label', { cls: 'ss-codex-control', text: 'Provider' }).createEl('select', { attr: { 'aria-label': 'Provider', 'data-testid': 'codex.execution.provider' } }) : undefined;
   const desktop = hasHostCapability('local-cli', parent);
@@ -22,23 +24,26 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
     }),
   });
   root.append(permissions);
+  const claude = mountClaudeExecutionControls(root, plugin, () => desktop && backend() === 'claude');
   const render = () => {
     if (disposed) return;
-    const native = backend() === 'codex'; parent.classList.toggle('ss-native-codex-composer', native);
-    permissions.hidden = !native || !desktop; root.classList.toggle('is-codex', native && desktop);
+    const selected = backend(), native = isLocalAgentId(selected);
+    parent.classList.toggle('ss-native-codex-composer', native);
+    permissions.hidden = selected !== 'codex' || !desktop; root.classList.toggle('is-codex', selected === 'codex' && desktop);
+    root.classList.toggle('is-claude', selected === 'claude' && desktop);
     if (provider) {
       provider.empty(); provider.createEl('option', { value: 'systemsculpt', text: 'SystemSculpt API' });
-      provider.createEl('option', { value: 'codex', text: desktop ? 'On-machine Codex' : 'On-machine Codex · desktop only' }).disabled = !desktop;
-      provider.value = backend(); provider.disabled = changing;
+      for (const [id, name] of Object.entries(LOCAL_AGENTS)) provider.createEl('option', { value: id, text: desktop ? `On-machine ${name}` : `On-machine ${name} · desktop only` }).disabled = !desktop;
+      provider.value = selected; provider.disabled = changing;
     }
-    picker.refresh();
+    picker.refresh(); claude.refresh();
   };
   provider?.addEventListener('change', () => {
-    const next = provider.value; if (changing || (next !== 'systemsculpt' && next !== 'codex') || (next === 'codex' && !desktop)) return;
+    const next = provider.value; if (changing || (next !== 'systemsculpt' && !isLocalAgentId(next)) || (next !== 'systemsculpt' && !desktop)) return;
     changing = true; provider.disabled = true;
     void plugin.getSettingsManager().updateSettings({ textExecutionBackend: next }).then(() => context?.onProviderChange?.())
       .catch(cause => picker.showError(cause instanceof Error ? cause.message : 'Could not switch provider.')).finally(() => { changing = false; render(); });
   });
   const updated = plugin.app.workspace.on('systemsculpt:settings-updated', render); render();
-  return () => { if (disposed) return; disposed = true; picker.dispose(); plugin.app.workspace.offref(updated); parent.classList.remove('ss-native-codex-composer'); root.remove(); };
+  return () => { if (disposed) return; disposed = true; picker.dispose(); claude.dispose(); plugin.app.workspace.offref(updated); parent.classList.remove('ss-native-codex-composer'); root.remove(); };
 }

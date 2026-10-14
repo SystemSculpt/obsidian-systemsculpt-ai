@@ -2,10 +2,11 @@ import { mountCodexExecutionControls } from "../../../services/codex/CodexExecut
 jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 import { AgentChatView } from '../AgentChatView';
 import { CodexChatSession } from '../../../services/codex/CodexChatSession';
+import { ClaudeChatSession } from '../../../services/claude/ClaudeChatSession';
 import { AgentChatSession } from '../../../chat/managed/ChatSession';
 
 const prototype = AgentChatView.prototype as any;
-function view(backend: 'codex' | 'systemsculpt' = 'codex') {
+function view(backend: 'codex' | 'claude' | 'systemsculpt' = 'codex') {
   return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
     creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() } } as any;
@@ -35,7 +36,7 @@ it('does not block native chat on SystemSculpt credits or show a subscription re
 });
 
 it('mounts the active provider after session replacement and opens provider changes in a fresh tab', async () => {
-  for (const backend of ['codex', 'systemsculpt'] as const) {
+  for (const backend of ['codex', 'claude', 'systemsculpt'] as const) {
     const current = view(backend);
     current.plugin.openNewChat = jest.fn(async () => {});
     current.workspace.composer = { element: {} };
@@ -154,4 +155,13 @@ it.each([false, true])('clears the previous account balance and serializes a fre
   expect(current.creditsBalance).toEqual(freshBalance);
   expect(current.workspace.setCreditsBalance).not.toHaveBeenCalledWith(expect.objectContaining({ totalRemaining: 99 }));
   expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(freshBalance);
+});
+
+it('creates a Claude Code session for the selected backend and for saved Claude Code chats', () => {
+  const native = view('claude'); native.agent = prototype.createAgentSession.call(native);
+  expect(native.agent).toBeInstanceOf(ClaudeChatSession); expect(native.agent.agent).toBe('claude');
+  expect(prototype.planReminderBanner.call(native)).toBeNull();
+  expect(prototype.hasAuthoritativeUnavailableBalance.call(native)).toBe(false);
+  const saved = view('codex'); saved.chatExecutionBackend = 'claude';
+  expect(prototype.createAgentSession.call(saved)).toBeInstanceOf(ClaudeChatSession);
 });
