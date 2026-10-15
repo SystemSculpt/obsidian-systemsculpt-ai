@@ -54,7 +54,7 @@ function fakeVault(initial: Record<string, string> = {}) {
     getFileCache: jest.fn((file: TFile) => {
       if (unindexed.has(file.path)) return null;
       const match = /^---\n([\s\S]*?)---\n/.exec(files.get(file.path) ?? "");
-      return match ? { frontmatter: YAML.parse(match[1]) } : {};
+      return match ? { frontmatter: YAML.parse(match[1]), sections: [{ type: "yaml" }] } : { sections: [{ type: "paragraph" }] };
     }),
   };
   return { app: { vault, metadataCache } as unknown as App, files, vault, unindexed, listeners, emit, metadataCache };
@@ -221,6 +221,17 @@ describe("PhoneCaptureInbox", () => {
 
     expect(await h.makeInbox().sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
     expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: path });
+  });
+
+  it("reconciles an empty cached snapshot of a nonempty URI-created note", async () => {
+    const path = "From URI.md";
+    const h = setup({ files: { [path]: "---\ncapture_id: cap_1\n---\nBody" } });
+    // Obsidian's URI handler creates an empty file, then modifies its content.
+    // getFileCache can still return the indexed empty-file snapshot at sync.
+    h.metadataCache.getFileCache.mockReturnValue({} as ReturnType<typeof h.metadataCache.getFileCache>);
+    expect(await h.makeInbox().sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
     expect(h.files.size).toBe(1);
     expect(h.server.acks[0].body).toEqual({ vault_path: path });
   });

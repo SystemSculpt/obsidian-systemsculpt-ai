@@ -490,8 +490,11 @@ class CaptureNoteIndex {
     for (const file of files) {
       if (this.dirty.has(file)) continue;
       const cache = this.app.metadataCache.getFileCache(file);
-      if (cache) this.put(file, cache.frontmatter?.capture_id);
-      else this.dirty.set(file, this.changes);
+      // obsidian://new can create an empty file, then fill it. A non-null
+      // empty snapshot is not evidence that the nonempty note has no identity.
+      if (cache && (file.stat.size === 0 || cache.sections?.length || cache.frontmatter)) {
+        this.put(file, cache.frontmatter?.capture_id);
+      } else this.dirty.set(file, this.changes);
     }
     this.initialized = true;
     this.rebuild = false;
