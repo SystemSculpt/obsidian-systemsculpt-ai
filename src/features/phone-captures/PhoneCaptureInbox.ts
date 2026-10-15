@@ -1,4 +1,4 @@
-import { type App, TFile, normalizePath, stringifyYaml } from "obsidian";
+import { type App, type EventRef, TFile, normalizePath, parseYaml, stringifyYaml } from "obsidian";
 import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
 import { ensureVaultFolder } from "../../tools/vault/utils";
@@ -138,8 +138,6 @@ export class PhoneCaptureInbox {
   private readonly baseUrl: string;
   private running: Promise<PhoneCaptureSyncResult> | null = null;
   private lastSyncAt = Number.NEGATIVE_INFINITY;
-  /** Notes written this session, found even before the metadata cache indexes them. */
-  private readonly written = new Map<string, string>();
   /** Captures the user declined to save; asked again only by a manual sync. */
   private readonly declined = new Set<string>();
   /** The server rejected this plugin version; stop polling until restart. */
@@ -192,14 +190,20 @@ export class PhoneCaptureInbox {
     let deferred = 0;
     let failed = 0;
     let cursor: string | null = null;
+    // One bounded index per sync, kept current by vault events across every await.
+    // Nothing (including listeners or remembered paths) survives the sync.
+    const identity = new CaptureNoteIndex(this.options.app);
     try {
       for (let page = 0; page < MAX_PAGES_PER_SYNC; page += 1) {
         const listed = await this.list(licenseKey, cursor);
         const pending: PhoneCapture[] = [];
         for (const capture of listed.captures) {
-          const existing = this.findInVault(capture.id);
-          if (existing) {
-            if (await this.acknowledge(licenseKey, capture.id, existing)) alreadyInVault += 1;
+          const existing = await identity.use(() => {
+            const path = identity.find(capture.id);
+            return path ? this.acknowledge(licenseKey, capture.id, path) : null;
+          });
+          if (existing !== null) {
+            if (existing) alreadyInVault += 1;
             else failed += 1;
           } else if (this.declined.has(capture.id)) {
             deferred += 1;
@@ -217,17 +221,22 @@ export class PhoneCaptureInbox {
         }
 
         for (const capture of accepted) {
-          let path: string;
           try {
-            path = await this.write(capture, folder);
+            const written = await this.write(capture, folder, identity);
+            if (written) saved.push(written);
+            // Reconcile again after create: never acknowledge a deleted/replaced
+            // file, and use the actual path if it moved while the write completed.
+            const acknowledged = await identity.use(() => {
+              const path = identity.find(capture.id);
+              if (!path) throw new Error("The saved capture is no longer in the vault.");
+              return this.acknowledge(licenseKey, capture.id, path);
+            });
+            if (!acknowledged) failed += 1;
+            else if (!written) alreadyInVault += 1;
           } catch (error) {
             failed += 1;
             this.options.onError?.("Couldn't save an iOS capture to the vault.", error);
-            continue;
           }
-          saved.push(path);
-          // A failed acknowledgement is retried next sync from the note's frontmatter.
-          if (!(await this.acknowledge(licenseKey, capture.id, path))) failed += 1;
         }
 
         cursor = listed.nextCursor;
@@ -238,6 +247,8 @@ export class PhoneCaptureInbox {
       this.options.onError?.("Couldn't check for iOS captures.", error);
       if (manual) this.options.notify(this.describeFailure(error));
       return { saved, alreadyInVault, deferred, failed: failed + 1, skipped: "unavailable" };
+    } finally {
+      identity.dispose();
     }
 
     if (saved.length > 0) {
@@ -350,18 +361,7 @@ export class PhoneCaptureInbox {
     return payload;
   }
 
-  /** The note that already holds this capture, by its `capture_id` frontmatter. */
-  private findInVault(captureId: string): string | null {
-    const { vault, metadataCache } = this.options.app;
-    const remembered = this.written.get(captureId);
-    if (remembered && vault.getAbstractFileByPath(remembered) instanceof TFile) return remembered;
-    for (const file of vault.getMarkdownFiles()) {
-      if (metadataCache.getFileCache(file)?.frontmatter?.capture_id === captureId) return file.path;
-    }
-    return null;
-  }
-
-  private async write(capture: PhoneCapture, folder: string): Promise<string> {
+  private async write(capture: PhoneCapture, folder: string, identity: CaptureNoteIndex): Promise<string | null> {
     const { vault } = this.options.app;
     await ensureVaultFolder(this.options.app, folder);
     const stem = toSafeVaultFileName(
@@ -369,22 +369,160 @@ export class PhoneCaptureInbox {
       { fallback: "iOS capture", maxBytes: 180 },
     );
     const content = renderPhoneCaptureNote(capture);
-    // macOS, Windows and iOS disks ignore letter case, so a note whose name
-    // differs only in case already holds the path there.
-    const taken = new Set(vault.getMarkdownFiles().map((file) => file.path.toLowerCase()));
     for (let n = 1; n <= MAX_COLLISION_SUFFIX; n += 1) {
       const path = normalizePath(`${folder}/${n === 1 ? stem : `${stem} ${n}`}.md`);
-      if (vault.getAbstractFileByPath(path) || taken.has(path.toLowerCase())) continue;
-      try {
-        await vault.create(path, content);
-      } catch (error) {
-        // Another writer took the name between the check and the create.
-        if (vault.getAbstractFileByPath(path)) continue;
-        throw error;
-      }
-      this.written.set(capture.id, path);
-      return path;
+      const outcome = await identity.use(() => {
+        // Confirmation, folder creation and collision retries all yield. Check
+        // identity again, with no await between that check and starting create.
+        if (identity.find(capture.id)) return "existing" as const;
+        if (vault.getAbstractFileByPath(path) || identity.hasPath(path)) return "collision" as const;
+        return vault.create(path, content).then(() => "created" as const, (error: unknown) => {
+          if (vault.getAbstractFileByPath(path)) return "collision" as const;
+          throw error;
+        });
+      });
+      if (outcome === "existing") return null;
+      if (outcome === "created") return path;
     }
     throw new Error("No free file name for the capture.");
+  }
+}
+
+/**
+ * A sync-scoped view of actual note identities. Indexed notes need no disk
+ * reads; only unindexed or changed notes are read, sequentially. Uncertainty
+ * (read failure, churn or a budget limit) stops delivery, never means absent.
+ */
+class CaptureNoteIndex {
+  private readonly entries = new Map<TFile, { path: string; id: string | null }>();
+  private readonly ids = new Map<string, Set<TFile>>();
+  private readonly paths = new Map<string, number>();
+  private readonly dirty = new Map<TFile, number>();
+  private readonly refs: EventRef[];
+  private initialized = false;
+  private rebuild = false;
+  private exhausted = false;
+  private changes = 0;
+  private scans = 0;
+  private reads = 0;
+  private bytes = 0;
+
+  constructor(private readonly app: App) {
+    const { vault } = app;
+    const changed = (file: TFile) => {
+      if (!(file instanceof TFile)) return;
+      this.remove(file);
+      this.dirty.delete(file);
+      if (++this.changes > 4096 || this.dirty.size >= 4096) {
+        this.exhausted = true;
+      } else if (file.extension === "md") {
+        this.dirty.set(file, this.changes);
+      }
+    };
+    this.refs = [
+      vault.on("create", changed),
+      vault.on("modify", changed),
+      vault.on("rename", (file) => {
+        if (file instanceof TFile) changed(file);
+        else this.rebuild = true; // A folder move changes all descendant paths.
+      }),
+      vault.on("delete", (file) => {
+        if (file instanceof TFile) {
+          this.remove(file);
+          this.dirty.delete(file);
+        } else this.rebuild = true;
+      }),
+    ];
+  }
+
+  dispose(): void {
+    for (const ref of this.refs) this.app.vault.offref(ref);
+  }
+
+  find(id: string): string | null {
+    return this.ids.get(id)?.values().next().value?.path ?? null;
+  }
+
+  hasPath(path: string): boolean {
+    return this.paths.has(path.toLowerCase());
+  }
+
+  /** Invoke the action without yielding after reconciliation, even to a caller. */
+  async use<T>(action: () => T | Promise<T>): Promise<T> {
+    for (;;) {
+      if (this.exhausted) throw new Error("Capture identity reconciliation changed too often. Retry after indexing.");
+      if (!this.initialized || this.rebuild) this.scan();
+      const next = this.dirty.entries().next().value;
+      if (!next) return action();
+      const [file, change] = next;
+      const { vault } = this.app;
+      if (vault.getAbstractFileByPath(file.path) !== file) {
+        this.dirty.delete(file);
+        continue;
+      }
+      const { size, mtime } = file.stat;
+      // Bound both work and allocation; retry after Obsidian indexes a large
+      // import instead of scanning all of its contents or creating duplicates.
+      if (++this.reads > 1024 || size > 1024 * 1024 || (this.bytes += size) > 8 * 1024 * 1024) {
+        throw new Error("Capture identity read budget reached. Retry after indexing.");
+      }
+      const content = await vault.read(file);
+      if (this.dirty.get(file) !== change) continue;
+      if (file.stat.size !== size || file.stat.mtime !== mtime) continue;
+      if (content.length > 1024 * 1024) throw new Error("Capture identity note is too large.");
+      // Only parse YAML frontmatter, never capture_id-like text in the body.
+      const frontmatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(content)?.[1];
+      if (frontmatter && frontmatter.length > 64 * 1024) throw new Error("Capture frontmatter is too large.");
+      const parsed: unknown = frontmatter ? parseYaml(frontmatter) : null;
+      this.put(file, isRecord(parsed) ? parsed.capture_id : null);
+      this.dirty.delete(file);
+    }
+  }
+
+  private scan(): void {
+    const files = this.app.vault.getMarkdownFiles();
+    if (++this.scans > 3 || files.length > 100_000) throw new Error("Capture identity scan budget reached.");
+    this.entries.clear();
+    this.ids.clear();
+    this.paths.clear();
+    // Keep invalidations across a folder-triggered rescan: cached metadata may
+    // still describe the old contents of a file changed during this sync.
+    for (const file of files) {
+      if (this.dirty.has(file)) continue;
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache) this.put(file, cache.frontmatter?.capture_id);
+      else this.dirty.set(file, this.changes);
+    }
+    this.initialized = true;
+    this.rebuild = false;
+  }
+
+  private remove(file: TFile): void {
+    const old = this.entries.get(file);
+    if (!old) return;
+    this.entries.delete(file);
+    const path = old.path.toLowerCase();
+    const count = this.paths.get(path)!;
+    if (count === 1) this.paths.delete(path);
+    else this.paths.set(path, count - 1);
+    if (old.id) {
+      const matches = this.ids.get(old.id)!;
+      matches.delete(file);
+      if (!matches.size) this.ids.delete(old.id);
+    }
+  }
+
+  private put(file: TFile, value: unknown): void {
+    this.remove(file);
+    if (this.entries.size >= 100_000) throw new Error("Capture identity index is full.");
+    const id = typeof value === "string" && CAPTURE_ID.test(value) ? value : null;
+    this.entries.set(file, { path: file.path, id });
+    const path = file.path.toLowerCase();
+    this.paths.set(path, (this.paths.get(path) ?? 0) + 1);
+    if (id) {
+      const matches = this.ids.get(id) ?? new Set<TFile>();
+      matches.add(file);
+      this.ids.set(id, matches);
+    }
   }
 }

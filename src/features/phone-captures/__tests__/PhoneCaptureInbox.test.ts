@@ -11,33 +11,53 @@ import type { PlatformRequestClient, PlatformRequestInput } from "../../../servi
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
   const YAML = jest.requireActual("yaml");
-  return { ...actual, stringifyYaml: (value: unknown) => YAML.stringify(value) };
+  return { ...actual, stringifyYaml: (value: unknown) => YAML.stringify(value), parseYaml: (value: string) => YAML.parse(value) };
 });
 
 function fakeVault(initial: Record<string, string> = {}) {
   const files = new Map<string, string>(Object.entries(initial));
   const folders = new Set<string>();
+  const objects = new Map<string, TFile>();
+  const unindexed = new Set<string>();
+  const listeners = new Map<object, { event: string; callback: (file: TFile) => void }>();
+  const fileAt = (path: string) => {
+    if (!files.has(path)) return null;
+    if (!objects.has(path)) objects.set(path, new TFile({ path }));
+    const file = objects.get(path)!;
+    file.stat = { size: Buffer.byteLength(files.get(path)!), mtime: 1, ctime: 1 };
+    return file;
+  };
+  const emit = (event: string, file: TFile) => {
+    for (const listener of listeners.values()) if (listener.event === event) listener.callback(file);
+  };
   const vault = {
-    getAbstractFileByPath: (path: string) => {
-      if (files.has(path)) return new TFile({ path });
-      if (folders.has(path)) return new TFolder({ path });
-      return null;
-    },
+    on: jest.fn((event: string, callback: (file: TFile) => void) => {
+      const ref = {}; listeners.set(ref, { event, callback }); return ref;
+    }),
+    offref: jest.fn((ref: object) => { listeners.delete(ref); }),
+    getAbstractFileByPath: (path: string) => fileAt(path) ?? (folders.has(path) ? new TFolder({ path }) : null),
     createFolder: jest.fn(async (path: string) => { folders.add(path); }),
     create: jest.fn(async (path: string, content: string) => {
       if (files.has(path)) throw new Error("File already exists.");
       files.set(path, content);
-      return new TFile({ path });
+      const file = fileAt(path)!;
+      emit("create", file);
+      return file;
     }),
-    getMarkdownFiles: () => [...files.keys()].filter((p) => p.endsWith(".md")).map((path) => new TFile({ path })),
+    read: jest.fn(async (file: TFile) => {
+      if (!files.has(file.path)) throw new Error("File missing");
+      return files.get(file.path)!;
+    }),
+    getMarkdownFiles: jest.fn(() => [...files.keys()].filter((p) => p.endsWith(".md")).map((path) => fileAt(path)!)),
   };
   const metadataCache = {
-    getFileCache: (file: TFile) => {
+    getFileCache: jest.fn((file: TFile) => {
+      if (unindexed.has(file.path)) return null;
       const match = /^---\n([\s\S]*?)---\n/.exec(files.get(file.path) ?? "");
-      return match ? { frontmatter: YAML.parse(match[1]) } : null;
-    },
+      return match ? { frontmatter: YAML.parse(match[1]) } : {};
+    }),
   };
-  return { app: { vault, metadataCache } as unknown as App, files, vault };
+  return { app: { vault, metadataCache } as unknown as App, files, vault, unindexed, listeners, emit, metadataCache };
 }
 
 type Route = (input: PlatformRequestInput) => { status: number; body: unknown };
@@ -91,7 +111,8 @@ function setup(options: Readonly<{
   confirm?: jest.Mock;
   checkLinked?: () => Promise<boolean>;
 }> = {}) {
-  const { app, files, vault } = fakeVault(options.files);
+  const host = fakeVault(options.files);
+  const { app, files, vault } = host;
   const server = fakeServer(options.captures ?? [CAPTURE]);
   let now = 1_000_000;
   let settings: PhoneCaptureSettings = {
@@ -106,7 +127,7 @@ function setup(options: Readonly<{
   const confirm = options.confirm ?? jest.fn(async () => true);
   const checkLinked = jest.fn(options.checkLinked ?? (async () => true));
   const onLinked = jest.fn(async () => { settings = { ...settings, linked: true }; });
-  const inbox = new PhoneCaptureInbox({
+  const makeInbox = () => new PhoneCaptureInbox({
     app,
     settings: () => settings,
     pluginVersion: "6.12.0",
@@ -119,7 +140,7 @@ function setup(options: Readonly<{
     now: () => now,
   });
   return {
-    inbox, files, vault, server, notify, confirm, checkLinked, onLinked,
+    ...host, inbox: makeInbox(), makeInbox, files, vault, server, notify, confirm, checkLinked, onLinked,
     advance: (ms: number) => { now += ms; },
   };
 }
@@ -164,10 +185,10 @@ describe("PhoneCaptureInbox", () => {
     const existing = "SystemSculpt/Inbox/Friday Oat Milk 2026-10-14.md";
     const { inbox, files, vault, server } = setup({ files: { [existing]: "mine" } });
     // A case-insensitive disk (macOS, Windows, iOS) refuses the differently cased name.
+    const create = vault.create.getMockImplementation()!;
     vault.create.mockImplementation(async (path: string, content: string) => {
       if ([...files.keys()].some((p) => p.toLowerCase() === path.toLowerCase())) throw new Error("File already exists.");
-      files.set(path, content);
-      return new TFile({ path });
+      return create(path, content);
     });
 
     const result = await inbox.sync();
@@ -189,6 +210,168 @@ describe("PhoneCaptureInbox", () => {
     expect(vault.create).not.toHaveBeenCalled();
     expect(result).toMatchObject({ saved: [], alreadyInVault: 1 });
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: moved } })]);
+  });
+
+  it("finds an immediate external write before metadata indexing, even at a moved path", async () => {
+    const h = setup();
+    const path = "Elsewhere/URI note.md";
+    await h.vault.create(path, "---\ncapture_id: cap_1\n---\n\nCafé 日本語 & = #\n");
+    h.unindexed.add(path);
+    h.vault.create.mockClear();
+
+    expect(await h.makeInbox().sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: path });
+  });
+
+  it("recovers an unindexed note after a lost ack and a fresh inbox instance", async () => {
+    const h = setup();
+    h.server.setOverride((input) => input.method === "POST" ? { status: 503, body: {} } : null);
+    const first = await h.inbox.sync();
+    h.unindexed.add(first.saved[0]);
+    h.server.setOverride(null);
+
+    expect(await h.makeInbox().sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: first.saved[0] });
+  });
+
+  it("reconciles an external write made during the confirmation wait", async () => {
+    const confirm = jest.fn();
+    const h = setup({ settings: { askBeforeSaving: true }, confirm });
+    const path = "Elsewhere/From phone.md";
+    confirm.mockImplementation(async () => {
+      await h.vault.create(path, "---\ncapture_id: cap_1\n---\nBody\n");
+      h.unindexed.add(path);
+      return true;
+    });
+
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: path });
+  });
+
+  it("reconciles again after asynchronous folder creation", async () => {
+    const h = setup();
+    h.vault.createFolder.mockImplementationOnce(async () => {
+      const path = "External.md";
+      await h.vault.create(path, "---\ncapture_id: cap_1\n---\nBody\n");
+      h.unindexed.add(path);
+    });
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: "External.md" });
+  });
+
+  it("reconciles a write that arrives during a fallback read", async () => {
+    const h = setup({ files: { "Unindexed.md": "Unrelated" } });
+    h.unindexed.add("Unindexed.md");
+    h.vault.read.mockImplementationOnce(async () => {
+      await h.vault.create("External.md", "---\ncapture_id: cap_1\n---\nBody\n");
+      return "Unrelated";
+    });
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.files.size).toBe(2);
+    expect(h.server.acks[0].body).toEqual({ vault_path: "External.md" });
+  });
+
+  it("discards a fallback result if that file changed while it was being read", async () => {
+    const h = setup({ files: { "External.md": "---\ncapture_id: cap_1\n---\nOld body" } });
+    h.unindexed.add("External.md");
+    h.vault.read.mockImplementationOnce(async file => {
+      const old = h.files.get(file.path)!;
+      h.files.set(file.path, "Unrelated replacement");
+      h.emit("modify", file);
+      return old;
+    });
+    const result = await h.inbox.sync();
+    expect(result).toMatchObject({ alreadyInVault: 0, failed: 0 });
+    expect(result.saved).toHaveLength(1);
+    expect(h.files.get("External.md")).toBe("Unrelated replacement");
+    expect(h.server.acks[0].body).toEqual({ vault_path: result.saved[0] });
+  });
+
+  it("reconciles identity when another writer wins the create race", async () => {
+    const h = setup();
+    const create = h.vault.create.getMockImplementation()!;
+    h.vault.create.mockImplementationOnce(async (path, content) => {
+      await create(path, content);
+      throw new Error("File already exists.");
+    });
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: [...h.files.keys()][0] });
+  });
+
+  it("does not acknowledge a new file deleted before create returns", async () => {
+    const h = setup();
+    const create = h.vault.create.getMockImplementation()!;
+    h.vault.create.mockImplementation(async (path, content) => {
+      const file = await create(path, content);
+      h.files.delete(path);
+      h.emit("delete", file);
+      return file;
+    });
+    expect(await h.inbox.sync()).toMatchObject({ failed: 1 });
+    expect(h.server.acks).toHaveLength(0);
+    expect(h.files.size).toBe(0);
+    expect(h.listeners.size).toBe(0);
+  });
+
+  it("reads YAML frontmatter identity, including CRLF and quoted IDs, not body text", async () => {
+    const h = setup({ files: {
+      "From URI.md": '\uFEFF---\r\ncapture_id: "cap_1"\r\ntags: [café, 日本語]\r\n---\r\nBody',
+      "Unrelated.md": "Body\ncapture_id: cap_2\n",
+    }, captures: [CAPTURE, { ...CAPTURE, id: "cap_2" }] });
+    for (const path of h.files.keys()) h.unindexed.add(path);
+    const result = await h.inbox.sync();
+    expect(result).toMatchObject({ alreadyInVault: 1, failed: 0 });
+    expect(result.saved).toHaveLength(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: "From URI.md" });
+  });
+
+  it("scans 10,000 indexed files once per sync and reads each unknown file only once", async () => {
+    const files = Object.fromEntries(Array.from({ length: 10_000 }, (_, i) => [`Note ${i}.md`, "Unrelated"]));
+    const captures = Array.from({ length: 50 }, (_, i) => ({ ...CAPTURE, id: `cap_${i}`, title: `Capture ${i}` }));
+    const h = setup({ files, captures });
+    for (let i = 0; i < 20; i++) h.unindexed.add(`Note ${i}.md`);
+    expect(await h.inbox.sync()).toMatchObject({ failed: 0 });
+    expect(h.server.acks).toHaveLength(50);
+    expect(h.vault.getMarkdownFiles).toHaveBeenCalledTimes(1);
+    expect(h.metadataCache.getFileCache).toHaveBeenCalledTimes(10_000);
+    // Twenty pre-existing unknowns plus read-back of fifty newly saved notes.
+    expect(h.vault.read).toHaveBeenCalledTimes(70);
+    expect(h.listeners.size).toBe(0);
+  });
+
+  it("stops at the unknown-file read budget, then recovers once metadata is ready", async () => {
+    const files = Object.fromEntries(Array.from({ length: 1025 }, (_, i) => [`Note ${i}.md`, "Unrelated"]));
+    const h = setup({ files });
+    for (const path of h.files.keys()) h.unindexed.add(path);
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], failed: 1 });
+    expect(h.vault.read).toHaveBeenCalledTimes(1024);
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.server.acks).toHaveLength(0);
+    expect(h.listeners.size).toBe(0);
+    h.unindexed.clear();
+    expect(await h.inbox.sync()).toMatchObject({ failed: 0 });
+    expect(h.server.acks).toHaveLength(1);
+  });
+
+  it("never treats an unreadable or oversized unknown note as absent", async () => {
+    const unreadable = setup({ files: { "Unknown.md": "Unrelated" } });
+    unreadable.unindexed.add("Unknown.md");
+    unreadable.vault.read.mockRejectedValue(new Error("Read failed"));
+    expect(await unreadable.inbox.sync()).toMatchObject({ saved: [], failed: 1 });
+    expect(unreadable.server.acks).toHaveLength(0);
+    expect(unreadable.listeners.size).toBe(0);
+
+    const large = setup({ files: { "Large.md": "x".repeat(1024 * 1024 + 1) } });
+    large.unindexed.add("Large.md");
+    expect(await large.inbox.sync()).toMatchObject({ saved: [], failed: 1 });
+    expect(large.vault.read).not.toHaveBeenCalled();
+    expect(large.server.acks).toHaveLength(0);
   });
 
   it("retries a failed acknowledgement on the next sync without a second note", async () => {
