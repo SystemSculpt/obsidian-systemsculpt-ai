@@ -42,11 +42,8 @@ export type PhoneCaptureInboxOptions = Readonly<{
   /** Asks whether to save these captures now. Required for "ask before saving". */
   confirm: (captures: readonly PhoneCapture[], folder: string) => Promise<boolean>;
   notify: (message: string) => void;
-  /**
-   * Whether the account has used the iOS app: the server's answer, false when
-   * the server doesn't say, or null when it couldn't be asked.
-   */
-  checkLinked: () => Promise<boolean | null>;
+  /** Whether the account has used the iOS app; false when the server doesn't say. Rejects when it can't ask. */
+  checkLinked: () => Promise<boolean>;
   /** Remembers the link, so later startups poll the inbox right away. */
   onLinked: () => Promise<void>;
   onError?: (message: string, error: unknown) => void;
@@ -84,14 +81,6 @@ function normalizeTag(tag: unknown): string | null {
   if (typeof tag !== "string") return null;
   const value = tag.trim().replace(/^#+/, "").replace(/\s+/g, "-");
   return value && value.length <= 100 ? value : null;
-}
-
-/**
- * The account's iOS app link from the plugin-config capabilities: null when
- * the config couldn't be read, false when an older server doesn't say.
- */
-export function iosAppLinkedFromCapabilities(capabilities: Record<string, unknown> | null): boolean | null {
-  return capabilities === null ? null : capabilities.ios_app_linked === true;
 }
 
 /** Reads one inbox item; anything malformed is dropped rather than written. */
@@ -166,6 +155,13 @@ export class PhoneCaptureInbox {
   maybeSync(): Promise<PhoneCaptureSyncResult> | null {
     const now = (this.options.now ?? Date.now)();
     if (this.running || now - this.lastSyncAt < PHONE_CAPTURE_MIN_SYNC_GAP_MS) return null;
+    return this.sync();
+  }
+
+  /** Another read reported the account's iOS app link: check it now instead of on the next trigger. */
+  linkReported(): Promise<PhoneCaptureSyncResult> | null {
+    if (this.running || this.options.settings().linked) return null;
+    this.lastLinkCheckAt = Number.NEGATIVE_INFINITY;
     return this.sync();
   }
 
@@ -266,7 +262,7 @@ export class PhoneCaptureInbox {
     if (!manual && now - this.lastLinkCheckAt < PHONE_CAPTURE_LINK_CHECK_GAP_MS) return false;
     this.lastLinkCheckAt = now;
     try {
-      if ((await this.options.checkLinked()) !== true) return false;
+      if (!(await this.options.checkLinked())) return false;
       await this.options.onLinked();
     } catch (error) {
       this.options.onError?.("Couldn't check whether the iOS app is linked.", error);

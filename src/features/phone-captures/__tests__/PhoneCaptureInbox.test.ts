@@ -4,11 +4,9 @@ import {
   PHONE_CAPTURE_LINK_CHECK_GAP_MS,
   PHONE_CAPTURE_MIN_SYNC_GAP_MS,
   PhoneCaptureInbox,
-  iosAppLinkedFromCapabilities,
   type PhoneCaptureSettings,
 } from "../PhoneCaptureInbox";
 import type { PlatformRequestClient, PlatformRequestInput } from "../../../services/PlatformRequestClient";
-import { HostedTransportAdapter } from "../../../services/managed/adapters/HostedTransportAdapter";
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -91,7 +89,7 @@ function setup(options: Readonly<{
   files?: Record<string, string>;
   settings?: Partial<PhoneCaptureSettings>;
   confirm?: jest.Mock;
-  checkLinked?: () => Promise<boolean | null>;
+  checkLinked?: () => Promise<boolean>;
 }> = {}) {
   const { app, files, vault } = fakeVault(options.files);
   const server = fakeServer(options.captures ?? [CAPTURE]);
@@ -303,26 +301,22 @@ describe("PhoneCaptureInbox", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("treats a server without ios_app_linked as not linked", async () => {
-    const configBody = (capabilities: Record<string, unknown>) => ({
-      contract: "systemsculpt-plugin-config-v1",
-      capabilities: { hosted_chat: true, hosted_videos: false, ...capabilities },
+  it("checks right away when another read reports the link", async () => {
+    let linkedOnServer = false;
+    const { inbox, server, notify, onLinked } = setup({
+      settings: { linked: false },
+      checkLinked: async () => linkedOnServer,
     });
-    let body = configBody({});
-    const transport = new HostedTransportAdapter({
-      baseUrl: "https://api.example.test",
-      pluginVersion: "6.13.1",
-      licenseKey: () => "lic_test",
-      requestClient: {
-        request: jest.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
-      } as unknown as PlatformRequestClient,
-    });
-    const check = async () => iosAppLinkedFromCapabilities(await transport.getPluginConfigCapabilities());
 
-    expect(await check()).toBe(false);
-    body = configBody({ ios_app_linked: true });
-    expect(await check()).toBe(true);
-    expect(iosAppLinkedFromCapabilities(null)).toBeNull();
+    expect(await inbox.maybeSync()).toMatchObject({ skipped: "not_linked" });
+    linkedOnServer = true;
+
+    const result = await inbox.linkReported();
+    expect(result?.saved).toHaveLength(1);
+    expect(onLinked).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("iOS captures will be saved to SystemSculpt/Inbox.");
+    expect(inbox.linkReported()).toBeNull();
+    expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(1);
   });
 
   it("follows the cursor across pages", async () => {

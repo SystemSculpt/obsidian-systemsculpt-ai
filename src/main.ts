@@ -51,7 +51,6 @@ import { InboxTranscriptionService } from "./features/inbox-transcription/InboxT
 import {
   PHONE_CAPTURE_POLL_INTERVAL_MS,
   PhoneCaptureInbox,
-  iosAppLinkedFromCapabilities,
   type PhoneCaptureSyncResult,
 } from "./features/phone-captures/PhoneCaptureInbox";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
@@ -685,7 +684,8 @@ export default class SystemSculptPlugin extends Plugin {
   private registerLayoutTasks(coordinator: LifecycleCoordinator): void {
     // iPhone captures wait in the server inbox until a signed-in vault saves
     // them: at startup, when Obsidian regains focus, and on a timer. Until the
-    // account has used the iOS app, these triggers only ask about the link.
+    // account has used the iOS app, these triggers only read the credits
+    // balance, which says whether it has.
     coordinator.registerTask("layout", {
       id: "phoneCaptures.start",
       label: "iOS captures",
@@ -699,6 +699,12 @@ export default class SystemSculptPlugin extends Plugin {
         this.registerDomEvent(document, "visibilitychange", () => {
           if (document.visibilityState === "visible") sync();
         });
+        // Any credits refresh that reports the link turns the inbox on.
+        this.register(this.aiService.onCreditsBalance((balance) => {
+          if (!this.isUnloading && balance.iosAppLinked === true) {
+            void this.getPhoneCaptureInbox().linkReported();
+          }
+        }));
         sync();
       },
     });
@@ -2197,9 +2203,8 @@ export default class SystemSculptPlugin extends Plugin {
         askBeforeSaving: this.settings.phoneCapturesAskBeforeSaving,
         linked: this.settings.phoneCapturesLinked === true,
       }),
-      checkLinked: async () => iosAppLinkedFromCapabilities(
-        await this.getManagedCapabilityGraph().transport.getPluginConfigCapabilities(),
-      ),
+      // The credits balance carries the link; a recent balance is reused.
+      checkLinked: async () => (await this.aiService.readCreditsBalance()).iosAppLinked === true,
       onLinked: () => this.getSettingsManager().updateSettings({ phoneCapturesLinked: true }),
       confirm: async (captures, folder) => (await showConfirm(
         this.app,
