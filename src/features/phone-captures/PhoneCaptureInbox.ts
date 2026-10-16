@@ -25,13 +25,16 @@ export type PhoneCaptureSettings = Readonly<{
 }>;
 
 export type PhoneCaptureSyncResult = Readonly<{
-  /** Notes written by this sync. */
+  /** Notes written by this sync and verified in the vault before acknowledgement. */
   saved: readonly string[];
   /** Captures already in the vault that were only acknowledged. */
   alreadyInVault: number;
   /** Captures the user chose not to save yet. */
   deferred: number;
+  /** Failed saves, acknowledgements, or inbox checks. */
   failed: number;
+  /** Subset of failed: notes verified in the vault whose acknowledgement failed. */
+  unacknowledged: number;
   skipped?: "disabled" | "signed_out" | "not_linked" | "busy" | "unavailable";
 }>;
 
@@ -177,7 +180,7 @@ export class PhoneCaptureInbox {
 
   private async run(manual: boolean): Promise<PhoneCaptureSyncResult> {
     const settings = this.options.settings();
-    const empty = { saved: [], alreadyInVault: 0, deferred: 0, failed: 0 };
+    const empty = { saved: [], alreadyInVault: 0, deferred: 0, failed: 0, unacknowledged: 0 };
     if (!settings.enabled) return { ...empty, skipped: "disabled" };
     const licenseKey = settings.licenseKey.trim();
     if (!licenseKey) return { ...empty, skipped: "signed_out" };
@@ -189,6 +192,8 @@ export class PhoneCaptureInbox {
     let alreadyInVault = 0;
     let deferred = 0;
     let failed = 0;
+    let unacknowledged = 0;
+    let checkFailure: string | undefined;
     let cursor: string | null = null;
     // One bounded index per sync, kept current by vault events across every await.
     // Nothing (including listeners or remembered paths) survives the sync.
@@ -204,7 +209,10 @@ export class PhoneCaptureInbox {
           });
           if (existing !== null) {
             if (existing) alreadyInVault += 1;
-            else failed += 1;
+            else {
+              failed += 1;
+              unacknowledged += 1;
+            }
           } else if (this.declined.has(capture.id)) {
             deferred += 1;
           } else {
@@ -223,16 +231,18 @@ export class PhoneCaptureInbox {
         for (const capture of accepted) {
           try {
             const written = await this.write(capture, folder, identity);
-            if (written) saved.push(written);
             // Reconcile again after create: never acknowledge a deleted/replaced
             // file, and use the actual path if it moved while the write completed.
             const acknowledged = await identity.use(() => {
               const path = identity.find(capture.id);
               if (!path) throw new Error("The saved capture is no longer in the vault.");
+              if (written) saved.push(path);
               return this.acknowledge(licenseKey, capture.id, path);
             });
-            if (!acknowledged) failed += 1;
-            else if (!written) alreadyInVault += 1;
+            if (!acknowledged) {
+              failed += 1;
+              unacknowledged += 1;
+            } else if (!written) alreadyInVault += 1;
           } catch (error) {
             failed += 1;
             this.options.onError?.("Couldn't save an iOS capture to the vault.", error);
@@ -245,22 +255,35 @@ export class PhoneCaptureInbox {
     } catch (error) {
       if (error instanceof PhoneCaptureApiError && error.status === 426) this.upgradeRequired = true;
       this.options.onError?.("Couldn't check for iOS captures.", error);
-      if (manual) this.options.notify(this.describeFailure(error));
-      return { saved, alreadyInVault, deferred, failed: failed + 1, skipped: "unavailable" };
+      failed += 1;
+      checkFailure = this.describeFailure(error);
     } finally {
       identity.dispose();
     }
 
-    if (saved.length > 0) {
-      this.options.notify(
-        saved.length === 1
-          ? `Saved 1 iOS capture to ${folder}.`
-          : `Saved ${saved.length} iOS captures to ${folder}.`,
-      );
-    } else if (manual) {
-      this.options.notify(deferred > 0 ? "iOS captures are waiting to be saved." : "No new iOS captures.");
+    const result: PhoneCaptureSyncResult = {
+      saved, alreadyInVault, deferred, failed, unacknowledged,
+      ...(checkFailure ? { skipped: "unavailable" as const } : {}),
+    };
+    if (manual || saved.length > 0) this.notifyResult(result, folder, checkFailure);
+    return result;
+  }
+
+  private notifyResult(result: PhoneCaptureSyncResult, folder: string, checkFailure?: string): void {
+    const { saved, alreadyInVault, deferred, failed, unacknowledged } = result;
+    const captures = (count: number) => `${count} iOS capture${count === 1 ? "" : "s"}`;
+    const messages: string[] = [];
+    if (saved.length) messages.push(`Saved ${captures(saved.length)} to ${folder}.`);
+    if (alreadyInVault) {
+      messages.push(`${captures(alreadyInVault)} ${alreadyInVault === 1 ? "is" : "are"} already in this vault.`);
     }
-    return { saved, alreadyInVault, deferred, failed };
+    const saveFailures = failed - unacknowledged - (checkFailure ? 1 : 0);
+    if (saveFailures) messages.push(`Couldn't save ${captures(saveFailures)}.`);
+    if (unacknowledged) messages.push(`Delivery confirmation pending for ${captures(unacknowledged)} already in this vault.`);
+    if (deferred) messages.push("iOS captures are waiting to be saved.");
+    if (saveFailures || unacknowledged) messages.push("Sync again to retry.");
+    if (checkFailure) messages.push(checkFailure);
+    this.options.notify(messages.length ? messages.join(" ") : "No new iOS captures.");
   }
 
   /**

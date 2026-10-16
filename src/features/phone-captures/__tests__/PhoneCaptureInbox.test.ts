@@ -404,6 +404,92 @@ describe("PhoneCaptureInbox", () => {
     expect(server.acks.map((a) => a.body)).toEqual([{ vault_path: first.saved[0] }]);
   });
 
+  it("reports a failed save, keeps it pending and writes once on retry", async () => {
+    const h = setup();
+    h.vault.create.mockRejectedValueOnce(new Error("Disk full: private detail"));
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ saved: [], failed: 1, unacknowledged: 0 });
+    expect(h.notify).toHaveBeenLastCalledWith("Couldn't save 1 iOS capture. Sync again to retry.");
+    expect(h.files.size).toBe(0);
+    expect(h.server.acks).toHaveLength(0);
+    expect(h.server.pending.size).toBe(1);
+
+    expect((await h.inbox.sync({ manual: true })).saved).toHaveLength(1);
+    expect(h.files.size).toBe(1);
+    expect(h.server.acks).toHaveLength(1);
+    expect(h.server.pending.size).toBe(0);
+    expect(h.notify).toHaveBeenLastCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox.");
+  });
+
+  it("distinguishes saved-but-unacknowledged and failed re-ack from an empty inbox", async () => {
+    const h = setup();
+    h.server.setOverride(input => input.method === "POST" ? { status: 503, body: {} } : null);
+    const first = await h.inbox.sync({ manual: true });
+    expect(first).toMatchObject({ failed: 1, unacknowledged: 1 });
+    expect(h.notify).toHaveBeenLastCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Delivery confirmation pending for 1 iOS capture already in this vault. Sync again to retry.");
+    expect(await h.makeInbox().sync({ manual: true })).toMatchObject({ saved: [], failed: 1, unacknowledged: 1 });
+    expect(h.notify).toHaveBeenLastCalledWith("Delivery confirmation pending for 1 iOS capture already in this vault. Sync again to retry.");
+    expect(h.server.pending.size).toBe(1);
+    h.server.setOverride(null);
+    expect(await h.makeInbox().sync({ manual: true })).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0, unacknowledged: 0 });
+    expect(h.notify).toHaveBeenLastCalledWith("1 iOS capture is already in this vault.");
+    expect(h.vault.create).toHaveBeenCalledTimes(1);
+    expect(h.server.acks[0].body).toEqual({ vault_path: first.saved[0] });
+  });
+
+  it("reports both success and failure in a mixed batch, then retries only the unsaved note", async () => {
+    const h = setup({ captures: [CAPTURE, { ...CAPTURE, id: "cap_2", title: "Second" }] });
+    h.vault.create.mockRejectedValueOnce(new Error("Disk full: private detail"));
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ failed: 1, unacknowledged: 0 });
+    expect(h.notify).toHaveBeenLastCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Couldn't save 1 iOS capture. Sync again to retry.");
+    expect(h.files.size).toBe(1);
+    expect(h.server.pending.size).toBe(1);
+    expect(h.server.acks.map(a => a.id)).toEqual(["cap_2"]);
+    await h.inbox.sync({ manual: true });
+    expect(h.files.size).toBe(2);
+    expect(h.server.acks.map(a => a.id)).toEqual(["cap_2", "cap_1"]);
+  });
+
+  it("does not report a deleted or unverifiable new note as saved", async () => {
+    for (const failure of ["deleted", "unreadable"]) {
+      const h = setup();
+      const create = h.vault.create.getMockImplementation()!;
+      h.vault.create.mockImplementation(async (path, content) => {
+        const file = await create(path, content);
+        if (failure === "deleted") { h.files.delete(path); h.emit("delete", file); }
+        else h.vault.read.mockRejectedValue(new Error("Read failed: private detail"));
+        return file;
+      });
+      expect(await h.inbox.sync({ manual: true })).toMatchObject({ saved: [], failed: 1, unacknowledged: 0 });
+      expect(h.notify).toHaveBeenLastCalledWith("Couldn't save 1 iOS capture. Sync again to retry.");
+      expect(h.server.acks).toHaveLength(0);
+      expect(h.server.pending.size).toBe(1);
+    }
+  });
+
+  it("keeps the real empty inbox message and stays quiet in the background", async () => {
+    const h = setup({ captures: [] });
+    await h.inbox.sync();
+    expect(h.notify).not.toHaveBeenCalled();
+    await h.inbox.sync({ manual: true });
+    expect(h.notify).toHaveBeenLastCalledWith("No new iOS captures.");
+  });
+
+  it("includes saved progress when a later page cannot be checked", async () => {
+    const h = setup();
+    h.server.setOverride(input => input.method !== "GET" ? null : new URL(input.url).searchParams.has("after")
+      ? { status: 503, body: {} }
+      : { status: 200, body: { captures: [CAPTURE], next_cursor: "next" } });
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ failed: 1, skipped: "unavailable" });
+    expect(h.notify).toHaveBeenLastCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Couldn't check for iOS captures. Try again in a moment.");
+  });
+
+  it("includes deferred captures alongside saved or unacknowledged notes", async () => {
+    const h = setup({ captures: [CAPTURE, { ...CAPTURE, id: "cap_2" }], files: { "Existing.md": "---\ncapture_id: cap_1\n---\nBody" }, settings: { askBeforeSaving: true }, confirm: jest.fn(async () => false) });
+    h.server.setOverride(input => input.method === "POST" ? { status: 503, body: {} } : null);
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ failed: 1, unacknowledged: 1, deferred: 1 });
+    expect(h.notify).toHaveBeenLastCalledWith("Delivery confirmation pending for 1 iOS capture already in this vault. iOS captures are waiting to be saved. Sync again to retry.");
+  });
+
   it("asks before saving when enabled and asks again only on a manual sync", async () => {
     const confirm = jest.fn(async () => false);
     const { inbox, vault, server, advance } = setup({ settings: { askBeforeSaving: true }, confirm });
