@@ -48,7 +48,7 @@ export type PhoneCaptureInboxOptions = Readonly<{
   /** Whether the account has used the iOS app; false when the server doesn't say. Rejects when it can't ask. */
   checkLinked: () => Promise<boolean>;
   /** Remembers the link, so later startups poll the inbox right away. */
-  onLinked: () => Promise<void>;
+  onLinked: (licenseKey: string) => Promise<void>;
   onError?: (message: string, error: unknown) => void;
   requestClient?: PlatformRequestClient;
   baseUrl?: string;
@@ -146,6 +146,24 @@ export class PhoneCaptureInbox {
   /** The server rejected this plugin version; stop polling until restart. */
   private upgradeRequired = false;
   private lastLinkCheckAt = Number.NEGATIVE_INFINITY;
+  private accountKey = "";
+
+  private refreshAccount(): void {
+    const key = this.options.settings().licenseKey.trim();
+    if (key === this.accountKey) return;
+    this.accountKey = key;
+    this.lastSyncAt = this.lastLinkCheckAt = Number.NEGATIVE_INFINITY;
+    this.declined.clear();
+    this.upgradeRequired = false;
+  }
+
+  private isCurrentAccount(licenseKey: string): boolean {
+    return this.options.settings().licenseKey.trim() === licenseKey;
+  }
+
+  private requireCurrentAccount(licenseKey: string): void {
+    if (!this.isCurrentAccount(licenseKey)) throw new Error("The capture account changed during sync.");
+  }
 
   constructor(private readonly options: PhoneCaptureInboxOptions) {
     this.baseUrl = (options.baseUrl ?? SystemSculptEnvironment.resolveBaseUrl()).replace(/\/+$/, "");
@@ -154,6 +172,7 @@ export class PhoneCaptureInbox {
 
   /** Background trigger (startup, focus, timer): skipped when a sync ran recently. */
   maybeSync(): Promise<PhoneCaptureSyncResult> | null {
+    this.refreshAccount();
     const now = (this.options.now ?? Date.now)();
     if (this.running || now - this.lastSyncAt < PHONE_CAPTURE_MIN_SYNC_GAP_MS) return null;
     return this.sync();
@@ -169,6 +188,7 @@ export class PhoneCaptureInbox {
   /** Runs one sync, or joins the one in progress. `manual` asks again about declined captures. */
   sync(options: Readonly<{ manual?: boolean }> = {}): Promise<PhoneCaptureSyncResult> {
     if (this.running) return this.running;
+    this.refreshAccount();
     if (options.manual) this.declined.clear();
     this.lastSyncAt = (this.options.now ?? Date.now)();
     const run = this.run(options.manual === true).finally(() => {
@@ -187,7 +207,7 @@ export class PhoneCaptureInbox {
     if (this.upgradeRequired && !manual) return { ...empty, skipped: "unavailable" };
 
     const folder = normalizePath(settings.folder.trim() || DEFAULT_PHONE_CAPTURE_FOLDER);
-    if (!settings.linked && !(await this.detectLink(manual, folder))) return { ...empty, skipped: "not_linked" };
+    if (!settings.linked && !(await this.detectLink(manual, folder, licenseKey))) return { ...empty, skipped: "not_linked" };
     const saved: string[] = [];
     let alreadyInVault = 0;
     let deferred = 0;
@@ -200,10 +220,13 @@ export class PhoneCaptureInbox {
     const identity = new CaptureNoteIndex(this.options.app);
     try {
       for (let page = 0; page < MAX_PAGES_PER_SYNC; page += 1) {
+        this.requireCurrentAccount(licenseKey);
         const listed = await this.list(licenseKey, cursor);
+        this.requireCurrentAccount(licenseKey);
         const pending: PhoneCapture[] = [];
         for (const capture of listed.captures) {
           const existing = await identity.use(() => {
+            this.requireCurrentAccount(licenseKey);
             const path = identity.find(capture.id);
             return path ? this.acknowledge(licenseKey, capture.id, path) : null;
           });
@@ -220,9 +243,11 @@ export class PhoneCaptureInbox {
           }
         }
 
+        this.requireCurrentAccount(licenseKey);
         let accepted = pending;
         if (pending.length > 0 && settings.askBeforeSaving
           && !(await this.options.confirm(pending, folder))) {
+          this.requireCurrentAccount(licenseKey);
           for (const capture of pending) this.declined.add(capture.id);
           deferred += pending.length;
           accepted = [];
@@ -230,10 +255,12 @@ export class PhoneCaptureInbox {
 
         for (const capture of accepted) {
           try {
-            const written = await this.write(capture, folder, identity);
+            this.requireCurrentAccount(licenseKey);
+            const written = await this.write(capture, folder, identity, licenseKey);
             // Reconcile again after create: never acknowledge a deleted/replaced
             // file, and use the actual path if it moved while the write completed.
             const acknowledged = await identity.use(() => {
+              this.requireCurrentAccount(licenseKey);
               const path = identity.find(capture.id);
               if (!path) throw new Error("The saved capture is no longer in the vault.");
               if (written) saved.push(path);
@@ -244,6 +271,7 @@ export class PhoneCaptureInbox {
               unacknowledged += 1;
             } else if (!written) alreadyInVault += 1;
           } catch (error) {
+            if (!this.isCurrentAccount(licenseKey)) throw error;
             failed += 1;
             this.options.onError?.("Couldn't save an iOS capture to the vault.", error);
           }
@@ -253,6 +281,7 @@ export class PhoneCaptureInbox {
         if (!cursor) break;
       }
     } catch (error) {
+      if (!this.isCurrentAccount(licenseKey)) return { ...empty, skipped: "signed_out" };
       if (error instanceof PhoneCaptureApiError && error.status === 426) this.upgradeRequired = true;
       this.options.onError?.("Couldn't check for iOS captures.", error);
       failed += 1;
@@ -265,7 +294,7 @@ export class PhoneCaptureInbox {
       saved, alreadyInVault, deferred, failed, unacknowledged,
       ...(checkFailure ? { skipped: "unavailable" as const } : {}),
     };
-    if (manual || saved.length > 0) this.notifyResult(result, folder, checkFailure);
+    if (this.isCurrentAccount(licenseKey) && (manual || saved.length > 0)) this.notifyResult(result, folder, checkFailure);
     return result;
   }
 
@@ -291,13 +320,14 @@ export class PhoneCaptureInbox {
    * capture requests and no notices. The first time the server reports the
    * link, it is remembered and announced once.
    */
-  private async detectLink(manual: boolean, folder: string): Promise<boolean> {
+  private async detectLink(manual: boolean, folder: string, licenseKey: string): Promise<boolean> {
     const now = (this.options.now ?? Date.now)();
     if (!manual && now - this.lastLinkCheckAt < PHONE_CAPTURE_LINK_CHECK_GAP_MS) return false;
     this.lastLinkCheckAt = now;
     try {
-      if (!(await this.options.checkLinked())) return false;
-      await this.options.onLinked();
+      if (!(await this.options.checkLinked()) || !this.isCurrentAccount(licenseKey)) return false;
+      await this.options.onLinked(licenseKey);
+      if (!this.isCurrentAccount(licenseKey)) return false;
     } catch (error) {
       this.options.onError?.("Couldn't check whether the iOS app is linked.", error);
       return false;
@@ -384,7 +414,7 @@ export class PhoneCaptureInbox {
     return payload;
   }
 
-  private async write(capture: PhoneCapture, folder: string, identity: CaptureNoteIndex): Promise<string | null> {
+  private async write(capture: PhoneCapture, folder: string, identity: CaptureNoteIndex, licenseKey: string): Promise<string | null> {
     const { vault } = this.options.app;
     await ensureVaultFolder(this.options.app, folder);
     const stem = toSafeVaultFileName(
@@ -397,6 +427,7 @@ export class PhoneCaptureInbox {
       const outcome = await identity.use(() => {
         // Confirmation, folder creation and collision retries all yield. Check
         // identity again, with no await between that check and starting create.
+        this.requireCurrentAccount(licenseKey);
         if (identity.find(capture.id)) return "existing" as const;
         if (vault.getAbstractFileByPath(path) || identity.hasPath(path)) return "collision" as const;
         return vault.create(path, content).then(() => "created" as const, (error: unknown) => {

@@ -142,6 +142,7 @@ function setup(options: Readonly<{
   return {
     ...host, inbox: makeInbox(), makeInbox, files, vault, server, notify, confirm, checkLinked, onLinked,
     advance: (ms: number) => { now += ms; },
+    changeAccount: (licenseKey: string) => { settings = { ...settings, licenseKey, linked: false }; },
   };
 }
 
@@ -169,6 +170,44 @@ describe("PhoneCaptureInbox", () => {
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
     expect(server.acks[0].headers["Idempotency-Key"]).toMatch(/^ack-cap_1-[0-9a-f]{16}$/);
     expect(notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox.");
+  });
+
+  it("ignores a previous account's delayed link response and checks the new account immediately", async () => {
+    let finishLink!: (linked: boolean) => void;
+    const state = setup({ settings: { linked: false }, checkLinked: () => new Promise(resolve => { finishLink = resolve; }) });
+    const running = state.inbox.sync();
+    state.changeAccount("never-used-ios");
+    finishLink(true);
+    await running;
+    expect(state.onLinked).not.toHaveBeenCalled();
+    expect(state.server.requests).toEqual([]);
+    expect(state.notify).not.toHaveBeenCalled();
+    state.checkLinked.mockResolvedValue(false);
+    await state.inbox.maybeSync();
+    expect(state.checkLinked).toHaveBeenCalledTimes(2);
+    expect(state.server.requests).toEqual([]);
+  });
+
+  it.each(["list", "confirmation", "create"])("stops old-account delivery after switching during %s", async (phase) => {
+    const state = setup({ settings: { askBeforeSaving: true } });
+    if (phase === "list") state.server.setOverride(() => {
+      state.changeAccount("never-used-ios");
+      return null;
+    });
+    if (phase === "confirmation") state.confirm.mockImplementation(async () => {
+      state.changeAccount("never-used-ios");
+      return true;
+    });
+    if (phase === "create") state.vault.createFolder.mockImplementation(async () => {
+      state.changeAccount("never-used-ios");
+    });
+
+    await state.inbox.sync({ manual: true });
+
+    expect(state.files.size).toBe(0);
+    expect(state.server.acks).toEqual([]);
+    expect(state.notify).not.toHaveBeenCalled();
+    expect(state.listeners.size).toBe(0);
   });
 
   it("never overwrites an existing note with the same name", async () => {

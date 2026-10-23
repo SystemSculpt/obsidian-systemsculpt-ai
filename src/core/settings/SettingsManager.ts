@@ -914,16 +914,20 @@ export class SettingsManager {
   /**
    * Update settings with partial changes
    */
-  async updateSettings(newSettings: Partial<SystemSculptSettings>): Promise<void> {
+  async updateSettings(newSettings: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<void> {
     return this.enqueuePersistence(() => this.updateSettingsNow(newSettings));
   }
 
-  private async updateSettingsNow(newSettings: Partial<SystemSculptSettings>): Promise<void> {
+  private async updateSettingsNow(update: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<void> {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
+    const newSettings = typeof update === "function" ? update(this.settings) : update;
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
+    if (updatedSettings.licenseKey?.trim() !== this.settings.licenseKey?.trim()) {
+      updatedSettings.phoneCapturesLinked = false;
+    }
     // The chats-folder list only grows. Chats stay in the folder they were
     // created in and attachment cleanup scans every listed folder, so neither
     // a concurrent append nor a restored backup may drop an entry.
