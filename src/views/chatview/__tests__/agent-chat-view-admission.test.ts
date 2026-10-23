@@ -3450,6 +3450,8 @@ describe("AgentChatView controls", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
     expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")).not.toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-composer-errors")?.textContent)
+      .toContain("broken.pdf could not be processed: conversion failed");
 
     parent.querySelector<HTMLButtonElement>('[aria-label="Retry broken.pdf"]')!.click();
     await retryStarted.promise;
@@ -3502,7 +3504,7 @@ describe("AgentChatView controls", () => {
     expect(workspace.getMessageAttachments().map((attachment) => attachment.name))
       .toEqual(["new-draft.md"]);
     expect(parent.textContent).not.toContain("broken.pdf");
-    expect(noticeLog).toHaveBeenCalledWith(
+    expect(noticeLog).not.toHaveBeenCalledWith(
       "Notice: broken.pdf could not be processed: conversion failed",
     );
     workspace.unload();

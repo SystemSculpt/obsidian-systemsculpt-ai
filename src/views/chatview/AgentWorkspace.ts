@@ -317,6 +317,8 @@ export class AgentWorkspace extends Component {
     this.queueElement.toggleAttribute("hidden", true);
 
     this.composer = new AgentComposer(this.element, {
+      app: options.app,
+      sourcePath: options.sourcePath,
       onSubmit: options.onSubmit,
       onStop: options.onStop,
       onAttach: options.onAttach,
@@ -545,11 +547,19 @@ export class AgentWorkspace extends Component {
         });
         const icon = row.createSpan({
           cls: "systemsculpt-agent-queue-icon",
+          attr: { "aria-hidden": "true" },
         });
         setIcon(icon, "list-end");
+        row.createSpan({ cls: "systemsculpt-agent-queue-label", text: "Queued" });
         row.createSpan({ cls: "systemsculpt-agent-queue-copy" });
         if (this.options.onRunQueuedNow) {
-          const runNow = iconButton(row, "chat.queue.run-now", "Stop and send queued follow-up now", "arrow-up");
+          const runNow = createUiAction(row, {
+            label: "Send now",
+            testId: "chat.queue.run-now",
+            size: "small",
+            tooltip: false,
+          });
+          runNow.addClass("systemsculpt-agent-queue-send-now");
           runNow.dataset.queueAction = "run-now";
           runNow.onclick = () => {
             const currentId = row?.dataset.queueItemId;
@@ -576,7 +586,7 @@ export class AgentWorkspace extends Component {
         ':scope > [data-queue-action="run-now"]',
       );
       if (runNow) {
-        updateUiAction(runNow, { label: `Stop and send ${target} now` });
+        runNow.setAttribute("aria-label", `Stop and send ${target} now`);
       }
       const remove = row.querySelector<HTMLButtonElement>(
         ':scope > [data-queue-action="remove"]',
@@ -625,6 +635,7 @@ export class AgentWorkspace extends Component {
     }
     const keys = contentKeys(messages);
     this.history = messages;
+    this.composer.setPromptHistory(messages);
     if (sameContentKeys(keys, this.historyKeys)) return Promise.resolve();
     return this.renderHistoryPreservingAnchor().then(() => {
       this.historyKeys = keys;

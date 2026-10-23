@@ -82,7 +82,9 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(styles).toMatch(/--ss-safe-bottom:[^;]*safe-area-inset-bottom/s);
     expect(styles).toContain("@media (pointer: coarse)");
     expect(styles).toContain("@container ss-surface (max-width: 500px)");
-    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{/);
+    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{[^}]*padding-bottom:\s*var\(--ss-mobile-bottom-clearance\)/s);
+    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-composer\s*\{/);
+    expect(styles).toMatch(/@media \(pointer: coarse\)\s*\{[^@]*\.systemsculpt-agent-attachment-open\s*\{[^}]*min-height:\s*var\(--ss-touch-target\)/s);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-settings-surface\s*\{/);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-embeddings-view__results-list\s*\{/);
     expect(styles).not.toMatch(/\.is-mobile|\.mobile-navbar-action/);
@@ -213,12 +215,10 @@ describe("built bundle in Obsidian Mobile", () => {
       chatView.contentEl.querySelector('button[aria-label="Send message"]'),
     ).not.toBeNull();
     expect(
-      chatView.contentEl.querySelector('button[aria-label="Attach files"]'),
+      chatView.contentEl.querySelector('button[aria-label="Add files and notes"][aria-haspopup="menu"]'),
     ).not.toBeNull();
     expect(
-      chatView.contentEl.querySelector(
-        'button[aria-label="Pin files for every message"]',
-      ),
+      chatView.contentEl.querySelector(".systemsculpt-agent-composer > .systemsculpt-agent-composer-footer"),
     ).not.toBeNull();
     expect(
       chatView.contentEl.querySelector(".systemsculpt-agent-viewport")?.getAttribute("tabindex"),
