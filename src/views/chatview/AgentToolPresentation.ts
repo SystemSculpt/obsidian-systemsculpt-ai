@@ -5,6 +5,7 @@ import {
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
+import { nativeToolPresentation } from "./NativeToolPresentation";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 
@@ -166,6 +167,13 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Manage: ["Managing", "Managed"],
   Pin: ["Pinning", "Pinned"],
   Unpin: ["Unpinning", "Unpinned"],
+  Run: ["Running", "Ran"],
+  Use: ["Using", "Used"],
+  Change: ["Changing", "Changed"],
+  Delete: ["Deleting", "Deleted"],
+  Allow: ["Allowing", "Allowed"],
+  Answer: ["Answering", "Answered"],
+  Send: ["Sending", "Sent"],
 };
 
 function actionState(displayState: AgentToolDisplayState): ToolActionState {
@@ -227,6 +235,10 @@ function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): bool
  * work may still continue and that successful partial results were retained.
  */
 export function presentAgentToolFailure(part: AgentToolPart): string {
+  const native = nativeToolPresentation(part);
+  if (native) return part.state === "outcome-unknown"
+    ? `The result from ${native.agentName} is uncertain. Check the requested action before retrying.`
+    : `This ${native.agentName} action could not be completed.`;
   const { canonicalName } = splitToolName(part.name);
   if (hasPartialOutcome(part, toolOutcomeCounts(part, canonicalName))) {
     return "Some requested items failed; successful items were kept.";
@@ -356,6 +368,9 @@ function limitToolDetails(details: readonly AgentToolDetail[]): readonly AgentTo
 export function presentAgentToolDetails(
   part: AgentToolPart,
 ): readonly AgentToolDetail[] {
+  // Native previews own their readable fields; do not apply hosted truncation
+  // or interpret provider output as a local vault-tool result.
+  if (part.native) return [];
   const { canonicalName } = splitToolName(part.name);
   if (part.location === "server") {
     if (canonicalName !== "web_search") return [];
@@ -454,6 +469,18 @@ export function presentAgentToolDetails(
 }
 
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
+  const native = nativeToolPresentation(part);
+  if (native) {
+    const active = part.state === "running" || part.state === "approved";
+    return {
+      canonicalName: part.name,
+      label: part.state === "succeeded" ? native.completedTitle : active ? actionLabel(native.title, "active") : native.title,
+      actionIcon: native.icon,
+      displayState: part.state,
+      icon: STATE_ICONS[part.state],
+      summary: native.description ?? null,
+    };
+  }
   const { canonicalName } = splitToolName(part.name);
   const outcomeCounts = toolOutcomeCounts(part, canonicalName);
   const input = record(part.input);

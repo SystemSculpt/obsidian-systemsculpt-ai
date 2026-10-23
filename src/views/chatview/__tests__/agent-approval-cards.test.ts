@@ -1,0 +1,302 @@
+/** @jest-environment jsdom */
+import { AgentApprovalCards } from "../AgentApprovalCards";
+import type { AgentToolPart } from "../../../chat/ChatConversation";
+import { claudePermissionResponse } from "../../../services/claude/LocalClaudeClient";
+
+function tool(id: string, extra: Partial<AgentToolPart> = {}): AgentToolPart {
+  return { id, callId: id, messageId: "m", order: 1, kind: "tool", name: "Edit", location: "vault", input: { file_path: "/vault/Notes/Plan.md", old_string: "Draft", new_string: "Ready" }, state: "approval-required", approvalId: id, native: { agent: "claude", workingDirectory: "/vault" }, ...extra };
+}
+
+function setup(owner = document, onApprove = jest.fn((): boolean => true), isVisible = () => true) {
+  const host = owner.body.createDiv();
+  const root = host.createDiv();
+  const composer = host.createDiv();
+  const input = composer.createEl("textarea");
+  const onHiddenApproval = jest.fn();
+  const cards = new AgentApprovalCards(root, { composer: () => composer, onApprove, isVisible, onHiddenApproval });
+  cards.load();
+  const add = (part: AgentToolPart) => {
+    const card = cards.create(part, part.name.toLowerCase());
+    root.appendChild(card);
+    return card;
+  };
+  return { root, composer, input, cards, add, onApprove, onHiddenApproval, dispose: () => { cards.unload(); host.remove(); } };
+}
+
+function key(target: HTMLElement, name: string, options: KeyboardEventInit = {}) {
+  target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...options }));
+}
+
+const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+afterEach(() => { document.body.empty(); });
+
+describe("inline approval keyboard ownership", () => {
+  it("focuses a new card, labels it and announces the proposed action", () => {
+    const ui = setup();
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    expect(document.activeElement).toBe(card);
+    expect(card.getAttribute("role")).toBe("group");
+    expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toContain("Notes/Plan.md");
+    expect(ui.root.querySelector('[role="status"]')?.textContent).toMatch(/Claude Code wants to edit Notes\/Plan.md/i);
+    expect(card.querySelector('[data-focus-key="tool-allow-once"]')?.getAttribute("aria-keyshortcuts")).toContain("Enter");
+    ui.dispose();
+  });
+
+  it("never steals composer focus, and Alt+Up reviews the pending card", () => {
+    const ui = setup();
+    ui.input.value = "Still typing";
+    ui.input.focus();
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    expect(document.activeElement).toBe(ui.input);
+    expect(ui.composer.querySelector('[data-testid="chat.approval.review"]')?.hasAttribute("hidden")).toBe(false);
+    key(ui.input, "ArrowDown", { altKey: true });
+    expect(document.activeElement).toBe(ui.input);
+    key(ui.input, "ArrowUp", { altKey: true });
+    expect(document.activeElement).toBe(card);
+    expect(ui.input.value).toBe("Still typing");
+    ui.dispose();
+  });
+
+  it("focuses a card from an empty composer but not during composition or outside the view", () => {
+    const ui = setup();
+    ui.input.focus();
+    ui.input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    const first = tool("one"), card = ui.add(first);
+    ui.cards.sync([first]);
+    expect(document.activeElement).toBe(ui.input);
+    ui.input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    const second = tool("two"); ui.add(second);
+    ui.cards.sync([first, second]);
+    expect(document.activeElement).toBe(card);
+    const outside = document.body.createEl("button"); outside.focus();
+    const third = tool("three"); ui.add(third); ui.cards.sync([first, second, third]);
+    expect(document.activeElement).toBe(outside);
+    ui.dispose();
+  });
+
+  it("answers the middle card then focuses below it before returning to older requests", async () => {
+    const ui = setup();
+    const parts = [tool("one"), tool("two"), tool("three")];
+    const [one, two, three] = parts.map(ui.add);
+    ui.cards.sync(parts);
+    two.focus(); key(two, "Enter"); await tick();
+    expect(document.activeElement).toBe(three);
+    key(three, "Escape"); await tick();
+    expect(document.activeElement).toBe(one);
+    ui.dispose();
+  });
+
+  it("sends a single question option by its numbered shortcut without treating input digits as actions", async () => {
+    const ui = setup();
+    const part = tool("question", { native: { agent: "codex", workingDirectory: "/vault" }, input: { questions: [{ id: "folder", question: "Which folder?", options: [{ label: "Notes" }, { label: "Inbox" }] }] } });
+    const card = ui.add(part); ui.cards.sync([part]);
+    const input = card.querySelector("input")!; input.focus(); key(input, "1");
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    expect(card.querySelector('[data-focus-key="tool-allow-chat"]')).toBeNull();
+    card.focus(); key(card, "2"); await tick();
+    expect(ui.onApprove).toHaveBeenCalledWith("question", true, false, { folder: ["Inbox"] });
+    ui.dispose();
+  });
+
+  it("uses Claude question text as the native answer key and preserves multiple selections", async () => {
+    const ui = setup();
+    const questions = [{ question: "Which sections?", header: "Sections", multiSelect: true, options: [{ label: "Summary" }, { label: "Tasks" }] }];
+    const part = tool("question", { name: "AskUserQuestion", input: { questions } });
+    const card = ui.add(part); ui.cards.sync([part]);
+    expect(card.querySelector("legend")?.textContent).toBe("Which sections?");
+    expect(card.querySelector('[data-focus-key="tool-allow-chat"]')).toBeNull();
+    key(card, "1"); key(card, "2");
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    key(card, "1"); key(card, "1");
+    key(card, "Enter"); await tick();
+    const answers = { "Which sections?": ["Tasks", "Summary"] };
+    expect(ui.onApprove).toHaveBeenCalledWith("question", true, false, answers);
+    expect(claudePermissionResponse({ toolName: "AskUserQuestion", description: "", input: { questions } }, { approved: true, answers })).toEqual({
+      behavior: "allow", updatedInput: { questions, answers: { "Which sections?": "Tasks, Summary" } },
+    });
+    ui.dispose();
+  });
+
+  it("arrows navigate pending cards; Enter, Escape and session shortcut send exactly one answer", async () => {
+    const ui = setup();
+    const parts = [tool("one"), tool("two"), tool("three")];
+    const [one, two, three] = parts.map(ui.add);
+    ui.cards.sync(parts);
+    key(one, "ArrowDown");
+    expect(document.activeElement).toBe(two);
+    key(two, "ArrowUp");
+    expect(document.activeElement).toBe(one);
+    key(one, "Enter");
+    key(one, "Enter");
+    await tick();
+    expect(ui.onApprove.mock.calls).toEqual([["one", true]]);
+    expect(document.activeElement).toBe(two);
+    key(two, "Escape");
+    await tick();
+    expect(ui.onApprove).toHaveBeenLastCalledWith("two", false);
+    expect(document.activeElement).toBe(three);
+    key(three, "Enter", { ctrlKey: true, shiftKey: true });
+    await tick();
+    expect(ui.onApprove).toHaveBeenLastCalledWith("three", true, true);
+    expect(document.activeElement).toBe(ui.input);
+    ui.dispose();
+  });
+
+  it("supports Cmd+Enter and does not reinterpret Enter on Deny or Details", async () => {
+    const ui = setup();
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    const deny = card.querySelector<HTMLButtonElement>('[data-focus-key="tool-deny"]')!;
+    key(deny, "Enter");
+    key(card.querySelector("summary")!, "Enter");
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    key(card, "Enter", { metaKey: true });
+    await tick();
+    expect(ui.onApprove).toHaveBeenCalledWith("one", true);
+    ui.dispose();
+  });
+
+  it("ignores repeats and IME composition, and leaves arrow keys inside answer fields", () => {
+    const ui = setup();
+    const part = tool("one", { native: { agent: "codex", workingDirectory: "/vault" }, input: { questions: [{ id: "q", question: "Which heading?", options: [] }] } });
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    key(card, "Enter", { repeat: true });
+    key(card, "Enter", { isComposing: true });
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    const input = card.querySelector("input")!;
+    input.focus();
+    key(input, "ArrowDown");
+    expect(document.activeElement).toBe(input);
+    ui.dispose();
+  });
+
+  it("withdraws a focused card and refuses stale handlers", async () => {
+    const ui = setup();
+    const one = tool("one"), two = tool("two");
+    const card = ui.add(one), next = ui.add(two);
+    ui.cards.sync([one, two]);
+    const focused = ui.cards.captureFocus();
+    card.remove();
+    ui.cards.sync([{ ...one, state: "cancelled", approvalDecision: "withdrawn" }, two], focused);
+    expect(document.activeElement).toBe(next);
+    card.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')!.click();
+    await tick();
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    next.remove();
+    ui.cards.sync([], "two");
+    expect(document.activeElement).toBe(ui.input);
+    ui.dispose();
+  });
+
+  it("does not move focus from a card already under review when another arrives", () => {
+    const ui = setup();
+    const one = tool("one"), two = tool("two");
+    const card = ui.add(one);
+    ui.cards.sync([one]);
+    ui.add(two);
+    ui.cards.sync([one, two]);
+    expect(document.activeElement).toBe(card);
+    ui.dispose();
+  });
+
+  it("announces a hidden request once without focusing the background chat", () => {
+    const ui = setup(document, jest.fn(() => true), () => false);
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    ui.cards.sync([part]);
+    expect(ui.onHiddenApproval).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(card);
+    ui.dispose();
+  });
+
+  it("uses its pop-out document, never a focused composer in the other window", () => {
+    const otherInput = document.body.createEl("textarea");
+    otherInput.focus();
+    const owner = document.implementation.createHTMLDocument("Chat pop-out");
+    const ui = setup(owner);
+    const part = tool("one"), card = ui.add(part);
+    const ownFocus = jest.spyOn(card, "focus");
+    ui.cards.sync([part]);
+    expect(card.ownerDocument).toBe(owner);
+    expect(ownFocus).toHaveBeenCalled();
+    expect(document.activeElement).toBe(otherInput);
+    expect(ui.composer.querySelector("button")?.ownerDocument).toBe(owner);
+    ui.dispose();
+  });
+
+  it("keeps Review and composition listeners with an existing chat moved to another document", () => {
+    const ui = setup();
+    const part = tool("one"), card = ui.add(part);
+    ui.cards.sync([part]);
+    const owner = document.implementation.createHTMLDocument("Moved chat");
+    owner.body.appendChild(ui.root.parentElement!);
+    expect(ui.input.ownerDocument).toBe(owner);
+    const focus = jest.spyOn(card, "focus");
+    key(ui.input, "ArrowUp", { altKey: true });
+    expect(focus).toHaveBeenCalledTimes(1);
+    key(ui.input, "ArrowUp", { altKey: true, isComposing: true });
+    key(ui.input, "ArrowUp", { altKey: true, repeat: true });
+    expect(focus).toHaveBeenCalledTimes(1);
+    const active = jest.spyOn(owner, "activeElement", "get").mockReturnValue(ui.input);
+    ui.input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    const second = tool("two"); ui.add(second); ui.cards.sync([part, second]);
+    expect(focus).toHaveBeenCalledTimes(1);
+    ui.input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    const third = tool("three"); ui.add(third); ui.cards.sync([part, second, third]);
+    expect(focus).toHaveBeenCalledTimes(2);
+    active.mockRestore();
+    ui.dispose();
+  });
+
+  it("sends question options and typed answers through the same inline action", async () => {
+    const ui = setup();
+    const part = tool("question", { name: "requestUserInput", native: { agent: "codex", workingDirectory: "/vault" }, input: { questions: [
+      { id: "format", header: "Format", question: "Which format?", options: [{ label: "Bullets", description: "An easy-to-scan list" }] },
+      { id: "title", header: "Title", question: "What title?", options: [] },
+    ] } });
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    card.querySelector<HTMLButtonElement>('.systemsculpt-agent-approval-options button')!.click();
+    const inputs = card.querySelectorAll("input");
+    inputs[1].value = "Plan";
+    inputs[1].dispatchEvent(new Event("input", { bubbles: true }));
+    key(inputs[1], "Enter", { ctrlKey: true });
+    await tick();
+    expect(ui.onApprove).toHaveBeenCalledWith("question", true, false, { format: ["Bullets"], title: ["Plan"] });
+    ui.dispose();
+  });
+
+  it("keeps hosted chat trust and trash's existing always-ask behavior", async () => {
+    const ui = setup();
+    const part = tool("hosted", { native: undefined, name: "edit", input: { path: "Plan.md", edits: [] } });
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    card.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-chat"]')!.click();
+    await tick();
+    expect(ui.onApprove).toHaveBeenCalledWith("hosted", true, true);
+    const trash = ui.add(tool("trash", { name: "trash", native: undefined }));
+    expect(trash.querySelector('[data-focus-key="tool-allow-chat"]')).toBeNull();
+    ui.dispose();
+  });
+
+  it("shows a shortened large input only in Details without denying or truncating the request", () => {
+    const ui = setup();
+    const content = "a".repeat(128_001);
+    const part = tool("write", { name: "Write", input: { file_path: "/vault/Long.md", content } });
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    expect(card.querySelector("details")!.open).toBe(false);
+    expect(card.querySelector("details pre")?.textContent).toContain("Preview shortened");
+    expect(part.input).toEqual({ file_path: "/vault/Long.md", content });
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    ui.dispose();
+  });
+});

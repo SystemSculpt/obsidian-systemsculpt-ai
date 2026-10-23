@@ -1,5 +1,6 @@
 import type { ChatSession } from "../../chat/ChatSession";
 import { hasHostCapability } from "../../platform/hostCapabilities";
+import { applyPluginSurface, createUiAction } from "../../core/ui/surface";
 import { mountCodexExecutionControls } from "../../services/codex/CodexExecutionControls";
 import { codexOptionsFromSettings, defaultTextBackend, localAgentDetectionDirectory } from "../../services/codex/CodexExecutionSettings";
 import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
@@ -104,6 +105,8 @@ import { isVaultImageContextFileExtension } from "../../constants/fileTypes";
 import { showConfirm } from "../../core/ui/notifications";
 import { normalizeFirstPartyToolName } from "../../tools/toolNames";
 import {
+  createSurfaceElement,
+  createSurfaceFragment,
   getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
@@ -472,6 +475,7 @@ export class AgentChatView extends ItemView {
   private readonly attachmentStore: ChatAttachmentVaultStore;
   private readonly queueRepository: AgentQueueStateRepository;
   private workspace: AgentWorkspace | null = null;
+  private approvalNotice: Notice | null = null;
   private exportService: ChatExportService | null = null;
   private creditsPromise: Promise<void> | null = null;
   private creditsFreshTail: Promise<void> | null = null;
@@ -609,13 +613,17 @@ export class AgentChatView extends ItemView {
     const backend = this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings);
     const forkHistory = () => this.pendingForkHistory?.prefix ?? [];
     if (backend === "codex") {
-      return new CodexChatSession(this.app, { persistAssistant }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
+      return new CodexChatSession(this.app, { persistAssistant, notice: text => this.workspace?.setBanner(text, "info") }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(this.app, { persistAssistant, notice: text => {
-        if (!this.claudeAutoUnavailable) this.workspace?.setBanner(text, "info");
-        this.claudeAutoUnavailable = true;
-        this.workspace?.composer.element.dispatchEvent(new Event("systemsculpt:approval-mode"));
+      return new ClaudeChatSession(this.app, { persistAssistant, notice: (text, reason) => {
+        if (reason !== "auto-unavailable" || !this.claudeAutoUnavailable) this.workspace?.setBanner(text, "info");
+        if (reason === "auto-unavailable") {
+          this.claudeAutoUnavailable = true;
+          const composer = this.workspace?.composer.element;
+          const EventClass = composer?.ownerDocument.defaultView?.Event;
+          if (composer && EventClass) composer.dispatchEvent(new EventClass("systemsculpt:approval-mode"));
+        }
       } }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
     }
     return new AgentChatSession({
@@ -769,7 +777,9 @@ export class AgentChatView extends ItemView {
       onRemoveAttachment: async (attachment) => {
         await this.contextManager.unpinFile(attachment.path || attachment.label);
       },
-      onApprove: (approvalId, approved, rememberForChat) => this.respondToToolApproval(approvalId, approved, rememberForChat),
+      onApprove: (approvalId, approved, rememberForChat, answers) => this.respondToToolApproval(approvalId, approved, rememberForChat, answers),
+      isApprovalVisible: () => this.containerEl.isShown(),
+      onHiddenApproval: part => this.showApprovalNotice(part),
       onOpenArtifact: (artifact) => this.openArtifact(artifact),
       onCopyArtifactPath: (artifact) => this.copyArtifactPath(artifact),
       onRetryFailedTurn: (id) => this.retryFailedTurn(id),
@@ -1449,6 +1459,8 @@ export class AgentChatView extends ItemView {
 
   private async performClose(): Promise<void> {
     this.closing = true;
+    this.approvalNotice?.hide();
+    this.approvalNotice = null;
     this.contextManager.dispose();
     this.expediteLocalFailedReceiptRetryTimers();
     this.beginQueueDrainSuppression();
@@ -3017,7 +3029,33 @@ export class AgentChatView extends ItemView {
       .some((message) => message.message_id === messageIdToResubmit);
   }
 
-  private respondToToolApproval(approvalId: string, approved: boolean, rememberForChat = false): void {
+  private showApprovalNotice(part: AgentToolPart): void {
+    if (this.closing || this.approvalNotice?.noticeEl.isConnected) return;
+    const owner = this.containerEl.ownerDocument;
+    const fragment = createSurfaceFragment(owner);
+    const surface = createSurfaceElement(owner, "div");
+    applyPluginSurface(surface, "transient");
+    const button = createUiAction(surface, {
+      label: `${part.native ? LOCAL_AGENTS[part.native.agent] : "SystemSculpt"} is waiting for your approval`,
+      testId: "chat.approval.notice",
+      tooltip: false,
+    });
+    button.addClass("systemsculpt-agent-approval-notice");
+    fragment.appendChild(surface);
+    const notice = new Notice(fragment, 0);
+    this.approvalNotice = notice;
+    // Notice normally mounts in the active window; keep this one with its chat.
+    const container = owner.querySelector<HTMLElement>(".notice-container")
+      ?? owner.body.createDiv({ cls: "notice-container" });
+    container.appendChild(notice.noticeEl.closest(".notice") ?? notice.noticeEl);
+    button.onclick = () => {
+      notice.hide();
+      this.approvalNotice = null;
+      void this.app.workspace.revealLeaf(this.leaf).then(() => this.workspace?.renderer.focusPendingApproval());
+    };
+  }
+
+  private respondToToolApproval(approvalId: string, approved: boolean, rememberForChat = false, answers?: Record<string, string[]>): boolean {
     const tool = this.agent.getSnapshot().parts.find((part) =>
       part.kind === "tool" && part.approvalId === approvalId);
     const trustedToolName = tool?.kind === "tool"
@@ -3027,16 +3065,20 @@ export class AgentChatView extends ItemView {
       && rememberForChat
       && tool?.kind === "tool"
       && tool.location === "vault"
+      && !tool.native
       && isMutatingTool(trustedToolName)
       && trustedToolName !== "trash";
     const introducedChatTrust = rememberToolForChat
       && !this.sessionTrustedToolNames.has(trustedToolName);
     if (rememberToolForChat) this.sessionTrustedToolNames.add(trustedToolName);
     try {
-      const settled = this.agent.respondToApproval(approvalId, approved);
+      const settled = tool?.kind === "tool" && tool.native
+        ? this.agent.respondToApproval(approvalId, approved, "manual", { rememberForSession: rememberForChat, answers })
+        : this.agent.respondToApproval(approvalId, approved);
       if (!settled && introducedChatTrust) {
         this.sessionTrustedToolNames.delete(trustedToolName);
       }
+      return settled;
     } catch (error) {
       if (introducedChatTrust) this.sessionTrustedToolNames.delete(trustedToolName);
       throw error;
@@ -3462,6 +3504,10 @@ export class AgentChatView extends ItemView {
       && /not installed|not (?:signed|logged) in|signed.out|run .*login|authentication.failed/i.test(snapshot.terminalError?.message ?? "")) {
       this.lastDetectionFailureTurn = snapshot.turnId;
       void detectLocalAgents({ force: true, workingDirectory: localAgentDetectionDirectory(this.app) });
+    }
+    if (!snapshot.parts.some(part => part.kind === "tool" && part.state === "approval-required")) {
+      this.approvalNotice?.hide();
+      this.approvalNotice = null;
     }
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {

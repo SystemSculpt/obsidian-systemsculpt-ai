@@ -4318,14 +4318,15 @@ describe("AgentConversationRenderer tail status", () => {
     const preview = approval.querySelector<HTMLElement>(
       ".systemsculpt-agent-approval-preview",
     )!;
-    expect(approval.textContent).toContain("Allow this change in your vault?");
+    expect(approval.textContent).toContain("SystemSculpt wants to write file · Projects/Plan.md");
     expect(approval.querySelector('[data-testid="chat.approval.deny"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-once"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-for-chat"]')).not.toBeNull();
     expect(preview.hidden).toBe(true);
     expect(preview.childElementCount).toBe(0);
     expect(shell.open).toBe(true);
-    expect(document.activeElement).toBe(header);
+    expect(shell.hidden).toBe(true);
+    expect(document.activeElement).toBe(approval);
 
     const reordered = { ...approvalTool, order: 1 };
     const reorderedSnapshot = snapshot(reordered, "waiting");
@@ -4357,7 +4358,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(undefined, preview);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(shell.open).toBe(true);
-    expect(document.activeElement).toBe(header);
+    expect(document.activeElement).toBe(approval);
     renderer.unload();
   });
 

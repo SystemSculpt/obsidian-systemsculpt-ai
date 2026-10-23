@@ -15,12 +15,12 @@ jest.mock('../../codex/CodexThreadLocator', () => ({ CodexThreadLocator: jest.fn
 const native = runLocalClaude as jest.Mock;
 const SESSION = 'b33728f4-ea7d-4fec-bcd0-bf79649b7d28';
 const edit = { toolName: 'Edit', description: 'note.md', requestId: 'req1', toolUseId: 'tool1', input: { file_path: '/vault/note.md', old_string: 'a', new_string: 'b' } };
-function setup(autoApprove = true) {
+function setup(autoApprove = true, notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void) {
   let sessionId: string | undefined;
   const locator = { read: jest.fn(async () => sessionId), write: jest.fn(async (_id, id) => { sessionId = id; }) };
   (CodexThreadLocator as jest.Mock).mockImplementation(() => locator);
   const persistAssistant = jest.fn(async () => {});
-  const session = new ClaudeChatSession({} as never, { persistAssistant }, () => [], () => ({ model: 'sonnet', permissionMode: 'default' }));
+  const session = new ClaudeChatSession({} as never, { persistAssistant, notice }, () => [], () => ({ model: 'sonnet', permissionMode: 'default' }));
   if (autoApprove) session.subscribe(snapshot => {
     const pending = snapshot.parts.find((part): part is AgentToolPart => part.kind === 'tool' && part.state === 'approval-required' && !!part.approvalId);
     if (pending) session.respondToApproval(pending.approvalId!, true);
@@ -66,6 +66,16 @@ it.each(['detach', 'disconnect', 'conversation'])('closes the chat-owned native 
   else if (ending === 'detach') await session.detach();
   else session.disconnect();
   expect(transport.close).toHaveBeenCalledTimes(1);
+});
+it('distinguishes native session resets from Auto availability notices', async () => {
+  const notice = jest.fn(), { session } = setup(true, notice);
+  native.mockImplementation(async (_input, _signal, callbacks) => {
+    callbacks.notice('Auto is unavailable'); return { text: '' };
+  });
+  await session.start(input());
+  expect(notice).toHaveBeenCalledWith('Auto is unavailable', 'auto-unavailable');
+  (ClaudeChatTransport as jest.Mock).mock.calls.at(-1)![0]('Session reset');
+  expect(notice).toHaveBeenCalledWith('Session reset', 'session-reset');
 });
 it('shows Claude Code errors as a retryable failure', async () => {
   const { session } = setup();

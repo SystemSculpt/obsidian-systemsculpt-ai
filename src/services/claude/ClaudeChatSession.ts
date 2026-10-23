@@ -5,13 +5,13 @@ import { ClaudeChatTransport, claudeSessionPermissionUpdates, type ClaudeExecuti
 
 /** Chat presentation adapter. Claude Code owns every model step, tool, permission and durable session. */
 export class ClaudeChatSession extends LocalAgentChatSession {
-  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string) => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({})) {
-    const transport = new ClaudeChatTransport(localOptions.notice);
+  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({})) {
+    const transport = new ClaudeChatTransport(text => localOptions.notice?.(text, 'session-reset'));
     super(app, 'claude', localOptions, forkHistory, (turn, signal, events) => transport.run({ ...executionOptions(), prompt: turn.prompt, images: turn.images, workingDirectory: turn.workingDirectory, sessionId: turn.threadId }, signal, {
       session: events.thread,
       log: text => events.status(text.startsWith('Tool: ') ? text.slice(6) : 'Claude Code is working'),
       text: events.text,
-      notice: localOptions.notice,
+      notice: text => localOptions.notice?.(text, 'auto-unavailable'),
       supportsQuestions: true,
       tool: activity => events.tool({ callId: activity.id, name: activity.name, input: activity.input, inputText: activity.inputText, state: activity.state,
         native: { agent: 'claude', workingDirectory: turn.workingDirectory },

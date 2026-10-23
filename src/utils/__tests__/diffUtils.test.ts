@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { generateDiff, isFileOpen, getFileContent, DiffLine, DiffResult } from "../diffUtils";
+import { generateDiff, parseUnifiedDiff, isFileOpen, getFileContent, DiffLine, DiffResult } from "../diffUtils";
 import { MarkdownView, TFile } from "obsidian";
 
 function createMarkdownView(path: string, editor: { getValue: jest.Mock } | null = null): MarkdownView {
@@ -14,6 +14,34 @@ function createMarkdownView(path: string, editor: { getValue: jest.Mock } | null
 }
 
 describe("diffUtils", () => {
+  describe("parseUnifiedDiff", () => {
+    it("parses native per-file patches with exact supplied line numbers and separate hunks", () => {
+      const result = parseUnifiedDiff("diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -2,2 +2,2 @@\n context\n-old\n+new\n@@ -40 +40,2 @@ section\n-last\n+new last\n+extra\n");
+      expect(result?.stats).toEqual({ additions: 3, deletions: 2 });
+      expect(result?.hunks).toHaveLength(2);
+      expect(result?.lines).toContainEqual({ type: "unchanged", content: "context", oldLineNumber: 2, newLineNumber: 2 });
+      expect(result?.lines).toContainEqual({ type: "added", content: "extra", newLineNumber: 41 });
+      expect(result?.isTruncated).toBe(false);
+    });
+
+    it("parses creation, deletion, CRLF patches, and no-final-newline markers", () => {
+      expect(parseUnifiedDiff("@@ -0,0 +1,2 @@\r\n+first\r\n+second\r\n\\ No newline at end of file\r\n")?.stats).toEqual({ additions: 2, deletions: 0 });
+      expect(parseUnifiedDiff("@@ -1 +0,0 @@\n-removed\n")?.lines).toEqual([{ type: "removed", content: "removed", oldLineNumber: 1 }]);
+    });
+
+    it("does not mistake content beginning with patch header characters for metadata", () => {
+      const result = parseUnifiedDiff("@@ -1 +1 @@\n--- old heading\n+++ new heading\n");
+      expect(result?.lines.map(line => line.content)).toEqual(["-- old heading", "++ new heading"]);
+    });
+
+    it.each([
+      "", "not a patch", "--- a.md\n+++ b.md", "@@ -1,2 +1,2 @@\n-old\n+new\n",
+      "@@ -1 +1 @@\n-old\n+new\n+extra\n", "@@ -1,2 +1,2 @@\n-old\n+new\n@@ -10 +10 @@\n-a\n+b\n",
+    ])("returns unavailable for missing or inconsistent patch content", patch => {
+      expect(parseUnifiedDiff(patch)).toBeNull();
+    });
+  });
+
   describe("generateDiff", () => {
     it("returns empty diff for identical content", () => {
       const result = generateDiff("hello", "hello");

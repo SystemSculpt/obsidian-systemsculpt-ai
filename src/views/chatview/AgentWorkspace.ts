@@ -26,6 +26,8 @@ import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInput
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
+import type { ApprovalAnswer } from "./AgentApprovalCards";
+import type { AgentToolPart } from "../../chat/ChatConversation";
 import {
   AgentConversationRenderer,
   type AgentConversationRendererIncidentSnapshot,
@@ -51,7 +53,9 @@ export type AgentWorkspaceOptions = Readonly<{
   attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
+  onApprove: ApprovalAnswer;
+  isApprovalVisible?: () => boolean;
+  onHiddenApproval?: (part: AgentToolPart) => void;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
@@ -265,6 +269,9 @@ export class AgentWorkspace extends Component {
           ? this.scroller.beginDisclosureLayoutMutation(disclosureControl)
           : this.scroller.beginLayoutMutation(mutationTarget),
       onApprove: options.onApprove,
+      approvalComposer: () => this.composer?.element,
+      isApprovalVisible: options.isApprovalVisible,
+      onHiddenApproval: options.onHiddenApproval,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
       showPlanOffer: () => this.showPlanOffer,

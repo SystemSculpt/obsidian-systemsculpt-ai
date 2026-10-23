@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
+import { App, Component, MarkdownRenderer, setIcon, TFile } from "obsidian";
 import { AgentComposer } from "../AgentComposer";
 import {
   type AgentArtifact,
@@ -2634,14 +2634,14 @@ describe("AgentWorkspace", () => {
     expect(parent.textContent).not.toContain("Needs approval");
     parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-deny"]')!.click();
     expect(onApprove).toHaveBeenCalledWith("approval-1", false);
+    await workspace.setAgentSnapshot({ ...snapshot, parts: [{ ...approvalTool, approvalId: "approval-2" }] });
     const allowOnce = parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')!;
     expect(allowOnce.classList.contains("ss-button--primary")).toBe(true);
     allowOnce.click();
-    expect(onApprove).toHaveBeenCalledWith("approval-1", true);
-    Array.from(parent.querySelectorAll<HTMLButtonElement>(".systemsculpt-agent-approval-actions button"))
-      .find((entry) => entry.textContent === "Allow for chat")!
-      .click();
-    expect(onApprove).toHaveBeenCalledWith("approval-1", true, true);
+    expect(onApprove).toHaveBeenCalledWith("approval-2", true);
+    await workspace.setAgentSnapshot({ ...snapshot, parts: [{ ...approvalTool, approvalId: "approval-3" }] });
+    parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-chat"]')!.click();
+    expect(onApprove).toHaveBeenCalledWith("approval-3", true, true);
 
     const pendingPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     const pendingHeader = pendingPart.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
@@ -3927,7 +3927,9 @@ describe("AgentWorkspace", () => {
       expect(parent.querySelector('[data-part-key="text-token-stream"]')).toBe(textPart);
       expect(textPart.firstChild).not.toBeNull();
       expect(textPart.textContent).toBe(correctedFormattedStream);
-      expect(selection.toString()).toBe("First");
+      // Resolving the focused approval returns to the composer, whose native
+      // textarea focus replaces the document selection.
+      expect(document.activeElement).toBe(workspace.composer.element.querySelector("textarea"));
       expect(markdownRender).toHaveBeenCalledTimes(expectedMarkdownCalls);
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
       expect(tailStatus.isConnected).toBe(false);
@@ -5486,6 +5488,106 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it.each(["approved", "denied", "withdrawn"] as const)(
+    "retains the captured native preview and raw Details after %s, including in-flight hydration",
+    async (decision) => {
+      for (const hydrateBeforeDecision of [true, false]) {
+        const parent = document.body.createDiv();
+        const app = new App();
+        const file = Object.assign(new TFile(), { path: "Plan.md" });
+        jest.spyOn(app.vault, "getAbstractFileByPath").mockReturnValue(file);
+        let finishRead!: (content: string) => void;
+        const read = jest.spyOn(app.vault, "read")
+          .mockResolvedValue("Already changed on disk")
+          .mockImplementationOnce(() => new Promise<string>((resolve) => { finishRead = resolve; }));
+        const workspace = new AgentWorkspace(parent, {
+          app,
+          sourcePath: () => "",
+          onSubmit: jest.fn(),
+          onStop: jest.fn(),
+          onAttach: jest.fn(),
+          onRemoveAttachment: jest.fn(),
+          onApprove: jest.fn(),
+          onOpenArtifact: jest.fn(),
+          onCopyArtifactPath: jest.fn(),
+          onNewChat: jest.fn(),
+          onOpenHistory: jest.fn(),
+          onOpenSettings: jest.fn(),
+        });
+        workspace.load();
+        try {
+          const pending: Extract<AgentPart, { kind: "tool" }> = {
+            id: "native-edit", kind: "tool", messageId: "assistant-1", callId: "native-edit",
+            order: 0, name: "Edit", location: "server", state: "approval-required",
+            approvalId: "native-approval",
+            input: { file_path: "/vault/Plan.md", old_string: "Before", new_string: "After" },
+            native: { agent: "claude", workingDirectory: "/vault" },
+          };
+          const snapshot: AgentConversationSnapshot = {
+            runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting",
+            waitingReason: "approval",
+            messages: [{ id: "assistant-1", role: "assistant", partIds: [pending.id] }],
+            parts: [pending],
+          };
+          await workspace.setAgentSnapshot(snapshot);
+          const node = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+          const preview = node.querySelector<HTMLElement>(".systemsculpt-agent-approval-preview")!;
+          const rawDetails = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-approval-details")!;
+          const hydration = (workspace.renderer as unknown as {
+            toolApprovalPreviewHydrationStates: WeakMap<HTMLElement, { hydration: Promise<void> | null }>;
+          }).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
+          expect(read).toHaveBeenCalledTimes(1);
+          if (hydrateBeforeDecision) {
+            finishRead("Before\n");
+            await hydration;
+          }
+          const capturedDiff = preview.querySelector(".systemsculpt-diff-viewer");
+          const resolved: typeof pending = {
+            ...pending,
+            state: decision === "approved" ? "approved" : decision === "denied" ? "denied" : "cancelled",
+            approvalDecision: decision,
+          };
+          const resolvedSnapshot: AgentConversationSnapshot = {
+            ...snapshot, status: "running", phase: "working", waitingReason: undefined, parts: [resolved],
+          };
+          await workspace.setAgentSnapshot(resolvedSnapshot);
+          const shell = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool")!;
+          expect(shell.open).toBe(false);
+          expect(shell.classList.contains("is-disclosure")).toBe(true);
+          expect(node.querySelector(".systemsculpt-agent-approval")).toBeNull();
+          expect(shell.querySelector(".systemsculpt-agent-approval-actions")).toBeNull();
+          expect(shell.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
+          expect(shell.querySelector(".systemsculpt-agent-approval-details")).toBe(rawDetails);
+          if (!hydrateBeforeDecision) {
+            finishRead("Before\n");
+            await hydration;
+          } else {
+            expect(preview.querySelector(".systemsculpt-diff-viewer")).toBe(capturedDiff);
+          }
+          expect(preview.hasAttribute("hidden")).toBe(false);
+          expect(preview.querySelector(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content")?.textContent).toBe("Before");
+          expect(preview.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe("After");
+          expect(rawDetails.querySelector("pre")?.textContent).toBe(JSON.stringify(pending.input, null, 2));
+          shell.querySelector<HTMLElement>(":scope > summary")!.click();
+          expect(shell.open).toBe(true);
+          // A subsequent native update may rebuild support rows. The reviewed
+          // content remains the same nodes, and is never read from disk again.
+          await workspace.setAgentSnapshot({
+            ...resolvedSnapshot,
+            parts: [{ ...resolved, error: { code: "native-action-error", message: "Action ended", retryable: false } }],
+          });
+          expect(shell.open).toBe(true);
+          expect(shell.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
+          expect(shell.querySelector(".systemsculpt-agent-approval-details")).toBe(rawDetails);
+          expect(read).toHaveBeenCalledTimes(1);
+        } finally {
+          workspace.unload();
+          parent.remove();
+        }
+      }
+    },
+  );
+
   it("coalesces bursty stream snapshots and renders only the newest frame", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -6497,7 +6599,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("restores denied, stopped, and uncertain tool outcomes without flattening them to failed", async () => {
+  it.each(["hosted", "native"] as const)("round-trips %s denied, stopped, and uncertain tool outcomes without flattening them to failed", async (backend) => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -6526,14 +6628,19 @@ describe("AgentWorkspace", () => {
       state: "failed" as const,
       timestamp: 1,
       result: { success: false, error: { code, message } },
+      ...(backend === "native" ? {
+        native: { agent: "claude" as const, workingDirectory: "/vault" },
+        approvalDecision: id === "denied" ? "denied" as const : id === "stopped" ? "withdrawn" as const : "approved" as const,
+        ...(id === "uncertain" ? { approvalScope: "session" as const } : {}),
+      } : {}),
     });
 
     const outcomeCalls = [
-      tool("denied", "USER_DENIED", "The user denied this tool execution."),
-      tool("stopped", "TOOL_CANCELLED_BEFORE_START", "Cancelled before execution."),
-      tool("uncertain", "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART", "Outcome unknown after restart."),
+      tool("denied", backend === "native" ? "NATIVE_TOOL_DENIED" : "USER_DENIED", "The user denied this tool execution."),
+      tool("stopped", backend === "native" ? "NATIVE_TOOL_CANCELLED" : "TOOL_CANCELLED_BEFORE_START", "Cancelled before execution."),
+      tool("uncertain", backend === "native" ? "NATIVE_TOOL_OUTCOME_UNKNOWN" : "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART", "Outcome unknown after restart."),
     ];
-    await workspace.setHistory([{
+    await workspace.setHistory(reloadSavedMessages([{
       role: "assistant",
       content: "Tool outcomes",
       message_id: "assistant-outcomes",
@@ -6547,7 +6654,7 @@ describe("AgentWorkspace", () => {
         })),
         { id: "content-part", type: "content", timestamp: 4, data: "Tool outcomes" },
       ],
-    }]);
+    }]));
     await hydrateRestoredWorked(
       workspace.renderer,
       parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!,
@@ -6563,6 +6670,14 @@ describe("AgentWorkspace", () => {
       ...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-tool-state-icon"),
     ].map((element) => element.dataset.iconState);
     expect(stateIcons).toEqual(["x", "x", "x"]);
+    const tools = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-tool")];
+    expect(tools.map(tool => ["denied", "cancelled", "outcome-unknown"].find(state => tool.classList.contains(`is-${state}`))))
+      .toEqual(["denied", "cancelled", "outcome-unknown"]);
+    if (backend === "native") {
+      expect(tools[0].textContent).toContain("· Denied");
+      expect(tools[1].textContent).toContain("· Withdrawn");
+      expect(tools[2].textContent).toContain("· Approved for this chat");
+    }
     workspace.unload();
   });
 });
