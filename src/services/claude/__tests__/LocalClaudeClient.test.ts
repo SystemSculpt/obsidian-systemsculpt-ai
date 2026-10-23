@@ -11,7 +11,7 @@ function host(options: { config?: unknown; spawnError?: string; script?: Script 
     stdin: Object.assign(new EventEmitter(), { write: jest.fn(), end: jest.fn() }), kill: jest.fn(),
   });
   // Like the real CLI, closing stdin ends the process.
-  child.stdin.end.mockImplementation(() => queueMicrotask(() => child.emit('exit', 0)));
+  child.stdin.end.mockImplementation(() => queueMicrotask(() => { child.emit('exit', 0); child.emit('close', 0); }));
   const messages: any[] = [];
   const send = (value: unknown) => child.stdout.emit('data', JSON.stringify(value) + '\n');
   const reply = (text: string) => {
@@ -40,7 +40,10 @@ function host(options: { config?: unknown; spawnError?: string; script?: Script 
 }
 const callbacks = (allow = true) => ({ session: jest.fn(), log: jest.fn(), text: jest.fn(), permission: jest.fn(async () => allow) });
 const input = { prompt: 'Read note.md', workingDirectory: '/vault' };
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: () => SESSION });
+});
 
 describe('launch arguments', () => {
   it('streams JSON both ways, routes permission prompts to the plugin and asks before edits by default', () => {
@@ -117,8 +120,71 @@ describe('stream', () => {
   it('reports a failed turn and an early exit with the CLI output', async () => {
     host({ script: (send, msg) => { if (msg.type === 'user') send({ type: 'result', subtype: 'error_max_turns', is_error: true, session_id: SESSION }); } });
     await expect(runLocalClaude(input, new AbortController().signal, callbacks())).rejects.toThrow('Claude Code did not finish: error_max_turns');
-    host({ script: (_send, msg, child) => { if (msg.type === 'user') { child.stderr.emit('data', 'boom'); child.emit('exit', 1); } } });
+    host({ script: (_send, msg, child) => { if (msg.type === 'user') { child.stderr.emit('data', 'boom'); child.emit('exit', 1); child.emit('close', 1); } } });
     await expect(runLocalClaude(input, new AbortController().signal, callbacks())).rejects.toThrow('Claude Code stopped before finishing. boom');
+  });
+});
+
+describe('native lifecycle', () => {
+  it('names a new session up front and saves it only once Claude Code confirms it', async () => {
+    const { spawn } = host({ spawnError: 'ENOENT' }), missing = callbacks();
+    await expect(runLocalClaude(input, new AbortController().signal, missing)).rejects.toThrow(/not installed/);
+    expect((spawn.mock.calls[0] as any[])[1]).toEqual(expect.arrayContaining(['--session-id', SESSION]));
+    expect(missing.session).not.toHaveBeenCalled();
+    host(); const failing = callbacks();
+    failing.session.mockRejectedValue(new Error('disk full'));
+    await expect(runLocalClaude(input, new AbortController().signal, failing)).rejects.toThrow('disk full');
+  });
+  it('rejects an event from a different session', async () => {
+    host({ script: (send, msg) => { if (msg.type === 'user') send({ type: 'system', subtype: 'init', session_id: 'c44839f5-fb8e-4fed-8de1-cf8a75a8e839' }); } });
+    const cb = callbacks();
+    await expect(runLocalClaude(input, new AbortController().signal, cb)).rejects.toThrow('different session identity');
+    expect(cb.session).not.toHaveBeenCalled();
+  });
+  it('excludes overlapping resumes until the first process closes', async () => {
+    const { child, messages, reply } = host({ script: () => {} });
+    const first = runLocalClaude({ ...input, sessionId: SESSION }, new AbortController().signal, callbacks());
+    for (let i = 0; i < 40 && !messages.length; i++) await Promise.resolve();
+    await expect(runLocalClaude({ ...input, sessionId: SESSION }, new AbortController().signal, callbacks())).rejects.toThrow(/already running/);
+    reply('done');
+    await first;
+    expect(child.stdin.end).toHaveBeenCalled();
+  });
+  it('waits for stdio close rather than failing at process exit', async () => {
+    host({ script: (send, msg, child) => {
+      if (msg.type !== 'user') return;
+      child.emit('exit', 0);
+      send({ type: 'result', subtype: 'success', result: 'final', session_id: SESSION });
+      child.emit('close', 0);
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'final' });
+  });
+  it('returns the terminal answer, not commentary or a truncated suffix', async () => {
+    const final = 'x'.repeat(260_000);
+    host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Working on it.' }] }, session_id: SESSION });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: final }] }, session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: final, session_id: SESSION });
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: final });
+  });
+  it('ignores buffered callbacks after cancellation and waits for process closure', async () => {
+    const { child, send, messages } = host({ script: () => {} });
+    child.stdin.end.mockImplementation(() => {});
+    const cb = callbacks(), controller = new AbortController();
+    let finished = false;
+    const running = runLocalClaude(input, controller.signal, cb).finally(() => { finished = true; });
+    void running.catch(() => {});
+    for (let i = 0; i < 40 && !messages.length; i++) await Promise.resolve();
+    controller.abort();
+    send({ type: 'assistant', message: { content: [{ type: 'text', text: 'late' }] } });
+    send({ type: 'control_request', request_id: 'late', request: { subtype: 'can_use_tool', tool_name: 'Edit' } });
+    await Promise.resolve(); await Promise.resolve();
+    expect(finished).toBe(false);
+    expect(cb.text).not.toHaveBeenCalled(); expect(cb.permission).not.toHaveBeenCalled();
+    child.emit('close', 0);
+    await expect(running).rejects.toThrow('canceled');
   });
 });
 
