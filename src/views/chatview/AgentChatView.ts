@@ -829,7 +829,7 @@ export class AgentChatView extends ItemView {
       runLine: {
         onSelectBackend: (id) => void this.selectBackend(id),
         onSelectMode: (value) => void this.selectMode(value),
-        onSelectModel: (id) => void this.selectModel(id),
+        onModelChange: (id) => void this.changeAgentModel(id),
         onDetectAgain: () => void this.detectAgain(),
         onOpenSettings: () => this.plugin.openSettingsTab("chat"),
         onAction: (action) => {
@@ -3907,7 +3907,7 @@ export class AgentChatView extends ItemView {
     this.workspace?.announce(`Switched to ${presentMode(this.chromeState()).label}`);
   }
 
-  private async selectModel(id: string): Promise<void> {
+  private async changeAgentModel(id: string): Promise<void> {
     const separator = id.indexOf(":");
     const kind = id.slice(0, separator);
     const value = id.slice(separator + 1);
@@ -3933,7 +3933,7 @@ export class AgentChatView extends ItemView {
         }
       }
     } catch (error) {
-      this.reportAgentError(error, "selectModel");
+      this.reportAgentError(error, "changeAgentModel");
       return;
     }
     this.syncChrome();

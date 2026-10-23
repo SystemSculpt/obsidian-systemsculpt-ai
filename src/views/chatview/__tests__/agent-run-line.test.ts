@@ -47,7 +47,7 @@ function mount(overrides: Partial<AgentRunLineOptions> = {}) {
   const options: AgentRunLineOptions = {
     onSelectBackend: jest.fn(),
     onSelectMode: jest.fn(),
-    onSelectModel: jest.fn(),
+    onModelChange: jest.fn(),
     onDetectAgain: jest.fn(),
     onOpenSettings: jest.fn(),
     onAction: jest.fn(),
@@ -133,7 +133,7 @@ describe("AgentRunLine", () => {
     segment(parent, "detail").click();
     expect(options.onModelMenuOpen).toHaveBeenCalledTimes(1);
     menus().at(-1)!.select("Opus");
-    expect(options.onSelectModel).toHaveBeenCalledWith("model:opus");
+    expect(options.onModelChange).toHaveBeenCalledWith("model:opus");
     line.unload();
   });
 

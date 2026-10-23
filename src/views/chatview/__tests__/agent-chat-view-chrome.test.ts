@@ -142,10 +142,10 @@ describe("AgentChatView chrome wiring", () => {
       { model: "gpt-6.1", name: "GPT-6.1", efforts: ["low", "high"], defaultEffort: "high" },
       { model: "mini", name: "Mini", efforts: ["medium"], defaultEffort: "medium" },
     ];
-    await (view as any).selectModel("model:mini");
+    await (view as any).changeAgentModel("model:mini");
     expect(view.plugin.settings).toMatchObject({ codexModel: "mini", codexThinkingLevel: "medium" });
-    await (view as any).selectModel("effort:medium");
-    await (view as any).selectModel("tier:priority");
+    await (view as any).changeAgentModel("effort:medium");
+    await (view as any).changeAgentModel("tier:priority");
     expect(view.plugin.settings).toMatchObject({ codexThinkingLevel: "medium", codexServiceTier: "priority" });
   });
 

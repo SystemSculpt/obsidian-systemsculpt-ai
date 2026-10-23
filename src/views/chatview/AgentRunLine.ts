@@ -13,7 +13,7 @@ export type AgentRunLineOptions = Readonly<{
   onSelectBackend: (id: string) => void;
   onSelectMode: (value: string) => void;
   /** `model:<id>`, `effort:<id>` or `tier:<id>`. */
-  onSelectModel: (id: string) => void;
+  onModelChange: (id: string) => void;
   onDetectAgain: () => void;
   onOpenSettings: () => void;
   onAction: (action: NonNullable<RunLineSegment["action"]>) => void;
@@ -245,7 +245,7 @@ export class AgentRunLine extends Component {
     } else if (kind === "mode") {
       this.options.onSelectMode(id);
     } else {
-      this.options.onSelectModel(id);
+      this.options.onModelChange(id);
     }
   }
 
