@@ -476,6 +476,7 @@ export class AgentChatView extends ItemView {
   private readonly queueRepository: AgentQueueStateRepository;
   private workspace: AgentWorkspace | null = null;
   private approvalNotice: Notice | null = null;
+  private approvalNoticeSurface: HTMLElement | null = null;
   private exportService: ChatExportService | null = null;
   private creditsPromise: Promise<void> | null = null;
   private creditsFreshTail: Promise<void> | null = null;
@@ -1461,6 +1462,7 @@ export class AgentChatView extends ItemView {
     this.closing = true;
     this.approvalNotice?.hide();
     this.approvalNotice = null;
+    this.approvalNoticeSurface = null;
     this.contextManager.dispose();
     this.expediteLocalFailedReceiptRetryTimers();
     this.beginQueueDrainSuppression();
@@ -3030,7 +3032,7 @@ export class AgentChatView extends ItemView {
   }
 
   private showApprovalNotice(part: AgentToolPart): void {
-    if (this.closing || this.approvalNotice?.noticeEl.isConnected) return;
+    if (this.closing || this.approvalNoticeSurface?.isConnected) return;
     const owner = this.containerEl.ownerDocument;
     const fragment = createSurfaceFragment(owner);
     const surface = createSurfaceElement(owner, "div");
@@ -3044,13 +3046,15 @@ export class AgentChatView extends ItemView {
     fragment.appendChild(surface);
     const notice = new Notice(fragment, 0);
     this.approvalNotice = notice;
+    this.approvalNoticeSurface = surface;
     // Notice normally mounts in the active window; keep this one with its chat.
     const container = owner.querySelector<HTMLElement>(".notice-container")
       ?? owner.body.createDiv({ cls: "notice-container" });
-    container.appendChild(notice.noticeEl.closest(".notice") ?? notice.noticeEl);
+    container.appendChild(surface.closest(".notice") ?? surface);
     button.onclick = () => {
       notice.hide();
       this.approvalNotice = null;
+      this.approvalNoticeSurface = null;
       void this.app.workspace.revealLeaf(this.leaf).then(() => this.workspace?.renderer.focusPendingApproval());
     };
   }
@@ -3508,6 +3512,7 @@ export class AgentChatView extends ItemView {
     if (!snapshot.parts.some(part => part.kind === "tool" && part.state === "approval-required")) {
       this.approvalNotice?.hide();
       this.approvalNotice = null;
+      this.approvalNoticeSurface = null;
     }
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {

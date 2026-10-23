@@ -58,7 +58,7 @@ describe("native presentation metadata", () => {
   });
 
   it("uses a readable fallback for unknown native actions without exposing protocol names", () => {
-    expect(nativeToolPresentation(part("mcp__unknown_extension__action")))
+    expect(nativeToolPresentation(part("UnknownNativeAction")))
       .toMatchObject({ title: "Run a Claude Code action", completedTitle: "Ran a Claude Code action", icon: "wrench" });
     expect(nativeToolPresentation(codex("future_item", {})))
       .toMatchObject({ title: "Run a Codex action", completedTitle: "Ran a Codex action" });

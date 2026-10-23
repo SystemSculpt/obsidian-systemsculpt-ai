@@ -31,7 +31,7 @@ it("retains hosted remember-for-chat behavior, including rollback when a request
 it("puts one clickable waiting Notice in the chat's owner document and reveals that leaf", async () => {
   const owner = document.implementation.createHTMLDocument("Chat window");
   const otherWindowNotices = document.body.createDiv({ cls: "notice-container" });
-  const noticeContainer = document.body.createDiv();
+  const noticeContainer = document.body.createDiv({ cls: "notice" });
   const hide = jest.fn(() => noticeContainer.remove());
   (Notice as unknown as jest.Mock).mockImplementationOnce((message: DocumentFragment) => {
     noticeContainer.appendChild(message);

@@ -3,6 +3,7 @@ import { createSurfaceElement, createUiAction } from "../../core/ui/surface";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentAgentTool } from "./AgentToolPresentation";
 import { nativeToolPresentation } from "./NativeToolPresentation";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 
 export type ApprovalAnswer = (
   approvalId: string,
@@ -185,7 +186,7 @@ export class AgentApprovalCards extends Component {
     action(questionList.length ? "Skip" : "Deny", "Esc", { testId: "chat.approval.deny" }, "tool-deny", "Escape", false);
     // Keep the hosted trash policy: it always asks, even after chat trust.
     if (!questionList.length && (part.native || canonicalName !== "trash")) {
-      const shortcut = /Mac/.test(card.ownerDocument.defaultView?.navigator.platform ?? "") ? "⇧⌘↵" : "Ctrl+Shift+Enter";
+      const shortcut = getHostOperatingSystem() === "macOS" ? "⇧⌘↵" : "Ctrl+Shift+Enter";
       action("Approve all in this chat", shortcut, { testId: "chat.approval.allow-for-chat" }, "tool-allow-chat", "Shift+Meta+Enter Shift+Control+Enter", true, true);
     }
     return card;
