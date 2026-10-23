@@ -13,7 +13,6 @@ import {
   type ChatAttachmentIngestionResult,
 } from "./attachments/ChatMessageAttachments";
 import { containsControlCharacters } from "../../utils/characterValidation";
-import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 export type AgentComposerAttachment = Readonly<{
   id: string;
@@ -38,7 +37,6 @@ export type AgentComposerOptions = Readonly<{
   attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onApprovalModeChange?: (mode: ChatApprovalMode) => void;
   onHeightChange?: () => void;
 }>;
 
@@ -77,7 +75,6 @@ export class AgentComposer extends Component {
   private readonly attachButton: HTMLButtonElement;
   private readonly vaultContextButton: HTMLButtonElement;
   private readonly filePicker: HTMLInputElement;
-  private readonly approvalMode: HTMLSelectElement;
   private readonly micButton: HTMLButtonElement | null;
   private readonly sendButton: HTMLButtonElement;
   private readonly stopButton: HTMLButtonElement;
@@ -144,13 +141,6 @@ export class AgentComposer extends Component {
         "aria-hidden": "true",
       },
     });
-    this.approvalMode = tools.createEl("select", {
-      cls: "dropdown systemsculpt-agent-approval-mode",
-      attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
-    });
-    this.approvalMode.createEl("option", { value: "auto", text: "Auto" });
-    this.approvalMode.createEl("option", { value: "ask", text: "Ask" });
-    this.approvalMode.createEl("option", { value: "full-access", text: "Full access" });
     this.micButton = options.onMic
       ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
       : null;
@@ -215,11 +205,6 @@ export class AgentComposer extends Component {
       else if (vaultPath) void this.options.onVaultContextDrop?.(vaultPath);
     });
     if (this.micButton) this.registerDomEvent(this.micButton, "click", () => void this.options.onMic?.());
-    this.registerDomEvent(this.approvalMode, "change", () => {
-      const mode = parseChatApprovalMode(this.approvalMode.value);
-      this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
-      this.options.onApprovalModeChange?.(mode);
-    });
     this.registerDomEvent(this.sendButton, "click", () => void this.submit());
     this.registerDomEvent(this.stopButton, "click", () => void this.options.onStop());
     this.registerDomEvent(this.cancelAttachmentsButton, "click", () => this.messageAttachments.cancelProcessing());
@@ -266,12 +251,6 @@ export class AgentComposer extends Component {
     this.renderAttachments();
     this.resize();
     this.syncControls();
-  }
-
-  public setApprovalMode(mode: ChatApprovalMode): void {
-    this.approvalMode.value = mode;
-    this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
-    this.element.dispatchEvent(new Event("systemsculpt:approval-mode"));
   }
 
   public setRunning(running: boolean): void {
@@ -496,7 +475,6 @@ export class AgentComposer extends Component {
     this.attachButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.vaultContextButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.filePicker.disabled = this.historyEditing || readOnly || this.attachmentBusy;
-    this.approvalMode.disabled = this.historyEditing || readOnly || this.running;
     if (this.micButton) this.micButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.element.classList.toggle("is-submitting", this.submitting);
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);

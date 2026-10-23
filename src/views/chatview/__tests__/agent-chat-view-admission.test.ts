@@ -834,9 +834,6 @@ describe("AgentChatView composer admission", () => {
     });
     await afterTerminal;
     expect(view.creditsBalance).toMatchObject({ availableUnreserved: 5 });
-    expect(setCreditsBalance).toHaveBeenLastCalledWith(
-      expect.objectContaining({ availableUnreserved: 5 }),
-    );
   });
 
   it("keeps post-terminal credit refresh correlation distinct across serialized fresh reads", async () => {
@@ -2749,9 +2746,10 @@ describe("AgentChatView composer admission", () => {
       expect.stringMatching(/^user-/),
       { anchorSubmittedPrompt: true },
     );
-    await expect(view.setApprovalMode("full-access")).rejects.toThrow(
-      "Tool access cannot change while SystemSculpt is working.",
-    );
+    // A mode change during a run applies from the next message (spec 4.1).
+    Object.assign(view, { app: { workspace: { requestSaveLayout: jest.fn() } }, chatId: "" });
+    await expect(view.setApprovalMode("full-access")).resolves.toBeUndefined();
+    expect(view.approvalMode).toBe("full-access");
     (view as any).creditsBalance = {
       usageClass: "customer",
       totalRemaining: 5,
@@ -3431,7 +3429,7 @@ describe("AgentChatView controls", () => {
     });
 
     workspace.setQueue((view as any).queuedFollowUps);
-    workspace.setApprovalMode("full-access");
+    (view as any).approvalMode = "full-access";
     workspace.setAttachments([{
       id: "context",
       label: "Context.md",
@@ -3465,7 +3463,7 @@ describe("AgentChatView controls", () => {
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-pinned")).toHaveLength(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-queue-item")).toHaveLength(0);
-    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')?.value).toBe("auto");
+    expect((view as any).approvalMode).toBe("auto");
     expect(document.activeElement).toBe(parent.querySelector("textarea"));
     expect(clearPinnedFiles).toHaveBeenCalledTimes(1);
     expect(detach).toHaveBeenCalledTimes(1);
@@ -3615,7 +3613,7 @@ describe("AgentChatView controls", () => {
     workspace.unload();
   });
 
-  it("shows the plan reminder banner on a fresh chat without an active plan", async () => {
+  it("guides a fresh hosted chat from its empty state, not a banner", async () => {
     const parent = document.body.createDiv();
     const app = new App();
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
@@ -3681,6 +3679,7 @@ describe("AgentChatView controls", () => {
           messages: [],
           contextFiles: [],
         })),
+        snapshot: jest.fn(() => ({ chatId: "", title: "New chat", version: 0, messages: [] })),
       },
       syncAttachments: jest.fn(),
       updateViewState: jest.fn(),
@@ -3688,34 +3687,35 @@ describe("AgentChatView controls", () => {
       isFullyLoaded: true,
     });
     const banner = parent.querySelector<HTMLElement>(".systemsculpt-agent-banner")!;
+    const empty = parent.querySelector<HTMLElement>('[data-testid="chat.empty"]')!;
 
-    await (view as any).startNewChat(false);
-    expect(banner.hasAttribute("hidden")).toBe(false);
-    expect(banner.classList.contains("is-error")).toBe(false);
-    expect(banner.textContent).toBe(
-      "Sign in to SystemSculpt to start chatting, or switch Provider to your own Claude Code or Codex.",
-    );
-
-    // On-machine agents are desktop only, so mobile keeps the account guidance.
+    // Spec 3.1 D: the signed-out card replaces the old sign-in banner, with
+    // T-36's free-start offer verbatim.
     const previousDesktop = Platform.isDesktopApp, previousMobile = Platform.isMobileApp;
     try {
       Platform.isDesktopApp = false; Platform.isMobileApp = true;
       await (view as any).startNewChat(false);
-      expect(banner.textContent).toBe(
-        "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.",
+      expect(banner.hasAttribute("hidden")).toBe(true);
+      expect(empty.textContent).toContain("Chat with your vault using SystemSculpt.");
+      expect(empty.textContent).toContain(
+        "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.",
       );
+      expect(empty.querySelector('[data-testid="chat.empty.start-free"]')?.textContent).toBe("Start free");
+      expect(empty.querySelector('[data-testid="chat.empty.sign-in"]')?.textContent).toBe("Sign in");
+      // Mobile shows no desktop-only install hints.
+      expect(empty.querySelector('[data-testid="chat.empty.detect-again"]')).toBeNull();
+
+      settings.userEmail = "free@user.test";
+      await (view as any).startNewChat(false);
+      expect(banner.hasAttribute("hidden")).toBe(true);
+      expect(empty.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
+      expect(empty.querySelector('[data-testid="chat.empty.see-plans"]')).not.toBeNull();
+
+      settings.licenseKey = "skss-test";
+      await (view as any).startNewChat(false);
+      expect(banner.hasAttribute("hidden")).toBe(true);
+      expect(empty.textContent).toContain("Ask about your notes or give SystemSculpt a task.");
     } finally { Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
-
-    settings.userEmail = "free@user.test";
-    await (view as any).startNewChat(false);
-    expect(banner.textContent).toBe(
-      "Your account has no active plan yet. Send a message to see plan options.",
-    );
-
-    settings.licenseKey = "skss-test";
-    await (view as any).startNewChat(false);
-    expect(banner.hasAttribute("hidden")).toBe(true);
-    expect(banner.textContent).toBe("");
     workspace.unload();
   });
 
@@ -5859,7 +5859,14 @@ it.each([false, true])('keeps saved native history on Codex and adapts its compo
     await harness.view.loadChatById('legacy-chat');
     expect((harness.view as any).chatExecutionBackend).toBe('codex');
     expect(harness.workspace.setHistory).toHaveBeenCalledWith(messages);
-    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(mobile ? 'Open a new SystemSculpt API chat on this device, or continue this Codex chat on desktop.' : null);
+    expect(harness.workspace.setComposerReadOnly).toHaveBeenLastCalledWith(mobile ? "Codex isn't available on this device." : null);
+    if (mobile) {
+      expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
+        "This chat ran on Codex. Codex isn't available on this device, so this chat is read-only here.",
+        "info",
+        expect.objectContaining({ label: "New chat" }),
+      );
+    }
     expect(harness.loaded.messages).toEqual(messages);
   } finally { locator.mockRestore(); Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
 });

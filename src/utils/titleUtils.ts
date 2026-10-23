@@ -13,6 +13,11 @@ export function generateDefaultChatTitle(): string {
   return `Chat ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
 }
 
+/** A title generateDefaultChatTitle made, rather than one a person typed. */
+export function isGeneratedChatTitle(title: string): boolean {
+  return /^Chat \d/.test(title.trim());
+}
+
 /**
  * Removes path separators and other filesystem-reserved characters from a
  * chat title. Chat files are named by chat ID, so this title is display text

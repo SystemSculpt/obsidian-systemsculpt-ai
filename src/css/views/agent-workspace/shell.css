@@ -1,6 +1,6 @@
 /**
  * Agent workspace shell: mounted view host, root surface, typography, header,
- * and viewport ownership.
+ * viewport ownership, the run line under the composer, and the empty states.
  */
 
 .workspace-leaf-content[data-type="systemsculpt-chat-view"] > .view-content {
@@ -16,6 +16,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  padding-bottom: var(--systemsculpt-agent-status-bar-overlap, 0px);
   background: var(--ss-surface-0);
   font-size: var(--ss-text-base);
 }
@@ -42,52 +43,84 @@
   z-index: var(--ss-z-raised);
   display: flex;
   align-items: center;
-  min-height: var(--ss-control-height-lg);
-  padding: var(--ss-space-2) var(--ss-space-3);
+  gap: var(--ss-space-2);
+  min-height: 36px;
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-1) var(--ss-space-3);
   border-bottom: 1px solid var(--ss-line);
   background: var(--ss-surface-0);
 }
 
 .systemsculpt-agent-header-title {
+  display: flex;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button,
+.systemsculpt-agent-header .systemsculpt-agent-title-input {
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 var(--ss-space-1);
+  margin-left: calc(var(--ss-space-1) * -1);
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-base);
   font-weight: var(--ss-weight-semibold);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button {
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ss-ink);
+  cursor: text;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button:hover {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-input {
+  flex: 1 1 auto;
+  border-color: var(--ss-line-accent);
+  background: var(--ss-surface-0);
+  color: var(--ss-ink);
 }
 
 .systemsculpt-agent-header-actions {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--ss-space-1);
   margin-left: auto;
 }
 
-.systemsculpt-agent-credits {
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  background: transparent;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
+.systemsculpt-agent-header-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
 }
 
-.systemsculpt-agent-credits.is-low {
-  border-color: var(--ss-warning-line);
-  background: var(--ss-warning-tint);
-  color: var(--ss-warning);
+/* History replaces the conversation and the composer while it is open. */
+.systemsculpt-agent-workspace.is-history-open > :not(.systemsculpt-history-panel, .systemsculpt-agent-sr-only) {
+  display: none;
 }
 
-.systemsculpt-agent-credits.is-empty {
-  border-color: var(--ss-danger-line);
-  background: var(--ss-danger-tint);
-  color: var(--ss-danger);
-}
-
-.systemsculpt-agent-credits.is-internal-qa {
-  border-color: var(--interactive-accent);
-  color: var(--text-accent);
+.systemsculpt-agent-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .systemsculpt-agent-viewport {
@@ -121,13 +154,10 @@
   display: none;
 }
 
-.ss-mobile-layout .systemsculpt-agent-header-actions {
-  width: 100%;
-  margin-left: 0;
-}
-
-.ss-mobile-layout .systemsculpt-agent-credits {
-  margin-right: auto;
+.ss-mobile-layout .systemsculpt-agent-header-button {
+  width: var(--ss-touch-target);
+  min-width: var(--ss-touch-target);
+  height: var(--ss-touch-target);
 }
 
 /* Android landscape leaves only a single control row beneath Obsidian's
@@ -141,7 +171,245 @@
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-viewport,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-run-line-host {
     display: none;
   }
+}
+
+/* ── Run line: backend · mode · model or credits, under the composer ── */
+
+.systemsculpt-agent-run-line-host {
+  width: min(100%, var(--ss-agent-content-width));
+  /* Sits 6px under the composer card, which keeps its own bottom padding. */
+  margin: calc(6px - var(--ss-space-4)) auto 0;
+  padding: 0 var(--ss-space-4) var(--ss-space-2);
+}
+
+/* One line at every width: the model segment gives way first. */
+.systemsculpt-agent-run-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  max-width: 100%;
+  height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment:hover,
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment[aria-expanded="true"] {
+  background: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-warning {
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-danger {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-run-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-run-icon,
+.systemsculpt-agent-run-chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.systemsculpt-agent-run-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-run-chevron {
+  opacity: 0.7;
+}
+
+.systemsculpt-agent-run-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-backend {
+  flex-shrink: 0;
+}
+
+.systemsculpt-agent-run-separator {
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  user-select: none;
+}
+
+.systemsculpt-agent-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: 0 var(--ss-space-1);
+}
+
+.systemsculpt-agent-run-icon.is-spinning svg,
+.systemsculpt-history-row-icon.is-spinning svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+/* Spec 4.1's narrow form ("Claude Code ▾", "gpt-6.1 ▾"), measured on the
+ * view: a 380 px sidebar leaves the line about 350 px after padding. */
+@container ss-surface (max-width: 439px) {
+  .systemsculpt-agent-run-wide {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-agent-run-line .systemsculpt-agent-run-segment {
+    height: var(--ss-touch-target);
+  }
+}
+
+/* Menu items carry a muted second line (Obsidian's menu, our spans). */
+.systemsculpt-agent-menu-title,
+.systemsculpt-agent-menu-description {
+  display: block;
+}
+
+.systemsculpt-agent-menu-description {
+  max-width: 34ch;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  white-space: normal;
+}
+
+/* ── Empty states (spec 3.1) ── */
+
+.systemsculpt-agent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ss-z-raised);
+  display: grid;
+  place-items: center;
+  min-height: var(--ss-agent-empty-height);
+  padding: var(--ss-space-4) var(--ss-space-3);
+  overflow-y: auto;
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+  text-align: center;
+}
+
+.systemsculpt-agent-empty-body {
+  display: grid;
+  justify-items: center;
+  gap: var(--ss-space-2);
+  width: 100%;
+  max-width: 32em;
+}
+
+.systemsculpt-agent-empty-body > p {
+  margin: 0;
+  line-height: var(--ss-leading-relaxed);
+}
+
+.systemsculpt-agent-empty-title {
+  margin: 0;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-xl);
+  font-weight: var(--ss-weight-semibold);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-empty-note {
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-empty-offer {
+  display: grid;
+  justify-items: center;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-empty-offer p {
+  margin: 0;
+  line-height: var(--ss-leading-relaxed);
+}
+
+.systemsculpt-agent-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-agent-empty-hint {
+  margin-top: var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-empty .systemsculpt-agent-empty-link {
+  display: inline;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--ss-ink-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.systemsculpt-agent-empty .systemsculpt-agent-empty-link:hover {
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-starters {
+  display: grid;
+  gap: var(--ss-space-2);
+  width: min(100%, 22rem);
+  margin-top: var(--ss-space-4);
+}
+
+.systemsculpt-agent-starters .systemsculpt-agent-starter {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-1) var(--ss-space-3);
+  overflow: hidden;
+  color: var(--ss-ink);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-empty :where(button) {
+  pointer-events: auto;
 }
