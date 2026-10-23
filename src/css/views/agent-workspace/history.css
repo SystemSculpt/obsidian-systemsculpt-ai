@@ -1,0 +1,195 @@
+/**
+ * Chat history inside the chat view (spec 4.4): a search field, grouped rows
+ * with a backend badge and a compact time, and row actions on hover or focus.
+ */
+
+.systemsculpt-history-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.systemsculpt-history-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: 36px;
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.systemsculpt-history-panel-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.systemsculpt-history-panel-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.systemsculpt-history-panel-search {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+
+.systemsculpt-history-panel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--ss-space-2) var(--ss-space-2);
+  overscroll-behavior: contain;
+}
+
+.systemsculpt-history-group + .systemsculpt-history-group {
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-history-group-title {
+  padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-1) var(--ss-space-2);
+  border: 0;
+  border-radius: var(--ss-radius-sm);
+  background: transparent;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row:hover {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row.is-active {
+  background: var(--ss-state-selected);
+  box-shadow: inset 0 0 0 1px var(--ss-line-accent);
+}
+
+/* The open chat: an accent bar on the leading edge. */
+.systemsculpt-history-panel .systemsculpt-history-row.is-current::before {
+  position: absolute;
+  top: var(--ss-space-1);
+  bottom: var(--ss-space-1);
+  left: 0;
+  width: 3px;
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-accent);
+  content: "";
+}
+
+.systemsculpt-history-row-star {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ss-warning);
+}
+
+.systemsculpt-history-row-star svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+  fill: currentColor;
+}
+
+.systemsculpt-history-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--ss-control-height-sm);
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-history-row-badge,
+.systemsculpt-history-row-time {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  white-space: nowrap;
+}
+
+.systemsculpt-history-row-time {
+  min-width: 3ch;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.systemsculpt-history-row-icon {
+  display: inline-flex;
+}
+
+.systemsculpt-history-row-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+/* Row actions replace the time while the row is hovered or active. */
+.systemsculpt-history-row-actions {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.systemsculpt-history-row-actions .ss-button--icon {
+  width: var(--ss-control-height-sm);
+  min-width: var(--ss-control-height-sm);
+  height: var(--ss-control-height-sm);
+  min-height: var(--ss-control-height-sm);
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row:is(:hover, .is-active) .systemsculpt-history-row-actions {
+  display: inline-flex;
+}
+
+.systemsculpt-history-panel .systemsculpt-history-row:is(:hover, .is-active) .systemsculpt-history-row-time:not(.is-running) {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-history-panel .systemsculpt-history-row {
+    min-height: var(--ss-touch-target);
+  }
+
+  .systemsculpt-history-row-actions {
+    display: inline-flex;
+  }
+}
+
+.systemsculpt-history-panel-status {
+  padding: var(--ss-space-2) var(--ss-space-4);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-history-panel-status.is-empty {
+  padding-top: var(--ss-space-8);
+  text-align: center;
+}
+
+.systemsculpt-history-panel-more {
+  align-self: center;
+  margin: 0 var(--ss-space-3) var(--ss-space-3);
+}
