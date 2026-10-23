@@ -25,6 +25,7 @@ export interface UiActionOptions {
 export interface UiActionState {
   label?: string;
   icon?: string | null;
+  tone?: UiActionTone;
   disabled?: boolean;
   selected?: boolean;
   busy?: boolean;
@@ -142,6 +143,14 @@ export function updateUiAction(
       icon.replaceChildren();
       setIcon(icon, state.icon);
     }
+  }
+
+  if (state.tone !== undefined) {
+    for (const toneClass of Object.values(ACTION_TONE_CLASS)) {
+      if (toneClass) button.classList.remove(toneClass);
+    }
+    const toneClass = ACTION_TONE_CLASS[state.tone];
+    if (toneClass) button.classList.add(toneClass);
   }
 
   if (state.title !== undefined) {
