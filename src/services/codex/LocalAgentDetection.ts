@@ -101,9 +101,9 @@ async function probe(agent: LocalAgentId): Promise<LocalAgentAvailability> {
       state.installed = true;
       const path = await desktopHost.path();
       const native = agent === 'codex' ? await resolveCodexLaunchOptions(launch) : null;
-      const environment = { ...(native?.environment ?? launch.environment) };
+      const environment: Record<string, string | undefined> = { ...(native?.environment ?? launch.environment) };
       delete environment.CLAUDECODE;
-      const home = native?.codexHome ?? environment.CLAUDE_CONFIG_DIR ?? path.join(launch.home, '.claude');
+      const home = native?.codexHome ?? (environment.CLAUDE_CONFIG_DIR || path.join(launch.home, '.claude'));
       await Promise.all([
         signedIn(agent, binary, environment, launch.home, controller.signal).then(value => { state.signedIn = value; }),
         sessionUsage(agent, home, deadline).then(value => { Object.assign(state, value); }),
