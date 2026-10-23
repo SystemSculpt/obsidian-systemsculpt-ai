@@ -2,8 +2,9 @@ import { isRecord } from '../../studio/utils';
 import { connectCodex, type CodexConnection, type CodexJson } from './CodexAppServer';
 import { resolveCodexOptions, type CodexExecutionOptions } from './CodexExecutionSettings';
 import { codexActivity, type CodexActivity } from './CodexActivity';
+import { codexApprovalParameters, resolveCodexApprovalMode } from './CodexApprovalPolicy';
 const activeThreads = new Set<string>();
-export type CodexRequest = CodexExecutionOptions & { prompt: string; workingDirectory: string; threadId?: string; images?: readonly string[]; dynamicTools?: readonly CodexJson[]; recoverCompletedTurn?: boolean };
+export type CodexRequest = CodexExecutionOptions & { approvalMode?: string; prompt: string; workingDirectory: string; threadId?: string; images?: readonly string[]; dynamicTools?: readonly CodexJson[]; recoverCompletedTurn?: boolean };
 export type CodexResult = { threadId: string; turnId: string; text: string; status: string };
 export type CodexCallbacks = {
   log: (text: string) => void;
@@ -18,6 +19,8 @@ export type CodexCallbacks = {
 export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, callbacks: CodexCallbacks): Promise<CodexResult> {
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Codex prompt must contain 1–256,000 characters.');
   const options = resolveCodexOptions(input);
+  const approvalMode = resolveCodexApprovalMode(input.approvalMode);
+  const approvalParameters = codexApprovalParameters(approvalMode, input.workingDirectory);
   const approvalItems = new Map<string, CodexJson>();
   let connection: CodexConnection | undefined, threadId = '', turnId = '', text = '', streamingText = '', lockedThreadId = '';
   const claimThread = (id: string) => {
@@ -63,9 +66,6 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
       serviceTier: options.serviceTier,
       config: { model_reasoning_effort: options.effort },
     };
-    // Resumes otherwise restore historic permissions. Ask Codex to resolve today's
-    // native config in an ephemeral thread, then transfer its exact policy unchanged.
-    // No model turn runs in the temporary thread and no plugin approval setting enters this path.
     if (input.threadId && input.recoverCompletedTurn) {
       const saved = await connection.request('thread/read', { threadId: input.threadId, includeTurns: true });
       const turns = isRecord(saved.thread) && Array.isArray(saved.thread.turns) ? saved.thread.turns : [];
@@ -77,15 +77,18 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
       }
       if (isRecord(last) && last.status === 'inProgress') throw new Error('The saved native turn is still active. Reconnect after Codex finishes; Studio will not start a duplicate turn.');
     }
-    const native = input.threadId ? await connection.request('thread/start', { ...parameters, ephemeral: true }) : undefined;
+    // Settings resumes refresh historic permissions from today's native config.
+    // The ephemeral thread resolves policy only; it never runs a model turn.
+    const native = input.threadId && approvalMode === 'settings' ? await connection.request('thread/start', { ...parameters, ephemeral: true }) : undefined;
     if (native && (native.approvalPolicy == null || typeof native.approvalsReviewer !== 'string' || !isRecord(native.sandbox))) {
       throw new Error('Codex did not resolve its configured permissions.');
     }
     const profile = native && isRecord(native.activePermissionProfile) ? native.activePermissionProfile.id : undefined;
     const thread = await connection.request(input.threadId ? 'thread/resume' : 'thread/start', {
       ...(!input.threadId && input.dynamicTools?.length ? { dynamicTools: input.dynamicTools } : {}),
-      ...parameters, ...(input.threadId ? { threadId: input.threadId, approvalPolicy: native!.approvalPolicy,
-        approvalsReviewer: native!.approvalsReviewer, ...(typeof profile === 'string' ? { permissions: profile } : {}) } : {}),
+      ...parameters, ...approvalParameters.thread, ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(native ? { approvalPolicy: native.approvalPolicy,
+        approvalsReviewer: native.approvalsReviewer, ...(typeof profile === 'string' ? { permissions: profile } : {}) } : {}),
     });
     if (!isRecord(thread.thread) || typeof thread.thread.id !== 'string') throw new Error('Codex returned no thread identity.');
     threadId = thread.thread.id;
@@ -93,7 +96,7 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
     if (!lockedThreadId) claimThread(threadId);
     await callbacks.thread(threadId); callbacks.log(`Codex thread: ${threadId}`);
     const started = await connection.request('turn/start', { threadId, model: options.model, effort: options.effort, serviceTierForTurn: options.serviceTier,
-      ...(native && typeof profile !== 'string' ? { sandboxPolicy: native.sandbox } : {}),
+      ...approvalParameters.turn, ...(native && typeof profile !== 'string' ? { sandboxPolicy: native.sandbox } : {}),
       input: [{ type: 'text', text: input.prompt, text_elements: [] }, ...(input.images || []).map(url => ({ type: 'image', url }))] });
     if (isRecord(started.turn)) turnId = String(started.turn.id || turnId);
     callbacks.ready?.({ turnId, send: async message => {

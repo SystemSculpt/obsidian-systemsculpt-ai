@@ -1,0 +1,45 @@
+{
+  "source": "codex-cli 0.162.1: codex app-server generate-json-schema (approval fields and sandbox variants used by the plugin)",
+  "ThreadStartParams": {
+    "approvalPolicy": { "anyOf": [{ "$ref": "#/definitions/AskForApproval" }, { "type": "null" }] },
+    "approvalsReviewer": { "anyOf": [{ "$ref": "#/definitions/ApprovalsReviewer" }, { "type": "null" }] },
+    "sandbox": { "anyOf": [{ "$ref": "#/definitions/SandboxMode" }, { "type": "null" }] }
+  },
+  "ThreadResumeParams": {
+    "approvalPolicy": { "anyOf": [{ "$ref": "#/definitions/AskForApproval" }, { "type": "null" }] },
+    "approvalsReviewer": { "anyOf": [{ "$ref": "#/definitions/ApprovalsReviewer" }, { "type": "null" }] },
+    "sandbox": { "anyOf": [{ "$ref": "#/definitions/SandboxMode" }, { "type": "null" }] }
+  },
+  "TurnStartParams": {
+    "approvalPolicy": { "anyOf": [{ "$ref": "#/definitions/AskForApproval" }, { "type": "null" }] },
+    "approvalsReviewer": { "anyOf": [{ "$ref": "#/definitions/ApprovalsReviewer" }, { "type": "null" }] },
+    "sandboxPolicy": { "anyOf": [{ "$ref": "#/definitions/SandboxPolicy" }, { "type": "null" }] }
+  },
+  "definitions": {
+    "AskForApproval": { "type": "string", "enum": ["untrusted", "on-request", "never"] },
+    "ApprovalsReviewer": { "type": "string", "enum": ["user", "auto_review", "guardian_subagent"] },
+    "SandboxMode": { "type": "string", "enum": ["read-only", "workspace-write", "danger-full-access"] },
+    "SandboxPolicy": {
+      "readOnly": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "networkAccess": { "default": false, "type": "boolean" },
+          "type": { "enum": ["readOnly"], "type": "string" }
+        }
+      },
+      "workspaceWrite": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "excludeSlashTmp": { "default": false, "type": "boolean" },
+          "excludeTmpdirEnvVar": { "default": false, "type": "boolean" },
+          "networkAccess": { "default": false, "type": "boolean" },
+          "type": { "enum": ["workspaceWrite"], "type": "string" },
+          "writableRoots": { "default": [], "items": { "$ref": "#/definitions/AbsolutePathBuf" }, "type": "array" }
+        }
+      }
+    },
+    "AbsolutePathBuf": { "type": "string" }
+  }
+}

@@ -3,6 +3,7 @@ import { hasHostCapability } from '../../platform/hostCapabilities';
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import type { App } from 'obsidian';
 import { isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from './LocalAgents';
+import { resolveCodexApprovalMode, type CodexApprovalMode } from './CodexApprovalPolicy';
 
 /** The selected on-machine agent, or null where none can run (mobile falls back to SystemSculpt API). */
 export function localTextAgent(settings: Pick<SystemSculptSettings, 'textExecutionBackend'> | undefined): LocalAgentId | null {
@@ -38,6 +39,7 @@ export function resolveCodexOptions(options: CodexExecutionOptions): Required<Co
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(serviceTier)) throw new Error('Invalid Codex speed mode.');
   return { model, effort, serviceTier };
 }
-export function codexOptionsFromSettings(settings: SystemSculptSettings): Required<CodexExecutionOptions> {
-  return resolveCodexOptions({ model: settings.codexModel, effort: settings.codexThinkingLevel, serviceTier: settings.codexServiceTier });
+export function codexOptionsFromSettings(settings: SystemSculptSettings & { codexApprovalMode?: string }): Required<CodexExecutionOptions> & { approvalMode: CodexApprovalMode } {
+  return { ...resolveCodexOptions({ model: settings.codexModel, effort: settings.codexThinkingLevel, serviceTier: settings.codexServiceTier }),
+    approvalMode: resolveCodexApprovalMode(settings.codexApprovalMode) };
 }
