@@ -278,7 +278,7 @@ function stepsForVerb(positional, flags) {
       } }];
     case "select": {
       if (!rest[0] || rest[1] === undefined) {
-        throw new Error('select requires a target and value, e.g. select chat.composer.approval-mode full-access');
+        throw new Error('select requires a target and value, e.g. select "setting:Default chat font size" large');
       }
       return [{ action: "select", params: { target: rest[0], value: rest[1] } }];
     }

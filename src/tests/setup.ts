@@ -564,7 +564,12 @@ const syncGlobalDomFactories = () => {
     createRootElement("div", options);
   (g as any).createSpan = (options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }) =>
     createRootElement("span", options);
-  (g as any).createFragment = () => createRootFragment();
+  // Obsidian's createFragment runs its callback on the new fragment.
+  (g as any).createFragment = (callback?: (fragment: DocumentFragment) => void) => {
+    const fragment = createRootFragment();
+    callback?.(fragment);
+    return fragment;
+  };
 };
 
 const syncRuntimeWindowGlobals = (win: any = g.window) => {

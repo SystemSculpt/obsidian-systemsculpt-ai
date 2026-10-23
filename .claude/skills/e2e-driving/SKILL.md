@@ -47,7 +47,7 @@ npm run e2e -- click chat.header.new
 npm run e2e -- type "Draft text" [--append] [--submit] [--target <t>]
 npm run e2e -- press Enter [--shift|--ctrl|--alt|--meta]
 npm run e2e -- attach ./diagram.png [--via picker|drop]
-npm run e2e -- select chat.composer.approval-mode full-access
+npm run e2e -- click chat.run.mode    # then: click "css:.menu [data-menu-item='mode.ask']"
 npm run e2e -- select "setting:Default chat font size" large
 npm run e2e -- scroll top|bottom|<deltaY>
 npm run e2e -- read <target>          # element summary incl. value/disabled
@@ -71,7 +71,7 @@ Use `wait-run` (`waitForRun`), never a bare `wait` on the stop button:
   plain check right after submit sees an idle composer and reports success for
   a turn that never ran.
 - It **approves automatically**, clicking `chat.approval.allow-for-chat` the
-  way a user would. Do not rely on setting `chat.composer.approval-mode` — a
+  way a user would. Do not rely on setting the mode from `chat.run.mode` — a
   run parked on approval is indistinguishable from a stalled one, so a driven
   run would hang by design. Pass `approve: false` to test the approval UI
   itself.
@@ -87,9 +87,8 @@ Use `wait-run` (`waitForRun`), never a bare `wait` on the stop button:
   assert `hidden`, not `gone`.
 - The stop button is **not** a completion signal on its own; it can flip in
   ~100 ms while the run never started. Assert transcript content too.
-- Approval mode is **per chat and resets on New chat**. Set it after the new
-  chat exists, and only while no run is live — the composer refuses the change
-  mid-run.
+- Hosted approval mode is **per chat and resets on New chat**. Set it after the
+  new chat exists. A change made mid-run applies from the next message.
 - A driver change needs `npm run build:local-agent && npm run sync:local:agent`
   (plain `sync:local` refuses a loopback API base by design).
 - On failure the report now carries a `diagnostics` block (recent warn/error

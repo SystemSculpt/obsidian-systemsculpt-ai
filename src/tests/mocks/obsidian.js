@@ -768,6 +768,159 @@ class Setting {
  * Minimal hotkey scope mirror — enough for code that layers a child scope
  * over `app.scope` and registers key overrides on it.
  */
+/** Records items like Obsidian's Menu; tests open it and click items. */
+class MenuItem {
+  constructor() {
+    this.title = "";
+    this.icon = null;
+    this.checked = null;
+    this.disabled = false;
+    this.isLabel = false;
+    this.section = null;
+    this.warning = false;
+    this.callback = null;
+  }
+
+  setTitle(title) {
+    this.title = typeof title === "string" ? title : title?.textContent ?? "";
+    return this;
+  }
+
+  setIcon(icon) {
+    this.icon = icon;
+    return this;
+  }
+
+  setChecked(checked) {
+    this.checked = checked;
+    return this;
+  }
+
+  setDisabled(disabled) {
+    this.disabled = disabled;
+    return this;
+  }
+
+  setIsLabel(isLabel) {
+    this.isLabel = isLabel;
+    return this;
+  }
+
+  setSection(section) {
+    this.section = section;
+    return this;
+  }
+
+  setWarning(warning) {
+    this.warning = warning;
+    return this;
+  }
+
+  onClick(callback) {
+    this.callback = callback;
+    return this;
+  }
+
+  click(event) {
+    if (this.disabled || this.isLabel) return;
+    this.callback?.(event ?? new MouseEvent("click"));
+  }
+}
+
+class Menu extends Component {
+  constructor() {
+    super();
+    this.items = [];
+    this.shown = false;
+    this.position = null;
+    this.hideCallbacks = [];
+    Menu.instances.push(this);
+  }
+
+  addItem(callback) {
+    const item = new MenuItem();
+    this.items.push(item);
+    callback(item);
+    return this;
+  }
+
+  addSeparator() {
+    this.items.push({ separator: true });
+    return this;
+  }
+
+  showAtMouseEvent(event) {
+    this.shown = true;
+    this.position = { x: event?.clientX ?? 0, y: event?.clientY ?? 0 };
+    return this;
+  }
+
+  showAtPosition(position, doc) {
+    this.shown = true;
+    this.position = position;
+    this.doc = doc;
+    return this;
+  }
+
+  hide() {
+    if (!this.shown) return this;
+    this.shown = false;
+    for (const callback of this.hideCallbacks) callback();
+    return this;
+  }
+
+  close() {
+    this.hide();
+  }
+
+  onHide(callback) {
+    this.hideCallbacks.push(callback);
+  }
+
+  setNoIcon() {
+    return this;
+  }
+
+  setUseNativeMenu() {
+    return this;
+  }
+
+  /** Clicks the item with this title and hides the menu, as Obsidian does. */
+  select(title) {
+    const item = this.items.find((entry) => !entry.separator && entry.title === title);
+    if (!item) throw new Error(`Menu item not found: ${title}`);
+    this.hide();
+    item.click();
+    return item;
+  }
+}
+Menu.instances = [];
+
+function setTooltip(element, tooltip, options = {}) {
+  element.setAttribute("aria-label", tooltip);
+  if (options.placement) element.setAttribute("data-tooltip-position", options.placement);
+}
+
+/** Case-insensitive subsequence match; tighter matches score higher. */
+function prepareFuzzySearch(query) {
+  const needle = String(query ?? "").toLowerCase().replace(/\s+/g, "");
+  return (text) => {
+    const haystack = String(text ?? "").toLowerCase();
+    if (!needle) return { score: 0, matches: [] };
+    const matches = [];
+    let from = 0;
+    let gaps = 0;
+    for (const character of needle) {
+      const index = haystack.indexOf(character, from);
+      if (index < 0) return null;
+      if (index > from) gaps += index - from;
+      matches.push([index, index + 1]);
+      from = index + 1;
+    }
+    return { score: -gaps - matches[0][0] * 0.01, matches };
+  };
+}
+
 class Scope {
   constructor(parent) {
     this.parent = parent ?? null;
@@ -881,7 +1034,11 @@ module.exports = {
   ButtonComponent,
   ExtraButtonComponent,
   Platform,
+  Menu,
+  MenuItem,
   setIcon,
+  setTooltip,
+  prepareFuzzySearch,
   debounce,
   MarkdownRenderer,
   normalizePath: (path) => (path ?? "").replace(/\\/g, "/"),
