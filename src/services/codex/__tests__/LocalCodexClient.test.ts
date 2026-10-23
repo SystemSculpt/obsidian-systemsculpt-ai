@@ -114,7 +114,6 @@ it('forwards user-selected model, thinking and speed to the native thread and tu
 });
 
 describe.each([
-  { approvalMode: undefined, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/workspace'], networkAccess: false } },
   { approvalMode: 'auto', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/workspace'], networkAccess: false } },
   { approvalMode: 'ask', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/workspace'], networkAccess: false } },
   { approvalMode: 'read-only', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly', networkAccess: false } },
@@ -138,9 +137,9 @@ it('rejects an unsupported approval mode before starting a native process', asyn
   expect((await desktopHost.childProcess()).spawn).not.toHaveBeenCalled();
 });
 
-it('lets a new native thread inherit config without permission overrides in settings mode', async () => {
+it.each([undefined, 'settings'])('lets a new native thread inherit config without overrides for Studio or settings (%s)', async approvalMode => {
   const { messages } = host();
-  await runLocalCodex({ ...input, approvalMode: 'settings' }, new AbortController().signal, callbacks());
+  await runLocalCodex({ ...input, approvalMode }, new AbortController().signal, callbacks());
   for (const message of messages.filter(message => ['thread/start', 'turn/start'].includes(message.method))) {
     for (const key of ['approvalPolicy', 'approvalsReviewer', 'sandbox', 'sandboxPolicy', 'permissions']) expect(message.params).not.toHaveProperty(key);
   }

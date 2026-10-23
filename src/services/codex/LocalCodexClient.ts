@@ -19,7 +19,8 @@ export type CodexCallbacks = {
 export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, callbacks: CodexCallbacks): Promise<CodexResult> {
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Codex prompt must contain 1–256,000 characters.');
   const options = resolveCodexOptions(input);
-  const approvalMode = resolveCodexApprovalMode(input.approvalMode);
+  // Chat supplies its Auto default explicitly; Studio keeps native inheritance.
+  const approvalMode = resolveCodexApprovalMode(input.approvalMode ?? 'settings');
   const approvalParameters = codexApprovalParameters(approvalMode, input.workingDirectory);
   const approvalItems = new Map<string, CodexJson>();
   let connection: CodexConnection | undefined, threadId = '', turnId = '', text = '', streamingText = '', lockedThreadId = '';

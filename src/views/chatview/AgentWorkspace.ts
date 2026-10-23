@@ -9,6 +9,7 @@ import {
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import type { ChatMessage } from "../../types";
+import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
   AnchoredScroller,
@@ -69,7 +70,7 @@ export type AgentWorkspaceOptions = Readonly<{
   showPlanOffer?: boolean;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
-  onApprovalModeChange?: (mode: "ask" | "full-access") => void;
+  onApprovalModeChange?: (mode: ChatApprovalMode) => void;
 }>;
 
 function iconButton(parent: HTMLElement, testId: string, label: string, icon: string): HTMLButtonElement {
@@ -826,7 +827,7 @@ export class AgentWorkspace extends Component {
     this.composer.setValue(value, options);
   }
 
-  public setApprovalMode(mode: "ask" | "full-access"): void {
+  public setApprovalMode(mode: ChatApprovalMode): void {
     this.composer.setApprovalMode(mode);
   }
 

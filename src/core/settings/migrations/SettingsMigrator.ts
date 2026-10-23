@@ -340,6 +340,20 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     describe: "Remove the write-only embeddings rebuild flag",
     migrate: removeKeys(LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14),
   },
+  {
+    to: 15,
+    describe: "Detect unchosen desktop chat backends and default native permissions to Auto",
+    migrate: (settings) => ({
+      ...settings,
+      // Old hosted defaults were indistinguishable from choices. Keep paid
+      // accounts on hosted; a live balance check covers uncached entitlements.
+      textExecutionBackendExplicit: settings.textExecutionBackend === "codex"
+        || settings.textExecutionBackend === "claude"
+        || (typeof settings.licenseKey === "string" && !!settings.licenseKey.trim()
+          && (settings.licenseValid === true || settings.subscriptionStatus === "active" || settings.subscriptionStatus === "lifetime")),
+      claudePermissionMode: settings.claudePermissionMode === "default" ? "auto" : settings.claudePermissionMode,
+    }),
+  },
 ];
 
 /** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */

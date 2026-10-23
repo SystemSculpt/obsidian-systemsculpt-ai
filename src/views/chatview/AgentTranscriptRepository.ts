@@ -17,6 +17,7 @@ import { ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import {
   parseAgentConversationId,
+  parseChatApprovalMode,
   type ChatApprovalMode,
 } from "./storage/ChatPersistenceTypes";
 
@@ -448,7 +449,7 @@ export class AgentTranscriptRepository {
         ...this.snapshot(),
         contextFiles: Object.freeze([...(loaded.context_files || [])]),
         ...(loaded.chatFontSize ? { chatFontSize: loaded.chatFontSize } : {}),
-        approvalMode: loaded.approvalMode === "full-access" ? "full-access" : "ask",
+        approvalMode: parseChatApprovalMode(loaded.approvalMode),
       });
     });
   }

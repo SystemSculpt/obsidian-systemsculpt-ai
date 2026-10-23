@@ -2,7 +2,7 @@ import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
 import { readLocalAgentLaunchConfig } from '../codex/LocalAgentLaunch';
 
-export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'settings'] as const;
+export const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number];
 export type ClaudeExecutionOptions = { model?: string; permissionMode?: string };
 export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[] };
@@ -11,6 +11,7 @@ export type ClaudePermissionRequest = { toolName: string; description: string; i
 export type ClaudeCallbacks = {
   session: (sessionId: string) => void | Promise<void>;
   log: (text: string) => void;
+  notice?: (text: string) => void;
   text?: (text: string) => void;
   /** Resolves true to allow this one tool call. The signal aborts when Claude Code withdraws the request. */
   permission: (request: ClaudePermissionRequest, signal: AbortSignal) => Promise<boolean>;
@@ -20,10 +21,18 @@ export const CLAUDE_SIGN_IN_MESSAGE = 'Claude Code is not signed in. Open a term
 const SESSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{7,79}$/;
 const MAX_LINE = 16 * 1024 * 1024;
 const activeSessions = new Set<string>();
+export const CLAUDE_AUTO_FALLBACK_NOTICE = "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
+class ClaudeAutoUnavailable extends Error {}
+function rejectsAutoMode(message: string): boolean {
+  return /(?:permission.?mode[^\n]*auto|auto[^\n]*(?:mode|permission))/i.test(message)
+    && /invalid|unsupported|not (?:available|supported|allowed|enabled)|unavailable|not eligible|requires|choices|cannot use/i.test(message);
+}
 
 export function resolveClaudeOptions(options: ClaudeExecutionOptions): Required<ClaudeExecutionOptions> & { permissionMode: ClaudePermissionMode } {
   const model = options.model?.trim() || '';
-  const permissionMode = options.permissionMode?.trim() || 'default';
+  const selected = options.permissionMode?.trim() || 'auto';
+  // "default" was the old CLI spelling of Ask; persisted defaults migrate to Auto.
+  const permissionMode = selected === 'default' ? 'manual' : selected;
   if (model && !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/.test(model)) throw new Error('Invalid Claude Code model.');
   if (!(CLAUDE_PERMISSION_MODES as readonly string[]).includes(permissionMode)) throw new Error('Invalid Claude Code permission mode.');
   return { model, permissionMode: permissionMode as ClaudePermissionMode };
@@ -59,6 +68,15 @@ function toolSummary(name: string, input: unknown, cwd: string): string {
 
 /** One turn in the installed Claude Code CLI. Claude Code owns login, tools, permissions and session history. */
 export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, callbacks: ClaudeCallbacks): Promise<ClaudeResult> {
+  try { return await runClaudeAttempt(input, signal, callbacks); }
+  catch (error) {
+    if (!(error instanceof ClaudeAutoUnavailable) || signal.aborted) throw error;
+    callbacks.notice?.(CLAUDE_AUTO_FALLBACK_NOTICE); callbacks.log(CLAUDE_AUTO_FALLBACK_NOTICE);
+    return runClaudeAttempt({ ...input, permissionMode: 'acceptEdits' }, signal, callbacks);
+  }
+}
+
+async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callbacks: ClaudeCallbacks): Promise<ClaudeResult> {
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Claude Code prompt must contain 1–256,000 characters.');
   const args = claudeLaunchArgs(input, input.sessionId);
   const message = userMessage(input.prompt, input.images || []);
@@ -80,6 +98,8 @@ export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, 
     return await new Promise<ClaudeResult>((resolve, reject) => {
       const prompts = new Map<string, AbortController>();
       let buffer = '', stderr = '', settled = false, text = '', partial = '', signedOut = false, nextRequest = 0;
+      let initialized = false, activityStarted = false, pipeFailure = false, fallbackRequestId: string | undefined;
+      const auto = resolveClaudeOptions(input).permissionMode === 'auto';
       // A new identity is saved once Claude Code confirms it, so a launch that never started cannot leave a chat resuming a missing session.
       let saving: Promise<void> | undefined = input.sessionId ? Promise.resolve() : undefined;
       let outcome: { result?: ClaudeResult; error?: Error } | undefined;
@@ -104,12 +124,17 @@ export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, 
         : `Unable to start the installed Claude Code CLI: ${error.message}`) }));
       // Close, unlike exit, fires after stdout is drained, so a final result written just before exit still counts.
       child.on('close', () => {
-        finish({ error: new Error(signedOut ? CLAUDE_SIGN_IN_MESSAGE : `Claude Code stopped before finishing.${stderr ? ` ${stderr.slice(-2000)}` : ''}`) });
+        const error = auto && !initialized && !activityStarted && rejectsAutoMode(stderr)
+          ? new ClaudeAutoUnavailable('Claude Code rejected Auto mode before starting.')
+          : new Error(signedOut ? CLAUDE_SIGN_IN_MESSAGE : `Claude Code stopped before finishing.${stderr ? ` ${stderr.slice(-2000)}` : ''}`);
+        // A rejected CLI option can close stdin before its diagnostic reaches stderr.
+        if (error instanceof ClaudeAutoUnavailable && pipeFailure) outcome = { error };
+        finish({ error });
         if (killTimer !== undefined) window.clearTimeout(killTimer);
         if (outcome?.error || !saving) reject(outcome?.error ?? new Error('Claude Code did not confirm its session.'));
         else void saving.then(() => resolve(outcome!.result!), reject);
       });
-      child.stdin.on('error', (error: Error) => finish({ error }));
+      child.stdin.on('error', (error: Error & { code?: string }) => { pipeFailure = error.code === 'EPIPE'; finish({ error }); });
       child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4000); });
       child.stdout.setEncoding('utf8');
 
@@ -134,7 +159,24 @@ export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, 
             saving.catch(error => finish({ error: error instanceof Error ? error : new Error(String(error)) }));
           }
         }
-        if (event.type === 'system' && event.subtype === 'init') callbacks.log(`Connected to on-machine Claude Code${typeof event.model === 'string' ? ` · ${event.model}` : ''}`);
+        if (event.type === 'system' && event.subtype === 'init') {
+          initialized = true;
+          callbacks.log(`Connected to on-machine Claude Code${typeof event.model === 'string' ? ` · ${event.model}` : ''}`);
+          if (auto && typeof event.permissionMode === 'string' && event.permissionMode !== 'auto') {
+            callbacks.notice?.(CLAUDE_AUTO_FALLBACK_NOTICE); callbacks.log(CLAUDE_AUTO_FALLBACK_NOTICE);
+            // Change the live session instead of replaying a prompt that may already be running.
+            if (event.permissionMode !== 'acceptEdits') {
+              fallbackRequestId = `systemsculpt-mode-${++nextRequest}`;
+              write({ type: 'control_request', request_id: fallbackRequestId, request: { subtype: 'set_permission_mode', mode: 'acceptEdits' } });
+            }
+          }
+        }
+        if (event.type === 'control_response' && isRecord(event.response) && event.response.request_id === fallbackRequestId) {
+          if (event.response.subtype === 'error') finish({ error: new Error('Claude Code could not enable Accept edits. Choose Ask before edits or update Claude Code.') });
+          fallbackRequestId = undefined;
+          return;
+        }
+        if (event.type === 'assistant' || event.type === 'stream_event' || event.type === 'control_request') activityStarted = true;
         if (event.type === 'control_request' && typeof event.request_id === 'string' && isRecord(event.request)) {
           if (event.request.subtype === 'can_use_tool') answer(event.request_id, event.request);
           else write({ type: 'control_response', response: { subtype: 'error', request_id: event.request_id, error: `SystemSculpt does not support ${String(event.request.subtype)}.` } });
@@ -166,7 +208,9 @@ export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, 
           if (signedOut) finish({ error: new Error(CLAUDE_SIGN_IN_MESSAGE) });
           else if (event.is_error === true || event.subtype !== 'success') {
             const detail = typeof event.result === 'string' && event.result ? event.result : Array.isArray(event.errors) ? event.errors.join(' ') : String(event.subtype);
-            finish({ error: new Error(`Claude Code did not finish: ${detail.slice(0, 2000)}`) });
+            finish({ error: auto && !activityStarted && rejectsAutoMode(detail)
+              ? new ClaudeAutoUnavailable('Claude Code rejected Auto mode before starting.')
+              : new Error(`Claude Code did not finish: ${detail.slice(0, 2000)}`) });
           } else finish({ result: { sessionId, text: typeof event.result === 'string' ? event.result : text } });
         }
       };

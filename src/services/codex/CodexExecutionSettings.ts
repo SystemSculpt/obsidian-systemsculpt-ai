@@ -19,6 +19,11 @@ export function defaultTextBackend(settings: Pick<SystemSculptSettings, 'textExe
 export function codexVaultDirectory(app: App): string {
   return codexWorkingDirectory(app, '.');
 }
+/** Detection can still find PATH installs when a host has no local vault path. */
+export function localAgentDetectionDirectory(app: App): string | undefined {
+  if (!hasHostCapability('local-cli')) return undefined;
+  try { return codexVaultDirectory(app); } catch { return undefined; }
+}
 /** Persist vault-relative paths; resolve only on the machine executing the task. */
 export function codexWorkingDirectory(app: App, configuredPath: string): string {
   if (!hasHostCapability('local-cli')) throw new Error('On-machine agents require Obsidian Desktop. Choose SystemSculpt API in Chat settings on this device.');

@@ -22,5 +22,6 @@
  *  - 12: removed retired user-configured workflow automations, backlog state, and automation skip records.
  *  - 13: added the persisted default output preset for Audio Processor.
  *  - 14: removed the write-only embeddings rebuild flag (#341).
+ *  - 15: distinguish chosen chat backends and default native permissions to Auto.
  */
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;

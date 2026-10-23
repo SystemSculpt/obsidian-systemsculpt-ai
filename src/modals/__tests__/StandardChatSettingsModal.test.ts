@@ -49,8 +49,9 @@ describe("StandardChatSettingsModal", () => {
     expect(titleId).toBeTruthy();
     expect(modal.modalEl.querySelector(`#${titleId}`)?.textContent).toBe("Chat settings");
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "Ask Approval",
-      "Full Access",
+      "Auto",
+      "Ask",
+      "Full access",
       "Small",
       "Medium",
       "Large",

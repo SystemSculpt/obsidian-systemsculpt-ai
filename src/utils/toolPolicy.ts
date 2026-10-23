@@ -26,6 +26,8 @@ export type ToolApprovalPolicy = {
   trustedToolNames?: Set<string>;
   requireDestructiveApproval?: boolean;
   autoApproveAllowlist?: string[];
+  /** Routine vault edits are automatic; moving and trashing still need a yes. */
+  mode?: "auto" | "ask" | "full-access";
 };
 
 const MUTATING_TOOLS = new Set<FirstPartyToolName>([
@@ -89,7 +91,8 @@ export function requiresUserApproval(
   const canonicalName = normalizeFirstPartyToolName(toolName);
   if (!isFirstPartyToolName(canonicalName)) return true;
   if (!MUTATING_TOOLS.has(canonicalName)) return false;
-  if (policy.requireDestructiveApproval === false) return false;
+  if (policy.requireDestructiveApproval === false || policy.mode === "full-access") return false;
+  if (policy.mode === "auto") return canonicalName === "move" || canonicalName === "trash";
   if (canonicalName === "trash") return true;
 
   const trusted = normalizedNames(policy.trustedToolNames);

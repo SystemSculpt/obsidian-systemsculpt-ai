@@ -9,6 +9,25 @@ import {
 } from "../toolPolicy";
 
 describe("first-party tool policy", () => {
+  it.each([
+    ['read', false, false, false],
+    ['write', false, true, false],
+    ['edit', false, true, false],
+    ['multi_edit', false, true, false],
+    ['create_folders', false, true, false],
+    ['move', true, true, false],
+    ['trash', true, true, false],
+    ['unknown', true, true, true],
+  ] as const)('applies Auto, Ask and Full access to %s', (tool, auto, ask, full) => {
+    expect(requiresUserApproval(tool, { mode: 'auto' })).toBe(auto);
+    expect(requiresUserApproval(tool, { mode: 'ask' })).toBe(ask);
+    expect(requiresUserApproval(tool, { mode: 'full-access' })).toBe(full);
+  });
+  it('keeps moves and trash asking in Auto even with a remembered action', () => {
+    for (const tool of ['move', 'trash']) expect(requiresUserApproval(tool, {
+      mode: 'auto', trustedToolNames: new Set(['*']), autoApproveAllowlist: ['*'],
+    })).toBe(true);
+  });
   it("uses canonical names directly", () => {
     expect(splitToolName("read")).toEqual({ actualName: "read", canonicalName: "read" });
   });

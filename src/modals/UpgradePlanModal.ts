@@ -5,7 +5,8 @@ import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/extern
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
 import { hasHostCapability } from "../platform/hostCapabilities";
-import { preferredLocalAgent } from "../services/codex/LocalAgentLaunch";
+import { preferredLocalAgent } from "../services/codex/LocalAgentDetection";
+import { localAgentDetectionDirectory } from "../services/codex/CodexExecutionSettings";
 import { AccountConnectModal, type AccountConnectActions } from "./AccountConnectModal";
 import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode } from "../services/AccountConnectService";
@@ -147,8 +148,8 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   /**
-   * Opens a new chat on the user's own Claude Code (or Codex when only Codex
-   * is installed), exactly as choosing it in the chat's Provider menu would.
+   * Opens a new chat on the detected local agent, exactly as choosing it in
+   * the chat's Provider menu would.
    */
   private useLocalAgent(): void {
     const plugin = this.plugin;
@@ -156,7 +157,7 @@ export class UpgradePlanModal extends StandardModal {
     // A fresh install shows this welcome over Settings, which Obsidian can host
     // in its own window. Close it so the new chat is in front with focus.
     (plugin.app as typeof plugin.app & { setting?: { close?: () => void } }).setting?.close?.();
-    void preferredLocalAgent()
+    void preferredLocalAgent({ workingDirectory: localAgentDetectionDirectory(plugin.app) })
       .then((agent) => plugin.getSettingsManager().updateSettings({ textExecutionBackend: agent }))
       // The chat still opens if the setting could not be saved; its Provider menu offers the same choice.
       .then(() => plugin.openNewChat(), () => plugin.openNewChat());

@@ -2,13 +2,13 @@ import { JSDOM } from "jsdom";
 import { UpgradePlanModal, hasActivePlan, requireActivePlan } from "../UpgradePlanModal";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { hasHostCapability } from "../../platform/hostCapabilities";
-import { preferredLocalAgent } from "../../services/codex/LocalAgentLaunch";
+import { preferredLocalAgent } from "../../services/codex/LocalAgentDetection";
 
 jest.mock("../../platform/hostCapabilities", () => ({
   ...jest.requireActual("../../platform/hostCapabilities"),
   hasHostCapability: jest.fn(() => true),
 }));
-jest.mock("../../services/codex/LocalAgentLaunch", () => ({ preferredLocalAgent: jest.fn(async () => "claude") }));
+jest.mock("../../services/codex/LocalAgentDetection", () => ({ preferredLocalAgent: jest.fn(async () => "claude") }));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 (global as any).window = dom.window;

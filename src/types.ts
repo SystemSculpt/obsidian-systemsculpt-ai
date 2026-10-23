@@ -85,10 +85,13 @@ export interface SystemSculptSettings {
   codexThinkingLevel?: string;
   codexServiceTier?: string;
   textExecutionBackend?: "systemsculpt" | "codex" | "claude";
+  /** False until a person chooses; new desktop chats use session-local detection. */
+  textExecutionBackendExplicit?: boolean;
+  codexApprovalMode?: "auto" | "ask" | "read-only" | "settings";
   /** Claude Code model alias; empty uses Claude Code's own default. */
   claudeModel?: string;
   /** Claude Code permission mode for plugin turns; "settings" inherits Claude Code's configuration. */
-  claudePermissionMode?: "default" | "acceptEdits" | "plan" | "settings";
+  claudePermissionMode?: "auto" | "manual" | "acceptEdits" | "plan" | "settings";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -259,9 +262,9 @@ export interface SystemSculptSettings {
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
-  textExecutionBackend: "systemsculpt",
-  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
-  claudeModel: "", claudePermissionMode: "default",
+  textExecutionBackend: "systemsculpt", textExecutionBackendExplicit: false,
+  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default", codexApprovalMode: "auto",
+  claudeModel: "", claudePermissionMode: "auto",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,

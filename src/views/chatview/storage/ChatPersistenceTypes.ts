@@ -1,6 +1,11 @@
 import type { ChatMessage } from "../../../types";
 
-export type ChatApprovalMode = "ask" | "full-access";
+export type ChatApprovalMode = "auto" | "ask" | "full-access";
+
+/** Saved history is conservative: missing or future modes never grant access. */
+export function parseChatApprovalMode(value: unknown): ChatApprovalMode {
+  return value === "auto" || value === "full-access" ? value : "ask";
+}
 
 export function parseAgentConversationId(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
