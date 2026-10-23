@@ -4,6 +4,16 @@ import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { nativeToolPresentation, renderNativeToolPreview } from "../NativeToolPresentation";
 import { nativeToolPath, prepareNativeWriteEditPreview } from "../ToolCallPreview";
 import { presentAgentTool, presentAgentToolDetails, presentAgentToolFailure } from "../AgentToolPresentation";
+import { desktopHost } from "../../../platform/desktopOnly";
+
+jest.mock("../../../platform/hostCapabilities", () => ({ hasHostCapability: jest.fn(() => true) }));
+jest.mock("../../../platform/desktopOnly", () => ({ desktopHost: { fs: jest.fn() } }));
+
+const realpath = jest.fn(async (path: string) => path);
+beforeEach(() => {
+  realpath.mockReset().mockImplementation(async (path: string) => path);
+  (desktopHost.fs as jest.Mock).mockResolvedValue({ realpath });
+});
 
 function part(name = "Edit", input: unknown = {}, overrides: Partial<AgentToolPart> = {}): AgentToolPart {
   return {
@@ -12,11 +22,12 @@ function part(name = "Edit", input: unknown = {}, overrides: Partial<AgentToolPa
     native: { agent: "claude", workingDirectory: "/vault" }, ...overrides,
   };
 }
-function vault(contents: Record<string, string> = {}) {
+function vault(contents: Record<string, string> = {}, root = "/vault") {
   const files = new Map(Object.keys(contents).map(path => [path, new TFile({ path })]));
   const read = jest.fn(async (file: TFile) => contents[file.path]);
   const getAbstractFileByPath = jest.fn((path: string) => files.get(path) ?? null);
-  return { app: { vault: { read, getAbstractFileByPath } } as unknown as App, read, getAbstractFileByPath };
+  const adapter = { getBasePath: () => root, getFullPath: (path: string) => path === "." ? root : `${root}/${path}` };
+  return { app: { vault: { adapter, read, getAbstractFileByPath } } as unknown as App, read, getAbstractFileByPath };
 }
 function edit(input: Record<string, unknown> = {}) {
   return part("Edit", { file_path: "/vault/Notes/Plan.md", old_string: "before", new_string: "after", ...input });
@@ -115,6 +126,53 @@ describe("real native edit previews", () => {
     expect(read).toHaveBeenCalledTimes(1);
     expect(preview).toMatchObject({ path: "Notes/Plan.md", oldContent: "first\nbefore\nlast\n", newContent: "first\n$& after\nlast\n", status: "changed", requestedCount: 1, appliedCount: 1 });
     expect(preview?.diff.stats).toEqual({ additions: 1, deletions: 1 });
+  });
+
+  it.each(["/private/tmp/t136-qa/vault/Notes/Plan.md", "Notes/Plan.md"])("previews %s against the canonical current vault root", async file_path => {
+    const root = "/tmp/t136-qa/vault", canonical = "/private/tmp/t136-qa/vault";
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "before" }, root);
+    realpath.mockResolvedValue(canonical);
+    const request = part("Edit", { file_path, old_string: "before", new_string: "after" }, {
+      native: { agent: "claude", workingDirectory: canonical },
+    });
+
+    expect(nativeToolPresentation(request)?.title).toBe("Edit Notes/Plan.md");
+    const preview = await prepareNativeWriteEditPreview(app, request);
+    expect(preview).toMatchObject({ path: "Notes/Plan.md", status: "changed", oldContent: "before", newContent: "after" });
+    expect(preview?.diff.stats).toEqual({ additions: 1, deletions: 1 });
+    expect(realpath.mock.calls).toEqual([[root]]);
+    expect(getAbstractFileByPath.mock.calls).toEqual([["Notes/Plan.md"]]);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["/restored/vault", "/private/tmp/t136-qa"])("denies restored workingDirectory %s even with a same-named current vault file", async workingDirectory => {
+    const root = "/tmp/t136-qa/vault", canonical = "/private/tmp/t136-qa/vault";
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "before" }, root);
+    realpath.mockResolvedValue(canonical);
+    for (const file_path of ["Notes/Plan.md", `${workingDirectory}/Notes/Plan.md`, `${canonical}/Notes/Plan.md`]) {
+      const request = part("Edit", { file_path, old_string: "before", new_string: "after" }, {
+        native: { agent: "claude", workingDirectory },
+      });
+      expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ status: "unavailable", oldContent: "", newContent: "" });
+    }
+    expect(realpath).toHaveBeenCalled();
+    expect(realpath.mock.calls.every(([path]) => path === root)).toBe(true);
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("does not trust restored root metadata when the current root cannot be established", async () => {
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "before" }, "/tmp/t136-qa/vault");
+    const request = part("Edit", { file_path: "Notes/Plan.md", old_string: "before", new_string: "after" }, {
+      native: { agent: "claude", workingDirectory: "/private/tmp/t136-qa/vault" },
+    });
+    realpath.mockRejectedValueOnce(new Error("Root unavailable"));
+    expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ status: "unavailable" });
+    Object.assign(app.vault, { adapter: {} });
+    expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ status: "unavailable" });
+    expect(realpath.mock.calls).toEqual([["/tmp/t136-qa/vault"]]);
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("keeps CRLF exact for matching and preserves untouched CRLF content", async () => {

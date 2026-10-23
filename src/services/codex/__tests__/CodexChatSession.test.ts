@@ -11,7 +11,7 @@ jest.mock('../LocalCodexClient', () => {
   const runLocalCodex = jest.fn();
   return { runLocalCodex, CodexChatTransport: jest.fn(() => ({ run: runLocalCodex, close: jest.fn() })) };
 });
-jest.mock('../CodexExecutionSettings', () => ({ codexVaultDirectory: () => '/vault' }));
+jest.mock('../CodexExecutionSettings', () => ({ localAgentChatDirectory: async () => '/vault' }));
 jest.mock('../CodexThreadLocator', () => ({ CodexThreadLocator: jest.fn() }));
 const native = runLocalCodex as jest.Mock;
 function setup() {

@@ -5494,6 +5494,7 @@ describe("AgentWorkspace", () => {
       for (const hydrateBeforeDecision of [true, false]) {
         const parent = document.body.createDiv();
         const app = new App();
+        Object.assign(app.vault.adapter, { getBasePath: () => "/vault" });
         const file = Object.assign(new TFile(), { path: "Plan.md" });
         jest.spyOn(app.vault, "getAbstractFileByPath").mockReturnValue(file);
         let finishRead!: (content: string) => void;

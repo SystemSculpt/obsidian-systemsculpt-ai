@@ -3,6 +3,8 @@ import { DiffViewer } from "../../components/DiffViewer";
 import type { ToolCall } from "../../types/toolCalls";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { getFunctionDataFromToolCall } from "../../utils/toolDisplay";
+import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import { localAgentChatDirectory } from "../../services/codex/CodexExecutionSettings";
 import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
 import { generateDiff, DiffResult } from "../../utils/diffUtils";
 import { applyFileEdits } from "../../tools/vault/editApplication";
@@ -127,7 +129,7 @@ function nativeRecord(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown> : {};
 }
 
-/** Lexical only: presentation never resolves symlinks or reads outside the vault. */
+/** Lexical only: native-requested paths are never resolved through the filesystem. */
 function normalizedNativePath(path: string): string {
   const slashPath = path.replace(/\\/gu, "/");
   const root = /^[A-Za-z]:\//u.exec(slashPath)?.[0]
@@ -142,6 +144,11 @@ function normalizedNativePath(path: string): string {
   return root + segments.join("/");
 }
 
+// Windows drive letters are case-insensitive; preserve the requested spelling.
+function comparableNativePath(value: string): string {
+  return /^[A-Za-z]:/u.test(value) ? value[0].toLowerCase() + value.slice(1) : value;
+}
+
 /** workingDirectory is the vault root supplied to a native Chat session. */
 export function nativeToolPath(path: string, workingDirectory: string): { displayPath: string; vaultPath: string | null } {
   const normalizedRoot = normalizedNativePath(workingDirectory);
@@ -151,11 +158,9 @@ export function nativeToolPath(path: string, workingDirectory: string): { displa
     return { displayPath: path, vaultPath: null };
   }
   const target = normalizedNativePath(/^(?:[/\\]|[A-Za-z]:[/\\])/u.test(path) ? path : `${root}/${path}`);
-  // Windows drive letters are case-insensitive; preserve the requested spelling.
-  const comparable = (value: string) => /^[A-Za-z]:/u.test(value) ? value[0].toLowerCase() + value.slice(1) : value;
   const prefix = root.endsWith("/") ? root : `${root}/`;
-  const relative = comparable(target) === comparable(root) ? ""
-    : comparable(target).startsWith(comparable(prefix)) ? target.slice(prefix.length) : null;
+  const relative = comparableNativePath(target) === comparableNativePath(root) ? ""
+    : comparableNativePath(target).startsWith(comparableNativePath(prefix)) ? target.slice(prefix.length) : null;
   return { displayPath: relative === "" ? "Vault root" : relative ?? target, vaultPath: relative || null };
 }
 
@@ -164,13 +169,19 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
   if (part.native?.agent !== "claude" || !["Edit", "MultiEdit", "Write"].includes(part.name)) return null;
   const input = nativeRecord(part.input);
   if (typeof input.file_path !== "string" || !input.file_path) return null;
-  const target = nativeToolPath(input.file_path, part.native.workingDirectory);
+  const workingDirectory = part.native.workingDirectory;
+  const target = nativeToolPath(input.file_path, workingDirectory);
   const adapter = app.vault.adapter as { getBasePath?: () => string } | undefined;
-  const vaultRoot = adapter?.getBasePath?.();
-  if (vaultRoot && target.vaultPath) {
-    const absolute = /^(?:[/\\]|[A-Za-z]:[/\\])/u.test(input.file_path)
-      ? input.file_path : `${part.native.workingDirectory}/${input.file_path}`;
-    target.vaultPath = nativeToolPath(absolute, vaultRoot).vaultPath;
+  let vaultRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, ".");
+  const sameRoot = (root: string) => comparableNativePath(normalizedNativePath(root))
+    === comparableNativePath(normalizedNativePath(workingDirectory));
+  if (target.vaultPath) {
+    if (vaultRoot && !sameRoot(vaultRoot)) {
+      try { vaultRoot = await localAgentChatDirectory(app); }
+      catch { vaultRoot = null; }
+    }
+    // Saved native metadata is not authority to read a same-named file in another vault.
+    if (!vaultRoot || !sameRoot(vaultRoot)) target.vaultPath = null;
   }
   const edits = part.name === "MultiEdit" ? (Array.isArray(input.edits) ? input.edits : []) : [input];
   const requestedCount = part.name === "Write" ? 0 : edits.length;

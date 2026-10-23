@@ -5,7 +5,7 @@ import type { AgentConversationSnapshot, AgentPart, AgentToolPart } from '../../
 import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAgentContextSource, type ThinAgentContextResponse } from '../managed/ThinAgentV1Contract';
 import { isRecord } from '../../studio/utils';
 import { CodexThreadLocator } from './CodexThreadLocator';
-import { codexVaultDirectory } from './CodexExecutionSettings';
+import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
@@ -171,7 +171,7 @@ export class LocalAgentChatSession implements ChatSession {
     try {
       if (this.conversationId !== null && this.conversationId !== input.conversationId) await this.closeTransport();
       this.conversationId = input.conversationId;
-      const cwd = codexVaultDirectory(this.app), threadId = await this.locator.read(input.conversationId);
+      const cwd = await localAgentChatDirectory(this.app), threadId = await this.locator.read(input.conversationId);
       await input.buildBody?.(controller.signal);
       const images: string[] = [];
       const userText = input.message.parts.map(value => {
