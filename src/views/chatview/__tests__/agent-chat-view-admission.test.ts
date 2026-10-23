@@ -3465,7 +3465,7 @@ describe("AgentChatView controls", () => {
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-pinned")).toHaveLength(0);
     expect(parent.querySelectorAll(".systemsculpt-agent-queue-item")).toHaveLength(0);
-    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')?.value).toBe("ask");
+    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')?.value).toBe("auto");
     expect(document.activeElement).toBe(parent.querySelector("textarea"));
     expect(clearPinnedFiles).toHaveBeenCalledTimes(1);
     expect(detach).toHaveBeenCalledTimes(1);

@@ -128,6 +128,18 @@ describe("SettingsManager managed settings contract", () => {
     expect(second.settings.thinAgentClientId).toBe(first.settings.thinAgentClientId);
   });
 
+  it.each(['systemsculpt', 'claude', 'codex'] as const)('records an explicit %s choice without marking unrelated saves', async backend => {
+    const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings.textExecutionBackendExplicit).toBe(false);
+    await manager.updateSettings({ chatFontSize: 'large' });
+    expect(manager.settings.textExecutionBackendExplicit).toBe(false);
+    await manager.updateSettings({ textExecutionBackend: backend });
+    expect(manager.settings.textExecutionBackendExplicit).toBe(true);
+    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({ textExecutionBackend: backend, textExecutionBackendExplicit: true }));
+  });
+
   it("persists updates and emits the settings-updated event", async () => {
     const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
     const manager = new SettingsManager(plugin);

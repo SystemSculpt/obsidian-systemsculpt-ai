@@ -6,11 +6,12 @@ import { answerClaudePermission } from './ClaudeRequestModal';
 
 /** Chat presentation adapter. Claude Code owns every model step, tool, permission and durable session. */
 export class ClaudeChatSession extends LocalAgentChatSession {
-  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void> }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({})) {
+  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string) => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({})) {
     super(app, 'claude', localOptions, forkHistory, (turn, signal, events) => runLocalClaude({ ...executionOptions(), prompt: turn.prompt, images: turn.images, workingDirectory: turn.workingDirectory, sessionId: turn.threadId }, signal, {
       session: events.thread,
       log: text => events.status(text.startsWith('Tool: ') ? text.slice(6) : 'Claude Code is working'),
       text: events.text,
+      notice: localOptions.notice,
       permission: (request, requestSignal) => events.waitFor(() => answerClaudePermission(app, request, requestSignal)),
     }));
   }

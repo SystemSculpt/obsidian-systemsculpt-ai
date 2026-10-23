@@ -1,4 +1,5 @@
-import { isLocalAgentInstalled, preferredLocalAgent } from '../LocalAgentLaunch';
+import { posix, win32 } from 'node:path';
+import { isLocalAgentInstalled, resolveLocalAgentBinary } from '../LocalAgentLaunch';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
@@ -21,6 +22,7 @@ function machine(files: Record<string, unknown>, configs: Record<string, string>
     isAbsolute: (path: string) => windows ? /^[A-Z]:\\/.test(path) : path.startsWith('/'),
     delimiter: windows ? ';' : ':',
     join: (...parts: string[]) => parts.join(windows ? '\\' : '/'),
+    resolve: (...parts: string[]) => (windows ? win32 : posix).resolve(...parts),
   });
   (desktopHost.environment as jest.Mock).mockReturnValue(windows
     ? { PATH: 'C:\\Tools', PATHEXT: '.EXE;.CMD' }
@@ -51,11 +53,25 @@ it('resolves Windows command extensions', async () => {
   await expect(isLocalAgentInstalled('codex')).resolves.toBe(true);
 });
 
-it('prefers Claude Code, uses Codex when only Codex is installed, and defaults to Claude Code', async () => {
-  machine({ '/usr/bin/claude': executable, '/usr/bin/codex': executable });
-  await expect(preferredLocalAgent()).resolves.toBe('claude');
-  machine({ '/usr/bin/codex': executable });
-  await expect(preferredLocalAgent()).resolves.toBe('codex');
-  machine({});
-  await expect(preferredLocalAgent()).resolves.toBe('claude');
+it.each(['./tools/claude', 'tools/claude'])('resolves a relative configured binary from the same cwd as execution (%s)', async binary => {
+  machine({ '/vault/tools/claude': executable, '/usr/bin/tools/claude': executable }, { claude: JSON.stringify({ binary }) });
+  await expect(resolveLocalAgentBinary('claude', undefined, '/vault')).resolves.toBe('/vault/tools/claude');
+  await expect(resolveLocalAgentBinary('claude')).resolves.toBeNull();
+});
+
+it('resolves relative Windows binary paths and command extensions from the task directory', async () => {
+  machine({ 'C:\\Vault\\tools\\claude.CMD': executable }, { claude: JSON.stringify({ binary: '.\\tools\\claude' }) }, 'win32');
+  await expect(resolveLocalAgentBinary('claude', undefined, 'C:\\Vault')).resolves.toBe('C:\\Vault\\tools\\claude.CMD');
+});
+
+it('resolves relative PATH entries in the task directory', async () => {
+  machine({ '/vault/tools/claude': executable });
+  (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: 'tools' });
+  await expect(resolveLocalAgentBinary('claude', undefined, '/vault')).resolves.toBe('/vault/tools/claude');
+  await expect(resolveLocalAgentBinary('claude')).resolves.toBeNull();
+});
+
+it('returns the concrete binary path used by the status probe', async () => {
+  machine({ '/home/test/.local/bin/claude': executable });
+  await expect(resolveLocalAgentBinary('claude')).resolves.toBe('/home/test/.local/bin/claude');
 });

@@ -15,6 +15,7 @@ import {
 } from "./ChatFrontmatterIdentity";
 import {
   parseAgentConversationId,
+  parseChatApprovalMode,
   type ChatMetadata,
   type ParsedChatMarkdown,
 } from "./ChatPersistenceTypes";
@@ -662,7 +663,7 @@ export class ChatMarkdownSerializer {
       ...(tags.length > 0 ? { tags } : {}),
       context_files: processedContextFiles,
       chatFontSize: parsed.chatFontSize as "small" | "medium" | "large" | undefined,
-      approvalMode: parsed.approvalMode === "full-access" ? "full-access" : "ask",
+      approvalMode: parseChatApprovalMode(parsed.approvalMode),
       agentConversationId: parseAgentConversationId(parsed.agentConversationId),
     };
   }

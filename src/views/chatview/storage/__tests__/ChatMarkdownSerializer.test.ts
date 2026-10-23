@@ -39,6 +39,10 @@ jest.mock("obsidian", () => ({
 }));
 
 describe("ChatMarkdownSerializer", () => {
+  it.each(['auto', 'ask', 'full-access', 'future'])('parses persisted %s mode conservatively', mode => {
+    const markdown = `---\nid: mode-test\ntitle: Modes\ncreated: 2026-10-23T00:00:00.000Z\nlastModified: 2026-10-23T00:00:00.000Z\napprovalMode: ${mode}\n---\n\n`;
+    expect(ChatMarkdownSerializer.parseMarkdown(markdown)?.metadata.approvalMode).toBe(mode === 'future' ? 'ask' : mode);
+  });
   describe("serializeMessages", () => {
     it("serializes simple user message", () => {
       const messages: ChatMessage[] = [

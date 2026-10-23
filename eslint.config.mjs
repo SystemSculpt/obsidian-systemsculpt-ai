@@ -66,7 +66,8 @@ export default defineConfig(
           ignoreRegex: [
             "^(Ask Approval|Full Access)$",
             "^SystemSculpt/Studio$",
-            "^SystemSculpt API$",
+            "^SystemSculpt(?: API)?$",
+            "^Finding Claude Code or Codex…$",
             "^Show a vim-style line number gutter",
             "^SRT subtitle file",
             "^Keep the Markdown/SRT picker visible",

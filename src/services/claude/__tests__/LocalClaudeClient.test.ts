@@ -49,9 +49,9 @@ beforeEach(() => {
 afterEach(() => uuid.mockRestore());
 
 describe('launch arguments', () => {
-  it('streams JSON both ways, routes permission prompts to the plugin and asks before edits by default', () => {
+  it('streams JSON both ways, routes permission prompts to the plugin and uses Auto by default', () => {
     const args = claudeLaunchArgs({});
-    expect(args).toEqual(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--permission-mode', 'default']);
+    expect(args).toEqual(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--permission-mode', 'auto']);
     expect(args.join(' ')).not.toMatch(/bypass|dangerously/i);
   });
   it('leaves the mode to Claude Code settings, passes the model and resumes a saved session', () => {
@@ -63,6 +63,62 @@ describe('launch arguments', () => {
     expect(() => claudeLaunchArgs({ permissionMode: 'bypassPermissions' })).toThrow('Invalid Claude Code permission mode.');
     expect(() => claudeLaunchArgs({ model: '--dangerously-skip-permissions' })).toThrow('Invalid Claude Code model.');
     expect(() => claudeLaunchArgs({}, '--resume')).toThrow('Invalid saved Claude Code session identity.');
+  });
+});
+
+describe('Auto compatibility', () => {
+  it.each(['auto', 'manual', 'acceptEdits', 'plan'])('passes supported %s with stdio prompts', mode => {
+    expect(claudeLaunchArgs({ permissionMode: mode })).toEqual(expect.arrayContaining(['--permission-prompt-tool', 'stdio', '--permission-mode', mode]));
+  });
+  it('sends manual for the old Ask spelling and rejects dontAsk', () => {
+    expect(claudeLaunchArgs({ permissionMode: 'default' })).toContain('manual');
+    expect(() => claudeLaunchArgs({ permissionMode: 'dontAsk' })).toThrow('Invalid Claude Code permission mode.');
+  });
+  it.each(['stderr', 'result', 'pipe'])('retries Auto rejection from %s once as Accept edits', async source => {
+    const fallback = host();
+    const rejected = host({ script: (send, msg, child) => {
+      if (msg.type !== 'user') return;
+      if (source === 'result') send({ type: 'result', subtype: 'error', is_error: true, errors: ['Auto mode is not available'] });
+      else {
+        if (source === 'pipe') child.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+        child.stderr.emit('data', "error: option '--permission-mode <mode>' argument 'auto' is invalid. Allowed choices: acceptEdits, manual, plan");
+        child.emit('close', 1);
+      }
+    } });
+    const spawn = jest.fn().mockImplementationOnce(() => rejected.child).mockImplementationOnce(() => fallback.child);
+    (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn });
+    const cb = { ...callbacks(), notice: jest.fn() };
+    await expect(runLocalClaude(input, new AbortController().signal, cb)).resolves.toMatchObject({ text: 'hello there' });
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
+    expect(cb.notice).toHaveBeenCalledTimes(1);
+    expect(cb.notice).toHaveBeenCalledWith(expect.stringContaining("Auto mode isn't available"));
+  });
+  it.each(['manual', 'acceptEdits'])('honors init downgrade to %s without replaying work', async permissionMode => {
+    const { spawn, messages } = host({ script: (send, msg) => {
+      if (msg.type === 'user') {
+        send({ type: 'system', subtype: 'init', session_id: SESSION, permissionMode });
+        if (permissionMode === 'acceptEdits') send({ type: 'result', subtype: 'success', result: 'done', session_id: SESSION });
+      }
+      if (msg.type === 'control_request') {
+        expect(msg.request).toEqual({ subtype: 'set_permission_mode', mode: 'acceptEdits' });
+        send({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response: {} } });
+        send({ type: 'result', subtype: 'success', result: 'done', session_id: SESSION });
+      }
+    } });
+    const cb = { ...callbacks(), notice: jest.fn() };
+    await expect(runLocalClaude(input, new AbortController().signal, cb)).resolves.toMatchObject({ text: 'done' });
+    expect(spawn).toHaveBeenCalledTimes(1); expect(messages.filter(msg => msg.type === 'user')).toHaveLength(1);
+    expect(cb.notice).toHaveBeenCalledTimes(1);
+  });
+  it('never replays a rejection after agent activity', async () => {
+    const { spawn } = host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'assistant', session_id: SESSION, message: { content: [] } });
+      send({ type: 'result', subtype: 'error', is_error: true, errors: ['Auto mode is not available'] });
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).rejects.toThrow('Auto mode is not available');
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 });
 

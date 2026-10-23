@@ -13,6 +13,7 @@ import {
   type ChatAttachmentIngestionResult,
 } from "./attachments/ChatMessageAttachments";
 import { containsControlCharacters } from "../../utils/characterValidation";
+import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 export type AgentComposerAttachment = Readonly<{
   id: string;
@@ -37,7 +38,7 @@ export type AgentComposerOptions = Readonly<{
   attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onApprovalModeChange?: (mode: "ask" | "full-access") => void;
+  onApprovalModeChange?: (mode: ChatApprovalMode) => void;
   onHeightChange?: () => void;
 }>;
 
@@ -147,8 +148,9 @@ export class AgentComposer extends Component {
       cls: "dropdown systemsculpt-agent-approval-mode",
       attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
     });
-    this.approvalMode.createEl("option", { value: "ask", text: "Ask Approval" });
-    this.approvalMode.createEl("option", { value: "full-access", text: "Full Access" });
+    this.approvalMode.createEl("option", { value: "auto", text: "Auto" });
+    this.approvalMode.createEl("option", { value: "ask", text: "Ask" });
+    this.approvalMode.createEl("option", { value: "full-access", text: "Full access" });
     this.micButton = options.onMic
       ? createButton(tools, "systemsculpt-agent-icon-button", "chat.composer.mic", "Record message", "mic")
       : null;
@@ -214,7 +216,7 @@ export class AgentComposer extends Component {
     });
     if (this.micButton) this.registerDomEvent(this.micButton, "click", () => void this.options.onMic?.());
     this.registerDomEvent(this.approvalMode, "change", () => {
-      const mode = this.approvalMode.value === "full-access" ? "full-access" : "ask";
+      const mode = parseChatApprovalMode(this.approvalMode.value);
       this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
       this.options.onApprovalModeChange?.(mode);
     });
@@ -266,9 +268,10 @@ export class AgentComposer extends Component {
     this.syncControls();
   }
 
-  public setApprovalMode(mode: "ask" | "full-access"): void {
+  public setApprovalMode(mode: ChatApprovalMode): void {
     this.approvalMode.value = mode;
     this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
+    this.element.dispatchEvent(new Event("systemsculpt:approval-mode"));
   }
 
   public setRunning(running: boolean): void {

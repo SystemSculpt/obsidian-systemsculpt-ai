@@ -38,24 +38,29 @@ export async function readLocalAgentLaunchConfig(name: string, label: string): P
   return { configPath, home, setting, environment };
 }
 
-/** True when the agent's CLI resolves to a file the way its launch would find it. Never starts it. */
-export async function isLocalAgentInstalled(agent: LocalAgentId): Promise<boolean> {
-  try {
-    const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
-    const { setting, environment } = await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
-    const binary = setting('binary', agent), windows = os.platform() === 'win32';
-    const extensions = windows ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
-    const folders = path.isAbsolute(binary) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
-    for (const folder of folders) for (const extension of extensions) {
-      const stat = await fs.stat(folder ? path.join(folder, binary + extension) : binary + extension).catch(() => null);
-      if (stat?.isFile() && (windows || (stat.mode & 0o111) !== 0)) return true;
-    }
-  } catch { /* An unreadable launch setting shows its own guidance when the agent runs. */ }
-  return false;
+/** Resolves the same machine-local binary and PATH a native run uses. Never starts it. */
+export async function resolveLocalAgentBinary(agent: LocalAgentId, launch?: LocalAgentLaunchConfig, workingDirectory?: string): Promise<string | null> {
+  const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
+  const { setting, environment, home } = launch ?? await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
+  const binary = setting('binary', agent), windows = os.platform() === 'win32';
+  // Codex starts its app-server from home; Claude Code starts in the task's cwd.
+  const cwd = agent === 'codex' ? home : workingDirectory;
+  const relativePath = !path.isAbsolute(binary) && (binary.includes('/') || (windows && binary.includes('\\')));
+  if (relativePath && (!cwd || !path.isAbsolute(cwd))) return null;
+  const command = relativePath ? path.resolve(cwd!, binary) : binary;
+  const extensions = windows ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
+  const folders = path.isAbsolute(command) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const folder of folders) for (const extension of extensions) {
+    if (folder && !path.isAbsolute(folder) && (!cwd || !path.isAbsolute(cwd))) continue;
+    const directory = folder && !path.isAbsolute(folder) ? path.resolve(cwd!, folder) : folder;
+    const candidate = directory ? path.join(directory, command + extension) : command + extension;
+    const stat = await fs.stat(candidate).catch(() => null);
+    if (stat?.isFile() && (windows || (stat.mode & 0o111) !== 0)) return candidate;
+  }
+  return null;
 }
 
-/** Claude Code unless only Codex is installed; with neither, Claude Code's chat explains how to install it. */
-export async function preferredLocalAgent(): Promise<LocalAgentId> {
-  if (await isLocalAgentInstalled('claude')) return 'claude';
-  return await isLocalAgentInstalled('codex') ? 'codex' : 'claude';
+export async function isLocalAgentInstalled(agent: LocalAgentId): Promise<boolean> {
+  try { return await resolveLocalAgentBinary(agent) !== null; }
+  catch { return false; } // Launch failures show their own guidance when the agent runs.
 }

@@ -113,9 +113,33 @@ it('forwards user-selected model, thinking and speed to the native thread and tu
   expect(messages.find(m => m.method === 'turn/start').params).toMatchObject({ model: 'selected-model', effort: 'xhigh', serviceTierForTurn: 'priority' });
 });
 
-it('lets a new native thread inherit config without permission overrides', async () => {
+describe.each([
+  { approvalMode: 'auto', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/workspace'], networkAccess: false } },
+  { approvalMode: 'ask', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', writableRoots: ['/workspace'], networkAccess: false } },
+  { approvalMode: 'read-only', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly', networkAccess: false } },
+])('Codex approval mode $approvalMode', ({ approvalMode, approvalPolicy, approvalsReviewer, sandbox, sandboxPolicy }) => {
+  it.each([undefined, 'native-thread'])('applies the selected policy to the thread and turn (resume %s)', async threadId => {
+    const { messages } = host({ nativeProfile: 'previous-policy' });
+    await runLocalCodex({ ...input, approvalMode, threadId }, new AbortController().signal, callbacks());
+    const threads = messages.filter(message => ['thread/start', 'thread/resume'].includes(message.method));
+    expect(threads).toHaveLength(1);
+    expect(threads[0].method).toBe(threadId ? 'thread/resume' : 'thread/start');
+    expect(threads[0].params).toMatchObject({ cwd: '/workspace', approvalPolicy, approvalsReviewer, sandbox });
+    expect(threads[0].params).not.toHaveProperty('permissions');
+    expect(threads[0].params).not.toHaveProperty('ephemeral');
+    expect(messages.find(message => message.method === 'turn/start').params).toMatchObject({ approvalPolicy, approvalsReviewer, sandboxPolicy });
+  });
+});
+
+it('rejects an unsupported approval mode before starting a native process', async () => {
+  host();
+  await expect(runLocalCodex({ ...input, approvalMode: 'bypass' }, new AbortController().signal, callbacks())).rejects.toThrow('Invalid Codex approval mode');
+  expect((await desktopHost.childProcess()).spawn).not.toHaveBeenCalled();
+});
+
+it.each([undefined, 'settings'])('lets a new native thread inherit config without overrides for Studio or settings (%s)', async approvalMode => {
   const { messages } = host();
-  await runLocalCodex(input, new AbortController().signal, callbacks());
+  await runLocalCodex({ ...input, approvalMode }, new AbortController().signal, callbacks());
   for (const message of messages.filter(message => ['thread/start', 'turn/start'].includes(message.method))) {
     for (const key of ['approvalPolicy', 'approvalsReviewer', 'sandbox', 'sandboxPolicy', 'permissions']) expect(message.params).not.toHaveProperty(key);
   }
@@ -126,7 +150,7 @@ it.each([
   { nativePolicy: 'untrusted', nativeReviewer: 'user', nativeSandbox: { type: 'readOnly' }, nativeProfile: 'locked-workspace' },
 ])('refreshes resumed permissions verbatim from native config, including granular policy and reviewer (%j)', async policy => {
   const { messages } = host(policy);
-  await runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks());
+  await runLocalCodex({ ...input, approvalMode: 'settings', threadId: 'native-thread' }, new AbortController().signal, callbacks());
   const probe = messages.find(m => m.method === 'thread/start');
   expect(probe.params.ephemeral).toBe(true);
   for (const key of ['approvalPolicy', 'approvalsReviewer', 'sandbox', 'permissions']) expect(probe.params).not.toHaveProperty(key);
@@ -157,11 +181,11 @@ it('accepts a provider that does not require an OpenAI account', async () => {
   host({ failLogin: true, requiresOpenaiAuth: false });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
 });
-it('uses the normal Codex home instead of an inherited agent home', async () => {
+it('uses CODEX_HOME for the same native login and history detected by the plugin', async () => {
   host();
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', CODEX_HOME: '/agent/shadow', HOME: '/home/test' });
   await runLocalCodex(input, new AbortController().signal, callbacks());
-  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/.codex' }) }));
+  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/agent/shadow' }) }));
 });
 it('launches an explicitly configured wrapper and home without a shell', async () => {
   host({ failLogin: true, requiresOpenaiAuth: false });
@@ -201,7 +225,7 @@ it.each([false, true])('resolves native Windows homes and preserves PATH entries
   expect(fs.readFile).toHaveBeenCalledWith(win32.join(home, '.config', 'systemsculpt', 'codex.json'), 'utf8');
   const spawn = (await desktopHost.childProcess()).spawn as jest.Mock;
   expect(spawn).toHaveBeenCalledWith(custom ? win32.join(home, 'tools/codex.exe') : 'codex', ['app-server'], expect.objectContaining({
-    cwd: home, env: expect.objectContaining({ CODEX_HOME: win32.join(home, custom ? 'custom-codex' : '.codex') }),
+    cwd: home, env: expect.objectContaining({ CODEX_HOME: custom ? win32.join(home, 'custom-codex') : String.raw`C:\agent\shadow` }),
   }));
   const entries = spawn.mock.calls[0][2].env.PATH.split(';');
   expect(entries.slice(0, 2)).toEqual(nativePath.split(';'));

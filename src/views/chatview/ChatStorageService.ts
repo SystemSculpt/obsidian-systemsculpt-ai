@@ -12,7 +12,7 @@ import type {
   ChatMetadata,
   ChatResumeDescriptor,
 } from "./storage/ChatPersistenceTypes";
-import { parseAgentConversationId } from "./storage/ChatPersistenceTypes";
+import { parseAgentConversationId, parseChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import type SystemSculptPlugin from "../../main";
 
 type LoadedChatRecord = {
@@ -371,7 +371,7 @@ export class ChatStorageService {
         version: newVersion,
         messageCount: messages.length,
         chatFontSize: options.chatFontSize || "medium",
-        approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
+        approvalMode: parseChatApprovalMode(options.approvalMode),
       };
       if (agentConversationId) metadata.agentConversationId = agentConversationId;
 
@@ -578,7 +578,7 @@ export class ChatStorageService {
       version: metadata.version || 0,
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
-      approvalMode: metadata.approvalMode === "full-access" ? "full-access" : "ask",
+      approvalMode: parseChatApprovalMode(metadata.approvalMode),
       agentConversationId: parseAgentConversationId(metadata.agentConversationId),
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
     };

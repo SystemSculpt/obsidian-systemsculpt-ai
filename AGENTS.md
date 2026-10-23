@@ -22,7 +22,7 @@ Managed AI traffic uses the first-party SystemSculpt API at
 https://systemsculpt.com/api/plugin. OpenRouter and server agent
 implementation details stay behind that interface.
 
-Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product surface and retires development of the standalone desktop app. Personal agent execution uses Codex and T3 Code directly. Preserve saved projects, drafts, and history. Michael’s 2026-09-08 direction authorizes selectable on-machine Codex for ChatView, Studio text generation and desktop Studio Codex task cards through the installed Codex app-server and the machine’s existing Codex login, as in T3 Code. This is a thin local protocol client exception: Codex owns its agent loop, credentials, approval review, tools and authoritative thread history; never copy tokens or introduce a separate agent runtime. Michael’s 2026-10-14 direction adds on-machine Claude Code to ChatView and Studio text generation under the same exception: the installed `claude` CLI owns its login, settings, permissions, tools and session history; the plugin never reads `~/.claude` and never enables permission bypass. Michael’s 2026-09-08 run-board direction also authorizes independent explicit native Codex run instances and project-scoped message/handoff tools. The plugin projects public native activity, stores a bounded presentation cache, and forwards explicit messages as native turns; ordinary independent runs must not infer completion or schedule autonomous continuation. Michael’s 2026-09-08 Command Center direction authorizes owner-started native Codex orchestrators: persist the model-authored plan, dispatch bounded assignments, deliver child results and resume interrupted workflow threads. Codex chooses every next step and explicitly declares the objective outcome; Studio handles event delivery and recovery only. Managed SystemSculpt AI keeps the API boundary above. Preserve existing standalone work while reusing applicable portable Studio behavior here.
+Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product surface and retires development of the standalone desktop app. Personal agent execution uses Codex and T3 Code directly. Preserve saved projects, drafts, and history. Michael’s 2026-09-08 direction authorizes selectable on-machine Codex for ChatView, Studio text generation and desktop Studio Codex task cards through the installed Codex app-server and the machine’s existing Codex login, as in T3 Code. This is a thin local protocol client exception: Codex owns its agent loop, credentials, approval review, tools and authoritative thread history; never copy tokens or introduce a separate agent runtime. Michael’s 2026-10-14 direction adds on-machine Claude Code to ChatView and Studio text generation under the same exception: the installed `claude` CLI owns its login, settings, permissions, tools and session history; the plugin never reads file contents under ~/.claude or ~/.codex; agent detection may list session-store names and timestamps (Michael, 2026-10-23). It never passes `bypassPermissions` or `dontAsk`. Michael’s 2026-09-08 run-board direction also authorizes independent explicit native Codex run instances and project-scoped message/handoff tools. The plugin projects public native activity, stores a bounded presentation cache, and forwards explicit messages as native turns; ordinary independent runs must not infer completion or schedule autonomous continuation. Michael’s 2026-09-08 Command Center direction authorizes owner-started native Codex orchestrators: persist the model-authored plan, dispatch bounded assignments, deliver child results and resume interrupted workflow threads. Codex chooses every next step and explicitly declares the objective outcome; Studio handles event delivery and recovery only. Managed SystemSculpt AI keeps the API boundary above. Preserve existing standalone work while reusing applicable portable Studio behavior here.
 
 ## Server-upgrade independence
 
@@ -229,16 +229,48 @@ manual mobile exploration is performed.
 
 ## Product contracts
 
-- Managed API approval modes are Ask Approval and Full Access. On-machine Codex inherits native configuration, including approval policy, sandbox, permission profiles and reviewer; never override these with plugin settings. On-machine Claude Code runs with one of its own permission modes (Ask before edits by default, Accept edits, Plan only, or its own settings) and answers its permission prompts in a plugin dialog.
-- Read-only vault tools may run immediately; mutating tools follow the selected
-  approval policy.
+- New desktop chats honor an explicit execution-backend choice first and preserve
+  paid hosted users' selection during migration. Otherwise, choose among installed,
+  signed-in Claude Code and Codex by primary session-file count in the last 30 days
+  (using file modification times), then newest session-file mtime; Claude Code wins
+  an exact tie. If neither is usable, use hosted SystemSculpt. Saved chats retain
+  their backend. Desktop users need no SystemSculpt account or license to use their
+  own agents; mobile uses hosted execution.
+- Agent detection is cached for the Obsidian session. Refresh with **Detect again**
+  or after a native run fails because the agent is missing or signed out; do not
+  poll. Usage detection may only list/stat native session-store names and timestamps,
+  never read file contents or credentials. Keep chat controls to a compact execution
+  summary with **Change** and, on desktop, **Detect again**.
+- New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
+  safety checks, not permission bypass. Manual choices are **Ask before edits**
+  (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude
+  Code settings** (no permission-mode override). If Auto is unavailable, use Accept
+  edits with a visible Auto-unavailable notice. Never pass `bypassPermissions` or
+  `dontAsk`; native permission requests are answered in a plugin dialog.
+- New Codex chats default to **Auto**: `on-request`, `workspace-write` rooted in the
+  vault, and `approvalsReviewer: auto_review`. **Ask** keeps the same approval policy
+  and sandbox with reviewer `user`; **Read only** uses `read-only` and `never`.
+  Plugin-defined modes never request `danger-full-access` or pair `never` with a
+  writable sandbox. **Codex settings** inherits native approval policy, sandbox,
+  permission profiles and reviewer unchanged. Resuming in settings mode resolves
+  current native configuration through an ephemeral thread without a model turn.
+- Chat's Codex approval-mode override does not apply to Studio. Studio continues to
+  inherit native Codex configuration, including on resume; `CodexExecutionOptions`
+  carries model, effort and service tier, not the plugin chat approval mode.
+- New hosted chats default to **Auto**: reads, lists, searches, open/context actions,
+  folder creation, writes and edits (including multi-edit) run without asking;
+  move/rename and trash require approval. **Ask** requires approval for every vault
+  mutation; **Full access** allows all vault actions without asking. Preserve saved
+  hosted modes; missing or unknown saved modes fall back to Ask, not Auto.
 - The client executes local vault tools but never orchestrates the agent that
   requested them.
 - The server conversation session and event journal are authoritative. Local
   transcript data is a cache/export surface only.
 - File and folder paths are vault-relative unless a desktop-only Studio node
   explicitly accepts an external path.
-- The managed API base is a build-time value. The text execution selector may choose SystemSculpt API or the installed on-machine Codex; it never exposes managed API routing or credentials.
+- The managed API base is a build-time value. The text execution selector may choose
+  SystemSculpt API, on-machine Codex or on-machine Claude Code; it never exposes
+  managed API routing or credentials.
 - Release artifacts are exactly manifest.json, main.js, and styles.css.
 
 ## Repository hygiene

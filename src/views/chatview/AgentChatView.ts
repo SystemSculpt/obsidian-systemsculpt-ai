@@ -1,7 +1,7 @@
 import type { ChatSession } from "../../chat/ChatSession";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { mountCodexExecutionControls } from "../../services/codex/CodexExecutionControls";
-import { codexOptionsFromSettings, defaultTextBackend } from "../../services/codex/CodexExecutionSettings";
+import { codexOptionsFromSettings, defaultTextBackend, localAgentDetectionDirectory } from "../../services/codex/CodexExecutionSettings";
 import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
@@ -43,7 +43,9 @@ import {
 } from "./FileContextManager";
 import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportResult } from "./export/ChatExportTypes";
-import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
+import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
+import { resolveDefaultChatBackend } from "../../services/codex/DefaultChatBackend";
+import { detectLocalAgents } from "../../services/codex/LocalAgentDetection";
 import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
 import type {
   AgentArtifact,
@@ -537,7 +539,7 @@ export class AgentChatView extends ItemView {
     this.chatId = initial.chatId?.trim() || "";
     this.chatTitle = initial.chatTitle?.trim() || generateDefaultChatTitle();
     this.chatFontSize = initial.chatFontSize || plugin.settings.chatFontSize || "medium";
-    this.approvalMode = initial.approvalMode === "full-access" ? "full-access" : "ask";
+    this.approvalMode = initial.approvalMode === undefined && !this.chatId ? "auto" : parseChatApprovalMode(initial.approvalMode);
     this.draftKey = initial.draftKey?.trim() || messageId("draft");
 
     this.contextManager = new FileContextManager({
@@ -597,6 +599,8 @@ export class AgentChatView extends ItemView {
    */
   private codexControlsCleanup?: () => void;
   private chatExecutionBackend?: TextExecutionBackend;
+  private lastDetectionFailureTurn?: string;
+  private claudeAutoUnavailable = false;
   private createAgentSession(): ChatSession {
     const persistAssistant = async (message: ChatMessage): Promise<void> => {
       const snapshot = await this.transcript.persistAssistant(message);
@@ -608,7 +612,11 @@ export class AgentChatView extends ItemView {
       return new CodexChatSession(this.app, { persistAssistant }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(this.app, { persistAssistant }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
+      return new ClaudeChatSession(this.app, { persistAssistant, notice: text => {
+        if (!this.claudeAutoUnavailable) this.workspace?.setBanner(text, "info");
+        this.claudeAutoUnavailable = true;
+        this.workspace?.composer.element.dispatchEvent(new Event("systemsculpt:approval-mode"));
+      } }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
     }
     return new AgentChatSession({
       baseUrl: this.agentBaseUrl,
@@ -722,7 +730,7 @@ export class AgentChatView extends ItemView {
     } else if (wasNative) {
       void this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
     }
-    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: backendOf(this.agent), onProviderChange: () => this.plugin.openNewChat() }) : undefined;
+    this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: backendOf(this.agent), onProviderChange: () => this.plugin.openNewChat(), claudeAutoUnavailable: () => this.claudeAutoUnavailable }) : undefined;
   }
 
   public get messages(): ChatMessage[] {
@@ -911,7 +919,7 @@ export class AgentChatView extends ItemView {
       await this.hydrateQueue(this.draftKey);
       if (this.conversationOriginToken !== loadOriginToken) return;
       if (loaded.chatFontSize) this.chatFontSize = loaded.chatFontSize;
-      this.approvalMode = loaded.approvalMode === "full-access" ? "full-access" : "ask";
+      this.approvalMode = parseChatApprovalMode(loaded.approvalMode);
       this.applyFontSize();
       this.workspace?.setApprovalMode(this.approvalMode);
       this.workspace?.setTitle(this.chatTitle);
@@ -1058,7 +1066,7 @@ export class AgentChatView extends ItemView {
     }
   }
   private applyApprovalMode(mode: ChatApprovalMode): void {
-    this.approvalMode = mode === "full-access" ? "full-access" : "ask";
+    this.approvalMode = parseChatApprovalMode(mode);
     this.workspace?.setApprovalMode(this.approvalMode);
     this.updateViewState();
     this.app.workspace.requestSaveLayout();
@@ -2141,6 +2149,7 @@ export class AgentChatView extends ItemView {
             trustedToolNames: forceDestructiveApproval
               ? new Set<string>()
               : this.sessionTrustedToolNames,
+            mode: forceDestructiveApproval ? "ask" : this.approvalMode,
           };
       if (!(this.agent instanceof LocalAgentChatSession) && !hasActivePlan(this.plugin)) {
         throw planRequiredError("Chat");
@@ -3049,7 +3058,10 @@ export class AgentChatView extends ItemView {
       // The old draft no longer owns preparation errors once New chat wins.
       this.pendingThinConversationId = null;
       this.thinBootstrapRequest = null;
-      this.chatExecutionBackend = defaultTextBackend(this.plugin.settings); await this.replaceAgentSession();
+      this.claudeAutoUnavailable = false;
+      const backend = await resolveDefaultChatBackend(this.plugin.settings, () => this.aiService.readCreditsBalance(), localAgentDetectionDirectory(this.app));
+      if (this.conversationOriginToken !== newChatOriginToken) return;
+      this.chatExecutionBackend = backend; await this.replaceAgentSession();
       if (this.conversationOriginToken !== newChatOriginToken) return;
       this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");
@@ -3065,7 +3077,7 @@ export class AgentChatView extends ItemView {
       this.localReportIds().clear();
       this.workspace?.resetMessageEditor();
       this.sessionTrustedToolNames.clear();
-      this.approvalMode = "ask";
+      this.approvalMode = "auto";
       this.workspace?.setApprovalMode(this.approvalMode);
       this.contextLoading = true;
       try { this.contextManager.clearPinnedFiles(); }
@@ -3445,6 +3457,12 @@ export class AgentChatView extends ItemView {
     if (snapshotOrigin && !this.isCurrentConversationOrigin(snapshotOrigin)) return;
     const workspace = this.workspace;
     const agent = this.agent;
+    if (agent instanceof LocalAgentChatSession && snapshot.status === "failed" && snapshot.turnId
+      && snapshot.turnId !== this.lastDetectionFailureTurn
+      && /not installed|not (?:signed|logged) in|signed.out|run .*login|authentication.failed/i.test(snapshot.terminalError?.message ?? "")) {
+      this.lastDetectionFailureTurn = snapshot.turnId;
+      void detectLocalAgents({ force: true, workingDirectory: localAgentDetectionDirectory(this.app) });
+    }
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {
       void rendering.then(() => {

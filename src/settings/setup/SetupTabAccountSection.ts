@@ -1,4 +1,5 @@
 import { Notice, Setting, TextComponent } from "obsidian";
+import { hasHostCapability } from "../../platform/hostCapabilities";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { checkPremiumUserStatus } from "../../utils/licenseUtils";
@@ -71,7 +72,7 @@ export function renderAccountSection(
       : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
   const statusSetting = new Setting(root)
     .setName("Account")
-    .setDesc(pendingSignIn ? `${accountDesc} Waiting for browser sign-in…` : accountDesc);
+    .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
 
   if (isProActive) {
     statusSetting.addButton((button) => {

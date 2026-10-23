@@ -58,7 +58,7 @@ export default defineConfig(
       "obsidianmd/ui/sentence-case": [
         "warn",
         {
-          ignoreRegex: ["^(Ask Approval|Full Access)$"],
+          ignoreRegex: ["^(Ask Approval|Full Access)$", "^Finding Claude Code or Codex…$"],
           ignoreWords: ["SystemSculpt", "Studio", "OS", "SRT", "Finder", "CEO", "Codex", "API"],
         },
       ],

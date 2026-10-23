@@ -925,6 +925,9 @@ export class SettingsManager {
     const newSettings = typeof update === "function" ? update(this.settings) : update;
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
+    if (newSettings.textExecutionBackend !== undefined && newSettings.textExecutionBackendExplicit === undefined) {
+      updatedSettings.textExecutionBackendExplicit = true;
+    }
     if (updatedSettings.licenseKey?.trim() !== this.settings.licenseKey?.trim()) {
       updatedSettings.phoneCapturesLinked = false;
     }

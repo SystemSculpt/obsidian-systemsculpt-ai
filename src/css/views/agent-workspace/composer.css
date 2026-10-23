@@ -283,6 +283,23 @@
   border-radius: var(--ss-radius-lg);
   background: var(--ss-surface-1);
 }
+.ss-codex-controls[hidden] { display: none; }
+.ss-agent-execution-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  padding-block: var(--ss-space-2);
+}
+.ss-agent-execution-summary button {
+  font-size: inherit;
+  color: var(--ss-ink-muted);
+  background: transparent;
+  box-shadow: none;
+}
+.ss-agent-execution-summary button:focus-visible { outline: 2px solid var(--ss-ink-accent); outline-offset: 2px; }
 .ss-codex-controls:not(.is-codex) { grid-template-columns: minmax(0, 1fr); }
 .ss-codex-controls.is-claude { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.2fr); }
 .ss-codex-control {

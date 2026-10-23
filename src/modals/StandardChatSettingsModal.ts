@@ -70,9 +70,11 @@ export class StandardChatSettingsModal extends StandardModal {
       id: "approval",
       title: "Tool access",
       value: this.values.approvalMode,
+      description: "Auto handles routine edits. Moving or trashing notes still asks.",
       choices: [
-        { value: "ask", label: "Ask Approval" },
-        { value: "full-access", label: "Full Access" },
+        { value: "auto", label: "Auto" },
+        { value: "ask", label: "Ask" },
+        { value: "full-access", label: "Full access" },
       ],
       disabled: this.options.approvalModeDisabled === true,
       onSelect: async (approvalMode) => {

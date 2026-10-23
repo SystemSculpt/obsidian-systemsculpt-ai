@@ -8,7 +8,7 @@ import { LocalAgentChatSession } from './LocalAgentChatSession';
 /** Chat presentation adapter. Codex owns every model step, tool and durable thread. */
 export class CodexChatSession extends LocalAgentChatSession {
   constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void> }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => CodexExecutionOptions = () => ({})) {
-    super(app, 'codex', localOptions, forkHistory, (turn, signal, events) => runLocalCodex({ ...executionOptions(), ...turn }, signal, {
+    super(app, 'codex', localOptions, forkHistory, (turn, signal, events) => runLocalCodex({ approvalMode: 'auto', ...executionOptions(), ...turn }, signal, {
       thread: events.thread,
       log: text => events.status(text.startsWith('Command ') ? text : 'Codex is working'),
       text: events.text,

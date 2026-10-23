@@ -529,7 +529,7 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
-  it("offers familiar Ask Approval and Full Access modes in the composer", () => {
+  it("offers Auto, Ask and Full access modes in the composer", () => {
     const parent = document.body.createDiv();
     const onApprovalModeChange = jest.fn();
     const composer = new AgentComposer(parent, {
@@ -541,7 +541,7 @@ describe("AgentComposer", () => {
     });
     composer.load();
     const select = parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!;
-    expect(Array.from(select.options).map((option) => option.text)).toEqual(["Ask Approval", "Full Access"]);
+    expect(Array.from(select.options).map((option) => option.text)).toEqual(["Auto", "Ask", "Full access"]);
     expect(select.hasAttribute("title")).toBe(false);
     composer.setApprovalMode("full-access");
     expect(select.value).toBe("full-access");
