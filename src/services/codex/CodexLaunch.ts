@@ -1,13 +1,13 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
-import { readLocalAgentLaunchConfig } from './LocalAgentLaunch';
+import { readLocalAgentLaunchConfig, type LocalAgentLaunchConfig } from './LocalAgentLaunch';
 
 /** Machine-local launch preferences. Never read or copy Codex credentials. */
-export async function resolveCodexLaunchOptions() {
+export async function resolveCodexLaunchOptions(launch?: LocalAgentLaunchConfig) {
   const [fs, path] = await Promise.all([desktopHost.fs(), desktopHost.path()]);
-  const { configPath, home, setting, environment } = await readLocalAgentLaunchConfig('codex', 'Codex');
+  const { configPath, home, setting, environment } = launch ?? await readLocalAgentLaunchConfig('codex', 'Codex');
   const binary = setting('binary', 'codex');
-  const codexHome = setting('home', path.join(home, '.codex'));
+  const codexHome = setting('home', environment.CODEX_HOME || path.join(home, '.codex'));
   if (!path.isAbsolute(codexHome)) throw new Error(`Codex home must be an absolute path in ${configPath}.`);
   let homeStat;
   try { homeStat = await fs.stat(codexHome); }
@@ -16,7 +16,6 @@ export async function resolveCodexLaunchOptions() {
     throw new Error(`Cannot access Codex home ${codexHome}. Check its directory permissions.`);
   }
   if (!homeStat.isDirectory()) throw new Error(`Codex home is not a directory: ${codexHome}`);
-  // GUI apps can inherit an agent's temporary CODEX_HOME without its launch arguments.
-  // Use the normal native login unless this machine explicitly selects another home.
+  // Detection and execution must inspect the same native login and session store.
   return { binary, environment: { ...environment, CODEX_HOME: codexHome }, home, codexHome };
 }

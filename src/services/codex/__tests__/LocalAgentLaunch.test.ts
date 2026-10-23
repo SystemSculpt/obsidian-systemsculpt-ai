@@ -1,4 +1,4 @@
-import { isLocalAgentInstalled, preferredLocalAgent } from '../LocalAgentLaunch';
+import { isLocalAgentInstalled, resolveLocalAgentBinary } from '../LocalAgentLaunch';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
@@ -51,11 +51,7 @@ it('resolves Windows command extensions', async () => {
   await expect(isLocalAgentInstalled('codex')).resolves.toBe(true);
 });
 
-it('prefers Claude Code, uses Codex when only Codex is installed, and defaults to Claude Code', async () => {
-  machine({ '/usr/bin/claude': executable, '/usr/bin/codex': executable });
-  await expect(preferredLocalAgent()).resolves.toBe('claude');
-  machine({ '/usr/bin/codex': executable });
-  await expect(preferredLocalAgent()).resolves.toBe('codex');
-  machine({});
-  await expect(preferredLocalAgent()).resolves.toBe('claude');
+it('returns the concrete binary path used by the status probe', async () => {
+  machine({ '/home/test/.local/bin/claude': executable });
+  await expect(resolveLocalAgentBinary('claude')).resolves.toBe('/home/test/.local/bin/claude');
 });

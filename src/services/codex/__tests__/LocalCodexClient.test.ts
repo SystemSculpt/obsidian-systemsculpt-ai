@@ -182,11 +182,11 @@ it('accepts a provider that does not require an OpenAI account', async () => {
   host({ failLogin: true, requiresOpenaiAuth: false });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
 });
-it('uses the normal Codex home instead of an inherited agent home', async () => {
+it('uses CODEX_HOME for the same native login and history detected by the plugin', async () => {
   host();
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', CODEX_HOME: '/agent/shadow', HOME: '/home/test' });
   await runLocalCodex(input, new AbortController().signal, callbacks());
-  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/.codex' }) }));
+  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/agent/shadow' }) }));
 });
 it('launches an explicitly configured wrapper and home without a shell', async () => {
   host({ failLogin: true, requiresOpenaiAuth: false });
@@ -226,7 +226,7 @@ it.each([false, true])('resolves native Windows homes and preserves PATH entries
   expect(fs.readFile).toHaveBeenCalledWith(win32.join(home, '.config', 'systemsculpt', 'codex.json'), 'utf8');
   const spawn = (await desktopHost.childProcess()).spawn as jest.Mock;
   expect(spawn).toHaveBeenCalledWith(custom ? win32.join(home, 'tools/codex.exe') : 'codex', ['app-server'], expect.objectContaining({
-    cwd: home, env: expect.objectContaining({ CODEX_HOME: win32.join(home, custom ? 'custom-codex' : '.codex') }),
+    cwd: home, env: expect.objectContaining({ CODEX_HOME: custom ? win32.join(home, 'custom-codex') : String.raw`C:\agent\shadow` }),
   }));
   const entries = spawn.mock.calls[0][2].env.PATH.split(';');
   expect(entries.slice(0, 2)).toEqual(nativePath.split(';'));

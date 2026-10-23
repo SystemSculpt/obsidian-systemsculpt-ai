@@ -1,0 +1,212 @@
+import { posix } from 'node:path';
+import { desktopHost } from '../../../platform/desktopOnly';
+import { hasHostCapability } from '../../../platform/hostCapabilities';
+import { detectLocalAgents, invalidateLocalAgentDetection, preferredLocalAgent } from '../LocalAgentDetection';
+
+jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn(), childProcess: jest.fn() } }));
+jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
+
+const now = Date.UTC(2026, 9, 23, 12);
+const day = 24 * 60 * 60 * 1000;
+const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+type Agent = 'claude' | 'codex';
+type MachineOptions = {
+  installed?: Agent[];
+  signedIn?: Agent[];
+  environment?: Record<string, string>;
+  configs?: Partial<Record<Agent, Record<string, string>>>;
+  status?: Partial<Record<Agent, { error?: Error; stdout?: string; stderr?: string }>>;
+  hang?: Agent;
+};
+
+function machine(options: MachineOptions = {}) {
+  const stats = new Map<string, { isFile: () => boolean; isDirectory: () => boolean; mode: number; mtimeMs: number }>();
+  const directories = new Map<string, Map<string, 'file' | 'directory' | 'symlink'>>();
+  const directory = (path: string) => {
+    if (directories.has(path)) return;
+    directories.set(path, new Map());
+    stats.set(path, { isFile: () => false, isDirectory: () => true, mode: 0o40755, mtimeMs: now - 100 * day });
+    if (path !== '/') { directory(posix.dirname(path)); directories.get(posix.dirname(path))!.set(posix.basename(path), 'directory'); }
+  };
+  const file = (path: string, mtimeMs = now, symlink = false) => {
+    directory(posix.dirname(path));
+    directories.get(posix.dirname(path))!.set(posix.basename(path), symlink ? 'symlink' : 'file');
+    stats.set(path, { isFile: () => true, isDirectory: () => false, mode: 0o100755, mtimeMs });
+  };
+  directory('/home/test'); directory('/home/test/.codex');
+  for (const agent of options.installed ?? ['claude', 'codex']) file(`/bin/${agent}`);
+  const fs = {
+    stat: jest.fn(async (path: string) => { if (!stats.has(path)) throw missing; return stats.get(path); }),
+    readdir: jest.fn(async (path: string) => {
+      if (!directories.has(path)) throw missing;
+      return [...directories.get(path)!].map(([name, type]) => ({ name, isFile: () => type === 'file', isDirectory: () => type === 'directory' }));
+    }),
+    readFile: jest.fn(async (path: string) => {
+      // This is the only file content the plugin is allowed to read.
+      const agent = /^\/home\/test\/\.config\/systemsculpt\/(claude|codex)\.json$/.exec(path)?.[1] as Agent | undefined;
+      if (!agent) throw new Error(`Unexpected content read: ${path}`);
+      if (!options.configs?.[agent]) throw missing;
+      return JSON.stringify(options.configs[agent]);
+    }),
+  };
+  const execFile = jest.fn((binary: string, _args: string[], _config: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+    const agent = binary.includes('claude') ? 'claude' : 'codex';
+    if (agent === options.hang) return;
+    const loggedIn = (options.signedIn ?? ['claude', 'codex']).includes(agent);
+    const status = options.status?.[agent];
+    queueMicrotask(() => callback(status?.error ?? null,
+      status?.stdout ?? (agent === 'claude' ? JSON.stringify({ loggedIn, email: 'private@example.test' }) : ''),
+      status?.stderr ?? (agent === 'codex' ? (loggedIn ? 'Logged in using ChatGPT' : 'Not logged in') : '')));
+  });
+  jest.mocked(desktopHost.fs).mockResolvedValue(fs as never);
+  jest.mocked(desktopHost.path).mockResolvedValue(posix);
+  jest.mocked(desktopHost.os).mockResolvedValue({ homedir: () => '/home/test', platform: () => 'darwin' } as never);
+  jest.mocked(desktopHost.environment).mockReturnValue({ PATH: '/bin', ...options.environment });
+  jest.mocked(desktopHost.childProcess).mockResolvedValue({ execFile } as never);
+  return { fs, execFile, directory, file };
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  jest.mocked(hasHostCapability).mockReturnValue(true);
+  invalidateLocalAgentDetection();
+});
+afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+
+it.each([
+  { installed: [] as Agent[], signedIn: [] as Agent[], preferred: 'systemsculpt' },
+  { installed: ['claude'] as Agent[], signedIn: ['claude'] as Agent[], preferred: 'claude' },
+  { installed: ['codex'] as Agent[], signedIn: ['codex'] as Agent[], preferred: 'codex' },
+  { installed: ['claude', 'codex'] as Agent[], signedIn: ['claude', 'codex'] as Agent[], preferred: 'claude' },
+  { installed: ['claude', 'codex'] as Agent[], signedIn: [] as Agent[], preferred: 'systemsculpt' },
+  { installed: ['claude', 'codex'] as Agent[], signedIn: ['codex'] as Agent[], preferred: 'codex' },
+])('chooses a usable agent or hosted without any usage data (%j)', async options => {
+  machine(options);
+  const result = await detectLocalAgents();
+  expect(result.preferred).toBe(options.preferred);
+  for (const agent of ['claude', 'codex'] as const) expect(result.agents[agent]).toMatchObject({
+    installed: options.installed.includes(agent), signedIn: options.signedIn.includes(agent), recentSessionCount: 0, lastUsed: null,
+  });
+  expect(JSON.stringify(result)).not.toContain('private@example.test');
+});
+
+it('ranks 30-day session counts before recency and inspects nested file mtimes, not parent mtimes', async () => {
+  const host = machine();
+  host.file('/home/test/.claude/projects/vault/a.jsonl', now - 2 * day);
+  host.file('/home/test/.claude/projects/vault/b.jsonl', now - 3 * day);
+  host.file('/home/test/.claude/projects/old-vault/old.jsonl', now - 40 * day);
+  host.file('/home/test/.codex/sessions/2026/10/23/recent.jsonl', now - day);
+  const result = await detectLocalAgents();
+  expect(result.preferred).toBe('claude');
+  expect(result.agents.claude).toMatchObject({ recentSessionCount: 2, lastUsed: now - 2 * day });
+  expect(result.agents.codex).toMatchObject({ recentSessionCount: 1, lastUsed: now - day });
+  host.file('/home/test/.codex/sessions/2026/10/23/second.jsonl', now);
+  expect((await detectLocalAgents({ force: true })).preferred).toBe('codex');
+  host.file('/home/test/.claude/projects/vault/b.jsonl', now);
+  expect((await detectLocalAgents({ force: true })).preferred).toBe('claude');
+});
+
+it('ignores usage from signed-out or uninstalled agents', async () => {
+  const host = machine({ signedIn: ['codex'] });
+  host.file('/home/test/.claude/projects/vault/a.jsonl');
+  expect((await detectLocalAgents()).preferred).toBe('codex');
+  const absent = machine({ installed: ['codex'] });
+  absent.file('/home/test/.claude/projects/vault/a.jsonl');
+  expect((await detectLocalAgents({ force: true })).preferred).toBe('codex');
+  expect(absent.execFile).toHaveBeenCalledTimes(1);
+});
+
+it('reads only launch config contents, lists primary sessions, and never follows symlink or subagent entries', async () => {
+  const host = machine();
+  host.file('/home/test/.claude/projects/vault/main.jsonl');
+  host.file('/home/test/.claude/projects/vault/link.jsonl', now, true);
+  host.file('/home/test/.claude/projects/vault/main/subagents/agent.jsonl');
+  host.file('/home/test/.codex/sessions/2026/10/23/main.jsonl');
+  host.file('/home/test/.codex/auth.json');
+  const result = await detectLocalAgents();
+  expect(result.agents.claude.recentSessionCount).toBe(1);
+  expect(result.agents.codex.recentSessionCount).toBe(1);
+  expect(host.fs.readFile.mock.calls.every(([path]) => /^\/home\/test\/\.config\/systemsculpt\/(claude|codex)\.json$/.test(path))).toBe(true);
+  expect(host.fs.stat).not.toHaveBeenCalledWith('/home/test/.claude/projects/vault/link.jsonl');
+  expect(host.fs.readdir).not.toHaveBeenCalledWith('/home/test/.claude/projects/vault/main/subagents', expect.anything());
+});
+
+it('uses the configured launch binary and the same effective native homes for auth and metadata', async () => {
+  const host = machine({ environment: { CLAUDE_CONFIG_DIR: '/custom/claude', CODEX_HOME: '/custom/codex', CLAUDECODE: '1' }, configs: { claude: { binary: '~/tools/claude' } } });
+  host.file('/home/test/tools/claude');
+  host.file('/custom/claude/projects/vault/main.jsonl');
+  host.file('/custom/codex/sessions/2026/10/23/main.jsonl');
+  const result = await detectLocalAgents();
+  expect(result.agents.claude.recentSessionCount).toBe(1);
+  expect(result.agents.codex.recentSessionCount).toBe(1);
+  expect(host.execFile).toHaveBeenCalledWith('/home/test/tools/claude', ['auth', 'status', '--json'], expect.objectContaining({ env: expect.objectContaining({ CLAUDE_CONFIG_DIR: '/custom/claude' }), timeout: 3000 }), expect.any(Function));
+  expect(host.execFile).toHaveBeenCalledWith('/bin/codex', ['login', 'status'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/custom/codex' }), timeout: 3000 }), expect.any(Function));
+  expect(host.execFile.mock.calls.every(([, , config]) => !('CLAUDECODE' in (config as { env: object }).env))).toBe(true);
+});
+
+it('gives an explicit machine-local Codex home precedence over CODEX_HOME', async () => {
+  const host = machine({ environment: { CODEX_HOME: '/inherited/codex' }, configs: { codex: { home: '~/chosen-codex' } } });
+  host.file('/home/test/chosen-codex/sessions/2026/10/23/main.jsonl');
+  expect((await detectLocalAgents()).agents.codex.recentSessionCount).toBe(1);
+  expect(host.execFile).toHaveBeenCalledWith('/bin/codex', ['login', 'status'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/chosen-codex' }) }), expect.any(Function));
+});
+
+it('retains installed status when the native home is missing and does not run its auth command', async () => {
+  const host = machine({ environment: { CODEX_HOME: '/missing/codex' } });
+  expect((await detectLocalAgents()).agents.codex).toMatchObject({ installed: true, signedIn: false });
+  expect(host.execFile).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { claude: { stdout: 'not JSON' }, codex: { stderr: 'Not logged in' } },
+  { claude: { error: new Error('failed'), stdout: '{"loggedIn":true}' }, codex: { error: new Error('failed'), stderr: 'Logged in using ChatGPT' } },
+])('requires successful exit and a positive native auth status (%j)', async status => {
+  machine({ status });
+  expect((await detectLocalAgents()).preferred).toBe('systemsculpt');
+});
+
+it('caches results and concurrent probes until invalidated or explicitly detected again', async () => {
+  const host = machine();
+  const first = detectLocalAgents();
+  expect(detectLocalAgents()).toBe(first);
+  await first; await detectLocalAgents();
+  expect(host.execFile).toHaveBeenCalledTimes(2);
+  await detectLocalAgents({ force: true });
+  expect(host.execFile).toHaveBeenCalledTimes(4);
+  invalidateLocalAgentDetection(); await detectLocalAgents();
+  expect(host.execFile).toHaveBeenCalledTimes(6);
+});
+
+it('returns promptly when an auth command hangs without hiding the other usable agent', async () => {
+  jest.useFakeTimers();
+  machine({ hang: 'claude' });
+  const result = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).preferred).toBe('codex');
+  expect((await result).agents.claude).toMatchObject({ installed: true, signedIn: false });
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('does not block authenticated status on a stalled filesystem metadata probe', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'] });
+  host.fs.readdir.mockImplementation(() => new Promise(() => {}));
+  const result = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).preferred).toBe('claude');
+});
+
+it('leaves mobile on hosted without loading filesystem or child-process adapters', async () => {
+  jest.mocked(hasHostCapability).mockReturnValue(false);
+  expect((await detectLocalAgents({ force: true })).preferred).toBe('systemsculpt');
+  expect(desktopHost.fs).not.toHaveBeenCalled();
+  expect(desktopHost.childProcess).not.toHaveBeenCalled();
+});
+
+it('uses detection for the explicit welcome choice and offers Claude install guidance when neither is usable', async () => {
+  machine({ signedIn: ['codex'] });
+  expect(await preferredLocalAgent()).toBe('codex');
+  machine({ installed: [] }); invalidateLocalAgentDetection();
+  expect(await preferredLocalAgent()).toBe('claude');
+});
