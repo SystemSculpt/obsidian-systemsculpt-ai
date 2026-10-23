@@ -1,7 +1,7 @@
 {
   "author": "SystemSculpt",
   "authorUrl": "https://systemsculpt.com",
-  "description": "Chat with your vault, run approved actions, transcribe audio, find related notes, and build visual AI workflows.",
+  "description": "Chat with your vault using your own Claude Code or Codex on desktop, or hosted AI. The AI agent edits notes with your approval, transcribes audio and finds related notes. Free to start.",
   "fundingUrl": "https://www.patreon.com/SystemSculpt",
   "id": "systemsculpt-ai",
   "isDesktopOnly": false,
