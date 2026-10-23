@@ -130,7 +130,7 @@ export class DiffViewer {
       case 'missing':
         return `This file does not exist in your vault, so the change cannot be applied.${detail}`;
       case 'unmatched':
-        return `The text this change looks for is not in the file, so nothing would be replaced.${detail}`;
+        return `This change could not be matched in the file, so nothing would be replaced.${detail}`;
       default:
         return 'This file already matches the proposed content — approving changes nothing.';
     }
@@ -142,7 +142,9 @@ export class DiffViewer {
     });
 
     // Group lines into change hunks (continuous groups of changes with context)
-    const hunks = this.groupIntoHunks(this.diffResult.lines);
+    const hunks = this.diffResult.hunks
+      ? this.diffResult.hunks.flatMap((hunk) => this.groupIntoHunks(hunk))
+      : this.groupIntoHunks(this.diffResult.lines);
 
     if (hunks.length === 0) {
       const notice = content.createDiv({

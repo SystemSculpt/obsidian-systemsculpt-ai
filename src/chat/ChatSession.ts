@@ -37,6 +37,11 @@ type ResponseRenderMilestone = "response_first_dom_committed" | "response_first_
 type ToolRenderMilestone = "local_tool_terminal_dom_committed" | "local_tool_terminal_paint_opportunity"
   | "continuation_content_dom_committed" | "continuation_content_paint_opportunity";
 
+export type ApprovalResponseOptions = Readonly<{
+  rememberForSession?: boolean;
+  answers?: Record<string, string[]>;
+}>;
+
 /** The presentation seam shared by managed and native execution owners. */
 export interface ChatSession {
   getSnapshot(): AgentConversationSnapshot;
@@ -47,7 +52,7 @@ export interface ChatSession {
   cancel(): Promise<void>;
   detach(): Promise<void>;
   disconnect(): void;
-  respondToApproval(approvalId: string, approved: boolean, source?: "manual" | "policy"): boolean;
+  respondToApproval(approvalId: string, approved: boolean, source?: "manual" | "policy", options?: ApprovalResponseOptions): boolean;
   recordLifecycle?(input: AgentLifecycleInput): void;
   recordClientRequestLifecycle?(input: AgentLifecycleInput): void;
   // Rendering diagnostics are observational and only supplied by backends that own them.

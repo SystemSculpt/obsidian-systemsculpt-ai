@@ -246,7 +246,8 @@ manual mobile exploration is performed.
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude
   Code settings** (no permission-mode override). If Auto is unavailable, use Accept
   edits with a visible Auto-unavailable notice. Never pass `bypassPermissions` or
-  `dontAsk`; native permission requests are answered in a plugin dialog.
+  `dontAsk`; ChatView answers native permission requests in inline approval
+  cards. Studio retains its native request dialog.
 - New Codex chats default to **Auto**: `on-request`, `workspace-write` rooted in the
   vault, and `approvalsReviewer: auto_review`. **Ask** keeps the same approval policy
   and sandbox with reviewer `user`; **Read only** uses `read-only` and `never`.

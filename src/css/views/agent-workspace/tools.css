@@ -244,32 +244,160 @@
   margin-top: var(--ss-space-2);
 }
 .systemsculpt-agent-approval {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--ss-space-3);
-  margin-top: var(--ss-space-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  margin-block: var(--ss-space-2);
   padding: var(--ss-space-3);
-  border: 1px solid var(--ss-warning-line);
+  border: 1px solid var(--ss-line-strong);
+  border-inline-start: 3px solid var(--ss-warning);
   border-radius: var(--ss-radius-md);
-  background: var(--ss-warning-tint);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-approval:focus-within {
+  border-color: var(--ss-line-accent);
+  box-shadow: var(--ss-ring);
+}
+.systemsculpt-agent-approval:focus-visible,
+.systemsculpt-agent-approval button:focus-visible,
+.systemsculpt-agent-approval input:focus-visible {
+  outline: 2px solid var(--ss-accent);
+  outline-offset: 2px;
+}
+.systemsculpt-agent-approval-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+.systemsculpt-agent-approval-icon {
+  align-self: center;
+  display: inline-flex;
+  flex: none;
+  color: var(--ss-ink-muted);
+}
+.systemsculpt-agent-approval-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+.systemsculpt-agent-approval-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: var(--ss-weight-semibold);
+}
+.systemsculpt-agent-approval-counter {
+  flex: none;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
 }
 .systemsculpt-agent-approval-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: var(--ss-space-2);
 }
 .systemsculpt-agent-approval-actions > .ss-button {
-  padding-inline: var(--ss-space-3);
+  padding-inline: var(--ss-space-2);
+  white-space: normal;
+  height: auto;
 }
 .systemsculpt-agent-approval-preview {
-  grid-column: 1 / -1;
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--ss-warning-line);
+  overflow: auto;
+  border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
   background: var(--ss-surface-0);
+}
+.systemsculpt-agent-approval-preview dl {
+  margin: 0;
+  padding: var(--ss-space-2);
+}
+.systemsculpt-agent-approval-preview dt {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-preview dd {
+  margin: 0 0 var(--ss-space-2);
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-approval-details {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-details summary {
+  cursor: pointer;
+}
+.systemsculpt-agent-approval-details pre,
+.systemsculpt-agent-approval-preview pre {
+  margin: 0;
+  padding: var(--ss-space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--ss-font-mono);
+}
+.systemsculpt-agent-approval-question {
+  min-width: 0;
+  margin: 0;
+  padding: var(--ss-space-2);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+}
+.systemsculpt-agent-approval-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-bottom: var(--ss-space-2);
+}
+.systemsculpt-agent-approval-options button {
+  height: auto;
+  white-space: normal;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.systemsculpt-agent-approval-options button[aria-pressed="true"] {
+  outline: 2px solid var(--ss-accent);
+}
+.systemsculpt-agent-approval-option-description,
+.systemsculpt-agent-approval-answer-label {
+  display: block;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-question input {
+  width: 100%;
+}
+.systemsculpt-agent-approval-review {
+  align-self: flex-start;
+  margin-bottom: var(--ss-space-2);
+}
+@media (pointer: coarse) {
+  .systemsculpt-agent-approval kbd {
+    display: none;
+  }
+}
+.systemsculpt-agent-approval-review[hidden],
+.systemsculpt-agent-tool[hidden],
+.systemsculpt-agent-approval-preview[hidden] {
+  display: none;
+}
+.systemsculpt-agent-approval-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.systemsculpt-agent-approval-notice-surface {
+  /* Notices size to their content; inline-size containment collapses them. */
+  container-type: normal;
+}
+.systemsculpt-agent-approval-notice {
+  width: 100%;
+  white-space: normal;
+  height: auto;
 }
 .systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
   padding: var(--ss-space-2) var(--ss-space-3);

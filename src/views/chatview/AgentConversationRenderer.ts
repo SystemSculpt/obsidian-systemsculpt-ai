@@ -54,6 +54,8 @@ import {
 } from "./ChatMessagePresentation";
 import { InlineMessageEditor, type AgentInlineMessageEdit } from "./InlineMessageEditor";
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
+import { AgentApprovalCards, type ApprovalAnswer } from "./AgentApprovalCards";
+import { nativeToolPresentation, renderNativeToolPreview } from "./NativeToolPresentation";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
 export type AgentConversationRendererOptions = Readonly<{
@@ -64,7 +66,10 @@ export type AgentConversationRendererOptions = Readonly<{
     disclosureControl?: HTMLElement,
     mutationTarget?: HTMLElement,
   ) => (() => void) | undefined;
-  onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
+  onApprove: ApprovalAnswer;
+  approvalComposer?: () => HTMLElement | undefined;
+  isApprovalVisible?: () => boolean;
+  onHiddenApproval?: (part: AgentToolPart) => void;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   showPlanOffer?: () => boolean;
@@ -210,10 +215,11 @@ type HistoricalOverflowHydrationState = {
 type HistoricalHydrationStatus = "cold" | "hydrating" | "hydrated" | "disposed";
 
 type ToolApprovalPreviewHydrationState = {
-  approval: HTMLElement;
+  container: HTMLElement;
   preview: HTMLElement;
   fingerprint: string;
   toolCall: ToolCall;
+  part: AgentToolPart;
   lifecycleGeneration: number;
   toolRenderEpoch: number;
   hydration: Promise<void> | null;
@@ -345,9 +351,12 @@ function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["s
 
   switch (tool.result?.error?.code) {
     case "USER_DENIED":
+    case "NATIVE_TOOL_DENIED":
       return "denied";
     case "TOOL_CANCELLED_BEFORE_START":
+    case "NATIVE_TOOL_CANCELLED":
       return "cancelled";
+    case "NATIVE_TOOL_OUTCOME_UNKNOWN":
     case "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN":
     case "TOOL_OUTCOME_UNKNOWN":
     case "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART":
@@ -363,7 +372,7 @@ function visibleToolError(part: AgentToolPart): string | null {
 
 function toolDisplayFingerprint(part: AgentToolPart): string {
   const presentation = presentAgentTool(part);
-  const approvalInput = part.location === "vault"
+  const approvalInput = (part.location === "vault" || part.native)
     && part.state === "approval-required"
     && part.approvalId
     ? part.input
@@ -379,6 +388,9 @@ function toolDisplayFingerprint(part: AgentToolPart): string {
     error: visibleToolError(part),
     approvalId: approvalInput === undefined ? undefined : part.approvalId,
     approvalInput,
+    approvalDecision: part.approvalDecision,
+    approvalScope: part.approvalScope,
+    native: part.native,
     artifacts,
   });
 }
@@ -434,7 +446,7 @@ function terminalToolPresentation(
     : presentation.phase === "failed"
       ? "failed"
       : "outcome-unknown";
-  return { ...part, state };
+  return { ...part, state, ...(part.state === "approval-required" ? { approvalDecision: "withdrawn" as const } : {}) };
 }
 
 /** Projects durable messages plus the active normalized agent run into native DOM. */
@@ -492,6 +504,7 @@ export class AgentConversationRenderer extends Component {
   private readonly copyFeedbackTimers = new Map<HTMLButtonElement, number>();
   private readonly incidentDisclosureStates = new Map<HTMLElement, IncidentDisclosureState>();
   private readonly liveMarkdown: LiveMarkdownRenderer;
+  private readonly approvals: AgentApprovalCards;
   private renderGeneration = 0;
   private lifecycleGeneration = 0;
   private renderingEnabled = true;
@@ -537,6 +550,17 @@ export class AgentConversationRenderer extends Component {
       },
     });
     this.addChild(this.liveMarkdown);
+    this.approvals = new AgentApprovalCards(this.element, {
+      onApprove: options.onApprove,
+      composer: options.approvalComposer,
+      isVisible: options.isApprovalVisible,
+      onHiddenApproval: options.onHiddenApproval,
+    });
+    this.addChild(this.approvals);
+  }
+
+  public focusPendingApproval(): void {
+    this.approvals.focusFirst();
   }
 
   /** Resets per-run timing while keeping current content-free DOM state counts. */
@@ -1433,6 +1457,7 @@ export class AgentConversationRenderer extends Component {
     const lifecycleGeneration = this.lifecycleGeneration;
     const isCurrent = (): boolean =>
       this.renderingEnabled && lifecycleGeneration === this.lifecycleGeneration;
+    const focusedApproval = this.approvals.captureFocus();
     this.element.setAttribute("aria-busy", String(presentation.busy));
     const body = this.ensureActiveTurn(snapshot.turnId);
     this.activeTurn?.toggleClass("is-active", presentation.busy);
@@ -1546,6 +1571,7 @@ export class AgentConversationRenderer extends Component {
         this.activeToolErrorSuppression.delete(key);
       }
     }
+    this.approvals.sync(orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"), focusedApproval);
     if (renderErrors.length > 0) throw renderErrors[0];
   }
 
@@ -2501,6 +2527,7 @@ export class AgentConversationRenderer extends Component {
   }
 
   public clearActive(): void {
+    this.approvals?.clear();
     this.toolRenderEpoch += 1;
     this.forgetMarkdown(this.activeRoot);
     this.activeRoot.empty();
@@ -2793,6 +2820,30 @@ export class AgentConversationRenderer extends Component {
     suppressToolError = false,
   ): boolean {
     const presentation = presentAgentTool(part);
+    const approvalRequired = (part.location === "vault" || part.native)
+      && part.state === "approval-required"
+      && Boolean(part.approvalId);
+    const existingApproval = node.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-approval",
+    );
+    let retainedNativePreview = part.native && !approvalRequired
+      ? node.querySelector<HTMLElement>(
+        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support > .systemsculpt-agent-resolved-preview",
+      )
+      : null;
+    if (part.native && !approvalRequired && existingApproval) {
+      // Keep the exact preview reviewed before execution, not a new diff against
+      // the now-modified vault file. Move only the preview and raw disclosure;
+      // pending actions and answer fields must not survive resolution.
+      retainedNativePreview = createSurfaceElement(node.ownerDocument, "div");
+      retainedNativePreview.className = "systemsculpt-agent-resolved-preview";
+      retainedNativePreview.dataset.approvalFingerprint = existingApproval.dataset.approvalFingerprint;
+      for (const child of existingApproval.querySelectorAll<HTMLElement>(
+        ":scope > .systemsculpt-agent-approval-preview, :scope > .systemsculpt-agent-approval-details",
+      )) retainedNativePreview.appendChild(child);
+      const hydration = this.toolApprovalPreviewHydrationStates.get(node);
+      if (hydration?.container === existingApproval) hydration.container = retainedNativePreview;
+    }
     const detailRows = presentAgentToolDetails(part);
     const actionableArtifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
       ? part.output?.artifacts ?? []
@@ -2800,12 +2851,14 @@ export class AgentConversationRenderer extends Component {
     const toolError = part.error && !suppressToolError
       ? visibleToolError(part) ?? "This action could not be completed."
       : null;
-    const hasDetail = detailRows.length > 0 || Boolean(toolError) || actionableArtifacts.length > 0;
+    const hasDetail = detailRows.length > 0 || Boolean(toolError) || actionableArtifacts.length > 0
+      || Boolean(retainedNativePreview);
     const supportFingerprint = JSON.stringify({
       detailRows,
       toolError,
       actionableArtifacts,
       suppressToolError,
+      retainedNativePreview: Boolean(retainedNativePreview),
     });
     const supportNeedsRender = node.dataset.toolSupportFingerprint !== supportFingerprint
       || !node.querySelector(":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support")
@@ -2839,29 +2892,20 @@ export class AgentConversationRenderer extends Component {
       }
     }
 
-    const approvalRequired = part.location === "vault"
-      && part.state === "approval-required"
-      && Boolean(part.approvalId);
     const approvalFingerprint = approvalRequired
       ? JSON.stringify({
         approvalId: part.approvalId,
         canonicalName: presentation.canonicalName,
         input: part.input,
+        native: part.native,
       })
       : null;
-    const existingApproval = node.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-approval",
-    );
     const reusableApproval = approvalFingerprint
       && existingApproval?.dataset.approvalFingerprint === approvalFingerprint
       ? existingApproval
       : null;
     const stagedApproval = approvalRequired && !reusableApproval
-      ? this.createDetachedToolApproval(
-        node.ownerDocument,
-        part,
-        presentation.canonicalName,
-      )
+      ? this.approvals.create(part, presentation.canonicalName)
       : null;
     if (stagedApproval && approvalFingerprint) {
       stagedApproval.dataset.approvalFingerprint = approvalFingerprint;
@@ -2989,8 +3033,22 @@ export class AgentConversationRenderer extends Component {
       setIcon(stateIcon, presentation.icon);
       stateIcon.dataset.iconState = presentation.icon;
     }
-    if (label.textContent !== presentation.label) label.setText(presentation.label);
-    if (presentation.summary) {
+    const decision = part.approvalDecision ?? (part.approvalId && !approvalRequired
+      ? part.state === "denied" ? "denied"
+        : part.state === "cancelled" || part.state === "outcome-unknown" ? "withdrawn"
+          : part.state === "approved" || part.state === "running" || part.state === "succeeded" ? "approved" : undefined
+      : undefined);
+    const native = nativeToolPresentation(part);
+    const decisionLabel = decision === "withdrawn" ? "Withdrawn" : decision === "denied" ? "Denied"
+      : part.approvalScope === "session" ? "Approved for this chat" : "Approved";
+    const actionLabel = native
+      ? part.state === "succeeded" ? native.completedTitle : native.title
+      : presentation.label;
+    const displayLabel = decision ? `${actionLabel} · ${decisionLabel}` : presentation.label;
+    if (label.textContent !== displayLabel) label.setText(displayLabel);
+    shell.toggleAttribute("hidden", Boolean(approvalRequired));
+    if (existingApproval && !approvalRequired) (shell as HTMLDetailsElement).open = false;
+    if (presentation.summary && !(native && decision)) {
       if (summary.textContent !== presentation.summary) summary.setText(presentation.summary);
       summary.toggleAttribute("hidden", false);
     } else {
@@ -3000,6 +3058,9 @@ export class AgentConversationRenderer extends Component {
     if (supportNeedsRender || rebuiltShell) {
       support.replaceChildren(...Array.from(stagedSupport.childNodes));
       node.dataset.toolSupportFingerprint = supportFingerprint;
+    }
+    if (retainedNativePreview && retainedNativePreview.parentElement !== support) {
+      support.appendChild(retainedNativePreview);
     }
     support.toggleAttribute("hidden", !support.hasChildNodes());
     const currentApproval = node.querySelector<HTMLElement>(
@@ -3021,59 +3082,12 @@ export class AgentConversationRenderer extends Component {
         desiredApproval,
         approvalFingerprint,
         toolCallForPart(part),
+        part,
       );
-    } else {
+    } else if (!retainedNativePreview) {
       this.toolApprovalPreviewHydrationStates.delete(node);
     }
     return true;
-  }
-
-  private createDetachedToolApproval(
-    ownerDocument: Document,
-    part: AgentToolPart,
-    canonicalName: string,
-  ): HTMLElement {
-    const approval = createSurfaceElement(ownerDocument, "div");
-    approval.className = "systemsculpt-agent-approval";
-    approval.setAttrs({
-      role: "group",
-      "aria-live": "polite",
-      "aria-atomic": "true",
-    });
-    approval.createDiv({
-      cls: "systemsculpt-agent-approval-copy",
-      text: "Allow this change in your vault?",
-    });
-    const actions = approval.createDiv({ cls: "systemsculpt-agent-approval-actions" });
-    const deny = createUiAction(actions, {
-      label: "Deny",
-      testId: "chat.approval.deny",
-      size: "small",
-    });
-    deny.setAttr("data-focus-key", "tool-deny");
-    const approve = createUiAction(actions, {
-      label: "Allow once",
-      testId: "chat.approval.allow-once",
-      tone: "primary",
-      size: "small",
-    });
-    approve.setAttr("data-focus-key", "tool-allow-once");
-    deny.onclick = () => void this.options.onApprove(part.approvalId!, false);
-    approve.onclick = () => void this.options.onApprove(part.approvalId!, true);
-    if (canonicalName !== "trash") {
-      const allowForChat = createUiAction(actions, {
-        label: "Allow for chat",
-        testId: "chat.approval.allow-for-chat",
-        size: "small",
-      });
-      allowForChat.setAttr("data-focus-key", "tool-allow-chat");
-      allowForChat.onclick = () => void this.options.onApprove(part.approvalId!, true, true);
-    }
-    approval.createDiv({
-      cls: "systemsculpt-agent-approval-preview",
-      attr: { hidden: "" },
-    });
-    return approval;
   }
 
   private prepareToolApprovalPreviewHydration(
@@ -3081,11 +3095,12 @@ export class AgentConversationRenderer extends Component {
     approval: HTMLElement,
     fingerprint: string,
     toolCall: ToolCall,
+    part: AgentToolPart,
   ): void {
     const existing = this.toolApprovalPreviewHydrationStates.get(node);
     if (
       existing
-      && existing.approval === approval
+      && existing.container === approval
       && existing.fingerprint === fingerprint
     ) {
       return;
@@ -3095,10 +3110,11 @@ export class AgentConversationRenderer extends Component {
     );
     if (!preview) return;
     this.toolApprovalPreviewHydrationStates.set(node, {
-      approval,
+      container: approval,
       preview,
       fingerprint,
       toolCall,
+      part,
       lifecycleGeneration: this.lifecycleGeneration,
       toolRenderEpoch: this.toolRenderEpoch,
       hydration: null,
@@ -3121,12 +3137,11 @@ export class AgentConversationRenderer extends Component {
   ): Promise<void> {
     const staging = createSurfaceElement(state.preview.ownerDocument, "div");
     try {
-      const diff = await renderWriteEditInlineDiff(
-        this.options.app,
-        staging,
-        state.toolCall,
-      );
-      if (!diff) await renderOperationsInlinePreview(staging, state.toolCall);
+      const native = await renderNativeToolPreview(this.options.app, staging, state.part);
+      if (!native) {
+        const diff = await renderWriteEditInlineDiff(this.options.app, staging, state.toolCall);
+        if (!diff) await renderOperationsInlinePreview(staging, state.toolCall);
+      }
     } catch {
       return;
     }
@@ -3153,10 +3168,10 @@ export class AgentConversationRenderer extends Component {
       && state.toolRenderEpoch === this.toolRenderEpoch
       && this.toolApprovalPreviewHydrationStates.get(node) === state
       && node.isConnected
-      && state.approval.isConnected
-      && state.approval.dataset.approvalFingerprint === state.fingerprint
-      && state.approval.contains(state.preview)
-      && node.querySelector(":scope > .systemsculpt-agent-approval") === state.approval;
+      && state.container.isConnected
+      && state.container.dataset.approvalFingerprint === state.fingerprint
+      && state.container.contains(state.preview)
+      && node.contains(state.container);
   }
 
   private renderArtifact(parent: HTMLElement, artifact: AgentArtifact): void {
@@ -3206,6 +3221,9 @@ export class AgentConversationRenderer extends Component {
       location: isServerExecutedManagedToolCall(tool) ? "server" : "vault",
       input,
       state,
+      ...(tool.native ? { native: tool.native } : {}),
+      ...(tool.approvalDecision ? { approvalDecision: tool.approvalDecision } : {}),
+      ...(tool.approvalScope ? { approvalScope: tool.approvalScope } : {}),
       ...(typeof tool.result?.data !== "undefined" || paths.length ? {
         output: {
           ...(summary ? { summary } : {}),

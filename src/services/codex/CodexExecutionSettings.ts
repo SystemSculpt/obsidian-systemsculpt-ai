@@ -1,5 +1,6 @@
 import type { SystemSculptSettings } from '../../types';
 import { hasHostCapability } from '../../platform/hostCapabilities';
+import { desktopHost } from '../../platform/desktopOnly';
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import type { App } from 'obsidian';
 import { isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from './LocalAgents';
@@ -18,6 +19,12 @@ export function defaultTextBackend(settings: Pick<SystemSculptSettings, 'textExe
 }
 export function codexVaultDirectory(app: App): string {
   return codexWorkingDirectory(app, '.');
+}
+/** Chat launches from the real current vault root, matching native absolute tool paths. */
+export async function localAgentChatDirectory(app: App): Promise<string> {
+  const root = codexVaultDirectory(app);
+  // Resolve only host-owned root metadata, never a native-requested path or file contents.
+  return (await desktopHost.fs()).realpath(root);
 }
 /** Detection can still find PATH installs when a host has no local vault path. */
 export function localAgentDetectionDirectory(app: App): string | undefined {

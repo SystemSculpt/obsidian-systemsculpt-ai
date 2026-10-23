@@ -1,3 +1,5 @@
+import type { AgentApprovalDecision, NativeToolMetadata } from '../chat/ChatConversation';
+
 /**
  * Type definitions for the improved tool call system
  * This implements a single source of truth architecture for tool calls
@@ -72,4 +74,8 @@ export interface ToolCall {
    * must not send a result for it, because one exists there already.
    */
   executedOn?: 'server';
+  /** Native activity is a presentation cache, never a durable permission grant. */
+  native?: NativeToolMetadata;
+  approvalDecision?: AgentApprovalDecision;
+  approvalScope?: 'session';
 }

@@ -75,6 +75,17 @@ export type AgentReasoningPart = AgentPartBase & Readonly<{
   summary: string;
 }>;
 
+export type NativeToolMetadata = Readonly<{
+  agent: "claude" | "codex";
+  workingDirectory: string;
+  requestMethod?: string;
+  requestId?: string | number;
+  description?: string;
+  permissionSuggestions?: readonly Record<string, unknown>[];
+}>;
+
+export type AgentApprovalDecision = "approved" | "denied" | "withdrawn";
+
 export type AgentToolPart = AgentPartBase & Readonly<{
   kind: "tool";
   messageId: string;
@@ -85,6 +96,9 @@ export type AgentToolPart = AgentPartBase & Readonly<{
   inputText?: string;
   state: AgentToolState;
   approvalId?: string;
+  approvalDecision?: AgentApprovalDecision;
+  approvalScope?: "session";
+  native?: NativeToolMetadata;
   output?: ToolResultSummary;
   error?: ManagedAgentError;
 }>;

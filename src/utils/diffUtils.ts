@@ -14,11 +14,61 @@ export interface DiffLine {
 
 export interface DiffResult {
   lines: DiffLine[];
+  /** Explicit sections in a supplied patch; never join across omitted lines. */
+  hunks?: DiffLine[][];
   stats: {
     additions: number;
     deletions: number;
   };
   isTruncated: boolean;
+}
+
+/** Read one file's unified patch without reading or applying the target file. */
+export function parseUnifiedDiff(patch: string): DiffResult | null {
+  const hunks: DiffLine[][] = [];
+  const stats = { additions: 0, deletions: 0 };
+  let hunk: DiffLine[] | null = null;
+  let oldLine = 0, newLine = 0, oldRemaining = 0, newRemaining = 0;
+  const lines = patch.split(/\r?\n/u);
+  if (lines[lines.length - 1] === "") lines.pop();
+  for (const line of lines) {
+    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:.*)$/u.exec(line);
+    if (header) {
+      if (oldRemaining || newRemaining) return null;
+      oldLine = Number(header[1]);
+      newLine = Number(header[3]);
+      oldRemaining = Number(header[2] ?? 1);
+      newRemaining = Number(header[4] ?? 1);
+      if (![oldLine, newLine, oldRemaining, newRemaining].every(Number.isSafeInteger)) return null;
+      hunk = [];
+      hunks.push(hunk);
+      continue;
+    }
+    if (line === "\\ No newline at end of file") continue;
+    if (!hunk || (!oldRemaining && !newRemaining)) {
+      // File headers and patch metadata are not changed content.
+      if (/^(?:diff |index |--- |\+\+\+ |(?:new|deleted) file mode |(?:old|new) mode |(?:rename|copy) (?:from|to) |similarity index |$)/u.test(line)) continue;
+      return null;
+    }
+    const content = line.slice(1);
+    if (line.startsWith(" ") && oldRemaining > 0 && newRemaining > 0) {
+      hunk.push({ type: "unchanged", content, oldLineNumber: oldLine++, newLineNumber: newLine++ });
+      oldRemaining--;
+      newRemaining--;
+    } else if (line.startsWith("-") && oldRemaining > 0) {
+      hunk.push({ type: "removed", content, oldLineNumber: oldLine++ });
+      oldRemaining--;
+      stats.deletions++;
+    } else if (line.startsWith("+") && newRemaining > 0) {
+      hunk.push({ type: "added", content, newLineNumber: newLine++ });
+      newRemaining--;
+      stats.additions++;
+    } else {
+      return null;
+    }
+  }
+  if (!hunks.length || oldRemaining || newRemaining) return null;
+  return { lines: hunks.flat(), hunks, stats, isTruncated: false };
 }
 
 function splitLines(content: string): string[] {
