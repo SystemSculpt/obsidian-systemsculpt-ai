@@ -238,7 +238,7 @@ export function renderAccountSection(
   licenseSetting.addText((text) => {
     licenseInput = text;
     text
-      .setPlaceholder(hasSavedLicense ? "Saved key ••••••••" : "skss-...")
+      .setPlaceholder(hasSavedLicense ? "Saved key ••••••••" : "Paste your license key")
       .setValue("");
     text.inputEl.type = "password";
     tabInstance.registerListener(text.inputEl, "keydown", (event: KeyboardEvent) => {
