@@ -986,7 +986,13 @@ describe("AgentWorkspace", () => {
     workspace.setTitle("Conversation");
     expect(title.hasAttribute("title")).toBe(false);
 
+    workspace.setBanner("Monthly is $9", "error", true);
+    const bannerPlans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.banner.see-plans"]')!;
+    expect(bannerPlans.textContent).toBe("See plans");
+    bannerPlans.click();
+    expect(onViewPlans).toHaveBeenCalledTimes(2);
     workspace.setBanner("Connection failed", "error");
+    expect(parent.querySelector('[data-testid="chat.banner.see-plans"]')).toBeNull();
     expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
       .toBe("alert");
     workspace.setQueue([

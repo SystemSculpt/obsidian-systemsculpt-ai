@@ -67,6 +67,8 @@ export type AgentConversationRendererOptions = Readonly<{
   onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
+  showPlanOffer?: () => boolean;
+  onViewPlans?: () => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onCopyIncidentReport?: (
     reportId: string,
@@ -2577,7 +2579,7 @@ export class AgentConversationRenderer extends Component {
         const errorIcon = node.createSpan({ cls: "systemsculpt-agent-error-icon" });
         setIcon(errorIcon, "circle-alert");
         const copy = node.createDiv({ cls: "systemsculpt-agent-error-copy" });
-        const presented = presentAgentError(part.error, part.retryable);
+        const presented = presentAgentError(part.error, part.retryable, this.options.showPlanOffer?.());
         copy.createEl("strong", {
           cls: "systemsculpt-agent-error-heading",
           text: presented.heading,
@@ -2593,9 +2595,19 @@ export class AgentConversationRenderer extends Component {
           });
         }
         const actions = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
+          || presented.action === "see-plans" && this.options.onViewPlans
           || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" })
           : null;
+        if (actions && presented.action === "see-plans" && this.options.onViewPlans) {
+          const plans = createUiAction(actions, {
+            label: "See plans",
+            testId: "chat.turn.see-plans",
+            tone: "primary",
+            size: "small",
+          });
+          plans.onclick = () => void this.options.onViewPlans?.();
+        }
         if (actions && part.retryable && part.retryMessageId && this.options.onRetryFailedTurn) {
           const retry = createUiAction(actions, {
             label: "Retry",

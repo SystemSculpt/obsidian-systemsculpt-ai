@@ -16,6 +16,7 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: "Response interrupted" | "Could not finish" | "Not enough credits" | "Out of credits";
   message: string;
+  action?: "see-plans";
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
 }>;
@@ -38,7 +39,15 @@ export function presentAgentErrorMessage(
 export function presentAgentError(
   error: ManagedAgentError,
   retryable: boolean,
+  showPlanOffer = false,
 ): PresentedAgentError {
+  if (showPlanOffer && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {
+    return {
+      heading: "Out of credits",
+      message: "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.",
+      action: "see-plans",
+    };
+  }
   if (error.code === "out_of_credits") {
     return {
       heading: "Out of credits",

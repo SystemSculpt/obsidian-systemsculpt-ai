@@ -122,7 +122,7 @@ export function isManagedLicenseFailure(error: unknown): error is SystemSculptEr
 
 /** Single source for the "why is this locked" sentence shown across the plugin. */
 export const PLAN_REQUIRED_MESSAGE =
-  "You need a subscription, lifetime license, or credits to use SystemSculpt AI.";
+  "Create a free account for 500 starter credits, or choose a plan.";
 
 /** Pre-flight error thrown before contacting the server when no plan is active. */
 export function planRequiredError(feature: string): SystemSculptError {

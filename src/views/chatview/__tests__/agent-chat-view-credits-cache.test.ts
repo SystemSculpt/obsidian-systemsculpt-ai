@@ -27,6 +27,40 @@ describe("AgentChatView shared credits reads", () => {
     expect(readCreditsBalance.mock.calls.map(([options]) => options.fresh)).toEqual([false, false]);
   });
 
+  it.each([false, true, undefined])("offers plans only for explicit non-entitlement (%s)", async (includedCreditsEntitled) => {
+    const view = createView(jest.fn(async () => ({ ...balance, includedCreditsEntitled })));
+    await view.refreshCreditsBalance({ reason: "view_open" });
+    expect(view.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(includedCreditsEntitled === false);
+  });
+
+  it("clears the previous account's offer when the license changes", async () => {
+    const read = jest.fn().mockResolvedValueOnce({ ...balance, includedCreditsEntitled: false });
+    const view = createView(read);
+    await view.refreshCreditsBalance();
+    expect(view.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(true);
+    view.plugin.settings.licenseKey = "paid-license";
+    read.mockResolvedValueOnce({ ...balance, includedCreditsEntitled: true });
+    const pending = view.refreshCreditsBalance();
+    expect(view.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(false);
+    await pending;
+    expect(view.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([false, true, undefined])("presents a billing banner for entitlement %s", async (includedCreditsEntitled) => {
+    const view = createView(jest.fn(async () => balance));
+    view.creditsBalance = { ...balance, includedCreditsEntitled } as any;
+    view.refreshCreditsBalance = jest.fn(async () => undefined);
+    view.workspace.setBanner = jest.fn();
+    await view.handleError({ code: "out_of_credits", message: "private server detail" });
+    if (includedCreditsEntitled === false) {
+      expect(view.workspace.setBanner).toHaveBeenCalledWith(
+        "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.", "error", true,
+      );
+    } else {
+      expect(view.workspace.setBanner).toHaveBeenCalledWith("You have no credits left. Add credits to continue using Chat.", "error");
+    }
+  });
+
   it("reads fresh after a billed turn or a billing failure", async () => {
     const readCreditsBalance = jest.fn(async () => balance);
     const view = createView(readCreditsBalance);

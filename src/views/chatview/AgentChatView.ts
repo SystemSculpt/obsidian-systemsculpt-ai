@@ -774,7 +774,7 @@ export class AgentChatView extends ItemView {
       onOpenHistory: () => this.openHistory(),
       onOpenSettings: () => this.openChatSettings(),
       onOpenCredits: () => this.openCreditsBalanceModal(),
-      showPlanOffer: !this.plugin.settings.licenseKey?.trim(),
+      showPlanOffer: this.shouldOfferPlan(),
       onViewPlans: () => openExternalUrl(
         withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "chat"),
         this.containerEl.ownerDocument.defaultView ?? undefined,
@@ -1158,11 +1158,15 @@ export class AgentChatView extends ItemView {
     return (await this.exportChat(options)).markdown;
   }
 
+  private shouldOfferPlan(): boolean {
+    return !this.plugin.settings.licenseKey?.trim()
+      || this.creditsBalance?.includedCreditsEntitled === false;
+  }
+
   public async refreshCreditsBalance(
     options: CreditsRefreshOptions = {},
   ): Promise<void> {
     const licenseKey = this.plugin.settings.licenseKey?.trim() ?? "";
-    this.workspace?.setPlanOfferVisible(!licenseKey);
     const licenseChanged = this.creditsDisplayLicenseKey !== undefined
       && this.creditsDisplayLicenseKey !== licenseKey;
     this.creditsDisplayLicenseKey = licenseKey;
@@ -1173,6 +1177,7 @@ export class AgentChatView extends ItemView {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
     }
+    this.workspace?.setPlanOfferVisible(this.shouldOfferPlan());
     if (this.agent instanceof LocalAgentChatSession || !licenseKey) {
       this.creditsBalance = null;
       this.workspace?.setCreditsBalance(null);
@@ -1241,6 +1246,7 @@ export class AgentChatView extends ItemView {
         if (!canPublish()) return;
         this.creditsBalance = balance;
         this.workspace?.setCreditsBalance(this.creditsBalance);
+        this.workspace?.setPlanOfferVisible(this.shouldOfferPlan());
         this.recordCreditsRefreshLifecycle({
           code: "credits_refresh_succeeded",
           reason: refreshReason,
@@ -1255,6 +1261,7 @@ export class AgentChatView extends ItemView {
         if (!canPublish()) return;
         this.creditsBalance = null;
         this.workspace?.setCreditsBalance(null);
+        this.workspace?.setPlanOfferVisible(this.shouldOfferPlan());
         const failure = creditsRefreshFailure(error);
         this.recordCreditsRefreshLifecycle({
           code: "credits_refresh_failed",
@@ -1339,6 +1346,7 @@ export class AgentChatView extends ItemView {
       onBalanceUpdated: async (balance) => {
         this.creditsBalance = balance;
         this.workspace?.setCreditsBalance(balance);
+        this.workspace?.setPlanOfferVisible(this.shouldOfferPlan());
       },
       settingsTab: "account",
     });
@@ -1404,8 +1412,12 @@ export class AgentChatView extends ItemView {
       message: rawMessage,
       ...(status === undefined ? {} : { status }),
       retryable,
-    } satisfies ManagedAgentError, retryable);
-    this.workspace?.setBanner(presented.message, "error");
+    } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false);
+    if (presented.action === "see-plans") {
+      this.workspace?.setBanner(presented.message, "error", true);
+    } else {
+      this.workspace?.setBanner(presented.message, "error");
+    }
   }
 
   /**

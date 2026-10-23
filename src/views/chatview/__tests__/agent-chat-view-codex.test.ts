@@ -9,6 +9,7 @@ const prototype = AgentChatView.prototype as any;
 function view(backend: 'codex' | 'claude' | 'systemsculpt' = 'codex') {
   return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
+    shouldOfferPlan: prototype.shouldOfferPlan,
     creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() } } as any;
 }
 it('creates native sessions for the selected backend and retains saved-chat routing over the default', () => {

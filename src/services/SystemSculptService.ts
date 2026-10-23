@@ -73,6 +73,8 @@ export type CreditsBalanceSnapshot = {
   heldInFlight?: number;
   availableUnreserved?: number;
   includedPerMonth: number;
+  /** Undefined when an older server does not report plan entitlement. */
+  includedCreditsEntitled?: boolean;
   usageClass?: "customer" | "master_auth";
   cycleEndsAt: string;
   cycleStartedAt: string;
@@ -252,6 +254,9 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     heldInFlight,
     availableUnreserved,
     includedPerMonth,
+    ...(typeof value.included_credits_entitled === "boolean"
+      ? { includedCreditsEntitled: value.included_credits_entitled }
+      : {}),
     usageClass,
     cycleEndsAt,
     cycleStartedAt,
