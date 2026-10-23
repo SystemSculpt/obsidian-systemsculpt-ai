@@ -65,7 +65,16 @@ export const PHONE_CAPTURE_LINK_CHECK_GAP_MS = 30 * 60_000;
 const PAGE_LIMIT = 50;
 const MAX_PAGES_PER_SYNC = 10;
 const CAPTURE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const MAX_MARKDOWN_CHARS = 200_000;
+/** The server transcribes recordings up to 8 hours: about 450,000 characters of speech. */
+const MAX_MARKDOWN_CHARS = 1_000_000;
+/**
+ * The largest note identity reconciliation reads. A capture note (up to 3
+ * UTF-8 bytes per markdown character, plus frontmatter) must fit, or a long
+ * capture is saved but never verified and acknowledged.
+ */
+const MAX_IDENTITY_NOTE_BYTES = 4 * 1024 * 1024;
+/** Includes reading back each note the sync writes: about ten of the largest. */
+const MAX_IDENTITY_READ_BYTES_PER_SYNC = 32 * 1024 * 1024;
 const MAX_TITLE_CHARS = 200;
 const MAX_COLLISION_SUFFIX = 100;
 
@@ -517,13 +526,14 @@ class CaptureNoteIndex {
       const { size, mtime } = file.stat;
       // Bound both work and allocation; retry after Obsidian indexes a large
       // import instead of scanning all of its contents or creating duplicates.
-      if (++this.reads > 1024 || size > 1024 * 1024 || (this.bytes += size) > 8 * 1024 * 1024) {
+      if (++this.reads > 1024 || size > MAX_IDENTITY_NOTE_BYTES
+        || (this.bytes += size) > MAX_IDENTITY_READ_BYTES_PER_SYNC) {
         throw new Error("Capture identity read budget reached. Retry after indexing.");
       }
       const content = await vault.read(file);
       if (this.dirty.get(file) !== change) continue;
       if (file.stat.size !== size || file.stat.mtime !== mtime) continue;
-      if (content.length > 1024 * 1024) throw new Error("Capture identity note is too large.");
+      if (content.length > MAX_IDENTITY_NOTE_BYTES) throw new Error("Capture identity note is too large.");
       // Only parse YAML frontmatter, never capture_id-like text in the body.
       const frontmatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(content)?.[1];
       if (frontmatter && frontmatter.length > 64 * 1024) throw new Error("Capture frontmatter is too large.");

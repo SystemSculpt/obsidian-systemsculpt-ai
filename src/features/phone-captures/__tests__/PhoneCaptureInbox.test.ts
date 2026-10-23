@@ -238,6 +238,39 @@ describe("PhoneCaptureInbox", () => {
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
   });
 
+  it("saves the transcript of an 8-hour recording (450,000 characters)", async () => {
+    const line = "Speaker 2: Let's go back to the launch plan and who owns each step.\n";
+    const markdown = `${line.repeat(Math.ceil(450_000 / line.length)).slice(0, 449_999)}.`;
+    expect(markdown).toHaveLength(450_000);
+    const { inbox, files, server } = setup({
+      captures: [{ ...CAPTURE, kind: "voice", title: "Planning offsite", markdown, tags: [] }],
+    });
+
+    const result = await inbox.sync();
+
+    const path = "SystemSculpt/Inbox/Planning offsite 2026-10-14.md";
+    expect(result).toMatchObject({ saved: [path], failed: 0 });
+    expect(files.get(path)!.endsWith(`\n\n${markdown}\n`)).toBe(true);
+    expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
+  });
+
+  it("saves several of the largest multi-byte captures in one sync and skips longer ones", async () => {
+    const largest = "会議の記録".repeat(200_000);
+    expect(largest).toHaveLength(1_000_000);
+    const captures = ["cap_a", "cap_b", "cap_c"].map((id) => ({ ...CAPTURE, id, title: id, markdown: largest }));
+    const { inbox, files, server } = setup({
+      captures: [...captures, { ...CAPTURE, id: "cap_long", title: "Too long", markdown: `${largest}x` }],
+    });
+
+    const result = await inbox.sync();
+
+    expect(result).toMatchObject({ failed: 0 });
+    expect(result.saved).toHaveLength(3);
+    for (const path of result.saved) expect(Buffer.byteLength(files.get(path)!)).toBeGreaterThan(3_000_000);
+    expect(server.acks.map((ack) => ack.id)).toEqual(["cap_a", "cap_b", "cap_c"]);
+    expect([...server.pending.keys()]).toEqual(["cap_long"]);
+  });
+
   it("acknowledges a re-delivered capture that is already in the vault without writing again", async () => {
     const moved = "Notes/Moved capture.md";
     const { inbox, vault, server } = setup({
@@ -417,7 +450,7 @@ describe("PhoneCaptureInbox", () => {
     expect(unreadable.server.acks).toHaveLength(0);
     expect(unreadable.listeners.size).toBe(0);
 
-    const large = setup({ files: { "Large.md": "x".repeat(1024 * 1024 + 1) } });
+    const large = setup({ files: { "Large.md": "x".repeat(4 * 1024 * 1024 + 1) } });
     large.unindexed.add("Large.md");
     expect(await large.inbox.sync()).toMatchObject({ saved: [], failed: 1 });
     expect(large.vault.read).not.toHaveBeenCalled();
