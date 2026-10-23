@@ -40,10 +40,13 @@ function host(options: { config?: unknown; spawnError?: string; script?: Script 
 }
 const callbacks = (allow = true) => ({ session: jest.fn(), log: jest.fn(), text: jest.fn(), permission: jest.fn(async () => allow) });
 const input = { prompt: 'Read note.md', workingDirectory: '/vault' };
+// window.crypto is shared by every test file in a worker, so the stub must not outlive this one.
+let uuid: jest.SpyInstance;
 beforeEach(() => {
   jest.clearAllMocks();
-  Object.defineProperty(window.crypto, 'randomUUID', { configurable: true, value: () => SESSION });
+  uuid = jest.spyOn(window.crypto, 'randomUUID').mockReturnValue(SESSION);
 });
+afterEach(() => uuid.mockRestore());
 
 describe('launch arguments', () => {
   it('streams JSON both ways, routes permission prompts to the plugin and asks before edits by default', () => {
