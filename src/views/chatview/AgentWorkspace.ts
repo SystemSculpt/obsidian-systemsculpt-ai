@@ -154,6 +154,7 @@ export class AgentWorkspace extends Component {
   private readonly creditsButton: HTMLButtonElement | null;
   private readonly emptyState: HTMLElement;
   private readonly planOffer: HTMLElement;
+  private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
@@ -242,7 +243,7 @@ export class AgentWorkspace extends Component {
     this.emptyState.createEl("strong", { text: "What should we work on?" });
     this.emptyState.createDiv({ text: "Ask about your notes or give SystemSculpt a task." });
     this.planOffer = this.emptyState.createDiv({ cls: "systemsculpt-agent-plan-offer" });
-    this.planOffer.toggleAttribute("hidden", !options.showPlanOffer || !options.onViewPlans);
+    this.setPlanOfferVisible(options.showPlanOffer === true);
     if (options.onViewPlans) {
       this.planOffer.createDiv({ text: "Explore hosted AI chat, semantic search, and transcription." });
       const plans = createUiAction(this.planOffer, {
@@ -265,6 +266,8 @@ export class AgentWorkspace extends Component {
       onApprove: options.onApprove,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
+      showPlanOffer: () => this.showPlanOffer,
+      onViewPlans: options.onViewPlans,
       onRetryFailedTurn: options.onRetryFailedTurn,
       onCopyIncidentReport: options.onCopyIncidentReport,
       onRetryMessage: options.onRetryMessage,
@@ -447,15 +450,24 @@ export class AgentWorkspace extends Component {
     );
   }
 
-  public setBanner(message: string | null, kind: "info" | "error" = "info"): void {
+  public setBanner(message: string | null, kind: "info" | "error" = "info", showPlanAction = false): void {
     this.banner.toggleAttribute("hidden", !message);
     this.banner.classList.toggle("is-error", kind === "error");
     this.banner.setAttribute("role", kind === "error" ? "alert" : "status");
     this.banner.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
     this.banner.setText(message ?? "");
+    if (message && showPlanAction && this.options.onViewPlans) {
+      const plans = createUiAction(this.banner, {
+        label: "See plans",
+        testId: "chat.banner.see-plans",
+        size: "small",
+      });
+      plans.onclick = () => void this.options.onViewPlans?.();
+    }
   }
 
   public setPlanOfferVisible(visible: boolean): void {
+    this.showPlanOffer = visible;
     this.planOffer.toggleAttribute("hidden", !visible || !this.options.onViewPlans);
   }
 

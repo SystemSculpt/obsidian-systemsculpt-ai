@@ -129,21 +129,24 @@ export class UpgradePlanModal extends StandardModal {
       "AI chat, transcription, and document intelligence — right inside your vault.",
     );
     this.renderIcon("sparkles");
-    this.addDetail("Sign in to connect your account. View paid plans and credit packs for hosted AI features.");
+    this.addDetail("Create a free account to get 500 starter credits for hosted AI. No card needed. Paid plans start at $9/month.");
     this.addLink("upgrade-plan.pricing", "View plans", SYSTEMSCULPT_WEBSITE.LICENSE);
-    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
-    this.addActionButton("upgrade-plan.create-account", "Create free account", () => this.beginConnect("sign-up"));
+    this.addActionButton("upgrade-plan.create-account", "Start free", () => this.beginConnect("sign-up"), true);
+    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), false, "log-in");
     this.addActionButton("upgrade-plan.explore", "Explore on my own", () => this.close());
   }
 
   private renderSignedOut(): void {
     this.addTitle("Unlock SystemSculpt AI", this.featureLine());
     this.renderIcon("sparkles");
-    this.addDetail(PLAN_REQUIRED_MESSAGE);
-    this.addDetail("Sign in with your SystemSculpt account to get started — creating one is free.");
+    this.addDetail("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
     this.addLink("upgrade-plan.pricing", "Compare plans on systemsculpt.com", SYSTEMSCULPT_WEBSITE.LICENSE);
-    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
-    this.addActionButton("upgrade-plan.create-account", "Create free account", () => this.beginConnect("sign-up"));
+    this.addLink("upgrade-plan.license-key", "I have a license key", () => {
+      this.close();
+      this.plugin.openSettingsTab("account");
+    });
+    this.addActionButton("upgrade-plan.create-account", "Start free", () => this.beginConnect("sign-up"), true);
+    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), false, "log-in");
   }
 
   private renderChoosePlan(): void {

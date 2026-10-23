@@ -38,6 +38,13 @@ describe("decodeCreditsBalance", () => {
     },
   );
 
+  it.each([true, false, undefined, null, "false"])("reads only explicit included-credit entitlement (%s)", (entitled) => {
+    expect(decodeCreditsBalance({
+      ...creditsBalancePayload,
+      included_credits_entitled: entitled,
+    }).includedCreditsEntitled).toBe(typeof entitled === "boolean" ? entitled : undefined);
+  });
+
   it("reads whether the account has used the iOS app, false from older servers", () => {
     expect(decodeCreditsBalance(creditsBalancePayload).iosAppLinked).toBe(false);
     expect(decodeCreditsBalance({ ...creditsBalancePayload, ios_app_linked: false }).iosAppLinked).toBe(false);

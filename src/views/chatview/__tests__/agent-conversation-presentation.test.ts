@@ -176,6 +176,17 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     }, false)).toEqual({ heading, message });
   });
 
+  it.each(["out_of_credits", "insufficient_credits", "payment_required"])(
+    "offers monthly before credit packs for a non-entitled account with %s",
+    (code) => {
+      expect(presentAgentError({ code, message: "Remote billing detail." }, false, true)).toEqual({
+        heading: "Out of credits",
+        message: "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.",
+        action: "see-plans",
+      });
+    },
+  );
+
   it("uses the same final copy filter for global banners and tool failures", () => {
     expect(presentAgentErrorMessage(
       "Agent connection closed: WebSocket closed with code 4001",

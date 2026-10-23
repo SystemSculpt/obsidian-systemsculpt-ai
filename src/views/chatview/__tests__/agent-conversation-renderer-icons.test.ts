@@ -2316,6 +2316,40 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
+  it.each([true, false])("renders a billing receipt with a plan action only when offered (%s)", async (showPlanOffer) => {
+    const parent = document.body.createDiv();
+    const onViewPlans = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      showPlanOffer: () => showPlanOffer,
+      onViewPlans,
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "question", content: "Hello",
+    }, {
+      role: "assistant", message_id: "failure", content: "",
+      terminalOutcome: "failed", terminalFailureCode: "out_of_credits", terminalRetryable: false,
+      terminalReportId: `report_${"a".repeat(32)}`,
+    }]);
+    expect(parent.querySelector(".systemsculpt-agent-error-heading")?.textContent).toBe("Out of credits");
+    const action = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.see-plans"]');
+    if (showPlanOffer) {
+      expect(parent.textContent).toContain("Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.");
+      expect(action?.textContent).toBe("See plans");
+      action!.click();
+      expect(onViewPlans).toHaveBeenCalledTimes(1);
+    } else {
+      expect(parent.textContent).toContain("Add credits to continue using Chat.");
+      expect(action).toBeNull();
+    }
+    renderer.unload();
+  });
+
   it("restores one failed receipt card with retry and report ID copy actions", async () => {
     const parent = document.body.createDiv();
     const copyIncidentReport = jest.fn()

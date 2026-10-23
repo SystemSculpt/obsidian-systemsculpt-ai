@@ -116,6 +116,7 @@ function createPlugin(settings: Record<string, unknown> = {}) {
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
     getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
     openNewChat: jest.fn(),
+    openSettingsTab: jest.fn(),
     begin,
     reopen,
     submitManualCode,
@@ -142,16 +143,33 @@ describe("UpgradePlanModal", () => {
     jest.clearAllMocks();
   });
 
-  it("asks a signed-out vault to sign in and explains the plan requirement", () => {
-    const modal = new UpgradePlanModal(createPlugin(), { feature: "Chat" });
+  it("leads a signed-out vault with free starter credits and sign-up", async () => {
+    const plugin = createPlugin();
+    const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Unlock SystemSculpt AI");
-    expect(modal.modalEl.textContent).toContain("Chat needs an active SystemSculpt plan.");
-    expect(modal.modalEl.textContent).toContain(PLAN_REQUIRED_MESSAGE);
+    expect(modal.modalEl.textContent).toContain("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
-    expect(findButtonByText(modal.modalEl, "Create free account")).toBeTruthy();
+    const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
+    expect(start.textContent).toContain("Start free");
+    expect(start.classList.contains("ss-button--primary")).toBe(true);
+    start.click();
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
     modal.onClose();
+  });
+
+  it("opens Account settings for an existing license key", () => {
+    const plugin = createPlugin();
+    const modal = new UpgradePlanModal(plugin);
+    modal.onOpen();
+    const close = jest.spyOn(modal, "close");
+
+    findButtonByText(modal.modalEl, "I have a license key").click();
+
+    expect(close).toHaveBeenCalled();
+    expect(plugin.openSettingsTab).toHaveBeenCalledWith("account");
   });
 
   it("offers lifetime and monthly purchases to a signed-in account without a plan", () => {
@@ -160,6 +178,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
+    expect(modal.modalEl.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
     expect(findButtonByText(modal.modalEl, "Get lifetime license")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
     modal.onClose();
@@ -289,17 +308,31 @@ describe("UpgradePlanModal", () => {
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
   });
 
-  it("renders the soft onboarding welcome with an explore escape hatch", () => {
+  it("leads onboarding with Start free and retains sign-in, explore, and plans", async () => {
     const { hrefs, spy } = spyOnAnchorClicks();
-    const modal = new UpgradePlanModal(createPlugin(), { context: "onboarding" });
+    const plugin = createPlugin();
+    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Welcome to SystemSculpt AI");
     expect(modal.modalEl.textContent).not.toContain(PLAN_REQUIRED_MESSAGE);
-    expect(findButtonByText(modal.modalEl, "Explore on my own")).toBeTruthy();
+    expect(modal.modalEl.textContent).toContain("Create a free account to get 500 starter credits for hosted AI. No card needed. Paid plans start at $9/month.");
+    const actions = Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="upgrade-plan.create-account"], [data-testid="upgrade-plan.sign-in"], [data-testid="upgrade-plan.explore"]',
+    ));
+    expect(actions.map((button) => button.textContent)).toEqual(["Start free", "Sign in", "Explore on my own"]);
+    expect(actions[0].classList.contains("ss-button--primary")).toBe(true);
+    expect(actions[1].classList.contains("ss-button--primary")).toBe(false);
     findButtonByText(modal.modalEl, "View plans").click();
     expect(new URL(hrefs[0]).pathname).toBe("/pricing");
     expect(new URL(hrefs[0]).searchParams.get("utm_source")).toBe("obsidian-plugin");
+    actions[0].click();
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
+    findButtonByText(modal.modalEl, "Back").click();
+    const close = jest.spyOn(modal, "close");
+    findButtonByText(modal.modalEl, "Explore on my own").click();
+    expect(close).toHaveBeenCalled();
     spy.mockRestore();
     modal.onClose();
   });
