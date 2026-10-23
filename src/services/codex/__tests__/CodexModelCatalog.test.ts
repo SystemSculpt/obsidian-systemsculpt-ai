@@ -9,7 +9,7 @@ it('reads bounded native pages and excludes hidden safety-helper models from the
     { model: 'gpt-6-astra', displayName: 'Astra', supportedReasoningEfforts: [{ reasoningEffort: 'high' }], defaultReasoningEffort: 'high', serviceTiers: [{ id: 'priority', name: 'Fast' }] },
     { model: 'platform-reviewer', hidden: true },
   ], nextCursor: 'next' }).mockResolvedValueOnce({ data: [{ model: 'other', supportedReasoningEfforts: [], serviceTiers: [] }], nextCursor: null });
-  const close = jest.fn(); (connectCodex as jest.Mock).mockResolvedValue({ request, close });
+  const close = jest.fn(); (connectCodex as jest.Mock).mockResolvedValue({ request, close, closed: Promise.resolve() });
   const { models, permissions } = await readCodexCatalog('/vault', new AbortController().signal);
   expect(permissions).toBe('Never ask · Full access');
   expect(request).toHaveBeenNthCalledWith(1, 'config/read', { cwd: '/vault', includeLayers: false });
@@ -28,7 +28,7 @@ it('shares simultaneous catalog reads without letting one picker cancel the othe
   const request = jest.fn((method: string) => method === 'config/read'
     ? new Promise(resolve => { resolveConfig = resolve; })
     : Promise.resolve({ data: [] }));
-  const close = jest.fn(); jest.mocked(connectCodex).mockResolvedValue({ request, close });
+  const close = jest.fn(); jest.mocked(connectCodex).mockResolvedValue({ request, close, closed: Promise.resolve() });
   const firstController = new AbortController(), secondController = new AbortController();
   const first = readCodexCatalog('/shared-workspace', firstController.signal);
   const second = readCodexCatalog('/shared-workspace', secondController.signal);
@@ -46,7 +46,7 @@ it('refreshes native permissions on a later same-workspace read while reusing on
   const request = jest.fn(async (method: string) => method === 'config/read'
     ? { config: { approval_policy: approval, sandbox_mode: 'read-only' } }
     : { data: [{ model: 'test-model', supportedReasoningEfforts: [] }] });
-  jest.mocked(connectCodex).mockResolvedValue({ request, close: jest.fn() });
+  jest.mocked(connectCodex).mockResolvedValue({ request, close: jest.fn(), closed: Promise.resolve() });
   await expect(readCodexCatalog('/changing-config', new AbortController().signal)).resolves.toMatchObject({ permissions: 'Never ask · Read only' });
   approval = 'untrusted';
   await expect(readCodexCatalog('/changing-config', new AbortController().signal)).resolves.toMatchObject({ permissions: 'Ask for untrusted actions · Read only' });

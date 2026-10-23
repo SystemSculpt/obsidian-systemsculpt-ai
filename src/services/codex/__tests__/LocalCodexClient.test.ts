@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { win32 } from 'node:path';
-import { runLocalCodex } from '../LocalCodexClient';
+import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
@@ -9,12 +9,14 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
     stdout: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }), stderr: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }),
     stdin: Object.assign(new EventEmitter(), { write: jest.fn() }), kill: jest.fn(),
   });
+  child.kill.mockImplementation(() => { queueMicrotask(() => child.emit('close', 0)); return true; });
   const messages: any[] = [];
+  let turnNumber = 0, turnId = 'native-turn';
   const send = (value: unknown) => child.stdout.emit('data', JSON.stringify(value) + '\n');
   const finish = () => {
     send({ method: 'item/agentMessage/delta', params: { threadId: 'native-thread', delta: 'hello' } });
     send({ method: 'item/completed', params: { threadId: 'native-thread', item: { type: 'agentMessage', text: 'hello' } } });
-    send({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: 'native-turn', status: 'completed' } } });
+    send({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: turnId, status: 'completed' } } });
   };
   child.stdin.write.mockImplementation((line: string) => {
     const msg = JSON.parse(line); messages.push(msg);
@@ -26,7 +28,8 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
       if (msg.method === 'turn/interrupt') send({ id: msg.id, result: {} });
       if (msg.method === 'thread/read') send({ id: msg.id, result: { thread: { id: 'native-thread', turns: options.savedTurn ? [options.savedTurn] : [] } } });
       if (msg.method === 'turn/start') {
-        send({ id: msg.id, result: { turn: { id: 'native-turn' } } });
+        turnId = ++turnNumber === 1 ? 'native-turn' : `native-turn-${turnNumber}`;
+        send({ id: msg.id, result: { turn: { id: turnId } } });
         if (options.requestApproval) send({ id: 99, method: 'item/commandExecution/requestApproval', params: { threadId: 'native-thread', command: 'echo hello' } });
         else if (!options.wait) finish();
       }
@@ -39,7 +42,7 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
   (desktopHost.path as jest.Mock).mockResolvedValue({ isAbsolute: (path: string) => path.startsWith('/'), delimiter: ':', join: (...parts: string[]) => parts.join('/') });
   (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test' });
-  return { child, messages };
+  return { child, messages, send, finish };
 }
 const callbacks = () => ({ log: jest.fn(), thread: jest.fn(), text: jest.fn(), request: jest.fn(async () => ({ decision: 'decline' })) });
 const input = { prompt: 'hello', workingDirectory: '/workspace' };
@@ -65,9 +68,138 @@ it('persists the native identity before admitting a resumed turn', async () => {
 it('forwards native approval requests and the exact decision without auto-approval', async () => {
   const { messages } = host({ requestApproval: true }), cb = callbacks();
   await runLocalCodex(input, new AbortController().signal, cb);
-  expect(cb.request).toHaveBeenCalledWith('item/commandExecution/requestApproval', expect.objectContaining({ command: 'echo hello' }), expect.any(AbortSignal));
+  expect(cb.request).toHaveBeenCalledWith('item/commandExecution/requestApproval', expect.objectContaining({ command: 'echo hello' }), expect.any(AbortSignal), 99);
   expect(messages.find(m => m.id === 99).result).toEqual({ decision: 'decline' });
 });
+it.each(['resolved', 'completed', 'cancelled', 'failed'])('withdraws outstanding native requests and never writes a stale response (%s)', async ending => {
+  const { messages, send, finish, child } = host({ wait: true }), controller = new AbortController();
+  let requestSignal: AbortSignal | undefined, respond!: (value: unknown) => void;
+  const request = jest.fn((_method, _params, signal: AbortSignal) => { requestSignal = signal; return new Promise(resolve => { respond = resolve; }); });
+  const running = runLocalCodex(input, controller.signal, { ...callbacks(), request });
+  void running.catch(() => {});
+  for (let i = 0; i < 60 && !messages.some(message => message.method === 'turn/start'); i++) await Promise.resolve();
+  send({ id: 'approval', method: 'item/commandExecution/requestApproval', params: { threadId: 'native-thread', turnId: 'native-turn', itemId: 'command', command: 'pwd' } });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(requestSignal?.aborted).toBe(false);
+  if (ending === 'resolved') send({ method: 'serverRequest/resolved', params: { threadId: 'native-thread', requestId: 'approval' } });
+  else if (ending === 'completed') finish();
+  else if (ending === 'cancelled') controller.abort();
+  else child.emit('error', new Error('native failed'));
+  expect(requestSignal?.aborted).toBe(true);
+  respond({ decision: 'accept' });
+  if (ending === 'resolved') finish();
+  if (ending === 'cancelled' || ending === 'failed') await expect(running).rejects.toThrow(); else await running;
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(messages.some(message => message.id === 'approval')).toBe(false);
+});
+it('retains exact file diffs for request review and publishes native item activity', async () => {
+  const { messages, send, finish } = host({ wait: true }), activity = jest.fn(), request = jest.fn(async () => ({ decision: 'acceptForSession' }));
+  const running = runLocalCodex(input, new AbortController().signal, { ...callbacks(), activity, request });
+  for (let i = 0; i < 60 && !messages.some(message => message.method === 'turn/start'); i++) await Promise.resolve();
+  const item = { id: 'file', type: 'fileChange', status: 'inProgress', changes: [{ path: '/project/a.md', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-a\n+b' }] };
+  send({ method: 'item/started', params: { threadId: 'native-thread', item } });
+  send({ id: 101, method: 'item/fileChange/requestApproval', params: { threadId: 'native-thread', turnId: 'native-turn', itemId: 'file', reason: 'Review exact changes' } });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(request).toHaveBeenCalledWith('item/fileChange/requestApproval', expect.objectContaining({ change: item }), expect.any(AbortSignal), 101);
+  expect(messages.find(message => message.id === 101)?.result).toEqual({ decision: 'acceptForSession' });
+  expect(activity).toHaveBeenCalledWith(expect.objectContaining({ id: 'file', kind: 'file' }), item);
+  finish(); await running;
+});
+
+describe('chat-owned native transport', () => {
+  it('retains the thread lock and waits for child close before starting a replacement', async () => {
+    const first = host(), transport = new CodexChatTransport();
+    await transport.run(input, new AbortController().signal, callbacks());
+    first.child.kill.mockImplementation(() => true); // Deliberately delay native stdio closure.
+    const second = host();
+    const replacing = transport.run({ ...input, threadId: 'native-thread', effort: 'medium' }, new AbortController().signal, callbacks());
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(first.child.kill).toHaveBeenCalled(); expect(second.messages).toHaveLength(0);
+    await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
+    first.child.emit('close', 0);
+    try { await expect(replacing).resolves.toMatchObject({ status: 'completed' }); }
+    finally { await transport.close(); }
+  });
+  it('emits exact text tail offsets beyond the Studio rolling buffer', async () => {
+    const { messages, send } = host({ wait: true }), transport = new CodexChatTransport(), updates: [string, number][] = [];
+    const running = transport.run(input, new AbortController().signal, { ...callbacks(), text: (text, offset = 0) => updates.push([text, offset]) });
+    for (let i = 0; i < 60 && !messages.some(message => message.method === 'turn/start'); i++) await Promise.resolve();
+    const chunks = ['a'.repeat(255_990), 'b'.repeat(20), 'tail'];
+    for (const delta of chunks) send({ method: 'item/agentMessage/delta', params: { threadId: 'native-thread', turnId: 'native-turn', delta } });
+    const full = chunks.join('');
+    send({ method: 'item/completed', params: { threadId: 'native-thread', turnId: 'native-turn', item: { type: 'agentMessage', text: full } } });
+    send({ method: 'item/agentMessage/delta', params: { threadId: 'native-thread', turnId: 'native-turn', delta: 'next' } });
+    send({ method: 'item/completed', params: { threadId: 'native-thread', turnId: 'native-turn', item: { type: 'agentMessage', text: 'next' } } });
+    send({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: 'native-turn', status: 'completed' } } });
+    try {
+      await running;
+      expect(updates).toEqual([[chunks[0], 0], [chunks[1], 255_990], ['tail', 256_010], [full, 0], ['\n\nnext', full.length], ['\n\nnext', full.length]]);
+      expect(updates.reduce((text, [tail, offset]) => text.slice(0, offset) + tail, '')).toBe(`${full}\n\nnext`);
+    } finally { await transport.close(); }
+  });
+  it('keeps one loaded thread for serial turns and never replays approval answers', async () => {
+    const { messages, child } = host({ requestApproval: true }), notice = jest.fn(), transport = new CodexChatTransport(notice);
+    const first = callbacks(); first.request.mockResolvedValue({ decision: 'acceptForSession' });
+    try {
+      await transport.run(input, new AbortController().signal, first);
+      expect(child.kill).not.toHaveBeenCalled();
+      await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
+      const second = callbacks();
+      await expect(transport.run({ ...input, threadId: 'native-thread' }, new AbortController().signal, second)).resolves.toMatchObject({ turnId: 'native-turn-2' });
+      expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledTimes(1);
+      expect(messages.filter(message => message.method === 'thread/start')).toHaveLength(1);
+      expect(messages.some(message => message.method === 'thread/resume')).toBe(false);
+      expect(second.request).toHaveBeenCalledTimes(1); // Native prompts, not a plugin policy cache, still decide.
+      expect(messages.filter(message => message.id === 99).map(message => message.result)).toEqual([{ decision: 'acceptForSession' }, { decision: 'decline' }]);
+      expect(notice).not.toHaveBeenCalled();
+    } finally { await transport.close(); }
+    expect(child.kill).toHaveBeenCalledTimes(1);
+  });
+  it.each([{ model: 'gpt-5.4' }, { effort: 'medium' }, { workingDirectory: '/other' }])('restarts and explains reset for changed options (%j)', async change => {
+    const first = host(), notice = jest.fn(), transport = new CodexChatTransport(notice);
+    await transport.run(input, new AbortController().signal, callbacks());
+    const second = host();
+    try {
+      await transport.run({ ...input, threadId: 'native-thread', ...change }, new AbortController().signal, callbacks());
+      expect(first.child.kill).toHaveBeenCalledTimes(1); expect(second.messages.some(message => message.method === 'thread/resume')).toBe(true);
+      expect(notice).toHaveBeenCalledWith(expect.stringContaining('Previous session approvals no longer apply'));
+    } finally { await transport.close(); }
+  });
+  it('invalidates idle child exit, releases its lock and reconnects with a reset notice', async () => {
+    const first = host(), notice = jest.fn(), transport = new CodexChatTransport(notice);
+    await transport.run(input, new AbortController().signal, callbacks());
+    first.child.emit('exit', 1);
+    const second = host();
+    try {
+      await transport.run({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks());
+      expect(second.messages.some(message => message.method === 'thread/resume')).toBe(true); expect(notice).toHaveBeenCalledTimes(1);
+    } finally { await transport.close(); }
+  });
+  it('ignores old-turn activity and cancels a subsequent turn through its own signal', async () => {
+    const { messages, send, finish, child } = host({ wait: true }), transport = new CodexChatTransport();
+    const first = transport.run(input, new AbortController().signal, callbacks());
+    for (let i = 0; i < 60 && !messages.some(message => message.method === 'turn/start'); i++) await Promise.resolve();
+    finish(); await first;
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined, respond!: (value: { decision: string }) => void;
+    const second = { ...callbacks(), request: jest.fn((_method, _params, signal: AbortSignal) => { requestSignal = signal; return new Promise(resolve => { respond = resolve; }); }) };
+    const running = transport.run({ ...input, threadId: 'native-thread' }, controller.signal, second);
+    for (let i = 0; i < 60 && messages.filter(message => message.method === 'turn/start').length < 2; i++) await Promise.resolve();
+    send({ method: 'item/agentMessage/delta', params: { threadId: 'native-thread', turnId: 'native-turn', delta: 'stale' } });
+    send({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: 'native-turn', status: 'completed' } } });
+    expect(second.text).not.toHaveBeenCalled();
+    send({ id: 'second-approval', method: 'item/commandExecution/requestApproval', params: { threadId: 'native-thread', turnId: 'native-turn-2', itemId: 'command', command: 'pwd' } });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(requestSignal?.aborted).toBe(false);
+    await expect(transport.run(input, new AbortController().signal, callbacks())).rejects.toThrow('Wait for');
+    controller.abort(); await expect(running).rejects.toThrow('canceled');
+    expect(requestSignal?.aborted).toBe(true); respond({ decision: 'accept' });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(messages.some(message => message.id === 'second-approval')).toBe(false);
+    expect(child.kill).toHaveBeenCalled(); expect(transport.connection).toBeUndefined();
+  });
+});
+
 it('fails before thread creation when the machine is signed out', async () => {
   const { messages, child } = host({ failLogin: true });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('codex login');

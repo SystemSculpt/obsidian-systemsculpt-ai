@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { CLAUDE_SIGN_IN_MESSAGE, claudeLaunchArgs, runLocalClaude } from '../LocalClaudeClient';
+import { CLAUDE_SIGN_IN_MESSAGE, ClaudeChatTransport, claudeLaunchArgs, claudePermissionResponse, runLocalClaude } from '../LocalClaudeClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
@@ -94,6 +94,29 @@ describe('Auto compatibility', () => {
     expect(cb.notice).toHaveBeenCalledTimes(1);
     expect(cb.notice).toHaveBeenCalledWith(expect.stringContaining("Auto mode isn't available"));
   });
+  it.each(['stderr', 'result', 'pipe'])('retains the chat fallback process across follow-up turns after %s rejection', async source => {
+    const fallback = host();
+    const rejected = host({ script: (send, message, child) => {
+      if (message.type !== 'user') return;
+      if (source === 'result') send({ type: 'result', subtype: 'error', is_error: true, errors: ['Auto mode is not available'] });
+      else {
+        if (source === 'pipe') child.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+        child.stderr.emit('data', "error: permission-mode auto is unsupported"); child.emit('close', 1);
+      }
+    } });
+    const spawn = jest.fn().mockImplementationOnce(() => rejected.child).mockImplementationOnce(() => fallback.child);
+    (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn });
+    const resetNotice = jest.fn(), transport = new ClaudeChatTransport(resetNotice), cb = { ...callbacks(), notice: jest.fn() };
+    try {
+      await transport.run(input, new AbortController().signal, cb);
+      expect(fallback.child.stdin.end).not.toHaveBeenCalled();
+      await transport.run({ ...input, sessionId: SESSION }, new AbortController().signal, cb);
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(spawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
+      expect(fallback.messages.filter(message => message.type === 'user')).toHaveLength(2);
+      expect(cb.notice).toHaveBeenCalledTimes(1); expect(resetNotice).not.toHaveBeenCalled();
+    } finally { await transport.close(); }
+  });
   it.each(['manual', 'acceptEdits'])('honors init downgrade to %s without replaying work', async permissionMode => {
     const { spawn, messages } = host({ script: (send, msg) => {
       if (msg.type === 'user') {
@@ -184,6 +207,77 @@ describe('stream', () => {
   });
 });
 
+describe('chat-owned native transport', () => {
+  it('emits exact text tail offsets beyond the Studio rolling buffer', async () => {
+    const chunks = ['a'.repeat(255_990), 'b'.repeat(20), 'tail'], full = chunks.join('');
+    host({ script: (send, message) => {
+      if (message.type !== 'user') return;
+      send({ type: 'system', subtype: 'init', session_id: SESSION });
+      for (const text of chunks) send({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } }, session_id: SESSION });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: full }] }, session_id: SESSION });
+      send({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'next' } }, session_id: SESSION });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'next' }] }, session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: 'next', session_id: SESSION });
+    } });
+    const transport = new ClaudeChatTransport(), updates: [string, number][] = [];
+    try {
+      await transport.run(input, new AbortController().signal, { ...callbacks(), text: (text, offset = 0) => updates.push([text, offset]) });
+      expect(updates).toEqual([[chunks[0], 0], [chunks[1], 255_990], ['tail', 256_010], [full, 0], ['\n\nnext', full.length], ['\n\nnext', full.length]]);
+      expect(updates.reduce((text, [tail, offset]) => text.slice(0, offset) + tail, '')).toBe(`${full}\n\nnext`);
+    } finally { await transport.close(); }
+  });
+  it('retains one process and native grants across serial turns without replaying grants', async () => {
+    let granted = false;
+    const { child, messages, spawn } = host({ script: (send, message) => {
+      if (message.type === 'user') {
+        send({ type: 'system', subtype: 'init', session_id: SESSION });
+        if (!granted) send({ type: 'control_request', request_id: 'grant', request: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: 'command', input: { command: 'pwd' }, permission_suggestions: [{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: 'pwd' }], destination: 'session' }] } });
+        else send({ type: 'result', subtype: 'success', result: 'second', session_id: SESSION });
+      }
+      if (message.type === 'control_response') { granted = true; send({ type: 'result', subtype: 'success', result: 'first', session_id: SESSION }); }
+    } });
+    const transport = new ClaudeChatTransport(), permission = jest.fn(async () => ({ approved: true, rememberForSession: true }));
+    try {
+      await expect(transport.run(input, new AbortController().signal, { ...callbacks(), permission })).resolves.toMatchObject({ text: 'first' });
+      expect(child.stdin.end).not.toHaveBeenCalled();
+      const second = callbacks();
+      await expect(transport.run({ ...input, sessionId: SESSION }, new AbortController().signal, second)).resolves.toMatchObject({ text: 'second' });
+      expect(spawn).toHaveBeenCalledTimes(1); expect(permission).toHaveBeenCalledTimes(1); expect(second.permission).not.toHaveBeenCalled();
+      expect(messages.filter(message => message.type === 'control_response')).toHaveLength(1);
+      await expect(runLocalClaude({ ...input, sessionId: SESSION }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
+    } finally { await transport.close(); }
+    expect(child.stdin.end).toHaveBeenCalledTimes(1);
+  });
+  it.each([{ model: 'opus' }, { permissionMode: 'plan' }, { workingDirectory: '/other' }])('restarts and explains grant reset when options change (%j)', async change => {
+    const first = host(), notice = jest.fn(), transport = new ClaudeChatTransport(notice);
+    await transport.run(input, new AbortController().signal, callbacks());
+    const second = host();
+    try {
+      await transport.run({ ...input, sessionId: SESSION, ...change }, new AbortController().signal, callbacks());
+      expect(first.child.stdin.end).toHaveBeenCalledTimes(1); expect(second.spawn).toHaveBeenCalledTimes(1);
+      expect(notice).toHaveBeenCalledWith(expect.stringContaining('Previous session approvals no longer apply'));
+    } finally { await transport.close(); }
+  });
+  it('invalidates an idle child exit and starts a fresh native process next turn', async () => {
+    const first = host(), notice = jest.fn(), transport = new ClaudeChatTransport(notice);
+    await transport.run(input, new AbortController().signal, callbacks());
+    first.child.emit('close', 0);
+    const second = host();
+    try {
+      await transport.run({ ...input, sessionId: SESSION }, new AbortController().signal, callbacks());
+      expect(second.spawn).toHaveBeenCalledTimes(1); expect(notice).toHaveBeenCalledTimes(1);
+    } finally { await transport.close(); }
+  });
+  it('cancels an active retained turn and rejects concurrent turns', async () => {
+    const { messages, child } = host({ script: () => {} }), transport = new ClaudeChatTransport(), controller = new AbortController();
+    const running = transport.run(input, controller.signal, callbacks());
+    for (let i = 0; i < 60 && !messages.length; i++) await Promise.resolve();
+    await expect(transport.run(input, new AbortController().signal, callbacks())).rejects.toThrow('Wait for');
+    controller.abort(); await expect(running).rejects.toThrow('canceled'); await transport.close();
+    expect(child.stdin.end).toHaveBeenCalled(); expect(transport.connection).toBeUndefined();
+  });
+});
+
 describe('native lifecycle', () => {
   it('names a new session up front and saves it only once Claude Code confirms it', async () => {
     const { spawn } = host({ spawnError: 'ENOENT' }), missing = callbacks();
@@ -247,6 +341,55 @@ describe('native lifecycle', () => {
   });
 });
 
+describe('inline native protocol', () => {
+  it('publishes tool starts, streamed inputs and results matched by tool_use_id', async () => {
+    host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'one', name: 'Bash', input: {} } } });
+      send({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command":"pwd"}' } } });
+      send({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+      send({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'pwd' } }, { type: 'tool_use', id: 'two', name: 'Read', input: { file_path: '/vault/a.md' } }] } });
+      send({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'two', content: 'missing', is_error: true }, { type: 'tool_result', tool_use_id: 'one', content: '/vault' }] } });
+      send({ type: 'result', subtype: 'success', result: 'done', session_id: SESSION });
+    } });
+    const tool = jest.fn(); await runLocalClaude(input, new AbortController().signal, { ...callbacks(), tool });
+    expect(tool.mock.calls.map(([activity]) => [activity.id, activity.state])).toEqual([
+      ['one', 'input-streaming'], ['one', 'input-streaming'], ['one', 'running'], ['one', 'running'], ['two', 'running'], ['two', 'failed'], ['one', 'succeeded'],
+    ]);
+    expect(tool).toHaveBeenCalledWith(expect.objectContaining({ id: 'one', input: { command: 'pwd' } }));
+    expect(tool).toHaveBeenLastCalledWith({ id: 'one', state: 'succeeded', output: '/vault' });
+  });
+  it('sends exact suggested permission updates with session destinations only', async () => {
+    const suggestions = [
+      { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'git diff:*' }], behavior: 'allow', destination: 'localSettings' },
+      { type: 'addDirectories', directories: ['/workspace'], destination: 'userSettings' },
+      { type: 'replaceRules', rules: [{ toolName: 'Read' }], behavior: 'allow', destination: 'projectSettings' },
+      { type: 'removeRules', rules: [{ toolName: 'Edit' }], behavior: 'deny', destination: 'session' },
+      { type: 'removeDirectories', directories: ['/old'], destination: 'cliArg' },
+      { type: 'setMode', mode: 'plan', destination: 'session' },
+    ];
+    const toolInput = { command: 'git diff' };
+    const { messages } = host({ script: (send, msg) => {
+      if (msg.type === 'user') send({ type: 'control_request', request_id: 'permission', request: { subtype: 'can_use_tool', tool_use_id: 'bash', tool_name: 'Bash', input: toolInput, description: 'Inspect changes', decision_reason: 'Needs consent', permission_suggestions: suggestions } });
+      if (msg.type === 'control_response') send({ type: 'result', subtype: 'success', result: 'done', session_id: SESSION });
+    } });
+    const permission = jest.fn(async () => ({ approved: true, rememberForSession: true }));
+    await runLocalClaude(input, new AbortController().signal, { ...callbacks(), permission });
+    expect(permission).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'permission', toolUseId: 'bash', description: 'Inspect changes\nNeeds consent', permissionSuggestions: suggestions }), expect.any(AbortSignal));
+    expect(messages.find(message => message.type === 'control_response').response.response).toEqual({ behavior: 'allow', updatedInput: toolInput, updatedPermissions: suggestions.map(suggestion => ({ ...suggestion, destination: 'session' })) });
+    expect(suggestions[0].destination).toBe('localSettings');
+  });
+  it('never grants bypass/dontAsk modes and never synthesizes suggestions', () => {
+    const request = { toolName: 'Bash', description: '', input: { command: 'pwd' }, permissionSuggestions: ['bypassPermissions', 'dontAsk'].map(mode => ({ type: 'setMode', mode, destination: 'session' })) };
+    expect(claudePermissionResponse(request, { approved: true, rememberForSession: true })).toEqual({ behavior: 'allow', updatedInput: request.input });
+    expect(claudePermissionResponse(request, { approved: false, rememberForSession: true })).toEqual({ behavior: 'deny', message: 'The user declined this action in SystemSculpt.' });
+  });
+  it('maps inline question answers into the native updatedInput', () => {
+    const questions = [{ question: 'Which color?', header: 'Color', options: [{ label: 'Blue', description: 'Cool' }] }];
+    expect(claudePermissionResponse({ toolName: 'AskUserQuestion', description: '', input: { questions } }, { approved: true, answers: { 'Which color?': ['Blue'] } })).toEqual({ behavior: 'allow', updatedInput: { questions, answers: { 'Which color?': 'Blue' } } });
+  });
+});
+
 describe('permissions', () => {
   const edit = { type: 'control_request', request_id: 'req-1', request: { subtype: 'can_use_tool', tool_name: 'Edit', description: 'note.md', input: { file_path: '/vault/note.md', old_string: 'a', new_string: 'b' } } };
   const permissionScript = (extra?: (send: (value: unknown) => void) => void): Script => (send, msg) => {
@@ -256,7 +399,7 @@ describe('permissions', () => {
   it('forwards an approved edit with its unchanged input', async () => {
     const { messages } = host({ script: permissionScript() }), cb = callbacks(true);
     await runLocalClaude(input, new AbortController().signal, cb);
-    expect(cb.permission).toHaveBeenCalledWith({ toolName: 'Edit', description: 'note.md', input: edit.request.input }, expect.any(AbortSignal));
+    expect(cb.permission).toHaveBeenCalledWith({ toolName: 'Edit', description: 'note.md', input: edit.request.input, requestId: 'req-1' }, expect.any(AbortSignal));
     expect(messages.find(m => m.type === 'control_response').response).toEqual({ subtype: 'success', request_id: 'req-1', response: { behavior: 'allow', updatedInput: edit.request.input } });
   });
   it('denies a declined edit', async () => {
