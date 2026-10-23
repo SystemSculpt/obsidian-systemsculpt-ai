@@ -487,6 +487,27 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it("queues a second note added while the first is still being read instead of dropping it", async () => {
+    const plan = new TFile({ path: "Plan.md" });
+    const ideas = new TFile({ path: "Ideas.md" });
+    const { app } = vaultApp([plan, ideas]);
+    let releaseFirst!: () => void;
+    const firstRead = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    (app.vault as any).readBinary = jest.fn(async (file: TFile) => {
+      if (file === plan) await firstRead;
+      return Uint8Array.from(Buffer.from(`# ${file.basename}`)).buffer;
+    });
+    const { composer } = mount({ app });
+    const first = (composer as any).addVaultFiles([plan]);
+    const second = (composer as any).addVaultFiles([ideas]);
+    await settle();
+    expect(composer.getMessageAttachments()).toEqual([]);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(composer.getMessageAttachments().map((attachment) => attachment.name)).toEqual(["Plan.md", "Ideas.md"]);
+    composer.unload();
+  });
+
   it("only treats @ at a word start and an open [[ as mentions", () => {
     expect(findComposerMentionTrigger("email me@x", 10)).toBeNull();
     expect(findComposerMentionTrigger("@", 1)).toEqual({ start: 0, end: 1, query: "", kind: "@" });

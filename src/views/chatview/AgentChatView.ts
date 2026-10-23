@@ -740,7 +740,7 @@ export class AgentChatView extends ItemView {
     }
     this.codexControlsCleanup?.(); this.codexControlsCleanup = this.workspace?.composer?.element ? mountCodexExecutionControls(this.workspace.composer.element, this.plugin, { backend: backendOf(this.agent), onProviderChange: () => this.plugin.openNewChat(), claudeAutoUnavailable: () => this.claudeAutoUnavailable }) : undefined;
     const backend = backendOf(this.agent);
-    this.workspace?.composer.setAgentName(backend === "systemsculpt" ? "SystemSculpt" : LOCAL_AGENTS[backend]);
+    this.workspace?.composer?.setAgentName?.(backend === "systemsculpt" ? "SystemSculpt" : LOCAL_AGENTS[backend]);
   }
 
   public get messages(): ChatMessage[] {

@@ -152,6 +152,7 @@ export class AgentComposer extends Component {
   private recallIndex: number | null = null;
   private dragDepth = 0;
   private hostClearance = 0;
+  private attachmentQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly parent: HTMLElement, private readonly options: AgentComposerOptions) {
     super();
@@ -361,6 +362,8 @@ export class AgentComposer extends Component {
   public resetDraft(): void {
     this.attachmentGeneration += 1;
     this.attachmentBusy = false;
+    // Work still settling for the old draft must not hold up the new one.
+    this.attachmentQueue = Promise.resolve();
     this.messageAttachments.dispose();
     this.input.value = "";
     this.filePicker.value = "";
@@ -1117,11 +1120,29 @@ export class AgentComposer extends Component {
       collection.retry(id, this.input.value));
   }
 
-  private async runAttachmentOperation(
+  /**
+   * Attachment work runs one operation at a time, in order: a second drop or
+   * mention while a file is still being read waits instead of being lost.
+   * Work queued for a draft that has since been reset is skipped.
+   */
+  private runAttachmentOperation(
     label: string,
     run: (collection: ChatMessageAttachmentCollection) => Promise<ChatAttachmentIngestionResult>,
   ): Promise<void> {
-    if (this.attachmentBusy || this.readOnlyMessage) return;
+    const generation = this.attachmentGeneration;
+    const next = this.attachmentQueue.then(() => {
+      if (generation !== this.attachmentGeneration) return undefined;
+      return this.performAttachmentOperation(label, run);
+    });
+    this.attachmentQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async performAttachmentOperation(
+    label: string,
+    run: (collection: ChatMessageAttachmentCollection) => Promise<ChatAttachmentIngestionResult>,
+  ): Promise<void> {
+    if (this.readOnlyMessage) return;
     const generation = this.attachmentGeneration;
     const collection = this.messageAttachments;
     this.attachmentBusy = true;

@@ -7,6 +7,7 @@ import { isRecord } from '../../studio/utils';
 import { CodexThreadLocator } from './CodexThreadLocator';
 import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
+import { localAgentPromptText } from './LocalAgentMessageParts';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
 export type LocalAgentToolUpdate = Pick<AgentToolPart, 'callId' | 'state'> & Partial<Pick<AgentToolPart, 'name' | 'input' | 'inputText' | 'native' | 'output' | 'error'>>;
@@ -174,11 +175,7 @@ export class LocalAgentChatSession implements ChatSession {
       const cwd = await localAgentChatDirectory(this.app), threadId = await this.locator.read(input.conversationId);
       await input.buildBody?.(controller.signal);
       const images: string[] = [];
-      const userText = input.message.parts.map(value => {
-        if (value.type === 'text') return value.text;
-        if (value.mediaType.startsWith('image/')) { images.push(value.url); return ''; }
-        throw new Error(`This attachment must be converted to text or an image before sending it to ${name}.`);
-      }).join('\n');
+      const userText = input.message.parts.map(value => localAgentPromptText(value, images, name)).join('\n');
       const context = this.sources.map(source => {
         if (source.kind === 'image') { images.push(source.data_url); return `Attached image: ${source.path}`; }
         return source.kind === 'text' ? `File: ${source.path}\n${source.content}` : `Read the attached document from this vault path: ${source.path}`;
