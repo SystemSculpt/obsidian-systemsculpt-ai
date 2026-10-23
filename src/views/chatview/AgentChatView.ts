@@ -106,7 +106,6 @@ import { showConfirm } from "../../core/ui/notifications";
 import { normalizeFirstPartyToolName } from "../../tools/toolNames";
 import {
   createSurfaceElement,
-  createSurfaceFragment,
   getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
@@ -3034,7 +3033,6 @@ export class AgentChatView extends ItemView {
   private showApprovalNotice(part: AgentToolPart): void {
     if (this.closing || this.approvalNoticeSurface?.isConnected) return;
     const owner = this.containerEl.ownerDocument;
-    const fragment = createSurfaceFragment(owner);
     const surface = createSurfaceElement(owner, "div");
     applyPluginSurface(surface, "transient");
     const button = createUiAction(surface, {
@@ -3043,8 +3041,11 @@ export class AgentChatView extends ItemView {
       tooltip: false,
     });
     button.addClass("systemsculpt-agent-approval-notice");
-    fragment.appendChild(surface);
-    const notice = new Notice(fragment, 0);
+    // Notice's fragment check belongs to its original window, not this pop-out.
+    const notice = new Notice("", 0);
+    // Use the public 1.7.2 API shape; the replacement messageEl requires a newer host.
+    const messageElement = (notice as { noticeEl: HTMLElement }).noticeEl;
+    messageElement.replaceChildren(surface);
     this.approvalNotice = notice;
     this.approvalNoticeSurface = surface;
     // Notice normally mounts in the active window; keep this one with its chat.

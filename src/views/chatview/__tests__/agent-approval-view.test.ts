@@ -33,8 +33,10 @@ it("puts one clickable waiting Notice in the chat's owner document and reveals t
   const otherWindowNotices = document.body.createDiv({ cls: "notice-container" });
   const noticeContainer = document.body.createDiv({ cls: "notice" });
   const hide = jest.fn(() => noticeContainer.remove());
-  (Notice as unknown as jest.Mock).mockImplementationOnce((message: DocumentFragment) => {
-    noticeContainer.appendChild(message);
+  (Notice as unknown as jest.Mock).mockImplementationOnce((message: string) => {
+    // Obsidian rejects a DocumentFragment from another window's realm.
+    expect(typeof message).toBe("string");
+    noticeContainer.textContent = message;
     otherWindowNotices.appendChild(noticeContainer);
     return { noticeEl: noticeContainer, hide };
   });
