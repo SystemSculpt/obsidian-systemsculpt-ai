@@ -1360,8 +1360,9 @@ export class AgentChatView extends ItemView {
     if (this.agent instanceof LocalAgentChatSession) return null;
     if (hasActivePlan(this.plugin)) return null;
     const email = this.plugin.settings?.userEmail?.trim();
-    return email
-      ? "Your account has no active plan yet. Send a message to see plan options."
+    if (email) return "Your account has no active plan yet. Send a message to see plan options.";
+    return hasHostCapability("local-cli", this.containerEl)
+      ? "Sign in to SystemSculpt to start chatting, or switch Provider to your own Claude Code or Codex."
       : "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.";
   }
 

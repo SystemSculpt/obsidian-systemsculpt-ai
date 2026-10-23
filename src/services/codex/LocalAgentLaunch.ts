@@ -1,5 +1,6 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
+import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
 
 export type LocalAgentLaunchConfig = {
   configPath: string;
@@ -35,4 +36,26 @@ export async function readLocalAgentLaunchConfig(name: string, label: string): P
     '/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local/bin'), path.join(home, '.npm-global/bin'),
   ])].filter(Boolean).join(path.delimiter);
   return { configPath, home, setting, environment };
+}
+
+/** True when the agent's CLI resolves to a file the way its launch would find it. Never starts it. */
+export async function isLocalAgentInstalled(agent: LocalAgentId): Promise<boolean> {
+  try {
+    const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
+    const { setting, environment } = await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
+    const binary = setting('binary', agent), windows = os.platform() === 'win32';
+    const extensions = windows ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
+    const folders = path.isAbsolute(binary) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
+    for (const folder of folders) for (const extension of extensions) {
+      const stat = await fs.stat(folder ? path.join(folder, binary + extension) : binary + extension).catch(() => null);
+      if (stat?.isFile() && (windows || (stat.mode & 0o111) !== 0)) return true;
+    }
+  } catch { /* An unreadable launch setting shows its own guidance when the agent runs. */ }
+  return false;
+}
+
+/** Claude Code unless only Codex is installed; with neither, Claude Code's chat explains how to install it. */
+export async function preferredLocalAgent(): Promise<LocalAgentId> {
+  if (await isLocalAgentInstalled('claude')) return 'claude';
+  return await isLocalAgentInstalled('codex') ? 'codex' : 'claude';
 }
