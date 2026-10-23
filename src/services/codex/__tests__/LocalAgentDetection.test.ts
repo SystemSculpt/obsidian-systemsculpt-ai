@@ -152,6 +152,43 @@ it('gives an explicit machine-local Codex home precedence over CODEX_HOME', asyn
   expect(host.execFile).toHaveBeenCalledWith('/bin/codex', ['login', 'status'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/home/test/chosen-codex' }) }), expect.any(Function));
 });
 
+it('resolves relative Claude binaries and status in the task directory without reusing another vault cache', async () => {
+  const host = machine({ configs: { claude: { binary: './tools/claude' } }, signedIn: ['claude'] });
+  host.file('/vault-a/tools/claude');
+  host.file('/bin/tools/claude'); // PATH must not satisfy an explicitly relative path.
+  const first = detectLocalAgents({ workingDirectory: '/vault-a' });
+  expect(detectLocalAgents({ workingDirectory: '/vault-a' })).toBe(first);
+  expect((await first).preferred).toBe('claude');
+  expect((await detectLocalAgents({ workingDirectory: '/vault-b' })).preferred).toBe('systemsculpt');
+  expect((await detectLocalAgents()).agents.claude.installed).toBe(false);
+  expect(host.execFile).toHaveBeenCalledWith('/vault-a/tools/claude', ['auth', 'status', '--json'], expect.objectContaining({ cwd: '/vault-a' }), expect.any(Function));
+  expect(await preferredLocalAgent({ workingDirectory: '/vault-a' })).toBe('claude');
+});
+
+it('resolves a relative Codex binary from transport home rather than the vault', async () => {
+  const host = machine({ configs: { codex: { binary: './tools/codex' } } });
+  host.file('/home/test/tools/codex');
+  expect((await detectLocalAgents({ workingDirectory: '/vault' })).agents.codex.signedIn).toBe(true);
+  expect(host.execFile).toHaveBeenCalledWith('/home/test/tools/codex', ['login', 'status'], expect.objectContaining({ cwd: '/home/test' }), expect.any(Function));
+});
+
+it('visits dated Codex directories newest-first and stops before listing older history', async () => {
+  const host = machine();
+  // Deliberately create directories out of chronological order.
+  host.file('/home/test/.codex/sessions/2020/01/01/oldest.jsonl', now - 100 * day);
+  host.file('/home/test/.codex/sessions/2026/08/01/old.jsonl', now - 80 * day);
+  host.file('/home/test/.codex/sessions/2026/09/01/older.jsonl', now - 50 * day);
+  host.file('/home/test/.codex/sessions/2026/09/20/newest-old.jsonl', now - 33 * day);
+  host.file('/home/test/.codex/sessions/2026/10/23/recent.jsonl', now);
+  const result = await detectLocalAgents();
+  expect(result.agents.codex).toMatchObject({ recentSessionCount: 1, lastUsed: now });
+  const paths = host.fs.readdir.mock.calls.map(([path]) => path);
+  expect(paths.indexOf('/home/test/.codex/sessions/2026/10/23')).toBeLessThan(paths.indexOf('/home/test/.codex/sessions/2026/09/20'));
+  expect(paths).not.toContain('/home/test/.codex/sessions/2026/09/01');
+  expect(paths).not.toContain('/home/test/.codex/sessions/2026/08');
+  expect(paths).not.toContain('/home/test/.codex/sessions/2020');
+});
+
 it('retains installed status when the native home is missing and does not run its auth command', async () => {
   const host = machine({ environment: { CODEX_HOME: '/missing/codex' } });
   expect((await detectLocalAgents()).agents.codex).toMatchObject({ installed: true, signedIn: false });

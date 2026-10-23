@@ -19,7 +19,7 @@ export type LocalAgentDetection = Readonly<{
 const PROBE_TIMEOUT_MS = 3000;
 const RECENT_USAGE_MS = 30 * 24 * 60 * 60 * 1000;
 const unavailable = (): LocalAgentAvailability => ({ installed: false, signedIn: false, recentSessionCount: 0, lastUsed: null });
-let cachedDetection: Promise<LocalAgentDetection> | undefined;
+const cachedDetections = new Map<string | undefined, Promise<LocalAgentDetection>>();
 
 /** Only booleans and aggregate timestamps/counts leave the probe; status output is never retained. */
 async function signedIn(agent: LocalAgentId, binary: string, environment: Record<string, string | undefined>, cwd: string, signal: AbortSignal): Promise<boolean> {
@@ -71,24 +71,22 @@ async function sessionUsage(agent: LocalAgentId, home: string, deadline: number)
     const root = path.join(home, 'sessions');
     // Codex partitions primary sessions by start date. Inspect recent days and
     // the newest older day for last-used evidence, rather than walking history.
-    const days: string[] = [];
-    for (const year of (await list(root)).filter(entry => entry.isDirectory() && /^\d{4}$/.test(entry.name)).reverse()) {
-      for (const month of (await list(path.join(root, year.name))).filter(entry => entry.isDirectory() && /^(0[1-9]|1[0-2])$/.test(entry.name)).reverse()) {
-        for (const day of await list(path.join(root, year.name, month.name))) {
-          if (day.isDirectory() && /^(0[1-9]|[12]\d|3[01])$/.test(day.name)) days.push(`${year.name}/${month.name}/${day.name}`);
+    const newestDirectories = async (directory: string, pattern: RegExp) => (await list(directory))
+      .filter(entry => entry.isDirectory() && pattern.test(entry.name)).map(entry => entry.name).sort().reverse();
+    for (const year of await newestDirectories(root, /^\d{4}$/)) {
+      for (const month of await newestDirectories(path.join(root, year), /^(0[1-9]|1[0-2])$/)) {
+        for (const day of await newestDirectories(path.join(root, year, month), /^(0[1-9]|[12]\d|3[01])$/)) {
+          if (Date.now() >= deadline) return usage;
+          await sessions(path.join(root, year, month, day));
+          if (Date.parse(`${year}-${month}-${day}T23:59:59.999Z`) < cutoff) return usage;
         }
       }
-    }
-    for (const day of days.sort().reverse()) {
-      if (Date.now() >= deadline) break;
-      await sessions(path.join(root, ...day.split('/')));
-      if (Date.parse(`${day.replace(/\//g, '-')}T23:59:59.999Z`) < cutoff) break;
     }
   }
   return usage;
 }
 
-async function probe(agent: LocalAgentId): Promise<LocalAgentAvailability> {
+async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<LocalAgentAvailability> {
   const state = { ...unavailable() };
   const deadline = Date.now() + PROBE_TIMEOUT_MS;
   const controller = new AbortController();
@@ -96,16 +94,17 @@ async function probe(agent: LocalAgentId): Promise<LocalAgentAvailability> {
   const work = async () => {
     try {
       const launch = await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
-      const binary = await resolveLocalAgentBinary(agent, launch);
+      const binary = await resolveLocalAgentBinary(agent, launch, workingDirectory);
       if (!binary || Date.now() >= deadline) return;
       state.installed = true;
       const path = await desktopHost.path();
       const native = agent === 'codex' ? await resolveCodexLaunchOptions(launch) : null;
       const environment: Record<string, string | undefined> = { ...(native?.environment ?? launch.environment) };
       delete environment.CLAUDECODE;
-      const home = native?.codexHome ?? (environment.CLAUDE_CONFIG_DIR || path.join(launch.home, '.claude'));
+      const cwd = agent === 'codex' ? launch.home : workingDirectory || launch.home;
+      const home = native?.codexHome ?? path.resolve(cwd, environment.CLAUDE_CONFIG_DIR || path.join(launch.home, '.claude'));
       await Promise.all([
-        signedIn(agent, binary, environment, launch.home, controller.signal).then(value => { state.signedIn = value; }),
+        signedIn(agent, binary, environment, cwd, controller.signal).then(value => { state.signedIn = value; }),
         sessionUsage(agent, home, deadline).then(value => { Object.assign(state, value); }),
       ]);
     } catch { /* An unavailable CLI or inaccessible store must not block hosted chat. */ }
@@ -126,23 +125,27 @@ function preferredAgent(agents: LocalAgentDetection['agents']): TextExecutionBac
   return usable[0] ?? 'systemsculpt';
 }
 
-/** Cached for this Obsidian session; no polling and no persistent machine-usage data. */
-export function detectLocalAgents(options: { force?: boolean } = {}): Promise<LocalAgentDetection> {
+/** Cached per task directory for this Obsidian session; no polling or persistent usage data. */
+export function detectLocalAgents(options: { force?: boolean; workingDirectory?: string } = {}): Promise<LocalAgentDetection> {
   if (!hasHostCapability('local-cli')) return Promise.resolve({ preferred: 'systemsculpt', agents: { claude: unavailable(), codex: unavailable() } });
   if (options.force) invalidateLocalAgentDetection();
-  cachedDetection ??= Promise.all([probe('claude'), probe('codex')]).then(([claude, codex]) => {
-    const agents = { claude, codex };
-    return { preferred: preferredAgent(agents), agents };
-  });
-  return cachedDetection;
+  let detection = cachedDetections.get(options.workingDirectory);
+  if (!detection) {
+    detection = Promise.all([probe('claude', options.workingDirectory), probe('codex', options.workingDirectory)]).then(([claude, codex]) => {
+      const agents = { claude, codex };
+      return { preferred: preferredAgent(agents), agents };
+    });
+    cachedDetections.set(options.workingDirectory, detection);
+  }
+  return detection;
 }
 
 export function invalidateLocalAgentDetection(): void {
-  cachedDetection = undefined;
+  cachedDetections.clear();
 }
 
 /** The explicit welcome action still offers Claude Code's install guidance when neither is usable. */
-export async function preferredLocalAgent(): Promise<LocalAgentId> {
-  const { preferred } = await detectLocalAgents();
+export async function preferredLocalAgent(options: { workingDirectory?: string } = {}): Promise<LocalAgentId> {
+  const { preferred } = await detectLocalAgents(options);
   return preferred === 'systemsculpt' ? 'claude' : preferred;
 }

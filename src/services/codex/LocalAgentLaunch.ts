@@ -39,14 +39,21 @@ export async function readLocalAgentLaunchConfig(name: string, label: string): P
 }
 
 /** Resolves the same machine-local binary and PATH a native run uses. Never starts it. */
-export async function resolveLocalAgentBinary(agent: LocalAgentId, launch?: LocalAgentLaunchConfig): Promise<string | null> {
+export async function resolveLocalAgentBinary(agent: LocalAgentId, launch?: LocalAgentLaunchConfig, workingDirectory?: string): Promise<string | null> {
   const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
-  const { setting, environment } = launch ?? await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
+  const { setting, environment, home } = launch ?? await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
   const binary = setting('binary', agent), windows = os.platform() === 'win32';
+  // Codex starts its app-server from home; Claude Code starts in the task's cwd.
+  const cwd = agent === 'codex' ? home : workingDirectory;
+  const relativePath = !path.isAbsolute(binary) && (binary.includes('/') || (windows && binary.includes('\\')));
+  if (relativePath && (!cwd || !path.isAbsolute(cwd))) return null;
+  const command = relativePath ? path.resolve(cwd!, binary) : binary;
   const extensions = windows ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
-  const folders = path.isAbsolute(binary) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
+  const folders = path.isAbsolute(command) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
   for (const folder of folders) for (const extension of extensions) {
-    const candidate = folder ? path.join(folder, binary + extension) : binary + extension;
+    if (folder && !path.isAbsolute(folder) && (!cwd || !path.isAbsolute(cwd))) continue;
+    const directory = folder && !path.isAbsolute(folder) ? path.resolve(cwd!, folder) : folder;
+    const candidate = directory ? path.join(directory, command + extension) : command + extension;
     const stat = await fs.stat(candidate).catch(() => null);
     if (stat?.isFile() && (windows || (stat.mode & 0o111) !== 0)) return candidate;
   }
