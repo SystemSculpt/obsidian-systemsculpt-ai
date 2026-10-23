@@ -1,5 +1,6 @@
 import {
   ChatMessageAttachmentCollection,
+  isSupportedChatAttachmentName,
   composeAttachmentMetadata,
   composeUserMessageContent,
   restoreChatMessageDraft,
@@ -203,6 +204,50 @@ describe("ChatMessageAttachmentCollection", () => {
     for (let turn = 0; signals.length < count && turn < 100; turn++) await Promise.resolve();
     expect(signals).toHaveLength(count);
   }
+
+  it("names vault attachments by their vault path so the agent can find the note", async () => {
+    const collection = new ChatMessageAttachmentCollection(reader({ "Plan.md": "# Plan", "song.mp3": "id3" }));
+    const result = await collection.addVaultFiles([
+      { path: "Projects/Q4/Plan.md", file: file("Plan.md", "", "# Plan") },
+      { path: "Audio/song.mp3", file: file("song.mp3", "", "id3") },
+    ]);
+    expect(result.accepted.map((attachment) => attachment.name)).toEqual(["Projects/Q4/Plan.md"]);
+    const part = result.accepted[0].contentPart;
+    expect(part.type === "text" ? parseAttachedTextContent(part.text)?.name : null).toBe("Projects/Q4/Plan.md");
+    expect(result.issues).toEqual([expect.objectContaining({ code: "unsupported", fileName: "Audio/song.mp3" })]);
+    expect(isSupportedChatAttachmentName("Plan.md")).toBe(true);
+    expect(isSupportedChatAttachmentName("diagram.webp")).toBe(true);
+    expect(isSupportedChatAttachmentName("report.pdf")).toBe(true);
+    expect(isSupportedChatAttachmentName("song.mp3")).toBe(false);
+  });
+
+  it("lists a document as processing while it converts, including during a retry", async () => {
+    const { processor, signals } = stalledProcessor();
+    const onChange = jest.fn();
+    const collection = new ChatMessageAttachmentCollection(
+      reader({ "slow.pdf": "%PDF" }),
+      processor,
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+      onChange,
+    );
+    const pending = collection.addFiles([file("slow.pdf", "application/pdf", "%PDF")]);
+    await started(signals);
+    expect(onChange).toHaveBeenCalled();
+    expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "processing", name: "slow.pdf" })]);
+    expect(collection.snapshot()).toEqual([]);
+    expect(collection.hasEntries()).toBe(true);
+    collection.cancelProcessing();
+    await pending;
+    const failed = collection.displaySnapshot()[0];
+    expect(failed.status).toBe("failed");
+
+    const retry = collection.retry(failed.id);
+    await started(signals, 2);
+    expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "processing", id: failed.id })]);
+    expect(collection.remove(failed.id)).toBe(true);
+    expect(await retry).toEqual({ accepted: [], issues: [] });
+    expect(collection.displaySnapshot()).toEqual([]);
+  });
 
   it("stops a document still processing when the user cancels, and keeps it for a retry (#420)", async () => {
     const { processor, signals } = stalledProcessor();
