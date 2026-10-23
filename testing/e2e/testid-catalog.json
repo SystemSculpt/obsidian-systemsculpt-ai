@@ -227,6 +227,7 @@
     "upgrade-plan.reopen",
     "upgrade-plan.sign-in",
     "upgrade-plan.subscribe",
-    "upgrade-plan.sync"
+    "upgrade-plan.sync",
+    "upgrade-plan.use-local-agent"
   ]
 }

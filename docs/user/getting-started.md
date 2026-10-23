@@ -34,6 +34,7 @@ npm run build
 
 - Command palette: `Open SystemSculpt Chat`
 - Ribbon icon: `Open SystemSculpt Chat`
+- Desktop welcome: **Use my Claude Code or Codex** opens a chat on your installed Claude Code, or on Codex when only Codex is installed. No SystemSculpt account is needed.
 
 ## On-machine Codex (desktop)
 

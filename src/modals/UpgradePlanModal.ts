@@ -4,6 +4,8 @@ import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
+import { hasHostCapability } from "../platform/hostCapabilities";
+import { preferredLocalAgent } from "../services/codex/LocalAgentLaunch";
 import { AccountConnectModal, type AccountConnectActions } from "./AccountConnectModal";
 import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode } from "../services/AccountConnectService";
@@ -124,16 +126,40 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   private renderOnboarding(): void {
+    // On-machine agents run on desktop only; mobile keeps the account path.
+    const localAgents = hasHostCapability("local-cli", this.modalEl);
     this.addTitle(
       "Welcome to SystemSculpt AI",
       "AI chat, transcription, and document intelligence — right inside your vault.",
     );
     this.renderIcon("sparkles");
     this.addDetail("Create a free account to get 500 starter credits for hosted AI. No card needed. Paid plans start at $9/month.");
+    if (localAgents) {
+      this.addDetail("Already use Claude Code or Codex? Chat with your vault through your own install. No account needed.");
+    }
     this.addLink("upgrade-plan.pricing", "View plans", SYSTEMSCULPT_WEBSITE.LICENSE);
     this.addActionButton("upgrade-plan.create-account", "Start free", () => this.beginConnect("sign-up"), true);
     this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), false, "log-in");
+    if (localAgents) {
+      this.addActionButton("upgrade-plan.use-local-agent", "Use my Claude Code or Codex", () => this.useLocalAgent(), false, "terminal");
+    }
     this.addActionButton("upgrade-plan.explore", "Explore on my own", () => this.close());
+  }
+
+  /**
+   * Opens a new chat on the user's own Claude Code (or Codex when only Codex
+   * is installed), exactly as choosing it in the chat's Provider menu would.
+   */
+  private useLocalAgent(): void {
+    const plugin = this.plugin;
+    this.close();
+    // A fresh install shows this welcome over Settings, which Obsidian can host
+    // in its own window. Close it so the new chat is in front with focus.
+    (plugin.app as typeof plugin.app & { setting?: { close?: () => void } }).setting?.close?.();
+    void preferredLocalAgent()
+      .then((agent) => plugin.getSettingsManager().updateSettings({ textExecutionBackend: agent }))
+      // The chat still opens if the setting could not be saved; its Provider menu offers the same choice.
+      .then(() => plugin.openNewChat(), () => plugin.openNewChat());
   }
 
   private renderSignedOut(): void {

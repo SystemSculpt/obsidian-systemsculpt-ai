@@ -1,6 +1,14 @@
 import { JSDOM } from "jsdom";
 import { UpgradePlanModal, hasActivePlan, requireActivePlan } from "../UpgradePlanModal";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { hasHostCapability } from "../../platform/hostCapabilities";
+import { preferredLocalAgent } from "../../services/codex/LocalAgentLaunch";
+
+jest.mock("../../platform/hostCapabilities", () => ({
+  ...jest.requireActual("../../platform/hostCapabilities"),
+  hasHostCapability: jest.fn(() => true),
+}));
+jest.mock("../../services/codex/LocalAgentLaunch", () => ({ preferredLocalAgent: jest.fn(async () => "claude") }));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 (global as any).window = dom.window;
@@ -111,10 +119,12 @@ function createPlugin(settings: Record<string, unknown> = {}) {
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
   const pollInBackground = jest.fn();
   const hasPendingRequest = jest.fn(() => true);
+  const updateSettings = jest.fn().mockResolvedValue(undefined);
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
     getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
+    getSettingsManager: () => ({ updateSettings }),
     openNewChat: jest.fn(),
     openSettingsTab: jest.fn(),
     begin,
@@ -122,6 +132,7 @@ function createPlugin(settings: Record<string, unknown> = {}) {
     submitManualCode,
     pollInBackground,
     hasPendingRequest,
+    updateSettings,
   } as any;
 }
 
@@ -317,12 +328,17 @@ describe("UpgradePlanModal", () => {
     expect(modal.modalEl.textContent).toContain("Welcome to SystemSculpt AI");
     expect(modal.modalEl.textContent).not.toContain(PLAN_REQUIRED_MESSAGE);
     expect(modal.modalEl.textContent).toContain("Create a free account to get 500 starter credits for hosted AI. No card needed. Paid plans start at $9/month.");
-    const actions = Array.from(modal.modalEl.querySelectorAll<HTMLButtonElement>(
-      '[data-testid="upgrade-plan.create-account"], [data-testid="upgrade-plan.sign-in"], [data-testid="upgrade-plan.explore"]',
-    ));
-    expect(actions.map((button) => button.textContent)).toEqual(["Start free", "Sign in", "Explore on my own"]);
+    expect(modal.modalEl.textContent).toContain("Already use Claude Code or Codex? Chat with your vault through your own install. No account needed.");
+    const actions = Array.from(modal.footerEl.querySelectorAll<HTMLButtonElement>("button"));
+    expect(actions.map((button) => button.textContent)).toEqual(["Start free", "Sign in", "Use my Claude Code or Codex", "Explore on my own"]);
+    expect(actions.map((button) => button.dataset.testid)).toEqual([
+      "upgrade-plan.create-account",
+      "upgrade-plan.sign-in",
+      "upgrade-plan.use-local-agent",
+      "upgrade-plan.explore",
+    ]);
     expect(actions[0].classList.contains("ss-button--primary")).toBe(true);
-    expect(actions[1].classList.contains("ss-button--primary")).toBe(false);
+    expect(actions.slice(1).some((button) => button.classList.contains("ss-button--primary"))).toBe(false);
     findButtonByText(modal.modalEl, "View plans").click();
     expect(new URL(hrefs[0]).pathname).toBe("/pricing");
     expect(new URL(hrefs[0]).searchParams.get("utm_source")).toBe("obsidian-plugin");
@@ -334,6 +350,66 @@ describe("UpgradePlanModal", () => {
     findButtonByText(modal.modalEl, "Explore on my own").click();
     expect(close).toHaveBeenCalled();
     spy.mockRestore();
+    modal.onClose();
+  });
+
+  it.each(["claude", "codex"] as const)("opens a chat on the user's own %s from the desktop welcome", async (agent) => {
+    jest.mocked(preferredLocalAgent).mockResolvedValueOnce(agent);
+    const plugin = createPlugin();
+    const closeSettings = jest.fn();
+    plugin.app.setting = { close: closeSettings };
+    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
+    modal.onOpen();
+    const close = jest.spyOn(modal, "close");
+
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.use-local-agent"]')!.click();
+    await flushPromises();
+
+    expect(close).toHaveBeenCalled();
+    expect(closeSettings).toHaveBeenCalledTimes(1);
+    expect(plugin.updateSettings).toHaveBeenCalledWith({ textExecutionBackend: agent });
+    expect(plugin.openNewChat).toHaveBeenCalledTimes(1);
+    expect(plugin.updateSettings.mock.invocationCallOrder[0]).toBeLessThan(plugin.openNewChat.mock.invocationCallOrder[0]);
+    expect(plugin.begin).not.toHaveBeenCalled();
+    modal.onClose();
+  });
+
+  it("still opens chat when the provider choice cannot be saved", async () => {
+    const plugin = createPlugin();
+    plugin.updateSettings.mockRejectedValueOnce(new Error("disk full"));
+    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
+    modal.onOpen();
+
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.use-local-agent"]')!.click();
+    await flushPromises();
+
+    expect(plugin.openNewChat).toHaveBeenCalledTimes(1);
+    modal.onClose();
+  });
+
+  it("keeps the mobile welcome on the account path", () => {
+    jest.mocked(hasHostCapability).mockReturnValue(false);
+    try {
+      const plugin = createPlugin();
+      const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
+      modal.onOpen();
+
+      expect(modal.modalEl.textContent).not.toContain("Claude Code");
+      expect(Array.from(modal.footerEl.querySelectorAll("button")).map((button) => button.textContent))
+        .toEqual(["Start free", "Sign in", "Explore on my own"]);
+      expect(modal.modalEl.querySelector('[data-testid="upgrade-plan.use-local-agent"]')).toBeNull();
+      modal.onClose();
+    } finally {
+      jest.mocked(hasHostCapability).mockReturnValue(true);
+    }
+  });
+
+  it("does not offer on-machine agents outside the welcome", () => {
+    const plugin = createPlugin();
+    const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
+    modal.onOpen();
+    expect(modal.modalEl.querySelector('[data-testid="upgrade-plan.use-local-agent"]')).toBeNull();
+    expect(modal.modalEl.textContent).not.toContain("Claude Code");
     modal.onClose();
   });
 

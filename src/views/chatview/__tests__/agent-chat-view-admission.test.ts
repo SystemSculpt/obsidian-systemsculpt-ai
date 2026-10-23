@@ -3693,8 +3693,18 @@ describe("AgentChatView controls", () => {
     expect(banner.hasAttribute("hidden")).toBe(false);
     expect(banner.classList.contains("is-error")).toBe(false);
     expect(banner.textContent).toBe(
-      "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.",
+      "Sign in to SystemSculpt to start chatting, or switch Provider to your own Claude Code or Codex.",
     );
+
+    // On-machine agents are desktop only, so mobile keeps the account guidance.
+    const previousDesktop = Platform.isDesktopApp, previousMobile = Platform.isMobileApp;
+    try {
+      Platform.isDesktopApp = false; Platform.isMobileApp = true;
+      await (view as any).startNewChat(false);
+      expect(banner.textContent).toBe(
+        "Sign in to SystemSculpt to start chatting. Send a message and we'll guide you through it.",
+      );
+    } finally { Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
 
     settings.userEmail = "free@user.test";
     await (view as any).startNewChat(false);
