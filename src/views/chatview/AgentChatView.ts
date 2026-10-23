@@ -3035,6 +3035,7 @@ export class AgentChatView extends ItemView {
     const owner = this.containerEl.ownerDocument;
     const surface = createSurfaceElement(owner, "div");
     applyPluginSurface(surface, "transient");
+    surface.addClass("systemsculpt-agent-approval-notice-surface");
     const button = createUiAction(surface, {
       label: `${part.native ? LOCAL_AGENTS[part.native.agent] : "SystemSculpt"} is waiting for your approval`,
       testId: "chat.approval.notice",
@@ -3056,7 +3057,12 @@ export class AgentChatView extends ItemView {
       notice.hide();
       this.approvalNotice = null;
       this.approvalNoticeSurface = null;
-      void this.app.workspace.revealLeaf(this.leaf).then(() => this.workspace?.renderer.focusPendingApproval());
+      void this.app.workspace.revealLeaf(this.leaf).then(() => {
+        const focus = () => { if (!this.closing) this.workspace?.renderer.focusPendingApproval(); };
+        // Let Obsidian finish activating the leaf before replacing its composer focus.
+        if (owner.defaultView) owner.defaultView.requestAnimationFrame(focus);
+        else focus();
+      });
     };
   }
 
@@ -3305,7 +3311,10 @@ export class AgentChatView extends ItemView {
       },
     ));
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
-      if (leaf === this.leaf) this.workspace?.focus();
+      // Obsidian can announce activation after a Notice has already focused its card.
+      if (leaf === this.leaf && !this.containerEl.contains(this.containerEl.ownerDocument.activeElement)) {
+        this.workspace?.focus();
+      }
     }));
     this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
       void this.refreshCreditsBalance({ reason: "settings_update" });

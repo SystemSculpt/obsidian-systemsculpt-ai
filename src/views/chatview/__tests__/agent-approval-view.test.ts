@@ -28,8 +28,11 @@ it("retains hosted remember-for-chat behavior, including rollback when a request
   expect(view.sessionTrustedToolNames.has("edit")).toBe(true);
 });
 
-it("puts one clickable waiting Notice in the chat's owner document and reveals that leaf", async () => {
+it.each([false, true])("puts one clickable waiting Notice in the chat's owner document and reveals that leaf (window frame %s)", async delayed => {
   const owner = document.implementation.createHTMLDocument("Chat window");
+  let frame: FrameRequestCallback | undefined;
+  const animation = delayed ? jest.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frame = callback; return 1; }) : undefined;
+  if (delayed) Object.defineProperty(owner, "defaultView", { value: window });
   const otherWindowNotices = document.body.createDiv({ cls: "notice-container" });
   const noticeContainer = document.body.createDiv({ cls: "notice" });
   const hide = jest.fn(() => noticeContainer.remove());
@@ -53,6 +56,39 @@ it("puts one clickable waiting Notice in the chat's owner document and reveals t
   await Promise.resolve();
   expect(hide).toHaveBeenCalledTimes(1);
   expect(revealLeaf).toHaveBeenCalledWith(view.leaf);
+  if (delayed) {
+    expect(focusPendingApproval).not.toHaveBeenCalled();
+    expect(frame).toBeDefined();
+    frame!(0);
+  }
   expect(focusPendingApproval).toHaveBeenCalledTimes(1);
+  animation?.mockRestore();
   otherWindowNotices.remove();
+});
+
+it("preserves a revealed approval's focus when Obsidian emits delayed leaf activation", () => {
+  const ownerFrame = document.body.createEl("iframe");
+  const owner = ownerFrame.contentDocument!;
+  const containerEl = owner.body.appendChild(owner.createElement("div"));
+  const card = containerEl.appendChild(owner.createElement("div"));
+  card.tabIndex = 0;
+  const focus = jest.fn();
+  const handlers = new Map<string, (leaf: unknown) => void>();
+  const leaf = {};
+  const view = {
+    containerEl, leaf, workspace: { focus }, registerEvent: jest.fn(),
+    app: { workspace: { on: (name: string, callback: (leaf: unknown) => void) => { handlers.set(name, callback); } } },
+  };
+  prototype.installWorkspaceBindings.call(view);
+  card.focus();
+  expect(owner.activeElement).toBe(card);
+  handlers.get("active-leaf-change")!(leaf);
+  expect(focus).not.toHaveBeenCalled();
+  expect(owner.activeElement).toBe(card);
+  card.blur();
+  handlers.get("active-leaf-change")!({});
+  expect(focus).not.toHaveBeenCalled();
+  handlers.get("active-leaf-change")!(leaf);
+  expect(focus).toHaveBeenCalledTimes(1);
+  ownerFrame.remove();
 });

@@ -390,6 +390,10 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+.systemsculpt-agent-approval-notice-surface {
+  /* Notices size to their content; inline-size containment collapses them. */
+  container-type: normal;
+}
 .systemsculpt-agent-approval-notice {
   width: 100%;
   white-space: normal;
