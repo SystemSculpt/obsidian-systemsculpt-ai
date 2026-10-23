@@ -38,6 +38,13 @@ describe("decodeCreditsBalance", () => {
     },
   );
 
+  it("reads whether the account has used the iOS app, false from older servers", () => {
+    expect(decodeCreditsBalance(creditsBalancePayload).iosAppLinked).toBe(false);
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, ios_app_linked: false }).iosAppLinked).toBe(false);
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, ios_app_linked: "yes" }).iosAppLinked).toBe(false);
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, ios_app_linked: true }).iosAppLinked).toBe(true);
+  });
+
   it("preserves held and spendable balances while accepting the legacy gross-only shape", () => {
     expect(decodeCreditsBalance({
       ...creditsBalancePayload,

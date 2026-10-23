@@ -4,8 +4,8 @@ Architecture requirement adopted: **2026-07-29**.
 
 This page describes the SystemSculpt API backend. The server owns its agent,
 history, model execution, and continuation; the plugin presents activity and
-performs approved Obsidian operations. On-machine Codex instead adapts its native
-thread through `src/services/codex/CodexChatSession.ts`. Both backends implement
+performs approved Obsidian operations. On-machine agents (Codex, Claude Code) instead adapt their native
+threads through `src/services/codex/LocalAgentChatSession.ts`. Both backends implement
 `src/chat/ChatSession.ts` for the same chat workspace.
 
 ## Client structure

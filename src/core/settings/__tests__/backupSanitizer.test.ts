@@ -42,6 +42,15 @@ describe("backupSanitizer", () => {
     }
   });
 
+  it.each([false, true, undefined])("restores the current account's iOS link (%s), not the backup's", (linked) => {
+    const restored = applyCurrentSecretsToBackup(
+      { licenseKey: "", phoneCapturesLinked: !linked },
+      { licenseKey: "current-license-key", phoneCapturesLinked: linked },
+    );
+
+    expect(restored.phoneCapturesLinked).toBe(linked === true);
+  });
+
   it("restores only the current license and cannot reintroduce retired secrets", () => {
     const restored = applyCurrentSecretsToBackup(
       { licenseKey: "malicious-backup-key", ...retiredSecretState },

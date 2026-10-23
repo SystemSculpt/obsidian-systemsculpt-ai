@@ -134,7 +134,7 @@
 }
 
 .ss-studio-node-card[data-chrome-layout="media"]
-  .ss-studio-node-ports-col:has(.ss-studio-port-row.is-output) {
+  .ss-studio-node-ports-col.is-outputs {
   left: auto;
   right: -5px;
 }

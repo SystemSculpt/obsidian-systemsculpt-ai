@@ -193,7 +193,6 @@
   padding: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
   border: 0;
   white-space: nowrap;
 }
@@ -309,7 +308,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   min-height: var(--ss-touch-target);
-  column-gap: var(--ss-space-2);
+  gap: 0 var(--ss-space-2);
 }
 
 .ss-transcribe-audio__remember-checkbox {

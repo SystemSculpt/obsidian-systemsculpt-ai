@@ -2,19 +2,25 @@ import type { SystemSculptSettings } from '../../types';
 import { hasHostCapability } from '../../platform/hostCapabilities';
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import type { App } from 'obsidian';
+import { isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from './LocalAgents';
 
-export function usesLocalCodex(settings: Pick<SystemSculptSettings, 'textExecutionBackend'> | undefined): boolean {
-  return settings?.textExecutionBackend === 'codex' && hasHostCapability('local-cli');
+/** The selected on-machine agent, or null where none can run (mobile falls back to SystemSculpt API). */
+export function localTextAgent(settings: Pick<SystemSculptSettings, 'textExecutionBackend'> | undefined): LocalAgentId | null {
+  const backend = settings?.textExecutionBackend;
+  return isLocalAgentId(backend) && hasHostCapability('local-cli') ? backend : null;
 }
-export function defaultTextBackend(settings: Pick<SystemSculptSettings, 'textExecutionBackend'>): 'codex' | 'systemsculpt' {
-  return usesLocalCodex(settings) ? 'codex' : 'systemsculpt';
+export function usesLocalCodex(settings: Pick<SystemSculptSettings, 'textExecutionBackend'> | undefined): boolean {
+  return localTextAgent(settings) === 'codex';
+}
+export function defaultTextBackend(settings: Pick<SystemSculptSettings, 'textExecutionBackend'>): TextExecutionBackend {
+  return localTextAgent(settings) ?? 'systemsculpt';
 }
 export function codexVaultDirectory(app: App): string {
   return codexWorkingDirectory(app, '.');
 }
 /** Persist vault-relative paths; resolve only on the machine executing the task. */
 export function codexWorkingDirectory(app: App, configuredPath: string): string {
-  if (!hasHostCapability('local-cli')) throw new Error('On-machine Codex requires Obsidian Desktop. Choose SystemSculpt API in Chat settings on this device.');
+  if (!hasHostCapability('local-cli')) throw new Error('On-machine agents require Obsidian Desktop. Choose SystemSculpt API in Chat settings on this device.');
   const configured = configuredPath.trim() || '.';
   if (isAbsoluteFilesystemPath(configured)) return configured;
   const path = resolveAbsoluteVaultPath(app.vault.adapter, configured);

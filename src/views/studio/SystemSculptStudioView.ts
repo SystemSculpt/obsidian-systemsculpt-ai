@@ -3,7 +3,7 @@ import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
 import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
 import { startStudioIndependentRun } from './StudioIndependentRun';
-import { usesLocalCodex } from "../../services/codex/CodexExecutionSettings";
+import { localTextAgent } from "../../services/codex/CodexExecutionSettings";
 import { applyStudioNodeSource } from "../../studio/StudioNodeSource";
 import { StudioRunObservationController } from "./StudioRunObservationController";
 import {
@@ -2073,9 +2073,9 @@ export class SystemSculptStudioView extends ItemView {
       new Notice(formatStudioHostUnavailableNodesNotice(blockedNodes));
       return;
     }
-    // Managed nodes require a plan; local Codex text execution does not.
+    // Managed nodes require a plan; on-machine agent text execution does not.
     const needsManagedApi = scope.scopedProject.graph.nodes.some(
-      (node) => this.findNodeDefinition(node)?.capabilityClass === "api" && !(node.kind === "studio.text_generation" && usesLocalCodex(this.plugin.settings)),
+      (node) => this.findNodeDefinition(node)?.capabilityClass === "api" && !(node.kind === "studio.text_generation" && localTextAgent(this.plugin.settings) !== null),
     );
     if (needsManagedApi && !hasActivePlan(this.plugin)) {
       UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });

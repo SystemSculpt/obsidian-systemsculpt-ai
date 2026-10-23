@@ -80,6 +80,8 @@ export type CreditsBalanceSnapshot = {
   turnInFlightUntil: string | null;
   purchaseUrl: string | null;
   billingCycle?: "monthly" | "annual" | "unknown";
+  /** The account has used the iOS app. False when an older server doesn't say. */
+  iosAppLinked?: boolean;
   annualUpgradeOffer?: {
     amountSavedCents: number;
     percentSaved: number;
@@ -257,6 +259,7 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     turnInFlightUntil,
     purchaseUrl: normalizeCreditsCheckoutUrl(value.purchase_url),
     billingCycle,
+    iosAppLinked: value.ios_app_linked === true,
     annualUpgradeOffer,
   };
 }

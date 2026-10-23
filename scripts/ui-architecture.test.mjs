@@ -188,7 +188,7 @@ test("the shared surface owns adaptation and obsolete UI seams stay deleted", ()
   assert.match(surfaceCss, /prefers-reduced-motion:\s*reduce/);
   assert.match(surfaceCss, /@media\s*\(pointer:\s*coarse\)[\s\S]*?--ss-control-height:\s*var\(--ss-touch-target\)[\s\S]*?--ss-control-height-sm:\s*var\(--ss-touch-target\)/);
   assert.match(surfaceCss, /:focus-visible/);
-  assert.match(surfaceCss, /\[hidden\][^{]*\{[^}]*display:\s*none\s*!important/s);
+  assert.match(surfaceCss, /#ss-specificity-boost\)\s*\[hidden\]\s*\{[^}]*display:\s*none/s);
   assert.match(tokensCss, /--ss-text-base:\s*var\(--font-ui-small,\s*13px\)/);
   assert.match(tokensCss, /--ss-text-(?:xs|lg):\s*calc\(var\(--ss-text-base\)\s*\*/);
 

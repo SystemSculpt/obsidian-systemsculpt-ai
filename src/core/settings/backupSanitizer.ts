@@ -41,6 +41,8 @@ export function applyCurrentSecretsToBackup<T extends Record<string, unknown>>(
   for (const key of CURRENT_SECRET_KEYS) {
     merged[key] = typeof currentSettings[key] === "string" ? currentSettings[key] : "";
   }
+  // The iOS link belongs to the retained account, not the backup's account.
+  merged.phoneCapturesLinked = currentSettings.phoneCapturesLinked === true;
   removeRetiredSettings(merged);
   return merged as T;
 }

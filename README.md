@@ -1,13 +1,14 @@
 # SystemSculpt AI for Obsidian
 
-SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex.
+SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex or Claude Code.
 
-Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex remains available without a SystemSculpt plan.
+Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex and Claude Code remain available without a SystemSculpt plan.
 
 ## What it does
 
 - Chat with notes, documents, images, and built-in vault tools.
 - Use on-machine Codex for desktop chats and Studio tasks with its native permissions and history.
+- Use on-machine Claude Code for desktop chats and Studio text generation with its own login, permissions, and session history.
 - Stream reasoning, content, citations, tool activity, and approvals.
 - Attach or paste multiple mixed files into a conversation.
 - Find related notes with a portable semantic index.
@@ -42,7 +43,9 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 - On Obsidian Desktop, Studio's CLI, dataset-adapter, media-ingest, and FFmpeg nodes can read or write user-selected paths outside the vault and execute user-configured commands. These capabilities run only when the user configures and executes the relevant node and are unavailable on mobile.
 - On Obsidian Desktop, on-machine Codex runs only after you select it for chat or Studio text generation, or use a Studio Codex task card, run board, or command center. The plugin then launches your installed `codex app-server` command as a local child process and exchanges messages with it over standard input and output to list models and run turns. Codex keeps its own login, configuration, and thread history. On-machine Codex is unavailable on mobile.
 - To start Codex, the plugin reads the optional launch settings file `~/.config/systemsculpt/codex.json`, which can set the `binary` to run and the Codex `home` directory. It checks that the Codex home (`~/.codex` by default) exists and passes it to Codex as `CODEX_HOME`. The plugin does not read, copy, or upload files inside the Codex home, including Codex credentials.
-- Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. License keys are removed from exported diagnostics and settings backups.
+- On Obsidian Desktop, on-machine Claude Code runs only after you select it for chat or Studio text generation. The plugin then launches your installed `claude` command (`claude -p` with JSON input and output) as a local child process in the vault folder and exchanges messages with it over standard input and output. Claude Code keeps its own login, settings, permissions, and session history. On-machine Claude Code is unavailable on mobile.
+- To start Claude Code, the plugin reads the optional launch settings file `~/.config/systemsculpt/claude.json`, which can set the `binary` to run. The plugin does not read, copy, or upload anything under `~/.claude`, including Claude Code credentials.
+- Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. On-machine Claude Code asks before edits by default; you can choose Accept edits, Plan only, or your own Claude Code settings. Claude Code's permission requests appear as plugin dialogs, and the plugin never turns on Claude Code's permission bypass. License keys are removed from exported diagnostics and settings backups.
 
 ## Documentation
 
@@ -50,7 +53,7 @@ SystemSculpt checks its first-party release endpoint and shows one update prompt
 - [Agent tools and approvals](docs/user/agent-mode.md)
 - [Settings](docs/user/settings.md)
 - [Commands](docs/user/commands.md)
-- [Studio workspaces and on-machine Codex](docs/studio-workspaces.md)
+- [Studio workspaces, on-machine Codex and Claude Code](docs/studio-workspaces.md)
 - [Similar Notes](docs/user/similar-notes.md)
 - [Audio and transcription](docs/user/audio-transcription.md)
 - [Audio Processor](docs/user/audio-processor.md)

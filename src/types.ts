@@ -84,7 +84,11 @@ export interface SystemSculptSettings {
   codexModel?: string;
   codexThinkingLevel?: string;
   codexServiceTier?: string;
-  textExecutionBackend?: "systemsculpt" | "codex";
+  textExecutionBackend?: "systemsculpt" | "codex" | "claude";
+  /** Claude Code model alias; empty uses Claude Code's own default. */
+  claudeModel?: string;
+  /** Claude Code permission mode for plugin turns; "settings" inherits Claude Code's configuration. */
+  claudePermissionMode?: "default" | "acceptEdits" | "plan" | "settings";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -174,6 +178,14 @@ export interface SystemSculptSettings {
   attachmentsDirectory: string;
   extractionsDirectory: string;
   workflowEngine: WorkflowEngineSettings;
+  /** Save captures from the SystemSculpt iPhone app into the vault. */
+  phoneCapturesEnabled: boolean;
+  /** Vault folder for iPhone captures. Empty means SystemSculpt/Inbox. */
+  phoneCapturesFolder: string;
+  /** Ask before saving new iPhone captures. */
+  phoneCapturesAskBeforeSaving: boolean;
+  /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
+  phoneCapturesLinked: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -249,6 +261,7 @@ export interface SystemSculptSettings {
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   textExecutionBackend: "systemsculpt",
   codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
+  claudeModel: "", claudePermissionMode: "default",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -287,6 +300,10 @@ Please:
   attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   workflowEngine: createDefaultWorkflowEngineSettings(),
+  phoneCapturesEnabled: true,
+  phoneCapturesFolder: "SystemSculpt/Inbox",
+  phoneCapturesAskBeforeSaving: false,
+  phoneCapturesLinked: false,
 
   skipEmptyNoteWarning: false,
 

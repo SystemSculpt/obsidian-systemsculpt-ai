@@ -101,6 +101,20 @@ export class CommandManager {
     this.registerOpenEmbeddingsView();
     this.registerEmbeddingsDatabaseCommands();
     this.registerSystemSculptStudioCommands();
+    this.registerSavePhoneCaptures();
+  }
+
+  private registerSavePhoneCaptures() {
+    this.plugin.addCommand({
+      id: "save-ios-captures",
+      name: "Save iOS captures now",
+      // Hidden until the account has used the iOS app.
+      checkCallback: (checking: boolean) => {
+        if (this.plugin.settings.phoneCapturesLinked !== true) return false;
+        if (!checking) void this.plugin.syncPhoneCaptures({ manual: true });
+        return true;
+      },
+    });
   }
 
 

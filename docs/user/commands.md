@@ -23,7 +23,7 @@ Source of truth:
 
 ## Chat and writing
 
-Chat uses the selected SystemSculpt API or on-machine Codex backend. Choose the execution backend and model in the chat controls.
+Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude Code backend. Choose the execution backend and model in the chat controls.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
@@ -87,6 +87,7 @@ there never change the canvas.
 | --- | --- | --- | --- |
 | Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Reviews cleanup candidates before moving them to Trash |
 | Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
+| Save iOS captures now |  | `save-ios-captures` | Saves captures waiting from the SystemSculpt iOS app; asks again about captures you chose not to save. Listed only after your account has used the iOS app |
 
 ### Studio cards
 

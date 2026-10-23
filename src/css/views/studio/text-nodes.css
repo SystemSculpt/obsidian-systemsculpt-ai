@@ -21,7 +21,7 @@
  * at it. StudioGraphTextNodeMeasure.ts sets the exact width after render;
  * this rule covers the first paint and editing (max: the auto token). */
 .ss-studio-node-card.ss-studio-text-node-card.is-auto-width { width: max-content; min-width: var(--ss-space-6); max-width: var(--ss-studio-text-node-auto-max-width); }
-.ss-studio-text-node-card.is-auto-width:has(.ss-studio-text-node-editor, .ss-studio-text-node-live-editor) .ss-studio-text-node-content { min-width: 14em; }
+.ss-studio-text-node-card.is-auto-width.is-editing-text .ss-studio-text-node-content { min-width: 14em; }
 
 /* Text-node height is intrinsic: the card auto-grows with its reflowed
  * content, so the display div and editing textarea both size to content —
@@ -160,17 +160,17 @@
 
 /* Pair Obsidian's smaller live-preview inline-code type and box model so glyphs
  * and wrap boundaries stay stable on edit. */
-.ss-studio-text-node-display.is-markdown :not(pre) > code {
+:is(.ss-studio-text-node-display, #ss-specificity-boost).is-markdown :not(pre) > code {
   padding: 0.15em 0.3em;
   color: var(--code-normal);
   background-color: var(--code-background);
   border: var(--code-border-width) solid var(--code-border-color);
   border-radius: var(--ss-radius-studio-code);
+  /* Same prefixed property as Obsidian's own inline-code rule. */
   -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  overflow-wrap: anywhere !important;
-  white-space: break-spaces !important;
-  word-break: break-word !important;
+  overflow-wrap: anywhere;
+  white-space: break-spaces;
+  word-break: break-word;
   font-size: var(--ss-text-studio-code-size);
   line-height: var(--ss-leading-base);
 }
@@ -246,14 +246,14 @@
   background: transparent;
 }
 
-.ss-studio-text-node-live-editor .markdown-source-view,
-.ss-studio-text-node-live-editor .cm-editor,
-.ss-studio-text-node-live-editor .cm-editor .cm-scroller,
-.ss-studio-text-node-live-editor .cm-editor .cm-sizer,
-.ss-studio-text-node-live-editor .cm-editor .cm-content {
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .markdown-source-view,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-editor,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-editor .cm-scroller,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-editor .cm-sizer,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-editor .cm-content {
   /* Keep every native layer on the node's font/leading contract. */
-  font-size: var(--ss-studio-text-node-font-size, inherit) !important;
-  line-height: var(--ss-leading-base) !important;
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
 }
 
 .ss-studio-text-node-live-editor .cm-editor {
@@ -279,75 +279,88 @@
 }
 
 /* Keep line-number gutters in note editors, never canvas annotations. */
-.ss-studio-text-node-live-editor .cm-gutters {
-  display: none !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-gutters {
+  display: none;
 }
 
-/* Match native source-row spacing to the rendered block rhythm. */
-.ss-studio-text-node-live-editor .cm-content > .HyperMD-header:first-child {
-  padding-top: 0 !important;
+/* Match native source-row spacing to the rendered block rhythm. Empty rows
+ * carry the class from StudioTextNodeEmptyLines.ts. */
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-content > .HyperMD-header:first-child {
+  padding-top: 0;
 }
 
-.ss-studio-text-node-live-editor
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
   .cm-content
-  > .cm-line:not([class*="HyperMD-"]):has(> br:only-child) {
-  height: 1em !important;
-  min-height: 1em !important;
-  line-height: 1em !important;
+  > .cm-line.ss-studio-text-node-empty-line:not([class*="HyperMD-"]) {
+  height: 1em;
+  min-height: 1em;
+  line-height: 1em;
 }
 
-.ss-studio-text-node-live-editor
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
   .cm-content
   > .HyperMD-header
-  + .cm-line:has(> br:only-child) {
-  height: max(1em, var(--p-spacing, 1rem)) !important;
-  min-height: max(1em, var(--p-spacing, 1rem)) !important;
-  line-height: max(1em, var(--p-spacing, 1rem)) !important;
+  + .cm-line.ss-studio-text-node-empty-line {
+  height: max(1em, var(--p-spacing, 1rem));
+  min-height: max(1em, var(--p-spacing, 1rem));
+  line-height: max(1em, var(--p-spacing, 1rem));
 }
 
-/* Obsidian expands editable table widgets past their content column with a
- * high-specificity negative margin. Canvas text nodes instead use the exact
- * preview width; the repeated class intentionally wins that native rule. */
-.ss-studio-text-node-live-editor.ss-studio-text-node-live-editor
+/* Obsidian expands editable table widgets past their content column with
+ * an important `margin: 0 calc(-1 * var(--size-4-4))`. Canvas text nodes instead
+ * use the exact preview width: zero the spacing variable on the widget itself
+ * so that native margin resolves to 0, then restore it for the widget's
+ * contents. */
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) {
+  --ss-studio-text-node-size-4-4: var(--size-4-4);
+}
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
   .markdown-source-view.mod-cm6
   .cm-content .cm-table-widget {
-  box-sizing: border-box !important;
-  contain: layout style !important;
-  position: relative !important;
+  --size-4-4: 0px;
+  box-sizing: border-box;
+  contain: layout style;
+  position: relative;
   z-index: 2;
-  width: 100% !important;
-  max-width: 100% !important;
-  margin: 0 !important;
-  overflow: visible !important;
-  padding: 0 !important;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
 }
-.ss-studio-text-node-live-editor .cm-table-widget,
-.ss-studio-text-node-live-editor .cm-table-widget table,
-.ss-studio-text-node-live-editor .cm-table-widget th,
-.ss-studio-text-node-live-editor .cm-table-widget td,
-.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper {
-  font-size: var(--ss-studio-text-node-font-size, inherit) !important;
-  line-height: var(--ss-leading-base) !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
+  .markdown-source-view.mod-cm6
+  .cm-content .cm-table-widget > * {
+  --size-4-4: var(--ss-studio-text-node-size-4-4);
+  --table-drag-handle-size: var(--ss-studio-text-node-size-4-4);
 }
-.ss-studio-text-node-live-editor .cm-table-widget th,
-.ss-studio-text-node-live-editor .cm-table-widget td {
-  min-width: 0 !important;
-  padding: 0 !important;
-  border: var(--table-border-width) solid var(--table-border-color) !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget table,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget th,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget td,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget .table-cell-wrapper {
+  font-size: var(--ss-studio-text-node-font-size, inherit);
+  line-height: var(--ss-leading-base);
+}
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget th,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget td {
+  min-width: 0;
+  padding: 0;
+  border: var(--table-border-width) solid var(--table-border-color);
 }
 
 /* The native widget adds its own table-cell box around the rendered cell.
  * These compensating insets keep editable tables pixel-aligned with preview
  * tables across the full supported text-node font-size range. */
-.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper {
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget .table-cell-wrapper {
   padding: var(--ss-text-studio-table-cell-block)
-    var(--ss-text-studio-table-cell-inline) !important;
+    var(--ss-text-studio-table-cell-inline);
 }
 
-.ss-studio-text-node-live-editor .cm-table-widget .table-cell-wrapper,
-.ss-studio-text-node-live-editor .cm-table-widget .cm-content.cm-lineWrapping {
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget .table-cell-wrapper,
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .cm-table-widget .cm-content.cm-lineWrapping {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .ss-studio-text-node-live-editor .cm-table-widget .table-row-btn,
 .ss-studio-text-node-live-editor .cm-table-widget .table-col-btn {
@@ -356,41 +369,41 @@
   pointer-events: none;
 }
 
-.ss-studio-text-node-live-editor
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
   .cm-table-widget:is(:hover, :focus-within, .has-focus)
   :is(.table-row-btn, .table-col-btn) {
-  opacity: 1 !important;
-  pointer-events: auto !important;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Live preview keeps the opening/closing fences as logical CodeMirror rows.
  * The rendered surface above turns its block padding into the same two rows;
  * this shared piecewise metric stays aligned at small, default, and large
  * node fonts while every additional source line advances by one equal row. */
-.ss-studio-text-node-live-editor .HyperMD-codeblock {
-  padding-inline-start: var(--size-4-4) !important;
-  padding-inline-end: 0 !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .HyperMD-codeblock {
+  padding-inline-start: var(--size-4-4);
+  padding-inline-end: 0;
   line-height: max(
     calc(1.104762em + 2.9167px),
     calc(0.985714em + 4.375px)
-  ) !important;
+  );
 }
 
 /* Plain list rows use the normal text rhythm. Checkbox controls establish a
  * slightly taller rendered row, so only task lines receive the compensating
  * inset; applying it to every list item makes mixed lists drift on each bullet. */
-.ss-studio-text-node-live-editor .HyperMD-list-line {
-  line-height: var(--ss-leading-base) !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .HyperMD-list-line {
+  line-height: var(--ss-leading-base);
 }
 
-.ss-studio-text-node-live-editor
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost)
   .HyperMD-list-line:not(.HyperMD-task-line) {
-  padding-block: 0 !important;
+  padding-block: 0;
 }
 
-.ss-studio-text-node-live-editor .HyperMD-task-line {
-  padding-top: max(0px, calc(4.2555px - 0.26825em)) !important;
-  padding-bottom: max(0px, calc(4.2555px - 0.26825em)) !important;
+:is(.ss-studio-text-node-live-editor, #ss-specificity-boost) .HyperMD-task-line {
+  padding-top: max(0px, calc(4.2555px - 0.26825em));
+  padding-bottom: max(0px, calc(4.2555px - 0.26825em));
 }
 
 .ss-studio-text-node-live-editor .cm-editor.cm-focused {

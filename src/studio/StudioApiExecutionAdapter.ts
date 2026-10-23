@@ -1,7 +1,9 @@
 import { StudioCodexRuns, codexRunKey } from "../services/codex/StudioCodexRuns";
 import { studioImageReferenceLimit } from "./StudioMediaModelCapabilities";
 import { answerCodexRequest } from "../services/codex/CodexRequestModal";
-import { codexOptionsFromSettings, codexVaultDirectory, usesLocalCodex } from "../services/codex/CodexExecutionSettings";
+import { codexOptionsFromSettings, codexVaultDirectory, localTextAgent } from "../services/codex/CodexExecutionSettings";
+import { claudeOptionsFromSettings, runLocalClaude } from "../services/claude/LocalClaudeClient";
+import { answerClaudePermission } from "../services/claude/ClaudeRequestModal";
 import type SystemSculptPlugin from "../main";
 import { ManagedImageGenerationAdapter } from "../services/images/ManagedImageGenerationAdapter";
 import { ManagedJobClient } from "../services/managed/ManagedJobClient";
@@ -71,11 +73,18 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   }
 
   async generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult> {
-    if (usesLocalCodex(this.plugin.settings)) {
+    const localAgent = localTextAgent(this.plugin.settings);
+    if (localAgent) {
       const payload = await request.buildPayload();
-      const result = await this.codexRuns.run(codexRunKey(request.projectId || request.projectPath, request.nodeId), { ...codexOptionsFromSettings(this.plugin.settings), prompt: [payload.systemPrompt, payload.prompt].filter(Boolean).join('\n\n'), workingDirectory: codexVaultDirectory(this.plugin.app) }, request.signal, {
-        log: text => request.log?.(text), thread: () => {}, request: (method, params, signal) => answerCodexRequest(this.plugin.app, method, params, signal),
-      });
+      const key = codexRunKey(request.projectId || request.projectPath, request.nodeId);
+      const prompt = [payload.systemPrompt, payload.prompt].filter(Boolean).join('\n\n'), workingDirectory = codexVaultDirectory(this.plugin.app);
+      const result = localAgent === 'claude'
+        ? await this.codexRuns.track(key, 'claude', request.signal, (signal, thread) => runLocalClaude({ ...claudeOptionsFromSettings(this.plugin.settings), prompt, workingDirectory }, signal, {
+          log: text => request.log?.(text), session: thread, permission: (permission, permissionSignal) => answerClaudePermission(this.plugin.app, permission, permissionSignal),
+        }))
+        : await this.codexRuns.run(key, { ...codexOptionsFromSettings(this.plugin.settings), prompt, workingDirectory }, request.signal, {
+          log: text => request.log?.(text), thread: () => {}, request: (method, params, signal) => answerCodexRequest(this.plugin.app, method, params, signal),
+        });
       return { text: result.text };
     }
     const id = operationId("text", request.runId, request.nodeId);

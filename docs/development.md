@@ -355,3 +355,20 @@ Changes apply to new connections; use Reconnect Codex or reload the plugin to
 refresh the model picker. Existing threads remain owned by their original
 Codex home. Custom providers reporting `requiresOpenaiAuth: false` can connect
 without a ChatGPT account.
+
+## Claude Code discovery
+
+On-machine Claude Code launches the installed `claude` CLI in print mode with
+JSON streams on standard input and output, in the vault folder. It uses the
+same PATH additions as Codex. Claude Code continues to own its login, settings,
+permissions, tools, and session history; the plugin never reads `~/.claude`.
+
+For a custom installation, create the machine-local file
+`~/.config/systemsculpt/claude.json`, for example:
+
+```json
+{ "binary": "~/.claude-custom/bin/claude" }
+```
+
+`binary` is optional and is an executable name or path, not a shell command.
+No credentials belong in this file. Sign in with `claude`, then `/login`.

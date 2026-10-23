@@ -1,19 +1,20 @@
 import { normalizePath, type App } from 'obsidian';
+import type { LocalAgentId } from './LocalAgents';
 
-/** Local locator only: Codex keeps the authoritative thread history. No credentials are read or copied. */
+/** Local locator only: the on-machine agent keeps the authoritative thread history. No credentials are read or copied. */
 export class CodexThreadLocator {
-  constructor(private readonly app: App) {}
+  constructor(private readonly app: App, private readonly agent: LocalAgentId = 'codex') {}
   private path(conversationId: string): string {
     if (!/^[A-Za-z0-9_-]{1,160}$/.test(conversationId)) throw new Error('Invalid chat identity.');
-    return normalizePath(`${this.app.vault.configDir}/plugins/systemsculpt-ai/codex-threads/${conversationId}.json`);
+    return normalizePath(`${this.app.vault.configDir}/plugins/systemsculpt-ai/${this.agent}-threads/${conversationId}.json`);
   }
   async read(conversationId: string): Promise<string | undefined> {
     const path = this.path(conversationId), adapter = this.app.vault.adapter;
     if (typeof adapter.exists !== 'function' || !(await adapter.exists(path))) return undefined;
     const stat = await adapter.stat(path);
-    if (!stat || stat.size > 1024) throw new Error('Invalid saved Codex thread locator.');
+    if (!stat || stat.size > 1024) throw new Error('Invalid saved on-machine thread locator.');
     const value = JSON.parse(await adapter.read(path)) as { threadId?: unknown };
-    if (typeof value.threadId !== 'string' || !/^[a-f0-9-]{20,80}$/i.test(value.threadId)) throw new Error('Invalid saved Codex thread identity.');
+    if (typeof value.threadId !== 'string' || !/^[a-f0-9-]{20,80}$/i.test(value.threadId)) throw new Error('Invalid saved on-machine thread identity.');
     return value.threadId;
   }
   async write(conversationId: string, threadId: string): Promise<void> {

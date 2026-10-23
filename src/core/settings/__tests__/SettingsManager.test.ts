@@ -146,6 +146,36 @@ describe("SettingsManager managed settings contract", () => {
     );
   });
 
+  it("keeps the iOS link only for the account that reported it", async () => {
+    const plugin = createPlugin({ licenseKey: "linked-account", phoneCapturesLinked: true });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(manager.settings.phoneCapturesLinked).toBe(true);
+    await manager.updateSettings({ licenseKey: "never-used-ios" });
+    expect(manager.settings.phoneCapturesLinked).toBe(false);
+    await manager.updateSettings({ phoneCapturesLinked: true });
+    await manager.updateSettings({ licenseKey: "" });
+    expect(manager.settings.phoneCapturesLinked).toBe(false);
+  });
+
+  it("checks the current account inside the settings persistence queue", async () => {
+    const plugin = createPlugin({ licenseKey: "linked-account" });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    await Promise.all([
+      manager.updateSettings({ licenseKey: "never-used-ios" }),
+      manager.updateSettings(current => current.licenseKey === "linked-account"
+        ? { phoneCapturesLinked: true } : {}),
+    ]);
+    expect(manager.settings.phoneCapturesLinked).toBe(false);
+    await manager.updateSettings(current => current.licenseKey === "never-used-ios"
+      ? { phoneCapturesLinked: true } : {});
+    expect(manager.settings.phoneCapturesLinked).toBe(true);
+  });
+
   it("migrates a restored v3 backup before applying it", async () => {
     const plugin = createPlugin();
     const manager = new SettingsManager(plugin);

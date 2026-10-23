@@ -20,7 +20,7 @@ export function answerCodexRequest(app: App, method: string, params: Record<stri
       onOpen() {
         super.onOpen(); this.addTitle(approval ? 'Codex requests approval' : 'Codex needs your input');
         if (approval) {
-          this.contentEl.createEl('pre', { text: details });
+          this.contentEl.createEl('pre', { cls: 'ss-native-request-details', text: details });
           this.addActionButton('studio.codex.decline', 'Decline', () => this.finish(decision(false)));
           this.addActionButton('studio.codex.approve', 'Approve once', () => this.finish(decision(true)), true);
         } else {

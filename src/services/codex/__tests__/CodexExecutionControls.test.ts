@@ -102,3 +102,36 @@ it('lets the user reconnect after a native catalog error and restores saved choi
   dispose(); dispose = mountCodexExecutionControls(parent, plugin as never); await flush();
   expect((parent.querySelector('[data-testid="codex.execution.speed"]') as HTMLSelectElement).value).toBe('priority'); dispose();
 });
+
+it('offers on-machine Claude Code with its own model and permission choices', async () => {
+  const parent = document.createElement('div');
+  const settings: Record<string, unknown> = { textExecutionBackend: 'claude', claudeModel: '', claudePermissionMode: 'default' };
+  const updateSettings = jest.fn(async patch => { Object.assign(settings, patch); });
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
+  (readCodexCatalog as jest.Mock).mockClear();
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {}); await flush();
+  const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
+  expect([...provider.options].map(option => [option.value, option.textContent])).toEqual([['systemsculpt', 'SystemSculpt API'], ['codex', 'On-machine Codex'], ['claude', 'On-machine Claude Code']]);
+  expect(provider.value).toBe('claude'); expect(readCodexCatalog).not.toHaveBeenCalled();
+  expect(parent.classList.contains('ss-native-codex-composer')).toBe(true);
+  expect(parent.querySelector('[data-testid="codex.execution.model"]')?.parentElement?.hidden).toBe(true);
+  const model = parent.querySelector('[data-testid="claude.execution.model"]') as HTMLSelectElement;
+  const permissions = parent.querySelector('[data-testid="claude.execution.permissions"]') as HTMLSelectElement;
+  expect(model.parentElement?.hidden).toBe(false); expect(permissions.value).toBe('default');
+  expect([...permissions.options].map(option => option.value)).toEqual(['default', 'acceptEdits', 'plan', 'settings']);
+  model.value = 'opus'; model.dispatchEvent(new Event('change'));
+  permissions.value = 'acceptEdits'; permissions.dispatchEvent(new Event('change')); await flush();
+  expect(settings).toMatchObject({ claudeModel: 'opus', claudePermissionMode: 'acceptEdits' });
+  dispose();
+});
+it('marks Claude Code desktop only and hides its options on a mobile host', async () => {
+  const { hasHostCapability } = jest.requireMock('../../../platform/hostCapabilities');
+  hasHostCapability.mockReturnValue(false);
+  const parent = document.createElement('div');
+  const plugin = { settings: { textExecutionBackend: 'claude' }, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn() }) };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt' }); await flush();
+  const claude = [...(parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement).options].find(option => option.value === 'claude')!;
+  expect(claude.disabled).toBe(true); expect(claude.textContent).toBe('On-machine Claude Code · desktop only');
+  expect(parent.querySelector('[data-testid="claude.execution.model"]')?.parentElement?.hidden).toBe(true);
+  dispose(); hasHostCapability.mockReturnValue(true);
+});
