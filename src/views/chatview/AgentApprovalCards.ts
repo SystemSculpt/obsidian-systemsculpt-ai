@@ -215,6 +215,10 @@ export class AgentApprovalCards extends Component {
       this.focusAfter(previouslyFocused, previousOrder);
       return;
     }
+    // Grouping a newly resolved tool can reparent the next pending card and blur it.
+    if (previouslyFocused && this.root.ownerDocument.activeElement === this.root.ownerDocument.body) {
+      this.cards().find(card => card.dataset.approvalId === previouslyFocused)?.focus({ preventScroll: true });
+    }
     if (!newParts.length) return;
     const first = newParts[0];
     const native = nativeToolPresentation(first);

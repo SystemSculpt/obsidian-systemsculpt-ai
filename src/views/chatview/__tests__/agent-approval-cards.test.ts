@@ -91,6 +91,25 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  it("restores the next pending card after timeline regrouping reparents it", async () => {
+    const ui = setup();
+    const parts = [tool("one"), tool("two")];
+    const [one, two] = parts.map(ui.add);
+    ui.cards.sync(parts);
+    key(one, "Enter"); await tick();
+    expect(document.activeElement).toBe(two);
+    const focused = ui.cards.captureFocus();
+    const group = ui.root.createDiv();
+    group.appendChild(two);
+    expect(document.activeElement).toBe(document.body);
+    ui.cards.sync([parts[1]], focused);
+    expect(document.activeElement).toBe(two);
+    const outside = document.body.createEl("button"); outside.focus();
+    ui.cards.sync([parts[1]], focused);
+    expect(document.activeElement).toBe(outside);
+    ui.dispose();
+  });
+
   it("sends a single question option by its numbered shortcut without treating input digits as actions", async () => {
     const ui = setup();
     const part = tool("question", { native: { agent: "codex", workingDirectory: "/vault" }, input: { questions: [{ id: "folder", question: "Which folder?", options: [{ label: "Notes" }, { label: "Inbox" }] }] } });
