@@ -60,9 +60,6 @@ For hosted chat, mobile chat, or other hosted features:
 
 - Command palette: `Open SystemSculpt Chat`
 - Ribbon icon: `Open SystemSculpt Chat`
-- Desktop welcome: **Use my Claude Code or Codex** explicitly chooses an on-machine
-  agent, using the same readiness and recent-use ranking. If neither is ready, it
-  offers Claude Code setup guidance. No SystemSculpt account or license is needed.
 - The run line under the composer shows the backend, mode and model or credits;
   each part is a menu. **Auto** is the default for new chats. Saved chats keep their
   backend, and saved hosted modes are preserved (missing or unknown modes use **Ask**).

@@ -23,5 +23,6 @@
  *  - 13: added the persisted default output preset for Audio Processor.
  *  - 14: removed the write-only embeddings rebuild flag (#341).
  *  - 15: distinguish chosen chat backends and default native permissions to Auto.
+ *  - 16: removed automatic welcome, release-announcement, and post-update toast state.
  */
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;

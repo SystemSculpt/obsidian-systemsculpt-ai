@@ -3,7 +3,7 @@ import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type SystemSculptPlugin from "../main";
 import { EmbeddingsPendingFilesModal } from "../modals/EmbeddingsPendingFilesModal";
-import { showConfirm } from "../core/ui/notifications";
+import { confirmSimilarNotesRebuild } from "../modals/SimilarNotesRebuildConfirmation";
 
 export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -115,17 +115,7 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
         .setWarning()
         .setButtonText("Rebuild")
         .onClick(async () => {
-          const { confirmed } = await showConfirm(
-            tabInstance.app,
-            "Rebuild the Similar notes index? Existing local vectors will be replaced.",
-            {
-              title: "Rebuild Semantic Index",
-              primaryButton: "Rebuild",
-              secondaryButton: "Cancel",
-              icon: "alert-triangle",
-            }
-          );
-          if (!confirmed) return;
+          if (!await confirmSimilarNotesRebuild(tabInstance.app)) return;
 
           button.setDisabled(true);
           try {

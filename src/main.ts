@@ -68,8 +68,7 @@ import { ManagedJobRecoveryStore } from "./services/managed/ManagedJobRecoverySt
 import { ObsidianManagedRecoveryAdapter } from "./services/managed/adapters/ObsidianManagedRecoveryAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
-import { AccountConnectModal } from "./modals/AccountConnectModal";
-import { UpgradePlanModal, defaultAccountConnectActions } from "./modals/UpgradePlanModal";
+import { presentAccountConnectOutcome } from "./modals/UpgradePlanModal";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
@@ -325,25 +324,13 @@ export default class SystemSculptPlugin extends Plugin {
       // both desktop and mobile. Cheap synchronous registration. Delivery is
       // not guaranteed (the host can gate plugin URIs behind a trust prompt
       // or drop them), so the connect service also polls while a sign-in is
-      // pending and greets the user the moment it completes.
-      this.getAccountConnectService().setBackgroundOutcomeHandler((outcome) => {
-        UpgradePlanModal.closeCurrent();
-        new AccountConnectModal(
-          this.app,
-          () => Promise.resolve(outcome),
-          defaultAccountConnectActions(this),
-        ).open();
+      // pending. Whichever finishes it, the outcome appears once, in the
+      // account surface that started it.
+      this.getAccountConnectService().setOutcomeHandler((outcome) => {
+        presentAccountConnectOutcome(this, outcome);
       });
       this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
-        const connect = this.getAccountConnectService();
-        // The upgrade/sign-in modal's browser handoff is superseded the
-        // moment the deep link comes back — close it before the welcome.
-        UpgradePlanModal.closeCurrent();
-        new AccountConnectModal(
-          this.app,
-          () => connect.handleProtocolCallback(params),
-          defaultAccountConnectActions(this),
-        ).open();
+        void this.getAccountConnectService().handleProtocolCallback(params);
       });
 
       this.registerLayoutReadyHandler(loadStart);
@@ -873,28 +860,12 @@ export default class SystemSculptPlugin extends Plugin {
           layoutPhase.complete({
             elapsedSinceLoadMs: Number((performance.now() - loadStart).toFixed(1)),
           });
-          this.maybeShowAccountOnboarding();
         })
         .catch((error) => {
           this.failures.push("layout initialization");
           layoutPhase.fail(error);
         });
     });
-  }
-
-  /**
-   * One-time first-run welcome: only for a vault that has never signed in and
-   * never seen it. Persists the flag immediately so it can never nag again.
-   */
-  private maybeShowAccountOnboarding(): void {
-    if (this.settings.accountOnboardingShown === true) return;
-    if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-    window.setTimeout(() => {
-      if (this.settings.accountOnboardingShown === true) return;
-      if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-      void this.getSettingsManager().updateSettings({ accountOnboardingShown: true });
-      UpgradePlanModal.openOnce(this, { context: "onboarding" });
-    }, 1500);
   }
 
   private scheduleStorageInitialization(tracer: InitializationTracer): void {

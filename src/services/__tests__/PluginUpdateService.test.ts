@@ -37,8 +37,6 @@ async function settle(): Promise<void> {
 
 function createPlugin(overrides: Record<string, unknown> = {}) {
   const settings = {
-    lastAnnouncedPluginRelease: "",
-    lastLoadedPluginVersion: "6.6.1",
     ...overrides,
   };
   const statusBarEl = document.createElement("div") as HTMLElement & { setText?: (text: string) => void };
@@ -80,65 +78,67 @@ describe("PluginUpdateService", () => {
     expect(parsePluginReleaseInfo("<html>gateway error</html>")).toBeNull();
   });
 
-  it("shows one prompt per release and keeps an update action", async () => {
+  it("keeps background release discovery passive: a status-bar action and nothing else", async () => {
     const plugin = createPlugin();
     const request = jest.fn().mockResolvedValue(release());
     const notify = jest.fn();
     const openUpdatePage = jest.fn();
-    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
-    const service = new PluginUpdateService(plugin, {
-      request,
-      notify,
-      openUpdatePage,
-      showUpdatePrompt,
-    });
+    const service = new PluginUpdateService(plugin, { request, notify, openUpdatePage });
 
     service.start();
+    await settle();
     await service.checkForUpdates();
 
-    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
-    expect(plugin.updateSettings).toHaveBeenCalledWith({ lastAnnouncedPluginRelease: "6.6.2" });
+    expect(request).toHaveBeenCalledTimes(2);
     expect(notify).not.toHaveBeenCalled();
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(document.querySelector(".modal")).toBeNull();
     expect(plugin.statusBarEl.hidden).toBe(false);
     expect(plugin.statusBarEl.textContent).toBe("Update SystemSculpt to 6.6.2");
+    expect(openUpdatePage).not.toHaveBeenCalled();
     plugin.statusBarEl.click();
     expect(openUpdatePage).toHaveBeenCalledTimes(1);
-
-    showUpdatePrompt.mockClear();
-    await service.checkForUpdates();
-    expect(showUpdatePrompt).not.toHaveBeenCalled();
     service.stop();
   });
 
-  it("opens the Obsidian update page from the prompt", async () => {
+  it("shows no toast or prompt after the plugin itself was updated", async () => {
     const plugin = createPlugin();
+    plugin.manifest.version = "6.6.2";
+    const notify = jest.fn();
+    const service = new PluginUpdateService(plugin, {
+      request: jest.fn().mockResolvedValue(release("6.6.2")),
+      notify,
+    });
+
+    service.start();
+    await settle();
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    service.stop();
+  });
+
+  it("answers a manual check with one available result that opens Obsidian's plugin updates", async () => {
+    const plugin = createPlugin();
+    const notify = jest.fn();
     const openUpdatePage = jest.fn();
     const service = new PluginUpdateService(plugin, {
       request: jest.fn().mockResolvedValue(release()),
-      notify: jest.fn(),
+      notify,
       openUpdatePage,
-      showUpdatePrompt: jest.fn().mockResolvedValue(true),
     });
 
-    await service.checkForUpdates();
+    await expect(service.checkForUpdates({ manual: true })).resolves.toMatchObject({ outcome: "update_available" });
 
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("SystemSculpt 6.6.2 is available.", 10_000, {
+      label: "Open plugin updates",
+      onSelect: expect.any(Function),
+    });
+    expect(openUpdatePage).not.toHaveBeenCalled();
+    notify.mock.calls[0][2].onSelect();
     expect(openUpdatePage).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not repeat a dismissed release unless the user checks manually", async () => {
-    const plugin = createPlugin({ lastAnnouncedPluginRelease: "6.6.2" });
-    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
-    const service = new PluginUpdateService(plugin, {
-      request: jest.fn().mockResolvedValue(release()),
-      notify: jest.fn(),
-      showUpdatePrompt,
-    });
-
-    await service.checkForUpdates();
-    expect(showUpdatePrompt).not.toHaveBeenCalled();
-
-    await service.checkForUpdates({ manual: true });
-    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
   });
 
   it("checks at launch, then at most once per six hours with a single timeout", async () => {
@@ -332,12 +332,16 @@ describe("PluginUpdateService", () => {
     const service = new PluginUpdateService(plugin, {
       request: jest.fn().mockResolvedValue(release()),
       notify,
-      showUpdatePrompt: jest.fn().mockResolvedValue(false),
     });
 
     await service.checkForUpdates();
-
     expect(notify).not.toHaveBeenCalled();
     expect(plugin.addStatusBarItem).not.toHaveBeenCalled();
+
+    // Mobile has no status bar, so the manual check is its update entry point.
+    await service.checkForUpdates({ manual: true });
+    expect(notify).toHaveBeenCalledWith("SystemSculpt 6.6.2 is available.", 10_000, expect.objectContaining({
+      label: "Open plugin updates",
+    }));
   });
 });

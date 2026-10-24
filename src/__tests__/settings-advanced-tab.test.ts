@@ -108,9 +108,19 @@ jest.mock("../platform/hostCapabilities", () => ({
   hasHostCapability: jest.fn(() => true),
 }));
 
+const mockOwnerWindow = {
+  setTimeout: (callback: () => void) => { callback(); return 0; },
+  location: { reload: jest.fn() },
+};
+jest.mock("../core/ui/surface/SurfaceDomContext", () => ({
+  getSurfaceOwnerWindow: jest.fn(() => mockOwnerWindow),
+}));
+
 import { App, Notice } from "obsidian";
 import { displayAdvancedTabContent } from "../settings/AdvancedTabContent";
 import { hasHostCapability } from "../platform/hostCapabilities";
+import { showPrompt } from "../core/ui/modals/PromptModal";
+import { DEFAULT_SETTINGS } from "../types";
 
 describe("Advanced settings tab", () => {
   beforeEach(() => {
@@ -209,5 +219,55 @@ describe("Advanced settings tab", () => {
       .not.toEqual(expect.arrayContaining([
         expect.objectContaining({ textContent: "Open folder" }),
       ]));
+  });
+
+  function renderResetSetting() {
+    const app = new App();
+    const saveData = jest.fn().mockResolvedValue(undefined);
+    const updateSettings = jest.fn().mockResolvedValue(true);
+    const container = document.createElement("div");
+    const tab: any = {
+      app,
+      plugin: { settings: {}, saveData, getSettingsManager: jest.fn(() => ({ updateSettings })) },
+      renderQuickActionsSection: jest.fn(),
+    };
+    displayAdvancedTabContent(container, tab);
+    const reset = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Reset…");
+    expect(reset).toBeDefined();
+    return { app, reset: reset!, saveData, updateSettings };
+  }
+
+  it.each([
+    ["cancelled", null],
+    ["declined", { confirmed: false }],
+  ])("writes nothing and does not reload when the factory reset is %s", async (_label, answer) => {
+    (showPrompt as jest.Mock).mockResolvedValue(answer);
+    const { reset, saveData, updateSettings } = renderResetSetting();
+
+    reset.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(saveData).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(mockOwnerWindow.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("says what a factory reset replaces, then resets saved settings once and reloads once", async () => {
+    (showPrompt as jest.Mock).mockResolvedValue({ confirmed: true });
+    const { app, reset, saveData, updateSettings } = renderResetSetting();
+
+    reset.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(showPrompt).toHaveBeenCalledWith(app, "Reset to Factory Defaults", {
+      description: "Reset SystemSculpt’s saved settings to defaults and reload Obsidian? Your current settings will be replaced.",
+      primaryButton: "Reset & Reload",
+      secondaryButton: "Cancel",
+    });
+    expect(saveData).toHaveBeenCalledTimes(1);
+    expect(saveData).toHaveBeenCalledWith(null);
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS });
+    expect(mockOwnerWindow.location.reload).toHaveBeenCalledTimes(1);
   });
 });

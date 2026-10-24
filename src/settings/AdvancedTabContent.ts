@@ -50,7 +50,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             "Reset to Factory Defaults",
             {
                 description:
-                    "This will delete ALL saved settings and customizations for SystemSculpt, returning everything to default. Do you want to continue?",
+                    "Reset SystemSculpt’s saved settings to defaults and reload Obsidian? Your current settings will be replaced.",
                 primaryButton: "Reset & Reload",
                 secondaryButton: "Cancel",
             }

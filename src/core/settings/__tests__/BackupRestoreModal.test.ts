@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
-import { BackupSelectionModal } from "../BackupRestoreModal";
+import { App, Notice } from "obsidian";
+import { BackupRestoreModal, BackupSelectionModal } from "../BackupRestoreModal";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 const backups = [
   { path: ".systemsculpt/settings-backups/latest.json", name: "Latest backup", date: "Today", details: "Schema: 6" },
@@ -68,5 +70,55 @@ describe("BackupSelectionModal", () => {
     expect(list.getAttribute("role")).toBe("group");
     expect(state?.textContent).toContain("No matching backups");
     expect(state?.getAttribute("role")).toBe("status");
+  });
+});
+
+describe("BackupRestoreModal.restoreFromBackup", () => {
+  const path = ".systemsculpt/settings-backups/latest.json";
+
+  function createRestore(backupText: string | null) {
+    const app = new App();
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(backupText !== null);
+    (app.vault.adapter.read as jest.Mock).mockResolvedValue(backupText ?? "");
+    const restoreFromExternalSettings = jest.fn().mockResolvedValue(undefined);
+    const plugin: any = {
+      app,
+      getSettingsManager: () => ({
+        getSettings: () => ({ licenseKey: "current-license", phoneCapturesLinked: true, chatFontSize: "large" }),
+        restoreFromExternalSettings,
+      }),
+    };
+    return { restore: new BackupRestoreModal(app, plugin), restoreFromExternalSettings };
+  }
+
+  it("restores the backup's settings with the current credentials, not the redacted ones", async () => {
+    const { restore, restoreFromExternalSettings } = createRestore(JSON.stringify({
+      licenseKey: "",
+      licenseValid: true,
+      chatFontSize: "small",
+    }));
+
+    await expect(restore.restoreFromBackup(path)).resolves.toBe(true);
+
+    expect(restoreFromExternalSettings).toHaveBeenCalledTimes(1);
+    expect(restoreFromExternalSettings).toHaveBeenCalledWith(expect.objectContaining({
+      licenseKey: "current-license",
+      phoneCapturesLinked: true,
+      chatFontSize: "small",
+    }));
+  });
+
+  it.each([
+    ["missing", null],
+    ["not JSON", "{ truncated"],
+    ["a list", "[]"],
+    ["empty", "null"],
+  ])("leaves settings untouched when the backup is %s", async (_label, backupText) => {
+    const { restore, restoreFromExternalSettings } = createRestore(backupText);
+
+    await expect(restore.restoreFromBackup(path)).resolves.toBe(false);
+
+    expect(restoreFromExternalSettings).not.toHaveBeenCalled();
+    expect(Notice).toHaveBeenCalled();
   });
 });

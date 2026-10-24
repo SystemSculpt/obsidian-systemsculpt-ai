@@ -31,6 +31,8 @@ export class InboxTranscriptionService {
   private readonly app: App;
   private disposed = false;
   private pendingFiles: PendingFileEvent[] = [];
+  /** Files left waiting by Not now; only Resume inbox transcription sends them. */
+  private deferredFiles = new Map<string, TFile>();
   private debounceTimer: number | null = null;
   private isProcessingBulk = false;
   private progressWidget: BulkTranscriptionProgressWidget | null = null;
@@ -57,6 +59,16 @@ export class InboxTranscriptionService {
         void this.handleFileEvent(file);
       })
     );
+
+    this.plugin.addCommand({
+      id: "resume-inbox-transcription",
+      name: "Resume inbox transcription",
+      checkCallback: (checking: boolean) => {
+        if (this.disposed || this.isProcessingBulk || this.deferredFiles.size === 0) return false;
+        if (!checking) void this.resumeDeferredFiles();
+        return true;
+      },
+    });
   }
 
   destroy(): void {
@@ -64,6 +76,7 @@ export class InboxTranscriptionService {
     this.requestStop({ type: "user" });
     this.clearDebounceTimer();
     this.pendingFiles = [];
+    this.deferredFiles.clear();
     this.progressWidget?.close();
     this.progressWidget = null;
     this.abortController = null;
@@ -95,46 +108,6 @@ export class InboxTranscriptionService {
   ): boolean {
     const skipMap = this.getSkipMap(settings);
     return Boolean(skipMap[this.buildSkipKey(file.path)]);
-  }
-
-  private async persistSkippedFiles(
-    files: PendingFileEvent[],
-    reason: string
-  ): Promise<number> {
-    if (files.length === 0) return 0;
-    const settings = this.getWorkflowSettings();
-    const existing = this.getSkipMap(settings);
-    const updated: Record<string, WorkflowSkipEntry> = { ...existing };
-    const timestamp = new Date().toISOString();
-    let added = 0;
-
-    for (const pending of files) {
-      const key = this.buildSkipKey(pending.file.path);
-      if (updated[key]) continue;
-      updated[key] = {
-        path: pending.file.path,
-        type: "transcription",
-        skippedAt: timestamp,
-        reason,
-      };
-      added += 1;
-    }
-
-    if (added > 0) {
-      const updatedEngine = {
-        ...settings,
-        skippedFiles: updated,
-      };
-      const settingsManager = this.plugin.getSettingsManager?.();
-      if (settingsManager?.updateSettings) {
-        await settingsManager.updateSettings({ workflowEngine: updatedEngine });
-      } else {
-        this.plugin.settings.workflowEngine = updatedEngine;
-        await this.plugin.saveSettings();
-      }
-    }
-
-    return added;
   }
 
   private requestStop(reason: { type: "user" | "error"; error?: unknown }): void {
@@ -291,23 +264,40 @@ export class InboxTranscriptionService {
             resolve();
           });
         },
-        onCancel: () => {
-          void (async () => {
-            const skippedCount = await this.persistSkippedFiles(files, "user_skip");
-            if (skippedCount > 0) {
-              new Notice(`Skipped ${skippedCount} file${skippedCount > 1 ? "s" : ""}. You can clear skips in Settings -> Workflow.`, 7000);
-            }
-            this.plugin.getLogger().info("Bulk inbox transcription cancelled by user", {
-              source: "InboxTranscriptionService",
-              metadata: { fileCount: files.length, skippedCount },
-            });
-            this.isProcessingBulk = false;
-            resolve();
-          })();
+        onDefer: () => {
+          for (const pending of files) this.deferredFiles.set(pending.file.path, pending.file);
+          this.plugin.getLogger().info("Bulk inbox transcription deferred by user", {
+            source: "InboxTranscriptionService",
+            metadata: { fileCount: files.length },
+          });
+          this.isProcessingBulk = false;
+          resolve();
         },
       });
       modal.open();
     });
+  }
+
+  /**
+   * Sends the files Not now left waiting, as the user asked. Files since
+   * deleted, moved out of the inbox, or already skipped are left alone.
+   */
+  private async resumeDeferredFiles(): Promise<void> {
+    const settings = this.getWorkflowSettings();
+    const files: PendingFileEvent[] = [];
+    for (const [path, file] of this.deferredFiles) {
+      if (this.app.vault.getAbstractFileByPath(path) !== file) continue;
+      const pending = this.classifyFile(file, settings);
+      if (pending) files.push(pending);
+    }
+    this.deferredFiles.clear();
+    if (files.length === 0 || this.isProcessingBulk) return;
+    this.isProcessingBulk = true;
+    try {
+      await this.startBulkProcessing(files);
+    } finally {
+      this.isProcessingBulk = false;
+    }
   }
 
   private async startBulkProcessing(files: PendingFileEvent[]): Promise<void> {

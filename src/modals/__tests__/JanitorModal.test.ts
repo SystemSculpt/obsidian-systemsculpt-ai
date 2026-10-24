@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import { JanitorModal } from "../JanitorModal";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
@@ -122,6 +122,62 @@ describe("JanitorModal", () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(trash).toHaveBeenCalledTimes(1);
     expect(trash).toHaveBeenCalledWith(reviewed);
+    modal.close();
+  });
+
+  async function reviewChatCleanup(files: TFile[]) {
+    const modal = createHarness();
+    await Promise.resolve();
+    await Promise.resolve();
+    (modal.app.vault.getFiles as jest.Mock).mockImplementation(() => files);
+    (modal.app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path) => files.find((file) => file.path === path) ?? null);
+    const trash = jest.fn(async () => undefined);
+    (modal.app.fileManager as any).trashFile = trash;
+    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="janitor.refresh"]')!.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const section = [...modal.modalEl.querySelectorAll<HTMLElement>(".ss-janitor-section")].find((element) => element.textContent?.includes("Chat history"))!;
+    section.querySelector<HTMLButtonElement>("button")!.click();
+    const confirmation = document.querySelector<HTMLElement>(".ss-janitor-confirmation-modal")!;
+    return { modal, trash, confirmation };
+  }
+
+  it("describes the move by Obsidian's trash setting and promises no restore", async () => {
+    const chat = new TFile({ path: "SystemSculpt/Chats/old.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const { modal, confirmation } = await reviewChatCleanup([chat]);
+
+    expect(confirmation.textContent).toContain(
+      "1 files from SystemSculpt/Chats will be moved to trash using Obsidian’s trash setting. Review the list before continuing.",
+    );
+    expect(confirmation.textContent).not.toContain("restore");
+    modal.close();
+  });
+
+  it.each([
+    ["Cancel", (confirmation: HTMLElement) => confirmation.querySelector<HTMLButtonElement>('[data-testid="janitor.confirm.cancel"]')!.click()],
+    ["the close button", (confirmation: HTMLElement) => confirmation.querySelector<HTMLButtonElement>(".ss-modal__close-button")!.click()],
+  ])("moves nothing to trash on %s", async (_label, dismiss) => {
+    const chat = new TFile({ path: "SystemSculpt/Chats/old.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const { modal, trash, confirmation } = await reviewChatCleanup([chat]);
+
+    dismiss(confirmation);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    expect(trash).not.toHaveBeenCalled();
+    modal.close();
+  });
+
+  it("leaves an item that changed after review untouched and says so", async () => {
+    const changed = new TFile({ path: "SystemSculpt/Chats/changed.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const unchanged = new TFile({ path: "SystemSculpt/Chats/unchanged.md", extension: "md", stat: { size: 2000, mtime: 1 } });
+    const { modal, trash, confirmation } = await reviewChatCleanup([changed, unchanged]);
+
+    changed.stat.mtime = 2;
+    confirmation.querySelector<HTMLButtonElement>('[data-testid="janitor.confirm.accept"]')!.click();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    expect(trash).toHaveBeenCalledTimes(1);
+    expect(trash).toHaveBeenCalledWith(unchanged);
+    expect(Notice).toHaveBeenCalledWith(expect.stringContaining("Kept 1 items that changed since review."));
     modal.close();
   });
 });

@@ -57,7 +57,9 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(15);
+    expect(plugin.settings.schemaVersion).toBe(16);
+    expect(plugin.settings).not.toHaveProperty("accountOnboardingShown");
+    expect(plugin.settings).not.toHaveProperty("lastAnnouncedPluginRelease");
     expect(plugin.settings.textExecutionBackendExplicit).toBe(false);
     expect(plugin.settings.claudePermissionMode).toBe("auto");
     expect(plugin.settings.codexApprovalMode).toBe("auto");

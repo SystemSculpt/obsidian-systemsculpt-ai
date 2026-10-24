@@ -1313,6 +1313,26 @@ describe("AgentChatView composer admission", () => {
     harness.composer.unload();
   });
 
+  it.each([
+    ["an on-machine agent runs", true],
+    ["hosted chat stops at the plan gate", false],
+  ])("without a SystemSculpt plan, %s", async (_label, native) => {
+    // Starting the run proves admission passed the hosted plan gate.
+    const harness = createHarness("before-commit");
+    harness.view.plugin.settings.licenseKey = "";
+    if (native) {
+      const agent = Object.assign(Object.create(LocalAgentChatSession.prototype), harness.agent, { agent: "claude" });
+      Object.assign(harness.view, { agent, createAgentSession: () => agent });
+    }
+    harness.composer.setValue("Summarize this note");
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(harness.agent.start).toHaveBeenCalledTimes(native ? 1 : 0);
+    harness.composer.unload();
+  });
+
   it("merges text and attachments back when local transcript persistence rejects before admission", async () => {
     const harness = createHarness("before-commit");
     harness.composer.setValue("Original request");

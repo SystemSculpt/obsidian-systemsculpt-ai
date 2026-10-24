@@ -3,6 +3,8 @@
 import { App } from "obsidian";
 import { displayBackupTabContent } from "../settings/BackupTabContent";
 import { hasHostCapability } from "../platform/hostCapabilities";
+import { showPrompt } from "../core/ui/modals/PromptModal";
+import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
 
 jest.mock("../platform/hostCapabilities", () => ({
   hasHostCapability: jest.fn(() => false),
@@ -79,5 +81,68 @@ describe("Backup settings tab", () => {
       .not.toEqual(expect.arrayContaining([
         expect.objectContaining({ textContent: "Open folder" }),
       ]));
+  });
+
+  async function chooseBackup(backupText: string | Error, answer: { confirmed: boolean } | null) {
+    const app = new App();
+    (app.vault.adapter.read as jest.Mock).mockImplementation(async () => {
+      if (backupText instanceof Error) throw backupText;
+      return backupText;
+    });
+    const restoreFromBackup = jest.fn().mockResolvedValue(true);
+    jest.mocked(BackupRestoreModal).mockImplementationOnce(() => ({
+      open: jest.fn().mockResolvedValue(".systemsculpt/settings-backups/latest.json"),
+      restoreFromBackup,
+    }) as any);
+    (showPrompt as jest.Mock).mockResolvedValue(answer);
+    const plugin: any = {
+      app,
+      settings: { automaticBackupsEnabled: false },
+      getSettingsManager: jest.fn(() => ({
+        updateSettings: jest.fn().mockResolvedValue(undefined),
+        getAutomaticBackupService: jest.fn(() => ({ start: jest.fn(), stop: jest.fn() })),
+      })),
+    };
+    const display = jest.fn();
+    const container = document.createElement("div");
+    displayBackupTabContent(container, { app, plugin, display } as any);
+    const select = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Select backup");
+    expect(select).toBeDefined();
+    select!.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    return { app, restoreFromBackup, display };
+  }
+
+  it("asks once with the backup's contents and restores nothing when cancelled", async () => {
+    const { app, restoreFromBackup, display } = await chooseBackup(JSON.stringify({ licenseValid: true }), null);
+
+    expect(showPrompt).toHaveBeenCalledWith(app, "Restore settings from backup", {
+      description: `Replace your current settings with this backup?
+
+This backup contains:
+• Chat display defaults and client-side workspace preferences
+• Embeddings and audio settings
+• License status: Active`,
+      primaryButton: "Restore",
+      secondaryButton: "Cancel",
+    });
+    expect(restoreFromBackup).not.toHaveBeenCalled();
+    expect(display).not.toHaveBeenCalled();
+  });
+
+  it("restores the chosen backup once after confirmation", async () => {
+    const { restoreFromBackup, display } = await chooseBackup(JSON.stringify({ licenseValid: false }), { confirmed: true });
+
+    expect(restoreFromBackup).toHaveBeenCalledTimes(1);
+    expect(restoreFromBackup).toHaveBeenCalledWith(".systemsculpt/settings-backups/latest.json");
+    expect(display).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the short fallback question when the backup cannot be read", async () => {
+    const { app } = await chooseBackup(new Error("unreadable"), { confirmed: false });
+
+    expect(showPrompt).toHaveBeenCalledWith(app, "Restore settings from backup", expect.objectContaining({
+      description: "Replace your current settings with the selected backup?",
+    }));
   });
 });

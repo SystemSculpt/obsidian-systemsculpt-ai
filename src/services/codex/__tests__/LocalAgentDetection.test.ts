@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
-import { detectLocalAgents, invalidateLocalAgentDetection, preferredLocalAgent } from '../LocalAgentDetection';
+import { detectLocalAgents, invalidateLocalAgentDetection } from '../LocalAgentDetection';
 
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn(), childProcess: jest.fn() } }));
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
@@ -162,7 +162,6 @@ it('resolves relative Claude binaries and status in the task directory without r
   expect((await detectLocalAgents({ workingDirectory: '/vault-b' })).preferred).toBe('systemsculpt');
   expect((await detectLocalAgents()).agents.claude.installed).toBe(false);
   expect(host.execFile).toHaveBeenCalledWith('/vault-a/tools/claude', ['auth', 'status', '--json'], expect.objectContaining({ cwd: '/vault-a' }), expect.any(Function));
-  expect(await preferredLocalAgent({ workingDirectory: '/vault-a' })).toBe('claude');
 });
 
 it('resolves a relative Codex binary from transport home rather than the vault', async () => {
@@ -239,11 +238,4 @@ it('leaves mobile on hosted without loading filesystem or child-process adapters
   expect((await detectLocalAgents({ force: true })).preferred).toBe('systemsculpt');
   expect(desktopHost.fs).not.toHaveBeenCalled();
   expect(desktopHost.childProcess).not.toHaveBeenCalled();
-});
-
-it('uses detection for the explicit welcome choice and offers Claude install guidance when neither is usable', async () => {
-  machine({ signedIn: ['codex'] });
-  expect(await preferredLocalAgent()).toBe('codex');
-  machine({ installed: [] }); invalidateLocalAgentDetection();
-  expect(await preferredLocalAgent()).toBe('claude');
 });

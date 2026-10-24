@@ -143,9 +143,3 @@ export function detectLocalAgents(options: { force?: boolean; workingDirectory?:
 export function invalidateLocalAgentDetection(): void {
   cachedDetections.clear();
 }
-
-/** The explicit welcome action still offers Claude Code's install guidance when neither is usable. */
-export async function preferredLocalAgent(options: { workingDirectory?: string } = {}): Promise<LocalAgentId> {
-  const { preferred } = await detectLocalAgents(options);
-  return preferred === 'systemsculpt' ? 'claude' : preferred;
-}

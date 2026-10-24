@@ -119,7 +119,6 @@ describe("SystemSculptPlugin startup phases", () => {
     const critical = deferred();
     (plugin as any).lifecycleCoordinator = { runPhase };
     (plugin as any).criticalInitializationPromise = critical.promise;
-    jest.spyOn(plugin as any, "maybeShowAccountOnboarding").mockImplementation(() => undefined);
 
     (plugin as any).registerLayoutReadyHandler(0);
     layoutReady!();

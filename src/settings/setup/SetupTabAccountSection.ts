@@ -5,8 +5,9 @@ import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } 
 import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
-import { AccountConnectModal } from "../../modals/AccountConnectModal";
-import { defaultAccountConnectActions, UpgradePlanModal } from "../../modals/UpgradePlanModal";
+import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
+import { CONNECT_ERROR_COPY, LICENSE_CONFIRMING_COPY, signedInLine } from "../../modals/AccountConnectOutcome";
+import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
 
@@ -32,6 +33,7 @@ export function renderAccountSection(
   ): Promise<void> => {
     try {
       button.setDisabled(true);
+      tabInstance.accountConnectOutcome = null;
       const opened = await connectService.begin(mode, ownerWindow);
       if (!opened) {
         new Notice("Couldn't open your browser. Reopen the sign-in page below, then paste the connection code shown there.");
@@ -73,6 +75,7 @@ export function renderAccountSection(
   const statusSetting = new Setting(root)
     .setName("Account")
     .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
+  renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
 
   if (isProActive) {
     statusSetting.addButton((button) => {
@@ -210,11 +213,10 @@ export function renderAccountSection(
           new Notice("Paste the connection code from your browser first.");
           return;
         }
-        new AccountConnectModal(
-          plugin.app,
-          () => connectService.submitManualCode(value),
-          defaultAccountConnectActions(plugin),
-        ).open();
+        // The outcome replaces this section through the shared sign-in result.
+        button.setDisabled(true).setButtonText("Signing in…");
+        await connectService.submitManualCode(value);
+        if (button.buttonEl.isConnected) button.setDisabled(false).setButtonText("Complete sign-in");
       };
       button.onClick(() => void submitCode?.());
     });
@@ -475,4 +477,22 @@ export function renderAccountSection(
   privacyLink.rel = "noopener noreferrer";
   privacyLink.textContent = "Privacy";
   managedDataSetting.descEl.append(termsLink, " and ", privacyLink, ".");
+}
+
+/**
+ * The latest sign-in result under the Account row. A plan-less account needs
+ * no line: the row itself says it is signed in without a plan.
+ */
+function renderConnectOutcome(descEl: HTMLElement, outcome: ConnectOutcome | null): void {
+  if (!outcome || outcome.kind === "no-license") return;
+  const text = outcome.kind === "error"
+    ? CONNECT_ERROR_COPY[outcome.reason]
+    : outcome.licenseValid
+      ? signedInLine(outcome.email)
+      : `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
+  descEl.createDiv({
+    cls: `ss-account-connect-result${outcome.kind === "error" ? " is-error" : ""}`,
+    text,
+    attr: { role: "status", "data-testid": "settings.account.connect-result" },
+  });
 }
