@@ -113,7 +113,8 @@ it("hides the empty scroll region and reveals arrivals without taking focus", as
 it("bounds the in-flow review region while retaining all text and touch-sized actions", () => {
   const css = readFileSync(resolve(__dirname, "../../../css/views/agent-workspace/states.css"), "utf8");
   const region = css.match(/\.systemsculpt-agent-phone-handoff-region\s*\{([^}]+)\}/)![1];
-  expect(region).toMatch(/flex:\s*0 1 auto/);
+  // The transcript yields first, so a short card never hides its result link behind a scroll.
+  expect(region).toMatch(/flex:\s*0 0 auto/);
   expect(region).toMatch(/min-height:\s*0/);
   expect(region).toMatch(/min-width:\s*0/);
   expect(region).toMatch(/max-height:\s*40%/);

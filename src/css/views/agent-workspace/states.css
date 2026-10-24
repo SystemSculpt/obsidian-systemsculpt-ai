@@ -100,10 +100,10 @@
   overflow-wrap: anywhere;
 }
 
-/* Separate in-flow review from transcript end-follow. Long sources scroll in full;
- * the inbox can shrink on short panes and never occupies more than 40% of the workspace. */
+/* Separate in-flow review from transcript end-follow. The inbox keeps its full height
+ * (the transcript yields first) up to 40% of the workspace; longer sources scroll in full. */
 .systemsculpt-agent-phone-handoff-region {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
   max-height: 40%;
