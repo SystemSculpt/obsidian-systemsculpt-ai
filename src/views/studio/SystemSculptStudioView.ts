@@ -1,4 +1,5 @@
 import { StudioOutputContainerController } from "./StudioOutputContainerController";
+import { createSurfaceElement } from "../../core/ui/surface/SurfaceDomContext";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
 import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
@@ -184,6 +185,8 @@ import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { applyPluginSurface } from "../../core/ui/surface";
 import { createStudioAction } from "./StudioAction";
 import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
+import { observeLeafVisibility } from "../../core/ui/surface/LeafVisibility";
+import { StudioPresentation } from "./StudioPresentation";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
 function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null, recovery?: { reason: string; retrying: boolean; retry: () => void }): void {
@@ -241,7 +244,7 @@ export class SystemSculptStudioView extends ItemView {
   private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.render() });
   private readonly outputContainers = new StudioOutputContainerController({
     getProject: () => this.currentProject,
-    getNodeElement: (id) => this.graphInteraction.getNodeElement(id),
+    getNodeElement: (id) => this.leafVisible ? this.graphInteraction.getNodeElement(id) : null,
     isDragging: () => this.nodeDragInProgress,
     commit: (mutate) => this.commitCurrentProjectMutation("runtime.projector", mutate, { captureHistory: false }),
     positionsChanged: () => this.graphInteraction.notifyNodePositionsChanged(),
@@ -454,17 +457,45 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private detachSurfaceActivity: (() => void) | null = null;
+  private detachLeafVisibility: (() => void) | null = null;
+  private leafVisible = true;
+  private readonly presentation = new StudioPresentation();
+  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, object>();
+
+  private setLeafVisible(visible: boolean): void {
+    if (this.closed || this.leafVisible === visible) return;
+    this.leafVisible = visible;
+    this.activity.setVisible(visible);
+    if (!visible) {
+      this.presentation.setVisible(false);
+      this.outputContainers.dispose();
+      this.resetViewportScrollingState();
+      return;
+    }
+    // Reconcile project/run state before retained card observers read it.
+    this.render();
+    this.presentation.setVisible(true);
+    if (this.graphViewportEl) this.outputContainers.mount(this.graphViewportEl);
+  }
 
   async onOpen(): Promise<void> {
     this.detachSurfaceActivity?.();
     this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
+    this.detachLeafVisibility?.();
+    this.detachLeafVisibility = observeLeafVisibility(this.containerEl, this.app.workspace, visible => this.setLeafVisible(visible));
     this.runObservation.bind(this.plugin.getStudioService());
     this.activity.bind(this.plugin.getStudioService().agentRuns);
     this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
     this.detachWindowMigration?.();
     this.detachWindowMigration = this.contentEl.onWindowMigrated((ownerWindow) => {
+      // Presentation clocks belong to the new owner window, even when visibility
+      // itself did not change during migration.
+      this.presentation.setVisible(false);
+      this.outputContainers.dispose();
       this.bindOwnerWindowEvents(ownerWindow);
       this.render();
+      this.presentation.setVisible(this.leafVisible);
+      if (this.leafVisible && this.graphViewportEl) this.outputContainers.mount(this.graphViewportEl);
     });
     this.bindVaultEvents();
     await this.loadNodeDefinitions();
@@ -489,6 +520,9 @@ export class SystemSculptStudioView extends ItemView {
     this.closed = true;
     this.detachSurfaceActivity?.();
     this.detachSurfaceActivity = null;
+    this.detachLeafVisibility?.();
+    this.detachLeafVisibility = null;
+    this.presentation.dispose();
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
@@ -1232,7 +1266,9 @@ export class SystemSculptStudioView extends ItemView {
     }
     for (const nodeId of removedNodeIds) {
       this.runPresentation.removeNode(nodeId);
-      this.graphInteraction.onNodeRemoved(nodeId);
+      // The workspace reconciles removed cards on show; removing their edge
+      // bindings now would repaint the hidden canvas.
+      if (this.leafVisible !== false) this.graphInteraction.onNodeRemoved(nodeId);
       this.textEdits.end(nodeId);
     }
     return true;
@@ -1336,15 +1372,15 @@ export class SystemSculptStudioView extends ItemView {
     containerEl: HTMLElement
   ): Promise<void> {
     const content = String(markdown || "");
-    containerEl.empty();
-    if (!content.trim()) {
-      return;
-    }
-
+    const request = {};
+    this.markdownPreviewRequests.set(containerEl, request);
+    // The host renderer can finish asynchronously. Keep both success and fallback
+    // off the mounted card until the leaf can present them.
+    const staging = createSurfaceElement(containerEl.ownerDocument, "div");
     const noteSourcePath = node.kind === "studio.note" ? normalizePath(readPrimaryStudioNotePath(node.config)) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
-      await MarkdownRenderer.render(this.app, content, containerEl, sourcePath, this);
+      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, this);
     } catch (error) {
       console.warn("[SystemSculpt Studio] Failed to render node markdown preview", {
         nodeId: node.id,
@@ -1352,9 +1388,13 @@ export class SystemSculptStudioView extends ItemView {
         sourcePath,
         error: error instanceof Error ? error.message : String(error),
       });
-      containerEl.empty();
-      containerEl.setText(content);
+      staging.setText(content);
     }
+    await this.presentation.deliver(() => {
+      if (!this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === request) {
+        containerEl.replaceChildren(...Array.from(staging.childNodes));
+      }
+    });
   }
 
   private readCurrentNodeDetailMode(): StudioNodeDetailMode {
@@ -2957,6 +2997,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphViewportScrolled(): void {
+    if (!this.leafVisible) return;
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.markViewportScrolling();
@@ -3138,6 +3179,7 @@ export class SystemSculptStudioView extends ItemView {
       currentProject: this.currentProject,
       currentProjectPath: this.currentProjectPath,
       agentRuns: this.plugin.getStudioService().agentRuns,
+      presentation: this.presentation,
       nodeDetailMode,
       graphInteraction: this.graphInteraction,
       getNodeRunState: (nodeId) => this.runPresentation.getNodeState(nodeId),
@@ -3281,7 +3323,7 @@ export class SystemSculptStudioView extends ItemView {
     ) {
       const viewport = this.graphViewportEl;
       requestStudioAnimationFrame(viewport, () => {
-        if (this.graphViewportEl === viewport) {
+        if (this.leafVisible && this.graphViewportEl === viewport) {
           this.fitGraphOverviewInViewport();
         }
       });
@@ -3336,7 +3378,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private render(): void {
-    if (this.closed) return;
+    if (this.closed || this.leafVisible === false) return;
     const reason = this.currentProjectSession?.getReadOnlyReason();
     const recovery = reason ? { reason, retrying: this.retryingMigration, retry: () => { void this.retryMigration(); } } : undefined;
     if (this.imageEditNodeId && !(this.currentProject && this.findNode(this.currentProject, this.imageEditNodeId))) {

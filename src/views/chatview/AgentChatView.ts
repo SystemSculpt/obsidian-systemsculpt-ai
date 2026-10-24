@@ -804,6 +804,7 @@ export class AgentChatView extends ItemView {
     this.contentEl.addClass("systemsculpt-agent-view");
     this.workspace = new AgentWorkspace(this.contentEl, {
       app: this.app,
+      visibilityRoot: this.containerEl,
       sourcePath: () => this.getExpectedChatHistoryFilePath() || "",
       reducedMotion: () => this.plugin.settings.reduceChatMotion === true,
       onSubmit: (submission) => {
@@ -4149,6 +4150,7 @@ export class AgentChatView extends ItemView {
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {
       void rendering.then(() => {
+        if (workspace.isRenderingVisible?.() === false) return;
         if (
           this.workspace === workspace
           && this.agent === agent

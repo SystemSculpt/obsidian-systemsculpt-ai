@@ -1,4 +1,5 @@
 import { Notice } from 'obsidian';
+import { StudioPresentation } from '../StudioPresentation';
 import { StudioRunDetailModal } from './StudioRunDetailModal';
 export { StudioRunDetailModal } from './StudioRunDetailModal';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
@@ -11,7 +12,7 @@ const statusLabels: Record<StudioAgentRun['status'], string> = { queued: 'Queued
 const shortId = (id: string): string => id.slice(-8);
 const report = (error: unknown): void => { new Notice(error instanceof Error ? error.message : 'The run action failed.'); };
 
-export function renderStudioRunCollection(root: HTMLElement, options: { runs: StudioAgentRuns; projectId: string; projectPath: string; sources?: string[]; compact?: boolean; groupBy?: string; showCompleted?: boolean }): () => void {
+export function renderStudioRunCollection(root: HTMLElement, options: { runs: StudioAgentRuns; presentation?: StudioPresentation; projectId: string; projectPath: string; sources?: string[]; compact?: boolean; groupBy?: string; showCompleted?: boolean }): () => void {
   const { runs } = options;
   const container = root.createDiv({ cls: `ss-studio-run-board${options.compact ? ' is-compact' : ''}`, attr: { 'data-testid': 'studio.run.board' } });
   markStudioNodeCardInteractive(container);
@@ -23,10 +24,10 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
   const completed = createStudioAction(toolbar, { label: showCompleted ? 'Hide finished' : 'Show finished', testId: 'studio.run.finished', onSelect: () => { showCompleted = !showCompleted; completed.setText(showCompleted ? 'Hide finished' : 'Show finished'); render(); } });
   createStudioAction(toolbar, { label: 'Refresh', testId: 'studio.run.refresh', onSelect: () => { void runs.refresh(options.projectPath, options.projectId).catch(report); } });
   const body = container.createDiv({ cls: 'ss-studio-run-lanes' });
-  let disposed = false, layoutSignature = '';
+  let layoutSignature = '', loadError = '';
   const liveCards = new Map<string, HTMLElement>();
-  const render = (): void => {
-    if (disposed) return;
+  const paint = (): void => {
+    if (loadError) { layoutSignature = ''; liveCards.clear(); body.setText(loadError); return; }
     const records = runs.list(options.projectId, options.sources).filter(run => (showCompleted || isActiveAgentRun(run.status)) && `${run.title} ${run.id} ${run.currentActivity}`.toLowerCase().includes(query));
     const hasOlder = runs.hasOlder(options.projectPath), capped = runs.isCapped(options.projectPath);
     const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, capped, records.map(run => [run.id, run.status])]);
@@ -68,18 +69,29 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
     }
     loadOlder();
   };
-  const unsubscribe = runs.subscribe(projectId => { if (projectId === options.projectId) render(); });
-  void runs.load(options.projectPath, options.projectId).then(render).catch(error => { if (!disposed) body.setText(error instanceof Error ? error.message : 'Run history could not load.'); });
-  render();
-  return () => { disposed = true; unsubscribe(); };
+  const load = (): void => {
+    void runs.load(options.projectPath, options.projectId).then(() => { loadError = ''; render(); }).catch(error => {
+      loadError = error instanceof Error ? error.message : 'Run history could not load.';
+      render();
+    });
+  };
+  const observation = (options.presentation ?? new StudioPresentation()).watch(paint, refresh => {
+    // Another board may have recovered the shared history while unsubscribed.
+    // Read its current state now, and recheck a previous failed load on show.
+    if (loadError) { loadError = ''; load(); }
+    return runs.subscribe(projectId => { if (projectId === options.projectId) { loadError = ''; refresh(); } });
+  });
+  function render(): void { observation.refresh(); }
+  load();
+  return observation.dispose;
 }
 
-export function renderStudioRunStatus(root: HTMLElement, runs: StudioAgentRuns, projectId: string, nodeId: string): () => void {
+export function renderStudioRunStatus(root: HTMLElement, runs: StudioAgentRuns, projectId: string, nodeId: string, presentation = new StudioPresentation()): () => void {
   const el = root.createDiv({ cls: 'ss-studio-run-inline' }); markStudioNodeCardInteractive(el);
   const render = (): void => {
     el.empty(); const records = runs.list(projectId, [nodeId]), active = records.filter(run => isActiveAgentRun(run.status));
     const latest = active[0] || records[0]; if (!latest) return;
     createStudioAction(el, { label: `${active.length ? `${active.length} active` : statusLabels[latest.status]} · ${latest.currentActivity.slice(0, 120)}`, testId: 'studio.run.latest', size: 'small', onSelect: () => new StudioRunDetailModal(runs, latest.id).open() });
   };
-  const unsubscribe = runs.subscribe(id => { if (id === projectId) render(); }); render(); return unsubscribe;
+  return presentation.watch(render, refresh => runs.subscribe(id => { if (id === projectId) refresh(); })).dispose;
 }

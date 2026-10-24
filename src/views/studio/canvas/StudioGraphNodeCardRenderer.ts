@@ -196,7 +196,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   });
   if (node.kind === 'studio.codex' || node.kind === 'studio.text_generation') renderStudioCodexStop(nodeEl, node.id, options.projectId || '');
   renderNodeStatusRow({ nodeEl, node, activity, resolveNodeBadge: options.resolveNodeBadge });
-  if (node.kind === 'studio.codex' && options.agentRuns) teardowns.push(renderStudioRunStatus(nodeEl, options.agentRuns, options.projectId || '', node.id));
+  if (node.kind === 'studio.codex' && options.agentRuns) teardowns.push(renderStudioRunStatus(nodeEl, options.agentRuns, options.projectId || '', node.id, options.presentation));
   renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
 
   if (placeholder) {
@@ -213,10 +213,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
 
   const change = (key: string, value: Parameters<typeof commitInlineConfigValueChange>[0]['value']) => commitInlineConfigValueChange({ node, key, value, onNodeConfigValueChange: options.onNodeConfigValueChange, onNodeConfigMutated: options.onNodeConfigMutated });
   const renderPanel = (root: HTMLElement): (() => void) | void => {
-    if (node.kind === 'studio.command_center' || node.kind === 'studio.button') return renderStudioCommandCenter(root, { node, nodes: options.projectNodes || [], projectId: options.projectId || '', projectPath: options.projectPath, busy: options.busy, runs: options.agentRuns, getRunState: options.getRelatedNodeRunState, definition: options.findNodeDefinition, run: options.onRunNode,
+    if (node.kind === 'studio.command_center' || node.kind === 'studio.button') return renderStudioCommandCenter(root, { node, nodes: options.projectNodes || [], projectId: options.projectId || '', projectPath: options.projectPath, busy: options.busy, runs: options.agentRuns, presentation: options.presentation, getRunState: options.getRelatedNodeRunState, definition: options.findNodeDefinition, run: options.onRunNode,
       onExecutionChange: value => change('execution', value), focus: id => { graphInteraction.setSelectedNodeIds([id]); graphInteraction.fitSelectedNodesInViewport(); } });
-    if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
-    if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change });
+    if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, presentation: options.presentation, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
+    if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change, presentation: options.presentation });
     if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };
@@ -236,7 +236,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       nodeDetailMode: options.nodeDetailMode, showTextEditor: visible('textEditor'), showSystemPromptField: visible('systemPrompt'), showOutputPreview: visible('outputPreview'), showFieldHelp: visible('fieldHelp') });
     if (node.kind === 'studio.codex') {
       const result = nodeEl.createDiv({ cls: 'ss-studio-node-result' });
-      if (options.agentRuns && options.projectPath) teardowns.push(renderStudioRunCollection(result, { runs: options.agentRuns, projectId: options.projectId || '', projectPath: options.projectPath, sources: [node.id], compact: true, groupBy: 'status', showCompleted: node.config.showCompleted !== false }) || (() => {}));
+      if (options.agentRuns && options.projectPath) teardowns.push(renderStudioRunCollection(result, { runs: options.agentRuns, presentation: options.presentation, projectId: options.projectId || '', projectPath: options.projectPath, sources: [node.id], compact: true, groupBy: 'status', showCompleted: node.config.showCompleted !== false }) || (() => {}));
       else renderStudioCodex(result, node, options.projectId || '', nodeRunState.outputs || {}, change);
     } else if (media && mediaSrc) {
       renderNodeMediaPreview({ nodeEl, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });

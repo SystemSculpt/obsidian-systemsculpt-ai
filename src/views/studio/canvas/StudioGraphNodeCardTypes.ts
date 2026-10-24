@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import type { StudioPresentation } from "../StudioPresentation";
 import type { StudioTextEditorMountState } from "../StudioTextEditSessions";
 import type { StudioImageBoardEditorHandle } from "./image-board/StudioImageBoardEditor";
 import type { StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
@@ -61,6 +62,7 @@ export type RenderStudioGraphNodeCardOptions = {
   projectId?: string;
   projectPath?: string;
   agentRuns?: StudioAgentRuns;
+  presentation?: StudioPresentation;
   projectNodes?: StudioNodeInstance[];
   getRelatedNodeRunState?: (nodeId: string) => StudioNodeRunDisplayState;
   layer: HTMLElement;

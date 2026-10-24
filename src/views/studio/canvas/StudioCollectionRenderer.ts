@@ -3,11 +3,12 @@ import { describeCollectionAge, readStudioCollectionSource, selectStudioCollecti
 import type { StudioJsonValue, StudioNodeInstance, StudioNodeOutputMap } from "../../../studio/types";
 import { isRecord } from "../../../studio/utils";
 import { createStudioAction } from "../StudioAction";
+import { StudioPresentation } from "../StudioPresentation";
 
 type ViewState = { query: string; expanded: Set<string>; pages: Map<string, number>; scrollLeft: number; columnScroll: Map<string, number> };
 const states = new WeakMap<Document, Map<string, ViewState>>();
-type Options = { node: StudioNodeInstance; outputs: StudioNodeOutputMap; scope?: string; onChange: (key: string, value: StudioJsonValue) => void };
-export function renderStudioCollection(root: HTMLElement, { node, outputs, scope = '', onChange }: Options): () => void {
+type Options = { node: StudioNodeInstance; outputs: StudioNodeOutputMap; scope?: string; onChange: (key: string, value: StudioJsonValue) => void; presentation?: StudioPresentation };
+export function renderStudioCollection(root: HTMLElement, { node, outputs, scope = '', onChange, presentation = new StudioPresentation() }: Options): () => void {
   const board = root.createDiv({ cls: 'ss-studio-collection' });
   const config = node.config;
   const data = selectStudioCollectionData(config, outputs);
@@ -144,11 +145,13 @@ export function renderStudioCollection(root: HTMLElement, { node, outputs, scope
   search.addEventListener('input', () => { state.query = search.value; renderColumns(); });
   renderColumns();
   columns.scrollLeft = state.scrollLeft;
-  updateSourceStatus();
-  const owner = root.ownerDocument.defaultView;
-  const timer = managed ? owner?.setInterval(updateSourceStatus, 30000) : undefined;
+  const observation = presentation.watch(updateSourceStatus, refresh => {
+    const owner = root.ownerDocument.defaultView;
+    const timer = managed ? owner?.setInterval(refresh, 30000) : undefined;
+    return () => { if (timer !== undefined) owner?.clearInterval(timer); };
+  });
   return () => {
-    if (timer !== undefined) owner?.clearInterval(timer);
+    observation.dispose();
     state.query = search.value; state.scrollLeft = columns.scrollLeft;
     columns.querySelectorAll<HTMLElement>('[data-collection-group]').forEach(column => {
       state.columnScroll.set(column.dataset.collectionGroup || '', column.querySelector('.ss-studio-collection-cards')?.scrollTop || 0);
