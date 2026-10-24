@@ -1394,7 +1394,7 @@ describe("RecorderService", () => {
 
     expect(mockTranscriptionStart).not.toHaveBeenCalled();
     expect(noticeMessages(noticeLog)).toEqual([
-      "Notice: A saved recording is waiting for transcription. Run “Transcribe an audio file” to continue.",
+      "Notice: A saved recording is waiting for transcription. Run “transcribe an audio file” to continue.",
     ]);
   });
 

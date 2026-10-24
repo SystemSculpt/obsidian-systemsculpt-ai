@@ -204,7 +204,7 @@ export class RecorderService {
     if (!settled.length) return;
     const recoverable = settled.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
-      new Notice("A saved recording is waiting for transcription. Run “Transcribe an audio file” to continue.", 7000);
+      new Notice("A saved recording is waiting for transcription. Run “transcribe an audio file” to continue.", 7000);
       return;
     }
 
