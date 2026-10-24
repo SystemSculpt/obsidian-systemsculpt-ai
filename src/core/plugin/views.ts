@@ -328,6 +328,17 @@ export class ViewManager {
     }
   }
 
+  /** Own a fresh leaf so phone work never replaces a person's current draft. */
+  async runPhoneHandoff(execution: import("../../features/phone-captures/PhoneHandoffInbox").HandoffExecution): Promise<string> {
+    if (execution.signal.aborted) throw new Error("The handoff was cancelled.");
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: execution.reveal, state: { chatId: "", chatTitle: "From your iPhone" } });
+    await leaf.loadIfDeferred();
+    if (execution.reveal) await this.app.workspace.revealLeaf(leaf);
+    if (!(leaf.view instanceof AgentChatView)) throw new Error("The agent workspace could not open.");
+    return leaf.view.executePhoneHandoff(execution);
+  }
+
   async activateEmbeddingsView(): Promise<EmbeddingsView> {
     // Check if we already have an embeddings view open
     const existingLeaves = this.app.workspace.getLeavesOfType(EMBEDDINGS_VIEW_TYPE);

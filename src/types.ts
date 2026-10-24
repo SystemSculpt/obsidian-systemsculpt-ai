@@ -186,6 +186,8 @@ export interface SystemSculptSettings {
   phoneCapturesAskBeforeSaving: boolean;
   /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
   phoneCapturesLinked: boolean;
+  /** Skip only the handoff's Run click, never the selected agent's own approvals. */
+  phoneHandoffsAutoRun: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -302,6 +304,7 @@ Please:
   phoneCapturesMeetingsFolder: "SystemSculpt/Meetings",
   phoneCapturesAskBeforeSaving: false,
   phoneCapturesLinked: false,
+  phoneHandoffsAutoRun: false,
 
   skipEmptyNoteWarning: false,
 

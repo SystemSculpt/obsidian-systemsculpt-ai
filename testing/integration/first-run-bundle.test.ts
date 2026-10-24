@@ -53,6 +53,13 @@ class FakeSystemSculpt {
   credits = STARTER_CREDITS;
   /** Holds each answer after its first words until `finishAnswer`. */
   holdAnswers = false;
+  phoneHandoff = false;
+  private handoffVault = "";
+  readonly handoff = {
+    id: "00000000-0000-4000-8000-000000000059", capture_id: "00000000-0000-4000-8000-000000000058",
+    instruction: "Summarize this phone capture.", agent: "systemsculpt", status: "pending", lease_expires_at: null as string | null,
+    result_summary: null as string | null, vault_path: null as string | null,
+  };
   private readonly failures = new Map<string, Reply>();
   private conversationId = "";
   private turns = 0;
@@ -80,6 +87,28 @@ class FakeSystemSculpt {
     if (failure) {
       this.failures.delete(request.path);
       return failure;
+    }
+    if (this.phoneHandoff) {
+      const handoff = () => ({ ...this.handoff, vault_id: this.handoffVault });
+      if (request.path === "/api/plugin/handoffs/capabilities") {
+        this.handoffVault = request.body.vault_id;
+        return { status: 200, json: { ok: true } };
+      }
+      if (request.path === "/api/plugin/handoffs") return { status: 200, json: { handoffs: this.handoff.status === "pending" ? [handoff()] : [], next_cursor: null } };
+      if (request.path === `/api/plugin/captures/${this.handoff.capture_id}`) return { status: 200, json: { capture: { id: this.handoff.capture_id, title: "Phone source", markdown: "Three project notes.", status: "ready" } } };
+      if (request.path === `/api/plugin/handoffs/${this.handoff.id}`) return { status: 200, json: { handoff: handoff() } };
+      if (request.path === `/api/plugin/handoffs/${this.handoff.id}/claim`) {
+        Object.assign(this.handoff, { status: "claimed", lease_expires_at: request.body.lease_expires_at });
+        return { status: 200, json: { handoff: handoff(), lease_token: "fixture-lease" } };
+      }
+      if (request.path === `/api/plugin/handoffs/${this.handoff.id}/progress`) {
+        Object.assign(this.handoff, { status: request.body.status, lease_expires_at: request.body.lease_expires_at });
+        return { status: 200, json: { handoff: handoff() } };
+      }
+      if (request.path === `/api/plugin/handoffs/${this.handoff.id}/complete`) {
+        Object.assign(this.handoff, { status: "completed", result_summary: request.body.result_summary, vault_path: request.body.vault_path });
+        return { status: 200, json: { handoff: handoff() } };
+      }
     }
     switch (request.path) {
       case "/api/plugin/releases/latest":
@@ -259,21 +288,30 @@ function installVault(app: any, pluginId: string): Map<string, string | ArrayBuf
     if (typeof data !== "string") throw new Error(`ENOENT: ${value}`);
     return data;
   };
+  const fileObjects = new Map<string, TFile>();
+  const fileAt = (value: string) => {
+    const name = key(value);
+    let file = fileObjects.get(name);
+    if (!file) { file = new TFile({ path: name } as never); fileObjects.set(name, file); }
+    return file;
+  };
   const { vault } = app;
   const { adapter } = vault;
   vault.configDir = ".obsidian";
   vault.getAbstractFileByPath = jest.fn((value: string) => {
-    if (files.has(key(value))) return new TFile({ path: key(value) } as never);
+    if (files.has(key(value))) return fileAt(value);
     return folders.has(key(value)) ? new TFolder({ path: key(value) } as never) : null;
   });
   vault.create = jest.fn(async (value: string, data: string) => {
     if (files.has(key(value))) throw new Error("File already exists.");
     files.set(key(value), data);
-    return new TFile({ path: key(value) } as never);
+    return fileAt(value);
   });
   vault.createFolder = jest.fn(async (value: string) => { folders.add(key(value)); });
   vault.read = jest.fn(async (file: TFile) => text(file.path));
   vault.cachedRead = vault.read;
+  vault.getMarkdownFiles = jest.fn(() => [...files.keys()].filter(value => value.endsWith(".md")).map(fileAt));
+  vault.process = jest.fn(async (file: TFile, transform: (value: string) => string) => { const next = transform(text(file.path)); files.set(key(file.path), next); return next; });
   vault.modify = jest.fn(async (file: TFile, data: string) => { files.set(key(file.path), data); });
   adapter.exists = jest.fn(async (value: string) => files.has(key(value)) || folders.has(key(value)));
   adapter.read = jest.fn(async (value: string) => text(value));
@@ -319,6 +357,7 @@ function installWorkspace(app: any, views: () => Map<string, (leaf: unknown) => 
   app.workspace.revealLeaf = jest.fn(async () => undefined);
   app.workspace.getLeaf = jest.fn(() => {
     const leaf = new WorkspaceLeaf(app) as any;
+    leaf.loadIfDeferred = jest.fn(async () => undefined);
     leaf.open = jest.fn(async (view: any) => {
       leaf.view = view;
       document.body.appendChild(view.containerEl);
@@ -493,6 +532,41 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(chat().querySelector('[data-testid="chat.empty.start-free"]')).toBeNull();
     expect(control("chat.run.detail", chat()).textContent).toBe(`${STARTER_CREDITS} credits`);
   }
+
+  it("receives a linked iPhone handoff, waits for Run, preserves the draft and reports a verified result note", async () => {
+    await signUpFromChat();
+    expect(plugin.settings.phoneHandoffsAutoRun).toBe(false);
+    expect(server.paths().some(value => value.includes("/handoffs"))).toBe(false);
+    await type("Keep my unrelated draft.");
+    server.phoneHandoff = true;
+    await plugin.getSettingsManager().updateSettings({ phoneCapturesLinked: true, phoneCapturesEnabled: false });
+    await jest.advanceTimersByTimeAsync(1_000);
+    const card = chat().querySelector<HTMLElement>(".systemsculpt-agent-phone-handoff")!;
+    expect(card.textContent).toContain(server.handoff.instruction);
+    expect(card.textContent).toContain("Three project notes.");
+    expect(server.handoff.status).toBe("pending");
+    expect(server.paths()).not.toContain("/api/plugin/agent/turn");
+    expect([...files.keys()].some(value => value.startsWith("SystemSculpt/Handoffs/"))).toBe(false);
+    const capability = server.requests.find(value => value.path === "/api/plugin/handoffs/capabilities");
+    expect(capability?.body.agents).toEqual(["systemsculpt"]);
+    // An unrelated capture confirmation may remain pending indefinitely. Focus
+    // still polls handoffs instead of awaiting that batch's user decision.
+    jest.spyOn(plugin.getPhoneCaptureInbox(), "maybeSync").mockReturnValue(new Promise(() => {}));
+    const advertisements = server.paths().filter(value => value.endsWith("/handoffs/capabilities")).length;
+    window.dispatchEvent(new Event("focus"));
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(server.paths().filter(value => value.endsWith("/handoffs/capabilities")).length).toBeGreaterThan(advertisements);
+    control("chat.phone-handoff.run", card).click();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(leaves).toHaveLength(2);
+    expect(control<HTMLTextAreaElement>("chat.composer.input", leaves[0].view.containerEl).value).toBe("Keep my unrelated draft.");
+    const resultPath = `SystemSculpt/Handoffs/${server.handoff.id}.md`;
+    expect(server.handoff).toMatchObject({ status: "completed", result_summary: ANSWER, vault_path: resultPath });
+    expect(files.get(resultPath)).toContain(ANSWER);
+    expect(files.get(resultPath)).toContain("handoff_state: completed");
+    expect(files.get(resultPath)).not.toContain(LICENSE_KEY);
+    expect(control("chat.phone-handoff.result", leaves[0].view.containerEl).textContent).toContain(resultPath);
+  });
 
   it("installs, signs up from chat's offer, and streams the first answer", async () => {
     await signUpFromChat();

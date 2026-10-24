@@ -210,6 +210,12 @@ const SETTINGS_CATALOG = {
     description: "Show the waiting captures and save them only when you confirm.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
+  "workspace.run-phone-handoffs": {
+    tabId: "workspace",
+    title: "Run iPhone handoffs without asking",
+    description: "Skips only the Run button for iPhone handoffs. Agent permissions and approval requests are unchanged.",
+    isVisible: (settings) => settings.phoneCapturesLinked === true,
+  },
   "workspace.phone-captures-folder": {
     tabId: "workspace",
     title: "iOS captures folder",

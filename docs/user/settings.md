@@ -79,6 +79,27 @@ automatic detection does not change Studio's backend default. **Codex chat modes
 not apply to Studio**: Studio continues to inherit Codex's native permission
 configuration. See [Studio workspaces](../studio-workspaces.md).
 
+## iPhone handoffs
+
+Once your signed-in account has used the iOS app, Chat shows **From your iPhone**
+cards with the full instruction, source capture and chosen agent. Choose **Run**
+to open a fresh agent workspace without replacing your current draft. Claude Code
+and Codex run on desktop only; hosted SystemSculpt can also run on mobile. The
+plugin reports the agents available in this vault to your iPhone.
+
+Under **Workspace → iOS captures**, **Run iPhone handoffs without asking** is off
+by default, including for existing installations. Turning it on starts incoming
+handoffs in background chat tabs. It skips only the card's Run click: the chosen
+agent's own permission mode and approval requests still apply. Approve or decline
+those requests in that handoff's chat, just as in an ordinary chat.
+
+The plugin checks for handoffs when Obsidian opens, regains focus and every five
+minutes. A completed result is saved as Markdown in `SystemSculpt/Handoffs/`, then
+its result and vault path are reported to the phone. Closing Obsidian, losing queue
+ownership or changing accounts stops local execution. An interrupted handoff is
+not silently run again: its result note records that it started, and its chat
+retains the conversation. Review both before sending the instruction again.
+
 ## Saving changes
 
 Chat tags and Studio text fields save after a short typing pause, or immediately

@@ -114,6 +114,12 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.thinAgentClientId).toMatch(/^client_[a-f0-9]{32}$/);
   });
 
+  it.each([undefined, null, "true", 1, false, true])("requires an explicit boolean opt-in for unattended handoffs (case %#)", async value => {
+    const manager = new SettingsManager(createPlugin({ phoneHandoffsAutoRun: value }));
+    await manager.loadSettings();
+    expect(manager.settings.phoneHandoffsAutoRun).toBe(value === true);
+  });
+
   it.each([undefined, null, 42, "Work/Meetings", ""])("loads the meeting capture folder without changing the inbox (case %#)", async (value) => {
     const manager = new SettingsManager(createPlugin({ phoneCapturesFolder: "Phone", phoneCapturesMeetingsFolder: value }));
     await manager.loadSettings();
