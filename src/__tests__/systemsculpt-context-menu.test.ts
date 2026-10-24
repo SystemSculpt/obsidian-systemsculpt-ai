@@ -14,12 +14,6 @@ jest.mock("obsidian", () => {
   return { ...actual, Notice: jest.fn() };
 });
 
-jest.mock("../views/chatview/AgentChatView", () => ({
-  AgentChatView: jest.fn().mockImplementation(() => ({
-    addFileToContext: jest.fn(),
-  })),
-}));
-
 jest.mock("../utils/clipboard", () => ({
   tryCopyImageFileToClipboard: jest.fn(),
 }));

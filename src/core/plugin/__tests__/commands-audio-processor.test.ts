@@ -7,6 +7,7 @@ jest.mock("obsidian", () => ({
 
 import { App, Notice, TFile } from "obsidian";
 import { CommandManager } from "../commands";
+import { ViewManager } from "../views";
 
 const openMock = jest.fn();
 const modalCtorMock = jest.fn().mockImplementation(() => ({ open: openMock }));
@@ -60,8 +61,11 @@ describe("CommandManager Audio Processor commands", () => {
     const addCommand = jest.fn();
     const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
+    const viewManager = new ViewManager(plugin, app);
+    plugin.getViewManager = () => viewManager;
     const manager = new CommandManager(plugin, app);
 
+    const openAudioProcessor = jest.spyOn(viewManager.ribbonManager, "openAudioProcessor");
     (manager as any).registerAudioProcessorCommands();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -84,12 +88,16 @@ describe("CommandManager Audio Processor commands", () => {
     expect(availabilityMock).toHaveBeenNthCalledWith(2, plugin);
     expect(modalCtorMock).toHaveBeenLastCalledWith(plugin, { initialTab: "youtube" });
     expect(openMock).toHaveBeenCalledTimes(2);
+    expect(openAudioProcessor).toHaveBeenNthCalledWith(1, "audio");
+    expect(openAudioProcessor).toHaveBeenNthCalledWith(2, "youtube");
   });
 
   it("keeps both artifact commands available for legacy detailed notes", async () => {
     const addCommand = jest.fn();
     const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
+    const viewManager = new ViewManager(plugin, app);
+    plugin.getViewManager = () => viewManager;
     const manager = new CommandManager(plugin, app);
 
     (manager as any).registerAudioProcessorCommands();
@@ -171,6 +179,8 @@ describe("CommandManager Audio Processor commands", () => {
     const addCommand = jest.fn();
     const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
+    const viewManager = new ViewManager(plugin, app);
+    plugin.getViewManager = () => viewManager;
     const manager = new CommandManager(plugin, app);
 
     (manager as any).registerAudioProcessorCommands();

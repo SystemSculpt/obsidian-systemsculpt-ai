@@ -1,11 +1,10 @@
 import { App, Notice, View, WorkspaceLeaf, TFile } from "obsidian";
 import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../../main";
-import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { confirmSimilarNotesRebuild } from "../../modals/SimilarNotesRebuildConfirmation";
-import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
+import { resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_DISPLAY_NAME, STUDIO_PROJECT_EXTENSION } from "../../studio/types";
@@ -58,12 +57,10 @@ async function loadTitleGenerationServiceModule(): Promise<
 export class CommandManager {
   private plugin: SystemSculptPlugin;
   private app: App;
-  private ribbonManager: RibbonManager;
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
     this.app = app;
-    this.ribbonManager = new RibbonManager(plugin, app);
   }
 
   /**
@@ -167,7 +164,7 @@ export class CommandManager {
       id: "open-systemsculpt-chat",
       name: "Open chat",
       callback: async () => {
-        await this.ribbonManager.openChatView();
+        await this.plugin.getViewManager().openChat();
       },
     });
   }
@@ -191,7 +188,7 @@ export class CommandManager {
       id: "chat-new-chat",
       name: "Chat: New chat",
       callback: () => {
-        if (!chat(false, (view) => void view.newChat())) void this.ribbonManager.openChatView();
+        if (!chat(false, (view) => void view.newChat())) void this.plugin.getViewManager().openChat();
       },
     });
     this.plugin.addCommand({
@@ -240,7 +237,7 @@ export class CommandManager {
       id: "open-systemsculpt-history",
       name: "Open history",
       callback: () => {
-        this.ribbonManager.openSystemSculptHistoryModal();
+        this.plugin.getViewManager().ribbonManager.openSystemSculptHistoryModal();
       },
     });
   }
@@ -250,7 +247,7 @@ export class CommandManager {
       id: "open-systemsculpt-janitor",
       name: "Open janitor",
       callback: () => {
-        this.ribbonManager.openJanitorModal();
+        this.plugin.getViewManager().ribbonManager.openJanitorModal();
       },
     });
   }
@@ -293,12 +290,7 @@ export class CommandManager {
   }
 
   private async openAudioProcessor(initialTab: "audio" | "youtube"): Promise<void> {
-    await this.ribbonManager.openAudioProcessor(initialTab);
-  }
-
-  /** Opens a fresh chat tab; exposed for post-sign-in "Get started". */
-  public async openChatView(): Promise<void> {
-    await this.ribbonManager.openChatView();
+    await this.plugin.getViewManager().ribbonManager.openAudioProcessor(initialTab);
   }
 
   private registerAudioArtifactCommand(kind: AudioProcessorArtifactKind): void {
@@ -441,14 +433,7 @@ export class CommandManager {
           || isAudioFileExtension(extension);
         if (!supported) return false;
         if (!checking) {
-          const leaf = this.app.workspace.getLeaf("tab");
-          const view = new AgentChatView(leaf, this.plugin);
-          void leaf.open(view).then(async () => {
-            await new Promise((resolve) => getSurfaceOwnerWindow(view.containerEl).setTimeout(resolve, 50));
-            this.app.workspace.setActiveLeaf(leaf, { focus: true });
-            await view.addFileToContext(activeFile);
-            view.focusInput();
-          }).catch(() => {
+          void this.plugin.getViewManager().openChat({ file: activeFile }).catch(() => {
             new Notice("Unable to open chat with this file.", 5000);
           });
         }

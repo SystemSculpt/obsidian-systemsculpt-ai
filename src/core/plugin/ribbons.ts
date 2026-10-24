@@ -1,8 +1,5 @@
 import { App, Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
-import { CHAT_VIEW_TYPE } from "./viewTypes";
-import { generateDefaultChatTitle } from "../../utils/titleUtils";
-import { AgentChatView } from "../../views/chatview/AgentChatView";
 
 type RibbonHandle = HTMLElement;
 
@@ -81,7 +78,7 @@ export class RibbonManager {
       "message-square",
       "Open chat",
       async () => {
-        await this.openChatView();
+        await this.plugin.getViewManager().openChat();
       }
     );
 
@@ -131,27 +128,6 @@ export class RibbonManager {
     this.isDisposed = true;
     this.ribbons.forEach((ribbon) => this.safeRemoveRibbon(ribbon));
     this.ribbons = [];
-  }
-
-  /**
-   * Open a new SystemSculpt Chat view in a new tab
-   */
-  public async openChatView() {
-    const { workspace } = this.app;
-    const leaf = workspace.getLeaf("tab");
-
-    // Set initial state with the default title
-    await leaf.setViewState({
-      type: CHAT_VIEW_TYPE,
-      state: {
-        chatId: "",
-        chatTitle: generateDefaultChatTitle(),
-      },
-    });
-
-    const view = new AgentChatView(leaf, this.plugin);
-    await leaf.open(view);
-    workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   /**
