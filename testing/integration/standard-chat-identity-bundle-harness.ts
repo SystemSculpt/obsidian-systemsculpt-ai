@@ -229,7 +229,9 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(content.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-agent-prompt-input")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
-  expect(content.querySelector("[aria-haspopup]")).toBeNull();
+  // The composer's add menu is the only popup: no model or provider picker.
+  expect(Array.from(content.querySelectorAll("[aria-haspopup]"), (element) => element.getAttribute("data-testid")))
+    .toEqual(["chat.composer.add"]);
   expect(view.getState()).not.toHaveProperty("selectedModelId");
   expect(view).not.toHaveProperty("isLegacyReadOnlyChat");
 
