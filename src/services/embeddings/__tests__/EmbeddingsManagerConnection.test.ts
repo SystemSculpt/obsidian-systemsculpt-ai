@@ -79,7 +79,14 @@ describe("EmbeddingsManager IndexedDB connection", () => {
     expect(manager.isReady()).toBe(false);
     await expect(manager.awaitReady()).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
 
+    // Once the older connection goes away, the next caller finishes initializing.
     blocker.close();
+    await manager.awaitReady();
+    expect(manager.getLifecycleSnapshot()).toMatchObject({ ready: true, lastError: null });
+    expect(fake.factory.databases.get(DB_NAME)?.version).toBe(11);
+    expect(fake.factory.openConnections(DB_NAME).size).toBe(1);
+
     await manager.cleanup();
+    expect(fake.factory.openConnections(DB_NAME).size).toBe(0);
   });
 });
