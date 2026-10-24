@@ -1,8 +1,9 @@
-import { TFile, type App } from "obsidian";
+import { TFile, type App, type Workspace } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import { ChatStorageService } from "../ChatStorageService";
+import { CHAT_TRANSCRIPT_COMMITTED_EVENT, emitChatTranscriptCommitted } from "../ChatTranscriptEvents";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
 import { ConversationProjection } from "../../../chat/managed/ConversationProjection";
@@ -185,6 +186,80 @@ describe("AgentTranscriptRepository", () => {
       { role: "assistant", messageId: "a1", version: 2 },
       { role: "assistant", messageId: "a1", version: 3 },
     ]);
+  });
+
+  it.each(["user", "assistant"] as const)("announces a %s transcript only after its write succeeds", async (role) => {
+    const { repository, storage } = createHarness();
+    if (role === "assistant") {
+      await repository.commitUser({ kind: "append", message: user("u1") });
+    }
+    const trigger = jest.fn();
+    const workspace = { trigger } as unknown as Workspace;
+    const unsubscribe = repository.subscribeToCommits(({ snapshot, role, messageId }) => {
+      emitChatTranscriptCommitted(workspace, {
+        chatId: snapshot.chatId, version: snapshot.version, role, messageId,
+      });
+    });
+    const started = deferred<void>();
+    const write = deferred<{ version: number }>();
+    const save = role === "user" ? storage.createChatExclusive : storage.saveChat;
+    save.mockImplementationOnce(async () => {
+      started.resolve();
+      return write.promise;
+    });
+
+    const saving = role === "user"
+      ? repository.commitUser({ kind: "append", message: user("u1") })
+      : repository.persistAssistant(assistant("a1"));
+    await started.promise;
+    expect(trigger).not.toHaveBeenCalled();
+
+    const version = role === "user" ? 1 : 2;
+    write.resolve({ version });
+    const saved = await saving;
+    expect(saved.version).toBe(version);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith(CHAT_TRANSCRIPT_COMMITTED_EVENT, {
+      chatId: saved.chatId, version, role, messageId: role === "user" ? "u1" : "a1",
+    });
+    expect(trigger.mock.contexts).toEqual([workspace]);
+
+    unsubscribe();
+    await repository.persistAssistant(assistant("a2"));
+    expect(trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["user", "assistant"] as const)("does not announce a failed %s write, but announces a successful retry", async (role) => {
+    const { repository, storage } = createHarness();
+    if (role === "assistant") {
+      await repository.commitUser({ kind: "append", message: user("u1") });
+    }
+    const before = repository.snapshot();
+    const trigger = jest.fn();
+    const workspace = { trigger } as unknown as Workspace;
+    const unsubscribe = repository.subscribeToCommits(({ snapshot, role, messageId }) => {
+      emitChatTranscriptCommitted(workspace, {
+        chatId: snapshot.chatId, version: snapshot.version, role, messageId,
+      });
+    });
+    const save = role === "user" ? storage.createChatExclusive : storage.saveChat;
+    save.mockRejectedValueOnce(new Error("disk full"));
+    const commit = () => role === "user"
+      ? repository.commitUser({ kind: "append", message: user("u1") })
+      : repository.persistAssistant(assistant("a1"));
+
+    await expect(commit()).rejects.toThrow(
+      role === "user" ? "Failed to exclusively create chat" : "disk full",
+    );
+    expect(trigger).not.toHaveBeenCalled();
+    expect(repository.snapshot()).toEqual(before);
+
+    const saved = await commit();
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith(CHAT_TRANSCRIPT_COMMITTED_EVENT, {
+      chatId: saved.chatId, version: before.version + 1, role, messageId: role === "user" ? "u1" : "a1",
+    });
+    unsubscribe();
   });
 
   it("preserves same-generation serialization for operations invoked together", async () => {
