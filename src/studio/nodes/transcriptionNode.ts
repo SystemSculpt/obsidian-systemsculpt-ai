@@ -1,6 +1,7 @@
 import { getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
 import type { StudioNodeDefinition } from "../types";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { createManagedFileSource, type ManagedFileSource } from "../../services/managed/ManagedFileSource";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
 import { getTranscriptionMaxFileSize } from "../../services/transcription/TranscriptionCoordinator";
 import { formatFileSize } from "../../utils/FileValidator";
@@ -34,17 +35,7 @@ export const transcriptionNode: StudioNodeDefinition = {
     allowUnknownKeys: true,
   },
   async execute(context) {
-    let sourceDescriptor: Readonly<{
-      sourcePath: string;
-      mimeType: string;
-      filename: string;
-    }> | undefined;
-    let sourceSizePromise: Promise<number> | undefined;
-    let loadedSource: Promise<Readonly<{
-      filename: string;
-      contentType: string;
-      bytes: ArrayBuffer;
-    }>> | undefined;
+    let source: ManagedFileSource | undefined;
     const resolveSourcePath = (): string => {
       const sourcePathInput = getText(context.inputs.path).trim();
       if (!sourcePathInput) {
@@ -52,50 +43,45 @@ export const transcriptionNode: StudioNodeDefinition = {
       }
       return sourcePathInput;
     };
-    const resolveSourceDescriptor = () => {
-      sourceDescriptor ??= (() => {
-        const sourcePath = resolveSourcePath();
-        const mimeType = inferMimeTypeFromPath(sourcePath);
-        if (!mimeType.startsWith("audio/")) {
-          throw new Error(
-            `Transcription node "${context.node.id}" only accepts audio paths. Received "${mimeType}".`
-          );
-        }
-        const filename = sourcePath.split(/[\\/]/).pop() || `studio-audio.${sourcePath.split(".").pop() || "bin"}`;
-        return Object.freeze({ sourcePath, mimeType, filename });
-      })();
-      return sourceDescriptor;
-    };
-    const ensureSourceWithinLimit = () => {
-      sourceSizePromise ??= (async () => {
-        const { sourcePath } = resolveSourceDescriptor();
-        const size = isLikelyAbsolutePath(sourcePath)
-          ? await context.services.statLocalFileSize(sourcePath)
-          : await context.services.statVaultFileSize(sourcePath);
-        const maxAudioBytes = getTranscriptionMaxFileSize();
-        if (!Number.isFinite(size) || size <= 0) {
-          throw new Error("Audio file is empty.");
-        }
-        if (size > maxAudioBytes) {
-          const mobilePrefix = getHostDeviceType() === "Mobile" ? "mobile " : "";
-          throw new Error(
-            `Audio file is too large (${formatFileSize(size)}). The ${mobilePrefix}transcription limit is ${formatFileSize(maxAudioBytes)}.`,
-          );
-        }
-        return size;
-      })();
-      return sourceSizePromise;
-    };
-    const loadSource = () => {
-      loadedSource ??= (async () => {
-        const { sourcePath, mimeType, filename } = resolveSourceDescriptor();
-        await ensureSourceWithinLimit();
-        const bytes = isLikelyAbsolutePath(sourcePath)
-          ? await context.services.readLocalFileBinary(sourcePath)
-          : await context.services.readVaultBinary(sourcePath);
-        return Object.freeze({ filename, contentType: mimeType, bytes });
-      })();
-      return loadedSource;
+    // Even the logical path stays lazy until the managed adapter admits the operation.
+    const getSource = (): ManagedFileSource => {
+      if (source) return source;
+      const sourcePath = resolveSourcePath();
+      source = createManagedFileSource(
+        buildStudioSourceIdentity(context.projectPath, context.node.id, sourcePath),
+        async () => {
+          const mimeType = inferMimeTypeFromPath(sourcePath);
+          if (!mimeType.startsWith("audio/")) {
+            throw new Error(
+              `Transcription node "${context.node.id}" only accepts audio paths. Received "${mimeType}".`
+            );
+          }
+          const filename = sourcePath.split(/[\\/]/).pop() || `studio-audio.${sourcePath.split(".").pop() || "bin"}`;
+          const local = isLikelyAbsolutePath(sourcePath);
+          const size = local
+            ? await context.services.statLocalFileSize(sourcePath)
+            : await context.services.statVaultFileSize(sourcePath);
+          const maxAudioBytes = getTranscriptionMaxFileSize();
+          if (!Number.isFinite(size) || size <= 0) {
+            throw new Error("Audio file is empty.");
+          }
+          if (size > maxAudioBytes) {
+            const mobilePrefix = getHostDeviceType() === "Mobile" ? "mobile " : "";
+            throw new Error(
+              `Audio file is too large (${formatFileSize(size)}). The ${mobilePrefix}transcription limit is ${formatFileSize(maxAudioBytes)}.`,
+            );
+          }
+          const content = local
+            ? await context.services.openLocalFileSource(sourcePath)
+            : await context.services.openVaultFileSource(sourcePath);
+          if (content.sizeBytes !== size) {
+            content.release();
+            throw new Error("The selected audio file changed while it was being opened.");
+          }
+          return Object.freeze({ ...content, filename, contentType: mimeType });
+        },
+      );
+      return source;
     };
 
     const transcription = await context.services.api.transcribeAudio({
@@ -104,22 +90,10 @@ export const transcriptionNode: StudioNodeDefinition = {
       projectPath: context.projectPath,
       signal: context.signal,
       source: {
-        get identity() {
-          return buildStudioSourceIdentity(
-            context.projectPath,
-            context.node.id,
-            resolveSourcePath(),
-          );
-        },
-        fingerprint: async () => {
-          const loaded = await loadSource();
-          return `sha256:${await sha256HexFromArrayBuffer(loaded.bytes)}`;
-        },
-        load: loadSource,
-        release: () => {
-          sourceSizePromise = undefined;
-          loadedSource = undefined;
-        },
+        get identity() { return getSource().identity; },
+        fingerprint: (signal) => getSource().fingerprint(signal),
+        load: () => getSource().load(),
+        release: () => source?.release?.(),
       },
     });
 

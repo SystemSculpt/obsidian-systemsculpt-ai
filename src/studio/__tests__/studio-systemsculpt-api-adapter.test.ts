@@ -102,7 +102,11 @@ describe("StudioApiExecutionAdapter managed cutover", () => {
     const source = {
       identity: "studio:source",
       fingerprint: async () => `sha256:${"c".repeat(64)}`,
-      load: async () => ({ filename: "audio.wav", contentType: "audio/wav", bytes: new Uint8Array([1]).buffer }),
+      load: async () => ({
+        filename: "audio.wav", contentType: "audio/wav", sizeBytes: 1,
+        readSlice: async (start: number, end: number) => new Uint8Array([1]).slice(start, end).buffer,
+        release: jest.fn(),
+      }),
     };
     const transcription = await adapter.transcribeAudio({
       runId: "run-1",

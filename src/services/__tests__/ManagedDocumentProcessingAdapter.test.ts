@@ -7,6 +7,20 @@ import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed
 import { ManagedDocumentProcessingAdapter } from "../managed/ManagedDocumentProcessingAdapter";
 import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 import { PlatformRequestClient } from "../PlatformRequestClient";
+import { createVaultFileSource } from "../../platform/fileSource";
+
+jest.mock("../../platform/fileSource", () => ({ createVaultFileSource: jest.fn() }));
+
+const documentContent = (sizeBytes = 6, values?: number[]) => ({
+  sizeBytes,
+  readSlice: jest.fn(async (start: number, end: number) => {
+    if (start < 0 || end > sizeBytes || end < start || end - start > 1024 * 1024) {
+      throw new Error("Expected a bounded document slice.");
+    }
+    return Uint8Array.from({ length: end - start }, (_, index) => values?.[start + index] ?? (start + index + 1) % 256).buffer;
+  }),
+  release: jest.fn(),
+});
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
 
@@ -63,11 +77,12 @@ function managedHarness() {
 }
 
 describe("managed document processing adapter contract", () => {
-  it("replays only the interrupted multipart part with the retained bytes and acknowledged ETags", async () => {
+  it("rereads only the interrupted multipart range and preserves acknowledged ETags", async () => {
     const h = managedHarness();
     const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+    const content = documentContent();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...content }) };
     h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
       .mockRejectedValueOnce(new Error("Part response was lost"));
     await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
@@ -77,15 +92,118 @@ describe("managed document processing adapter contract", () => {
     await expect(h.adapter.resume("document-op-1", { source })).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
     expect(h.jobs.uploadPart.mock.calls.map(([, partNumber, partBytes]) => [partNumber, [...new Uint8Array(partBytes)]]))
       .toEqual([[1, [1, 2, 3, 4]], [2, [5, 6]], [2, [5, 6]]]);
+    expect(content.readSlice.mock.calls).toEqual([[0, 4], [4, 6], [4, 6]]);
     expect(h.jobs.complete).toHaveBeenCalledWith(documentId, [{ partNumber: 1, etag }, { partNumber: 2, etag }], "document-op-1", expect.any(AbortSignal));
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
     expect(h.jobs.create).toHaveBeenCalledTimes(1);
   });
 
+  it("uploads a synthetic 25 MiB document in sequential bounded parts without allocating its body", async () => {
+    const { adapter, jobs } = managedHarness();
+    const sizeBytes = 25 * 1024 * 1024;
+    const partSizeBytes = 10 * 1024 * 1024;
+    const totalParts = Math.ceil(sizeBytes / partSizeBytes);
+    const uploaded: number[] = [];
+    const ranges: Array<[number, number]> = [];
+    const content = {
+      sizeBytes,
+      readSlice: async (start: number, end: number) => {
+        expect(start).toBe(uploaded.length * partSizeBytes);
+        expect(end).toBe(Math.min(start + partSizeBytes, sizeBytes));
+        if (end - start > partSizeBytes || (start === 0 && end === sizeBytes)) {
+          throw new Error("Whole-source document reads are forbidden.");
+        }
+        ranges.push([start, end]);
+        return new Uint8Array(end - start).fill(uploaded.length + 1).buffer;
+      },
+      release: jest.fn(),
+    };
+    jobs.create.mockResolvedValueOnce({
+      document: { id: documentId, status: "uploading" },
+      upload: { part_size_bytes: partSizeBytes, total_parts: totalParts },
+    });
+    jobs.uploadPart.mockImplementation(async (_id, partNumber, bytes) => {
+      expect(partNumber).toBe(uploaded.length + 1);
+      expect(ranges).toHaveLength(partNumber);
+      expect(bytes.byteLength).toBe(Math.min(partSizeBytes, sizeBytes - (partNumber - 1) * partSizeBytes));
+      expect(new Uint8Array(bytes)[0]).toBe(partNumber);
+      expect(new Uint8Array(bytes).at(-1)).toBe(partNumber);
+      await Promise.resolve();
+      uploaded.push(partNumber);
+      // Retain metadata, not the accumulated part bodies, in the test double.
+      jobs.uploadPart.mockClear();
+      return { partNumber, etag };
+    });
+
+    await expect(adapter.process({
+      identity: "vault:large.pdf",
+      fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "large.pdf", contentType: "application/pdf", ...content }),
+      release: content.release,
+    })).resolves.toMatchObject({ result: downloaded });
+
+    expect(uploaded).toEqual(Array.from({ length: totalParts }, (_, index) => index + 1));
+    expect(ranges).toEqual(uploaded.map((part) => [
+      (part - 1) * partSizeBytes, Math.min(part * partSizeBytes, sizeBytes),
+    ]));
+    expect(jobs.create).toHaveBeenCalledWith(expect.objectContaining({ contentLengthBytes: sizeBytes }), "document-op-1", expect.any(AbortSignal));
+    expect(jobs.complete).toHaveBeenCalledWith(documentId, uploaded.map((partNumber) => ({ partNumber, etag })), "document-op-1", expect.any(AbortSignal));
+    expect(content.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a document above the server's 25 MiB limit without reading any upload slices", async () => {
+    const { adapter, jobs } = managedHarness();
+    const content = documentContent(25 * 1024 * 1024 + 1);
+
+    await expect(adapter.process({
+      identity: "vault:too-large.pdf",
+      fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "too-large.pdf", contentType: "application/pdf", ...content }),
+      release: content.release,
+    })).rejects.toThrow("25 MB");
+
+    expect(content.readSlice).not.toHaveBeenCalled();
+    expect(jobs.create).not.toHaveBeenCalled();
+    expect(jobs.uploadPart).not.toHaveBeenCalled();
+    expect(content.release).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["short read", "abort"] as const)("fences the next part and preserves acknowledged document recovery after a slice %s", async (failure) => {
+    const { adapter, jobs, recovery } = managedHarness();
+    const controller = new AbortController();
+    const content = documentContent();
+    content.readSlice
+      .mockResolvedValueOnce(new Uint8Array([1, 2, 3, 4]).buffer)
+      .mockImplementationOnce(async () => {
+        if (failure === "abort") controller.abort();
+        return new Uint8Array(failure === "short read" ? [5] : [5, 6]).buffer;
+      });
+    const running = adapter.process({
+      identity: "vault:interrupted.pdf",
+      fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "interrupted.pdf", contentType: "application/pdf", ...content }),
+      release: content.release,
+    }, { signal: controller.signal });
+
+    if (failure === "abort") {
+      await expect(running).rejects.toMatchObject({ name: "AbortError" });
+    } else {
+      await expect(running).rejects.toThrow("changed while it was being read");
+    }
+    expect(content.readSlice.mock.calls).toEqual([[0, 4], [4, 6]]);
+    expect(jobs.uploadPart).toHaveBeenCalledTimes(1);
+    expect(jobs.complete).not.toHaveBeenCalled();
+    expect(jobs.start).not.toHaveBeenCalled();
+    expect(content.release).toHaveBeenCalledTimes(1);
+    await expect(recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({
+      phase: "uploading", completedParts: [{ partNumber: 1, etag }],
+    });
+  });
+
   it("rejects changed vault bytes before any new admission or dispatch on explicit operation retry", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.download.mockRejectedValueOnce(new Error("Result transfer interrupted"));
     await expect(h.adapter.process(source)).rejects.toThrow("Result transfer interrupted");
     await expect(h.adapter.resume("document-op-1", { source: { ...source, fingerprint: () => `sha256:${"b".repeat(64)}` } })).rejects.toThrow(/changed/);
@@ -97,12 +215,12 @@ describe("managed document processing adapter contract", () => {
   it("newly selecting an edited PDF preserves the old operation and converts the new bytes", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.download.mockRejectedValueOnce(new Error("Old result transfer interrupted"));
     await expect(h.adapter.process(source)).rejects.toThrow("Old result transfer interrupted");
     const retained = await h.recovery.read("document_processing", "document-op-1");
     const edited = { ...source, fingerprint: jest.fn(() => `sha256:${"b".repeat(64)}`),
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([9, 8, 7, 6, 5, 4]).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent(6, [9, 8, 7, 6, 5, 4]) }) };
     const adapter = new ManagedDocumentProcessingAdapter({
       admission: h.admission, jobs: h.jobs, recovery: h.recovery,
       createOperationId: () => "edited-document-op", wait: async () => undefined,
@@ -125,7 +243,7 @@ describe("managed document processing adapter contract", () => {
   it("continues the furthest of several operations holding the selected bytes and retires the rest, without another admission", async () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     // One upload of these bytes stopped after its first part...
     h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
       .mockRejectedValueOnce(new Error("Part response was lost"));
@@ -146,7 +264,7 @@ describe("managed document processing adapter contract", () => {
   it("continues with the operation it can when another holding the selected bytes refuses to retire", async () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     for (const operationId of ["concurrent-op-1", "concurrent-op-2"]) {
       await h.recovery.createAdmitted({ capability: "document_processing", operationId,
         source: { identity: source.identity, fingerprint: source.fingerprint() } });
@@ -167,7 +285,7 @@ describe("managed document processing adapter contract", () => {
       createOperationId: () => "other-chat-op", wait: async () => undefined,
     });
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     const progress = jest.fn();
 
     const results = await Promise.all([h.adapter.process(source), otherChat.process(source, { onProgress: progress })]);
@@ -185,7 +303,7 @@ describe("managed document processing adapter contract", () => {
       admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
     });
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     const commits: string[] = [];
     // The first commit finishes the operation before the waiting selection runs.
     const commit = (adapter: ManagedDocumentProcessingAdapter, chat: string) => async (result: { operationId: string }) => {
@@ -215,7 +333,7 @@ describe("managed document processing adapter contract", () => {
       admission: h.admission, jobs: h.jobs, recovery: h.recovery, wait: async () => undefined,
     });
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.uploadPart.mockImplementationOnce(async (_id, partNumber) => ({ partNumber, etag }))
       .mockRejectedValueOnce(new Error("Part response was lost"));
     await expect(h.adapter.process(source)).rejects.toThrow("Part response was lost");
@@ -231,7 +349,7 @@ describe("managed document processing adapter contract", () => {
   it("stops a selection waiting for its turn at once, without holding up the next", async () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     let release: (() => void) | undefined;
     h.jobs.download.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => { release = resolve; });
@@ -259,7 +377,7 @@ describe("managed document processing adapter contract", () => {
   it("keeps later selections and the operation waiting for a running selection after a waiting one stops", async () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     let release: (() => void) | undefined;
     h.jobs.download.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => { release = resolve; });
@@ -290,7 +408,7 @@ describe("managed document processing adapter contract", () => {
   it("retires the operation on a discard once the running selection finishes, with only a stopped one left", async () => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     let release: (() => void) | undefined;
     h.jobs.download.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => { release = resolve; });
@@ -314,7 +432,7 @@ describe("managed document processing adapter contract", () => {
     const h = managedHarness();
     const version = (hex: string) => ({ identity: "vault:documents/report.pdf",
       fingerprint: () => { h.events.push(`fingerprint:${hex}`); return `sha256:${hex.repeat(64)}`; },
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) });
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) });
     let release: (() => void) | undefined;
     h.jobs.download.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => { release = resolve; });
@@ -335,12 +453,12 @@ describe("managed document processing adapter contract", () => {
   it.each(["create", "part"] as const)("continues an interrupted %s upload when the same bytes come back under another name", async (interrupted) => {
     const h = managedHarness();
     const source = { identity: "chat-pdf:report", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     if (interrupted === "create") h.jobs.create.mockRejectedValueOnce(new Error("Upload response was lost"));
     else h.jobs.uploadPart.mockRejectedValueOnce(new Error("Upload response was lost"));
     await expect(h.adapter.process(source)).rejects.toThrow("Upload response was lost");
     const renamed = { ...source,
-      load: async () => ({ filename: "renamed.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "renamed.pdf", contentType: "application/pdf", ...documentContent() }) };
 
     await expect(h.adapter.process(renamed)).resolves.toMatchObject({ operationId: "document-op-1", result: downloaded });
     // The recorded request keeps the name the operation was created with.
@@ -356,7 +474,7 @@ describe("managed document processing adapter contract", () => {
     // 6.x fingerprinted the path, not the bytes.
     const legacy = { identity,
       fingerprint: () => `sha256:${sha256HexFromBytesPortable(new TextEncoder().encode(identity))}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.download.mockRejectedValueOnce(new Error("Legacy transfer interrupted"));
     await expect(h.adapter.process(legacy)).rejects.toThrow("Legacy transfer interrupted");
     const current = { ...legacy, fingerprint: () => `sha256:${sha256HexFromBytesPortable(new Uint8Array(bytes))}` };
@@ -381,7 +499,7 @@ describe("managed document processing adapter contract", () => {
   ] as const)("retires the operation when the service %s, so selecting the file again converts it anew", async (_case, call, failure) => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     // The first document stays failed or gone for good, as it does on the service.
     const healthy = h.jobs[call].getMockImplementation()!;
     h.jobs[call].mockImplementation((async (...args: never[]) => {
@@ -399,7 +517,7 @@ describe("managed document processing adapter contract", () => {
   it("keeps the operation when the service refuses a status read for another reason", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.status.mockRejectedValueOnce(new ManagedJobError("license_required", "A valid license is required.", 401));
     await expect(h.adapter.process(source)).rejects.toMatchObject({ code: "license_required" });
     await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({ phase: "processing" });
@@ -411,7 +529,7 @@ describe("managed document processing adapter contract", () => {
   it("fails closed when an acknowledged upload has no persisted multipart descriptor", async () => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     let record = await h.recovery.createAdmitted({ capability: "document_processing", operationId: "legacy-upload",
       source: { identity: source.identity, fingerprint: source.fingerprint() } });
     record = await h.recovery.markContentReady("document_processing", record.operationId, record.revision);
@@ -429,13 +547,13 @@ describe("managed document processing adapter contract", () => {
   it.each(["fingerprint", "length"] as const)("rejects mismatched %s before replaying an interrupted create", async (mismatch) => {
     const h = managedHarness();
     const source = { identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array(6).buffer }) };
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }) };
     h.jobs.create.mockRejectedValueOnce(new Error("Create response was lost"));
     await expect(h.adapter.process(source)).rejects.toThrow("Create response was lost");
     const changed = { ...source,
       fingerprint: () => `sha256:${(mismatch === "fingerprint" ? "b" : "a").repeat(64)}`,
       load: async () => ({ filename: "report.pdf", contentType: "application/pdf",
-        bytes: new Uint8Array(mismatch === "length" ? 7 : 6).buffer }),
+        ...documentContent(mismatch === "length" ? 7 : 6) }),
     };
     await expect(h.adapter.resume("document-op-1", { source: changed })).rejects.toThrow(/changed|metadata/);
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
@@ -448,10 +566,10 @@ describe("managed document processing adapter contract", () => {
     jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask", "setImmediate"] });
     const h = managedHarness();
     const app = new App();
-    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
-    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    app.vault.readBinary = jest.fn(async () => { throw new Error("Whole-file document reads are forbidden."); });
+    jest.mocked(createVaultFileSource).mockImplementation(() => documentContent());
     const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
-    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf", stat: { size: 6 } });
     const requestClient = new PlatformRequestClient();
     const request = jest.spyOn(requestClient, "request");
     const documents = new ManagedJobClient(new HostedTransportAdapter({
@@ -490,6 +608,8 @@ describe("managed document processing adapter contract", () => {
       const receipt = await makeService().processDocumentWithReceipt(file, options);
       expect(receipt.operationId).toBe("pin-retry-1");
       expect(committed).toEqual(["pin-retry-1"]);
+      expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+      expect(app.vault.readBinary).not.toHaveBeenCalled();
       expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
       expect(h.jobs.create).toHaveBeenCalledTimes(1);
       expect(h.jobs.start).toHaveBeenCalledTimes(1);
@@ -501,14 +621,14 @@ describe("managed document processing adapter contract", () => {
   it("commits two pins of one file one after the other, with one conversion", async () => {
     const h = managedHarness();
     const app = new App();
-    const sourceBytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
-    app.vault.readBinary = jest.fn(async () => sourceBytes);
+    app.vault.readBinary = jest.fn(async () => { throw new Error("Whole-file document reads are forbidden."); });
+    jest.mocked(createVaultFileSource).mockImplementation(() => documentContent());
     const notes = new Map<string, string>();
     app.vault.adapter.exists = jest.fn(async (path: string) => notes.has(path));
     app.vault.adapter.read = jest.fn(async (path: string) => notes.get(path)!);
     app.vault.create = jest.fn(async (path: string, text: string) => { notes.set(path, text); return new TFile({ path }); });
     const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
-    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf" });
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf", stat: { size: 6 } });
     const events: string[] = [];
     let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
     // The context tool pins through the plugin's one service.
@@ -536,6 +656,8 @@ describe("managed document processing adapter contract", () => {
 
     expect(receipts.map((receipt) => receipt.operationId)).toEqual(["pin-1", "pin-1"]);
     expect(receipts[1].extractionPath).toBe(receipts[0].extractionPath);
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(events).toEqual(["stage:pin-1", "read:pin-1", "cleanup:pin-1", "stage:pin-1", "read:pin-1", "cleanup:pin-1"]);
     expect(app.vault.create).toHaveBeenCalledTimes(1);
     expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
@@ -573,7 +695,7 @@ describe("managed document processing adapter contract", () => {
       fingerprint: () => { events.push("fingerprint"); return `sha256:${"a".repeat(64)}`; },
       load: async () => {
         events.push(storage.files.has(".systemsculpt/managed-jobs/document_processing/document-op-1.json") ? "read:recorded" : "read:unrecorded");
-        return { filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer };
+        return { filename: "report.pdf", contentType: "application/pdf", ...documentContent() };
       },
     });
 
@@ -616,7 +738,7 @@ describe("managed document processing adapter contract", () => {
       load: async () => ({
         filename: "long-report.pdf",
         contentType: "application/pdf",
-        bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer,
+        ...documentContent(),
       }),
     })).resolves.toEqual({
       operationId: "document-op-1",
@@ -868,7 +990,7 @@ describe("managed document processing adapter contract", () => {
       const running = adapter.process({
         identity: "vault:documents/report.pdf",
         fingerprint: () => `sha256:${"f".repeat(64)}`,
-        load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer }),
+        load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }),
       }, { signal: controller.signal }).finally(() => { settled = true; });
       const outcome = running.catch((error: unknown) => error);
 
@@ -908,7 +1030,7 @@ describe("managed document processing adapter contract", () => {
     const running = adapter.process({
       identity: "vault:documents/report.pdf",
       fingerprint: () => `sha256:${"f".repeat(64)}`,
-      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4, 5, 6]).buffer }),
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }),
     }, { signal: controller.signal });
     await waiting;
     controller.abort();

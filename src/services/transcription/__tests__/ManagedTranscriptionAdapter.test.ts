@@ -25,7 +25,11 @@ const etag = "0123456789abcdef0123456789abcdef";
 const hexSeed = (char: string) => (/^[a-f0-9]$/i.test(char) ? char.toLowerCase() : (char.charCodeAt(0) % 16).toString(16));
 const opaqueIdentity = (char: string) => `transcription:${hexSeed(char).repeat(64)}`;
 const fingerprintFor = (char: string) => `sha256:${hexSeed(char).repeat(64)}`;
-const audioBytes = (values: number[] = [1, 2, 3, 4, 5, 6]) => new Uint8Array(values).buffer;
+const audioContent = (values: number[] = [1, 2, 3, 4, 5, 6]) => ({
+  sizeBytes: values.length,
+  readSlice: jest.fn(async (start: number, end: number) => new Uint8Array(values.slice(start, end)).buffer),
+  release: jest.fn(),
+});
 const multipartUpload = (
   char: string,
   options: Partial<{
@@ -63,7 +67,7 @@ const source = (
   load: async () => ({
     filename: options.filename ?? "demo.webm",
     contentType: options.contentType ?? "audio/webm",
-    bytes: audioBytes(options.bytes),
+    ...audioContent(options.bytes),
   }),
   ...(options.release ? { release: options.release } : {}),
 });
@@ -119,7 +123,7 @@ describe("ManagedTranscriptionAdapter", () => {
       fingerprint: () => `sha256:${"a".repeat(64)}`,
       load: async () => {
         events.push(storage.files.has(".systemsculpt/managed-jobs/transcription/transcription-op-1.json") ? "read:recorded" : "read:unrecorded");
-        return { filename: "demo.webm", contentType: "audio/webm", bytes: audioBytes() };
+        return { filename: "demo.webm", contentType: "audio/webm", ...audioContent() };
       },
       release: () => { events.push("release"); },
     });
@@ -153,6 +157,85 @@ describe("ManagedTranscriptionAdapter", () => {
     expect(persisted).not.toContain("demo.webm");
   });
 
+  it("uploads a large synthetic source one server-sized slice at a time without allocating its body", async () => {
+    const { adapter, jobs } = harness();
+    const sizeBytes = 129 * 1024 * 1024 + 7;
+    const partSizeBytes = 10 * 1024 * 1024;
+    const totalParts = Math.ceil(sizeBytes / partSizeBytes);
+    const uploaded: number[] = [];
+    const ranges: Array<[number, number]> = [];
+    const readSlice = async (start: number, end: number) => {
+      expect(start).toBe(uploaded.length * partSizeBytes);
+      expect(end).toBe(Math.min(start + partSizeBytes, sizeBytes));
+      if (end - start > partSizeBytes || (start === 0 && end === sizeBytes)) {
+        throw new Error("Whole-source audio reads are forbidden.");
+      }
+      ranges.push([start, end]);
+      return new Uint8Array(end - start).fill(uploaded.length + 1).buffer;
+    };
+    const release = jest.fn();
+    jobs.create.mockResolvedValueOnce({
+      job: { id: jobId, status: "uploading" },
+      upload: { part_size_bytes: partSizeBytes, total_parts: totalParts },
+    });
+    jobs.uploadPart.mockImplementation(async (_id, partNumber, bytes) => {
+      expect(partNumber).toBe(uploaded.length + 1);
+      expect(ranges).toHaveLength(partNumber);
+      expect(bytes.byteLength).toBe(Math.min(partSizeBytes, sizeBytes - (partNumber - 1) * partSizeBytes));
+      expect(new Uint8Array(bytes)[0]).toBe(partNumber);
+      expect(new Uint8Array(bytes).at(-1)).toBe(partNumber);
+      await Promise.resolve();
+      uploaded.push(partNumber);
+      // Do not let Jest retain every part and accidentally materialize the file.
+      jobs.uploadPart.mockClear();
+      return { partNumber, etag };
+    });
+
+    await expect(adapter.transcribe({
+      ...source("a"),
+      load: async () => ({ filename: "large.webm", contentType: "audio/webm", sizeBytes, readSlice, release }),
+      release,
+    })).resolves.toMatchObject({ kind: "transcript", text: "managed transcript" });
+
+    expect(uploaded).toEqual(Array.from({ length: totalParts }, (_, index) => index + 1));
+    expect(ranges).toEqual(uploaded.map((part) => [
+      (part - 1) * partSizeBytes, Math.min(part * partSizeBytes, sizeBytes),
+    ]));
+    expect(jobs.create).toHaveBeenCalledWith(expect.objectContaining({ contentLengthBytes: sizeBytes }), "transcription-op-1", expect.any(AbortSignal));
+    expect(jobs.complete).toHaveBeenCalledWith(jobId, uploaded.map((partNumber) => ({ partNumber, etag })), "transcription-op-1", expect.any(AbortSignal));
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["short read", "abort"] as const)("fences the next part and retires an unfinished upload after a slice %s", async (failure) => {
+    const { adapter, jobs, recovery } = harness();
+    const controller = new AbortController();
+    const content = audioContent();
+    content.readSlice
+      .mockResolvedValueOnce(new Uint8Array([1, 2, 3, 4]).buffer)
+      .mockImplementationOnce(async () => {
+        if (failure === "abort") controller.abort();
+        return new Uint8Array(failure === "short read" ? [5] : [5, 6]).buffer;
+      });
+    const running = adapter.transcribe({
+      ...source("b"),
+      load: async () => ({ filename: "interrupted.webm", contentType: "audio/webm", ...content }),
+      release: content.release,
+    }, { signal: controller.signal });
+
+    if (failure === "abort") {
+      await expect(running).rejects.toMatchObject({ name: "AbortError", resumeAvailable: false });
+    } else {
+      await expect(running).rejects.toMatchObject({ retryDisposition: "restart", message: expect.stringContaining("changed while it was being read") });
+    }
+    expect(content.readSlice.mock.calls).toEqual([[0, 4], [4, 6]]);
+    expect(jobs.uploadPart).toHaveBeenCalledTimes(1);
+    expect(jobs.complete).not.toHaveBeenCalled();
+    expect(jobs.start).not.toHaveBeenCalled();
+    expect(jobs.abortUpload).toHaveBeenCalledWith(jobId);
+    expect(content.release).toHaveBeenCalledTimes(1);
+    await expect(recovery.readOptional("transcription", "transcription-op-1")).resolves.toBeNull();
+  });
+
   it("removes each polling abort listener after a normal timer resolution", async () => {
     jest.useFakeTimers();
     try {
@@ -172,7 +255,7 @@ describe("ManagedTranscriptionAdapter", () => {
       const running = adapter.transcribe({
         identity: opaqueIdentity("2"),
         fingerprint: () => `sha256:${"2".repeat(64)}`,
-        load: async () => ({ filename: "listener.webm", contentType: "audio/webm", bytes: audioBytes() }),
+        load: async () => ({ filename: "listener.webm", contentType: "audio/webm", ...audioContent() }),
       }, { signal: controller.signal });
 
       await jest.advanceTimersByTimeAsync(2_000);
@@ -273,7 +356,7 @@ describe("ManagedTranscriptionAdapter", () => {
     await expect(adapter.transcribe({
       identity: "vault:recordings/raw-path.webm",
       fingerprint: () => `sha256:${"9".repeat(64)}`,
-      load: async () => ({ filename: "raw-path.webm", contentType: "audio/webm", bytes: audioBytes([1]) }),
+      load: async () => ({ filename: "raw-path.webm", contentType: "audio/webm", ...audioContent([1]) }),
     })).rejects.toThrow("opaque transcription hash");
 
     expect(storage.files.size).toBe(0);
@@ -353,7 +436,7 @@ describe("ManagedTranscriptionAdapter", () => {
     await expect(adapter.transcribe({
       identity: opaqueIdentity("c"),
       fingerprint: () => `sha256:${"c".repeat(64)}`,
-      load: async () => ({ filename: "resume.webm", contentType: "audio/webm", bytes: audioBytes([1, 2, 3]) }),
+      load: async () => ({ filename: "resume.webm", contentType: "audio/webm", ...audioContent([1, 2, 3]) }),
     }, { onOperationIdAdopted })).resolves.toMatchObject({ kind: "transcript", operationId: "preserved-processing-op", text: "managed transcript" });
 
     expect(onOperationIdAdopted).toHaveBeenCalledWith("preserved-processing-op");
@@ -473,7 +556,7 @@ describe("ManagedTranscriptionAdapter", () => {
     await expect(adapter.transcribe({
       identity: opaqueIdentity("d"),
       fingerprint: () => fingerprintFor("a"),
-      load: async () => ({ filename: "dup.webm", contentType: "audio/webm", bytes: audioBytes([1]) }),
+      load: async () => ({ filename: "dup.webm", contentType: "audio/webm", ...audioContent([1]) }),
     })).rejects.toThrow(/multiple preserved transcription operations match this exact audio/i);
     expect(jobs.create).not.toHaveBeenCalled();
   });
@@ -508,7 +591,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const result = await adapter.transcribe({
       identity: opaqueIdentity("e"),
       fingerprint: () => `sha256:${"e".repeat(64)}`,
-      load: async () => ({ filename: "idempotent.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "idempotent.webm", contentType: "audio/webm", ...audioContent() }),
     });
     await adapter.beginLocalCommit(result.operationId);
     await adapter.beginLocalCommit(result.operationId);
@@ -687,7 +770,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const failure = await adapter.transcribe({
       identity: opaqueIdentity("f"),
       fingerprint: () => `sha256:${"f".repeat(64)}`,
-      load: async () => ({ filename: "terminal.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "terminal.webm", contentType: "audio/webm", ...audioContent() }),
     }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ManagedTranscriptionRetryError);
@@ -728,7 +811,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const running = adapter.transcribe({
       identity: opaqueIdentity("1"),
       fingerprint: () => `sha256:${"1".repeat(64)}`,
-      load: async () => ({ filename: "abort.webm", contentType: "audio/webm", bytes: audioBytes([1, 2, 3, 4]) }),
+      load: async () => ({ filename: "abort.webm", contentType: "audio/webm", ...audioContent([1, 2, 3, 4]) }),
     }, { signal: controller.signal });
     await waiting;
     controller.abort();
@@ -760,7 +843,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const running = adapter.transcribe({
       identity: opaqueIdentity("2"),
       fingerprint: () => `sha256:${"2".repeat(64)}`,
-      load: async () => ({ filename: "status-race.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "status-race.webm", contentType: "audio/webm", ...audioContent() }),
     }, { signal: controller.signal, onProgress: progress });
     await waiting;
     const progressBeforeAbort = progress.mock.calls.length;
@@ -788,7 +871,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const running = adapter.transcribe({
       identity: opaqueIdentity("3"),
       fingerprint: () => `sha256:${"3".repeat(64)}`,
-      load: async () => ({ filename: "unfinished.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "unfinished.webm", contentType: "audio/webm", ...audioContent() }),
     }, { signal: controller.signal });
     await waiting;
     controller.abort();
@@ -903,7 +986,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const failure = await adapter.transcribe({
       identity: opaqueIdentity("6"),
       fingerprint: () => `sha256:${"6".repeat(64)}`,
-      load: async () => ({ filename: "network.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "network.webm", contentType: "audio/webm", ...audioContent() }),
     }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ManagedTranscriptionRetryError);
@@ -938,7 +1021,7 @@ describe("ManagedTranscriptionAdapter", () => {
     const result = await adapter.transcribe({
       identity: opaqueIdentity("7"),
       fingerprint: () => `sha256:${"7".repeat(64)}`,
-      load: async () => ({ filename: "long.webm", contentType: "audio/webm", bytes: audioBytes() }),
+      load: async () => ({ filename: "long.webm", contentType: "audio/webm", ...audioContent() }),
     });
 
     expect(result).toMatchObject({

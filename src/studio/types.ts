@@ -1,4 +1,6 @@
 import type { HostCapability } from "../platform/hostCapabilities";
+import type { FileSource } from "../platform/fileSource";
+import type { ManagedFileSource } from "../services/managed/ManagedFileSource";
 
 export const STUDIO_PROJECT_EXTENSION = ".systemsculpt" as const;
 export const STUDIO_DISPLAY_NAME = "Studio" as const;
@@ -495,12 +497,7 @@ export type StudioTranscriptionRequest = {
   nodeId: string;
   projectPath: string;
   signal: AbortSignal;
-  source: {
-    identity: string;
-    fingerprint: () => string | Promise<string>;
-    load: () => Promise<{ filename: string; contentType: string; bytes: ArrayBuffer }>;
-    release?: () => void;
-  };
+  source: ManagedFileSource;
 };
 
 export type StudioTranscriptionResult = {
@@ -549,8 +546,10 @@ export interface StudioNodeExecutionServices {
   resolveAbsolutePath: (path: string) => string;
   readVaultText: (vaultPath: string) => Promise<string>;
   statVaultFileSize: (vaultPath: string) => Promise<number>;
+  openVaultFileSource: (vaultPath: string) => Promise<FileSource>;
   readVaultBinary: (vaultPath: string) => Promise<ArrayBuffer>;
   statLocalFileSize: (absolutePath: string) => Promise<number>;
+  openLocalFileSource: (absolutePath: string) => Promise<FileSource>;
   readLocalFileBinary: (absolutePath: string, maxBytes?: number) => Promise<ArrayBuffer>;
   writeTempFile: (
     bytes: ArrayBuffer,
