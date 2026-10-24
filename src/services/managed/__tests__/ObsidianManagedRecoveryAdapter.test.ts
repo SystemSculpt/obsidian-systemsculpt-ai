@@ -210,10 +210,17 @@ describe("ObsidianManagedRecoveryAdapter", () => {
       await expect(reopened.findExactSourceMatches("transcription", source)).resolves.toEqual([recovered]);
       await expect(adapter.list(root)).resolves.toEqual([path]);
 
+      const active = await reopened.createAdmitted({
+        capability: "transcription", operationId: "op-2", source: { ...source, identity: "vault:other.wav" },
+      });
+      const activePath = `${directory}/op-2.json`;
+      const activeBytes = await readFile(join(vault, activePath), "utf8");
       const abandoned = await reopened.abandon("transcription", "op-1", recovered.revision);
       await reopened.delete("transcription", "op-1", abandoned.revision);
       await expect(reopened.readOptional("transcription", "op-1")).resolves.toBeNull();
-      await expect(adapter.list(root)).resolves.toEqual([]);
+      await expect(adapter.list(root)).resolves.toEqual([activePath]);
+      await expect(reopened.read("transcription", "op-2")).resolves.toEqual(active);
+      await expect(readFile(join(vault, activePath), "utf8")).resolves.toBe(activeBytes);
       await expect(readFile(join(vault, "keep.md"), "utf8")).resolves.toBe("User note");
     } finally {
       await rm(vault, { recursive: true, force: true });
