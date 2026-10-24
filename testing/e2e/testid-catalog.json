@@ -80,6 +80,7 @@
     "chat.tool.file.copy-path",
     "chat.tool.file.open",
     "chat.tool.open-path",
+    "chat.tool.show-items",
     "chat.tool.show-output",
     "chat.tool.toggle",
     "chat.turn.add-credits",

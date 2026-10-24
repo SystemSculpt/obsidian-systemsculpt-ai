@@ -58,6 +58,7 @@ import { InlineMessageEditor, type AgentInlineMessageEdit } from "./InlineMessag
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
 import { AgentApprovalCards, type ApprovalAnswer } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
+import { renderHostedToolPreview } from "./HostedToolPreview";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
 export type AgentConversationRendererOptions = Readonly<{
@@ -3037,7 +3038,7 @@ export class AgentConversationRenderer extends Component {
       }
     }
     if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
-      if (part.native) stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
+      stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
       const raw = stagedSupport.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
       raw.createEl("summary", { text: "Details" });
       const rawCode = raw.createEl("pre", { attr: { tabindex: "0" } }).createEl("code");
@@ -3259,19 +3260,26 @@ export class AgentConversationRenderer extends Component {
     }
     support.toggleAttribute("hidden", !support.hasChildNodes());
     const previewHost = support.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool-preview");
-    if (part.native && previewHost && !retainedNativePreview) {
+    if (previewHost && !retainedNativePreview) {
       const currentSupport = support;
       const currentHeader = header;
       this.toolDetailHydrators.set(node, () => {
         if (previewHost.dataset.hydrated === supportFingerprint) return;
         previewHost.dataset.hydrated = supportFingerprint;
         const staging = createSurfaceElement(node.ownerDocument, "div");
-        void renderNativeToolPreview(this.options.app, staging, part, this).then(() => {
+        const rendered = part.native
+          ? renderNativeToolPreview(this.options.app, staging, part, this)
+          : Promise.resolve().then(() => renderHostedToolPreview(this.options.app, staging, part, this, {
+            onOpenPath: (path) => this.options.onOpenArtifact({ id: path, path, title: path, kind: "vault_file" }),
+          }));
+        void rendered.then((hasPreview) => {
           if (!this.renderingEnabled || !node.isConnected || !currentSupport.contains(previewHost)
             || node.dataset.toolSupportFingerprint !== supportFingerprint) return;
           const finish = this.options.beginLayoutMutation?.(currentHeader, previewHost);
-          try { previewHost.replaceChildren(...Array.from(staging.childNodes)); }
-          finally { finish?.(); }
+          try {
+            if (hasPreview) currentSupport.querySelector(":scope > .systemsculpt-agent-tool-details")?.remove();
+            previewHost.replaceChildren(...Array.from(staging.childNodes));
+          } finally { finish?.(); }
         }).catch(() => { delete previewHost.dataset.hydrated; });
       });
       if ((shell as HTMLDetailsElement).open) this.toolDetailHydrators.get(node)?.();

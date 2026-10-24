@@ -162,6 +162,22 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
+  it("hydrates readable hosted results only after opening the tool", async () => {
+    const { renderer, parent } = setup();
+    await render(renderer, snapshot([tool({ name: "list_items", input: { paths: ["Notes"] },
+      output: { data: { results: [{ path: "Notes", directories: [], files: Array.from({ length: 55 }, (_, index) => ({ path: `Notes/${index}.md` })) }] } } })]));
+    const shell = parent.querySelector<HTMLDetailsElement>('details.systemsculpt-agent-tool')!;
+    expect(shell.querySelector('.ss-hosted-tool-preview')).toBeNull();
+    shell.open = true; shell.dispatchEvent(new Event('toggle'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(shell.querySelectorAll('.ss-hosted-tool-list > li')).toHaveLength(50);
+    expect(shell.querySelector('.systemsculpt-agent-tool-details')).toBeNull();
+    shell.querySelector<HTMLButtonElement>('[data-testid="chat.tool.show-items"]')!.click();
+    expect(shell.querySelectorAll('.ss-hosted-tool-list > li')).toHaveLength(55);
+    expect(shell.querySelector('.systemsculpt-agent-tool-raw code')!.textContent).toBe("");
+    renderer.unload();
+  });
+
   it("keeps Details lazy and exposes a real keyboard disclosure", async () => {
     const { renderer, parent } = setup();
     await render(renderer, snapshot([tool({ name: "Bash", input: { command: "printf demo" }, native: { agent: "claude", workingDirectory: "/synthetic" } })]));
