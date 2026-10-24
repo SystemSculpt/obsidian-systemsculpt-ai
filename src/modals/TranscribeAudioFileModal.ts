@@ -18,6 +18,8 @@ import {
   type UiTabsHandle,
 } from "../core/ui/surface";
 import type SystemSculptPlugin from "../main";
+import { createDeviceFileSource } from "../platform/fileSource";
+import { getHostDeviceType } from "../platform/hostCapabilities";
 import {
   captureNoteInsertionTarget,
   type NoteInsertionTarget,
@@ -37,6 +39,11 @@ type TranscribeAudioSelection =
 
 const DEFAULT_RECORDINGS_DIRECTORY = "SystemSculpt/Recordings";
 const MAX_VISIBLE_FILES = 50;
+// A bounded copy window, not an additional input-size limit.
+const DEVICE_IMPORT_SLICE_BYTES = 4 * 1024 * 1024;
+// Preserve the pre-streaming limits only for legacy whole-buffer device imports.
+const LEGACY_DESKTOP_DEVICE_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
+const LEGACY_MOBILE_DEVICE_IMPORT_MAX_BYTES = 32 * 1024 * 1024;
 
 const sanitizeFileName = (name: string): string =>
   toSafeVaultFileName(name.replace(/\s+/g, " "), { replacement: "-", fallback: "" });
@@ -480,12 +487,27 @@ export class TranscribeAudioFileModal extends StandardModal {
     this.syncTranscribeButton();
   }
 
+  private deviceImportMaxBytes(): number {
+    if (this.portableBinaryAppend()) return getTranscriptionMaxFileSize();
+    return Math.min(getTranscriptionMaxFileSize(), getHostDeviceType() === "Mobile"
+      ? LEGACY_MOBILE_DEVICE_IMPORT_MAX_BYTES
+      : LEGACY_DESKTOP_DEVICE_IMPORT_MAX_BYTES);
+  }
+
+  private portableBinaryAppend(): ((file: TFile, bytes: ArrayBuffer) => Promise<void>) | null {
+    // Vault.appendBinary is portable from Obsidian 1.12.3; retain the older-host fallback.
+    const append = (this.app.vault as {
+      appendBinary?: (file: TFile, bytes: ArrayBuffer) => Promise<void>;
+    }).appendBinary;
+    return typeof append === "function" ? append.bind(this.app.vault) : null;
+  }
+
   private async handleDeviceSelection(file: File): Promise<void> {
     if (!isAudioFileExtension(this.extensionOf(file.name))) {
       new Notice("Choose a supported audio file.", 4500);
       return;
     }
-    const maxBytes = getTranscriptionMaxFileSize();
+    const maxBytes = this.deviceImportMaxBytes();
     if (!(await validateBrowserFileSize(file, this.app, {
       maxBytes,
       maxLabel: formatFileSize(maxBytes),
@@ -648,9 +670,17 @@ export class TranscribeAudioFileModal extends StandardModal {
     if (!this.isCurrentLaunch(launchGeneration)) return null;
 
     const safeName = sanitizeFileName(selection.file.name) || `audio.${this.extensionOf(selection.file.name)}`;
-    const bytes = await selection.file.arrayBuffer();
-    if (!this.isCurrentLaunch(launchGeneration)) return null;
-    const created = await this.createImportedAudio(directory, safeName, bytes);
+    const appendBinary = this.portableBinaryAppend();
+    let created: TFile | null;
+    if (selection.file.size > DEVICE_IMPORT_SLICE_BYTES && appendBinary) {
+      created = await this.importAudioInParts(directory, safeName, selection, launchGeneration, appendBinary);
+      if (!created) return null;
+    } else {
+      // Keep small imports and hosts predating portable binary append compatible.
+      const bytes = await selection.file.arrayBuffer();
+      if (!this.isCurrentLaunch(launchGeneration)) return null;
+      created = await this.createImportedAudio(directory, safeName, path => this.app.vault.createBinary(path, bytes));
+    }
     if (!(created instanceof TFile)) {
       throw new Error("The audio file could not be saved in the vault.");
     }
@@ -659,6 +689,45 @@ export class TranscribeAudioFileModal extends StandardModal {
       return null;
     }
     return created;
+  }
+
+  private async importAudioInParts(
+    directory: string,
+    safeName: string,
+    selection: Extract<TranscribeAudioSelection, { kind: "device" }>,
+    launchGeneration: number,
+    appendBinary: (file: TFile, bytes: ArrayBuffer) => Promise<void>,
+  ): Promise<TFile | null> {
+    const source = createDeviceFileSource(selection.file);
+    let staged: TFile | null = null;
+    let complete = false;
+    try {
+      // An incomplete copy must not appear as playable/transcribable audio.
+      staged = await this.createImportedAudio(directory, `${safeName}.partial`, path =>
+        this.app.vault.createBinary(path, new ArrayBuffer(0)),
+      );
+      if (!(staged instanceof TFile)) throw new Error("The audio file could not be saved in the vault.");
+      for (let start = 0; start < source.sizeBytes; start += DEVICE_IMPORT_SLICE_BYTES) {
+        if (!this.isCurrentLaunch(launchGeneration)) return null;
+        const end = Math.min(start + DEVICE_IMPORT_SLICE_BYTES, source.sizeBytes);
+        const bytes = await source.readSlice(start, end);
+        if (!this.isCurrentLaunch(launchGeneration)) return null;
+        if (bytes.byteLength !== end - start) throw new Error("The selected audio file changed while it was being read.");
+        await appendBinary(staged, bytes);
+      }
+      if (!this.isCurrentLaunch(launchGeneration)) return null;
+      const file = staged;
+      await this.createImportedAudio(directory, safeName, async path => {
+        await this.app.vault.rename(file, path);
+        return file;
+      });
+      if (!this.isCurrentLaunch(launchGeneration)) return null;
+      complete = true;
+      return file;
+    } finally {
+      source.release();
+      if (staged && !complete) await this.discardCancelledImport(selection, staged);
+    }
   }
 
   private isCurrentLaunch(launchGeneration: number): boolean {
@@ -680,7 +749,7 @@ export class TranscribeAudioFileModal extends StandardModal {
   private async createImportedAudio(
     directory: string,
     safeName: string,
-    bytes: ArrayBuffer,
+    create: (path: string) => Promise<TFile>,
   ): Promise<TFile> {
     const timestamp = Date.now();
     const dotIndex = safeName.lastIndexOf(".");
@@ -695,7 +764,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       if (this.app.vault.getAbstractFileByPath(path)) continue;
 
       try {
-        return await this.app.vault.createBinary(path, bytes);
+        return await create(path);
       } catch (error) {
         // Another vault operation may have claimed the path after our check.
         if (this.app.vault.getAbstractFileByPath(path)) continue;
