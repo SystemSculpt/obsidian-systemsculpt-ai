@@ -486,10 +486,11 @@ export class AgentWorkspace extends Component {
     this.moreMenu?.hide();
     const menu = new Menu().setUseNativeMenu(false);
     this.moreMenu = menu;
-    containMenuEscape(menu, anchor.ownerDocument);
+    const releaseEscape = containMenuEscape(menu, anchor.ownerDocument);
     this.options.buildMoreMenu?.(menu);
     anchor.setAttribute("aria-expanded", "true");
     menu.onHide(() => {
+      releaseEscape();
       if (this.moreMenu !== menu) return;
       this.moreMenu = null;
       anchor.setAttribute("aria-expanded", "false");
