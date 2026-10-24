@@ -269,6 +269,57 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it.each([false, true])("keeps idle snapshots idle despite stale activity and outer pending %s", (pending) => {
+    const idle: AgentConversationSnapshot = {
+      runId: null,
+      turnId: null,
+      status: "idle",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+      messages: [],
+      parts: [{
+        id: "stale-text", kind: "text", messageId: "assistant", order: 0,
+        state: "streaming", markdown: "Partial answer",
+      }, {
+        id: "stale-approval", kind: "tool", messageId: "assistant", order: 1,
+        callId: "call", name: "write", input: {}, location: "vault",
+        state: "approval-required", approvalId: "approval",
+      }],
+    };
+    expect(presentAgentConversation(idle, pending)).toMatchObject({
+      phase: "idle", busy: false, composerRunning: false, progressActive: false,
+      activityStatus: "Idle", visibleParts: idle.parts,
+    });
+    expect(presentAgentConversation({ ...idle, parts: [] }, pending)).toMatchObject({
+      phase: "idle", busy: false, composerRunning: false, progressActive: false,
+    });
+  });
+
+  it.each(["running", "waiting"] as const)("pauses progress without ending a %s run during recovery", (status) => {
+    const recovering: AgentConversationSnapshot = {
+      runId: "run", turnId: "turn", status, phase: "retrying", messages: [],
+      parts: [{
+        id: "tool", kind: "tool", messageId: "assistant", order: 0,
+        callId: "call", name: "web_search", location: "server",
+        input: { query: "latest" }, state: "running",
+      }],
+    };
+    for (const statusLabel of ["Reconnecting", "Recovering", "Continuing", "Connection interrupted"]) {
+      for (const pending of [false, true]) {
+        const presentation = presentAgentConversation({ ...recovering, statusLabel }, pending);
+        expect(presentation).toMatchObject({
+          phase: "recovering", busy: true, composerRunning: true, progressActive: false,
+          activityStatus: statusLabel === "Connection interrupted" ? "Reconnecting" : "Continuing",
+        });
+        expect(presentation.visibleParts).toBe(recovering.parts);
+      }
+    }
+    expect(presentAgentConversation({ ...recovering, phase: "working" }, false)).toMatchObject({
+      phase: "acting", busy: true, composerRunning: true, progressActive: true,
+      activityStatus: "Searching",
+    });
+  });
+
   it("presents a sustained connection interruption above stale tool activity", () => {
     const staleSearch = {
       id: "tool-1",
