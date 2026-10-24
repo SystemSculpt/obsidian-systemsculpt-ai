@@ -27,6 +27,13 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 }
 
+/** Waits for the composer's queued attachment work, however slow the host. */
+async function idle(composer: AgentComposer): Promise<void> {
+  await settle();
+  await (composer as unknown as { attachmentQueue: Promise<void> }).attachmentQueue;
+  await settle();
+}
+
 function byteFile(name: string, type: string, text: string): File {
   const file = new File([text], name, { type });
   Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode(text).buffer });
@@ -113,7 +120,7 @@ describe("AgentComposer", () => {
 
     composer.setValue("First request");
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     expect(submissions).toEqual([{ text: "First request", mode: "send" }]);
 
     composer.setRunning(true);
@@ -121,7 +128,7 @@ describe("AgentComposer", () => {
     expect(onStop).toHaveBeenCalledTimes(1);
     composer.setValue("Follow up");
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     expect(submissions.at(-1)).toEqual({ text: "Follow up", mode: "queue" });
 
     composer.setValue("Keep me");
@@ -171,7 +178,7 @@ describe("AgentComposer", () => {
     expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
     composer.setValue("Use the Archive folder instead");
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     expect(input.placeholder).toBe("Ask Claude Code to work in your vault…");
 
     composer.setReadOnly("View-only saved chat. Start a new chat to continue.");
@@ -208,7 +215,7 @@ describe("AgentComposer", () => {
     expect(input.placeholder).toBe("Ask SystemSculpt to work in your vault…");
     expect(query(".systemsculpt-agent-prompt-hint")!.hidden).toBe(true);
     query('[aria-label="Send message"]')!.click();
-    await settle();
+    await idle(composer);
     expect((composer as any).options.onSubmit).toBeDefined();
     composer.unload();
   });
@@ -280,7 +287,7 @@ describe("AgentComposer", () => {
       expect(key(input, { key: "Enter" }).defaultPrevented).toBe(false);
       expect(submissions).toHaveLength(0);
       query('[data-testid="chat.composer.send"]')!.click();
-      await settle();
+      await idle(composer);
       expect(submissions).toEqual([{ text: "Line one", mode: "send" }]);
       composer.unload();
     } finally {
@@ -323,7 +330,7 @@ describe("AgentComposer", () => {
     // Sent prompts join the history right away.
     composer.setValue("Third prompt");
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     key(input, { key: "ArrowUp" });
     expect(input.value).toBe("Third prompt");
     composer.unload();
@@ -387,7 +394,7 @@ describe("AgentComposer", () => {
 
     query('[data-testid="chat.composer.add"]')!.click();
     lastMenu().select("Add current note: Plan");
-    await settle();
+    await idle(composer);
     const chip = query<HTMLElement>(".systemsculpt-agent-attachment.is-message")!;
     expect(chip.textContent).toContain("Plan.md");
     expect(composer.getMessageAttachments()).toEqual([
@@ -399,7 +406,7 @@ describe("AgentComposer", () => {
     menu = lastMenu();
     expect(menuTitles(menu)).not.toContain("Add current note: Plan");
     menu.hide();
-    await settle();
+    await idle(composer);
     expect(document.activeElement).toBe(query('[data-testid="chat.composer.add"]'));
 
     // A click elsewhere closes the menu without pulling focus back.
@@ -408,7 +415,7 @@ describe("AgentComposer", () => {
     elsewhere.focus();
     elsewhere.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     lastMenu().hide();
-    await settle();
+    await idle(composer);
     expect(document.activeElement).toBe(elsewhere);
     composer.unload();
   });
@@ -425,12 +432,12 @@ describe("AgentComposer", () => {
     type(input, "Hello");
     expect(ghost.hidden).toBe(true);
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     expect(submissions[0].attachments).toBeUndefined();
     expect(ghost.hidden).toBe(false);
 
     ghost.click();
-    await settle();
+    await idle(composer);
     expect(ghost.hidden).toBe(true);
     expect(composer.getMessageAttachments()).toHaveLength(1);
     composer.unload();
@@ -462,7 +469,7 @@ describe("AgentComposer", () => {
     key(input, { key: "ArrowUp" });
     const insert = key(input, { key: "Enter" });
     expect(insert.defaultPrevented).toBe(true);
-    await settle();
+    await idle(composer);
     expect(input.value).toBe("Tighten [[Plan]] ");
     expect(popover.hidden).toBe(true);
     expect(input.hasAttribute("role")).toBe(false);
@@ -473,7 +480,7 @@ describe("AgentComposer", () => {
     type(input, "Tighten [[Plan]] and [[Planning");
     expect(popover.hidden).toBe(false);
     key(input, { key: "Tab" });
-    await settle();
+    await idle(composer);
     expect(input.value).toBe("Tighten [[Plan]] and [[Planning notes]] ");
     expect(composer.getMessageAttachments()).toHaveLength(2);
 
@@ -550,7 +557,7 @@ describe("AgentComposer", () => {
     message.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.open"]')!.click();
     expect(menuTitles(lastMenu())).toEqual(["Open", "Pin for every message", "Remove"]);
     lastMenu().select("Pin for every message");
-    await settle();
+    await idle(composer);
     expect(onVaultContextDrop).toHaveBeenCalledWith("Projects/Plan.md");
     expect(composer.getMessageAttachments()).toEqual([]);
 
@@ -599,14 +606,14 @@ describe("AgentComposer", () => {
       value: { types: ["Files", "text/plain"], files: [text, image], items: [], getData: () => "Pasted instructions" },
     });
     input.dispatchEvent(paste);
-    await settle();
+    await idle(composer);
 
     expect(paste.defaultPrevented).toBe(false);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
     expect(parent.querySelector<HTMLImageElement>(".systemsculpt-agent-attachment-preview")?.src)
       .toMatch(/^data:image\/png;base64,/);
     parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await settle();
+    await idle(composer);
 
     expect(submissions).toHaveLength(1);
     expect(submissions[0].text).toBe("Pasted instructions");
@@ -624,7 +631,7 @@ describe("AgentComposer", () => {
       value: { types: ["Files"], files: [image], items: [], getData: () => "" },
     });
     input.dispatchEvent(paste);
-    await settle();
+    await idle(composer);
     expect(paste.defaultPrevented).toBe(true);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message.is-image")).toHaveLength(1);
     composer.unload();
@@ -638,11 +645,11 @@ describe("AgentComposer", () => {
     const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(picker, "files", { configurable: true, value: [text, image] });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle();
+    await idle(composer);
 
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
     parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await settle();
+    await idle(composer);
 
     expect(submissions).toHaveLength(1);
     expect(submissions[0].text).toBe("");
@@ -712,7 +719,7 @@ describe("AgentComposer", () => {
       ],
     });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle();
+    await idle(composer);
 
     expect(query<HTMLElement>(".systemsculpt-agent-composer-errors")!.textContent)
       .toContain("broken.pdf could not be processed: conversion failed");
@@ -724,12 +731,12 @@ describe("AgentComposer", () => {
     expect(submissions).toEqual([]);
 
     query('[data-testid="chat.composer.attachment.retry"]')!.click();
-    await settle();
+    await idle(composer);
 
     expect(query<HTMLElement>(".systemsculpt-agent-composer-errors")!.hidden).toBe(true);
     expect(send.disabled).toBe(false);
     send.click();
-    await settle();
+    await idle(composer);
     expect(submissions).toHaveLength(1);
     expect(submissions[0].attachments.map((attachment: any) => attachment.name)).toEqual([
       "notes.md", "broken.pdf", "diagram.png",
@@ -761,7 +768,7 @@ describe("AgentComposer", () => {
     expect(reading.textContent).toContain("Reading slow.pdf…");
     expect(reading.querySelector(".systemsculpt-agent-attachment-icon.is-spinning")).not.toBeNull();
     stop.click();
-    await settle();
+    await idle(composer);
 
     expect(signals[0].aborted).toBe(true);
     expect(stop.hidden).toBe(true);
@@ -774,7 +781,7 @@ describe("AgentComposer", () => {
     expect(query<HTMLElement>(".systemsculpt-agent-attachment.is-processing")).not.toBeNull();
     composer.unload();
     expect(signals[1].aborted).toBe(true);
-    await settle();
+    await idle(composer);
   });
 
   it.each(["resolve", "reject"] as const)("Remove during Retry keeps the PDF removed after a late %s", async (outcome) => {
@@ -798,13 +805,13 @@ describe("AgentComposer", () => {
     const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(picker, "files", { configurable: true, value: [byteFile("remove.pdf", "application/pdf", "%PDF")] });
     picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle();
+    await idle(composer);
     query('[data-testid="chat.composer.attachment.retry"]')!.click();
     await Promise.resolve();
     query('[data-testid="chat.composer.attachment.remove"]')!.click();
     const abortedOnRemove = signal.aborted;
     finish();
-    await settle();
+    await idle(composer);
     expect(abortedOnRemove).toBe(true);
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
     expect(query('[data-testid="chat.composer.attachment.cancel"]')!.hidden).toBe(true);
@@ -829,7 +836,7 @@ describe("AgentComposer", () => {
     Object.defineProperty(drop, "dataTransfer", { value: transfer });
     viewport.dispatchEvent(drop);
     expect(overlay.hidden).toBe(true);
-    await settle();
+    await idle(composer);
     expect(composer.getMessageAttachments()).toEqual([expect.objectContaining({ name: "dropped.md" })]);
 
     const leaveEnter = new Event("dragenter", { bubbles: true, cancelable: true });
@@ -854,7 +861,7 @@ describe("AgentComposer", () => {
     const drop = new Event("drop", { bubbles: true, cancelable: true });
     Object.defineProperty(drop, "dataTransfer", { value: transfer });
     viewport.dispatchEvent(drop);
-    await settle();
+    await idle(composer);
     expect(drop.defaultPrevented).toBe(true);
     expect(composer.getMessageAttachments()).toEqual([expect.objectContaining({ name: "Projects/Plan.md" })]);
     composer.unload();
@@ -906,7 +913,7 @@ describe("AgentComposer", () => {
     composer.setRunning(true);
     composer.setValue("After that, tidy the links");
     key(input, { key: "Enter" });
-    await settle();
+    await idle(composer);
     expect(announce).toHaveBeenCalledWith("Message queued.");
     composer.unload();
   });
