@@ -232,7 +232,10 @@ describe("PhoneCaptureInbox", () => {
 
   it("preserves a meeting at the existing markdown limit and leaves oversized captures pending", async () => {
     const markdown = "会".repeat(1_000_000);
-    const h = setup({ captures: [{ ...MEETING, markdown }, { ...MEETING, id: "too_long", markdown: markdown + "x" }] });
+    const h = setup({ captures: [{ ...MEETING, markdown }, {
+      ...MEETING, id: "too_long", markdown: markdown + "x",
+      meeting: { ...MEETING.meeting, frontmatter: MEETING.meeting.frontmatter.replace(MEETING.id, "too_long") },
+    }] });
     const result = await h.inbox.sync();
     expect(result).toMatchObject({ failed: 0 });
     expect(result.saved).toHaveLength(1);
