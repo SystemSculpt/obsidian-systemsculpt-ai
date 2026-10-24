@@ -195,6 +195,33 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  it.each(['choice', 'typed'])('answers a Claude single question by %s with its original question key', async method => {
+    const ui = setup();
+    const questions = [{ question: "Which color?", header: "Color", multiSelect: false, options: [{ label: "Blue" }, { label: "Green" }] }];
+    const part = tool("question", { name: "AskUserQuestion", input: { questions } });
+    const card = ui.add(part); ui.cards.sync([part]);
+    if (method === 'choice') {
+      key(primary(card), "2");
+    } else {
+      const input = card.querySelector("input")!;
+      input.focus();
+      input.value = "A shade of turquoise";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      key(input, "Enter", { isComposing: true });
+      expect(ui.onApprove).not.toHaveBeenCalled();
+      key(input, "Enter");
+    }
+    await tick();
+    const answer = method === 'choice' ? 'Green' : 'A shade of turquoise';
+    const answers = { 'Which color?': [answer] };
+    expect(ui.onApprove.mock.calls).toEqual([["question", true, false, answers]]);
+    expect(claudePermissionResponse({ toolName: "AskUserQuestion", description: "", input: { questions } }, { approved: true, answers })).toEqual({
+      behavior: "allow", updatedInput: { questions, answers: { "Which color?": answer } },
+    });
+    expect(document.activeElement).toBe(ui.input);
+    ui.dispose();
+  });
+
   it("uses Claude question text as the native answer key and preserves multiple selections", async () => {
     const ui = setup();
     const questions = [{ question: "Which sections?", header: "Sections", multiSelect: true, options: [{ label: "Summary" }, { label: "Tasks" }] }];

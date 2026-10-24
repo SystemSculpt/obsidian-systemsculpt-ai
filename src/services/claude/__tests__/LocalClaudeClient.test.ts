@@ -407,6 +407,23 @@ describe('permissions', () => {
     await runLocalClaude(input, new AbortController().signal, callbacks(false));
     expect(messages.find(m => m.type === 'control_response').response.response).toEqual({ behavior: 'deny', message: 'The user declined this action in SystemSculpt.' });
   });
+  it.each([
+    { answer: ['Blue'] }, { answer: ['Blue', 'Green'] }, { answer: ['A shade of turquoise'] },
+  ])('returns inline question answer $answer in the permission response updatedInput', async ({ answer }) => {
+    const questions = [{ question: 'Which color?', header: 'Color', multiSelect: answer.length > 1, options: [{ label: 'Blue' }, { label: 'Green' }] }];
+    const toolInput = { questions, metadata: { source: 'native' } };
+    const { messages } = host({ script: (send, msg) => {
+      if (msg.type === 'user') send({ type: 'control_request', request_id: 'ask', request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: toolInput } });
+      if (msg.type === 'control_response') send({ type: 'result', subtype: 'success', result: 'Answer received', session_id: SESSION });
+    } });
+    const permission = jest.fn(async () => ({ approved: true, answers: { 'Which color?': answer } }));
+    await runLocalClaude(input, new AbortController().signal, { ...callbacks(), supportsQuestions: true, permission });
+    expect(permission).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'AskUserQuestion', input: toolInput }), expect.any(AbortSignal));
+    expect(messages.find(m => m.response?.request_id === 'ask').response).toEqual({ subtype: 'success', request_id: 'ask', response: {
+      behavior: 'allow', updatedInput: { ...toolInput, answers: { 'Which color?': answer.join(', ') } },
+    } });
+    expect(toolInput).not.toHaveProperty('answers');
+  });
   it('declines interactive questions and unsupported control requests without prompting', async () => {
     const { messages } = host({ script: (send, msg) => {
       if (msg.type !== 'user') return;
