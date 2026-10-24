@@ -23,6 +23,7 @@ import {
 } from "./types";
 import { requireYouTubeVideoUrl } from "./youtube";
 import {
+  dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
 } from "../../services/managed/ManagedJobObservation";
@@ -36,10 +37,6 @@ const POLL_INTERVAL_MS = 2_000;
  */
 const AWAITING_FUNDS_FIRST_RECHECK_MS = 60_000;
 const AWAITING_FUNDS_MAX_RECHECK_MS = 15 * 60_000;
-const MAX_UPLOAD_ATTEMPTS = 3;
-const UPLOAD_RETRY_DELAY_MS = 750;
-const MAX_UPLOAD_COMPLETION_ATTEMPTS = 3;
-const UPLOAD_COMPLETION_RETRY_DELAY_MS = 1_000;
 
 export interface AudioProcessorServiceOptions {
   apiClient?: AudioProcessorApiClient;
@@ -492,25 +489,21 @@ export class AudioProcessorService {
     uploadProgress: number,
     options: ProcessAudioOptions,
   ): Promise<{ part_number: number; etag: string }> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
-      if (options.signal.aborted) throw abortError();
-      try {
+    return dispatchManagedJob({
+      send: async () => {
         const signed = await this.api.getPartUrl(jobId, partNumber, options.signal);
-        return await this.api.uploadPart(signed, bytes, options.signal);
-      } catch (error) {
-        if (options.signal.aborted) throw error;
-        lastError = error;
-        if (attempt === MAX_UPLOAD_ATTEMPTS) break;
+        return this.api.uploadPart(signed, bytes, options.signal);
+      },
+      signal: options.signal,
+      wait: async (milliseconds, signal) => {
         options.onProgress?.({
           stage: "uploading",
           progress: 0.08 + uploadProgress * 0.27,
           message: `Retrying audio upload… part ${partNumber}`,
         });
-        await this.sleep(UPLOAD_RETRY_DELAY_MS * attempt, options.signal);
-      }
-    }
-    throw normalizeAudioProcessorError(lastError);
+        await this.sleep(milliseconds, signal);
+      },
+    });
   }
 
   private async completeUploadWithRetry(
@@ -519,43 +512,44 @@ export class AudioProcessorService {
     operationId: string,
     options: ProcessAudioOptions,
   ): Promise<AudioProcessorJob> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= MAX_UPLOAD_COMPLETION_ATTEMPTS; attempt += 1) {
-      if (options.signal.aborted) throw abortError();
-      try {
-        const completed = await this.api.completeUpload(jobId, parts, operationId, options.signal);
-        if (completed.status !== "uploading") {
-          await this.clearUploadRecovery(jobId);
-        }
-        return completed;
-      } catch (error) {
-        if (options.signal.aborted) throw error;
-        lastError = error;
-
-        // Completion is idempotent, but a lost response may mean the server
-        // already advanced the job. Read back authoritative state before
-        // replaying the same completion operation.
+    let retryAfterMs: number | undefined;
+    const completed = await dispatchManagedJob({
+      send: async () => {
+        retryAfterMs = undefined;
         try {
-          const observed = await this.api.getJob(jobId, options.signal);
-          if (observed.status !== "uploading") {
-            await this.clearUploadRecovery(jobId);
-            return observed;
+          return await this.api.completeUpload(jobId, parts, operationId, options.signal);
+        } catch (error) {
+          if (options.signal.aborted || !isRetryableManagedJobObservationError(error)) throw error;
+          // A lost response may mean the server already advanced the job.
+          // Reconcile before replaying, but never turn a permanent rejection
+          // into success or discard either request's Retry-After hint.
+          retryAfterMs = (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs;
+          try {
+            const observed = await this.api.getJob(jobId, options.signal);
+            if (observed.status !== "uploading") return observed;
+          } catch (readError) {
+            if (options.signal.aborted || !isRetryableManagedJobObservationError(readError)) throw readError;
+            const readRetryAfterMs = (readError as Partial<AudioProcessorApiError> | null)?.retryAfterMs;
+            if (readRetryAfterMs !== undefined) {
+              retryAfterMs = Math.max(retryAfterMs ?? 0, readRetryAfterMs);
+            }
           }
-        } catch (readError) {
-          if (options.signal.aborted) throw readError;
-          lastError = readError;
+          throw error;
         }
-
-        if (attempt === MAX_UPLOAD_COMPLETION_ATTEMPTS) break;
+      },
+      retryAfterMs: () => retryAfterMs,
+      signal: options.signal,
+      wait: async (milliseconds, signal) => {
         options.onProgress?.({
           stage: "queued",
           progress: 0.36,
           message: "Confirming audio upload…",
         });
-        await this.sleep(UPLOAD_COMPLETION_RETRY_DELAY_MS * attempt, options.signal);
-      }
-    }
-    throw normalizeAudioProcessorError(lastError);
+        await this.sleep(milliseconds, signal);
+      },
+    });
+    if (completed.status !== "uploading") await this.clearUploadRecovery(jobId);
+    return completed;
   }
 
   private async pollUntilComplete(

@@ -11,6 +11,7 @@ import type {
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
 import {
+  dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
   waitForManagedJob,
@@ -735,7 +736,11 @@ export class ManagedTranscriptionAdapter {
     }
     if (record.phase === "start_dispatching") {
       context.onProgress?.(72, "Resuming transcription…");
-      await this.dependencies.jobs.start(jobId, record.operationId, signal);
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.start(jobId, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeStarted(CAPABILITY, record.operationId, record.revision);
       throwIfAborted(signal);
@@ -785,7 +790,11 @@ export class ManagedTranscriptionAdapter {
         context.onProgress?.(2, "Resuming preserved upload…");
       }
 
-      const created = await this.dependencies.jobs.create(createRequest, record.operationId, signal);
+      const created = await dispatchManagedJob({
+        send: () => this.dependencies.jobs.create(createRequest, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       const jobId = readJobId(created);
       const multipartUpload = this.buildMultipartUploadDescriptor(createRequest, readUpload(created));
@@ -821,7 +830,11 @@ export class ManagedTranscriptionAdapter {
           record = await this.beginDispatch(record, "part", partNumber);
           throwIfAborted(signal);
         }
-        const part = await this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal);
+        const part = await dispatchManagedJob({
+          send: () => this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal),
+          signal,
+          wait: this.wait,
+        });
         throwIfAborted(signal);
         record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, record.operationId, record.revision, part);
         throwIfAborted(signal);
@@ -833,25 +846,24 @@ export class ManagedTranscriptionAdapter {
       }
     }
 
-    if (record.phase === "complete_dispatching") {
-      if (!record.completedParts?.length || !record.jobId) {
-        throw new Error("Managed transcription upload completion cannot resume without acknowledged parts.");
-      }
-      context.onProgress?.(68, "Finalizing preserved upload…");
-      await this.dependencies.jobs.complete(record.jobId, record.completedParts, record.operationId, signal);
-      throwIfAborted(signal);
-      record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, record.operationId, record.revision);
-      throwIfAborted(signal);
-    } else if (["created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const resumedJobId = record.jobId;
+    if (["complete_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
+      const jobId = record.jobId;
       const completedParts = record.completedParts;
-      if (!completedParts?.length || !resumedJobId) {
+      if (!completedParts?.length || !jobId) {
         throw new Error("Managed transcription upload completion cannot resume without acknowledged parts.");
       }
-      throwIfAborted(signal);
-      record = await this.beginDispatch(record, "complete");
-      throwIfAborted(signal);
-      await this.dependencies.jobs.complete(resumedJobId, completedParts, record.operationId, signal);
+      if (record.phase === "complete_dispatching") {
+        context.onProgress?.(68, "Finalizing preserved upload…");
+      } else {
+        throwIfAborted(signal);
+        record = await this.beginDispatch(record, "complete");
+        throwIfAborted(signal);
+      }
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.complete(jobId, completedParts, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, record.operationId, record.revision);
       throwIfAborted(signal);

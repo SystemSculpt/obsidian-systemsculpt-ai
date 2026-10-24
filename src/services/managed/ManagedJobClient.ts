@@ -162,7 +162,7 @@ export class ManagedJobClient {
     const response = await this.transport.job({ path, method: descriptor[0], headers, signal }); const parsed = await this.parse(capability, "part_url", response) as { internal: { partNumber: number; method: string; url: string; expectedBytes: number } };
     if (parsed.internal.partNumber !== partNumber) malformed("Multipart part identity mismatch.");
     if (bytes.byteLength !== parsed.internal.expectedBytes) this.invalid("Multipart bytes do not match expected length."); const upload = await this.transport.uploadSignedJobPart(parsed.internal.url, parsed.internal.method, {}, bytes, signal);
-    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), upload.status >= 500 || upload.status === 429);
+    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), upload.status >= 500 || upload.status === 429, null, retryAfterHeaderMs(upload.headers.get("retry-after")));
     const etag = upload.headers.get("etag"); if (!etag || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(etag) || (etag.startsWith('"') !== etag.endsWith('"'))) malformed("Invalid multipart ETag."); return { partNumber, etag };
   }
 

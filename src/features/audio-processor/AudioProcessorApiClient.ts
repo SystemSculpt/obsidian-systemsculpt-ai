@@ -178,6 +178,7 @@ export class AudioProcessorApiClient {
         `Audio upload failed (${response.status}).`,
         response.status,
         "upload_failed",
+        retryAfterHeaderMs(response.headers.get("retry-after")),
       );
     }
     const etag = response.headers.get("etag")?.trim();
@@ -370,13 +371,15 @@ export class AudioProcessorApiClient {
       allowTransportFallback: method === "GET",
     });
     const text = await response.text();
-    if (text.length > MAX_JSON_RESPONSE_CHARS) malformed("The audio service response was too large.");
+    if (response.ok && text.length > MAX_JSON_RESPONSE_CHARS) malformed("The audio service response was too large.");
 
     let payload: unknown = null;
     try {
-      payload = text ? JSON.parse(text) : null;
+      if (text && text.length <= MAX_JSON_RESPONSE_CHARS) payload = JSON.parse(text);
     } catch {
-      malformed("The audio service returned malformed JSON.");
+      // Gateways can return HTML or text for HTTP failures. Preserve their
+      // status and Retry-After instead of treating them as malformed success.
+      if (response.ok) malformed("The audio service returned malformed JSON.");
     }
     if (!response.ok) {
       const root = isRecord(payload) ? payload : {};

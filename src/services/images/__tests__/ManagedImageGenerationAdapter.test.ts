@@ -1,4 +1,5 @@
 import { ManagedImageGenerationAdapter } from "../ManagedImageGenerationAdapter";
+import { ManagedJobError } from "../../managed/ManagedJobClient";
 import type { ManagedJobRecoveryRecord } from "../../managed/ManagedTypes";
 
 const HASH_A = "a".repeat(64);
@@ -19,6 +20,58 @@ function record(phase: ManagedJobRecoveryRecord["phase"], revision: number, jobI
 }
 
 describe("ManagedImageGenerationAdapter", () => {
+  it.each([503, 429, 400])("handles create HTTP %s without creating a second job", async (status) => {
+    jest.useFakeTimers();
+    try {
+      const createdJobs = new Set<string>();
+      const create = jest.fn(async (_body, operationId) => {
+        if (status !== 400) createdJobs.add(operationId);
+        return { job: { id: "image-1", status: "queued" as const } };
+      });
+      const original = create.getMockImplementation()!;
+      create.mockImplementationOnce(async (...args) => {
+        await original(...args);
+        throw new ManagedJobError("managed_job_error", "Create failed", status, null, status !== 400, null, 5_000);
+      });
+      const metadata = { index: 0, mime_type: "image/png" as const, size_bytes: 1, sha256: HASH_A, width: 1, height: 1 };
+      const buildPayload = jest.fn(() => ({ prompt: "Draw" }));
+      const adapter = new ManagedImageGenerationAdapter({
+        admission: { acquireLease: async () => ({ outcome: "allowed" }) } as never,
+        recovery: {
+          createAdmitted: async () => record("admitted", 1),
+          markContentReady: async () => record("content_ready", 2),
+          beginDispatch: async () => record("create_dispatching", 3),
+          acknowledgeImageCreated: async () => record("processing", 4, "image-1"),
+          applyReconciliation: async () => record("result_ready", 5, "image-1"),
+        } as never,
+        jobs: {
+          prepareInputs: jest.fn(), create,
+          status: async () => ({ job: { id: "image-1", status: "succeeded" }, outputs: [metadata] }),
+          downloadOutput: async () => ({ metadata, bytes: new Uint8Array([1]).buffer }),
+        },
+      });
+      const running = adapter.generate({ operationId: "image-operation", sourceIdentity: "studio:image", buildPayload });
+      if (status === 400) {
+        await expect(running).rejects.toThrow("Create failed");
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(createdJobs.size).toBe(0);
+        expect(jest.getTimerCount()).toBe(0);
+      } else {
+        const finished = expect(running).resolves.toMatchObject({ jobId: "image-1" });
+        await jest.advanceTimersByTimeAsync(4_999);
+        expect(create).toHaveBeenCalledTimes(1);
+        await jest.advanceTimersByTimeAsync(1);
+        await finished;
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+        expect(createdJobs.size).toBe(1);
+      }
+      expect(buildPayload).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("rejects operation IDs that cannot form the required bounded idempotency key", async () => {
     const acquireLease = jest.fn();
     const adapter = new ManagedImageGenerationAdapter({

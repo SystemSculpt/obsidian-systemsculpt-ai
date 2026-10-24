@@ -12,6 +12,7 @@ import type {
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
 import {
+  dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
   waitForManagedJob,
@@ -231,12 +232,17 @@ export class ManagedImageGenerationAdapter {
     }
 
     record = await this.beginDispatch(record, "create");
-    const created = await this.dependencies.jobs.create({
+    const createRequest = {
       prompt: payload.prompt,
-    ...(payload.model ? { model: payload.model } : {}),
+      ...(payload.model ? { model: payload.model } : {}),
       ...(uploadedInputs && uploadedInputs.length > 0 ? { input_images: uploadedInputs } : {}),
       ...(Object.keys(payload.options).length > 0 ? { options: payload.options } : {}),
-    }, operation.operationId, signal);
+    };
+    const created = await dispatchManagedJob({
+      send: () => this.dependencies.jobs.create(createRequest, operation.operationId, signal),
+      signal,
+      wait: this.wait,
+    });
     throwIfAborted(signal);
     const jobId = String(created.job?.id || "").trim();
     if (!jobId) throw new Error("Managed image generation create response did not include a job ID.");

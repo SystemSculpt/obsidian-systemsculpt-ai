@@ -318,13 +318,27 @@ export class PlatformRequestClient {
     this.observeTransport(input, "requestUrl");
     // requestUrl takes no signal: on abort or deadline the client only stops
     // waiting, and the host finishes or fails the detached request itself.
-    const result = await this.within(input.signal, deadline, () => requestUrl({
-      url: input.url,
-      method: input.method,
-      headers,
-      body,
-      throw: false,
-    }));
+    const result = await this.within(input.signal, deadline, async () => {
+      try {
+        return await requestUrl({
+          url: input.url,
+          method: input.method,
+          headers,
+          body,
+          throw: false,
+        });
+      } catch (error) {
+        const failure = toError(error, "The request failed.");
+        if (failure.name === "AbortError") throw failure;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw Object.assign(new Error(error.message), { name: "AbortError", cause: error });
+        }
+        // HTTP failures are responses with throw:false. Native connection
+        // failures are ordinary Errors; expose the same category as fetch.
+        if (failure instanceof TypeError) throw failure;
+        throw Object.assign(new TypeError(failure.message), { cause: failure });
+      }
+    });
 
     const status = result.status || 500;
     const responseBody = input.responseEncoding === "arrayBuffer"
