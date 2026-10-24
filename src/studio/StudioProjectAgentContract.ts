@@ -33,7 +33,7 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.run_collection": "Live collection of independent native run instances. Connect role JSON outputs to matching source-ID ports; these are observation links and never execute roles. Double-click a run for public activity, messages and controls.",
   "studio.collection": "Display a bounded record collection as a Kanban board, grouped by configured fields. Carries the same JSON downstream; the source owns record changes.",
   "studio.workflow": "Retired workflow note. Preserve its saved title, configuration and connections; never add new instances. Its ports retain old connections only and never carry data during a run.",
-  "studio.codex": "Run a prompt through the installed Codex app-server with the machine login, selected model/thinking/speed (default gpt-6-astra/high/Normal), native approvals and durable Codex history. Working directory is vault-relative by default; dot means the current vault. Set threadId to resume; leave it blank for a new task.",
+  "studio.codex": "Run a prompt through the installed Codex app-server with the machine login, selected model/thinking/speed (native Codex model and thinking by default, Normal speed), native approvals and durable Codex history. Working directory is vault-relative by default; dot means the current vault. Set threadId to resume; leave it blank for a new task.",
   "studio.script": "Run an editable JavaScript module with typed ports in an approved Node process. Preferred for new custom actions.",
   "studio.json": "Provide, parse, or normalize JSON content for downstream nodes.",
   "studio.media_ingest": "Reference image, video, audio, or binary media for downstream nodes.",

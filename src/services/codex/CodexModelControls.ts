@@ -1,4 +1,4 @@
-import { readCodexCatalog, type CodexModel } from './CodexModelCatalog';
+import { codexDefaultLabel, readCodexCatalog, type CodexModel } from './CodexModelCatalog';
 import type { CodexExecutionOptions } from './CodexExecutionSettings';
 
 type Options = {
@@ -27,13 +27,14 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
   const option = (select: HTMLSelectElement, value: string, label: string, disabled = false) => { select.createEl('option', { value, text: label }).disabled = disabled; };
   const render = () => {
     if (disposed || pendingChanges || options.isVisible?.() === false) return;
-    const enabled = options.enabled(), selected = options.value(), current = models.find(item => item.model === selected.model);
+    const enabled = options.enabled(), selected = options.value(), current = models.find(item => selected.model ? item.model === selected.model : item.isDefault);
     model.empty(); effort.empty(); speed?.empty();
+    if (!command) option(model, '', codexDefaultLabel(models));
     for (const entry of models) option(model, entry.model, entry.name);
-    if (!current) option(model, selected.model, selected.model);
+    if (selected.model && !current) option(model, selected.model, selected.model);
     model.value = selected.model;
     const supported = current?.efforts || [];
-    for (const value of new Set([...supported, selected.effort])) option(effort, value, value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!current && !supported.includes(value));
+    for (const value of new Set([...(command ? [] : ['']), ...supported, selected.effort])) option(effort, value, !value ? 'Codex default' : value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!value && !!current && !supported.includes(value));
     effort.value = selected.effort;
     if (speed) {
       option(speed, 'default', 'Normal'); option(speed, current?.fastTier || 'priority', current && !current.fastTier ? 'Fast (unavailable)' : 'Fast', !!current && !current.fastTier);
@@ -44,7 +45,7 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
       select.parentElement!.hidden = !command && !enabled;
     }
     if (command) effort.disabled ||= loaded && !supported.length;
-    const message = actionError || (!enabled ? (command ? 'Agent execution settings are available on desktop.' : '') : error || (loading ? 'Connecting…' : loaded && !current ? 'Saved model is unavailable in the current Codex catalog.' : loaded && !supported.includes(selected.effort) ? 'Choose a supported reasoning level for this model.' : ''));
+    const message = actionError || (!enabled ? (command ? 'Agent execution settings are available on desktop.' : '') : error || (loading ? 'Connecting…' : loaded && selected.model && !current ? 'Saved model is unavailable in the current Codex catalog.' : loaded && selected.effort && !supported.includes(selected.effort) ? 'Choose a supported reasoning level for this model.' : ''));
     status.setText(message); status.hidden = !message; retry.hidden = !enabled || !error || loading;
     if (retry.hidden) retry.remove(); else status.after(retry);
   };
@@ -70,8 +71,9 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
     } catch (cause) { showError(cause instanceof Error ? cause.message : 'Could not save Codex options.'); settled(); }
   };
   model.addEventListener('change', () => {
+    if (!command && !model.value) { change({ model: '', effort: '' }); return; }
     const next = models.find(item => item.model === model.value); if (!next) return;
-    change({ model: next.model, effort: next.efforts.includes(effort.value) ? effort.value : next.defaultEffort, serviceTier: speed && speed.value !== 'default' && next.fastTier ? next.fastTier : 'default' });
+    change({ model: next.model, effort: !effort.value || next.efforts.includes(effort.value) ? effort.value : next.defaultEffort, serviceTier: speed && speed.value !== 'default' && next.fastTier ? next.fastTier : 'default' });
   });
   effort.addEventListener('change', () => change({ effort: effort.value }));
   speed?.addEventListener('change', () => change({ serviceTier: speed.value }));

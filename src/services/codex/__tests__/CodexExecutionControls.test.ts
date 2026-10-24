@@ -3,7 +3,7 @@ import { mountCodexExecutionControls } from '../CodexExecutionControls';
 import { readCodexCatalog } from '../CodexModelCatalog';
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true), getHostOperatingSystem: () => 'macOS' }));
 jest.mock('../LocalAgentDetection', () => ({ detectLocalAgents: jest.fn(async () => ({ preferred: 'claude' })), subscribeLocalAgentDetection: jest.fn(() => jest.fn()) }));
-jest.mock('../CodexModelCatalog', () => ({ readCodexCatalog: jest.fn() }));
+jest.mock('../CodexModelCatalog', () => ({ ...jest.requireActual('../CodexModelCatalog'), readCodexCatalog: jest.fn() }));
 jest.mock('../CodexExecutionSettings', () => ({ ...jest.requireActual('../CodexExecutionSettings'), codexVaultDirectory: () => '/vault' }));
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 it('shows native models, model-specific thinking and Normal/Fast, and saves the next-turn choices', async () => {
@@ -22,7 +22,7 @@ it('shows native models, model-specific thinking and Normal/Fast, and saves the 
   const speed = parent.querySelector('[data-testid="codex.execution.speed"]') as HTMLSelectElement;
   expect(parent.querySelector('.ss-codex-permissions')?.textContent).toBe('Codex settings · Never ask · Full access');
   expect(model.disabled).toBe(false); expect(model.value).toBe('gpt-6-astra');
-  expect([...thinking.options].map(option => option.value)).toEqual(['high', 'xhigh']);
+  expect([...thinking.options].map(option => option.value)).toEqual(['', 'high', 'xhigh']);
   speed.value = 'priority'; speed.dispatchEvent(new Event('change')); await flush();
   expect(settings.codexServiceTier).toBe('priority'); expect(speed.title).toContain('more of your Codex allowance');
   expect((parent.querySelector('.ss-codex-controls-status') as HTMLElement).hidden).toBe(true);
@@ -31,6 +31,30 @@ it('shows native models, model-specific thinking and Normal/Fast, and saves the 
   expect(settings).toEqual({ codexModel: 'other', codexThinkingLevel: 'low', codexServiceTier: 'default' });
   expect([...speed.options].find(option => option.textContent === 'Fast (unavailable)')?.disabled).toBe(true);
   dispose(); expect(offref).toHaveBeenCalled(); expect(parent.children).toHaveLength(0); parent.remove();
+});
+
+it('renders native defaults without saving them and lets an explicit pick return to inheritance', async () => {
+  const parent = document.createElement('div');
+  const settings = { codexModel: '', codexThinkingLevel: '', codexServiceTier: 'default' };
+  const updateSettings = jest.fn(async patch => { Object.assign(settings, patch); });
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
+  jest.mocked(readCodexCatalog).mockResolvedValue({ permissions: '', models: [
+    { model: 'native', name: 'Native model', efforts: ['low', 'high'], defaultEffort: 'low', isDefault: true },
+  ] });
+  const dispose = mountCodexExecutionControls(parent, plugin as never); await flush();
+  const model = parent.querySelector<HTMLSelectElement>('[data-testid="codex.execution.model"]')!;
+  const thinking = parent.querySelector<HTMLSelectElement>('[data-testid="codex.execution.thinking"]')!;
+  expect(model.selectedOptions[0].textContent).toBe('Codex default (Native model)');
+  expect(thinking.selectedOptions[0].textContent).toBe('Codex default');
+  expect(parent.querySelector('.ss-codex-controls-status')?.textContent).toBe('');
+  expect(updateSettings).not.toHaveBeenCalled();
+  model.value = 'native'; model.dispatchEvent(new Event('change')); await flush();
+  expect(settings).toMatchObject({ codexModel: 'native', codexThinkingLevel: '' });
+  thinking.value = 'high'; thinking.dispatchEvent(new Event('change')); await flush();
+  expect(settings.codexThinkingLevel).toBe('high');
+  model.value = ''; model.dispatchEvent(new Event('change')); await flush();
+  expect(settings).toMatchObject({ codexModel: '', codexThinkingLevel: '' });
+  dispose();
 });
 
 it('preserves execution controls on unrelated settings notifications', async () => {

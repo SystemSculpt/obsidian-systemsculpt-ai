@@ -124,10 +124,11 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
       },
     });
     void connection.closed.then(() => { if (lockedThreadId) activeThreads.delete(lockedThreadId); });
-    callbacks.log(`Connected to on-machine Codex · ${options.model} · ${options.effort} · ${options.serviceTier === 'default' ? 'Normal' : 'Fast'}`);
-    const parameters = { model: options.model, cwd: input.workingDirectory,
+    callbacks.log(`Connected to on-machine Codex · ${options.model || 'Codex default'} · ${options.effort || 'Default thinking'} · ${options.serviceTier === 'default' ? 'Normal' : 'Fast'}`);
+    const model = options.model ? { model: options.model } : {};
+    const parameters = { ...model, cwd: input.workingDirectory,
       serviceTier: options.serviceTier,
-      config: { model_reasoning_effort: options.effort },
+      ...(options.effort ? { config: { model_reasoning_effort: options.effort } } : {}),
     };
     if (input.threadId && input.recoverCompletedTurn) {
       const saved = await connection.request('thread/read', { threadId: input.threadId, includeTurns: true });
@@ -159,7 +160,7 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
     if (!lockedThreadId) claimThread(threadId);
     await callbacks.thread(threadId); callbacks.log(`Codex thread: ${threadId}`);
     const startTurn = async (): Promise<CodexResult> => {
-      const started = await connection!.request('turn/start', { threadId, model: options.model, effort: options.effort, serviceTierForTurn: options.serviceTier,
+      const started = await connection!.request('turn/start', { threadId, ...model, ...(options.effort ? { effort: options.effort } : {}), serviceTierForTurn: options.serviceTier,
         ...approvalParameters.turn, ...(native && typeof profile !== 'string' ? { sandboxPolicy: native.sandbox } : {}),
         input: [{ type: 'text', text: input.prompt, text_elements: [] }, ...(input.images || []).map(url => ({ type: 'image', url }))] });
       if (isRecord(started.turn)) turnId = String(started.turn.id || turnId);

@@ -3528,7 +3528,7 @@ export class AgentChatView extends ItemView {
     catch { claude = { model: "", permissionMode: "auto" }; }
     let codex: Readonly<{ model: string; effort: string; serviceTier: string; approvalMode: string }>;
     try { codex = codexOptionsFromSettings(settings); }
-    catch { codex = { model: settings.codexModel ?? "", effort: "high", serviceTier: "default", approvalMode: "auto" }; }
+    catch { codex = { model: settings.codexModel ?? "", effort: "", serviceTier: "default", approvalMode: "auto" }; }
     return {
       backend: backendOf(this.agent),
       localAgents: hasHostCapability("local-cli", this.containerEl),
@@ -3953,13 +3953,15 @@ export class AgentChatView extends ItemView {
       if (backend === "claude" && kind === "model") {
         await settings.updateSettings({ claudeModel: value });
       } else if (backend === "codex") {
-        if (kind === "model") {
+        if (kind === "model" && !value) {
+          await settings.updateSettings({ codexModel: "", codexThinkingLevel: "" });
+        } else if (kind === "model") {
           const next = this.codexModels?.find((candidate) => candidate.model === value);
           if (!next) return;
           const current = codexOptionsFromSettings(this.plugin.settings);
           await settings.updateSettings({
             codexModel: next.model,
-            codexThinkingLevel: next.efforts.includes(current.effort) ? current.effort : next.defaultEffort,
+            codexThinkingLevel: !current.effort || next.efforts.includes(current.effort) ? current.effort : next.defaultEffort,
             codexServiceTier: current.serviceTier !== "default" && next.fastTier ? next.fastTier : "default",
           });
         } else if (kind === "effort") {
