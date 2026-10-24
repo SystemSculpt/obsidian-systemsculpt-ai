@@ -76,6 +76,16 @@
   }
 }
 
+/* The lifecycle owner also covers unfocused windows and hidden Obsidian leaves. */
+:is(.ss-motion-paused, #ss-specificity-boost),
+:is(.ss-motion-paused, #ss-specificity-boost)::before,
+:is(.ss-motion-paused, #ss-specificity-boost)::after,
+:is(.ss-motion-paused, #ss-specificity-boost) *,
+:is(.ss-motion-paused, #ss-specificity-boost) *::before,
+:is(.ss-motion-paused, #ss-specificity-boost) *::after {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :is(.ss-surface, #ss-specificity-boost),
   :is(.ss-surface, #ss-specificity-boost)::before,
@@ -83,8 +93,7 @@
   :is(.ss-surface, #ss-specificity-boost) *,
   :is(.ss-surface, #ss-specificity-boost) *::before,
   :is(.ss-surface, #ss-specificity-boost) *::after {
-    animation-duration: 0.01ms;
-    animation-iteration-count: 1;
+    animation: none;
     scroll-behavior: auto;
     transition-duration: 0.01ms;
   }

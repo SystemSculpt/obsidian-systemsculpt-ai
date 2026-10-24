@@ -22,7 +22,6 @@
   --ss-activity-color-failed: var(--ss-danger);
   --ss-activity-color-stopped: var(--ss-ink-faint);
   --ss-activity-color: var(--ss-activity-color-idle);
-  --ss-activity-surge-period: 900ms;
   --ss-activity-breathe-period: 1600ms;
   --ss-activity-pulse-duration: 640ms;
 }
@@ -40,10 +39,20 @@
 /* ------------------------------------------------------------------ *
  * Node cards: breathing halo and progress bar (no stripes anywhere)
  * ------------------------------------------------------------------ */
-.ss-studio-node-card[data-activity="active"],
-.ss-studio-node-card[data-activity="waiting"] {
-  outline: 3px solid color-mix(in srgb, var(--ss-activity-color) 35%, transparent);
-  outline-offset: -1px;
+/* Only the decoration breathes; card content and hit targets stay still. */
+.ss-studio-node-card[data-activity]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border: 3px solid var(--ss-activity-color);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ss-studio-node-card[data-activity="active"]::after,
+.ss-studio-node-card[data-activity="waiting"]::after {
+  opacity: 0.4;
   animation: ss-studio-activity-breathe var(--ss-activity-breathe-period) var(--ss-ease) infinite;
 }
 
@@ -72,17 +81,19 @@
 
 .ss-studio-node-card[data-activity="active"]::before,
 .ss-studio-node-card[data-activity="waiting"]::before {
+  right: auto;
+  width: calc((100% - 2 * var(--ss-space-2)) / 3);
   opacity: 1;
   transform: none;
   background-color: transparent;
   background-image: linear-gradient(90deg, transparent, var(--ss-activity-color), transparent);
-  background-size: 50% 100%;
-  background-repeat: no-repeat;
   animation: ss-shimmer 1.6s linear infinite;
 }
 
 .ss-studio-node-card[data-activity="active"][data-activity-progress="determinate"]::before,
 .ss-studio-node-card[data-activity="waiting"][data-activity-progress="determinate"]::before {
+  right: var(--ss-space-2);
+  width: auto;
   background-color: var(--ss-activity-color);
   background-image: none;
   animation: none;
@@ -90,7 +101,7 @@
 }
 
 /* Transition emphasis: a ring that expands and fades once. */
-.ss-studio-node-card[data-activity-pulse] {
+.ss-studio-node-card[data-activity-pulse]::after {
   animation: ss-studio-activity-pulse-card var(--ss-activity-pulse-duration) var(--ss-ease-out) 1;
 }
 
@@ -179,17 +190,23 @@
   color: var(--ss-activity-color-active);
   border-color: var(--ss-activity-color-active);
   background-color: var(--ss-activity-color-active);
-  animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
 }
 
 .ss-studio-port-pin[data-activity="receiving"] {
   border-color: var(--ss-activity-color-active);
+}
+
+.ss-studio-port-pin[data-activity="emitting"]::after,
+.ss-studio-port-pin[data-activity="receiving"]::after {
   animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
+}
+
+.ss-studio-port-pin[data-activity="receiving"]::after {
   animation-delay: -0.55s;
 }
 
 /* ------------------------------------------------------------------ *
- * Cables: base line color, glow halo, travelling energy
+ * Cables: base line color, glow halo, static energy dashes
  * ------------------------------------------------------------------ */
 .ss-studio-edge-group {
   /* Read inline by StudioEdgeRenderer for the base line and arrow. */
@@ -243,7 +260,6 @@
 
 .ss-studio-edge-group[data-activity="surging"] .ss-studio-edge-energy {
   opacity: 1;
-  animation: ss-studio-surge var(--ss-activity-surge-period) linear infinite;
 }
 
 .ss-studio-edge-group[data-activity="delivered"] {
@@ -285,26 +301,25 @@
 .ss-studio-graph-viewport.is-scrolling .ss-studio-edge-energy,
 .ss-studio-graph-viewport.is-interacting .ss-studio-node-activity-dot,
 .ss-studio-graph-viewport.is-scrolling .ss-studio-node-activity-dot,
-.ss-studio-graph-viewport.is-interacting .ss-studio-port-pin[data-activity],
-.ss-studio-graph-viewport.is-scrolling .ss-studio-port-pin[data-activity] {
+.ss-studio-graph-viewport.is-interacting .ss-studio-port-pin::after,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-port-pin::after {
   animation-play-state: paused;
 }
 
 .ss-studio-graph-viewport.is-interacting .ss-studio-node-card[data-activity]::before,
-.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card[data-activity]::before {
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card[data-activity]::before,
+.ss-studio-graph-viewport.is-interacting .ss-studio-node-card[data-activity]::after,
+.ss-studio-graph-viewport.is-scrolling .ss-studio-node-card[data-activity]::after {
   animation-play-state: paused;
 }
 
-/* foundation/surface.css collapses every animation under reduced motion; the
+/* foundation/surface.css disables every animation under reduced motion; the
  * resting frames below stay legible without movement. */
 @media (prefers-reduced-motion: reduce) {
-  .ss-studio-node-card[data-activity="active"],
-  .ss-studio-node-card[data-activity="waiting"] {
-    outline-color: color-mix(in srgb, var(--ss-activity-color) 45%, transparent);
-  }
-
   .ss-studio-node-card[data-activity="active"]::before,
   .ss-studio-node-card[data-activity="waiting"]::before {
+    right: var(--ss-space-2);
+    width: auto;
     background-color: var(--ss-activity-color);
     background-image: none;
   }

@@ -183,6 +183,7 @@ import {
 } from "./systemsculpt-studio-view/StudioProjectSessionController";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { applyPluginSurface } from "../../core/ui/surface";
+import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
 function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null): void {
@@ -447,7 +448,11 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
+  private detachSurfaceActivity: (() => void) | null = null;
+
   async onOpen(): Promise<void> {
+    this.detachSurfaceActivity?.();
+    this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
     this.runObservation.bind(this.plugin.getStudioService());
     this.activity.bind(this.plugin.getStudioService().agentRuns);
     this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
@@ -477,6 +482,8 @@ export class SystemSculptStudioView extends ItemView {
   }
   private async closeStudioView(): Promise<void> {
     this.closed = true;
+    this.detachSurfaceActivity?.();
+    this.detachSurfaceActivity = null;
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
