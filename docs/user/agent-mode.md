@@ -95,6 +95,22 @@ A new card does not interrupt typing. Use **Approval needed · Review** or
 card. With no card pending, these keys keep their normal behavior. Resolved cards
 retain their result, and focus moves to the next pending card or back to the composer.
 
+## Answering inline questions
+
+When Claude Code or Codex asks an interactive question, it appears in the
+conversation without opening a modal. On a card with one single-choice question,
+focus the card and press **1–9** to choose and send an option. On a card with one
+multiple-choice Claude Code question, those keys toggle selections; use **Send**
+or **⌘/Ctrl+Enter** when ready. For a card with several questions, select or type
+an answer for each, then use **Send**. You can also focus **Your answer**, type a
+different answer, and press **Enter** to send. **Esc** skips the card without
+sending the text you typed.
+
+Questions use the same focus and **Review** shortcuts as approvals. Answering a
+question never grants permission for later tools. Available question tools depend
+on the native agent's configuration; SystemSculpt does not override native rules
+that disable them. Studio's permission dialogs are unchanged.
+
 ## Where tools come from
 
 Hosted vault actions are built directly into SystemSculpt. No separate tool server

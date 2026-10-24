@@ -834,7 +834,7 @@ class Menu extends Component {
     this.items = [];
     this.shown = false;
     this.position = null;
-    this.hideCallbacks = [];
+    this.hideCallback = null;
     Menu.instances.push(this);
   }
 
@@ -866,7 +866,9 @@ class Menu extends Component {
   hide() {
     if (!this.shown) return this;
     this.shown = false;
-    for (const callback of this.hideCallbacks) callback();
+    const callback = this.hideCallback;
+    this.hideCallback = null;
+    callback?.();
     return this;
   }
 
@@ -875,7 +877,8 @@ class Menu extends Component {
   }
 
   onHide(callback) {
-    this.hideCallbacks.push(callback);
+    // Obsidian replaces the single callback; registrations are not additive.
+    this.hideCallback = callback;
   }
 
   setNoIcon() {

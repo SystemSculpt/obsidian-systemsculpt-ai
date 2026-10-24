@@ -1,3 +1,4 @@
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type { StudioJsonValue } from "./types";
 import { isRecord } from "./utils";
 
@@ -35,12 +36,8 @@ export function applyStudioNotePrefaceToTextOutputs(
   return outputs;
 }
 
-function normalizeStudioNotePath(path: string): string {
-  return String(path || "").replace(/\\/g, "/").trim();
-}
-
 export function deriveStudioNoteTitleFromPath(vaultPath: string): string {
-  const normalized = normalizeStudioNotePath(vaultPath);
+  const normalized = normalizeVaultRelativePath(vaultPath, { preserveCharacters: true });
   if (!normalized) {
     return "";
   }
@@ -57,7 +54,7 @@ function parseStudioNoteItem(raw: StudioJsonValue): StudioNoteConfigItem | null 
   }
   const entry = raw as Record<string, StudioJsonValue>;
   return {
-    path: normalizeStudioNotePath(typeof entry.path === "string" ? entry.path : ""),
+    path: normalizeVaultRelativePath(typeof entry.path === "string" ? entry.path : "", { preserveCharacters: true }),
     enabled: entry.enabled !== false,
   };
 }
@@ -84,7 +81,7 @@ export function parseStudioNoteItems(raw: StudioJsonValue | undefined): StudioNo
 export function serializeStudioNoteItems(items: StudioNoteConfigItem[]): StudioJsonValue {
   return {
     items: items.map((item) => ({
-      path: normalizeStudioNotePath(item.path),
+      path: normalizeVaultRelativePath(item.path, { preserveCharacters: true }),
       enabled: item.enabled !== false,
     })),
   };
@@ -107,7 +104,7 @@ export function readEnabledStudioNoteItems(
 function readLegacyStudioNotePath(
   config: Record<string, StudioJsonValue>
 ): string {
-  return normalizeStudioNotePath(typeof config.vaultPath === "string" ? config.vaultPath : "");
+  return normalizeVaultRelativePath(typeof config.vaultPath === "string" ? config.vaultPath : "", { preserveCharacters: true });
 }
 
 export function readPrimaryStudioNotePath(
@@ -149,7 +146,7 @@ export function ensureStudioNoteConfigItems(
   const items = readStudioNoteItemsFromConfig(config);
   const legacyPath = readLegacyStudioNotePath(config);
   const normalizedItems = items.map((item) => ({
-    path: normalizeStudioNotePath(item.path),
+    path: normalizeVaultRelativePath(item.path, { preserveCharacters: true }),
     enabled: item.enabled !== false,
   }));
   const hasLegacyFallback = normalizedItems.length === 0 && legacyPath.length > 0;

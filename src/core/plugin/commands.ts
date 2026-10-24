@@ -1,4 +1,5 @@
-import { App, Notice, View, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
+import { App, Notice, View, WorkspaceLeaf, TFile } from "obsidian";
+import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
@@ -817,7 +818,7 @@ export class CommandManager {
       return null;
     }
 
-    const normalizedPath = normalizePath(pathCandidate.trim().replace(/\\/g, "/")).replace(/^\/+/, "");
+    const normalizedPath = normalizeVaultRelativePath(pathCandidate);
     if (!normalizedPath) {
       return null;
     }
