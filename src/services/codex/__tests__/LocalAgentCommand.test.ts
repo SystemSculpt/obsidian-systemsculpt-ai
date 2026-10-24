@@ -50,6 +50,13 @@ it('resolves a relative configured shim from the caller cwd', async () => {
   await expect(resolveLocalAgentCommand('.\\claude.cmd', args, environment, folder)).resolves.toEqual({ binary: node, args: [win32.join(folder, target), ...args] });
 });
 
+it('never reads a missing relative shim against the host process cwd', async () => {
+  const fs = host({ '.\\tools\\claude.cmd': npmNodeShim(target) });
+  const command = '.\\tools\\claude.cmd';
+  await expect(resolveLocalAgentCommand(command, args, environment, 'D:\\vault')).resolves.toEqual({ binary: command, args });
+  expect(fs.readFile).not.toHaveBeenCalled();
+});
+
 it.each(['win32', 'darwin', 'linux'])('keeps native executables and argv unchanged on %s', async platform => {
   const fs = installation();
   jest.mocked(desktopHost.os).mockResolvedValue({ platform: () => platform } as never);

@@ -127,7 +127,9 @@ const NPM_NODE_SHIM_HEADER = NPM_SHIM_HEADER + [
 export async function resolveLocalAgentCommand(binary: string, args: string[], environment: Record<string, string | undefined>, cwd: string): Promise<{ binary: string; args: string[] }> {
   const os = await desktopHost.os();
   if (os.platform() !== 'win32') return { binary, args };
-  const resolved = await resolveBinary(binary, environment, cwd) ?? binary;
+  const resolved = await resolveBinary(binary, environment, cwd);
+  // A missing relative shim must not be read against Obsidian's own process cwd.
+  if (!resolved) return { binary, args };
   if (!/\.(cmd|bat)$/i.test(resolved)) return { binary: resolved, args };
   const [fs, path] = await Promise.all([desktopHost.fs(), desktopHost.path()]);
   const source = (await fs.readFile(resolved, 'utf8')).replace(/\r\n/g, '\n').trim();
