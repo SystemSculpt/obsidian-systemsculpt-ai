@@ -173,7 +173,9 @@ export class LocalAgentChatSession implements ChatSession {
           result: { success: part.state === 'succeeded', data: part.output, ...(part.state === 'succeeded' ? {} : { error: part.error ?? { code: `NATIVE_TOOL_${part.state.toUpperCase().replace(/-/g, '_')}`, message: part.state === 'cancelled' && part.approvalDecision === 'withdrawn' ? 'Approval request withdrawn.' : `Native tool ${part.state}.` } }) },
         } }];
       });
-      return { role: 'assistant', content, message_id: messageId, messageParts, ...(terminalOutcome ? { terminalOutcome } : {}) };
+      // Saved chats show "Worked 41s" and the folded activity's duration from this.
+      const responseDurationMs = this.runStartedAt === null ? this.localSnapshot.elapsedMs : Math.round(performance.now() - this.runStartedAt);
+      return { role: 'assistant', content, message_id: messageId, messageParts, ...(responseDurationMs === undefined ? {} : { responseDurationMs }), ...(terminalOutcome ? { terminalOutcome } : {}) };
     };
     this.runStartedAt = performance.now();
     this.publish({ runId: input.turnId, turnId: input.turnId, status: 'running', phase: 'submitted', waitingReason: undefined, statusLabel: `Connecting to on-machine ${name}`, terminalError: undefined, parts: [], messages: [{ id: messageId, role: 'assistant', partIds: [] }] });
