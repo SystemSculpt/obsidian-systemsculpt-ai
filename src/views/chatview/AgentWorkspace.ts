@@ -1064,9 +1064,7 @@ export class AgentWorkspace extends Component {
         }
       }
     });
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const activeTurnId = activeResponse?.dataset.turnId?.trim();
     this.registeredActiveResponse = activeResponse && activeTurnId
       ? { turnId: activeTurnId, row: activeResponse }
@@ -1074,9 +1072,7 @@ export class AgentWorkspace extends Component {
   }
 
   private syncActiveResponseRow(): void {
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const turnId = activeResponse?.dataset.turnId?.trim();
     if (!activeResponse || !turnId) {
       if (this.registeredActiveResponse) this.syncRows();
@@ -1255,10 +1251,7 @@ export class AgentWorkspace extends Component {
       const presentation = presentAgentConversation(snapshot, this.runPending);
       this.composer.setRunning(presentation.composerRunning);
       this.syncEmpty();
-      const activeRun = this.renderer.element.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-active-run",
-      );
-      const finishLayoutMutation = this.scroller.beginLayoutMutation(activeRun ?? undefined);
+      const finishLayoutMutation = this.scroller.beginLayoutMutation(this.renderer.activeRoot);
       try {
         if (snapshot) {
           await this.renderer.renderActive(snapshot, presentation);
@@ -1323,12 +1316,8 @@ export class AgentWorkspace extends Component {
       return;
     }
     if (this.followedTurnId === turnId) return;
-    const durableUserRow = Array.from(
-      this.renderer.element.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-history .systemsculpt-agent-turn.is-user[data-message-id]",
-      ),
-    ).find((row) => row.dataset.messageId === turnId);
-    if (!durableUserRow) return;
+    const durableUserRow = this.registeredRows.get(`message:${turnId}`);
+    if (!durableUserRow?.classList.contains("is-user")) return;
     const rowId = `response:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
     if (this.submittedPromptTurnId === turnId) {
