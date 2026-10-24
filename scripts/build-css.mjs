@@ -14,13 +14,6 @@ class CssBuildSecurityError extends Error {
   }
 }
 
-function parseImports(indexPath) {
-  const content = fs.readFileSync(indexPath, "utf8");
-  const withoutComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
-  return [...withoutComments.matchAll(/@import\s+['"](.+)['"]/g)]
-    .map((match) => match[1]);
-}
-
 function lstatIfPresent(filePath) {
   try {
     return fs.lstatSync(filePath);
@@ -125,21 +118,24 @@ export function buildCssArtifact({
 
     const { sourceRoot, realSourceRoot } = inspectCssSourceRoot(resolvedIndexPath);
     startedAt = Date.now();
-    const imports = parseImports(resolvedIndexPath);
+    const entryCss = normalizeLineEndings(fs.readFileSync(resolvedIndexPath, "utf8"));
     missingFiles = [];
     combinedCss = `/**\n * SystemSculpt CSS\n * Generated from src/css/ sources.\n * DO NOT EDIT DIRECTLY.\n */\n\n`;
     processedCount = 0;
 
-    for (const importPath of imports) {
+    // Expand the manifest's imports in place: its trailing cascade invariants
+    // are CSS too. Match comments first so commented-out imports stay inert.
+    combinedCss += entryCss.replace(/\/\*[\s\S]*?\*\/|@import\s+(['"])([^'"]+)\1\s*;/g, (statement, _quote, importPath) => {
+      if (!importPath) return statement;
       const resolvedPath = resolveCssImport(sourceRoot, realSourceRoot, importPath);
       if (!resolvedPath) {
         missingFiles.push(importPath);
-        continue;
+        return "";
       }
       const content = normalizeLineEndings(fs.readFileSync(resolvedPath, "utf8"));
-      combinedCss += `/* ${path.basename(importPath)} */\n${content}\n\n`;
       processedCount += 1;
-    }
+      return `/* ${path.basename(importPath)} */\n${content}\n`;
+    });
 
     if (missingFiles.length > 0 && production) {
       throw new Error(`Missing CSS imports: ${missingFiles.join(", ")}`);

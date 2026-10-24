@@ -106,6 +106,17 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
     }
   });
 
+  test("host-rendered Markdown links consume the tested ink without unresolved-link fading", () => {
+    const tokens = declarations(rule(readCss("foundation/tokens.css"), ".systemsculpt-agent-workspace"));
+    for (const token of ["--link-color", "--link-external-color", "--link-unresolved-color"]) {
+      expect(tokens[token]).toBe("var(--ss-ink-accent)");
+    }
+    for (const token of ["--link-color-hover", "--link-external-color-hover"]) {
+      expect(tokens[token]).toBe("var(--ss-ink)");
+    }
+    expect(tokens["--link-unresolved-opacity"]).toBe("1");
+  });
+
   test("action states use the tested fills rather than white text on a pale status/accent", () => {
     const css = readCss("views/agent-workspace/shell.css");
     expect(rule(css, ".systemsculpt-agent-workspace .ss-button--primary"))
