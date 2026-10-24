@@ -2750,6 +2750,16 @@ export class AgentConversationRenderer extends Component {
           && part.error.code !== "content_filter";
         const actions = canRetry || presented.action || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" }) : null;
+        if (actions && canRetry) {
+          const retry = createUiAction(actions, {
+            label: "Retry",
+            testId: "chat.turn.retry-failed",
+            tone: "primary",
+            size: "small",
+          });
+          retry.addClass("systemsculpt-agent-error-retry");
+          retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
+        }
         if (actions && presented.action === "add-credits" && this.options.onOpenCredits) {
           const credits = createUiAction(actions, { label: "Add credits", testId: "chat.turn.add-credits", tone: "primary", size: "small" });
           credits.onclick = () => void this.options.onOpenCredits?.();
@@ -2775,16 +2785,6 @@ export class AgentConversationRenderer extends Component {
             size: "small",
           });
           plans.onclick = () => void this.options.onViewPlans?.();
-        }
-        if (actions && canRetry) {
-          const retry = createUiAction(actions, {
-            label: "Retry",
-            testId: "chat.turn.retry-failed",
-            tone: "primary",
-            size: "small",
-          });
-          retry.addClass("systemsculpt-agent-error-retry");
-          retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
         }
         if (actions && presented.reportId && this.options.onCopyIncidentReport) {
           const copyReport = createUiAction(actions, {
@@ -3389,10 +3389,14 @@ export class AgentConversationRenderer extends Component {
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {
-    parent.querySelector(":scope > .systemsculpt-agent-turn-changes")?.remove();
+    const existing = parent.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
     const changes = presentTurnChanges(parts);
+    const fingerprint = JSON.stringify(changes);
+    if (existing?.dataset.changes === fingerprint) return;
+    existing?.remove();
     if (!changes.length) return;
     const summary = parent.createDiv({ cls: "systemsculpt-agent-turn-changes", attr: { "data-testid": "chat.turn.changes" } });
+    summary.dataset.changes = fingerprint;
     summary.appendText(`Changed ${changes.length} ${changes.length === 1 ? "note" : "notes"}: `);
     changes.forEach((change, index) => {
       if (index) summary.appendText(", ");
@@ -3492,10 +3496,13 @@ export class AgentConversationRenderer extends Component {
     row.querySelector(":scope > .systemsculpt-agent-message-actions")?.remove();
     const actions = row.createDiv({ cls: "systemsculpt-agent-message-actions" });
     const timestamp = message.messageParts?.find((part) => part.timestamp > 1_000_000_000_000)?.timestamp;
-    if (timestamp) actions.setAttribute("title", new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+    if (time) actions.setAttribute("title", time);
+    const actionTitle = (label: string): string => time ? `${label} · ${time}` : label;
     if (canRetryResponse) {
       const retry = createUiAction(actions, {
         label: "Retry response", testId: "chat.turn.retry", icon: "rotate-ccw", size: "icon",
+        title: actionTitle("Retry response"),
       });
       retry.onclick = () => void this.options.onRetryFailedTurn?.(row.dataset.turnId!);
     }
@@ -3510,6 +3517,7 @@ export class AgentConversationRenderer extends Component {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
         label: `Copy ${subject}`,
+        title: actionTitle(`Copy ${subject}`),
         testId: "chat.turn.copy",
         icon: "copy",
         size: "icon",
@@ -3521,6 +3529,7 @@ export class AgentConversationRenderer extends Component {
     if (canRetry) {
       const retry = createUiAction(actions, {
         label: "Edit and resubmit",
+        title: actionTitle("Edit and resubmit"),
         testId: "chat.turn.edit-resubmit",
         icon: "pencil",
         size: "icon",

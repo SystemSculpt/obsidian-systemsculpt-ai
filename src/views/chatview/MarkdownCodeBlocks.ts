@@ -93,7 +93,8 @@ export function enhanceMarkdownCodeBlocks(
       }
       copy.type = "button";
       copy.addClass("copy-code-button", "systemsculpt-agent-code-copy");
-      copy.setAttrs({ "aria-label": "Copy code", "aria-live": "polite" });
+      copy.setAttribute("aria-label", "Copy code");
+      copy.removeAttribute("aria-live");
       setTooltip(copy, "Copy code");
       const copyButton = copy;
       copy.addEventListener("click", (event) => {
