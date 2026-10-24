@@ -57,8 +57,15 @@ function managedHarness(wait = async (_milliseconds: number, _signal: AbortSigna
   const events: string[] = [];
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
+  const createdJobs = new Map<string, { document: { id: string; status: string }; upload: { part_size_bytes: number; total_parts: number } }>();
   const jobs = {
-    create: jest.fn(async () => { events.push("create"); return { document: { id: documentId, status: "uploading" }, upload: { part_size_bytes: 4, total_parts: 2 } }; }),
+    create: jest.fn(async (_body: unknown, operationId: string) => {
+      events.push("create");
+      if (!createdJobs.has(operationId)) {
+        createdJobs.set(operationId, { document: { id: documentId, status: "uploading" }, upload: { part_size_bytes: 4, total_parts: 2 } });
+      }
+      return createdJobs.get(operationId)!;
+    }),
     uploadPart: jest.fn(async (_id: string, part: number, bytes: ArrayBuffer) => { events.push(`part:${part}:${bytes.byteLength}`); return { partNumber: part, etag }; }),
     complete: jest.fn(async () => { events.push("complete"); return { document: { id: documentId, status: "queued" } }; }),
     start: jest.fn(async () => { events.push("start"); return { document: { id: documentId, status: "processing" } }; }),
@@ -74,7 +81,7 @@ function managedHarness(wait = async (_milliseconds: number, _signal: AbortSigna
     createOperationId: () => `document-op-${++operations}`,
     wait,
   });
-  return { adapter, admission, events, jobs, recovery, storage };
+  return { adapter, admission, events, jobs, recovery, storage, createdJobs };
 }
 
 describe("managed document processing adapter contract", () => {
@@ -103,6 +110,7 @@ describe("managed document processing adapter contract", () => {
       expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
       expect(new Set(h.jobs.create.mock.calls.map((call) => call[1]))).toEqual(new Set(["document-op-1"]));
       expect(h.jobs.create).toHaveBeenCalledTimes(step === "create" ? 2 : 1);
+      expect(h.createdJobs.size).toBe(1);
       expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
       await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({
         jobId: documentId, phase: "result_ready", completedParts: [{ partNumber: 1, etag }, { partNumber: 2, etag }],

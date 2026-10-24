@@ -80,10 +80,14 @@ function harness(statuses: Array<{ job: { id: string; status: string }; transcri
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
   const statusQueue = [...statuses];
+  const createdJobs = new Map<string, { job: { id: string; status: string }; upload: { part_size_bytes: number; total_parts: number } }>();
   const jobs = {
-    create: jest.fn(async () => {
+    create: jest.fn(async (_body: unknown, operationId: string) => {
       events.push("create");
-      return { job: { id: jobId, status: "uploading" }, upload: { part_size_bytes: 4, total_parts: 2 } };
+      if (!createdJobs.has(operationId)) {
+        createdJobs.set(operationId, { job: { id: jobId, status: "uploading" }, upload: { part_size_bytes: 4, total_parts: 2 } });
+      }
+      return createdJobs.get(operationId)!;
     }),
     uploadPart: jest.fn(async (_id: string, part: number, bytes: ArrayBuffer) => {
       events.push(`part:${part}:${bytes.byteLength}`);
@@ -113,7 +117,7 @@ function harness(statuses: Array<{ job: { id: string; status: string }; transcri
     createOperationId: () => "transcription-op-1",
     wait,
   });
-  return { adapter, admission, events, jobs, recovery, storage };
+  return { adapter, admission, events, jobs, recovery, storage, createdJobs };
 }
 
 describe("ManagedTranscriptionAdapter", () => {
@@ -139,6 +143,7 @@ describe("ManagedTranscriptionAdapter", () => {
       // The create key remains the same even when its response was lost.
       expect(new Set(h.jobs.create.mock.calls.map((call) => call[1]))).toEqual(new Set(["transcription-op-1"]));
       expect(h.jobs.create).toHaveBeenCalledTimes(step === "create" ? 2 : 1);
+      expect(h.createdJobs.size).toBe(1);
       expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
       await expect(h.recovery.read("transcription", "transcription-op-1")).resolves.toMatchObject({
         jobId, phase: "result_ready", completedParts: [{ partNumber: 1, etag }, { partNumber: 2, etag }],
