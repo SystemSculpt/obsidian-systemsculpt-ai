@@ -1028,6 +1028,87 @@ describe("AgentWorkspace response scroll identity", () => {
     workspace.unload();
   });
 
+  it("streams only into the active turn without querying or mutating 500 earlier turns", async () => {
+    const { host, workspace } = createWorkspace();
+    const history: ChatMessage[] = [];
+    for (let index = 0; index < 500; index += 1) {
+      const tool = {
+        id: `read-${index}`,
+        messageId: `assistant-${index}`,
+        request: {
+          id: `read-${index}`,
+          type: "function" as const,
+          function: { name: "read", arguments: JSON.stringify({ path: `Note-${index}.md` }) },
+        },
+        state: "completed" as const,
+        timestamp: index,
+        result: { success: true, data: { content: `Note ${index}` } },
+      };
+      const content = `Review ${index}\n\n\`\`\`ts\nconst ready = true;\n\`\`\`\n\n\`\`\`diff\n-before\n+after\n\`\`\``;
+      history.push(
+        { role: "user", message_id: `user-${index}`, content: `Review note ${index}` },
+        {
+          role: "assistant", message_id: `assistant-${index}`, content,
+          tool_calls: [tool],
+          messageParts: [
+            { id: `tool-${index}`, type: "tool_call", timestamp: index, data: tool },
+            { id: `answer-${index}`, type: "content", timestamp: index + 1, data: content },
+          ],
+        },
+      );
+    }
+    await workspace.setHistory(history);
+    jest.useFakeTimers();
+    const animationFrames: FrameRequestCallback[] = [];
+    jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    const snapshot = (markdown: string): AgentConversationSnapshot => ({
+      ...completedSnapshot("user-live", "assistant-live"),
+      status: "running", phase: "working",
+      parts: [{
+        id: "text:assistant-live", kind: "text", messageId: "assistant-live",
+        state: "streaming", markdown, order: 0,
+      }],
+    });
+    const first = workspace.setAgentSnapshot(snapshot("One"));
+    animationFrames.shift()!(0);
+    await first;
+    const historyRoot = host.querySelector<HTMLElement>(".systemsculpt-agent-history")!;
+    const rows = Array.from(historyRoot.children);
+    expect(rows).toHaveLength(1000);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(historyRoot, { subtree: true, childList: true, characterData: true, attributes: true });
+    const renderHistory = jest.spyOn(workspace.renderer, "renderHistory");
+    const rootQuery = jest.spyOn(workspace.renderer.element, "querySelector");
+    const rootQueryAll = jest.spyOn(workspace.renderer.element, "querySelectorAll");
+    const markdownRender = jest.spyOn(MarkdownRenderer, "render");
+    markdownRender.mockClear();
+    try {
+      for (let token = 0; token < 3; token += 1) {
+        const next = workspace.setAgentSnapshot(snapshot(`One ${"two ".repeat(token + 1)}`));
+        for (let tick = 0; tick < 10 && animationFrames.length === 0; tick += 1) await Promise.resolve();
+        animationFrames.shift()!((token + 1) * 16);
+        await next;
+      }
+      await jest.runOnlyPendingTimersAsync();
+      expect(workspace.renderer.activeRoot.textContent).toContain("One two two two");
+      expect(markdownRender).toHaveBeenCalled();
+      expect(renderHistory).not.toHaveBeenCalled();
+      expect(rootQuery).not.toHaveBeenCalled();
+      expect(rootQueryAll).not.toHaveBeenCalled();
+      expect(mutations).toEqual([]);
+      expect(Array.from(historyRoot.children)).toEqual(rows);
+      expect(markdownRender.mock.calls.every(([, markdown]) => String(markdown).startsWith("One"))).toBe(true);
+    } finally {
+      observer.disconnect();
+      workspace.unload();
+      jest.useRealTimers();
+    }
+  });
+
   it("does not read long-history geometry for an active snapshot below the viewport", async () => {
     const animationFrames: FrameRequestCallback[] = [];
     jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {

@@ -472,7 +472,7 @@ function messageTimeFormat(): Intl.DateTimeFormat {
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
   private readonly historyRoot: HTMLElement;
-  private readonly activeRoot: HTMLElement;
+  public readonly activeRoot: HTMLElement;
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activeOverflowNodes = new Map<string, HTMLButtonElement>();
   private readonly activityOverflowStates = new WeakMap<HTMLButtonElement, {
@@ -586,6 +586,11 @@ export class AgentConversationRenderer extends Component {
       onOpenPath: (path) => this.options.onOpenArtifact({ id: path, title: path, path, kind: "vault_file" }),
     });
     this.addChild(this.approvals);
+  }
+
+  /** The mounted live response; settlement transfers it to history and clears this reference. */
+  public get activeResponseElement(): HTMLElement | null {
+    return this.activeTurn;
   }
 
   public setLoading(loading: boolean): void {
