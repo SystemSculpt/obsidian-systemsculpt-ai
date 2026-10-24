@@ -120,7 +120,18 @@
   box-shadow: 0 0 0 2px var(--ss-surface-0), var(--ss-ring);
 }
 
-.ss-studio-port-pin.is-drop-target.is-input {
+/* A separately composited ring leaves the pin and its hit area unchanged. */
+.ss-studio-port-pin::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 3px var(--ss-accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ss-studio-port-pin.is-drop-target.is-input::after {
   animation: ss-studio-port-halo 1.1s var(--ss-ease) infinite;
 }
 
