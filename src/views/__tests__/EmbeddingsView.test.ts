@@ -5,7 +5,7 @@
 import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../EmbeddingsView";
 import { WorkspaceLeaf, TFile } from "obsidian";
 import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
-import { CHAT_TRANSCRIPT_COMMITTED_EVENT } from "../chatview/ChatTranscriptEvents";
+import { emitChatTranscriptCommitted } from "../chatview/ChatTranscriptEvents";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
   let resolve!: (value: T) => void;
@@ -527,29 +527,39 @@ describe("EmbeddingsView", () => {
       expect(checkActiveFileSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("refreshes only the matching chat after a durable transcript commit", async () => {
+    it.each(["user", "assistant"] as const)("refreshes only the matching chat after a durable %s transcript commit", async (role) => {
       const chatView = createMockChatView({
         chatId: "chat-current",
-        messages: [{ message_id: "1", role: "user", content: "Committed transcript" }],
+        messages: [{ message_id: "current", role, content: "Committed transcript" }],
+      });
+      const workspace = mockPlugin.app.workspace;
+      workspace.trigger = jest.fn((name: string, payload: unknown) => {
+        for (const [eventName, handler] of workspace.on.mock.calls) {
+          if (eventName === name) handler(payload);
+        }
       });
       (view as any).currentChatView = chatView;
       (view as any).registerEvents();
-      const registration = mockPlugin.app.workspace.on.mock.calls.find(
-        ([eventName]: [string]) => eventName === CHAT_TRANSCRIPT_COMMITTED_EVENT,
-      );
-      const handler = registration?.[1] as (event: { chatId: string; version: number; role: "user"; messageId: string }) => void;
 
-      handler({ chatId: "another-chat", version: 1, role: "user", messageId: "other" });
+      emitChatTranscriptCommitted(workspace, { chatId: "another-chat", version: 1, role, messageId: "other" });
       await jest.advanceTimersByTimeAsync(600);
       expect(mockManager.searchSimilar).not.toHaveBeenCalled();
 
-      handler({ chatId: "chat-current", version: 2, role: "user", messageId: "current" });
+      emitChatTranscriptCommitted(workspace, { chatId: "chat-current", version: 2, role, messageId: "current" });
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
       await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(1);
       expect(mockManager.searchSimilar).toHaveBeenCalledWith(
         expect.stringContaining("Committed transcript"),
         15,
         expect.any(AbortSignal),
       );
+
+      mockManager.searchSimilar.mockClear();
+      (view as any).currentChatView = null;
+      emitChatTranscriptCommitted(workspace, { chatId: "chat-current", version: 3, role, messageId: "later" });
+      await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
     });
   });
 
