@@ -12,7 +12,7 @@ export type LocalAgentLaunchConfig = {
 };
 
 /** Reads `~/.config/systemsculpt/<name>.json`. Never reads an agent's own credentials or history. */
-export async function readLocalAgentLaunchConfig(name: string, label: string): Promise<LocalAgentLaunchConfig> {
+export async function readLocalAgentLaunchConfig(name: LocalAgentId, label: string): Promise<LocalAgentLaunchConfig> {
   const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
   const home = os.homedir();
   const configPath = path.join(home, '.config', 'systemsculpt', `${name}.json`);
@@ -30,12 +30,63 @@ export async function readLocalAgentLaunchConfig(name: string, label: string): P
     if (typeof value !== 'string' || !value.trim() || /[\r\n\0]/.test(value)) throw new Error(`Invalid ${label} ${key} in ${configPath}.`);
     return value.startsWith('~/') ? path.join(home, value.slice(2)) : value.trim();
   };
-  // GUI apps start with a minimal PATH; add the folders CLI installers use.
+  // Detection and native child processes share this PATH, including node for env shebangs.
   const environment: Record<string, string | undefined> = { ...desktopHost.environment() };
-  environment.PATH = [...new Set([...(environment.PATH || '').split(path.delimiter),
-    '/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local/bin'), path.join(home, '.npm-global/bin'),
-  ])].filter(Boolean).join(path.delimiter);
-  return { configPath, home, setting, environment };
+  const platform = os.platform(), windows = platform === 'win32';
+  // Node passes only the first case-insensitive PATH key to Windows children.
+  const pathKey = windows ? Object.keys(environment).sort().find(key => key.toUpperCase() === 'PATH') : 'PATH';
+  const inheritedPath = (pathKey ? environment[pathKey] : '') || '';
+  if (windows) for (const key of Object.keys(environment)) if (key.toUpperCase() === 'PATH') delete environment[key];
+  const roaming = environment.APPDATA || path.join(home, 'AppData', 'Roaming');
+  const local = environment.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const data = environment.XDG_DATA_HOME || path.join(home, '.local', 'share');
+  const existingFolders = [...inheritedPath.split(path.delimiter),
+    ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']), path.join(home, '.local', 'bin'), path.join(home, '.npm-global', 'bin')];
+  const setPath = (folders: string[]) => { environment.PATH = [...new Set(folders)].filter(Boolean).join(path.delimiter); };
+  setPath(existingFolders);
+  const launch = { configPath, home, setting, environment };
+  const existingBinary = await resolveLocalAgentBinary(name, launch);
+  const installFolders = [
+    ...(windows ? [path.join(roaming, 'npm'),
+      path.join(environment.ProgramFiles || path.join(path.parse(home).root, 'Program Files'), 'nodejs'),
+      path.join(environment['ProgramFiles(x86)'] || path.join(path.parse(home).root, 'Program Files (x86)'), 'nodejs'),
+      path.join(local, 'Programs', 'nodejs')] : []),
+    path.join(environment.VOLTA_HOME || (windows ? path.join(local, 'Volta') : path.join(home, '.volta')), 'bin'),
+    path.join(environment.ASDF_DATA_DIR || path.join(home, '.asdf'), 'shims'), path.join(home, '.asdf', 'bin'),
+    path.join(environment.BUN_INSTALL || path.join(home, '.bun'), 'bin'),
+    environment.PNPM_HOME || (windows ? path.join(local, 'pnpm') : platform === 'darwin' ? path.join(home, 'Library', 'pnpm') : path.join(data, 'pnpm')),
+    path.join(home, '.claude', 'local'),
+  ];
+  setPath([...existingFolders, ...installFolders]);
+  // Optional version-manager I/O must not delay an installation that already worked.
+  if (existingBinary) return launch;
+  const nvm = environment.NVM_DIR || (windows ? environment.NVM_HOME || path.join(roaming, 'nvm') : path.join(home, '.nvm'));
+  const fnmRoots = environment.FNM_DIR ? [environment.FNM_DIR] : windows ? [path.join(roaming, 'fnm')]
+    : [platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'fnm') : path.join(data, 'fnm'), path.join(home, '.fnm')];
+  const runtimeBin = (root: string) => windows ? root : path.join(root, 'bin');
+  const hasNode = async (folder: string) => {
+    const stat = await fs.stat(path.join(folder, windows ? 'node.exe' : 'node')).catch(() => null);
+    return !!stat?.isFile() && (windows || (stat.mode & 0o111) !== 0);
+  };
+  const newestBin = async (root: string, installation = '') => {
+    // Only list version directory names; never source shell startup files or read agent stores.
+    const versions = (await fs.readdir(root, { withFileTypes: true }).catch(() => []))
+      .filter(entry => entry.isDirectory() && /^v?\d+\.\d+\.\d+$/.test(entry.name))
+      .map(entry => entry.name).sort((left, right) => right.localeCompare(left, 'en', { numeric: true }));
+    return versions[0] ? runtimeBin(path.join(root, versions[0], installation)) : '';
+  };
+  const nvmBin = async () => {
+    const active = environment.NVM_BIN || (windows ? environment.NVM_SYMLINK : path.join(nvm, 'current', 'bin'));
+    if (active && await hasNode(active)) return active;
+    return newestBin(windows ? nvm : path.join(nvm, 'versions', 'node'));
+  };
+  const fnmBins = fnmRoots.map(async root => {
+    const active = environment.FNM_MULTISHELL_PATH ? runtimeBin(environment.FNM_MULTISHELL_PATH) : runtimeBin(path.join(root, 'aliases', 'default'));
+    return await hasNode(active) ? active : newestBin(path.join(root, 'node-versions'), 'installation');
+  });
+  const versionBins = await Promise.all([nvmBin(), ...fnmBins]);
+  setPath([...existingFolders, ...installFolders, ...versionBins]);
+  return launch;
 }
 
 /** Resolves the same machine-local binary and PATH a native run uses. Never starts it. */

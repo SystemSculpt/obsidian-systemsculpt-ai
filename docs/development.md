@@ -365,10 +365,23 @@ Then install the exact production-built candidate in real Obsidian. Verify one s
 ## Native Codex discovery
 
 On-machine Codex launches the installed `codex app-server` directly and uses
-`~/.codex` for its existing native login and configuration. This is independent
-of an agent-specific `CODEX_HOME` inherited when Obsidian was opened. The plugin
-adds common Homebrew and user CLI directories to the desktop application's PATH.
-Codex continues to own credentials, permissions, tools, and thread history.
+`~/.codex` for its existing native login and configuration, or the inherited
+`CODEX_HOME` when set. Codex continues to own credentials, permissions, tools,
+and thread history.
+
+For both native agents, the plugin preserves the desktop application's PATH
+first, then adds Homebrew, user CLI folders, Volta, asdf, nvm, fnm, bun and pnpm
+install locations. Windows includes `%APPDATA%\\npm`. The older
+`~/.claude/local` installation is also found automatically. Version-manager
+home environment variables are honored. For nvm, the active `NVM_BIN` or
+current symlink (Windows: `NVM_SYMLINK`) wins when present; otherwise the newest
+installed version is used. fnm uses its active/default runtime or newest
+installed version. These runtime folders stay on the launched process's PATH
+so Node-based CLI scripts can find `node`, even when Obsidian starts from the
+Dock or Start menu. No shell startup scripts are loaded.
+
+After installing an agent while Obsidian is open, use **Detect again** in the
+chat's backend menu. Detection remains cached for the Obsidian session.
 
 For a custom installation or provider wrapper, create the machine-local file
 `~/.config/systemsculpt/codex.json`, for example:
@@ -391,7 +404,8 @@ without a ChatGPT account.
 On-machine Claude Code launches the installed `claude` CLI in print mode with
 JSON streams on standard input and output, in the vault folder. It uses the
 same PATH additions as Codex. Claude Code continues to own its login, settings,
-permissions, tools, and session history; the plugin never reads `~/.claude`.
+permissions, tools, and session history; discovery only lists/stats install
+and session paths, never reads file contents under `~/.claude`.
 
 For a custom installation, create the machine-local file
 `~/.config/systemsculpt/claude.json`, for example:
