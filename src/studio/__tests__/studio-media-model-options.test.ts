@@ -1,5 +1,6 @@
 import type SystemSculptPlugin from "../../main";
-import { isStudioMediaModelConfigKey, resetStudioMediaModelOptions, resolveStudioMediaModelOptionsForPlugin } from "../StudioMediaModelOptions";
+import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin } from "../StudioMediaModelOptions";
+import { resetStudioVideoModelOptions } from "../StudioVideoModelOptions";
 import type { StudioNodeConfigDynamicOptionsSource, StudioNodeInstance } from "../types";
 
 function fixture() {
@@ -47,7 +48,7 @@ describe("Studio media model options", () => {
   it("resets dependent video controls without rewriting retired image configuration", () => {
     const { node } = fixture();
     node.config = { model: "maker/video", durationSeconds: "8", resolution: "1080p", aspectRatio: "16:9", generateAudio: true };
-    resetStudioMediaModelOptions(node, "model");
+    resetStudioVideoModelOptions(node, "model");
     expect(node.config).toEqual({ model: "maker/video", durationSeconds: "", resolution: "", aspectRatio: "", generateAudio: true });
     expect(isStudioMediaModelConfigKey(node.kind, "model")).toBe(true);
     expect(isStudioMediaModelConfigKey(node.kind, "resolution")).toBe(true);
@@ -55,7 +56,7 @@ describe("Studio media model options", () => {
 
     const saved = { ...node, kind: "studio.image_generation", config: { model: "saved/image", count: 3, quality: "high", imageSize: "2K", aspectRatio: "4:3" } };
     const original = { ...saved.config };
-    resetStudioMediaModelOptions(saved, "model");
+    resetStudioVideoModelOptions(saved, "model");
     expect(saved.config).toEqual(original);
     expect(isStudioMediaModelConfigKey(saved.kind, "model")).toBe(false);
   });

@@ -2,12 +2,11 @@ import { App } from "obsidian";
 import { StandardModal } from "../../../core/ui/modals/standard/StandardModal";
 import { createUiAction, updateUiAction } from "../../../core/ui/surface/SurfacePrimitives";
 import { findManagedVideoEstimate, type ManagedVideoModel } from "../../../services/videos/ManagedVideoModelCatalog";
-import { describeStudioMediaModelInputs, type StudioMediaModelKind } from "../../../studio/StudioMediaModelCapabilities";
+import { describeStudioMediaModelInputs } from "../../../studio/StudioMediaModelCapabilities";
 
 export type StudioMediaModelPickerModel = ManagedVideoModel;
 
 export type StudioMediaModelPickerModalOptions = {
-  kind: StudioMediaModelKind;
   models: readonly StudioMediaModelPickerModel[];
   selectedId: string;
   onSelect: (model: StudioMediaModelPickerModel) => void;

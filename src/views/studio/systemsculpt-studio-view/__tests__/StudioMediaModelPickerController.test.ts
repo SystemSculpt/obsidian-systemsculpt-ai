@@ -78,7 +78,7 @@ describe("Studio model picker lifetime", () => {
     release();
     await settle();
     expect(openStudioMediaModelPickerModal).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1]).toMatchObject({ kind: "video", selectedId: "" });
+    expect(jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1]).toMatchObject({ selectedId: "" });
     controller.dispose();
     expect(modal.close).toHaveBeenCalledTimes(1);
   });

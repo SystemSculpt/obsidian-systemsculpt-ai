@@ -45,11 +45,10 @@ export class StudioMediaModelPickerController {
         }
         this.modal?.close();
         this.modal = openStudioMediaModelPickerModal(this.host.plugin().app, {
-          kind: "video",
           models: snapshot.models,
           selectedId: currentValue,
-          favoriteIds: readMediaModelFavorites(this.host.plugin(), "video"),
-          onToggleFavorite: (modelId) => toggleMediaModelFavorite(this.host.plugin(), "video", modelId),
+          favoriteIds: readMediaModelFavorites(this.host.plugin()),
+          onToggleFavorite: (modelId) => toggleMediaModelFavorite(this.host.plugin(), modelId),
           onSelect: (model) => onValueChange(model.id, model.name),
           onClose: () => { this.modal = null; },
         });

@@ -220,9 +220,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
     if (node.kind === 'studio.image_generation') {
       root.createEl('p', { text: 'Image generation was retired. Saved outputs are preserved.', attr: { role: 'status' } });
-      const teardown = renderNodeMediaPreview({ nodeEl: root, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
-      renderNodeOutputPreview({ nodeEl: root, node, nodeRunState, showOutputPreview: true });
-      return teardown;
+      return renderNodeMediaPreview({ nodeEl: root, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
     }
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };

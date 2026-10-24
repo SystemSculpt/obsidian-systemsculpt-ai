@@ -69,7 +69,7 @@ describe("StudioMediaModelPickerModal", () => {
     const onClose = jest.fn();
     const onToggleFavorite = jest.fn(async () => true);
     const modal = openStudioMediaModelPickerModal(new App(), {
-      kind: "video", models: videoModels(), selectedId: "maker/beta", favoriteIds: ["maker/gamma"], onSelect, onClose, onToggleFavorite,
+      models: videoModels(), selectedId: "maker/beta", favoriteIds: ["maker/gamma"], onSelect, onClose, onToggleFavorite,
     });
     const root = modal.modalEl;
     expect(root.textContent).toContain("Video generation models");
@@ -108,7 +108,7 @@ describe("StudioMediaModelPickerModal", () => {
 
   it("reports a dismissal without a selection", () => {
     const onClose = jest.fn();
-    const modal = openStudioMediaModelPickerModal(new App(), { kind: "video", models: videoModels(), selectedId: "", onSelect: jest.fn(), onClose });
+    const modal = openStudioMediaModelPickerModal(new App(), { models: videoModels(), selectedId: "", onSelect: jest.fn(), onClose });
     expect(modal.modalEl.textContent).toContain("Video generation models");
     modal.close();
     expect(onClose).toHaveBeenCalledWith(false);

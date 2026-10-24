@@ -2,7 +2,6 @@ import type SystemSculptPlugin from "../main";
 import { getStudioMediaCatalogs } from "./StudioMediaCatalogs";
 import {
   isStudioVideoOptionsSource,
-  resetStudioVideoModelOptions,
   resolveStudioVideoModelOptions,
   STUDIO_VIDEO_GENERATION_NODE_KIND,
   STUDIO_VIDEO_MODEL_CONFIG_KEYS,
@@ -17,10 +16,6 @@ export function resolveStudioMediaModelOptionsForPlugin(
 ): Promise<StudioNodeConfigSelectOption[]> {
   if (node.kind !== STUDIO_VIDEO_GENERATION_NODE_KIND || !isStudioVideoOptionsSource(source)) return Promise.resolve([]);
   return resolveStudioVideoModelOptions(getStudioMediaCatalogs(plugin).videos, source, node);
-}
-
-export function resetStudioMediaModelOptions(node: StudioNodeInstance, changedKey: string): void {
-  resetStudioVideoModelOptions(node, changedKey);
 }
 
 /** Whether changing this config key must re-render the card so dependent pickers reload. */

@@ -2,7 +2,8 @@ import { StudioOutputContainerController } from "./StudioOutputContainerControll
 import { createSurfaceElement } from "../../core/ui/surface/SurfaceDomContext";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
-import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
+import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin } from "../../studio/StudioMediaModelOptions";
+import { resetStudioVideoModelOptions } from "../../studio/StudioVideoModelOptions";
 import { startStudioIndependentRun } from './StudioIndependentRun';
 import { localTextAgent } from "../../services/codex/CodexExecutionSettings";
 import { applyStudioNodeSource } from "../../studio/StudioNodeSource";
@@ -1537,7 +1538,7 @@ export class SystemSculptStudioView extends ItemView {
           return false;
         }
         target.config[key] = nextValue;
-        resetStudioMediaModelOptions(target, key);
+        resetStudioVideoModelOptions(target, key);
         return true;
       },
       {
