@@ -7,7 +7,8 @@ import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from './Lo
 
 export type LocalAgentAvailability = Readonly<{
   installed: boolean;
-  signedIn: boolean;
+  /** Null means the probe ended before native sign-in status was known. */
+  signedIn: boolean | null;
   recentSessionCount: number;
   lastUsed: number | null;
 }>;
@@ -20,16 +21,18 @@ const PROBE_TIMEOUT_MS = 3000;
 const RECENT_USAGE_MS = 30 * 24 * 60 * 60 * 1000;
 const unavailable = (): LocalAgentAvailability => ({ installed: false, signedIn: false, recentSessionCount: 0, lastUsed: null });
 const cachedDetections = new Map<string | undefined, Promise<LocalAgentDetection>>();
+const listeners = new Map<string | undefined, Set<(detection: LocalAgentDetection) => void>>();
 
-/** Only booleans and aggregate timestamps/counts leave the probe; status output is never retained. */
-async function signedIn(agent: LocalAgentId, binary: string, environment: Record<string, string | undefined>, cwd: string, signal: AbortSignal): Promise<boolean> {
+/** Only sign-in state and aggregate timestamps/counts leave the probe; status output is never retained. */
+async function signedIn(agent: LocalAgentId, binary: string, environment: Record<string, string | undefined>, cwd: string, signal: AbortSignal): Promise<boolean | null> {
   const childProcess = await desktopHost.childProcess();
   const command = await resolveLocalAgentCommand(binary, agent === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'], environment, cwd);
-  if (signal.aborted) return false;
+  if (signal.aborted) return null;
   return new Promise(resolve => {
     childProcess.execFile(command.binary, command.args, {
       cwd, env: environment, signal, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, shell: false,
     }, (error, stdout, stderr) => {
+      if (signal.aborted || error?.killed) { resolve(null); return; }
       if (error) { resolve(false); return; }
       if (agent === 'codex') { resolve(/^Logged in\b/im.test(`${stdout}\n${stderr}`)); return; }
       try {
@@ -99,6 +102,7 @@ async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<Lo
       const binary = await resolveLocalAgentBinary(agent, launch, workingDirectory);
       if (!binary || Date.now() >= deadline) return;
       state.installed = true;
+      state.signedIn = null;
       const path = await desktopHost.path();
       const native = agent === 'codex' ? await resolveCodexLaunchOptions(launch) : null;
       const environment: Record<string, string | undefined> = { ...(native?.environment ?? launch.environment) };
@@ -109,7 +113,10 @@ async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<Lo
         signedIn(agent, binary, environment, cwd, controller.signal).then(value => { state.signedIn = value; }),
         sessionUsage(agent, home, deadline).then(value => { Object.assign(state, value); }),
       ]);
-    } catch { /* An unavailable CLI or inaccessible store must not block hosted chat. */ }
+    } catch {
+      // A completed launch failure is distinct from a probe that ran out of time.
+      if (!controller.signal.aborted) state.signedIn = false;
+    }
   };
   try {
     await Promise.race([work(), new Promise<void>(resolve => { timer = window.setTimeout(resolve, PROBE_TIMEOUT_MS); })]);
@@ -120,8 +127,12 @@ async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<Lo
   }
 }
 
+export function isLocalAgentUsable(agent: LocalAgentAvailability | undefined): boolean {
+  return Boolean(agent?.installed && (agent.signedIn === true || (agent.signedIn === null && agent.recentSessionCount > 0)));
+}
+
 function preferredAgent(agents: LocalAgentDetection['agents']): TextExecutionBackend {
-  const usable = (['claude', 'codex'] as const).filter(agent => agents[agent].installed && agents[agent].signedIn);
+  const usable = (['claude', 'codex'] as const).filter(agent => isLocalAgentUsable(agents[agent]));
   usable.sort((left, right) => agents[right].recentSessionCount - agents[left].recentSessionCount
     || (agents[right].lastUsed ?? 0) - (agents[left].lastUsed ?? 0));
   return usable[0] ?? 'systemsculpt';
@@ -135,11 +146,36 @@ export function detectLocalAgents(options: { force?: boolean; workingDirectory?:
   if (!detection) {
     detection = Promise.all([probe('claude', options.workingDirectory), probe('codex', options.workingDirectory)]).then(([claude, codex]) => {
       const agents = { claude, codex };
+      if (cachedDetections.get(options.workingDirectory) === detection && (claude.signedIn === null || codex.signedIn === null)) {
+        // Cold CLI startup is not a sign-out. Retry unknown probes once, without
+        // making the first caller wait or turning the session cache into polling.
+        void Promise.all((['claude', 'codex'] as const).map(agent => agents[agent].signedIn === null
+          ? probe(agent, options.workingDirectory) : Promise.resolve(agents[agent]))).then(([claude, codex]) => {
+          if (cachedDetections.get(options.workingDirectory) !== detection) return;
+          const agents = { claude, codex };
+          const refreshed = { preferred: preferredAgent(agents), agents };
+          cachedDetections.set(options.workingDirectory, Promise.resolve(refreshed));
+          for (const listener of listeners.get(options.workingDirectory) ?? []) {
+            try { listener(refreshed); } catch { /* A view must not interrupt detection. */ }
+          }
+        });
+      }
       return { preferred: preferredAgent(agents), agents };
     });
     cachedDetections.set(options.workingDirectory, detection);
   }
   return detection;
+}
+
+/** Updates chrome after the one background retry, without switching an open chat's backend. */
+export function subscribeLocalAgentDetection(workingDirectory: string | undefined, listener: (detection: LocalAgentDetection) => void): () => void {
+  let subscribers = listeners.get(workingDirectory);
+  if (!subscribers) { subscribers = new Set(); listeners.set(workingDirectory, subscribers); }
+  subscribers.add(listener);
+  return () => {
+    subscribers.delete(listener);
+    if (subscribers.size === 0) listeners.delete(workingDirectory);
+  };
 }
 
 export function invalidateLocalAgentDetection(): void {

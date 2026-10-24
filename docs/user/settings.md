@@ -31,6 +31,11 @@ selection, SystemSculpt checks which agents are installed and signed in:
    an exact tie.
 3. If neither is ready, use hosted SystemSculpt.
 
+A sign-in check that takes longer than three seconds reports **Sign-in status
+unknown**, not signed out. An installed agent with sessions from the last 30 days
+can still be selected automatically. SystemSculpt checks once more in the
+background; that result updates availability without switching the open chat.
+
 Detection is cached for the current Obsidian session, not polled in the background.
 Choose **Detect again** in the chat's backend menu (the first part of the run line
 under the composer), or in an empty chat's install hint, after installing or
