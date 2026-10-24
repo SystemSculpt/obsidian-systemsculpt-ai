@@ -2,6 +2,19 @@
 
 Canonical repository guidance for every coding agent working on the SystemSculpt Obsidian client. Edit `AGENTS.md` directly.
 
+## What SystemSculpt is for (read first)
+
+1. Mission: everything a person captures and creates with AI, on any device, ends up as plain Markdown in their own Obsidian vault, on their own machine.
+2. The vault is the home and the source of truth. The plugin, the iPhone app, the desktop app (next) and our servers exist to get data into it and to put AI to work on it there. None of them is a second home.
+3. Plain Markdown always: every feature's output is a readable .md file (plus ordinary attachments) in the vault. No proprietary format or hidden state a person would need to keep their work.
+4. Every device, one vault: a capture is finished only when it's a file in the vault. Say "In your vault" only on a verified receipt.
+5. AI where the data lives: Claude Code or Codex (the person's own account) or SystemSculpt AI reads only what the person allows and writes back as files, with approval before edits.
+6. No lock-in: cancelling, uninstalling or deleting an account never takes anyone's notes. What's in the vault stays.
+7. Be exact about what leaves the machine: hosted AI goes through our server, OpenRouter and model providers; local agents talk to Anthropic or OpenAI; iPhone captures pass through our server. Never write "private AI", "local AI", "offline", "nothing leaves your device", "end-to-end encrypted" or "zero retention". The privacy policy is the source of truth.
+8. "Open source" means the Obsidian plugin (MIT) and the Markdown format. The iPhone app and server are closed; Obsidian is free but not open source.
+9. Rank work by one question: does it get a person's data into their vault as Markdown, or make it more useful there?
+10. Full text: vault "02 Areas/SystemSculpt Business/Product/Mission and positioning 2026-10.md".
+
 ## Repository boundary
 
 The SystemSculpt workspace has three sibling repositories:
