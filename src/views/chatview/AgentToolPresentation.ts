@@ -22,6 +22,8 @@ export type AgentToolPresentation = Readonly<{
   targetPath?: string;
   groupKind: string;
   groupCount: number;
+  /** Distinct notes or folders the group counts, so a repeated path counts once. */
+  groupItems?: readonly string[];
 }>;
 
 export type AgentToolDetail = Readonly<{
@@ -316,6 +318,9 @@ function contextToolLabel(input: Record<string, unknown>): string {
   return TOOL_LABELS.context;
 }
 
+/** Tools whose group copy counts notes or folders ("Edited 2 notes", "Listed 3 folders"). */
+const PATH_GROUP_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "multi_edit", "trash", "list_items"]);
+
 const MAX_TOOL_DETAIL_ROWS = 8;
 const MAX_TOOL_DETAIL_VALUE_LENGTH = 240;
 const VAULT_TOOLS_WITH_SAFE_DETAILS: ReadonlySet<string> = new Set([
@@ -517,6 +522,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
       summary: native.description ?? null,
       meta, targetPath: native.targetPath,
       groupKind: native.groupKind, groupCount: native.groupCount,
+      ...(native.groupItems ? { groupItems: native.groupItems } : {}),
     };
   }
   const { canonicalName } = splitToolName(part.name);
@@ -582,5 +588,6 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     ...(targetPath ? { targetPath } : {}),
     groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list" : presentedName,
     groupCount: serverTool ? 1 : counted?.items.length ?? Math.max(paths.length, 1),
+    ...(!serverTool && PATH_GROUP_TOOLS.has(canonicalName) && paths.length ? { groupItems: paths } : {}),
   };
 }
