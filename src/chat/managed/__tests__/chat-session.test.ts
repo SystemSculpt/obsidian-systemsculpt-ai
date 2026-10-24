@@ -31,6 +31,7 @@ import {
 } from "../Protocol";
 import {
   AgentChatSession,
+  type AgentChatSessionOptions,
   type AgentRunResult,
 } from "../ChatSession";
 import { AgentMutationJournal } from "../MutationJournal";
@@ -512,7 +513,8 @@ function createHarness(input: Readonly<{
   persistAssistant?: (message: ChatMessage) => Promise<void>;
   request?: jest.Mock<Promise<Response>, [PlatformRequestInput]>;
   runStallGraceMs?: number;
-  resynchronizationDelayMs?: (attempt: number) => number;
+  resynchronizationDelayMs?: ((attempt: number) => number) | null;
+  recoveryEnvironment?: AgentChatSessionOptions["recoveryEnvironment"];
   conversationId?: string;
   refreshCredits?: (
     reason: "post_terminal" | "billing_failure",
@@ -568,7 +570,9 @@ function createHarness(input: Readonly<{
     ...(input.runStallGraceMs
       ? { runStallGraceMs: input.runStallGraceMs }
       : {}),
-    resynchronizationDelayMs: input.resynchronizationDelayMs ?? (() => 0),
+    resynchronizationDelayMs: input.resynchronizationDelayMs === null
+      ? undefined : input.resynchronizationDelayMs ?? (() => 0),
+    recoveryEnvironment: input.recoveryEnvironment,
     now: () => 10_000,
     monotonicNow: input.monotonicNow ?? (() => 0),
   });
@@ -5097,6 +5101,222 @@ describe("AgentChatSession", () => {
     server.serverMessage(succeededTerminal(turnId, turnId));
     await tick();
     await expect(run).resolves.toMatchObject({ kind: "completed" });
+  });
+
+  describe("recovery scheduling", () => {
+    let host: Window;
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.spyOn(Math, "random").mockReturnValue(1);
+      host = Object.assign(new EventTarget(), {
+        navigator: { onLine: true },
+        document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+        setTimeout: window.setTimeout,
+        clearTimeout: window.clearTimeout,
+      }) as unknown as Window;
+    });
+
+    async function running(input: Parameters<typeof createHarness>[0] = {}) {
+      const harness = trackedHarness({
+        resynchronizationDelayMs: null,
+        recoveryEnvironment: {
+          ownerWindow: () => host, isVisible: () => true, subscribe: () => () => {},
+        },
+        ...input,
+      });
+      const server = await harness.open();
+      const turnId = "user_recovery_scheduling";
+      const user = wireUser(turnId, "Keep my response alive");
+      const run = harness.agent.start({
+        conversationId: CONVERSATION_ID, turnId, message: user,
+      });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.commands().some(command => command.kind === "submit")).toBe(true);
+      server.snapshotMessages = [user];
+      server.snapshotRunState = active(1, turnId, turnId);
+      server.serverMessage(sessionSnapshot([user], active(1, turnId, turnId)));
+      await jest.advanceTimersByTimeAsync(16);
+      return { ...harness, run, turnId };
+    }
+
+    it("backs repeated connection failures off exponentially beyond five seconds", async () => {
+      const harness = await running();
+      harness.request.mockRejectedValue(new Error("offline upstream"));
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(0);
+      for (const delay of [2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 120_000]) {
+        const before = harness.request.mock.calls.length;
+        await jest.advanceTimersByTimeAsync(delay - 1);
+        expect(harness.request).toHaveBeenCalledTimes(before);
+        await jest.advanceTimersByTimeAsync(1);
+        expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      }
+      expect(harness.agent.getSnapshot().status).toBe("running");
+    });
+
+    it("keeps backoff across successful but unchanged stalled snapshots", async () => {
+      const harness = await running({ runStallGraceMs: 100 });
+      await jest.advanceTimersByTimeAsync(84);
+      expect(harness.agent.getSnapshot().statusLabel).toBe("Still waiting on the server");
+      const reads = () => harness.request.mock.calls.filter(([request]) =>
+        String(request.url).includes("/get-messages")).length;
+      for (const delay of [2_000, 4_000, 8_000, 16_000, 32_000, 64_000]) {
+        const before = reads();
+        await jest.advanceTimersByTimeAsync(delay - 1);
+        expect(reads()).toBe(before);
+        await jest.advanceTimersByTimeAsync(1);
+        expect(reads()).toBe(before + 1);
+      }
+      expect(harness.agent.getSnapshot().statusLabel).toBe("Still waiting on the server");
+      expect(harness.commands().filter(command => command.kind === "submit")).toHaveLength(1);
+    });
+
+    it("cancels the pending retry offline and resumes only on the online event", async () => {
+      const online = jest.replaceProperty(host.navigator, "onLine", true);
+      const harness = await running();
+      harness.request.mockRejectedValue(new Error("offline upstream"));
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(1_000);
+      online.replaceValue(false);
+      host.dispatchEvent(new Event("offline"));
+      const before = harness.request.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      online.replaceValue(true);
+      host.dispatchEvent(new Event("online"));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      await jest.advanceTimersByTimeAsync(3_999);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(harness.request).toHaveBeenCalledTimes(before + 2);
+    });
+
+    it("does not start any recovery while already offline", async () => {
+      const harness = await running();
+      jest.replaceProperty(host.navigator, "onLine", false);
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(0);
+      const before = harness.request.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+    });
+
+    it("never overlaps recovery when online and visibility events arrive during a request", async () => {
+      const harness = await running();
+      const recovery = deferred<Response>();
+      harness.request.mockImplementationOnce(() => recovery.promise);
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(2_000);
+      const before = harness.request.mock.calls.length;
+      const online = jest.replaceProperty(host.navigator, "onLine", false);
+      host.dispatchEvent(new Event("offline"));
+      online.replaceValue(true);
+      host.dispatchEvent(new Event("online"));
+      host.document.dispatchEvent(new Event("visibilitychange"));
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      recovery.reject(new Error("bootstrap unavailable"));
+      await jest.advanceTimersByTimeAsync(0);
+      await jest.advanceTimersByTimeAsync(3_999);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+    });
+
+    it("uses the migrated window for online events and recovery timers", async () => {
+      let refresh = () => {};
+      const harness = await running({ recoveryEnvironment: {
+        ownerWindow: () => host,
+        isVisible: () => true,
+        subscribe: listener => { refresh = listener; return () => {}; },
+      } });
+      harness.request.mockRejectedValue(new Error("upstream unavailable"));
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(0);
+      const oldHost = host;
+      const remove = jest.spyOn(oldHost, "removeEventListener");
+      host = Object.assign(new EventTarget(), {
+        navigator: { onLine: false },
+        document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+        setTimeout: jest.fn(window.setTimeout),
+        clearTimeout: window.clearTimeout,
+      }) as unknown as Window;
+      refresh();
+      expect(remove).toHaveBeenCalledWith("online", expect.any(Function));
+      const before = harness.request.mock.calls.length;
+      oldHost.dispatchEvent(new Event("online"));
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      jest.replaceProperty(host.navigator, "onLine", true);
+      host.dispatchEvent(new Event("online"));
+      expect(host.setTimeout).toHaveBeenLastCalledWith(expect.any(Function), 0);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+    });
+
+    it("resets backoff on authoritative progress without mistaking snapshot reads for progress", async () => {
+      const harness = await running({ runStallGraceMs: 100 });
+      await jest.advanceTimersByTimeAsync(84 + 2_000 + 4_000);
+      harness.server.snapshotRunState = active(2, harness.turnId, harness.turnId);
+      await jest.advanceTimersByTimeAsync(8_000);
+      expect(harness.agent.getSnapshot().statusLabel).toBe("Thinking");
+      await jest.advanceTimersByTimeAsync(100);
+      const before = harness.request.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(1_999);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+    });
+
+    it("slows a hidden document and retries promptly when visible again", async () => {
+      const hidden = jest.replaceProperty(host.document, "visibilityState", "visible");
+      const harness = await running();
+      harness.request.mockRejectedValue(new Error("offline upstream"));
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(1_000);
+      hidden.replaceValue("hidden");
+      host.document.dispatchEvent(new Event("visibilitychange"));
+      const before = harness.request.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(59_999);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      hidden.replaceValue("visible");
+      host.document.dispatchEvent(new Event("visibilitychange"));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.request).toHaveBeenCalledTimes(before + 2);
+    });
+
+    it("slows an inactive view independently of document visibility and cleans up on detach", async () => {
+      let visible = true;
+      let refresh = () => {};
+      const unsubscribe = jest.fn();
+      const harness = await running({ recoveryEnvironment: {
+        ownerWindow: () => host,
+        isVisible: () => visible,
+        subscribe: listener => { refresh = listener; return unsubscribe; },
+      } });
+      harness.request.mockRejectedValue(new Error("offline upstream"));
+      harness.server.endTurn();
+      await jest.advanceTimersByTimeAsync(0);
+      visible = false;
+      refresh();
+      const before = harness.request.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(59_999);
+      expect(harness.request).toHaveBeenCalledTimes(before);
+      visible = true;
+      refresh();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      await harness.agent.detach();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      host.dispatchEvent(new Event("online"));
+      host.document.dispatchEvent(new Event("visibilitychange"));
+      await jest.advanceTimersByTimeAsync(3_600_000);
+      expect(harness.request).toHaveBeenCalledTimes(before + 1);
+      await expect(harness.run).resolves.toMatchObject({ kind: "cancelled" });
+    });
   });
 
   it("recovers a terminal snapshot when a healthy-looking turn stream dies open", async () => {

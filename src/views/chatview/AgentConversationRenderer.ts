@@ -445,7 +445,7 @@ function terminalToolPresentation(
 ): AgentPart {
   if (
     part.kind !== "tool"
-    || presentation.busy
+    || !["completed", "cancelled", "failed"].includes(presentation.phase)
     || (part.state !== "approval-required" && !isActiveAgentToolState(part.state))
   ) {
     return part;
@@ -497,6 +497,7 @@ export class AgentConversationRenderer extends Component {
     HistoricalActivityHydrationState
   >();
   private readonly activePartRefs = new Map<string, AgentPart>();
+  private readonly activePartProgressStates = new WeakMap<HTMLElement, boolean>();
   private readonly activeToolDisplayFingerprints = new Map<string, string>();
   private readonly activeToolErrorSuppression = new Map<string, boolean>();
   private readonly toolApprovalPreviewHydrationStates = new WeakMap<
@@ -1481,7 +1482,7 @@ export class AgentConversationRenderer extends Component {
       const part = this.historicalAgentPart(messagePart);
       if (!part) continue;
       const key = part.kind === "tool" ? toolPartKey(part.callId) : part.id;
-      const node = await this.renderActivePart(part, key, false, insertionParent);
+      const node = await this.renderActivePart(part, key, false, insertionParent, false);
       if (messagePart.type === "content") {
         const content = presentMessageContent(messagePart.data);
         node.querySelectorAll(":scope > .systemsculpt-agent-message-attachments")
@@ -1550,8 +1551,8 @@ export class AgentConversationRenderer extends Component {
     const isCurrent = (): boolean =>
       this.renderingEnabled && lifecycleGeneration === this.lifecycleGeneration;
     const focusedApproval = this.approvals.captureFocus();
-    this.element.setAttribute("aria-busy", String(presentation.busy));
     const body = this.ensureActiveTurn(snapshot.turnId);
+    this.element.setAttribute("aria-busy", String(presentation.busy));
     const identity = snapshot.turnId ?? snapshot.runId;
     const backend = this.options.backendName?.() ?? "SystemSculpt";
     if (presentation.busy && identity && identity !== this.announcedTurnId) {
@@ -1624,6 +1625,8 @@ export class AgentConversationRenderer extends Component {
           part,
           key,
           part.kind === "tool" && duplicatesTerminalError(part),
+          undefined,
+          presentation.progressActive,
         );
         if (!isCurrent()) return;
         lanes.push({ key, node });
@@ -1785,6 +1788,7 @@ export class AgentConversationRenderer extends Component {
     key: string,
     suppressToolError = false,
     insertionParent?: HTMLElement,
+    progressActive = true,
   ): Promise<HTMLElement> {
     const lifecycleGeneration = this.lifecycleGeneration;
     const renderEpoch = this.toolRenderEpoch;
@@ -1819,12 +1823,16 @@ export class AgentConversationRenderer extends Component {
         incomingToolFingerprint,
       )
       || suppressionChanged
+      // Frozen snapshots can reuse every part object. Lifecycle changes still
+      // need to pause/resume visuals without changing the authoritative parts.
+      || this.activePartProgressStates.get(node) !== progressActive
     ) {
       const committed = await this.renderPart(
         node,
         part,
         this.activePartRefs.get(key),
         suppressToolError,
+        progressActive,
       );
       if (
         !this.renderingEnabled
@@ -1843,6 +1851,7 @@ export class AgentConversationRenderer extends Component {
       }
       if (committed) {
         this.activePartRefs.set(key, part);
+        this.activePartProgressStates.set(node, progressActive);
         if (part.kind === "tool") {
           this.activeToolDisplayFingerprints.set(key, incomingToolFingerprint!);
           this.activeToolErrorSuppression.set(key, suppressToolError);
@@ -2193,8 +2202,7 @@ export class AgentConversationRenderer extends Component {
     }
     status.className =
       `systemsculpt-agent-tail-status is-${presentation.phase}`;
-    const waiting = presentation.phase === "awaiting-approval";
-    const timed = presentation.busy && !waiting;
+    const timed = presentation.progressActive && presentation.phase !== "awaiting-approval";
     const backend = this.options.backendName?.() ?? "SystemSculpt";
     const latestActivity = [...presentation.visibleParts].reverse().find((part) =>
       part.kind === "tool" ? isActiveAgentToolState(part.state)
@@ -2237,10 +2245,7 @@ export class AgentConversationRenderer extends Component {
       setIcon(icon, iconName);
       icon.dataset.iconState = iconName;
     }
-    icon?.classList.toggle(
-      "is-animated",
-      presentation.busy && presentation.phase !== "awaiting-approval",
-    );
+    icon?.classList.toggle("is-animated", timed);
     // Error cards announce failures; all polite events use the workspace announcer.
     // A failure without an error card still needs one alert (spec 6.3).
     const unannouncedFailure = presentation.phase === "failed"
@@ -2721,11 +2726,13 @@ export class AgentConversationRenderer extends Component {
     part: AgentPart,
     previousPart?: AgentPart,
     suppressToolError = false,
+    progressActive = true,
   ): Promise<boolean> {
     if (part.kind === "text") {
+      const streaming = progressActive && part.state === "streaming";
       node.className = "systemsculpt-agent-part is-text";
-      node.classList.toggle("is-streaming", part.state === "streaming");
-      if (part.state === "streaming") {
+      node.classList.toggle("is-streaming", streaming);
+      if (streaming) {
         this.liveMarkdown.stream(node, part.markdown);
         return true;
       }
@@ -2735,12 +2742,12 @@ export class AgentConversationRenderer extends Component {
     if (
       part.kind === "reasoning"
       && previousPart?.kind === "reasoning"
-      && await this.updateReasoning(node, part)
+      && await this.updateReasoning(node, part, progressActive)
     ) {
       return true;
     }
     if (part.kind === "tool") {
-      return this.renderTool(node, part, suppressToolError);
+      return this.renderTool(node, part, suppressToolError, progressActive);
     }
     this.forgetMarkdown(node);
     node.empty();
@@ -2751,6 +2758,8 @@ export class AgentConversationRenderer extends Component {
           node,
           part.summary,
           part.state === "streaming",
+          undefined,
+          progressActive,
         );
         return true;
       }
@@ -2905,9 +2914,11 @@ export class AgentConversationRenderer extends Component {
   private async renderReasoning(
     node: HTMLElement,
     summary: string,
-    streaming: boolean,
+    incomplete: boolean,
     preservedOpen?: boolean,
+    progressActive = true,
   ): Promise<void> {
+    const streaming = incomplete && progressActive;
     node.classList.toggle("is-streaming", streaming);
     const details = node.createEl("details", {
       cls: "systemsculpt-agent-reasoning-details",
@@ -2927,9 +2938,9 @@ export class AgentConversationRenderer extends Component {
     header.tabIndex = 0;
     const icon = header.createSpan({ cls: "systemsculpt-agent-reasoning-icon" });
     setIcon(icon, streaming ? "loader-circle" : "sparkles");
-    icon.dataset.iconState = streaming ? "streaming" : "complete";
+    icon.dataset.iconState = streaming ? "streaming" : incomplete ? "paused" : "complete";
     icon.classList.toggle("is-animated", streaming);
-    const labelText = streaming ? "Reasoning..." : "Reasoned";
+    const labelText = streaming ? "Reasoning..." : incomplete ? "Reasoning" : "Reasoned";
     header.createEl("strong", { text: labelText });
     const disclosure = header.createSpan({ cls: "systemsculpt-agent-reasoning-disclosure" });
     setIcon(disclosure, "chevron-right");
@@ -2956,6 +2967,7 @@ export class AgentConversationRenderer extends Component {
   private async updateReasoning(
     node: HTMLElement,
     current: Extract<AgentPart, { kind: "reasoning" }>,
+    progressActive = true,
   ): Promise<boolean> {
     const details = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details");
     const header = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-header");
@@ -2964,12 +2976,13 @@ export class AgentConversationRenderer extends Component {
     const body = details?.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-body");
     if (!details || !header || !icon || !label || !body) return false;
 
-    const streaming = current.state === "streaming";
-    const labelText = streaming ? "Reasoning..." : "Reasoned";
+    const incomplete = current.state === "streaming";
+    const streaming = incomplete && progressActive;
+    const labelText = streaming ? "Reasoning..." : incomplete ? "Reasoning" : "Reasoned";
     node.className = "systemsculpt-agent-part is-reasoning";
     node.classList.toggle("is-streaming", streaming);
     label.setText(labelText);
-    const iconState = streaming ? "streaming" : "complete";
+    const iconState = streaming ? "streaming" : incomplete ? "paused" : "complete";
     if (icon.dataset.iconState !== iconState) {
       setIcon(icon, streaming ? "loader-circle" : "sparkles");
       icon.dataset.iconState = iconState;
@@ -3025,6 +3038,7 @@ export class AgentConversationRenderer extends Component {
     node: HTMLElement,
     part: AgentToolPart,
     suppressToolError = false,
+    progressActive = true,
   ): boolean {
     const presentation = presentAgentTool(part);
     const approvalRequired = (part.location === "vault" || part.native)
@@ -3257,7 +3271,7 @@ export class AgentConversationRenderer extends Component {
     else header.removeAttribute("aria-description");
     header.setAttribute("aria-expanded", String((shell as HTMLDetailsElement).open));
     icon.setAttribute("aria-hidden", "true");
-    icon.classList.toggle("is-animated", presentation.icon === "loader-circle");
+    icon.classList.toggle("is-animated", progressActive && presentation.icon === "loader-circle");
     const actionIcon = presentation.icon;
     if (icon.dataset.iconName !== actionIcon) {
       setIcon(icon, actionIcon);
