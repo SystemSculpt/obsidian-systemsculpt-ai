@@ -313,6 +313,7 @@ class App {
       activeLeaf: null,
       on: jest.fn(() => ({ unload: jest.fn() })),
       off: jest.fn(),
+      offref: jest.fn(),
       trigger: jest.fn(),
       getActiveViewOfType: jest.fn(() => null),
       getActiveFile: jest.fn(() => null),

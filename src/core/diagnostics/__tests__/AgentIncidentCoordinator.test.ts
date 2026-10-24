@@ -437,6 +437,141 @@ function fakeDependencies(options: {
 }
 
 describe("AgentIncidentCoordinator", () => {
+  it("does not make a reserved report available until the save completes", async () => {
+    const save = createDeferred();
+    const { coordinator } = fakeDependencies({
+      finalize: () => fakeReport(301),
+      save: () => save.promise,
+    });
+    const ids = correlation(301);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    const ready = jest.fn();
+    const preparation = coordinator.prepareReport(receipt.reportId).then(ready);
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await waitForTimers();
+    expect(ready).not.toHaveBeenCalled();
+    save.resolve();
+    await preparation;
+    expect(ready).toHaveBeenCalledWith(true);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it.each([false, true])("settles unavailable when terminal admission fails (painted: %s)", async (painted) => {
+    jest.useFakeTimers();
+    const { coordinator, recorder } = fakeDependencies({ finalize: () => fakeReport(304) });
+    const ids = correlation(304);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    if (painted) recordFailureSurface(coordinator, ids);
+    recorder.record.mockReturnValueOnce(false);
+    finish(coordinator, ids);
+    const ready = jest.fn();
+    const preparation = coordinator.prepareReport(receipt.reportId).then(ready);
+    await jest.advanceTimersByTimeAsync(1_000);
+    await preparation;
+    expect(ready).toHaveBeenCalledWith(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(false);
+    expect(recorder.finalize).not.toHaveBeenCalled();
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("reports save failure and coalesces explicit retries of the same report", async () => {
+    const retrySave = createDeferred();
+    const { coordinator, store, recorder } = fakeDependencies({ finalize: () => fakeReport(302) });
+    store.save.mockRejectedValueOnce(new Error("disk unavailable"))
+      .mockImplementationOnce(() => retrySave.promise);
+    const ids = correlation(302);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    const retry = coordinator.prepareReport(receipt.reportId, true);
+    const duplicate = coordinator.prepareReport(receipt.reportId, true);
+    expect(store.save).toHaveBeenCalledTimes(2);
+    retrySave.resolve();
+    await expect(retry).resolves.toBe(true);
+    await expect(duplicate).resolves.toBe(true);
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
+    expect(store.save.mock.calls[1][0]).toBe(store.save.mock.calls[0][0]);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("retries failed canonicalization without finalizing the report twice", async () => {
+    const { coordinator, recorder, store } = fakeDependencies({ finalize: () => fakeReport(305) });
+    store.serialize.mockImplementationOnce(() => { throw new Error("serialization unavailable"); });
+    const ids = correlation(305);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(true);
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
+    expect(store.serialize).toHaveBeenCalledTimes(2);
+    expect(store.save).toHaveBeenCalledTimes(1);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("retries an actual failed adapter save with the original report bytes", async () => {
+    const { adapter, coordinator, store } = realHarness();
+    adapter.writeFailures = 3;
+    const ids = correlation(306);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.isReportPersisted(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(true);
+    await expect(coordinator.isReportPersisted(receipt.reportId)).resolves.toBe(true);
+    const bytes = persistedBytes(adapter, receipt.reportId)!;
+    expect(bytes).toBe(store.serialize(JSON.parse(bytes) as AgentIncidentReport));
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("marks an evicted queued save unavailable and can save it on retry", async () => {
+    const blocked = createDeferred();
+    const { coordinator, store } = fakeDependencies({
+      finalize: (ids) => fakeReport(Number.parseInt(ids.conversationId.slice(-8), 16)),
+    });
+    store.save.mockImplementationOnce(() => blocked.promise);
+    for (let value = 400; value <= 420; value += 1) {
+      const ids = correlation(value);
+      begin(coordinator, ids);
+      coordinator.captureFailure(failure(ids));
+      finish(coordinator, ids);
+      recordFailureSurface(coordinator, ids);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await expect(coordinator.prepareReport(reportId(401))).resolves.toBe(false);
+    const retry = coordinator.prepareReport(reportId(401), true);
+    blocked.resolve();
+    await expect(retry).resolves.toBe(true);
+    expect(store.save).toHaveBeenCalledWith(fakeReport(401));
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("checks persisted bytes after restart and refuses missing or corrupt reports", async () => {
+    const { adapter, coordinator } = realHarness();
+    const ids = correlation(303);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    await coordinator.closeAdmissionAndDrain();
+    const restarted = realHarness(adapter).coordinator;
+    await expect(restarted.prepareReport(receipt.reportId)).resolves.toBe(true);
+    await expect(restarted.prepareReport(reportId(999))).resolves.toBe(false);
+    const path = `${AGENT_INCIDENT_STORE_PATH}/${receipt.reportId}.json`;
+    adapter.files.get(path)!.data = "truncated";
+    await expect(restarted.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(restarted.prepareReport("../../invalid")).resolves.toBe(false);
+    await restarted.closeAdmissionAndDrain();
+  });
+
   afterEach(() => {
     jest.useRealTimers();
   });
@@ -851,13 +986,9 @@ describe("AgentIncidentCoordinator", () => {
     const receipt = coordinator.captureFailure(failure(ids));
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1));
 
-    let drained = false;
-    const draining = coordinator.closeAdmissionAndDrain().then(() => { drained = true; });
-    await jest.advanceTimersByTimeAsync(999);
-    expect(drained).toBe(false);
-    await jest.advanceTimersByTimeAsync(1);
-    await draining;
-    expect(drained).toBe(true);
+    await coordinator.closeAdmissionAndDrain();
+    await expect(coordinator.prepareReport(receipt!.reportId)).resolves.toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
     expect(receipt).toEqual({ reportId: `report_${ids.conversationId.slice(-32)}` });
     expect(recorder.finalize).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();

@@ -2,7 +2,6 @@ import type {
   AgentConversationSnapshot,
   ManagedAgentError,
   AgentPart,
-  AgentRunStatus,
   AgentToolPart,
 } from "../../chat/ChatConversation";
 
@@ -130,11 +129,12 @@ export type AgentConversationPresentation = Readonly<{
   phase: AgentPresentationPhase;
   busy: boolean;
   composerRunning: boolean;
+  /** Whether parts can show live progress; approval waits suppress the tail separately. */
+  progressActive: boolean;
   visibleParts: readonly AgentPart[];
   activityStatus: string;
 }>;
 
-const TERMINAL_STATUSES = new Set<AgentRunStatus>(["completed", "cancelled", "failed"]);
 const ACTIVE_TOOL_STATES = new Set<AgentToolPart["state"]>([
   "input-streaming",
   "input-ready",
@@ -148,6 +148,7 @@ export function isActiveAgentToolState(state: AgentToolPart["state"]): boolean {
 
 function phaseFor(snapshot: AgentConversationSnapshot | null, requestPending: boolean): AgentPresentationPhase {
   if (!snapshot) return requestPending ? "submitting" : "idle";
+  if (snapshot.status === "idle") return "idle";
   if (snapshot.status === "completed") return "completed";
   if (snapshot.status === "cancelled") return "cancelled";
   if (snapshot.status === "failed") return "failed";
@@ -181,14 +182,10 @@ function activityStatus(
   // Terminal truth wins even when the final journal retains an in-flight tool
   // record. Otherwise a failed search can present a completed checkmark beside
   // "Searching", making two lifecycle presenters contradict each other.
+  if (phase === "idle") return "Idle";
   if (phase === "completed") return "Done";
   if (phase === "cancelled") return "Stopped";
   if (phase === "failed") return "Failed";
-  // A sustained outage outranks stale tool activity: the frozen tool states
-  // below describe the last frames before the connection dropped, not what is
-  // happening now.
-  const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
-    part.kind === "tool" && isActiveAgentToolState(part.state)) ?? [];
   if (phase === "awaiting-approval") {
     return snapshot?.parts.some((part) => part.kind === "tool"
       && part.state === "approval-required"
@@ -196,7 +193,11 @@ function activityStatus(
       ? "Waiting for your answer"
       : "Waiting for your approval";
   }
+  // Recovery outranks stale tool activity without inventing a tool outcome.
   if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
+  if (phase === "recovering") return "Continuing";
+  const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
+    part.kind === "tool" && isActiveAgentToolState(part.state)) ?? [];
   if (activeTools.some((part) =>
     part.location === "server" && part.name === "web_search")) {
     return "Searching";
@@ -217,8 +218,6 @@ function activityStatus(
       return "Writing";
     case "submitting":
       return "Connecting…";
-    case "recovering":
-      return "Continuing";
     case "settling":
       return "Finishing";
     default:
@@ -228,8 +227,8 @@ function activityStatus(
 
 /**
  * The only projection from transport lifecycle into chat presentation.
- * Terminal snapshots deliberately override the outer pending promise so the
- * composer and live indicators stop at the protocol boundary, not later.
+ * Idle and terminal snapshots override the outer pending promise. Recovery
+ * keeps the run stoppable, but frozen parts must not imply live progress.
  */
 export function presentAgentConversation(
   snapshot: AgentConversationSnapshot | null,
@@ -237,13 +236,14 @@ export function presentAgentConversation(
 ): AgentConversationPresentation {
   const phase = phaseFor(snapshot, requestPending);
   const busy = snapshot
-    ? !TERMINAL_STATUSES.has(snapshot.status)
+    ? snapshot.status === "running" || snapshot.status === "waiting"
     : requestPending;
   const meaningfulParts = snapshot?.parts ?? [];
   return Object.freeze({
     phase,
     busy,
     composerRunning: busy,
+    progressActive: busy && snapshot?.phase !== "retrying",
     visibleParts: meaningfulParts,
     activityStatus: activityStatus(snapshot, phase),
   });

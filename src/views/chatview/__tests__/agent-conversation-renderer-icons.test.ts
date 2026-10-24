@@ -23,6 +23,7 @@ function presentation(
     phase,
     busy,
     composerRunning: busy,
+    progressActive: busy && phase !== "recovering" && snapshot.phase !== "retrying",
     visibleParts: snapshot.parts,
     activityStatus,
   };
@@ -760,6 +761,186 @@ describe("AgentConversationRenderer tail status", () => {
         expect(status.hasAttribute("data-agent-working-timer")).toBe(true);
         expect(label.firstChild).toBe(text);
       }
+    } finally { renderer.unload(); }
+  });
+
+  it.each(["idle", "recovering", "completed", "cancelled", "failed"] as const)(
+    "freezes stale part animations and elapsed timers on %s snapshots without rewriting source parts",
+    async (phase) => {
+      jest.useFakeTimers();
+      const parent = document.body.createDiv();
+      const renderer = new AgentConversationRenderer(parent, {
+        app: new App(), sourcePath: () => "", onApprove: jest.fn(),
+        onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      });
+      renderer.load();
+      const parts: readonly AgentPart[] = Object.freeze([
+        Object.freeze({
+          id: "tool", kind: "tool", messageId: "assistant", callId: "call", order: 0,
+          name: "web_search", input: { query: "latest" }, location: "server", state: "running",
+        } as const),
+        Object.freeze({
+          id: "reasoning", kind: "reasoning", messageId: "assistant", order: 1,
+          summary: "Partial reasoning", state: "streaming",
+        } as const),
+        Object.freeze({
+          id: "text", kind: "text", messageId: "assistant", order: 2,
+          markdown: "Partial answer", state: "streaming",
+        } as const),
+      ]);
+      const running: AgentConversationSnapshot = {
+        runId: "run", turnId: "turn", status: "running", phase: "working",
+        elapsedMs: 2_000, messages: [], parts,
+      };
+      try {
+        await renderer.renderActive(running, presentAgentConversation(running, true));
+        const overflow = parent.querySelector<HTMLButtonElement>("[data-agent-activity-overflow]")!;
+        overflow.click();
+        const reasoning = parent.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
+        reasoning.open = true;
+        reasoning.dispatchEvent(new Event("toggle"));
+        await jest.advanceTimersByTimeAsync(100);
+        const text = parent.querySelector<HTMLElement>('[data-part-key="text"]')!;
+        const tool = parent.querySelector<HTMLElement>('[data-part-key="tool:call"]')!;
+        const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+        expect(text.classList).toContain("is-streaming");
+        expect(tool.querySelector(".is-animated")).not.toBeNull();
+        expect(reasoning.querySelector(".is-animated")).not.toBeNull();
+        expect(overflow.querySelector(".is-animated")).not.toBeNull();
+        expect(tail.textContent).toBe("Writing · 2s");
+
+        const frozen: AgentConversationSnapshot = {
+          ...running,
+          status: phase === "recovering" ? "running" : phase,
+          phase: "retrying",
+          statusLabel: "Connection interrupted",
+        };
+        const frozenPresentation = presentAgentConversation(frozen, true);
+        await renderer.renderActive(frozen, frozenPresentation);
+        await jest.advanceTimersByTimeAsync(100);
+        expect(parent.querySelector(".is-animated, .is-streaming, [data-agent-working-timer]")).toBeNull();
+        expect(jest.getTimerCount()).toBe(0);
+        expect(renderer.element.getAttribute("aria-busy")).toBe(String(phase === "recovering"));
+        expect(frozenPresentation.composerRunning).toBe(phase === "recovering");
+        expect(parent.querySelector('[data-part-key="text"]')).toBe(text);
+        expect(text.textContent).toBe("Partial answer");
+        expect(reasoning.textContent).toContain("Partial reasoning");
+        expect(reasoning.querySelector("strong")!.textContent).toBe("Reasoning");
+        expect(parts.map(part => part.kind === "error" ? null : part.state))
+          .toEqual(["running", "streaming", "streaming"]);
+        if (phase === "recovering" || phase === "idle") {
+          expect(tool.classList).toContain("is-running");
+          expect(tool.classList).not.toContain("is-outcome-unknown");
+          expect(tool.querySelector("[aria-description='Done']")).toBeNull();
+          expect(parent.querySelector("[data-agent-turn-fold]")).toBeNull();
+        }
+        if (phase === "idle") expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
+        const frozenDom = parent.innerHTML;
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect(parent.innerHTML).toBe(frozenDom);
+        expect(jest.getTimerCount()).toBe(0);
+
+        if (phase === "recovering") {
+          expect(tail.textContent).toBe("Reconnecting");
+          // Only lifecycle and server elapsed time change: cached part identities
+          // must not prevent the live cursor, spinners, and timer from resuming.
+          const resumed = { ...running, elapsedMs: 4_000 };
+          await renderer.renderActive(resumed, presentAgentConversation(resumed, false));
+          expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(tail);
+          expect(parent.querySelector('[data-part-key="text"]')).toBe(text);
+          expect(text.classList).toContain("is-streaming");
+          expect(tool.querySelector(".is-animated")).not.toBeNull();
+          expect(reasoning.querySelector(".is-animated")).not.toBeNull();
+          expect(overflow.querySelector(".is-animated")).not.toBeNull();
+          expect(tail.textContent).toBe("Writing · 4s");
+          await jest.advanceTimersByTimeAsync(1_000);
+          expect(tail.textContent).toBe("Writing · 5s");
+          const updated: AgentConversationSnapshot = {
+            ...resumed,
+            parts: parts.map(part => part.kind === "text"
+              ? { ...part, markdown: "Answer continues after recovery" }
+              : part.kind === "reasoning"
+                ? { ...part, summary: "Reasoning continues after recovery" }
+                : part),
+          };
+          await renderer.renderActive(updated, presentAgentConversation(updated, false));
+          await jest.advanceTimersByTimeAsync(100);
+          expect(text.textContent).toBe("Answer continues after recovery");
+          expect(reasoning.textContent).toContain("Reasoning continues after recovery");
+        }
+      } finally {
+        renderer.unload();
+      }
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("never starts an elapsed timer for an idle snapshot while the request promise is pending", async () => {
+    jest.useFakeTimers();
+    const onAnnounce = jest.fn();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove: jest.fn(), onAnnounce,
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const idle: AgentConversationSnapshot = {
+      runId: null, turnId: null, status: "idle", elapsedMs: 1_000, messages: [], parts: [],
+    };
+    try {
+      await renderer.renderActive(idle, presentAgentConversation(idle, true));
+      expect(renderer.element.getAttribute("aria-busy")).toBe("false");
+      expect(parent.querySelector(".systemsculpt-agent-tail-status, .is-active, .is-animated")).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(jest.getTimerCount()).toBe(0);
+      expect(onAnnounce).not.toHaveBeenCalled();
+    } finally { renderer.unload(); }
+  });
+
+  it.each(["hosted", "native"] as const)("keeps inline %s approval actionable during frozen recovery and resumes after resolution", async (backend) => {
+    jest.useFakeTimers();
+    const onApprove = jest.fn();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove,
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const pending: Extract<AgentPart, { kind: "tool" }> = {
+      id: "pending", kind: "tool", messageId: "assistant", callId: "call", order: 0,
+      name: backend === "hosted" ? "read" : "Bash", input: {},
+      location: backend === "hosted" ? "vault" : "server",
+      ...(backend === "native" ? { native: { agent: "claude" as const, workingDirectory: "/vault" } } : {}),
+      state: "approval-required", approvalId: "approval",
+    };
+    const running: AgentConversationSnapshot = {
+      runId: "run", turnId: "turn", status: "waiting", phase: "waiting",
+      elapsedMs: 2_000, messages: [], parts: [pending],
+    };
+    try {
+      await renderer.renderActive(running, presentAgentConversation(running, true));
+      const approve = parent.querySelector<HTMLButtonElement>('[data-testid="chat.approval.allow-once"]')!;
+      approve.focus();
+      const recovering = { ...running, phase: "retrying" as const, statusLabel: "Connection interrupted" };
+      await renderer.renderActive(recovering, presentAgentConversation(recovering, true));
+      const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+      expect(parent.querySelector('[data-testid="chat.approval.allow-once"]')).toBe(approve);
+      expect(document.activeElement).toBe(approve);
+      expect(approve.disabled).toBe(false);
+      expect(tail.textContent).toBe("Waiting for your approval");
+      expect(parent.querySelector(".is-animated, [data-agent-working-timer]")).toBeNull();
+      approve.click();
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(onApprove).toHaveBeenCalledWith("approval", true);
+      const approved = { ...recovering, parts: [{ ...pending, state: "approved" as const }] };
+      await renderer.renderActive(approved, presentAgentConversation(approved, true));
+      expect(tail.textContent).toBe("Reconnecting");
+      expect(parent.querySelector(".systemsculpt-agent-approval, .is-animated, [data-agent-working-timer]")).toBeNull();
+      const resumed = { ...approved, status: "running" as const, phase: "working" as const, statusLabel: "Working" };
+      await renderer.renderActive(resumed, presentAgentConversation(resumed, true));
+      expect(tail.hasAttribute("data-agent-working-timer")).toBe(true);
+      expect(tail.querySelector(".is-animated")).not.toBeNull();
     } finally { renderer.unload(); }
   });
 
@@ -2504,6 +2685,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
       onRetryFailedTurn: retryFailedTurn,
     });
@@ -2536,7 +2718,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
-    expect(copy.textContent).toBe("Copy report");
+    expect(copy.textContent).toBe("Copy report ID");
     retry.click();
     copy.click();
     await Promise.resolve();
@@ -2583,6 +2765,77 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
+  it("hides report IDs while saving, offers a save retry, then enables copying", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const prepare = jest.fn(() => new Promise<boolean>((resolve) => { finishSave = resolve; }));
+    const copy = jest.fn(async () => true);
+    const retryTurn = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: prepare,
+      onCopyIncidentReport: copy,
+      onRetryFailedTurn: retryTurn,
+    });
+    renderer.load();
+    const reportId = `report_${"d".repeat(32)}`;
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-report-save", content: "Submitted prompt",
+    }, {
+      role: "assistant", message_id: "failed-report-save", content: "",
+      terminalOutcome: "failed", terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    finishSave(false);
+    await Promise.resolve();
+    expect(parent.textContent).toContain("Report unavailable");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.retry-incident-report"]')!;
+    retry.click();
+    expect(prepare).toHaveBeenLastCalledWith(reportId, true);
+    expect(retryTurn).not.toHaveBeenCalled();
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.querySelector('[data-testid="chat.turn.retry-incident-report"]')).toBeNull();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.textContent).toContain(`Report ID: ${reportId}`);
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy-incident-report"]')!.click();
+    await Promise.resolve();
+    expect(copy).toHaveBeenCalledWith(reportId);
+    renderer.unload();
+  });
+
+  it("does not add report actions after the renderer unloads", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "chat.md", onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      onCopyIncidentReport: jest.fn(),
+      onPrepareIncidentReport: () => new Promise<boolean>((resolve) => { finishSave = resolve; }),
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-unload-report", content: "Prompt",
+    }, {
+      role: "assistant", message_id: "failure-unload-report", content: "",
+      terminalOutcome: "failed", terminalReportId: `report_${"f".repeat(32)}`,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    renderer.unload();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+  });
+
   it("shows a compact copying state and blocks duplicate report ID copies", async () => {
     const parent = document.body.createDiv();
     let resolveCopy!: (value: boolean) => void;
@@ -2596,6 +2849,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
     });
     renderer.load();
@@ -2618,7 +2872,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
-    expect(copy.textContent).toBe("Copy report");
+    expect(copy.textContent).toBe("Copy report ID");
     copy.click();
     expect(copy.disabled).toBe(true);
     expect(copy.getAttribute("aria-busy")).toBe("true");

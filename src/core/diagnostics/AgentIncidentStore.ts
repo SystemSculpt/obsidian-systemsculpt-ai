@@ -284,6 +284,16 @@ export class AgentIncidentStore {
     });
   }
 
+  /** Verify a saved report without trusting a transcript's reserved ID. */
+  public async hasReport(reportId: string): Promise<boolean> {
+    try {
+      const path = this.reportPath(reportId);
+      return (await this.readCandidate(path, reportId, false)).kind === "valid";
+    } catch {
+      return false;
+    }
+  }
+
   public enforceRetention(): Promise<AgentIncidentRetentionResult> {
     return this.exclusive(async () => {
       await this.ensureDirectoryWithRetry();

@@ -218,7 +218,7 @@ for (const [label, styles, expected] of [
   });
 }
 
-test("production CSS builds fail closed on missing imports and normalize source line endings", () => {
+test("production CSS builds fail closed on missing imports and normalize source line endings", async () => {
   const root = createTempPluginDir();
   const cssRoot = path.join(root, "css");
   const indexPath = path.join(cssRoot, "index.css");
@@ -227,13 +227,13 @@ test("production CSS builds fail closed on missing imports and normalize source 
   fs.writeFileSync(indexPath, "@import 'present.css';\r\n", "utf8");
   fs.writeFileSync(path.join(cssRoot, "present.css"), ".present {\r\n  color: red;\r\n}\r\n", "utf8");
 
-  const first = buildCssArtifact({
+  const first = await buildCssArtifact({
     indexPath,
     outputPath,
     production: true,
     logger: {},
   });
-  const second = buildCssArtifact({
+  const second = await buildCssArtifact({
     indexPath,
     outputPath,
     production: true,
@@ -244,7 +244,7 @@ test("production CSS builds fail closed on missing imports and normalize source 
   assert.equal(fs.readFileSync(outputPath, "utf8"), first);
 
   fs.writeFileSync(indexPath, "@import 'missing.css';\n", "utf8");
-  assert.throws(
+  await assert.rejects(
     () => buildCssArtifact({
       indexPath,
       outputPath,
@@ -256,7 +256,7 @@ test("production CSS builds fail closed on missing imports and normalize source 
   assert.equal(fs.readFileSync(outputPath, "utf8"), first);
 });
 
-test("CSS builds preserve entry rules after imports, including focus and touch invariants", () => {
+test("CSS builds preserve entry rules after imports, including focus and touch invariants", async () => {
   const root = createTempPluginDir();
   const cssRoot = path.join(root, "css");
   const indexPath = path.join(cssRoot, "index.css");
@@ -274,22 +274,91 @@ test("CSS builds preserve entry rules after imports, including focus and touch i
   fs.writeFileSync(path.join(cssRoot, "base.css"), ".base { color: black; }");
   fs.writeFileSync(path.join(cssRoot, "feature.css"), ".control { box-shadow: none; }");
 
-  const css = buildCssArtifact({ indexPath, outputPath, logger: {} });
+  const css = await buildCssArtifact({ indexPath, outputPath, logger: {} });
   assert.equal(fs.readFileSync(outputPath, "utf8"), css);
   assert.equal(css.includes("\r"), false);
-  assert.ok(css.indexOf(".base {") < css.indexOf(".control {"));
-  assert.ok(css.includes(focusRule));
-  assert.ok(css.includes(touchRule));
-  assert.ok(css.indexOf(focusRule) > css.indexOf(".control { box-shadow: none; }"));
-  assert.ok(css.indexOf(touchRule) > css.indexOf(focusRule));
+  assert.equal(css, ".base{color:#000}.control{box-shadow:none}.control:focus-visible{box-shadow:var(--ss-ring)}@media (pointer: coarse){.control{min-height:44px}}\n");
 });
 
-test("production CSS builds never replace output with a failure sentinel", () => {
+test("CSS bundling resolves nested and qualified imports and minifies only production", async (t) => {
+  const root = createTempPluginDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cssRoot = path.join(root, "css");
+  const indexPath = path.join(cssRoot, "index.css");
+  const outputPath = path.join(root, "styles.css");
+  fs.mkdirSync(path.join(cssRoot, "nested"), { recursive: true });
+  fs.writeFileSync(indexPath, '@import url("nested/theme.css") screen;\n.control { color: black; }\n');
+  fs.writeFileSync(path.join(cssRoot, "nested/theme.css"), '@import "base.css";\n/* Ordinary source comment */\n.control { padding: 0px 0px 0px 0px; }\n');
+  fs.writeFileSync(path.join(cssRoot, "nested/base.css"), ".control { color: red; }\n");
+
+  const development = await buildCssArtifact({ indexPath, outputPath, production: false, logger: {} });
+  const production = await buildCssArtifact({ indexPath, outputPath, logger: {} });
+  assert.match(development, /\n {2,}color: red;/);
+  assert.equal(production, "@media screen{.control{color:red}}@media screen{.control{padding:0}}.control{color:#000}\n");
+  assert.ok(production.length < development.length);
+  assert.doesNotMatch(production, /@import|Ordinary source comment/);
+});
+
+test("development missing imports preserve the last complete CSS instead of publishing partial styles", async (t) => {
+  const root = createTempPluginDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexPath = path.join(root, "index.css");
+  const outputPath = path.join(root, "styles.css");
+  fs.writeFileSync(indexPath, '@import "missing.css";\n.partial { color: red; }');
+  fs.writeFileSync(outputPath, ".known-good {}\n");
+  assert.equal(await buildCssArtifact({ indexPath, outputPath, production: false, logger: {} }), null);
+  assert.equal(fs.readFileSync(outputPath, "utf8"), ".known-good {}\n");
+  fs.rmSync(outputPath);
+  assert.equal(await buildCssArtifact({ indexPath, outputPath, production: false, logger: {} }), null);
+  assert.equal(fs.readFileSync(outputPath, "utf8"), "/* CSS build failed */\n");
+});
+
+test("CSS nested url imports retain path safety even in development", async (t) => {
+  const root = createTempPluginDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cssRoot = path.join(root, "css");
+  const indexPath = path.join(cssRoot, "index.css");
+  const outputPath = path.join(root, "styles.css");
+  fs.mkdirSync(cssRoot);
+  fs.writeFileSync(indexPath, '@import "nested.css";');
+  fs.writeFileSync(path.join(cssRoot, "nested.css"), '@import url("../outside.css") screen;');
+  fs.writeFileSync(path.join(root, "outside.css"), ".outside-secret { color: red; }");
+  fs.writeFileSync(outputPath, ".known-good {}\n");
+  await assert.rejects(
+    () => buildCssArtifact({ indexPath, outputPath, production: false, logger: {} }),
+    /CSS import must be a relative path without traversal/,
+  );
+  assert.equal(fs.readFileSync(outputPath, "utf8"), ".known-good {}\n");
+});
+
+test("CSS asset URLs stay external without reading traversal, absolute, or symlink targets", async (t) => {
+  const root = createTempPluginDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cssRoot = path.join(root, "css");
+  const indexPath = path.join(cssRoot, "index.css");
+  const outputPath = path.join(root, "styles.css");
+  const outsidePath = path.join(root, "outside.txt");
+  fs.mkdirSync(cssRoot);
+  fs.writeFileSync(outsidePath, "outside-content-must-not-be-embedded");
+  fs.symlinkSync(outsidePath, path.join(cssRoot, "linked.txt"));
+  const urls = ["../outside.txt", outsidePath.replace(/\\/g, "/"), "linked.txt", "missing.png", "data:image/png;base64,AA==", "https://example.invalid/image.png"];
+  fs.writeFileSync(indexPath, urls.map((url, i) => `.asset-${i} { background: url(${JSON.stringify(url)}); }`).join("\n"));
+  for (const production of [true, false]) {
+    const css = await buildCssArtifact({ indexPath, outputPath, production, logger: {} });
+    for (const url of urls) assert.ok(css.includes(url));
+    assert.doesNotMatch(css, /outside-content-must-not-be-embedded/);
+    assert.ok(!css.includes(Buffer.from("outside-content-must-not-be-embedded").toString("base64")));
+    assert.equal(fs.readFileSync(outsidePath, "utf8"), "outside-content-must-not-be-embedded");
+    assert.deepEqual(fs.readdirSync(root).sort(), ["css", "outside.txt", "styles.css"]);
+  }
+});
+
+test("production CSS builds never replace output with a failure sentinel", async () => {
   const root = createTempPluginDir();
   const outputPath = path.join(root, "styles.css");
   fs.writeFileSync(outputPath, ".known-good {}\n", "utf8");
 
-  assert.throws(
+  await assert.rejects(
     () => buildCssArtifact({
       indexPath: path.join(root, "missing-index.css"),
       outputPath,
@@ -301,13 +370,13 @@ test("production CSS builds never replace output with a failure sentinel", () =>
   assert.equal(fs.readFileSync(outputPath, "utf8"), ".known-good {}\n");
 });
 
-test("development CSS failures preserve a prior good output", () => {
+test("development CSS failures preserve a prior good output", async () => {
   const root = createTempPluginDir();
   const outputPath = path.join(root, "styles.css");
   fs.writeFileSync(outputPath, ".known-good {}\n", "utf8");
 
   assert.equal(
-    buildCssArtifact({
+    await buildCssArtifact({
       indexPath: path.join(root, "missing-index.css"),
       outputPath,
       production: false,
@@ -318,7 +387,7 @@ test("development CSS failures preserve a prior good output", () => {
   assert.equal(fs.readFileSync(outputPath, "utf8"), ".known-good {}\n");
 });
 
-test("CSS imports reject absolute and traversal paths without reading outside the source root", (t) => {
+test("CSS imports reject absolute and traversal paths without reading outside the source root", async (t) => {
   const root = createTempPluginDir();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const cssRoot = path.join(root, "css");
@@ -332,7 +401,7 @@ test("CSS imports reject absolute and traversal paths without reading outside th
     fs.writeFileSync(indexPath, `@import ${JSON.stringify(importPath)};\n`, "utf8");
     fs.writeFileSync(outputPath, ".known-good {}\n", "utf8");
 
-    assert.throws(
+    await assert.rejects(
       () => buildCssArtifact({
         indexPath,
         outputPath,
@@ -346,7 +415,7 @@ test("CSS imports reject absolute and traversal paths without reading outside th
   }
 });
 
-test("CSS imports reject a symlink escape without embedding or changing the outside file", (t) => {
+test("CSS imports reject a symlink escape without embedding or changing the outside file", async (t) => {
   const root = createTempPluginDir();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const cssRoot = path.join(root, "css");
@@ -361,7 +430,7 @@ test("CSS imports reject a symlink escape without embedding or changing the outs
   fs.writeFileSync(outsidePath, ".outside-secret {}\n", "utf8");
   fs.symlinkSync(outsideRoot, path.join(cssRoot, "linked"), "dir");
 
-  assert.throws(
+  await assert.rejects(
     () => buildCssArtifact({
       indexPath,
       outputPath,
@@ -374,7 +443,7 @@ test("CSS imports reject a symlink escape without embedding or changing the outs
   assert.equal(fs.readFileSync(outsidePath, "utf8"), ".outside-secret {}\n");
 });
 
-test("CSS output rejects an existing symlink without changing its outside target", (t) => {
+test("CSS output rejects an existing symlink without changing its outside target", async (t) => {
   const root = createTempPluginDir();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const cssRoot = path.join(root, "css");
@@ -387,7 +456,7 @@ test("CSS output rejects an existing symlink without changing its outside target
   fs.writeFileSync(outsidePath, ".outside-target {}\n", "utf8");
   fs.symlinkSync(outsidePath, outputPath);
 
-  assert.throws(
+  await assert.rejects(
     () => buildCssArtifact({
       indexPath,
       outputPath,
@@ -400,7 +469,7 @@ test("CSS output rejects an existing symlink without changing its outside target
   assert.equal(fs.readFileSync(outsidePath, "utf8"), ".outside-target {}\n");
 });
 
-test("CSS output rejects an existing non-regular path", (t) => {
+test("CSS output rejects an existing non-regular path", async (t) => {
   const root = createTempPluginDir();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const cssRoot = path.join(root, "css");
@@ -411,7 +480,7 @@ test("CSS output rejects an existing non-regular path", (t) => {
   fs.writeFileSync(path.join(cssRoot, "present.css"), ".present {}\n", "utf8");
   fs.mkdirSync(outputPath);
 
-  assert.throws(
+  await assert.rejects(
     () => buildCssArtifact({
       indexPath,
       outputPath,
@@ -574,7 +643,7 @@ test("artifact inspection reports likely secrets without echoing their values", 
   for (const [secret, kind] of [
     [`sk-proj-${"A".repeat(32)}`, "OpenAI-compatible API key"],
     [`AKIA${"B".repeat(16)}`, "AWS access key"],
-    ["-----BEGIN PRIVATE KEY-----", "private key"],
+    [["-----BEGIN", "PRIVATE KEY-----"].join(" "), "private key"],
     ["https://build-user:super-secret-value@example.com/api", "credential-bearing URL"],
   ]) {
     await t.test(kind, () => {

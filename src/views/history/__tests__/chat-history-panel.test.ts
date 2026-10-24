@@ -191,6 +191,47 @@ describe("ChatHistoryPanel", () => {
     panel.unload();
   });
 
+  it.each(["Enter", "Escape"])("keeps a rename open during IME composition, then handles %s after composition", async (key) => {
+    const { parent, panel, search, options } = mount();
+    panel.open();
+    await flush();
+    keydown(search, "F10", { shiftKey: true });
+    menus().at(-1)!.select("Rename");
+    const input = parent.querySelector<HTMLInputElement>('[data-testid="history.row.rename"]')!;
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(document.activeElement).toBe(input);
+    input.value = "会議メモ";
+
+    for (const event of [
+      { key, isComposing: true },
+      { key: "Process", isComposing: true },
+      { key: "Process", isComposing: false },
+    ]) {
+      expect(keydown(input, event.key, { isComposing: event.isComposing })).toBe(true);
+      await flush();
+      expect(parent.querySelector('[data-testid="history.row.rename"]')).toBe(input);
+      expect(input.value).toBe("会議メモ");
+      expect(document.activeElement).toBe(input);
+      expect(options.onRename).not.toHaveBeenCalled();
+      expect(options.onOpen).not.toHaveBeenCalled();
+      expect(options.onClose).not.toHaveBeenCalled();
+    }
+
+    expect(keydown(input, key)).toBe(false);
+    await flush();
+    expect(parent.querySelector('[data-testid="history.row.rename"]')).toBeNull();
+    expect(document.activeElement).toBe(search);
+    if (key === "Enter") {
+      expect(options.onRename).toHaveBeenCalledTimes(1);
+      expect(options.onRename).toHaveBeenCalledWith(expect.objectContaining({ chatId: "links" }), "会議メモ");
+    } else {
+      expect(options.onRename).not.toHaveBeenCalled();
+      expect(parent.querySelector('[data-chat-id="links"] .systemsculpt-history-row-title')?.textContent)
+        .toBe("Fix broken links");
+    }
+    panel.unload();
+  });
+
   it("toggles a favorite from the row's own button without opening the chat", async () => {
     const { parent, panel, options } = mount();
     panel.open();

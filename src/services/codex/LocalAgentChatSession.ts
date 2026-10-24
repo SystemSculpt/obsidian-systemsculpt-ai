@@ -88,9 +88,11 @@ export class LocalAgentChatSession implements ChatSession {
       const terminal = terminalToolStates.has(update.state);
       if (terminal) for (const pending of [...this.approvals.values()]) if (pending.callId === update.callId) pending.finish();
       const previous = this.localSnapshot.parts.find((part): part is AgentToolPart => part.kind === 'tool' && part.callId === update.callId);
-      // Approval withdrawal is not an execution result. A real native result supersedes that
-      // presentation state; late starts cannot reopen it, nor a previously observed native result.
-      const keepState = previous && (nativeTerminalCalls.has(update.callId) || terminalToolStates.has(previous.state) && !terminal
+      // A native error result can acknowledge a user denial, not a failed execution.
+      // Withdrawal is different: a real native result still supersedes it.
+      // Late starts cannot reopen either a settled decision or a native result.
+      const keepState = previous && (previous.state === 'denied' && previous.approvalDecision === 'denied' && update.state === 'failed'
+        || nativeTerminalCalls.has(update.callId) || terminalToolStates.has(previous.state) && !terminal
         || previous.state === 'approval-required' && !terminal || ['running', 'approved'].includes(previous.state) && update.state === 'input-streaming');
       const state = keepState ? previous.state : update.state;
       if (terminal) nativeTerminalCalls.add(update.callId);
