@@ -90,6 +90,7 @@ const createTabHarness = (app: App, plugin: unknown) => {
   const tab = {
     app,
     plugin,
+    invalidateSearchIndex: jest.fn(),
     registerRenderCleanup: jest.fn((cleanup: () => void) => {
       cleanups.add(cleanup);
       return () => {

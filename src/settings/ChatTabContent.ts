@@ -1,5 +1,5 @@
 import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
-import { Setting } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { beginTextSettings } from "./TextSettings";
 
@@ -27,9 +27,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
     const normalizeDefaultChatTag = (value: string): string => value.trim().replace(/^#+/, "");
 
-    new Setting(containerEl)
-        .setName("Default chat tag")
-        .setDesc("Optional. Adds this tag to new chat history notes (frontmatter `tags`).")
+    createCatalogSetting(containerEl, "chat.default-tag")
         .addText((text) => {
             text
                 .setPlaceholder("Ai-chat")
@@ -41,9 +39,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         });
 
 // --- Default Chat Font Size ---
-new Setting(containerEl)
-    .setName("Default chat font size")
-    .setDesc("Select the default text size for new chat messages.")
+createCatalogSetting(containerEl, "chat.font-size")
     .addDropdown(dropdown => {
         dropdown
             .addOption("small", "Small")
@@ -57,9 +53,7 @@ new Setting(containerEl)
 	    });
 
 // --- Reduced Motion Preference ---
-new Setting(containerEl)
-    .setName("Reduce chat motion")
-    .setDesc("Minimize chat animations even when your system does not request reduced motion. Your system preference is always honored.")
+createCatalogSetting(containerEl, "chat.reduce-motion")
     .addToggle((toggle) => {
         toggle
             .setValue(plugin.settings.reduceChatMotion ?? false)

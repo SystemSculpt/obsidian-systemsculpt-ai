@@ -1,4 +1,5 @@
-import { Notice, Setting } from "obsidian";
+import { Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import { DEFAULT_STUDIO_PROJECTS_DIR } from "../studio/paths";
 import { STUDIO_DISPLAY_NAME } from "../studio/types";
@@ -18,8 +19,7 @@ export function displayImageGenerationTabContent(
   const { plugin } = tabInstance;
   containerEl.createEl("h3", { text: "Studio" });
 
-  new Setting(containerEl)
-    .setName(`Open ${STUDIO_DISPLAY_NAME}`)
+  createCatalogSetting(containerEl, "studio.open")
     .addButton((button) => {
       button
         .setButtonText(`Open ${STUDIO_DISPLAY_NAME}`)
@@ -32,9 +32,7 @@ export function displayImageGenerationTabContent(
         });
     });
 
-  new Setting(containerEl)
-    .setName("Projects folder")
-    .setDesc(`Default vault folder for new ${STUDIO_DISPLAY_NAME} projects.`)
+  createCatalogSetting(containerEl, "studio.projects-folder")
     .addText((text) => {
       text
         .setPlaceholder(DEFAULT_STUDIO_PROJECTS_DIR)
@@ -50,9 +48,7 @@ export function displayImageGenerationTabContent(
       }, tabInstance.app);
     });
 
-  new Setting(containerEl)
-    .setName("Run retention")
-    .setDesc("Maximum completed runs kept per project.")
+  createCatalogSetting(containerEl, "studio.run-retention")
     .addText((text) => {
       text
         .setPlaceholder("100")
@@ -67,9 +63,7 @@ export function displayImageGenerationTabContent(
       text.inputEl.inputMode = "numeric";
     });
 
-  new Setting(containerEl)
-    .setName("Artifact retention (mb)")
-    .setDesc("Target artifact storage per project before oldest run assets are pruned.")
+  createCatalogSetting(containerEl, "studio.artifact-retention")
     .addText((text) => {
       text
         .setPlaceholder("1024")

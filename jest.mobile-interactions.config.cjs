@@ -16,6 +16,7 @@ const mobileInteractionTests = [
 	"<rootDir>/src/views/studio/canvas/__tests__/studio-graph-workspace-renderer-controls.test.ts",
 	"<rootDir>/src/__tests__/main-diagnostics-session.test.ts",
 	"<rootDir>/src/__tests__/systemsculpt-settings-tab.test.ts",
+	"<rootDir>/src/__tests__/settings-lazy-render.test.ts",
 ];
 
 module.exports = {
