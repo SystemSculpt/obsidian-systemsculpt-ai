@@ -891,10 +891,6 @@ export default class SystemSculptPlugin extends Plugin {
     }, 0);
   }
 
-  private showUserNotice(message: string) {
-    new Notice(message, 8000); // Show for 8 seconds to ensure visibility
-  }
-
   private showErrorNotice(message: string) {
     new Notice(message, 15000);
   }
@@ -1376,14 +1372,8 @@ export default class SystemSculptPlugin extends Plugin {
       this.directoryManager = new DirectoryManager(this.app, this);
     }
 
-    const result = await this.directoryManager.repair();
-    if (result) {
-      this.showUserNotice("Directory structure has been repaired successfully.");
-    } else {
-      this.showUserNotice("Failed to repair directory structure. Check console for details.");
-    }
-
-    return result;
+    // The settings action that starts a repair shows its result inline.
+    return this.directoryManager.repair();
   }
 
   /**

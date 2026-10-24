@@ -45,10 +45,9 @@ export function renderAccountSection(
 
   let validateCurrentLicense: () => Promise<LicenseValidationResult>;
   validateCurrentLicense = async (): Promise<LicenseValidationResult> => {
-    const validatingNotice = new Notice("Validating license key...", 0);
+    // Both callers show "Working..." on their button while this runs.
     try {
       const result = await plugin.getLicenseManager().validateLicenseKeyDetailed();
-      validatingNotice.hide?.();
       if (result.outcome === "rejected") {
         new Notice("Invalid license key. Please check and try again.");
         return result;
@@ -57,11 +56,9 @@ export function renderAccountSection(
         new Notice("License validation is temporarily unavailable. Try again.");
         return result;
       }
-      new Notice("License activated successfully.");
       tabInstance.display();
       return result;
     } catch {
-      validatingNotice.hide?.();
       new Notice("Unable to validate license. Try again.");
       return { outcome: "unavailable", isValid: !!plugin.settings.licenseValid };
     }
@@ -94,7 +91,6 @@ export function renderAccountSection(
               subscriptionStatus: "",
               lastValidated: 0,
             });
-            new Notice("License deactivated.");
             tabInstance.display();
           } finally {
             button.setDisabled(false).setButtonText("Deactivate");

@@ -13,7 +13,7 @@ jest.mock("../modals/PromptModal", () => ({
 }));
 
 import { showPrompt } from "../modals/PromptModal";
-import { displayNotice, showActionNotice, showConfirm } from "../notifications";
+import { displayNotice, flashButtonResult, showActionNotice, showConfirm } from "../notifications";
 
 describe("notifications", () => {
   const app = {} as App;
@@ -110,5 +110,39 @@ describe("notifications", () => {
     expect(onSelect).not.toHaveBeenCalled();
     button.click();
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("flashButtonResult", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  it("shows the result on a text button, then restores its label once", () => {
+    jest.useFakeTimers();
+    const button = document.body.createEl("button", { text: "Copy error" });
+
+    flashButtonResult(button, "Copied");
+    expect(button.textContent).toBe("Copied");
+    jest.advanceTimersByTime(1_000);
+    flashButtonResult(button, "Copied");
+    jest.advanceTimersByTime(1_000);
+    expect(button.textContent).toBe("Copied");
+    jest.advanceTimersByTime(500);
+    expect(button.textContent).toBe("Copy error");
+  });
+
+  it("changes only the label of a shared surface action, keeping its icon", () => {
+    jest.useFakeTimers();
+    const button = document.body.createEl("button");
+    const icon = button.createSpan({ cls: "ss-button__icon" });
+    const label = button.createSpan({ cls: "ss-button__label", text: "Copy paths" });
+
+    flashButtonResult(button, "Copied");
+    expect(label.textContent).toBe("Copied");
+    expect(icon.isConnected).toBe(true);
+    jest.runAllTimers();
+    expect(label.textContent).toBe("Copy paths");
   });
 });

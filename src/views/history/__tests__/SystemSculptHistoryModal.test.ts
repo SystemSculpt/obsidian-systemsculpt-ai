@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import { SystemSculptHistoryModal } from "../SystemSculptHistoryModal";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 const mockHost = { localFilesystem: true };
 jest.mock("../../../platform/hostCapabilities", () => {
@@ -64,6 +66,30 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     expect(loadEntries).toHaveBeenCalledTimes(2);
     expect(modal.modalEl.textContent).toContain("Fresh history");
     expect(modal.modalEl.textContent).not.toContain("Stale history");
+  });
+
+  it("shows a failed history load once, in the modal, and retries from there", async () => {
+    const loadEntries = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("disk unavailable"))
+      .mockResolvedValueOnce([entry("after-retry", "Recovered history")]);
+    const plugin = { app: new App() } as any;
+    const modal = new SystemSculptHistoryModal(plugin, { loadEntries });
+
+    modal.open();
+    await flush();
+
+    const state = modal.modalEl.querySelector<HTMLElement>(".systemsculpt-history-state")!;
+    expect(state.textContent).toContain("Couldn’t load history");
+    expect(state.textContent).toContain("disk unavailable");
+    expect(state.getAttribute("role")).toBe("alert");
+    expect(Notice).not.toHaveBeenCalled();
+
+    modal.modalEl.querySelector<HTMLButtonElement>("[data-testid='history.retry']")!.click();
+    await flush();
+    expect(loadEntries).toHaveBeenCalledTimes(2);
+    expect(modal.modalEl.textContent).toContain("Recovered history");
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("delegates filtering, stable option semantics, wrapping navigation, and commit", async () => {

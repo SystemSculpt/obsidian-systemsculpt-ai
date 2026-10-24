@@ -1,10 +1,12 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import { displayBackupTabContent } from "../settings/BackupTabContent";
 import { hasHostCapability } from "../platform/hostCapabilities";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 jest.mock("../platform/hostCapabilities", () => ({
   hasHostCapability: jest.fn(() => false),
@@ -56,6 +58,37 @@ describe("Backup settings tab", () => {
     const text = container.textContent || "";
     expect(text).toContain("SystemSculpt preferences");
     expect(text).not.toContain("prompt preferences");
+  });
+
+  it("starts and stops automatic backups from the toggle without a notice", async () => {
+    const app = new App();
+    const backupService = { start: jest.fn(), stop: jest.fn() };
+    const updateSettings = jest.fn().mockResolvedValue(undefined);
+    const plugin: any = {
+      app,
+      settings: { automaticBackupsEnabled: false },
+      getSettingsManager: jest.fn(() => ({
+        updateSettings,
+        getAutomaticBackupService: jest.fn(() => backupService),
+      })),
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    displayBackupTabContent(container, { app, plugin, display: jest.fn() } as any);
+    const toggle = Array.from(container.querySelectorAll(".setting-item"))
+      .find((item) => item.querySelector(".setting-item-name")?.textContent === "Automatic backups")
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+
+    toggle!.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    toggle!.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(updateSettings).toHaveBeenNthCalledWith(1, { automaticBackupsEnabled: true });
+    expect(updateSettings).toHaveBeenNthCalledWith(2, { automaticBackupsEnabled: false });
+    expect(backupService.start).toHaveBeenCalledTimes(1);
+    expect(backupService.stop).toHaveBeenCalledTimes(1);
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("keeps the backup path visible without a dead folder action on portable hosts", () => {

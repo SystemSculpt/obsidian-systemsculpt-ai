@@ -98,3 +98,44 @@ describe.each([
     expect(jest.mocked(Notice).mock.calls.map(([message]) => String(message)).join("\n")).not.toMatch(/fail/iu);
   });
 });
+
+describe("Similar notes rebuild button in settings", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  it("shows progress on the button and finishes without a notice", async () => {
+    const app = new App();
+    const { plugin, forceRefreshCurrentNamespace } = createPlugin(app);
+    let finish!: () => void;
+    forceRefreshCurrentNamespace.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    jest.mocked(showConfirm).mockResolvedValue({ confirmed: true });
+    const container = document.createElement("div");
+    await displayEmbeddingsTabContent(container, { app, plugin, display: jest.fn() } as any);
+    const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === "Rebuild")!;
+
+    button.click();
+    await settle();
+    expect(button.textContent).toBe("Rebuilding…");
+    expect(button.disabled).toBe(true);
+
+    finish();
+    await settle();
+    expect(button.textContent).toBe("Rebuild");
+    expect(button.disabled).toBe(false);
+    expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed rebuild visible because the index may be unavailable", async () => {
+    const app = new App();
+    const { plugin, forceRefreshCurrentNamespace } = createPlugin(app);
+    forceRefreshCurrentNamespace.mockRejectedValue(new Error("disk full"));
+    jest.mocked(showConfirm).mockResolvedValue({ confirmed: true });
+
+    await clickSettingsRebuild(app, plugin);
+
+    expect(Notice).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledWith("Failed to rebuild the semantic index: disk full");
+  });
+});

@@ -142,7 +142,10 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
       .setName("Directory health")
       .setDesc("Verify or repair SystemSculpt directories.");
 
-    const statusEl = diagnosticsSetting.descEl.createDiv({ cls: "ss-inline-note" });
+    const statusEl = diagnosticsSetting.descEl.createDiv({
+      cls: "ss-inline-note",
+      attr: { role: "status", "aria-live": "polite" },
+    });
 
     diagnosticsSetting.addButton((button) => {
       button

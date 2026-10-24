@@ -39,7 +39,6 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
           await plugin.getSettingsManager().updateSettings({ embeddingsEnabled: value });
 
           if (value) {
-            new Notice("Similar notes enabled.");
             try {
               const manager = plugin.getOrCreateEmbeddingsManager();
               plugin.embeddingsStatusBar?.startMonitoring(manager);
@@ -48,7 +47,6 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
               new Notice(message);
             }
           } else {
-            new Notice("Similar notes disabled.");
             plugin.embeddingsStatusBar?.stopMonitoring();
           }
 
@@ -117,16 +115,15 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
         .onClick(async () => {
           if (!await confirmSimilarNotesRebuild(tabInstance.app)) return;
 
-          button.setDisabled(true);
+          button.setDisabled(true).setButtonText("Rebuilding…");
           try {
             const manager = plugin.getOrCreateEmbeddingsManager();
             await manager.forceRefreshCurrentNamespace();
-            new Notice("Semantic index rebuilt.");
             await refreshStatus();
           } catch (error: unknown) {
             new Notice(`Failed to rebuild the semantic index: ${error instanceof Error ? error.message : "Unknown error"}`);
           } finally {
-            button.setDisabled(false);
+            button.setDisabled(false).setButtonText("Rebuild");
           }
         });
     });

@@ -4,6 +4,7 @@ import { showPrompt } from "../core/ui/modals/PromptModal";
 import { DEFAULT_SETTINGS } from "../types";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
+import { flashButtonResult } from "../core/ui/notifications";
 import { hasHostCapability } from "../platform/hostCapabilities";
 
 export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -26,11 +27,6 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                     await plugin.getSettingsManager().updateSettings({
                         relativeLineNumbersEnabled: value,
                     });
-                    new Notice(
-                        value
-                            ? "Relative line numbers enabled."
-                            : "Relative line numbers disabled."
-                    );
                 });
         });
 
@@ -69,7 +65,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             // The updateSettings call with DEFAULT_SETTINGS will handle everything
 
             // Force reload to ensure clean state
-             new Notice("Settings reset. Reloading Obsidian...", 3000);
+             resetButton.setButtonText("Reloading…").setDisabled(true);
              const ownerWindow = getSurfaceOwnerWindow(containerEl);
              ownerWindow.setTimeout(() => ownerWindow.location.reload(), 1000);
 
@@ -105,7 +101,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                 const { text, path } = await plugin.exportDiagnosticsSnapshot();
                 const copied = await tryCopyToClipboard(text);
                 if (copied) {
-                    new Notice("Diagnostics snapshot copied to clipboard.", 4000);
+                    flashButtonResult(button.buttonEl, "Copied");
                 } else if (path) {
                     new Notice(`Diagnostics snapshot saved to ${path}.`, 5000);
                 } else {
@@ -120,10 +116,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     if (hasHostCapability("file-manager-reveal", containerEl)) {
         diagnosticsFolderSetting.addButton((button) => {
             button.setButtonText("Open folder").onClick(async () => {
-                const opened = await plugin.openDiagnosticsFolder();
-                if (opened) {
-                    new Notice("Opened diagnostics folder in your file manager.", 4000);
-                } else {
+                if (!await plugin.openDiagnosticsFolder()) {
                     new Notice("Unable to open diagnostics folder. Locate .systemsculpt/diagnostics manually.", 5000);
                 }
             });

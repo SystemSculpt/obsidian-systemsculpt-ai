@@ -183,7 +183,6 @@ export async function displayRecorderTabContent(
               postProcessingPrompt: DEFAULT_SETTINGS.postProcessingPrompt,
             });
             if (promptText) promptText.value = DEFAULT_SETTINGS.postProcessingPrompt;
-            new Notice("Cleanup instructions reset.");
           });
       });
   };
@@ -242,8 +241,6 @@ function renderMicrophoneSetting(
 
     dropdown.onChange((value) => {
       setCurrentHostPreferredMicrophoneId(ownerWindow, vaultIdentity, value);
-      const label = dropdown.selectEl?.selectedOptions[0]?.text || value;
-      new Notice(`Microphone set to ${label}.`);
     });
   });
 

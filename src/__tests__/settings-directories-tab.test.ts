@@ -44,6 +44,7 @@ const render = () => {
     },
     getSettingsManager: jest.fn(() => ({ updateSettings })),
     checkDirectoryHealth: jest.fn(),
+    repairDirectoryStructure: jest.fn().mockResolvedValue(true),
     directoryManager: { handleDirectorySettingChange },
   };
   const container = document.createElement("div");
@@ -51,7 +52,7 @@ const render = () => {
   renderedTabs.add(tab);
   displayDirectoriesTabContent(container, tab);
   const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="text"]'));
-  return { container, tab, inputs, updateSettings, handleDirectorySettingChange };
+  return { container, tab, inputs, updateSettings, handleDirectorySettingChange, plugin };
 };
 
 describe("Directories tab managed-only layout", () => {
@@ -65,6 +66,25 @@ describe("Directories tab managed-only layout", () => {
     renderedTabs.forEach((tab) => tab.hide());
     expect(jest.getTimerCount()).toBe(0);
     jest.useRealTimers();
+  });
+
+  it.each([
+    [true, "Directories repaired. Restart Obsidian to apply the changes."],
+    [false, "Repair didn’t complete. Check the console for details."],
+  ])("shows a repair result (%s) once, inline", async (repaired, expected) => {
+    const { container, plugin } = render();
+    plugin.repairDirectoryStructure.mockResolvedValue(repaired);
+    const repair = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Repair")!;
+
+    repair.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const status = container.querySelector<HTMLElement>(".ss-inline-note[role='status']")!;
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toBe(expected);
+    expect(plugin.repairDirectoryStructure).toHaveBeenCalledTimes(1);
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("shows durable local output directories without retired web-research storage", () => {

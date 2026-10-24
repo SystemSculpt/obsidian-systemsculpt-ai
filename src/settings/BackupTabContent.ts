@@ -25,10 +25,8 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
           const backupService = plugin.getSettingsManager().getAutomaticBackupService();
           if (value) {
             backupService.start();
-            new Notice('Automatic backups enabled');
           } else {
             backupService.stop();
-            new Notice('Automatic backups disabled');
           }
         });
     });
