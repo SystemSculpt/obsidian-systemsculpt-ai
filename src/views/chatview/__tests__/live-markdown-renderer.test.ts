@@ -8,6 +8,7 @@ import {
   reconcileLiveMarkdownDom,
   stableMarkdownBoundary,
 } from "../LiveMarkdownRenderer";
+import { enhanceMarkdownCodeBlocks } from "../MarkdownCodeBlocks";
 
 type Deferred = Readonly<{
   promise: Promise<void>;
@@ -1041,6 +1042,38 @@ describe("LiveMarkdownRenderer", () => {
 
     live.unload();
     expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a long code block expanded and focused through stream replacement and settlement", async () => {
+    const target = document.body.createDiv();
+    const live = new LiveMarkdownRenderer({
+      render: async (markdown, staging) => {
+        staging.createEl("pre").createEl("code", { text: markdown, cls: "language-ts" });
+        enhanceMarkdownCodeBlocks(staging, { onCopyFeedback: jest.fn() });
+      },
+    });
+    live.load();
+    const source = Array.from({ length: 31 }, (_, index) => `const n${index} = ${index};`).join("\n");
+    live.stream(target, source);
+    await live.flush(target);
+    const control = target.querySelector<HTMLButtonElement>('[data-testid="chat.code.show-all"]')!;
+    control.click();
+    control.focus();
+    const expanded = `${source}\nconst last = true;`;
+    live.stream(target, expanded);
+    await live.flush(target);
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(true);
+    const replacement = target.querySelector<HTMLButtonElement>('[data-testid="chat.code.show-all"]')!;
+    expect(replacement).not.toBe(control);
+    expect(replacement.getAttribute("aria-expanded")).toBe("true");
+    expect(replacement.textContent).toBe("Show less");
+    expect(document.activeElement).toBe(replacement);
+    await live.settle(target, expanded);
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(true);
+    replacement.click();
+    expect(replacement.textContent).toBe("Show all 32 lines");
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(false);
+    live.unload();
   });
 
   it("refreshes linked callout behavior while preserving reader state", async () => {

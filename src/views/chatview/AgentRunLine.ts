@@ -89,7 +89,7 @@ export class AgentRunLine extends Component {
     if (presentation.kind === "detecting") {
       const status = this.element.createSpan({
         cls: "systemsculpt-agent-run-status",
-        attr: { role: "status", "data-testid": "chat.run.detecting" },
+        attr: { "data-testid": "chat.run.detecting" },
       });
       const icon = status.createSpan({ cls: "systemsculpt-agent-run-icon is-spinning", attr: { "aria-hidden": "true" } });
       setIcon(icon, "loader-circle");

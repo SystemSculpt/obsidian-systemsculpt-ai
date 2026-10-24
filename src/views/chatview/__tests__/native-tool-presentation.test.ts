@@ -71,25 +71,64 @@ describe("native tool paths", () => {
   ] as const)("separates target %s from request cwd %s and vault root %s", (path, cwd, root, alias, displayPath, vaultPath) => {
     expect(nativeToolPath(path, cwd, root, alias)).toEqual({ displayPath, vaultPath });
   });
+
+  it.each([
+    ["/Users/me/Downloads/report.md", "~/Downloads/report.md (outside vault)"],
+    ["/Users/me", "/Users/me (outside vault)"],
+    ["/Users/meow/Plan.md", "/Users/meow/Plan.md (outside vault)"],
+    ["/Users/me/Vault/Plan.md", "Plan.md"],
+  ])("shows %s relative to home only when it is outside the vault", (path, displayPath) => {
+    expect(nativeToolPath(path, "/Users/me/Vault", "/Users/me/Vault", undefined, "/Users/me/").displayPath).toBe(displayPath);
+  });
 });
 
 describe("native presentation metadata", () => {
   it.each([
-    ["Edit", { file_path: "/vault/Notes/Plan.md" }, "Edit Notes/Plan.md", "Edited Notes/Plan.md", "file-pen-line"],
-    ["MultiEdit", { file_path: "Notes/Plan.md" }, "Edit Notes/Plan.md", "Edited Notes/Plan.md", "file-pen-line"],
-    ["Write", { file_path: "New.md" }, "Write New.md", "Wrote New.md", "file-plus-2"],
+    ["Edit", { file_path: "/vault/Notes/Plan.md" }, "Edit Plan.md", "Edited Plan.md", "file-pen-line"],
+    ["MultiEdit", { file_path: "Notes/Plan.md" }, "Edit Plan.md", "Edited Plan.md", "file-pen-line"],
+    ["Write", { file_path: "New.md" }, "Create New.md", "Created New.md", "file-plus-2"],
     ["Bash", { command: "git status", description: "Check changed files" }, "Run git status", "Ran git status", "terminal"],
-    ["WebFetch", { url: "https://example.com/guide" }, "Read https://example.com/guide", "Read https://example.com/guide", "globe-2"],
-    ["WebSearch", { query: "gardening advice" }, "Search the web for gardening advice", "Searched the web for gardening advice", "globe-2"],
+    ["WebFetch", { url: "https://example.com/guide" }, "Read example.com", "Read example.com", "globe-2"],
+    ["WebSearch", { query: "gardening advice" }, "Search the web for “gardening advice”", "Searched the web for “gardening advice”", "globe-2"],
   ])("presents %s using a readable verb and target", (name, input, title, completedTitle, icon) => {
     expect(nativeToolPresentation(part(name, input))).toMatchObject({ title, completedTitle, icon, agentName: "Claude Code" });
   });
 
-  it("uses a readable fallback for unknown native actions without exposing protocol names", () => {
+  it("names unknown native tools without applying the hosted provider privacy rule", () => {
     expect(nativeToolPresentation(part("UnknownNativeAction")))
-      .toMatchObject({ title: "Run a Claude Code action", completedTitle: "Ran a Claude Code action", icon: "wrench" });
+      .toMatchObject({ title: "Use UnknownNativeAction", completedTitle: "Used UnknownNativeAction", icon: "wrench" });
     expect(nativeToolPresentation(codex("future_item", {})))
-      .toMatchObject({ title: "Run a Codex action", completedTitle: "Ran a Codex action" });
+      .toMatchObject({ title: "Use future_item", completedTitle: "Used future_item" });
+  });
+
+  it("separates the basename, folder, safe link and a meaningful reason", () => {
+    expect(nativeToolPresentation(edit({ description: "Edit Plan.md" }))).toMatchObject({
+      title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md", approvalTitle: "edit Plan.md",
+    });
+    expect(nativeToolPresentation(edit({ description: "Add the launch checklist" }))?.meta).toBe("Notes · Add the launch checklist");
+    expect(nativeToolPresentation(edit({ file_path: "/outside/Plan.md" }))?.targetPath).toBeUndefined();
+  });
+
+  it("keeps a nested request cwd relative to the vault root in titles, meta, links and details", async () => {
+    const nested = { agent: "claude" as const, workingDirectory: "/vault/Notes", vaultRoot: "/vault", vaultRootAlias: "/alias/vault" };
+    expect(nativeToolPresentation(part("Edit", { file_path: "Plan.md", old_string: "a", new_string: "b" }, { native: nested }))).toMatchObject({
+      title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md",
+    });
+    expect(nativeToolPresentation(part("Edit", { file_path: "/alias/vault/Notes/Plan.md" }, { native: nested }))?.targetPath).toBe("Notes/Plan.md");
+    expect(nativeToolPresentation(part("Read", { file_path: "/vault/Plan.md" }, { native: nested }))?.targetPath).toBe("Plan.md");
+    const host = document.createElement("div");
+    await renderNativeToolPreview(vault().app, host, part("Read", { file_path: "Daily/Today.md" }, { native: nested, state: "running" }));
+    const link = host.querySelector<HTMLAnchorElement>(".ss-agent-tool-details a.internal-link");
+    expect(link?.textContent).toBe("Notes/Daily/Today.md");
+    expect(link?.dataset.href).toBe("Notes/Daily/Today.md");
+  });
+
+  it("uses progressive verbs and only reports explicit native auto blocks", () => {
+    const request = part("Bash", { command: "npm test", exitCode: 0 });
+    expect(presentAgentTool({ ...request, state: "succeeded" })).toMatchObject({ label: "Ran npm test", meta: "exit 0" });
+    expect(presentAgentTool({ ...request, state: "failed", error: { code: "AUTO_BLOCKED", message: "blocked" } }))
+      .toMatchObject({ icon: "shield-x", label: "Run npm test · Blocked by Claude Code" });
+    expect(presentAgentTool({ ...request, state: "failed", error: { code: "FAILED", message: "blocked" } }).label).toBe("Couldn't run npm test");
   });
 
   it("recognizes raw question requests as well as their native request method", () => {
@@ -110,12 +149,12 @@ describe("native presentation metadata", () => {
 
   it("preserves native approval and decision state without claiming execution", () => {
     const pending = edit();
-    expect(presentAgentTool(pending)).toMatchObject({ label: "Edit Notes/Plan.md", displayState: "approval-required", actionIcon: "file-pen-line" });
+    expect(presentAgentTool(pending)).toMatchObject({ label: "Edit Plan.md", displayState: "approval-required", actionIcon: "file-pen-line" });
     expect(presentAgentTool({ ...pending, state: "denied", approvalDecision: "denied" }))
-      .toMatchObject({ label: "Edit Notes/Plan.md", displayState: "denied", icon: "x" });
-    expect(presentAgentTool({ ...pending, state: "running", approvalDecision: "approved" }).label).toBe("Editing Notes/Plan.md...");
-    expect(presentAgentTool({ ...pending, state: "succeeded", approvalDecision: "approved" }).label).toBe("Edited Notes/Plan.md");
-    expect(presentAgentTool({ ...pending, state: "cancelled", approvalDecision: "withdrawn" }).label).toBe("Edit Notes/Plan.md");
+      .toMatchObject({ label: "Edit Plan.md", displayState: "denied", icon: "ban" });
+    expect(presentAgentTool({ ...pending, state: "running", approvalDecision: "approved" }).label).toBe("Editing Plan.md…");
+    expect(presentAgentTool({ ...pending, state: "succeeded", approvalDecision: "approved" }).label).toBe("Edited Plan.md");
+    expect(presentAgentTool({ ...pending, state: "cancelled", approvalDecision: "withdrawn" }).label).toBe("Edit Plan.md");
     expect(presentAgentToolDetails(pending)).toEqual([]);
     expect(presentAgentToolFailure({ ...pending, state: "failed" })).toBe("This Claude Code action could not be completed.");
   });
@@ -129,9 +168,9 @@ describe("native presentation metadata", () => {
     expect(await prepareNativeWriteEditPreview(app, hosted)).toBeNull();
     expect(read).not.toHaveBeenCalled();
     expect(host.childElementCount).toBe(0);
-    expect(presentAgentTool(hosted)).toMatchObject({ label: "Writing file...", summary: "Note.md" });
+    expect(presentAgentTool(hosted)).toMatchObject({ label: "Creating Note.md…", summary: "Note.md" });
     const server = { ...hosted, location: "server" as const, name: "future_action", state: "approval-required" as const };
-    expect(presentAgentTool(server)).toMatchObject({ label: "Running SystemSculpt action...", displayState: "running" });
+    expect(presentAgentTool(server)).toMatchObject({ label: "Running SystemSculpt action…", displayState: "running" });
   });
 });
 
@@ -153,7 +192,7 @@ describe("real native edit previews", () => {
       native: { agent: "claude", workingDirectory: canonical },
     });
 
-    expect(nativeToolPresentation(request)?.title).toBe("Edit Notes/Plan.md");
+    expect(nativeToolPresentation(request)?.title).toBe("Edit Plan.md");
     const preview = await prepareNativeWriteEditPreview(app, request);
     expect(preview).toMatchObject({ path: "Notes/Plan.md", status: "changed", oldContent: "before", newContent: "after" });
     expect(preview?.diff.stats).toEqual({ additions: 1, deletions: 1 });
@@ -169,7 +208,7 @@ describe("real native edit previews", () => {
     const request = part("Edit", { file_path, old_string: "before", new_string: "after" }, {
       native: { agent: "claude", workingDirectory: `${canonical}/Notes`, vaultRoot: canonical, vaultRootAlias: root },
     });
-    expect(nativeToolPresentation(request)?.title).toBe("Edit Notes/Plan.md");
+    expect(nativeToolPresentation(request)).toMatchObject({ title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md" });
     expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ path: "Notes/Plan.md", status: "changed", oldContent: "before", newContent: "after" });
     expect(realpath.mock.calls).toEqual([[root]]);
     expect(getAbstractFileByPath.mock.calls).toEqual([["Notes/Plan.md"]]);
@@ -284,7 +323,8 @@ describe("native preview rendering", () => {
     const { app } = vault({ "Notes/Plan.md": "first\nbefore\nlast" });
     const host = document.createElement("div");
     expect(await renderNativeToolPreview(app, host, edit())).toBe(true);
-    expect(host.querySelector(".systemsculpt-diff-filename")?.textContent).toBe("Notes/Plan.md");
+    expect(host.querySelector(".systemsculpt-diff-filename")).toBeNull();
+    expect(host.dataset.changeSize).toBe("+1 −1");
     expect(host.querySelector(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content")?.textContent).toBe("before");
     expect(host.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe("after");
     await renderNativeToolPreview(app, host, edit({ old_string: "missing" }));
@@ -308,15 +348,14 @@ describe("native preview rendering", () => {
     expect(host.textContent).not.toContain("approving changes nothing");
   });
 
-  it("renders command, description, directory, and the native approval reason as text", async () => {
+  it("renders the command as text and keeps its reason and directory in metadata", async () => {
     const { app } = vault();
     const host = document.createElement("div");
     const request = part("Bash", { command: 'printf "<script>"\npwd', description: "Check the folder", cwd: "/vault/Notes" }, { native: { agent: "claude", workingDirectory: "/vault", description: "This command needs your approval." } });
     await renderNativeToolPreview(app, host, request);
-    expect(host.querySelector("pre code")?.textContent).toBe('printf "<script>"\npwd');
-    expect(host.textContent).toContain("Check the folder");
-    expect(host.textContent).toContain("FolderNotes");
-    expect(host.textContent).toContain("This command needs your approval.");
+    expect(host.querySelector("pre code")?.textContent).toBe('$ printf "<script>"\npwd');
+    expect(nativeToolPresentation(request)?.meta).toBe("in Notes · Check the folder");
+    expect(host.textContent).not.toContain("Check the folder");
     expect(host.querySelector("script")).toBeNull();
   });
 
@@ -340,7 +379,8 @@ describe("native preview rendering", () => {
     expect(Array.from(host.querySelectorAll(".systemsculpt-diff-filename"), el => el.textContent)).toEqual(["One.md", "Two.md"]);
     expect(host.querySelectorAll(".systemsculpt-diff-hunk")).toHaveLength(3);
     expect(Array.from(host.querySelectorAll(".systemsculpt-diff-line-number-new"), el => el.textContent)).toContain("100");
-    expect(host.textContent).toContain("Update the notes");
+    expect(host.querySelectorAll("details.systemsculpt-inline-diff__file")).toHaveLength(2);
+    expect(host.textContent).not.toContain("Update the notes");
     expect(read).not.toHaveBeenCalled();
     expect(getAbstractFileByPath).not.toHaveBeenCalled();
   });
@@ -353,16 +393,20 @@ describe("native preview rendering", () => {
     });
     expect(nativeToolPresentation(request)?.title).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
     await renderNativeToolPreview(app, host, request);
-    expect(host.querySelector(".systemsculpt-inline-diff__summary")?.textContent).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
-    expect(host.querySelector(".systemsculpt-diff-filename")?.textContent).toBe("Plan.md");
+    // A one-file card names the file and destination once, in its title.
+    expect(host.querySelector(".systemsculpt-inline-diff__summary")).toBeNull();
+    expect(host.querySelector(".systemsculpt-diff-filename")).toBeNull();
+    expect(host.querySelector(".systemsculpt-diff-line-added")?.textContent).toContain("new");
     expect(read).not.toHaveBeenCalled();
     expect(getAbstractFileByPath).not.toHaveBeenCalled();
     expect(realpath).not.toHaveBeenCalled();
 
     await renderNativeToolPreview(app, host, { ...request, name: "permissions", input: { cwd: "/external", permissions: { fileSystem: { write: ["/external", "/vault/Notes"] } } },
       native: { ...request.native!, requestMethod: "item/permissions/requestApproval" } });
-    expect(host.textContent).toContain("Folder/external (outside vault)");
-    expect(host.textContent).toContain("Read and change /external (outside vault)");
+    expect(nativeToolPresentation({ ...request, name: "permissions", input: { cwd: "/external" },
+      native: { ...request.native!, requestMethod: "item/permissions/requestApproval" } })?.meta).toBe("in /external (outside vault)");
+    expect(host.textContent).toContain("Write outside this vault: /external");
+    expect(host.textContent).not.toContain("Write outside this vault: /external (outside vault)");
     expect(host.textContent).toContain("Read and change Notes");
     expect(host.textContent).not.toContain("Vault root");
   });
@@ -388,7 +432,8 @@ describe("native preview rendering", () => {
     } } }, "item/permissions/requestApproval");
     expect(nativeToolPresentation(request)?.title).toBe("Allow additional access");
     await renderNativeToolPreview(app, host, request);
-    for (const expected of ["Connect to the internet", "Read Notes", "Read and change /outside/Export", "Read Reference", "Read and change project folders", "Block access to files matching **/.env", "Publish the notes", "Vault root"]) {
+    expect(nativeToolPresentation(request)?.meta).toBe("in vault · Publish the notes");
+    for (const expected of ["Network access", "Read Notes", "Write outside this vault: /outside/Export", "Read Reference", "Read and change project folders", "Block access to files matching **/.env"]) {
       expect(host.textContent).toContain(expected);
     }
     expect(host.textContent).not.toContain("fileSystem");
@@ -400,6 +445,103 @@ describe("native preview rendering", () => {
     const content = "x".repeat(128_001) + "END";
     await renderNativeToolPreview(app, host, part("Write", { file_path: "Large.md", content }));
     expect(host.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe(content);
+  });
+
+  it("discloses all lines of a new file after the twelve-line approval preview", async () => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, part("Write", { file_path: "New.md", content: Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n") }));
+    expect(host.querySelector(".systemsculpt-inline-diff__new-file")?.textContent).toBe("New file");
+    expect(host.querySelector(".systemsculpt-diff-header")).toBeNull();
+    expect(host.querySelectorAll(".systemsculpt-diff-line-added")).toHaveLength(12);
+    host.querySelector<HTMLButtonElement>('[data-testid="chat.diff.show-all"]')!.click();
+    expect(host.querySelectorAll(".systemsculpt-diff-line-added")).toHaveLength(30);
+  });
+
+  it("shows the last twenty command output lines with access to the complete output", async () => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    const output = Array.from({ length: 25 }, (_, index) => `output ${index}`).join("\n");
+    await renderNativeToolPreview(app, host, part("Bash", { command: "npm test" }, { state: "succeeded", output: { data: output } }));
+    const code = host.querySelector(".ss-native-tool-output code")!;
+    expect(code.textContent?.split("\n")).toHaveLength(20);
+    expect(code.textContent).toMatch(/^output 5\n/u);
+    host.querySelector<HTMLButtonElement>('[data-testid="chat.tool.show-output"]')!.click();
+    expect(code.textContent).toBe(output);
+  });
+
+  it("keeps the full plan available after its initial sixteen-line presentation", async () => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    const plan = Array.from({ length: 20 }, (_, index) => `Step ${index}`).join("\n");
+    await renderNativeToolPreview(app, host, part("ExitPlanMode", { plan }));
+    expect(host.querySelector(".ss-native-plan-preview")?.classList.contains("is-collapsed")).toBe(true);
+    host.querySelector<HTMLButtonElement>('[data-testid="chat.approval.show-plan"]')!.click();
+    expect(host.querySelector(".ss-native-plan-preview")?.classList.contains("is-collapsed")).toBe(false);
+    expect(host.textContent).toBe(plan);
+  });
+
+  it("does not mislabel a vault write grant as outside the vault", async () => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, codex("permissions", { permissions: { fileSystem: { write: ["/vault/Notes"] } } }));
+    expect(host.textContent).toContain("Read and change Notes");
+    expect(host.textContent).not.toContain("outside this vault");
+  });
+
+  it.each(["succeeded", "failed", "denied", "cancelled", "running"] as const)("shows a recorded Edit request in %s without reading today's file or inventing line positions", async state => {
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "later content" });
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, { ...edit(), state });
+    expect(host.textContent).toContain("Original file line numbers are unavailable");
+    expect(host.querySelector(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content")?.textContent).toBe("before");
+    expect(host.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe("after");
+    expect(host.querySelector(".systemsculpt-diff-line-number")).toBeNull();
+    expect(host.querySelector(".systemsculpt-diff-hunk-header")).toBeNull();
+    expect(host.textContent).not.toContain("later content");
+    expect(read).not.toHaveBeenCalled();
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(realpath).not.toHaveBeenCalled();
+  });
+
+  it("keeps recorded MultiEdit snippets separate, including empty replacements", async () => {
+    const { app, read } = vault({ "Notes/Plan.md": "after" });
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, part("MultiEdit", { file_path: "Notes/Plan.md", edits: [
+      { old_string: "before", new_string: "middle" },
+      { old_string: "middle", new_string: "" },
+    ] }, { state: "succeeded" }));
+    expect(Array.from(host.querySelectorAll(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content"), node => node.textContent)).toEqual(["before", "middle"]);
+    expect(host.textContent).toContain("Requested edit 1");
+    expect(host.textContent).toContain("Requested edit 2");
+    expect(host.querySelector(".systemsculpt-diff-hunk-header")).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("shows completed Write content rather than diffing it against an invented empty original", async () => {
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "later content" });
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, part("Write", { file_path: "Notes/Plan.md", content: "written content" }, { state: "succeeded" }));
+    expect(host.querySelector("pre code")?.textContent).toBe("written content");
+    expect(host.textContent).toContain("this is not a before-and-after diff");
+    expect(host.querySelector(".systemsculpt-diff-viewer")).toBeNull();
+    expect(host.textContent).not.toContain("later content");
+    expect(read).not.toHaveBeenCalled();
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    part("AskUserQuestion", { questions: [{ question: "Enter a token", isSecret: true }] }),
+    codex("requestUserInput", { questions: [{ id: "token", question: "Enter a token", isSecret: true }] }),
+    codex("native_request", {}, "item/tool/requestUserInput"),
+  ])("never renders output answers from a native question request", async request => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    for (const data of ["secret-answer-sentinel", { output: "secret-answer-sentinel" }, [{ text: "secret-answer-sentinel" }]]) {
+      await renderNativeToolPreview(app, host, { ...request, state: "succeeded", output: { data } });
+      expect(host.textContent).not.toContain("secret-answer-sentinel");
+      expect(host.querySelector(".ss-native-tool-output")).toBeNull();
+    }
   });
 
   it("creates native preview nodes in the pop-out document", async () => {

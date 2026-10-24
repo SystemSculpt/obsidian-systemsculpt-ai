@@ -16,6 +16,12 @@ export type AgentToolPresentation = Readonly<{
   displayState: AgentToolDisplayState;
   icon: string;
   summary: string | null;
+  /** The summary counts outcomes ("1 completed, 2 failed"), so it's always meta. */
+  summaryCountsOutcomes?: true;
+  meta?: string;
+  targetPath?: string;
+  groupKind: string;
+  groupCount: number;
 }>;
 
 export type AgentToolDetail = Readonly<{
@@ -62,16 +68,16 @@ const TOOL_ACTION_ICONS: Readonly<Record<string, string>> = {
 };
 
 const STATE_ICONS: Readonly<Record<AgentToolDisplayState, string>> = {
-  "input-streaming": "minus",
-  "input-ready": "minus",
-  "approval-required": "minus",
-  approved: "minus",
-  running: "minus",
+  "input-streaming": "loader-circle",
+  "input-ready": "loader-circle",
+  "approval-required": "shield-question",
+  approved: "loader-circle",
+  running: "loader-circle",
   succeeded: "check",
   partial: "x",
   failed: "x",
-  denied: "x",
-  cancelled: "x",
+  denied: "ban",
+  cancelled: "minus",
   "outcome-unknown": "x",
 };
 
@@ -188,14 +194,14 @@ function actionState(displayState: AgentToolDisplayState): ToolActionState {
 function actionLabel(label: string, state: ToolActionState): string {
   if (state === "base") return label;
   if (label === UNKNOWN_SERVER_TOOL_LABEL) {
-    return state === "active" ? "Running SystemSculpt action..." : "Ran SystemSculpt action";
+    return state === "active" ? "Running SystemSculpt action…" : "Ran SystemSculpt action";
   }
   const verb = label.split(" ", 1)[0] ?? "";
   const forms = TOOL_ACTION_FORMS[verb];
   if (!forms) return label;
   const tense = state === "active" ? forms[0] : forms[1];
   const result = `${tense}${label.slice(verb.length)}`;
-  return state === "active" ? `${result}...` : result;
+  return state === "active" ? `${result}…` : result;
 }
 
 function countedLabel(counted: CountedTool, state: ToolActionState): string {
@@ -266,6 +272,12 @@ function webSearchQuery(part: AgentToolPart): string | null {
   return part.state === "succeeded"
     ? firstString(record(part.input).query)
     : null;
+}
+
+function webSearchResultCount(part: AgentToolPart): number | undefined {
+  if (!isWebSearchTool(part)) return undefined;
+  const count = record(part.output?.data).result_count;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined;
 }
 
 function displayedToolState(part: AgentToolPart): AgentToolPart["state"] {
@@ -362,6 +374,20 @@ function limitToolDetails(details: readonly AgentToolDetail[]): readonly AgentTo
 }
 
 /**
+ * The muted text after a tool line (spec 3.4: counts, +a −b, exit code). A
+ * summary shows only when it adds something: never a repeat of the label
+ * ("Searched “x”  x") or one target of several ("Read 2 notes  A.md").
+ */
+export function presentToolLineMeta(presentation: AgentToolPresentation): string | undefined {
+  if (presentation.meta) return presentation.meta;
+  const summary = presentation.summary;
+  if (!summary) return undefined;
+  if (presentation.summaryCountsOutcomes) return summary;
+  if (presentation.groupCount > 1 || presentation.label.toLowerCase().includes(summary.toLowerCase())) return undefined;
+  return summary;
+}
+
+/**
  * Returns only known, useful tool details. It never exposes raw JSON, file
  * contents, edit text, unknown server input, or provider-owned output data.
  */
@@ -375,7 +401,11 @@ export function presentAgentToolDetails(
   if (part.location === "server") {
     if (canonicalName !== "web_search") return [];
     const query = webSearchQuery(part);
-    return query ? [{ label: "Query", value: detailValue(query)! }] : [];
+    const count = webSearchResultCount(part);
+    return [
+      ...(query ? [{ label: "Query", value: detailValue(query)! }] : []),
+      ...(count !== undefined ? [{ label: "Results", value: String(count) }] : []),
+    ];
   }
   if (!VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName)) return [];
 
@@ -471,14 +501,22 @@ export function presentAgentToolDetails(
 export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const native = nativeToolPresentation(part);
   if (native) {
-    const active = part.state === "running" || part.state === "approved";
+    const active = isActiveAgentToolState(part.state) && part.state !== "approval-required";
+    const result = record(part.output?.data);
+    const exitCode = result.exitCode ?? record(part.input).exitCode;
+    const meta = typeof exitCode === "number" ? `exit ${exitCode}` : native.groupKind === "plan" ? native.meta : native.changeSize;
+    const blocked = /(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "");
+    const base = part.state === "succeeded" ? native.completedTitle : active ? native.runningTitle : native.title;
+    const label = blocked ? `${native.title} · Blocked by ${part.native?.agent === "claude" ? "Claude Code" : "Codex review"}`
+      : part.state === "failed" ? `Couldn't ${native.title.charAt(0).toLowerCase()}${native.title.slice(1)}` : base;
     return {
-      canonicalName: part.name,
-      label: part.state === "succeeded" ? native.completedTitle : active ? actionLabel(native.title, "active") : native.title,
+      canonicalName: part.name, label,
       actionIcon: native.icon,
       displayState: part.state,
-      icon: STATE_ICONS[part.state],
+      icon: blocked ? "shield-x" : STATE_ICONS[part.state],
       summary: native.description ?? null,
+      meta, targetPath: native.targetPath,
+      groupKind: native.groupKind, groupCount: native.groupCount,
     };
   }
   const { canonicalName } = splitToolName(part.name);
@@ -507,22 +545,42 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     : partialSummary ?? outputSummary ?? inputSummary(canonicalName, input);
   const presentedName = unknownServerTool ? "server_action" : canonicalName;
   const labelState = actionState(displayState);
+  const paths = canonicalName === "multi_edit" || canonicalName === "open" ? objectStrings(input.files, "path")
+    : [...strings(input.paths), ...strings(input.path)];
+  const targetPath = !serverTool && VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName) && paths.length === 1 ? paths[0] : undefined;
+  const target = targetPath?.split(/[\\/]/u).filter(Boolean).pop();
+  const baseLabel = canonicalName === "context" ? contextToolLabel(input)
+    : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length || ""} notes`.replace("  ", " "))
+      : canonicalName === "write" ? `Create ${target ?? "file"}`
+        : canonicalName === "edit" ? `Edit ${target ?? "file"}`
+          : canonicalName === "multi_edit" ? `Edit ${target ?? `${paths.length} notes`}`
+            : canonicalName === "list_items" ? `List ${targetPath ?? (counted ? `${counted.items.length} folders` : "vault")}`
+              : canonicalName === "create_folders" ? `Create ${targetPath ?? `${paths.length} folders`}`
+                : canonicalName === "trash" ? `Move ${target ?? `${paths.length} notes`} to trash`
+                  : canonicalName === "move" ? (() => {
+                    const sources = objectStrings(input.items, "source"), destinations = objectStrings(input.items, "destination");
+                    return sources.length === 1 && destinations.length === 1 ? `Move ${sources[0].split(/[\\/]/u).pop()} → ${destinations[0]}` : `Move ${sources.length || ""} notes`.replace("  ", " ");
+                  })()
+                  : canonicalName === "find" || canonicalName === "search"
+                    ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`
+                    : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
+  const query = webSearchQuery(part);
+  const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
+    : displayState === "failed" ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
+  const output = record(part.output?.data);
+  const resultCount = serverTool ? webSearchResultCount(part)
+    : typeof output.totalMatches === "number" ? output.totalMatches
+      : Array.isArray(output.matches) ? output.matches.length : undefined;
   return {
-    canonicalName: presentedName,
-    label: part.location === "server"
-      ? actionLabel(serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
-      : counted
-        ? countedLabel(counted, labelState)
-        : canonicalName === "context"
-          ? actionLabel(contextToolLabel(input), labelState)
-          : TOOL_LABELS[canonicalName]
-            ? actionLabel(TOOL_LABELS[canonicalName], labelState)
-            : canonicalName
-              .replace(/[_-]+/g, " ")
-              .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    canonicalName: presentedName, label,
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
     icon: STATE_ICONS[displayState],
     summary,
+    ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
+    ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : {}),
+    ...(targetPath ? { targetPath } : {}),
+    groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list" : presentedName,
+    groupCount: serverTool ? 1 : counted?.items.length ?? Math.max(paths.length, 1),
   };
 }

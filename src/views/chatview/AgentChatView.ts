@@ -3951,13 +3951,14 @@ export class AgentChatView extends ItemView {
   /**
    * Re-runs detection. An empty chat that detection chose for the person
    * moves to an agent that has become ready; their own choice stays.
+   * Resolves true when this chat's own agent is now installed and signed in.
    */
-  private async detectAgain(): Promise<void> {
-    if (!hasHostCapability("local-cli", this.containerEl)) return;
+  private async detectAgain(): Promise<boolean> {
+    if (!hasHostCapability("local-cli", this.containerEl)) return false;
     this.detection = null;
     this.syncChrome();
     const detection = await this.refreshDetection(true);
-    if (!detection) return;
+    if (!detection) return false;
     const ready = (["claude", "codex"] as const)
       .filter((agent) => detection.agents[agent]?.installed && detection.agents[agent]?.signedIn);
     const settings = this.plugin.settings;
@@ -3980,6 +3981,8 @@ export class AgentChatView extends ItemView {
     } else {
       new Notice("Claude Code and Codex aren't ready on this computer yet.", 5000);
     }
+    const current = backendOf(this.agent);
+    return isLocalAgentId(current) && ready.includes(current);
   }
 
   private async openArtifact(artifact: AgentArtifact): Promise<void> {

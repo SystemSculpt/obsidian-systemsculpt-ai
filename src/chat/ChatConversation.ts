@@ -81,6 +81,8 @@ export type NativeToolMetadata = Readonly<{
   /** Presentation roots supplied by Chat, never native permission authority. */
   vaultRoot?: string;
   vaultRootAlias?: string;
+  /** Lets paths outside the vault read as ~/…; presentation only. */
+  homeDirectory?: string;
   requestMethod?: string;
   requestId?: string | number;
   description?: string;

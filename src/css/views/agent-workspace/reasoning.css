@@ -100,11 +100,12 @@
 .systemsculpt-agent-reasoning-body {
   min-width: 0;
   max-height: var(--ss-agent-tool-details-height);
-  margin: var(--ss-space-0) 0 var(--ss-space-1) var(--ss-space-2);
-  padding: var(--ss-space-0) var(--ss-space-3) var(--ss-space-0) var(--ss-space-2);
+  margin: var(--ss-space-1) 0 var(--ss-space-2) 22px;
+  padding: var(--ss-space-2) var(--ss-space-3);
   overflow: auto;
   overscroll-behavior: contain;
-  border-left: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
   color: var(--ss-ink-muted);
   overflow-wrap: anywhere;
 }
@@ -135,11 +136,11 @@
 .systemsculpt-agent-part.is-text.is-streaming::after {
   content: "";
   display: inline-block;
-  width: 0.35em;
+  width: 2px;
   height: 0.75em;
   margin-left: 0.2em;
   border-radius: var(--ss-radius-xs);
-  background: var(--ss-ink-faint);
+  background: var(--ss-ink-muted);
   vertical-align: -0.08em;
   animation: ss-pulse 0.9s var(--ss-ease) infinite;
 }
@@ -149,7 +150,7 @@
 :is(.systemsculpt-agent-workspace.is-reduced-motion, #ss-specificity-boost) *::after {
   animation: none;
   scroll-behavior: auto;
-  transition-duration: 0.01ms;
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -157,5 +158,7 @@
   :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::before,
   :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::after {
     animation: none;
+    scroll-behavior: auto;
+    transition: none;
   }
 }

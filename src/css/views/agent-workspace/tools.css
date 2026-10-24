@@ -55,6 +55,9 @@
 }
 /* Tool rows share the same 26px rhythm and keep successful work neutral. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
   line-height: 20px;
@@ -105,7 +108,11 @@
   color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-icon {
-  flex-basis: 20px;
+  flex-basis: 16px;
+  width: 16px;
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-controls .systemsculpt-agent-tool-state-icon {
+  display: none;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-disclosure,
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-state-icon {
@@ -117,9 +124,10 @@
   height: var(--ss-icon-size-sm);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-disclosure svg,
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-icon svg,
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-state-icon svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-copy {
   display: flex;
@@ -183,15 +191,12 @@
   color: var(--ss-danger);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-support {
-  max-height: var(--ss-agent-tool-details-height);
-  margin: var(--ss-space-0) 0 var(--ss-space-1) var(--ss-space-2);
-  padding-right: var(--ss-space-3);
-  padding-left: var(--ss-space-2);
+  margin: var(--ss-space-1) 0 var(--ss-space-2) 22px;
+  padding: var(--ss-space-2) var(--ss-space-3);
   overflow: auto;
   overscroll-behavior: contain;
-  border-left: 1px solid var(--ss-line);
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-support[hidden],
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool:not([open]) > .systemsculpt-agent-tool-support {
@@ -222,14 +227,13 @@
   color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-error,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-state-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-approval-required .systemsculpt-agent-tool-state-icon {
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-approval-required .systemsculpt-agent-tool-icon {
   color: var(--ss-warning);
 }
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-state-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-state-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-cancelled .systemsculpt-agent-tool-state-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-state-icon {
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-icon {
   color: var(--ss-danger);
 }
 .systemsculpt-agent-tool-error {
@@ -250,20 +254,38 @@
   margin-block: var(--ss-space-2);
   padding: var(--ss-space-3);
   border: 1px solid var(--ss-line-strong);
-  border-inline-start: 3px solid var(--ss-warning);
+  box-shadow: inset 3px 0 var(--ss-warning);
   border-radius: var(--ss-radius-md);
   background: var(--ss-surface-1);
   color: var(--ss-ink);
 }
 .systemsculpt-agent-approval:focus-within {
   border-color: var(--ss-line-accent);
+  box-shadow: inset 3px 0 var(--ss-warning), var(--ss-ring);
+}
+.systemsculpt-agent-approval button:focus-visible,
+.systemsculpt-agent-approval input:focus-visible,
+.systemsculpt-agent-approval a:focus-visible,
+.systemsculpt-agent-approval summary:focus-visible {
+  outline: none;
   box-shadow: var(--ss-ring);
 }
-.systemsculpt-agent-approval:focus-visible,
-.systemsculpt-agent-approval button:focus-visible,
-.systemsculpt-agent-approval input:focus-visible {
-  outline: 2px solid var(--ss-accent);
-  outline-offset: 2px;
+.systemsculpt-agent-approval-meta {
+  margin-inline-start: 22px;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-approval-meta > span + span::before {
+  content: " · ";
+}
+.systemsculpt-agent-approval-copy a {
+  color: inherit;
+}
+.systemsculpt-agent-approval kbd {
+  margin-inline-start: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
 }
 .systemsculpt-agent-approval-header {
   display: flex;
@@ -296,6 +318,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--ss-space-2);
+  order: 1;
 }
 .systemsculpt-agent-approval-actions > .ss-button {
   padding-inline: var(--ss-space-2);
@@ -322,8 +345,17 @@
   overflow-wrap: anywhere;
 }
 .systemsculpt-agent-approval-details {
+  order: 2;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-details > summary {
+  text-align: end;
+}
+@container ss-surface (max-width: 379px) {
+  .systemsculpt-agent-approval-actions [data-focus-key="tool-allow-chat"] {
+    flex-basis: 100%;
+  }
 }
 .systemsculpt-agent-approval-details summary {
   cursor: pointer;
@@ -381,13 +413,14 @@
 .systemsculpt-agent-approval-preview[hidden] {
   display: none;
 }
-.systemsculpt-agent-approval-announcement {
+.systemsculpt-agent-approval-announcement,
+.systemsculpt-agent-approval-question-legend {
   position: absolute;
   width: 1px;
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip-path: inset(50%);
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
 .systemsculpt-agent-approval-notice-surface {
@@ -426,6 +459,70 @@
 }
 .systemsculpt-agent-approval-preview code {
   overflow-wrap: anywhere;
+}
+.ss-native-tool-preview,
+.ss-hosted-tool-preview {
+  min-width: 0;
+  font-size: var(--ss-text-sm);
+}
+.ss-hosted-tool-preview p {
+  margin-block: var(--ss-space-2);
+}
+.ss-hosted-tool-list {
+  margin-block: var(--ss-space-2);
+  padding-inline-start: var(--ss-space-4);
+  overflow-wrap: anywhere;
+}
+.ss-native-tool-preview .ss-agent-tool-details {
+  margin: 0;
+}
+.ss-native-tool-preview .ss-agent-tool-details dt {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.ss-native-tool-preview .ss-agent-tool-details dd {
+  margin: 0 0 var(--ss-space-2);
+  overflow-wrap: anywhere;
+}
+.ss-native-tool-preview pre,
+.ss-hosted-tool-preview pre {
+  overflow: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-family: var(--ss-font-mono);
+  font-size: calc(1em * 0.9);
+}
+.ss-native-tool-output {
+  max-height: var(--ss-agent-tool-details-height);
+}
+.ss-native-plan-preview.is-collapsed {
+  max-height: 25.6em;
+  overflow: hidden;
+}
+.systemsculpt-inline-diff__new-file {
+  width: fit-content;
+  margin: var(--ss-space-2);
+  padding: 0 var(--ss-space-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-inline-diff__file > summary {
+  padding: var(--ss-space-2);
+  color: var(--ss-ink);
+  cursor: pointer;
+}
+.systemsculpt-agent-tool-meta {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.systemsculpt-agent-tool-icon.is-animated svg {
+  animation: ss-spin 1s linear infinite;
 }
 .systemsculpt-agent-artifact {
   display: flex;

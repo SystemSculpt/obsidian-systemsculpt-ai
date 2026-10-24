@@ -1,4 +1,5 @@
 import {
+  presentToolLineMeta,
   presentAgentTool,
   presentAgentToolDetails,
   presentAgentToolFailure,
@@ -140,18 +141,21 @@ describe("presentAgentTool", () => {
   it("concentrates labels, state, and compact target summaries", () => {
     expect(presentAgentTool(part())).toMatchObject({
       canonicalName: "read",
-      label: "Reading 1 file...",
+      label: "Reading Plan.md…",
       actionIcon: "file-text",
-      icon: "minus",
+      icon: "loader-circle",
+      targetPath: "Projects/Plan.md",
+      groupKind: "read",
+      groupCount: 1,
       summary: "Projects/Plan.md",
     });
   });
 
   it.each([
-    ["input-streaming", "minus"],
-    ["input-ready", "minus"],
-    ["approved", "minus"],
-    ["running", "minus"],
+    ["input-streaming", "loader-circle"],
+    ["input-ready", "loader-circle"],
+    ["approved", "loader-circle"],
+    ["running", "loader-circle"],
     ["succeeded", "check"],
   ] as const)(
     "omits routine state text for %s while preserving its static mark",
@@ -163,10 +167,10 @@ describe("presentAgentTool", () => {
   );
 
   it.each([
-    ["approval-required", "minus"],
+    ["approval-required", "shield-question"],
     ["failed", "x"],
-    ["denied", "x"],
-    ["cancelled", "x"],
+    ["denied", "ban"],
+    ["cancelled", "minus"],
     ["outcome-unknown", "x"],
   ] as const)(
     "uses a static mark without visible state text for %s",
@@ -197,7 +201,7 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "write", input: { path: "Note.md" } })))
       .toMatchObject({
         canonicalName: "write",
-        label: "Writing file...",
+        label: "Creating Note.md…",
         actionIcon: "file-plus-2",
         summary: "Note.md",
       });
@@ -213,7 +217,7 @@ describe("presentAgentTool", () => {
       input: { action: "add", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Pinning files...",
+      label: "Pinning files…",
       summary: "Project.md",
     });
     expect(presentAgentTool(part({
@@ -221,14 +225,14 @@ describe("presentAgentTool", () => {
       input: { action: "remove", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Unpinning files...",
+      label: "Unpinning files…",
     });
     expect(presentAgentTool(part({
       name: "context",
       input: { paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Managing pinned files...",
+      label: "Managing pinned files…",
     });
   });
 
@@ -245,6 +249,17 @@ describe("presentAgentTool", () => {
       input: { query: "Completed public query" },
       state: "succeeded",
     }))).toEqual([{ label: "Query", value: "Completed public query" }]);
+  });
+
+  it("uses only the public result count for hosted web search", () => {
+    const search = part({ name: "web_search", location: "server", state: "succeeded", input: {},
+      output: { data: { query: "Public query", result_count: 3, matches: ["private"] } } });
+    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }, { label: "Results", value: "3" }]);
+    expect(presentAgentTool(search).meta).toBe("3 results");
+    for (const count of [-1, 1.5, "3", NaN, Infinity]) {
+      expect(presentAgentTool({ ...search, output: { data: { result_count: count, matches: ["private"] } } }).meta).toBeUndefined();
+    }
+    expect(presentAgentTool({ ...search, name: "private_server_tool" }).meta).toBeUndefined();
   });
 
   it("presents capped, known vault details without exposing file or edit content", () => {
@@ -339,7 +354,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action...",
+      label: "Running SystemSculpt action…",
       actionIcon: "wand-sparkles",
       summary: null,
     });
@@ -351,7 +366,7 @@ describe("presentAgentTool", () => {
       location: "server",
       input: { paths: ["Private provider path"] },
     }))).toMatchObject({
-      label: "Running SystemSculpt action...",
+      label: "Running SystemSculpt action…",
       summary: null,
     });
   });
@@ -364,8 +379,8 @@ describe("presentAgentTool", () => {
       approvalId: "server-approval",
     }))).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action...",
-      icon: "minus",
+      label: "Running SystemSculpt action…",
+      icon: "loader-circle",
     });
   });
 
@@ -382,9 +397,9 @@ describe("presentAgentTool", () => {
 
   it("uses accurate singular and plural labels for safely countable tools", () => {
     expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md"] } })).label)
-      .toBe("Read 1 file");
+      .toBe("Read One.md");
     expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md", "Two.md"] } })).label)
-      .toBe("Read 2 files");
+      .toBe("Read 2 notes");
     expect(presentAgentTool(part({
       state: "succeeded",
       name: "open",
@@ -404,7 +419,16 @@ describe("presentAgentTool", () => {
       state: "succeeded",
       name: "search",
       input: { patterns: ["TODO"] },
-    })).label).toBe("Searched 1 pattern");
+    })).label).toBe("Searched “TODO”");
+  });
+
+  it("uses explicit action failures, meaningful result metadata and from/to moves", () => {
+    expect(presentAgentTool(part({ name: "edit", input: { path: "Notes/Plan.md" }, state: "failed" })))
+      .toMatchObject({ label: "Couldn't edit Plan.md", targetPath: "Notes/Plan.md" });
+    expect(presentAgentTool(part({ name: "search", input: { patterns: ["launch"] }, state: "succeeded", output: { data: { totalMatches: 7 } } })))
+      .toMatchObject({ label: "Searched “launch”", meta: "7 results" });
+    expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Archive/Plan.md" }] }, state: "succeeded" })).label)
+      .toBe("Moved Plan.md → Archive/Plan.md");
   });
 
   it("presents an item-level partial failure independently", () => {
@@ -515,5 +539,17 @@ describe("presentAgentTool", () => {
       summary: "1 completed, 1 failed",
     });
     expect(JSON.stringify(presentation)).not.toContain(PRIVATE_FAILURE_SENTINEL);
+  });
+});
+
+describe("tool line meta", () => {
+  const hosted = (name: string, input: unknown) => ({
+    kind: "tool" as const, id: "t", callId: "t", messageId: "m", order: 0, name, input, state: "succeeded" as const, location: "vault" as const,
+  });
+  it("doesn't repeat the label or name one of several targets", () => {
+    const meta = (name: string, input: unknown) => presentToolLineMeta(presentAgentTool(hosted(name, input)));
+    expect(meta("search", { patterns: ["milestone"], paths: ["Notes"] })).toBeUndefined();
+    expect(meta("read", { paths: ["Notes/A.md", "B.md"] })).toBeUndefined();
+    expect(meta("read", { paths: ["Research/One.md"] })).toBe("Research/One.md");
   });
 });

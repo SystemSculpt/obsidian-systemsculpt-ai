@@ -38,6 +38,7 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     return element;
   };
   const card = (id: string) => query(`.systemsculpt-agent-approval[data-approval-id="${id}"]`);
+  const primary = (id: string) => card(id).querySelector('[data-focus-key="tool-allow-once"]');
   const showCards = async (parts = [pending("one", 0), pending("two", 1), pending("three", 2)]) => {
     await workspace.setAgentSnapshot({
       runId: "run", turnId: "user", status: "waiting", phase: "waiting", waitingReason: "approval",
@@ -174,7 +175,7 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     expect(onApprove.mock.calls).toEqual([["one", true]]);
     expect(onSubmit).not.toHaveBeenCalled();
     expect(input.value).toBe("Keep this draft");
-    expect(document.activeElement).toBe(card("two"));
+    expect(document.activeElement).toBe(primary("two"));
   });
 
   it("Deny — Escape denies only the focused card, not the running response", async () => {
@@ -184,7 +185,7 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     await settle();
     expect(onApprove.mock.calls).toEqual([["one", false]]);
     expect(onStop).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(card("two"));
+    expect(document.activeElement).toBe(primary("two"));
   });
 
   it.each(["metaKey", "ctrlKey"] as const)("Approve all in this chat — %s+Shift+Enter grants the focused request's session scope once", async (modifier) => {
@@ -196,22 +197,22 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     // This forwards the native/hosted session grant; it must not batch-answer other pending requests.
     expect(onApprove.mock.calls).toEqual([["one", true, true]]);
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(card("two"));
+    expect(document.activeElement).toBe(primary("two"));
   });
 
   it("Previous / next pending card — arrows wrap in order and skip an answered card", async () => {
     await showCards();
     card("one").focus();
     key(card("one"), { key: "ArrowUp" });
-    expect(document.activeElement).toBe(card("three"));
+    expect(document.activeElement).toBe(primary("three"));
     key(card("three"), { key: "ArrowDown" });
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     key(card("one"), { key: "ArrowDown" });
-    expect(document.activeElement).toBe(card("two"));
+    expect(document.activeElement).toBe(primary("two"));
     key(card("two"), { key: "Enter" });
     await settle();
     key(card("three"), { key: "ArrowUp" });
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     expect(onApprove.mock.calls).toEqual([["two", true]]);
   });
 
@@ -222,15 +223,15 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     expect(document.activeElement).toBe(input);
     expect(query('[data-testid="chat.approval.review"]').hidden).toBe(false);
     expect(key(input, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     expect(input.value).toBe("Keep typing");
     const header = query('[data-testid="chat.header.more"]');
     header.focus();
     expect(key(header, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     card("three").focus();
     expect(key(card("three"), { key: arrow, altKey: true }).defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     const outside = document.body.createEl("textarea");
     outside.focus();
     expect(key(outside, { key: arrow, altKey: true }).defaultPrevented).toBe(false);
@@ -252,7 +253,7 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     expect(key(target, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
     expect(workspace.isHistoryOpen).toBe(false);
     expect(workspace.element.classList.contains("is-history-open")).toBe(false);
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     expect(input.value).toBe("Keep this draft");
     expect(onApprove).not.toHaveBeenCalled();
   });
@@ -272,7 +273,7 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     expect(key(rename, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
     await settle();
     expect(workspace.isHistoryOpen).toBe(false);
-    expect(document.activeElement).toBe(card("one"));
+    expect(document.activeElement).toBe(primary("one"));
     expect(input.value).toBe("Keep this draft");
     expect(onApprove).not.toHaveBeenCalled();
   });

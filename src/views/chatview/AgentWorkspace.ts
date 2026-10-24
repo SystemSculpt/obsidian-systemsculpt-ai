@@ -6,6 +6,7 @@ import {
 } from "../../core/ui/surface";
 import {
   cancelSurfaceAnimationFrame,
+  getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
@@ -71,8 +72,8 @@ export type AgentWorkspaceOptions = Readonly<{
   onCopyText?: (text: string) => boolean | Promise<boolean>;
   onNewChat: () => void | Promise<void>;
   onOpenHistory: () => void | Promise<void>;
-  /** Error actions in the conversation (spec 3.7): Detect again, Use SystemSculpt instead. */
-  onDetectAgain?: () => void | Promise<void>;
+  /** Detect again resolves true when this chat's agent is ready, enabling Retry. */
+  onDetectAgain?: () => boolean | void | Promise<boolean | void>;
   onUseHosted?: () => void | Promise<void>;
   /** "Add credits" in an out-of-credits error: the credits modal. */
   onOpenCredits?: () => void | Promise<void>;
@@ -196,6 +197,7 @@ export class AgentWorkspace extends Component {
   private titleText = "New chat";
   private readonly emptyState: AgentEmptyState;
   private readonly liveRegion: HTMLElement;
+  private announceTimer: number | null = null;
   private chromeKey = "";
   private historyReturnFocus: HTMLElement | null = null;
   private showPlanOffer = false;
@@ -283,7 +285,6 @@ export class AgentWorkspace extends Component {
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
       sourcePath: options.sourcePath,
-      labelledBy: titleId,
       beginLayoutMutation: (disclosureControl, mutationTarget) => this.unloaded
         ? undefined
         : disclosureControl
@@ -317,6 +318,11 @@ export class AgentWorkspace extends Component {
       onResubmitMessage: options.onResubmitMessage,
       onCancelMessageEdit: options.onCancelMessageEdit,
       onCopyText: options.onCopyText,
+      backendName: options.backendName,
+      onAnnounce: (text) => this.announce(text),
+      onDetectAgain: options.onDetectAgain,
+      onUseHosted: options.onUseHosted,
+      onOpenCredits: options.onOpenCredits,
     });
     this.addChild(this.renderer);
 
@@ -382,26 +388,35 @@ export class AgentWorkspace extends Component {
       cls: "systemsculpt-agent-sr-only",
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "chat.announcer" },
     });
+    this.register(() => {
+      if (this.announceTimer !== null) getSurfaceOwnerWindow(this.liveRegion).clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+    });
   }
 
-  /**
-   * A one-time info line from the agent (Auto unavailable, session reset).
-   * R3 moves it into the conversation; until then it is the info banner.
-   */
+  /** A one-time info line from the agent, shown in the conversation. */
   public showNotice(text: string): void {
-    this.setBanner(text, "info");
+    this.renderer.showNotice(text);
   }
 
-  /** A saved chat is loading; R3's conversation renderer draws the skeleton. */
+  /** A saved chat is loading; the conversation shows its skeleton after 300 ms. */
   public setLoading(loading: boolean): void {
     this.element.classList.toggle("is-loading-chat", loading);
+    this.renderer.setLoading(loading);
+    this.syncEmpty();
   }
 
   /** Polite announcement for screen readers. */
   public announce(text: string): void {
     // Clearing first makes a repeated message announce again.
+    // A timer, not a frame: announcements never take a slot in the render frame queue.
     this.liveRegion.setText("");
-    requestSurfaceAnimationFrame(this.liveRegion, () => this.liveRegion.setText(text));
+    const ownerWindow = getSurfaceOwnerWindow(this.liveRegion);
+    if (this.announceTimer !== null) ownerWindow.clearTimeout(this.announceTimer);
+    this.announceTimer = ownerWindow.setTimeout(() => {
+      this.announceTimer = null;
+      this.liveRegion.setText(text);
+    }, 50);
   }
 
   /** Renders the run line and the empty state for the current chat. */
@@ -1011,20 +1026,22 @@ export class AgentWorkspace extends Component {
         discovered.set(id, { priority, row });
       }
     }
-    for (const [id, { row }] of discovered) {
-      const registered = this.registeredRows.get(id);
-      if (registered !== row) {
-        if (registered) this.scroller.unregisterRow(id);
-        this.scroller.registerRow(id, row);
-        this.registeredRows.set(id, row);
+    this.scroller.batchRowChanges(() => {
+      for (const [id, { row }] of discovered) {
+        const registered = this.registeredRows.get(id);
+        if (registered !== row) {
+          if (registered) this.scroller.unregisterRow(id);
+          this.scroller.registerRow(id, row);
+          this.registeredRows.set(id, row);
+        }
       }
-    }
-    for (const id of this.registeredRows.keys()) {
-      if (!discovered.has(id)) {
-        this.scroller.unregisterRow(id);
-        this.registeredRows.delete(id);
+      for (const id of this.registeredRows.keys()) {
+        if (!discovered.has(id)) {
+          this.scroller.unregisterRow(id);
+          this.registeredRows.delete(id);
+        }
       }
-    }
+    });
     const activeResponse = this.renderer.element.querySelector<HTMLElement>(
       ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
     );
@@ -1109,7 +1126,7 @@ export class AgentWorkspace extends Component {
     const hasActivePresentation = presentation.phase !== "idle";
     this.emptyState.element.toggleAttribute(
       "hidden",
-      this.history.length > 0 || hasActivePresentation,
+      this.element.classList.contains("is-loading-chat") || this.history.length > 0 || hasActivePresentation,
     );
   }
 

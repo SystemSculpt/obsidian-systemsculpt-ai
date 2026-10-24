@@ -9,6 +9,7 @@ import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
+import { desktopHost } from '../../platform/desktopOnly';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
 export type LocalAgentToolUpdate = Pick<AgentToolPart, 'callId' | 'state'> & Partial<Pick<AgentToolPart, 'name' | 'input' | 'inputText' | 'native' | 'output' | 'error'>>;
@@ -31,6 +32,8 @@ const terminalToolStates = new Set(['succeeded', 'failed', 'denied', 'cancelled'
 /** Chat presentation adapter shared by on-machine agents. The agent owns every model step, tool and durable thread. */
 export class LocalAgentChatSession implements ChatSession {
   private localSnapshot: AgentConversationSnapshot = { runId: null, turnId: null, status: 'idle', messages: [], parts: [] };
+  /** Monotonic start of the current turn; the status row's elapsed time counts from here. */
+  private runStartedAt: number | null = null;
   private readonly localListeners = new Set<(value: AgentConversationSnapshot) => void>();
   private readonly locator: CodexThreadLocator;
   private readonly approvals = new Map<string, PendingApproval>();
@@ -46,7 +49,9 @@ export class LocalAgentChatSession implements ChatSession {
   getSnapshot(): AgentConversationSnapshot { return this.localSnapshot; }
   subscribe(listener: (value: AgentConversationSnapshot) => void): () => void { this.localListeners.add(listener); return () => this.localListeners.delete(listener); }
   private publish(patch: Partial<AgentConversationSnapshot>) {
-    this.localSnapshot = { ...this.localSnapshot, ...patch };
+    const elapsedMs = this.runStartedAt === null ? undefined : Math.max(0, Math.round(performance.now() - this.runStartedAt));
+    this.localSnapshot = { ...this.localSnapshot, ...(elapsedMs === undefined ? {} : { elapsedMs }), ...patch };
+    if (patch.status === 'completed' || patch.status === 'failed' || patch.status === 'cancelled') this.runStartedAt = null;
     for (const listener of this.localListeners) { try { listener(this.localSnapshot); } catch { /* Presentation must not interrupt the agent. */ } }
   }
   private publishParts(parts: readonly AgentPart[]) {
@@ -72,7 +77,7 @@ export class LocalAgentChatSession implements ChatSession {
   private async execute(input: AgentRunInput, controller: AbortController): Promise<AgentRunResult> {
     const name = this.agentName, working = `${name} is working`, messageId = `${input.turnId}_assistant`;
     let accepting = true, receivedText = '', activeTextId: string | undefined, persisted = false;
-    let vaultRoot: string | undefined, vaultRootAlias: string | undefined;
+    let vaultRoot: string | undefined, vaultRootAlias: string | undefined, homeDirectory: string | undefined;
     const nativeTerminalCalls = new Set<string>();
     const live = () => accepting && !controller.signal.aborted;
     const waiting = () => this.publish(this.approvals.size
@@ -92,7 +97,7 @@ export class LocalAgentChatSession implements ChatSession {
       const mergedInput = isRecord(previous?.input) && isRecord(update.input) ? { ...previous.input, ...update.input } : update.input ?? previous?.input ?? {};
       const next: AgentToolPart = { id: `${messageId}_tool_${update.callId}`, order: this.localSnapshot.parts.length, kind: 'tool', messageId, location: 'server', ...previous, ...update,
         name: update.state === 'approval-required' && previous?.name && previous.name !== 'tool' ? previous.name : update.name || previous?.name || 'tool', state, input: mergedInput,
-        native: update.native ? { ...previous?.native, ...update.native, vaultRoot, vaultRootAlias } : previous?.native };
+        native: update.native ? { ...previous?.native, ...update.native, vaultRoot, vaultRootAlias, homeDirectory } : previous?.native };
       if (!previous) activeTextId = undefined;
       this.publishParts(previous ? this.localSnapshot.parts.map(part => part.id === previous.id ? next : part) : [...this.localSnapshot.parts, next]);
     };
@@ -168,8 +173,11 @@ export class LocalAgentChatSession implements ChatSession {
           result: { success: part.state === 'succeeded', data: part.output, ...(part.state === 'succeeded' ? {} : { error: part.error ?? { code: `NATIVE_TOOL_${part.state.toUpperCase().replace(/-/g, '_')}`, message: part.state === 'cancelled' && part.approvalDecision === 'withdrawn' ? 'Approval request withdrawn.' : `Native tool ${part.state}.` } }) },
         } }];
       });
-      return { role: 'assistant', content, message_id: messageId, messageParts, ...(terminalOutcome ? { terminalOutcome } : {}) };
+      // Saved chats show "Worked 41s" and the folded activity's duration from this.
+      const responseDurationMs = this.runStartedAt === null ? this.localSnapshot.elapsedMs : Math.round(performance.now() - this.runStartedAt);
+      return { role: 'assistant', content, message_id: messageId, messageParts, ...(responseDurationMs === undefined ? {} : { responseDurationMs }), ...(terminalOutcome ? { terminalOutcome } : {}) };
     };
+    this.runStartedAt = performance.now();
     this.publish({ runId: input.turnId, turnId: input.turnId, status: 'running', phase: 'submitted', waitingReason: undefined, statusLabel: `Connecting to on-machine ${name}`, terminalError: undefined, parts: [], messages: [{ id: messageId, role: 'assistant', partIds: [] }] });
     try {
       if (this.conversationId !== null && this.conversationId !== input.conversationId) await this.closeTransport();
@@ -179,6 +187,7 @@ export class LocalAgentChatSession implements ChatSession {
       const adapter = this.app.vault?.adapter as { getBasePath?: () => string } | undefined;
       const hostRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, '.');
       vaultRootAlias = hostRoot && hostRoot !== cwd ? hostRoot : undefined;
+      homeDirectory = await desktopHost.os().then(os => os.homedir(), () => undefined);
       await input.buildBody?.(controller.signal);
       const images: string[] = [];
       const userText = input.message.parts.map(value => localAgentPromptText(value, images, name)).join('\n');

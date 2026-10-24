@@ -198,6 +198,19 @@ test("continuous activity animations change only compositor properties", () => {
   }
 });
 
+test("chat skeleton shimmer stays inside stationary loading bars", () => {
+  const css = read("src/css/views/agent-workspace/states.css");
+  const bar = css.match(/\.systemsculpt-agent-loading-bar\s*\{([^}]+)\}/)?.[1];
+  const highlight = css.match(/\.systemsculpt-agent-loading-bar::after\s*\{([^}]+)\}/)?.[1];
+  assert.ok(bar && highlight);
+  assert.match(bar, /position:\s*relative;/);
+  assert.match(bar, /overflow:\s*hidden;/);
+  assert.doesNotMatch(bar, /animation:|transform:/);
+  assert.match(highlight, /position:\s*absolute;/);
+  assert.match(highlight, /width:\s*calc\(100% \/ 3\);/);
+  assert.match(highlight, /animation:\s*ss-shimmer/);
+});
+
 test("hidden surfaces and reduced motion override feature animation specificity", () => {
   const surface = read("src/css/foundation/surface.css");
   assert.match(surface, /:is\(\.ss-motion-paused, #ss-specificity-boost\) \*::after\s*\{\s*animation-play-state:\s*paused;/);

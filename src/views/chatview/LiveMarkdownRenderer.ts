@@ -3,6 +3,7 @@ import {
   createSurfaceElement,
   getSurfaceOwnerWindow,
 } from "../../core/ui/surface";
+import { setMarkdownCodeExpanded } from "./MarkdownCodeBlocks";
 
 const DEFAULT_STREAM_RENDER_INTERVAL_MS = 48;
 const TEXT_NODE_FILTER = 4;
@@ -79,6 +80,10 @@ type PreservedDomState = Readonly<{
     expanded: string | null;
   }>[];
   copies: readonly PreservedCopyState[];
+  codeBlocks: readonly Readonly<{
+    element: HTMLElement;
+    expanded: boolean;
+  }>[];
 }>;
 
 /**
@@ -609,6 +614,8 @@ function captureDomState(region: DomRegion): PreservedDomState {
         expanded: element.querySelector<HTMLElement>(".callout-title")
           ?.getAttribute("aria-expanded") ?? null,
       })),
+    codeBlocks: regionQueryAll<HTMLElement>(region, ".systemsculpt-agent-code-block")
+      .map((element) => ({ element, expanded: element.classList.contains("is-code-expanded") })),
     copies: regionQueryAll<HTMLButtonElement>(
       region,
       ".systemsculpt-agent-code-copy",
@@ -659,6 +666,14 @@ function restoreDomState(region: DomRegion, state: PreservedDomState): void {
     if (title && entry.expanded !== null) {
       title.setAttribute("aria-expanded", entry.expanded);
     }
+  });
+
+  const codeBlocks = regionQueryAll<HTMLElement>(region, ".systemsculpt-agent-code-block");
+  state.codeBlocks.forEach((entry, index) => {
+    const target = entry.element.isConnected && root.contains(entry.element)
+      ? entry.element
+      : codeBlocks[index];
+    if (target) setMarkdownCodeExpanded(target, entry.expanded);
   });
 
   const copies = regionQueryAll<HTMLButtonElement>(

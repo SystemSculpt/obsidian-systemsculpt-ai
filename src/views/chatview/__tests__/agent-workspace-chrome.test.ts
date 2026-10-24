@@ -130,11 +130,45 @@ describe("AgentWorkspace chrome", () => {
     workspace.unload();
   });
 
+  it("routes conversation loading and notices through the shared owner-window announcer", () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount({ backendName: () => "Claude Code" });
+    try {
+      const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      const empty = parent.querySelector('[data-testid="chat.empty"]')!;
+      expect(empty.hasAttribute("hidden")).toBe(false);
+      workspace.setLoading(true);
+      expect(empty.hasAttribute("hidden")).toBe(true);
+      jest.advanceTimersByTime(299);
+      expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
+      jest.advanceTimersByTime(51);
+      expect(parent.querySelector('[data-testid="chat.loading"]')).not.toBeNull();
+      expect(region.textContent).toBe("Loading chat");
+      workspace.setLoading(false);
+      expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
+      expect(empty.hasAttribute("hidden")).toBe(false);
+      workspace.showNotice("Auto is unavailable.");
+      expect(parent.querySelector('[data-testid="chat.notice"]')?.textContent).toContain("Auto is unavailable.");
+      expect(parent.querySelector('.systemsculpt-agent-banner')?.hasAttribute('hidden')).toBe(true);
+      jest.advanceTimersByTime(50);
+      expect(region.textContent).toBe("Auto is unavailable.");
+      workspace.announce("Do not announce after unload");
+      workspace.unload();
+      jest.advanceTimersByTime(50);
+      expect(region.textContent).toBe("");
+    } finally {
+      workspace.unload();
+      jest.useRealTimers();
+    }
+  });
+
   it("keeps one polite live region for announcements", () => {
     const { parent, workspace } = mount();
     const region = parent.querySelector<HTMLElement>('[data-testid="chat.announcer"]')!;
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.classList.contains("systemsculpt-agent-sr-only")).toBe(true);
+    workspace.setChrome(chrome({ detecting: true, localAgents: true }));
+    expect(parent.querySelectorAll('[aria-live="polite"], [role="status"]')).toHaveLength(1);
     for (const selector of [".systemsculpt-agent-banner", ".systemsculpt-agent-queue", ".systemsculpt-agent-prompt-hint", ".systemsculpt-history-panel-status"]) {
       expect(parent.querySelector(selector)?.getAttribute("aria-live")).toBeNull();
       expect(parent.querySelector(selector)?.getAttribute("role")).not.toBe("status");

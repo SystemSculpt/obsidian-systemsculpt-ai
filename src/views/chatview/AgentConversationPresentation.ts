@@ -14,9 +14,10 @@ const NOT_STARTED_ERROR =
   /(?:bootstrap|context|admission|license|rate_limit|response_start)|\bbootstrap\b/i;
 
 export type PresentedAgentError = Readonly<{
-  heading: "Response interrupted" | "Could not finish" | "Not enough credits" | "Out of credits";
+  heading: string;
   message: string;
-  action?: "see-plans";
+  action?: "see-plans" | "add-credits" | "detect" | "sign-in";
+  details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
 }>;
@@ -41,6 +42,30 @@ export function presentAgentError(
   retryable: boolean,
   showPlanOffer = false,
 ): PresentedAgentError {
+  const nativeAgent = /^local_(claude|codex)_/.exec(error.code)?.[1];
+  if (nativeAgent) {
+    const name = nativeAgent === "claude" ? "Claude Code" : "Codex";
+    const login = nativeAgent === "claude"
+      ? "Open a terminal, run `claude` and type /login. Then send your message again."
+      : "Open a terminal and run `codex login`. Then send your message again.";
+    if (/not installed|not on PATH|executable.*not found|ENOENT/i.test(error.message)) {
+      return {
+        heading: `${name} isn't installed on this computer`,
+        message: nativeAgent === "claude"
+          ? "Install Claude Code, then run `claude` in a terminal and type /login. Then choose Detect again."
+          : "Install Codex, then run `codex login` in a terminal. Then choose Detect again.",
+        action: "detect",
+      };
+    }
+    if (/not (?:signed|logged) in|authentication[_ ]failed|requires? (?:authentication|login)|please (?:sign|log) in/i.test(error.message)) {
+      return { heading: `${name} isn't signed in`, message: login, action: "sign-in" };
+    }
+    return {
+      heading: `${name} stopped before finishing`,
+      message: `Retry this message. If it keeps failing, run \`${nativeAgent}\` in a terminal to check it works.`,
+      details: error.message,
+    };
+  }
   if (showPlanOffer && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {
     return {
       heading: "Out of credits",
@@ -52,12 +77,14 @@ export function presentAgentError(
     return {
       heading: "Out of credits",
       message: "You have no credits left. Add credits to continue using Chat.",
+      action: "add-credits",
     };
   }
   if (error.code === "insufficient_credits" || error.code === "payment_required") {
     return {
       heading: "Not enough credits",
       message: "Not enough credits are available. Add credits to continue using Chat.",
+      action: showPlanOffer ? "see-plans" : "add-credits",
     };
   }
   if (error.code === "content_filter") {
@@ -124,14 +151,14 @@ function phaseFor(snapshot: AgentConversationSnapshot | null, requestPending: bo
   if (snapshot.status === "completed") return "completed";
   if (snapshot.status === "cancelled") return "cancelled";
   if (snapshot.status === "failed") return "failed";
-  if (snapshot.phase === "retrying") return "recovering";
-  if (snapshot.phase === "settling") return "settling";
   if (snapshot.parts.some((part) =>
     part.kind === "tool"
     && (part.location === "vault" || part.native)
     && part.state === "approval-required")) {
     return "awaiting-approval";
   }
+  if (snapshot.phase === "retrying") return "recovering";
+  if (snapshot.phase === "settling") return "settling";
   if (snapshot.parts.some((part) =>
     part.kind === "tool" && isActiveAgentToolState(part.state))) {
     return "acting";
@@ -160,10 +187,16 @@ function activityStatus(
   // A sustained outage outranks stale tool activity: the frozen tool states
   // below describe the last frames before the connection dropped, not what is
   // happening now.
-  if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
   const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
     part.kind === "tool" && isActiveAgentToolState(part.state)) ?? [];
-  if (phase === "awaiting-approval") return "Waiting for your approval";
+  if (phase === "awaiting-approval") {
+    return snapshot?.parts.some((part) => part.kind === "tool"
+      && part.state === "approval-required"
+      && (part.name === "AskUserQuestion" || part.native?.requestMethod?.endsWith("/requestUserInput")))
+      ? "Waiting for your answer"
+      : "Waiting for your approval";
+  }
+  if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
   if (activeTools.some((part) =>
     part.location === "server" && part.name === "web_search")) {
     return "Searching";
@@ -179,9 +212,11 @@ function activityStatus(
   switch (phase) {
     case "reasoning":
     case "acting":
-    case "responding":
-    case "submitting":
       return "Thinking";
+    case "responding":
+      return "Writing";
+    case "submitting":
+      return "Connecting…";
     case "recovering":
       return "Continuing";
     case "settling":
