@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { Menu } from "obsidian";
-import { AgentRunLine, type AgentRunLineOptions } from "../AgentRunLine";
+import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "../AgentRunLine";
 import type { AgentChromeState } from "../AgentChatChrome";
 
 type MockMenu = Menu & {
@@ -150,6 +150,23 @@ describe("AgentRunLine", () => {
       jest.runOnlyPendingTimers();
       expect(document.activeElement).toBe(segment(parent, "mode"));
       line.unload();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each(["before hide", "after hide"])("does not steal focus moved to another pane or dialog %s", (timing) => {
+    jest.useFakeTimers();
+    try {
+      const leaf = document.body.createDiv({ cls: "workspace-leaf" });
+      const opener = leaf.createEl("button");
+      const destination = document.body.createEl("input");
+      opener.focus();
+      if (timing === "before hide") destination.focus();
+      returnFocusAfterMenu(opener, () => opener);
+      if (timing === "after hide") destination.focus();
+      jest.runOnlyPendingTimers();
+      expect(document.activeElement).toBe(destination);
     } finally {
       jest.useRealTimers();
     }

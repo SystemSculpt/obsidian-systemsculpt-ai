@@ -32,8 +32,9 @@ export function returnFocusAfterMenu(host: HTMLElement, target: () => HTMLElemen
   const before = ownerDocument.activeElement;
   (ownerDocument.defaultView ?? window).setTimeout(() => {
     const active = ownerDocument.activeElement;
-    const moved = active !== before && active !== ownerDocument.body && host.closest(".workspace-leaf")?.contains(active);
-    if (moved) return;
+    const meaningfulFocus = active && active !== ownerDocument.body && !active.closest(".menu");
+    const outsideLeaf = !host.closest(".workspace-leaf")?.contains(active);
+    if (meaningfulFocus && (active !== before || outsideLeaf) && active !== target()) return;
     const element = target();
     if (element?.isConnected) element.focus();
   }, 0);

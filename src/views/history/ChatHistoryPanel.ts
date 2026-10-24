@@ -39,6 +39,7 @@ export type ChatHistoryPanelOptions = Readonly<{
   /** Confirms with the person; resolves true when the chat was moved to the trash. */
   onDelete: (row: ChatHistoryRow) => Promise<boolean>;
   now?: () => number;
+  announce?: (message: string) => void;
 }>;
 
 type PanelItem = Readonly<{ row: ChatHistoryRow; group: string }>;
@@ -121,7 +122,7 @@ export class ChatHistoryPanel extends Component {
     });
     this.statusEl = this.element.createDiv({
       cls: "systemsculpt-history-panel-status",
-      attr: { role: "status", "aria-live": "polite" },
+      attr: options.announce ? {} : { role: "status", "aria-live": "polite" },
     });
     this.showMoreEl = createUiAction(this.element, {
       label: "Show more",
@@ -558,6 +559,7 @@ export class ChatHistoryPanel extends Component {
           : this.query
             ? `No chats match "${this.search.input.value.trim()}"`
             : "No chats yet";
+    if (text && text !== this.statusEl.textContent && this.isOpen) this.options.announce?.(text);
     this.statusEl.setText(text);
     this.statusEl.toggleAttribute("hidden", !text);
     this.statusEl.classList.toggle("is-empty", empty && !this.loading && !searching);

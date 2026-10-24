@@ -45,6 +45,30 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  it.each([
+    ["/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
+    ["/private/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
+    ["/external/Notes/Plan.md", "/external/Notes/Plan.md (outside vault)"],
+  ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed) => {
+    const ui = setup();
+    try {
+      const part = tool("one", { location: "server", input: { file_path, old_string: "Draft", new_string: "Ready" },
+        native: { agent: "claude", workingDirectory: "/private/tmp/vault", vaultRoot: "/private/tmp/vault", vaultRootAlias: "/tmp/vault" } });
+      const original = JSON.stringify(part);
+      const card = ui.add(part);
+      ui.cards.sync([part]);
+      const title = `Claude Code wants to edit ${displayed}`;
+      expect(card.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe(title);
+      expect(ui.root.querySelector('[role="status"]')?.textContent).toBe(title);
+      expect(card.querySelector("details pre")?.textContent).toBe(JSON.stringify(part.input, null, 2));
+      expect(JSON.stringify(part)).toBe(original);
+      expect(ui.onApprove).not.toHaveBeenCalled();
+      key(card, "Enter");
+      await tick();
+      expect(ui.onApprove.mock.calls).toEqual([["one", true]]);
+    } finally { ui.dispose(); }
+  });
+
   it("never steals composer focus, and Alt+Up reviews the pending card", () => {
     const ui = setup();
     ui.input.value = "Still typing";
@@ -59,6 +83,47 @@ describe("inline approval keyboard ownership", () => {
     key(ui.input, "ArrowUp", { altKey: true });
     expect(document.activeElement).toBe(card);
     expect(ui.input.value).toBe("Still typing");
+    ui.dispose();
+  });
+
+  it("shows the review pill only while the person types, and leaves Alt+Up alone with nothing pending", () => {
+    const ui = setup();
+    const pill = () => ui.composer.querySelector<HTMLButtonElement>('[data-testid="chat.approval.review"]');
+    ui.input.focus();
+    const idle = new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true, cancelable: true });
+    ui.input.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+
+    // An empty composer gives focus to the card; no pill is needed.
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    expect(document.activeElement).toBe(card);
+    expect(pill()?.hidden).toBe(true);
+    expect(pill()?.getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowUp");
+    expect(pill()?.querySelector("kbd")?.getAttribute("aria-hidden")).toBe("true");
+
+    // Back in the composer, typing brings the pill; clearing the text hides it.
+    ui.input.focus();
+    expect(pill()?.hidden).toBe(true);
+    ui.input.value = "One more thing";
+    ui.input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(pill()?.hidden).toBe(false);
+    ui.input.value = "";
+    ui.input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(pill()?.hidden).toBe(true);
+    ui.input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    expect(pill()?.hidden).toBe(false);
+    ui.input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+
+    // Focus elsewhere in Obsidian: the pill waits for the person's return.
+    const editor = document.body.createEl("textarea");
+    editor.focus();
+    ui.cards.sync([part]);
+    expect(pill()?.hidden).toBe(false);
+
+    ui.cards.sync([]);
+    expect(pill()?.hidden).toBe(true);
     ui.dispose();
   });
 

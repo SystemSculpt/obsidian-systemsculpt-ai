@@ -6,9 +6,10 @@ import { App, MarkdownRenderer, setIcon, TFile } from "obsidian";
 import type { ChatMessage, MessagePart } from "../../../types";
 import type { AgentConversationSnapshot, AgentPart } from "../../../chat/ChatConversation";
 import type { ToolCall } from "../../../types/toolCalls";
-import type {
-  AgentConversationPresentation,
-  AgentPresentationPhase,
+import {
+  presentAgentConversation,
+  type AgentConversationPresentation,
+  type AgentPresentationPhase,
 } from "../AgentConversationPresentation";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 
@@ -693,6 +694,54 @@ describe("AgentConversationRenderer tail status", () => {
     expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
     expect(status.isConnected).toBe(false);
     renderer.unload();
+  });
+
+  it.each(["claude", "codex"] as const)("keeps %s approval waiting text through timer ticks until every request resolves", async agent => {
+    jest.useFakeTimers();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const pending: Extract<AgentPart, { kind: "tool" }>[] = [0, 1].map(index => ({
+      id: `tool-${index}`, callId: `tool-${index}`, messageId: "assistant", order: index, kind: "tool",
+      name: agent === "claude" ? "Bash" : "commandExecution", input: { command: "pwd" },
+      location: "server", state: "approval-required", approvalId: `approval-${index}`,
+      native: { agent, workingDirectory: "/vault", vaultRoot: "/vault" },
+    }));
+    const snapshot = (parts: readonly AgentPart[]): AgentConversationSnapshot => ({
+      runId: "run", turnId: "turn", status: "running", phase: "working", elapsedMs: 1_500,
+      messages: [{ id: "assistant", role: "assistant", partIds: parts.map(part => part.id) }], parts,
+    });
+    const render = async (parts: readonly AgentPart[]) => {
+      const value = snapshot(parts);
+      await renderer.renderActive(value, presentAgentConversation(value, true));
+    };
+    try {
+      await render([]);
+      const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+      const label = status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label")!;
+      const text = label.firstChild;
+      expect(label.textContent).toBe("Working for 1s");
+      await render(pending);
+      expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
+      expect(label.firstChild).toBe(text);
+      expect(label.textContent).toBe("Waiting for your approval");
+      expect(status.hasAttribute("data-agent-working-timer")).toBe(false);
+      expect(label.hasAttribute("data-agent-working-duration")).toBe(false);
+      expect(status.querySelector(".is-animated")).toBeNull();
+      jest.advanceTimersByTime(5_000);
+      expect(label.textContent).toBe("Waiting for your approval");
+      await render([{ ...pending[0], state: "approved" }, pending[1]]);
+      jest.advanceTimersByTime(1_000);
+      expect(label.textContent).toBe("Waiting for your approval");
+      for (const state of ["approved", "denied", "cancelled"] as const) {
+        await render([{ ...pending[0], state: "approved" }, { ...pending[1], state }]);
+        expect(label.textContent).toMatch(/^Working for /);
+        expect(status.hasAttribute("data-agent-working-timer")).toBe(true);
+        expect(label.firstChild).toBe(text);
+      }
+    } finally { renderer.unload(); }
   });
 
   it("rebases delayed elapsed samples without replacing or rewinding Working text", async () => {

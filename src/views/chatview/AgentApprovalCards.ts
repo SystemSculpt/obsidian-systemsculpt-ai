@@ -89,6 +89,8 @@ export class AgentApprovalCards extends Component {
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
     });
     this.registerDomEvent(root, "keydown", event => this.handleKey(event));
+    this.registerDomEvent(root, "focusin", () => this.syncReviewVisibility());
+    this.registerDomEvent(root, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
     this.register(() => { this.review?.remove(); this.announcement.remove(); });
   }
 
@@ -99,8 +101,11 @@ export class AgentApprovalCards extends Component {
     if (!composer || composer === this.composerEventTarget) return;
     this.composerEventTarget = composer;
     // Element listeners follow the chat when Obsidian moves it into a pop-out.
-    this.registerDomEvent(composer, "compositionstart", () => { this.composing = true; });
-    this.registerDomEvent(composer, "compositionend", () => { this.composing = false; });
+    this.registerDomEvent(composer, "compositionstart", () => { this.composing = true; this.syncReviewVisibility(); });
+    this.registerDomEvent(composer, "compositionend", () => { this.composing = false; this.syncReviewVisibility(); });
+    this.registerDomEvent(composer, "input", () => this.syncReviewVisibility());
+    this.registerDomEvent(composer, "focusin", () => this.syncReviewVisibility());
+    this.registerDomEvent(composer, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
     this.registerDomEvent(composer, "keydown", event => {
       if (event.altKey && event.key === "ArrowUp" && !event.ctrlKey && !event.metaKey
         && !event.repeat && !event.isComposing && this.pending.size) {
@@ -273,13 +278,48 @@ export class AgentApprovalCards extends Component {
     this.bindComposerEvents();
     const composer = this.options.composer?.();
     if (!this.review && composer) {
-      this.review = createUiAction(composer, { label: "Approval needed · Review ⌥↑", size: "small", testId: "chat.approval.review", tooltip: false });
+      this.review = createUiAction(composer, { label: "Approval needed · Review", icon: "shield-question", size: "small", testId: "chat.approval.review", tooltip: false });
       composer.prepend(this.review);
       this.review.addClass("systemsculpt-agent-approval-review");
       this.review.setAttribute("aria-keyshortcuts", "Alt+ArrowUp");
+      this.review.createEl("kbd", {
+        cls: "systemsculpt-agent-approval-review-key",
+        text: getHostOperatingSystem() === "macOS" ? "⌥↑" : "Alt+↑",
+        attr: { "aria-hidden": "true" },
+      });
       this.review.onclick = () => this.focusFirst();
     }
-    this.review?.toggleAttribute("hidden", this.pending.size === 0);
+    this.syncReviewVisibility();
+  }
+
+  /**
+   * The review pill shows only where a card could not take focus (spec 6.2.3):
+   * while the person types in the composer (or composes with an IME), or
+   * while focus is outside the chat. A card with focus, or an empty composer,
+   * needs no pill.
+   */
+  private syncReviewVisibility(): void {
+    if (!this.review) return;
+    this.review.toggleAttribute("hidden", !this.reviewWanted());
+  }
+
+  private syncReviewVisibilityAfterFocusMoves(): void {
+    // focusout fires before the next element takes focus.
+    this.root.ownerDocument.defaultView?.setTimeout(() => this.syncReviewVisibility(), 0);
+  }
+
+  private reviewWanted(): boolean {
+    if (this.pending.size === 0) return false;
+    const ownerDocument = this.root.ownerDocument;
+    const active = ownerDocument.activeElement;
+    const composer = this.options.composer?.();
+    if (active && composer?.contains(active)) {
+      if (active === this.review) return true;
+      const typed = active.tagName === "TEXTAREA" && (active as HTMLTextAreaElement).value.trim().length > 0;
+      return typed || this.composing;
+    }
+    const view = this.root.closest(".systemsculpt-agent-workspace") ?? this.root;
+    return !active || active === ownerDocument.body || !view.contains(active);
   }
 
   private handleKey(event: KeyboardEvent): void {

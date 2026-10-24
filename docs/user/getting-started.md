@@ -106,11 +106,25 @@ Auto. Approve or decline native permission requests in the plugin dialog. See
 
 ## Add context
 
-- Drag files into chat.
-- Attach files with the paperclip in chat.
-- Use the files control to add vault notes or supported vault images as context.
-- Type `@` to mention files.
+- Select **+** in the message box: **Add current note**, **Add notes from vault…**,
+  **Upload from computer…**, or **Pin files for every message…**.
+- Type `@` or `[[` to mention a note. Pick it with the arrow keys and Enter or Tab:
+  the message keeps a `[[Note]]` link and the note is attached to that message.
+- When the message box is empty, a dashed chip suggests the note you have open.
+  It is added only when you select it.
+- Drop files from your computer, notes from the file explorer, or Similar Notes
+  results anywhere on the chat. Paste images or files into the message box.
+- Each attachment is a chip above the message. Select a chip to open it, pin it
+  for every message, or remove it. Pinned files show a pin and stay after you send.
 - Use `Chat with File` from the command palette.
+
+## Message box keys
+
+- **Enter** sends; **Shift+Enter** adds a new line. On touch screens, Enter adds a
+  new line and the send button sends.
+- While a response runs, **Esc** stops it and **Enter** queues your next message.
+- **Up** and **Down** in an empty message box bring back your earlier messages.
+- Typing while the conversation has focus continues in the message box.
 
 ## Tool use
 

@@ -48,7 +48,8 @@ function harness(options: Readonly<{ messages?: number; agent?: "claude" | "code
     chatTitle: "Plan the Q4 launch",
     approvalMode: "auto",
     containerEl: document.body.createDiv(),
-    transcript: { snapshot: () => ({ messages: Array.from({ length: options.messages ?? 0 }, () => ({})) }) },
+    transcript: { snapshot: () => ({ messages: Array.from({ length: options.messages ?? 0 }, () => ({})) }), idle: jest.fn(async () => undefined), setTitle: jest.fn() },
+    chatStorage: { renameChat: jest.fn(async () => undefined) },
     contextManager: { getPinnedFiles: () => new Set(["Projects/Plan.md"]) },
     workspace: {
       setChrome: jest.fn(),
@@ -93,7 +94,7 @@ describe("AgentChatView chrome wiring", () => {
       .toHaveBeenCalledWith({ textExecutionBackend: "codex", textExecutionBackendExplicit: true });
     expect(view.startNewChat).toHaveBeenCalledWith(true, undefined, undefined, {
       backend: "codex",
-      carry: { text: "Carry this draft", attachments: [{ id: "shot" }], pinned: ["Projects/Plan.md"] },
+      carry: { pinned: ["Projects/Plan.md"] },
       switchedFrom: "chat-1",
     });
     expect(view.workspace.announce).toHaveBeenCalledWith("Started a new chat with Codex");
@@ -153,15 +154,17 @@ describe("AgentChatView chrome wiring", () => {
   it("binds its keys to the view's scope only", () => {
     const view = harness();
     (view as any).registerViewKeys();
-    const keys = (view.scope as unknown as { keys: Array<{ modifiers: string[]; key: string }> }).keys;
+    const keys = (view.scope as unknown as { keys: Array<{ modifiers: string[]; key: string | null; func: (event: KeyboardEvent) => unknown }> }).keys;
     expect(keys.map(({ modifiers, key }) => `${modifiers.join("+")}+${key}`))
-      .toEqual(["Mod+k", "Mod+Shift+o", "Mod+.", "Mod+Shift+."]);
+      .toEqual(["Mod+k", "Mod+Shift+o", "Mod+null", "Mod+Shift+null"]);
     expect((view.scope as unknown as { parent: unknown }).parent).toBe(view.app.scope);
-    const [, , mode, backend] = (view.scope as unknown as { keys: Array<{ func: () => unknown }> }).keys;
-    expect(mode.func()).toBe(false);
+    const [, , mode, backend] = keys;
+    expect(mode.func(new KeyboardEvent("keydown", { key: ":", code: "Period", metaKey: true }))).toBe(false);
     expect(view.workspace.runLine.openModeMenu).toHaveBeenCalledTimes(1);
-    expect(backend.func()).toBe(false);
+    expect(backend.func(new KeyboardEvent("keydown", { key: ">", code: "Period", metaKey: true, shiftKey: true }))).toBe(false);
     expect(view.workspace.runLine.openBackendMenu).toHaveBeenCalledTimes(1);
+    expect(mode.func(new KeyboardEvent("keydown", { key: ".", code: "NumpadDecimal", metaKey: true }))).toBeUndefined();
+    expect(view.workspace.runLine.openModeMenu).toHaveBeenCalledTimes(1);
   });
 
   it("makes a saved chat read-only where its agent cannot run, and writable again once it can", () => {
@@ -215,6 +218,40 @@ describe("AgentChatView chrome wiring", () => {
     expect(view.startNewChat).toHaveBeenCalledWith(false);
   });
 
+  it("drains cancellation output and pending physical writes before trashing a chat", async () => {
+    const view = harness({ messages: 2 });
+    const file = Object.assign(new TFile(), { path: "SystemSculpt/Chats/chat-1.md" });
+    view.app.vault.getAbstractFileByPath.mockReturnValue(file);
+    view.app.workspace.getLeavesOfType.mockReturnValue([{ view }]);
+    const order: string[] = [];
+    let finishWrite!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+    view.startNewChat.mockImplementation(async () => { order.push("cancel persisted; reset"); });
+    view.transcript.idle.mockImplementation(async () => {
+      await pendingWrite;
+      order.push("physical write finished");
+    });
+    view.app.fileManager.trashFile.mockImplementation(async () => { order.push("trash"); });
+    const deleting = (view as any).deleteSavedChat({ chatId: "chat-1", title: "Plan", chatPath: file.path, favorite: false });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.app.fileManager.trashFile).not.toHaveBeenCalled();
+    finishWrite();
+    await expect(deleting).resolves.toBe(true);
+    expect(order).toEqual(["cancel persisted; reset", "physical write finished", "trash"]);
+  });
+
+  it("does not trash the chat if detaching its writer fails", async () => {
+    const notice = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const view = harness({ messages: 2 });
+    view.app.workspace.getLeavesOfType.mockReturnValue([{ view }]);
+    view.startNewChat.mockRejectedValueOnce(new Error("Could not detach"));
+    await expect((view as any).deleteSavedChat({ chatId: "chat-1", title: "Plan", chatPath: "x.md", favorite: false })).resolves.toBe(false);
+    expect(view.app.fileManager.trashFile).not.toHaveBeenCalled();
+    expect(notice).toHaveBeenCalledWith("Notice: This chat couldn't be deleted.");
+    notice.mockRestore();
+  });
+
   it("starts the welcome's own sign-up and sign-in handoffs from the empty state", () => {
     const openConnect = jest.spyOn(UpgradePlanModal, "openConnect").mockImplementation(() => ({}) as UpgradePlanModal);
     try {
@@ -238,12 +275,19 @@ describe("AgentChatView chrome wiring", () => {
     expect(view.loadChatById).toHaveBeenCalledWith("previous-chat");
   });
 
-  it("renames an open chat through its view", async () => {
-    const view = harness({ messages: 2 });
-    view.app.workspace.getLeavesOfType.mockReturnValue([{ view }]);
+  it("renames the durable title once and updates all open copies without saving their transcripts", async () => {
+    const view = harness({ messages: 4 });
+    const stale = harness({ messages: 2 });
+    view.app.workspace.getLeavesOfType.mockReturnValue([{ view }, { view: stale }]);
     view.setTitle = jest.fn(async () => undefined);
-    await (view as any).renameSavedChat({ chatId: "chat-1", title: "Old", chatPath: "x.md", timestampMs: 1, backend: "claude", favorite: false }, "New title");
-    expect(view.setTitle).toHaveBeenCalledWith("New title");
+    stale.setTitle = jest.fn(async () => undefined);
+    await (view as any).renameSavedChat({ chatId: "chat-1", title: "Old", chatPath: "x.md" }, "New title");
+    expect(view.setTitle).toHaveBeenCalledWith("New title", false);
+    expect(stale.setTitle).toHaveBeenCalledWith("New title", false);
+    expect(view.transcript.idle).toHaveBeenCalledTimes(1);
+    expect(stale.transcript.idle).toHaveBeenCalledTimes(1);
+    expect(view.chatStorage.renameChat).toHaveBeenCalledTimes(1);
+    expect(view.chatStorage.renameChat).toHaveBeenCalledWith("x.md", "chat-1", "New title");
   });
 });
 

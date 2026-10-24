@@ -204,6 +204,31 @@ describe("ContextSelectionModal", () => {
     expect(document.body.contains(modal.modalEl)).toBe(false);
   });
 
+  it("adds files to one message without offering audio or pinning copy", async () => {
+    const { modal, onSelect } = harness({
+      autoFocusSearch: false,
+      purpose: "message",
+      isFileAlreadyPinned: (file) => file.path === "notes/project.md",
+    });
+
+    expect(modal.modalEl.textContent).toContain("Add notes to this message");
+    expect(modal.modalEl.textContent).toContain("These files are sent with this message only.");
+    expect(modal.modalEl.textContent).not.toContain("Pin files");
+    expect(modal.modalEl.textContent).not.toContain("recording");
+    expect(modal.modalEl.querySelector('[data-testid="modal.context.filter.audio"]')).toBeNull();
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(7);
+    const taken = modal.modalEl.querySelector<HTMLInputElement>('input[aria-label="notes/project.md, already added"]')!;
+    expect(taken.disabled).toBe(true);
+    expect(taken.closest("li")?.textContent).toContain("Added");
+
+    modal.modalEl.querySelector<HTMLInputElement>('input[aria-label="Add notes/meeting.md"]')!.click();
+    const add = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.add"]')!;
+    expect(add.textContent).toBe("Add 1 file");
+    add.click();
+    await Promise.resolve();
+    expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ path: "notes/meeting.md" })], expect.any(AbortSignal));
+  });
+
   it("keeps the dialog open and restores controls when adding fails", async () => {
     const { modal, onSelect } = harness({ autoFocusSearch: false });
     onSelect.mockRejectedValueOnce(new Error("Processing failed"));

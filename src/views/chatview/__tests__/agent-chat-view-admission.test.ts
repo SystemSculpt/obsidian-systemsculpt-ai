@@ -740,6 +740,23 @@ describe("AgentChatView composer admission", () => {
     document.body.empty();
   });
 
+  it("blocks automation and direct historical admission while the saved backend is unavailable", async () => {
+    const notice = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const harness = createHarness("before-start");
+    const view = harness.view as any;
+    view.unavailableBackend = "claude";
+    await view.sendAutomationMessage({ message: "Do not send", focusAfterSend: false });
+    await view.executeSubmission({ text: "Do not replace history", mode: "send" }, {
+      historicalResubmit: { messageId: "old-user", expectedIndex: 0, expectedVersion: 1 },
+    });
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(view.transcript.commitUser).not.toHaveBeenCalled();
+    expect(harness.durableMessages).toEqual([]);
+    expect(notice).toHaveBeenCalledWith("Notice: This chat is read-only here because Claude Code isn't available. Start a new chat to continue.");
+    notice.mockRestore();
+    harness.composer.unload();
+  });
+
   it.each([
     {
       name: "an empty balance",
@@ -3448,6 +3465,8 @@ describe("AgentChatView controls", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
     expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")).not.toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-composer-errors")?.textContent)
+      .toContain("broken.pdf could not be processed: conversion failed");
 
     parent.querySelector<HTMLButtonElement>('[aria-label="Retry broken.pdf"]')!.click();
     await retryStarted.promise;
@@ -3500,7 +3519,7 @@ describe("AgentChatView controls", () => {
     expect(workspace.getMessageAttachments().map((attachment) => attachment.name))
       .toEqual(["new-draft.md"]);
     expect(parent.textContent).not.toContain("broken.pdf");
-    expect(noticeLog).toHaveBeenCalledWith(
+    expect(noticeLog).not.toHaveBeenCalledWith(
       "Notice: broken.pdf could not be processed: conversion failed",
     );
     workspace.unload();
@@ -4902,6 +4921,20 @@ describe("AgentChatView thin conversation lifecycle", () => {
     } finally {
       locator.mockRestore();
     }
+  });
+
+  it("preserves the live composer and its unfinished attachments when switching backend", async () => {
+    const harness = createSavedChatLoadHarness([]);
+    const view = harness.view as any;
+    const resetComposerDraft = jest.fn();
+    const setMessageAttachments = jest.fn();
+    Object.assign(view.workspace, { resetComposerDraft, setMessageAttachments, setQueue: jest.fn(), focus: jest.fn() });
+    view.queueRepository = { save: jest.fn(async () => undefined) };
+    view.transcript.reset = jest.fn(() => ({ chatId: "", title: "New chat", version: 0, messages: [] }));
+    await view.startNewChat(false, undefined, undefined, { backend: "systemsculpt", carry: { pinned: ["Plan.md"] } });
+    expect(resetComposerDraft).not.toHaveBeenCalled();
+    expect(setMessageAttachments).not.toHaveBeenCalled();
+    expect(view.contextManager.setPinnedFiles).toHaveBeenCalledWith(["Plan.md"]);
   });
 
   it("retires a failed-load reset when a newer chat wins its history render", async () => {

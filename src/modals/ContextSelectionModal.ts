@@ -14,6 +14,41 @@ const FILE_TYPES = {
 } as const;
 
 type ContextFileType = keyof typeof FILE_TYPES;
+
+/** Pin files for every message, or add them to the message being written. */
+export type ContextSelectionPurpose = "pin" | "message";
+
+const PURPOSE_COPY = {
+  pin: {
+    title: "Pin files for every message",
+    description: "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+    action: "Pin files",
+    actionCount: (count: number) => `Pin ${count} file${count === 1 ? "" : "s"}`,
+    busy: "Pinning…",
+    select: (path: string) => `Pin ${path}`,
+    taken: (path: string) => `${path}, pinned for every message`,
+    takenBadge: "Pinned",
+    failure: "Couldn't pin files for every message.",
+    testId: "modal.context.pin",
+    types: ["text", "documents", "images", "audio"],
+  },
+  message: {
+    title: "Add notes to this message",
+    description: "These files are sent with this message only. To send a file with every message, pin it instead.",
+    action: "Add files",
+    actionCount: (count: number) => `Add ${count} file${count === 1 ? "" : "s"}`,
+    busy: "Adding…",
+    select: (path: string) => `Add ${path}`,
+    taken: (path: string) => `${path}, already added`,
+    takenBadge: "Added",
+    failure: "Couldn't add files to this message.",
+    testId: "modal.context.add",
+    types: ["text", "documents", "images"],
+  },
+} as const satisfies Record<ContextSelectionPurpose, {
+  types: readonly ContextFileType[];
+  [key: string]: unknown;
+}>;
 type ContextFilter = ContextFileType | "all";
 
 interface FileItem {
@@ -26,6 +61,8 @@ export interface ContextSelectionModalOptions {
   /** Closing the owning view closes this picker and cancels its selection work. */
   signal?: AbortSignal;
   isFileAlreadyPinned?: (file: TFile) => boolean;
+  /** Defaults to pinning; "message" adds the files to one message instead. */
+  purpose?: ContextSelectionPurpose;
   initialFilter?: ContextFilter;
   initialSearchQuery?: string;
   initialSelectedPaths?: string[];
@@ -45,6 +82,7 @@ export class ContextSelectionModal extends StandardModal {
   private readonly isFileAlreadyPinned?: (file: TFile) => boolean;
   private readonly initialSearchQuery: string;
   private readonly autoFocusSearch: boolean;
+  private readonly copy: (typeof PURPOSE_COPY)[ContextSelectionPurpose];
   private readonly maxRenderedFiles = 100;
   private renderedCount = 0;
   private listContainer: HTMLUListElement | null = null;
@@ -63,6 +101,7 @@ export class ContextSelectionModal extends StandardModal {
   ) {
     super(app);
     this.onSelect = onSelect;
+    this.copy = PURPOSE_COPY[options.purpose ?? "pin"];
     this.ownerSignal = options.signal;
     this.isFileAlreadyPinned = options.isFileAlreadyPinned;
     this.initialSearchQuery = options.initialSearchQuery?.trim() ?? "";
@@ -84,10 +123,10 @@ export class ContextSelectionModal extends StandardModal {
       this.close();
       return;
     }
-    this.addTitle("Pin files for every message");
+    this.addTitle(this.copy.title);
     this.contentEl.createEl("p", {
       cls: "ss-context-description",
-      text: "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+      text: this.copy.description,
     });
     this.searchInput = this.addSearchBar("modal.context.search", "Search files", (query) => {
       this.searchQuery = query.trim().toLowerCase();
@@ -101,8 +140,8 @@ export class ContextSelectionModal extends StandardModal {
       attr: { role: "toolbar", "aria-label": "File type" },
     });
     this.createFilterButton(filters, "all", "All");
-    for (const [type, info] of Object.entries(FILE_TYPES)) {
-      this.createFilterButton(filters, type as ContextFileType, info.label, info.icon);
+    for (const type of this.copy.types) {
+      this.createFilterButton(filters, type, FILE_TYPES[type].label, FILE_TYPES[type].icon);
     }
 
     this.listContainer = this.contentEl.createEl("ul", {
@@ -112,7 +151,7 @@ export class ContextSelectionModal extends StandardModal {
     this.renderFileList();
 
     this.addActionButton("modal.context.cancel", "Cancel", () => this.close());
-    this.addButton = this.addActionButton("modal.context.pin", "Pin files", () => void this.handleSelection(), true);
+    this.addButton = this.addActionButton(this.copy.testId, this.copy.action, () => void this.handleSelection(), true);
     this.updateAddButton();
 
     if (this.autoFocusSearch) {
@@ -137,12 +176,12 @@ export class ContextSelectionModal extends StandardModal {
     const items: FileItem[] = [];
     for (const file of this.app.vault.getFiles()) {
       const extension = file.extension.toLowerCase();
-      const match = Object.entries(FILE_TYPES).find(([, info]) =>
-        (info.extensions as readonly string[]).includes(extension));
-      if (!match) continue;
+      const type = (this.copy.types as readonly ContextFileType[]).find((candidate) =>
+        (FILE_TYPES[candidate].extensions as readonly string[]).includes(extension));
+      if (!type) continue;
       items.push({
         file,
-        type: match[0] as ContextFileType,
+        type,
         searchText: `${file.basename} ${file.path} ${extension}`.toLowerCase(),
       });
     }
@@ -236,13 +275,13 @@ export class ContextSelectionModal extends StandardModal {
       checkbox.disabled = pinned || this.processing;
       checkbox.dataset.pinned = String(pinned);
       checkbox.setAttribute("aria-label", pinned
-        ? `${item.file.path}, pinned for every message`
-        : `Pin ${item.file.path}`);
+        ? this.copy.taken(item.file.path)
+        : this.copy.select(item.file.path));
       this.renderFileVisual(label, item);
       const info = label.createSpan({ cls: "ss-context-file-info" });
       info.createSpan({ text: item.file.basename, cls: "ss-context-file-name" });
       info.createSpan({ text: item.file.path, cls: "ss-context-file-path" });
-      if (pinned) info.createSpan({ text: "Pinned", cls: "ss-context-file-badge" });
+      if (pinned) info.createSpan({ text: this.copy.takenBadge, cls: "ss-context-file-badge" });
 
       this.registerDomEvent(checkbox, "change", () => {
         if (checkbox.checked) this.selectedFiles.add(item.file);
@@ -323,7 +362,7 @@ export class ContextSelectionModal extends StandardModal {
   private updateAddButton(): void {
     if (!this.addButton) return;
     const count = this.selectedFiles.size;
-    this.addButton.setText(count === 0 ? "Pin files" : `Pin ${count} file${count === 1 ? "" : "s"}`);
+    this.addButton.setText(count === 0 ? this.copy.action : this.copy.actionCount(count));
     this.addButton.disabled = this.processing || count === 0;
   }
 
@@ -336,7 +375,7 @@ export class ContextSelectionModal extends StandardModal {
     }
     if (this.loadMoreButton) this.loadMoreButton.disabled = loading;
     if (this.addButton && loading) {
-      this.addButton.setText("Pinning…");
+      this.addButton.setText(this.copy.busy);
       this.addButton.disabled = true;
     } else {
       this.updateAddButton();
@@ -353,7 +392,7 @@ export class ContextSelectionModal extends StandardModal {
     } catch (error) {
       if (!task.isCurrent()) return;
       const detail = error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : "";
-      new Notice(`Couldn't pin files for every message.${detail}`, 5000);
+      new Notice(`${this.copy.failure}${detail}`, 5000);
       this.setLoadingState(false);
     }
   }

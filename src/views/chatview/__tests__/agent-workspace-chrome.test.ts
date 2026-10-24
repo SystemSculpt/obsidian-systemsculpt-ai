@@ -121,6 +121,8 @@ describe("AgentWorkspace chrome", () => {
     const { parent, workspace } = mount();
     workspace.setChrome(chrome());
     expect(parent.querySelector('[data-testid="chat.run.backend"]')?.textContent).toBe("SystemSculpt");
+    expect(workspace.composer.footerSlot.contains(workspace.runLine.element)).toBe(true);
+    expect(parent.querySelector('[data-testid="chat.composer.approval-mode"]')).toBeNull();
     expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Chat with your vault using SystemSculpt.");
     workspace.setChrome(chrome({ account: "signed-in" }));
     expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Ask about your notes or give SystemSculpt a task.");
@@ -133,6 +135,15 @@ describe("AgentWorkspace chrome", () => {
     const region = parent.querySelector<HTMLElement>('[data-testid="chat.announcer"]')!;
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.classList.contains("systemsculpt-agent-sr-only")).toBe(true);
+    for (const selector of [".systemsculpt-agent-banner", ".systemsculpt-agent-queue", ".systemsculpt-agent-prompt-hint", ".systemsculpt-history-panel-status"]) {
+      expect(parent.querySelector(selector)?.getAttribute("aria-live")).toBeNull();
+      expect(parent.querySelector(selector)?.getAttribute("role")).not.toBe("status");
+    }
+    const announce = jest.spyOn(workspace, "announce");
+    workspace.setBanner("This saved chat is read-only.");
+    workspace.setBanner("This saved chat is read-only.");
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith("This saved chat is read-only.");
     workspace.unload();
   });
 });

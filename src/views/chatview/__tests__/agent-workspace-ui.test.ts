@@ -3,7 +3,6 @@
  */
 
 import { App, Component, MarkdownRenderer, setIcon, TFile } from "obsidian";
-import { AgentComposer } from "../AgentComposer";
 import {
   type AgentArtifact,
   type AgentConversationSnapshot,
@@ -63,471 +62,6 @@ async function expandHistoricalOverflow(
 }
 
 const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
-
-describe("AgentComposer", () => {
-  it("sends while idle, queues while running, and preserves line breaks", async () => {
-    const parent = document.body.createDiv();
-    const submissions: Array<{ text: string; mode: "send" | "queue" }> = [];
-    const onStop = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop,
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const input = parent.querySelector("textarea")!;
-
-    const pinFiles = parent.querySelector<HTMLButtonElement>(
-      '[aria-label="Pin files for every message"]',
-    );
-    expect(pinFiles).not.toBeNull();
-    expect(pinFiles?.getAttribute("aria-description")).toContain(
-      "Files SystemSculpt reads while working remain part of this chat",
-    );
-
-    composer.setValue("First request");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions).toEqual([{ text: "First request", mode: "send" }]);
-
-    composer.setRunning(true);
-    expect(parent.querySelector('[aria-label="Search the web"]')).toBeNull();
-    parent.querySelector<HTMLButtonElement>('[aria-label="Stop response"]')!.click();
-    expect(onStop).toHaveBeenCalledTimes(1);
-    composer.setValue("Follow up");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions.at(-1)).toEqual({ text: "Follow up", mode: "queue" });
-
-    composer.setValue("Keep me");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-    expect(composer.getValue()).toBe("Keep me");
-    composer.unload();
-  });
-
-  it("makes a saved-history composer visibly read-only until a new chat enables it", async () => {
-    const parent = document.body.createDiv();
-    const onSubmit = jest.fn(async () => undefined);
-    const onAttach = jest.fn();
-    const onRemoveAttachment = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit,
-      onStop: jest.fn(),
-      onAttach,
-      onRemoveAttachment,
-    });
-    composer.load();
-    composer.setValue("Draft that must not be sent");
-    composer.setAttachments([{
-      id: "legacy-context",
-      label: "Legacy.md",
-      path: "Legacy.md",
-      kind: "vault",
-    }]);
-
-    composer.setReadOnly("View-only saved chat. Start a new chat to continue.");
-
-    const input = parent.querySelector<HTMLTextAreaElement>("textarea")!;
-    expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Start a new chat to continue.");
-    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent)
-      .toBe("View-only saved chat. Start a new chat to continue.");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>(
-      '[aria-label="Pin files for every message"]',
-    )!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Legacy.md"]')!.disabled).toBe(true);
-
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Legacy.md"]')!.click();
-    await Promise.resolve();
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(onAttach).not.toHaveBeenCalled();
-    expect(onRemoveAttachment).not.toHaveBeenCalled();
-    expect(composer.getValue()).toBe("Draft that must not be sent");
-
-    composer.setReadOnly(null);
-
-    expect(input.disabled).toBe(false);
-    expect(input.placeholder).toBe("Ask SystemSculpt to work in your vault…");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
-    parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(onSubmit).toHaveBeenCalledWith({
-      text: "Draft that must not be sent",
-      mode: "send",
-    });
-    composer.unload();
-  });
-
-  it("distinguishes pinned files from one-message attachments and exposes an unpin action", () => {
-    const parent = document.body.createDiv();
-    const onRemoveAttachment = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment,
-    });
-    composer.load();
-    composer.setAttachments([{ id: "a", label: "Project.md", path: "Project.md", kind: "vault" }]);
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("role"))
-      .toBe("list");
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("aria-label"))
-      .toBe("Message attachments and pinned files");
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("aria-description"))
-      .toContain("Pinned files are reread for every message");
-    expect(parent.querySelector(".systemsculpt-agent-attachment")?.getAttribute("role"))
-      .toBe("listitem");
-    const pinned = parent.querySelector<HTMLElement>(".systemsculpt-agent-attachment.is-pinned")!;
-    expect(pinned.title).toBe("Project.md. Pinned and reread for every message.");
-    expect(pinned.querySelector(".systemsculpt-agent-attachment-badge")?.textContent).toBe("Pinned");
-    const unpin = parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Project.md"]')!;
-    unpin.click();
-    expect(onRemoveAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
-
-    expect(parent.textContent).toContain("Project.md");
-    composer.unload();
-  });
-
-  it("keeps a vault image thumbnail visible after selection", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    composer.setAttachments([{
-      id: "image",
-      label: "Diagram.png",
-      path: "[[Images/Diagram.png]]",
-      kind: "image",
-      previewUrl: "app://local/Images/Diagram.png",
-    }]);
-
-    const preview = parent.querySelector<HTMLImageElement>(
-      ".systemsculpt-agent-attachment.is-pinned .systemsculpt-agent-attachment-preview",
-    )!;
-    expect(preview.src).toContain("Images/Diagram.png");
-    expect(preview.alt).toBe("");
-    expect(preview.loading).toBe("lazy");
-    expect(preview.decoding).toBe("async");
-    expect(preview.draggable).toBe(false);
-
-    preview.dispatchEvent(new Event("error"));
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-pinned img")).toBeNull();
-    const fallback = parent.querySelector(
-      ".systemsculpt-agent-attachment.is-pinned .systemsculpt-agent-attachment-icon",
-    );
-    expect(fallback).not.toBeNull();
-    expect(fallback?.nextElementSibling?.classList.contains("systemsculpt-agent-attachment-label"))
-      .toBe(true);
-    composer.unload();
-  });
-
-  it("preserves pasted text while ingesting multiple mixed clipboard files", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const text = new File(["# Plan"], "plan.md", { type: "text/markdown" });
-    const image = new File([new Uint8Array([1, 2, 3])], "diagram.png", { type: "image/png" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("# Plan").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new Uint8Array([1, 2, 3]).buffer });
-
-    composer.setValue("Pasted instructions");
-    const paste = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(paste, "clipboardData", {
-      value: { types: ["Files", "text/plain"], files: [text, image], items: [] },
-    });
-    parent.querySelector("textarea")!.dispatchEvent(paste);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(paste.defaultPrevented).toBe(false);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
-    expect(parent.querySelector<HTMLImageElement>(".systemsculpt-agent-attachment-preview")?.src).toMatch(/^data:image\/png;base64,/);
-    const send = parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
-    expect(send.disabled).toBe(false);
-    send.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].text).toBe("Pasted instructions");
-    expect(submissions[0].attachments.map((item: any) => item.kind)).toEqual(["text", "image"]);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
-    composer.unload();
-  });
-
-  it("ingests multiple mixed files through the native picker and sends attachment-only", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const text = new File(["notes"], "notes.txt", { type: "text/plain" });
-    const image = new File([new Uint8Array([7, 8])], "photo.webp", { type: "image/webp" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("notes").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new Uint8Array([7, 8]).buffer });
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [text, image] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
-    parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].text).toBe("");
-    expect(submissions[0].attachments.map((item: any) => item.kind)).toEqual(["text", "image"]);
-    composer.unload();
-  });
-
-  it("restores a rejected submission without overwriting the newer draft", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    composer.setValue("New draft typed while waiting");
-    const rejectedAttachment = {
-      status: "ready" as const,
-      id: "text-hash",
-      name: "brief.md",
-      mimeType: "text/markdown",
-      byteLength: 7,
-      kind: "text" as const,
-      contentPart: {
-        type: "text" as const,
-        text: "--- BEGIN ATTACHED FILE: brief.md (text/markdown) ---\n# Brief\n--- END ATTACHED FILE: brief.md ---",
-      },
-    };
-
-    composer.restoreRejectedSubmission({
-      text: "Rejected request",
-      attachments: [rejectedAttachment],
-    });
-
-    expect(composer.getValue()).toBe("Rejected request\n\nNew draft typed while waiting");
-    expect(composer.getMessageAttachments()).toEqual([rejectedAttachment]);
-    expect(composer.hasDraft()).toBe(true);
-    composer.unload();
-  });
-
-  it("blocks a mixed batch when PDF processing fails, then submits the whole batch after retry", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    let attempt = 0;
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn(async () => {
-          attempt += 1;
-          if (attempt === 1) throw new Error("conversion failed");
-          return { operationId: "pdf-retry", markdown: "Recovered document" };
-        }),
-        complete: jest.fn(async () => undefined),
-        discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const text = new File(["notes"], "notes.md", { type: "text/markdown" });
-    const pdf = new File(["%PDF"], "broken.pdf", { type: "application/pdf" });
-    const image = new File(["image"], "diagram.png", { type: "image/png" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("notes").buffer });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new TextEncoder().encode("image").buffer });
-
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [text, pdf, image] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(noticeLog).toHaveBeenCalledWith(
-      "Notice: broken.pdf could not be processed: conversion failed",
-    );
-    const send = parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(3);
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("broken.pdf");
-    expect(send.disabled).toBe(true);
-    send.click();
-    expect(submissions).toEqual([]);
-
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(send.disabled).toBe(false);
-    send.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].attachments.map((attachment: any) => attachment.name)).toEqual([
-      "notes.md", "broken.pdf", "diagram.png",
-    ]);
-    composer.unload();
-  });
-
-  it("offers a stop control while documents process, and stops them when clicked or when the chat closes (#420)", async () => {
-    const parent = document.body.createDiv();
-    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    const signals: AbortSignal[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn((_input, { signal }) => new Promise<never>((_resolve, reject) => {
-          signals.push(signal);
-          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-        })),
-        complete: jest.fn(async () => undefined),
-        discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const pdf = new File(["%PDF"], "slow.pdf", { type: "application/pdf" });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!;
-    expect(stop.hidden).toBe(true);
-
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    for (let turn = 0; signals.length === 0 && turn < 100; turn++) await Promise.resolve();
-    expect(stop.hidden).toBe(false);
-    stop.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(signals[0].aborted).toBe(true);
-    expect(stop.hidden).toBe(true);
-    expect(noticeLog).toHaveBeenCalledWith("Notice: slow.pdf could not be processed: processing was stopped. Retry to process it.");
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("slow.pdf");
-
-    // Closing the chat stops a retry that is still processing.
-    noticeLog.mockClear();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    for (let turn = 0; signals.length === 1 && turn < 100; turn++) await Promise.resolve();
-    composer.unload();
-    expect(signals[1].aborted).toBe(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(noticeLog).not.toHaveBeenCalled();
-    noticeLog.mockRestore();
-  });
-
-  it.each(["resolve", "reject"] as const)("Remove during Retry keeps the PDF removed after a late %s", async (outcome) => {
-    const parent = document.body.createDiv();
-    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    let finish!: () => void;
-    let signal!: AbortSignal;
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(), onStop: jest.fn(), onAttach: jest.fn(), onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn().mockRejectedValueOnce(new Error("First failure"))
-          .mockImplementationOnce((_input, options) => {
-            signal = options.signal;
-            return new Promise((resolve, reject) => { finish = () => outcome === "resolve"
-              ? resolve({ operationId: "late", markdown: "Late result" }) : reject(new Error("Late failure")); });
-          }),
-        complete: jest.fn(async () => undefined), discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const pdf = new File(["%PDF"], "remove.pdf", { type: "application/pdf" });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    notices.mockClear();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.remove"]')!.click();
-    const abortedOnRemove = signal.aborted;
-    finish();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(abortedOnRemove).toBe(true);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
-    expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!.hidden).toBe(true);
-    expect(notices).not.toHaveBeenCalled();
-    composer.setValue("Send without the removed PDF");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
-    composer.unload();
-    notices.mockRestore();
-  });
-
-  it("turns a Similar Notes drag payload into a pinned file instead of a message attachment", () => {
-    const parent = document.body.createDiv();
-    const onVaultContextDrop = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      onVaultContextDrop,
-    });
-    composer.load();
-    const transfer = {
-      types: ["application/x-systemsculpt-similar-note"],
-      files: [],
-      items: [],
-      getData: jest.fn(() => JSON.stringify({
-        path: "Research/Project.md",
-        title: "Project",
-        source: "similar-notes",
-      })),
-    };
-    const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, "dataTransfer", { value: transfer });
-
-    composer.element.dispatchEvent(drop);
-
-    expect(drop.defaultPrevented).toBe(true);
-    expect(onVaultContextDrop).toHaveBeenCalledWith("Research/Project.md");
-    expect((composer as any).messageAttachments.displaySnapshot()).toEqual([]);
-    composer.unload();
-  });
-
-  it("does not enable send for pinned files without prompt text or message attachments", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-
-    composer.setAttachments([{ id: "context", label: "Project.md", path: "Project.md", kind: "vault" }]);
-
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')?.disabled).toBe(true);
-    composer.unload();
-  });
-});
 
 describe("AgentWorkspace", () => {
   const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
@@ -937,11 +471,11 @@ describe("AgentWorkspace", () => {
 
     expect(workspace.element.matches('.ss-surface[data-ss-surface="view"]')).toBe(true);
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
-    expect(parent.querySelector('[aria-label="Attach files"]')?.classList.contains("ss-button--icon")).toBe(true);
+    expect(parent.querySelector('[aria-label="Add files and notes"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
     // Credits live in the run line now, and only for hosted chat (spec 4.2).
     expect(parent.querySelector(".systemsculpt-agent-credits")).toBeNull();
-    for (const label of ["Chat history", "New chat", "More", "Attach files", "Jump to latest"]) {
+    for (const label of ["Chat history", "New chat", "More", "Add files and notes", "Jump to latest"]) {
       expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
     }
     expect(parent.querySelector(".systemsculpt-agent-header-title")?.getAttribute("role"))
@@ -990,6 +524,9 @@ describe("AgentWorkspace", () => {
       "Remove queued follow-up 2 of 2",
     ]);
     expect(actionLabels.join(" ")).not.toContain("private");
+    const firstQueued = parent.querySelector<HTMLElement>(".systemsculpt-agent-queue-item")!;
+    expect(firstQueued.querySelector(".systemsculpt-agent-queue-label")?.textContent).toBe("Queued");
+    expect(firstQueued.querySelector('[data-queue-action="run-now"]')?.textContent).toBe("Send now");
 
     workspace.unload();
   });
@@ -2367,6 +1904,58 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("invites the person to steer after a denial with nothing else pending", async () => {
+    const parent = document.body.createDiv();
+    const onApprove = jest.fn(async () => true);
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      reducedMotion: () => true,
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove,
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    workspace.composer.setAgentName("Claude Code");
+    await workspace.setHistory([{ role: "user", content: "Tidy the plan", message_id: "user-1" }]);
+    const pending = (id: string, order: number): Extract<AgentPart, { kind: "tool" }> => ({
+      id: `tool-${id}`, kind: "tool", messageId: "assistant-1", callId: `call-${id}`, name: "edit",
+      location: "vault", input: { path: `${id}.md` }, state: "approval-required", approvalId: id, order,
+    });
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-a", "tool-b"] }],
+      parts: [pending("a", 0), pending("b", 1)],
+    });
+    const input = parent.querySelector<HTMLTextAreaElement>('[data-testid="chat.composer.input"]')!;
+    const deny = (id: string) => parent.querySelector<HTMLButtonElement>(
+      `.systemsculpt-agent-approval[data-approval-id="${id}"] [data-focus-key="tool-deny"]`,
+    )!.click();
+
+    deny("a");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(onApprove).toHaveBeenCalledWith("a", false);
+    // Another card still waits: no steering yet.
+    expect(input.placeholder).not.toContain("what to do instead");
+
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-b"] }],
+      parts: [pending("b", 1)],
+    });
+    deny("b");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    workspace.unload();
+  });
+
   it("keeps a pending approval visible when the tool drawer is collapsed", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -3200,7 +2789,7 @@ describe("AgentWorkspace", () => {
     }
   });
 
-  it("keeps one stable Working status while distinguishing approval by its icon", async () => {
+  it("keeps one stable status row while distinguishing pending approval by text and icon", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -3305,7 +2894,7 @@ describe("AgentWorkspace", () => {
       state: "approval-required",
       approvalId: "approval-write",
       order: 0,
-    }), "Working", activity, false);
+    }), "Waiting for your approval", activity, false);
     await assertPhase(snapshot("retrying", "Continuing"), "Working", activity);
     await assertPhase(snapshot("retrying", "Reconnecting"), "Working", activity);
     await assertPhase(snapshot("settling", "Finishing"), "Working", activity);
@@ -5258,7 +4847,8 @@ describe("AgentWorkspace", () => {
 
     expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
       .toBe(false);
-    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent).toBe("Enter to send");
+    expect(parent.querySelector<HTMLElement>(".systemsculpt-agent-prompt-hint")?.hidden).toBe(true);
+    expect(parent.querySelector<HTMLElement>('[aria-label="Stop response"]')?.hidden).toBe(true);
     expect(parent.querySelector('[aria-label="Send message"]')).not.toBeNull();
     workspace.unload();
   });

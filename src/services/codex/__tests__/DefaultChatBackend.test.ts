@@ -23,9 +23,29 @@ it.each(['claude', 'codex', 'systemsculpt'] as const)('mobile stays hosted for %
   expect(await resolveDefaultChatBackend({ ...settings, textExecutionBackend: backend }, jest.fn())).toBe('systemsculpt');
   expect(detectLocalAgents).not.toHaveBeenCalled();
 });
-it.each([{ licenseValid: true }, { subscriptionStatus: 'active' }, { subscriptionStatus: 'lifetime' }])('preserves a paid cached license %j', async paid => {
-  expect(await resolveDefaultChatBackend({ ...settings, licenseKey: 'test', ...paid }, jest.fn())).toBe('systemsculpt');
+it.each([{ licenseValid: true }, { subscriptionStatus: 'active' }, { subscriptionStatus: 'lifetime' }])('preserves a paid license after checking its entitlement %j', async paid => {
+  const balance = jest.fn(async () => ({ includedCreditsEntitled: true }));
+  expect(await resolveDefaultChatBackend({ ...settings, licenseKey: 'test', ...paid }, balance)).toBe('systemsculpt');
+  expect(balance).toHaveBeenCalledTimes(1);
   expect(detectLocalAgents).not.toHaveBeenCalled();
+});
+it('detects for an upgraded starter account even when its license is valid and active', async () => {
+  const migrated = migrateSettingsToCurrentSchema({
+    schemaVersion: 14, textExecutionBackend: 'systemsculpt', licenseKey: 'starter',
+    licenseValid: true, subscriptionStatus: 'active',
+  }, DEFAULT_SETTINGS).settings;
+  expect(await resolveDefaultChatBackend(migrated, async () => ({ includedCreditsEntitled: false }))).toBe('claude');
+});
+it('preserves an upgraded paid account through its live entitlement', async () => {
+  const migrated = migrateSettingsToCurrentSchema({
+    schemaVersion: 14, textExecutionBackend: 'systemsculpt', licenseKey: 'paid',
+    licenseValid: true, subscriptionStatus: 'active',
+  }, DEFAULT_SETTINGS).settings;
+  expect(await resolveDefaultChatBackend(migrated, async () => ({ includedCreditsEntitled: true }))).toBe('systemsculpt');
+  expect(detectLocalAgents).not.toHaveBeenCalled();
+});
+it('preserves hosted when an older balance response cannot establish entitlement', async () => {
+  expect(await resolveDefaultChatBackend({ ...settings, licenseKey: 'test' }, async () => ({}))).toBe('systemsculpt');
 });
 it('preserves hosted when the live balance says included credits are entitled', async () => {
   expect(await resolveDefaultChatBackend({ ...settings, licenseKey: 'test' }, async () => ({ includedCreditsEntitled: true }))).toBe('systemsculpt');
@@ -39,9 +59,9 @@ it('does not silently switch a possibly paid account when its entitlement read f
 });
 it.each([
   [{ textExecutionBackend: 'systemsculpt' }, false],
-  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', licenseValid: true }, true],
-  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', subscriptionStatus: 'active' }, true],
-  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', subscriptionStatus: 'lifetime' }, true],
+  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', licenseValid: true }, false],
+  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', subscriptionStatus: 'active' }, false],
+  [{ textExecutionBackend: 'systemsculpt', licenseKey: 'paid', subscriptionStatus: 'lifetime' }, false],
   [{ textExecutionBackend: 'claude' }, true],
   [{ textExecutionBackend: 'codex' }, true],
 ])('migrates legacy backend intent %j', (raw, explicit) => {

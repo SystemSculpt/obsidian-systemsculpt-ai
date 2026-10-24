@@ -8,6 +8,7 @@ const mobileInteractionTests = [
 	"<rootDir>/src/platform/__tests__/mobileHostLayout.test.ts",
 	"<rootDir>/src/core/ui/surface/__tests__/PluginSurface.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-workspace-ui.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-composer.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/anchored-scroller.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-node-insert-menu.test.ts",
 	"<rootDir>/src/views/studio/__tests__/studio-run-host-preflight.test.ts",

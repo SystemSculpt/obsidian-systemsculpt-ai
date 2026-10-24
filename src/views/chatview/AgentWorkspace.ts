@@ -6,10 +6,8 @@ import {
 } from "../../core/ui/surface";
 import {
   cancelSurfaceAnimationFrame,
-  getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
-import { statusBarBottomOverlap } from "../../platform/desktopStatusBar";
 import type { ChatMessage } from "../../types";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
@@ -271,7 +269,7 @@ export class AgentWorkspace extends Component {
 
     this.banner = this.element.createDiv({
       cls: "systemsculpt-agent-banner",
-      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+      attr: { "aria-atomic": "true" },
     });
     this.banner.toggleAttribute("hidden", true);
 
@@ -290,7 +288,20 @@ export class AgentWorkspace extends Component {
         : disclosureControl
           ? this.scroller.beginDisclosureLayoutMutation(disclosureControl)
           : this.scroller.beginLayoutMutation(mutationTarget),
-      onApprove: options.onApprove,
+      onApprove: (approvalId, approved, rememberForSession, answers) => {
+        const answered = answers
+          ? options.onApprove(approvalId, approved, rememberForSession, answers)
+          : rememberForSession
+            ? options.onApprove(approvalId, approved, rememberForSession)
+            : options.onApprove(approvalId, approved);
+        return Promise.resolve(answered).then((result) => {
+          // After a denial with nothing else waiting, invite the person to steer.
+          if (!approved && !answers && result !== false && !this.hasPendingApprovalOtherThan(approvalId)) {
+            this.composer.showSteeringPlaceholder();
+          }
+          return result;
+        });
+      },
       approvalComposer: () => this.composer?.element,
       isApprovalVisible: options.isApprovalVisible,
       onHiddenApproval: options.onHiddenApproval,
@@ -333,12 +344,13 @@ export class AgentWorkspace extends Component {
       attr: {
         role: "list",
         "aria-label": "Queued follow-ups",
-        "aria-live": "polite",
       },
     });
     this.queueElement.toggleAttribute("hidden", true);
 
     this.composer = new AgentComposer(this.element, {
+      app: options.app,
+      sourcePath: options.sourcePath,
       onSubmit: options.onSubmit,
       onStop: options.onStop,
       onAttach: options.onAttach,
@@ -347,19 +359,20 @@ export class AgentWorkspace extends Component {
       attachmentLimits: options.attachmentLimits,
       onMic: options.onMic,
       onRemoveAttachment: options.onRemoveAttachment,
+      announce: (message) => this.announce(message),
       onHeightChange: () => {
         if (!this.unloaded) this.scroller.notifyViewportGeometryChanged();
       },
     });
     this.addChild(this.composer);
 
-    // R5 exposes AgentComposer.footerSlot; until then the line sits right under the card.
-    const runLineHost = this.element.createDiv({ cls: "systemsculpt-agent-run-line-host" });
-    this.composer.element.after(runLineHost);
-    this.runLine = new AgentRunLine(runLineHost, options.runLine ?? NO_RUN_LINE);
+    this.runLine = new AgentRunLine(this.composer.footerSlot, options.runLine ?? NO_RUN_LINE);
     this.addChild(this.runLine);
 
-    this.historyPanel = new ChatHistoryPanel(this.element, options.history ?? NO_HISTORY);
+    this.historyPanel = new ChatHistoryPanel(this.element, {
+      ...(options.history ?? NO_HISTORY),
+      announce: (message) => this.announce(message),
+    });
     this.addChild(this.historyPanel);
 
     // One polite live region per view (spec 6.3); streaming text is never announced.
@@ -367,31 +380,6 @@ export class AgentWorkspace extends Component {
       cls: "systemsculpt-agent-sr-only",
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "chat.announcer" },
     });
-    this.watchStatusBarOverlap();
-  }
-
-  /**
-   * Keeps the run line clear of Obsidian's floating status bar, which covers
-   * the bottom of the right sidebar on desktop.
-   */
-  private watchStatusBarOverlap(): void {
-    const ownerWindow = getSurfaceOwnerWindow(this.element) as Window & { ResizeObserver?: typeof ResizeObserver };
-    // Without a ResizeObserver host (tests) there is no layout to clear.
-    if (typeof ownerWindow.ResizeObserver !== "function") return;
-    let applied = -1;
-    const sync = (): void => {
-      if (this.unloaded) return;
-      const overlap = statusBarBottomOverlap(this.element);
-      if (overlap === applied) return;
-      applied = overlap;
-      this.element.setCssProps({ "--systemsculpt-agent-status-bar-overlap": `${overlap}px` });
-    };
-    // The observer also reports the first layout once the view is mounted.
-    const observer = new ownerWindow.ResizeObserver(sync);
-    observer.observe(this.element);
-    this.register(() => observer.disconnect());
-    this.registerDomEvent(ownerWindow, "resize", sync);
-    this.registerEvent(this.options.app.workspace.on("layout-change", sync));
   }
 
   /**
@@ -576,6 +564,11 @@ export class AgentWorkspace extends Component {
     return true;
   }
 
+  private hasPendingApprovalOtherThan(approvalId: string): boolean {
+    return (this.snapshot?.parts ?? []).some((part) =>
+      part.kind === "tool" && part.state === "approval-required" && part.approvalId !== approvalId);
+  }
+
   public setTitle(title: string): void {
     this.titleText = title.trim() || "New chat";
     this.titleButton.setText(this.titleText);
@@ -592,11 +585,14 @@ export class AgentWorkspace extends Component {
     kind: "info" | "error" = "info",
     action: boolean | Readonly<{ label: string; testId: string; onSelect: () => void }> = false,
   ): void {
+    const previousMessage = this.banner.dataset.message;
+    this.banner.dataset.message = message ?? "";
     this.banner.toggleAttribute("hidden", !message);
     this.banner.classList.toggle("is-error", kind === "error");
-    this.banner.setAttribute("role", kind === "error" ? "alert" : "status");
-    this.banner.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+    if (kind === "error") this.banner.setAttribute("role", "alert");
+    else this.banner.removeAttribute("role");
     this.banner.setText(message ?? "");
+    if (message && message !== previousMessage && kind !== "error") this.announce(message);
     if (!message) return;
     if (action === true && this.options.onViewPlans) {
       const plans = createUiAction(this.banner, {
@@ -686,11 +682,19 @@ export class AgentWorkspace extends Component {
         });
         const icon = row.createSpan({
           cls: "systemsculpt-agent-queue-icon",
+          attr: { "aria-hidden": "true" },
         });
         setIcon(icon, "list-end");
+        row.createSpan({ cls: "systemsculpt-agent-queue-label", text: "Queued" });
         row.createSpan({ cls: "systemsculpt-agent-queue-copy" });
         if (this.options.onRunQueuedNow) {
-          const runNow = iconButton(row, "chat.queue.run-now", "Stop and send queued follow-up now", "arrow-up");
+          const runNow = createUiAction(row, {
+            label: "Send now",
+            testId: "chat.queue.run-now",
+            size: "small",
+            tooltip: false,
+          });
+          runNow.addClass("systemsculpt-agent-queue-send-now");
           runNow.dataset.queueAction = "run-now";
           runNow.onclick = () => {
             const currentId = row?.dataset.queueItemId;
@@ -717,7 +721,7 @@ export class AgentWorkspace extends Component {
         ':scope > [data-queue-action="run-now"]',
       );
       if (runNow) {
-        updateUiAction(runNow, { label: `Stop and send ${target} now` });
+        runNow.setAttribute("aria-label", `Stop and send ${target} now`);
       }
       const remove = row.querySelector<HTMLButtonElement>(
         ':scope > [data-queue-action="remove"]',
@@ -766,6 +770,7 @@ export class AgentWorkspace extends Component {
     }
     const keys = contentKeys(messages);
     this.history = messages;
+    this.composer.setPromptHistory(messages);
     if (sameContentKeys(keys, this.historyKeys)) return Promise.resolve();
     return this.renderHistoryPreservingAnchor().then(() => {
       this.historyKeys = keys;

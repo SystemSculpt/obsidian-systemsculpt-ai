@@ -16,7 +16,6 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding-bottom: var(--systemsculpt-agent-status-bar-overlap, 0px);
   background: var(--ss-surface-0);
   font-size: var(--ss-text-base);
 }
@@ -171,20 +170,12 @@
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-viewport,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-run-line-host {
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
     display: none;
   }
 }
 
 /* ── Run line: backend · mode · model or credits, under the composer ── */
-
-.systemsculpt-agent-run-line-host {
-  width: min(100%, var(--ss-agent-content-width));
-  /* Sits 6px under the composer card, which keeps its own bottom padding. */
-  margin: calc(6px - var(--ss-space-4)) auto 0;
-  padding: 0 var(--ss-space-4) var(--ss-space-2);
-}
 
 /* One line at every width: the model segment gives way first. */
 .systemsculpt-agent-run-line {
@@ -215,6 +206,11 @@
   font-size: inherit;
   cursor: pointer;
   transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button:focus-visible,
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment:focus-visible {
+  box-shadow: var(--ss-ring);
 }
 
 .systemsculpt-agent-run-line .systemsculpt-agent-run-segment:hover,

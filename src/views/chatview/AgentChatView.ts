@@ -86,7 +86,6 @@ import {
 import { emitChatTranscriptCommitted } from "./ChatTranscriptEvents";
 import {
   AgentTranscriptRepository,
-  type AgentTranscriptSaveOptions,
   type AgentTranscriptSnapshot,
   type AgentUserCommitInput,
 } from "./AgentTranscriptRepository";
@@ -1138,7 +1137,7 @@ export class AgentChatView extends ItemView {
   }
 
   public async pinFile(file: TFile): Promise<void> {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     await this.contextManager.pinVaultFile(file);
   }
 
@@ -1167,7 +1166,7 @@ export class AgentChatView extends ItemView {
   } = {}): Promise<void> {
     const text = (options.message ?? this.getInputText()).trim();
     if (!text) return;
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     const expectedConversationOriginToken = this.conversationOriginToken;
     const previous = this.automationApprovalMode;
     if (options.approvalMode) this.automationApprovalMode = options.approvalMode;
@@ -1802,7 +1801,7 @@ export class AgentChatView extends ItemView {
     submission: AgentComposerSubmit,
     includeContextFiles: boolean,
   ): void {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     this.queuedFollowUps.push({
       id: messageId("queued"),
       text: submission.text,
@@ -1845,7 +1844,7 @@ export class AgentChatView extends ItemView {
     clearComposerAfterAdmission = false,
     clientStartedAtMonotonicMs = this.clientMonotonicNow(),
   ): void {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     const admissionOriginToken = expectedConversationOriginToken
       ?? this.conversationOriginToken;
     const currentOperation = this.activeSubmissionOperation;
@@ -2150,6 +2149,7 @@ export class AgentChatView extends ItemView {
     }> | null = null;
 
     try {
+      if (this.blockReadOnlyHistoryAction()) return;
       if (this.hasAuthoritativeUnavailableBalance()) {
         throw this.unavailableBalanceAdmissionError();
       }
@@ -2158,7 +2158,7 @@ export class AgentChatView extends ItemView {
         && !this.transcript.snapshot().agentConversationId
       ) {
         this.setLegacyHistoryViewOnly(true);
-        this.blockLegacyHistoryAction();
+        this.blockReadOnlyHistoryAction();
         return;
       }
       if (!this.isCurrentSubmissionOperation(operation)) return;
@@ -2740,7 +2740,7 @@ export class AgentChatView extends ItemView {
   }
 
   private async runQueuedFollowUpNow(id: string): Promise<void> {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     const releaseQueueDrainSuppression = this.beginQueueDrainSuppression();
     let queueDrainSuppressionReleased = false;
     const expectedConversationOriginToken = this.conversationOriginToken;
@@ -2779,7 +2779,7 @@ export class AgentChatView extends ItemView {
   }
 
   private async prepareRetry(messageIdToRetry: string): Promise<void> {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     const target = this.transcript.snapshot().messages.find((message) =>
       message.message_id === messageIdToRetry && message.role === "user");
     if (!target) {
@@ -2792,7 +2792,7 @@ export class AgentChatView extends ItemView {
   }
 
   private async retryFailedTurn(messageIdToRetry: string): Promise<void> {
-    if (this.blockLegacyHistoryAction()) return;
+    if (this.blockReadOnlyHistoryAction()) return;
     const target = this.transcript.snapshot().messages.find((message) =>
       message.message_id === messageIdToRetry && message.role === "user");
     if (!target) {
@@ -2895,7 +2895,7 @@ export class AgentChatView extends ItemView {
   }
 
   private async retryRejectedSubmission(turnId: string): Promise<boolean> {
-    if (this.blockLegacyHistoryAction()) return true;
+    if (this.blockReadOnlyHistoryAction()) return true;
     const expectedConversationOriginToken = this.conversationOriginToken;
     const rejected = this.pendingRejectedRetry;
     if (!rejected || rejected.turnId !== turnId) return false;
@@ -2976,7 +2976,7 @@ export class AgentChatView extends ItemView {
   }
 
   private async resubmitMessage(messageIdToResubmit: string, text: string): Promise<boolean> {
-    if (this.blockLegacyHistoryAction()) return false;
+    if (this.blockReadOnlyHistoryAction()) return false;
     const expectedConversationOriginToken = this.conversationOriginToken;
     const pending = this.pendingRetry;
     if (!pending || pending.targetMessageId !== messageIdToResubmit) return false;
@@ -3157,8 +3157,8 @@ export class AgentChatView extends ItemView {
     options: Readonly<{
       /** A backend the person just chose; skips default resolution. */
       backend?: TextExecutionBackend;
-      /** The draft, attachments and pinned files a backend switch carries over. */
-      carry?: Readonly<{ text: string; attachments: readonly ChatMessageAttachment[]; pinned: readonly string[] }>;
+      /** Keep the live composer draft (including processing attachments) across a backend switch. */
+      carry?: Readonly<{ pinned: readonly string[] }>;
       switchedFrom?: string;
     }> = {},
   ): Promise<void> {
@@ -3194,7 +3194,7 @@ export class AgentChatView extends ItemView {
       if (this.conversationOriginToken !== newChatOriginToken) return;
       this.chatExecutionBackend = backend; await this.replaceAgentSession();
       if (this.conversationOriginToken !== newChatOriginToken) return;
-      this.workspace?.resetComposerDraft();
+      if (!options.carry) this.workspace?.resetComposerDraft();
       const newConversationId = protocolId("conversation");
       this.pendingThinConversationId = newConversationId;
       if (this.queueHydrated) await this.persistQueueState();
@@ -3215,10 +3215,6 @@ export class AgentChatView extends ItemView {
         else this.contextManager.clearPinnedFiles();
       } finally { this.contextLoading = false; }
       if (this.conversationOriginToken !== newChatOriginToken) return;
-      if (options.carry) {
-        if (options.carry.text) this.workspace?.setInputText(options.carry.text);
-        if (options.carry.attachments.length) this.workspace?.setMessageAttachments(options.carry.attachments);
-      }
       if (options.switchedFrom) this.switchedFrom = { chatId: options.switchedFrom };
       const snapshot = this.transcript.reset({ title: title?.trim() || generateDefaultChatTitle() });
       this.applyTranscriptIdentity(snapshot);
@@ -3474,11 +3470,13 @@ export class AgentChatView extends ItemView {
       void this.newChat();
       return false;
     });
-    this.scope.register(["Mod"], ".", () => {
+    this.scope.register(["Mod"], null, (event) => {
+      if (event.code !== "Period") return;
       this.openModeMenu();
       return false;
     });
-    this.scope.register(["Mod", "Shift"], ".", () => {
+    this.scope.register(["Mod", "Shift"], null, (event) => {
+      if (event.code !== "Period") return;
       this.openBackendMenu();
       return false;
     });
@@ -3530,6 +3528,7 @@ export class AgentChatView extends ItemView {
     const workspace = this.workspace;
     if (!workspace || this.closing || typeof workspace.setChrome !== "function") return;
     try {
+      workspace.composer?.setAgentName(agentName(backendOf(this.agent)));
       workspace.setChrome(this.chromeState());
     } catch (error) {
       this.logAgentError(error, "syncChrome");
@@ -3698,32 +3697,19 @@ export class AgentChatView extends ItemView {
     });
   }
 
-  /**
-   * Renames a chat from history. An open chat renames through its view; a
-   * closed one is loaded and saved again with the new title. A chat that
-   * cannot be parsed is left unchanged.
-   */
-  private async renameSavedChat(row: ChatHistoryRow, title: string): Promise<void> {
-    const open = this.chatViews(row.chatId);
+  /** Rename only the durable title; stale open copies must never rewrite the transcript. */
+  private async renameSavedChat(row: Pick<ChatHistoryRow, "chatId" | "chatPath" | "title">, title: string): Promise<void> {
+    const normalized = normalizeChatTitle(title) || row.title;
+    const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript, title: view.chatTitle }));
     try {
-      if (open.length > 0) {
-        for (const view of open) await view.setTitle(title);
-        return;
-      }
-      let saveOptions: AgentTranscriptSaveOptions = {};
-      const repository = new AgentTranscriptRepository(this.chatStorage, () => saveOptions);
-      const loaded = await repository.load(row.chatId);
-      if (!loaded) throw new Error("This chat could not be loaded.");
-      const normalized = normalizeChatTitle(title) || loaded.title;
-      saveOptions = {
-        contextFiles: new Set(loaded.contextFiles),
-        title: normalized,
-        chatFontSize: loaded.chatFontSize ?? "medium",
-        approvalMode: loaded.approvalMode,
-      };
-      repository.setTitle(normalized);
-      await repository.saveMetadata();
+      for (const { view } of open) await view.setTitle(normalized, false);
+      // A write already in flight may still carry the previous title.
+      await Promise.all(open.map(({ transcript }) => transcript.idle()));
+      await this.chatStorage.renameChat(row.chatPath, row.chatId, normalized);
     } catch {
+      for (const { view, title: previousTitle } of open) {
+        if (view.chatId === row.chatId && view.chatTitle === normalized) await view.setTitle(previousTitle, false);
+      }
       new Notice("This chat couldn't be renamed.", 5000);
     }
   }
@@ -3735,21 +3721,29 @@ export class AgentChatView extends ItemView {
       { title: "Delete chat?", primaryButton: "Delete", icon: "trash-2" },
     );
     if (!confirmed) return false;
-    const file = this.app.vault.getAbstractFileByPath(row.chatPath);
-    if (!(file instanceof TFile)) return false;
     try {
+      const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript }));
+      // Detaching a native run saves its partial output; reset fences queued
+      // writes, and idle waits for physical writes already in progress.
+      await Promise.all(open.map(({ view }) => view.startNewChat(false)));
+      await Promise.all(open.map(({ transcript }) => transcript.idle()));
+      const file = this.app.vault.getAbstractFileByPath(row.chatPath);
+      if (!(file instanceof TFile)) return false;
       await this.app.fileManager.trashFile(file);
     } catch {
       new Notice("This chat couldn't be deleted.", 5000);
       return false;
     }
     if (row.favorite) await this.toggleFavoriteChat(row.chatId).catch(() => undefined);
-    // An open copy would write the deleted chat back on its next save.
-    for (const view of this.chatViews(row.chatId)) await view.startNewChat(false);
     return true;
   }
 
   private async renameFromHeader(title: string): Promise<void> {
+    const chatPath = this.getChatHistoryFilePath();
+    if (this.chatId && chatPath) {
+      await this.renameSavedChat({ chatId: this.chatId, chatPath, title: this.chatTitle }, title);
+      return;
+    }
     if (!this.chatId) this.titleExplicit = true;
     await this.setTitle(title);
     this.workspace?.setTitle(this.displayTitle());
@@ -3878,8 +3872,6 @@ export class AgentChatView extends ItemView {
     await this.startNewChat(true, undefined, undefined, {
       backend: next,
       carry: {
-        text: this.getInputText(),
-        attachments: [...this.getMessageAttachments()],
         pinned: [...this.contextManager.getPinnedFiles()],
       },
       ...(previousChatId ? { switchedFrom: previousChatId } : {}),
@@ -3963,8 +3955,6 @@ export class AgentChatView extends ItemView {
       await this.startNewChat(true, undefined, undefined, {
         backend: detection.preferred,
         carry: {
-          text: this.getInputText(),
-          attachments: [...this.getMessageAttachments()],
           pinned: [...this.contextManager.getPinnedFiles()],
         },
       });
@@ -4065,7 +4055,11 @@ export class AgentChatView extends ItemView {
     if (viewOnly) this.workspace?.setBanner(LEGACY_HISTORY_VIEW_ONLY_BANNER);
   }
 
-  private blockLegacyHistoryAction(): boolean {
+  private blockReadOnlyHistoryAction(): boolean {
+    if (this.unavailableBackend) {
+      new Notice(`This chat is read-only here because ${LOCAL_AGENTS[this.unavailableBackend]} isn't available. Start a new chat to continue.`, 6000);
+      return true;
+    }
     if (!this.legacyHistoryViewOnly) return false;
     this.workspace?.setBanner(LEGACY_HISTORY_VIEW_ONLY_BANNER);
     new Notice(

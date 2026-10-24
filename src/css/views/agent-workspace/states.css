@@ -1,6 +1,6 @@
 /**
- * Agent workspace state overlays: jump affordance, follow-up queue, and run
- * banners. The empty state lives with the chrome in shell.css.
+ * Agent workspace state overlays: jump affordance and run banners.
+ * Empty states live in shell.css; queued follow-ups in composer.css.
  */
 
 .systemsculpt-agent-jump {
@@ -22,35 +22,6 @@
 
 .systemsculpt-agent-jump[aria-hidden="true"] {
   display: none;
-}
-
-.systemsculpt-agent-queue {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-2);
-  width: min(100%, var(--ss-agent-content-width));
-  margin: 0 auto;
-  padding: 0 var(--ss-space-5) var(--ss-space-2);
-}
-
-.systemsculpt-agent-queue-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-2) var(--ss-space-3);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  background: var(--ss-surface-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-}
-
-.systemsculpt-agent-queue-item span:nth-child(2) {
-  min-width: 0;
-  overflow: hidden;
-  flex: 1 1 auto;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .systemsculpt-agent-banner {
