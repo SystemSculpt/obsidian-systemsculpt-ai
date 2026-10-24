@@ -121,18 +121,19 @@ export class LocalAgentChatSession implements ChatSession {
           if (part.kind !== 'text') return [part];
           const start = position; position += part.markdown.length;
           if (position <= unchanged) return [part];
-          if (start >= unchanged) return [];
+          if (start > unchanged) return [];
           activeTextId = part.id;
           return [{ ...part, markdown: part.markdown.slice(0, unchanged - start) }];
         });
       }
       const delta = nextText.slice(unchanged), previous = parts.find(part => part.id === activeTextId);
-      if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
-      else if (delta) {
+      if (!delta) this.publishParts(parts.filter(part => part.kind !== 'text' || part.markdown.length > 0));
+      else if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
+      else {
         const order = parts.reduce((last, part) => Math.max(last, part.order + 1), 0);
         activeTextId = `${messageId}_text_${order}`;
         this.publishParts([...parts, { id: activeTextId, order, kind: 'text', messageId, state: 'streaming', markdown: delta }]);
-      } else this.publishParts(parts);
+      }
     };
     const approval = (update: LocalAgentToolUpdate, signal: AbortSignal, grantsSessionScope = true): Promise<LocalAgentApprovalResponse> => {
       if (!live() || signal.aborted) return Promise.reject(new Error('Native approval withdrawn.'));
