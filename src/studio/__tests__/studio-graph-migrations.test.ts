@@ -557,7 +557,7 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrateStudioProjectToPathOnlyPorts(migrated.project).changed).toBe(false);
   });
 
-  it("clamps legacy image counts above the new maximum to 4", () => {
+  it("preserves legacy image counts above the retired execution maximum", () => {
     const project = baseProject();
     project.graph.nodes.push({
       id: "image",
@@ -572,16 +572,16 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     });
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
-    expect(migrated.changed).toBe(true);
+    expect(migrated.changed).toBe(false);
 
     const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
     expect(imageNode?.config).toMatchObject({
-      count: 4,
+      count: 8,
       aspectRatio: "16:9",
     });
   });
 
-  it("floors decimal legacy image counts to a valid integer", () => {
+  it("preserves decimal legacy image counts on read-only retired cards", () => {
     const project = baseProject();
     project.graph.nodes.push({
       id: "image",
@@ -595,13 +595,13 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     });
 
     const migrated = migrateStudioProjectToPathOnlyPorts(project);
-    expect(migrated.changed).toBe(true);
+    expect(migrated.changed).toBe(false);
 
     const imageNode = migrated.project.graph.nodes.find((node) => node.id === "image");
-    expect(imageNode?.config).toMatchObject({ count: 3 });
+    expect(imageNode?.config).toMatchObject({ count: 3.7 });
   });
 
-  it("sanitizes configured legacy image model levers once, then remains idempotent", () => {
+  it("sanitizes obsolete image routing while retaining retired image settings", () => {
     const project = baseProject();
     project.graph.nodes.push({
       id: "image",
@@ -612,6 +612,8 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
       config: {
         modelId: "openai/gpt-5-image",
         provider: "openai",
+        apiKey: "obsolete-test-credential",
+        oauth: { token: "obsolete-test-token" },
         count: 1,
         aspectRatio: "1:1",
         imageSize: "2K",
@@ -624,6 +626,8 @@ describe("migrateStudioProjectToPathOnlyPorts", () => {
     expect(migrated.project.graph.nodes.find((node) => node.id === "image")?.config).toEqual({
       count: 1,
       aspectRatio: "1:1",
+      imageSize: "2K",
+      seed: 42,
     });
     expect(
       migrated.project.migrations.applied.some(

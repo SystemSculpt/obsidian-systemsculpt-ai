@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { retiredImageGenerationNode } from "../../../../studio/nodes/retiredImageGenerationNode";
 import { StudioPortInteraction } from "../StudioPortInteraction";
 import { StudioLinkStore } from "../StudioLinkStore";
 import { StudioGraphInteractionEngine } from "../../StudioGraphInteractionEngine";
@@ -260,7 +261,7 @@ describe("StudioPortInteraction drag-to-connect", () => {
   });
 });
 
-function makeConnectionHarness(targetKind: "studio.workflow" | "studio.json" = "studio.workflow") {
+function makeConnectionHarness(targetKind: "studio.workflow" | "studio.image_generation" | "studio.json" = "studio.workflow") {
   const project = createEmptyStudioProject({ name: "Connections", policyPath: "Connections.systemsculpt-assets/policy/grants.json", minPluginVersion: "6.14.0", maxRuns: 10, maxArtifactsMb: 128 });
   project.graph.nodes = [
     { id: "src", kind: "studio.json", version: "1.0.0", title: "Source", position: { x: 0, y: 50 }, config: {} },
@@ -272,10 +273,10 @@ function makeConnectionHarness(targetKind: "studio.workflow" | "studio.json" = "
     getCurrentProject: () => project, isBusy: () => false, setError, commitProjectMutation: commit, requestRender: jest.fn(),
     getPortType: (nodeId, direction, portId) => {
       const node = project.graph.nodes.find(entry => entry.id === nodeId);
-      const definition = node?.kind === "studio.workflow" ? workflowNode : jsonNode;
+      const definition = node?.kind === "studio.workflow" ? workflowNode : node?.kind === "studio.image_generation" ? retiredImageGenerationNode : jsonNode;
       return (direction === "in" ? definition.inputPorts : definition.outputPorts).find(port => port.id === portId)?.type || null;
     },
-    portTypeCompatible: (source, target) => source === target,
+    portTypeCompatible: (source, target) => source === target || target === "any",
   });
   const canvas = document.body.createDiv();
   canvas.getBoundingClientRect = () => rectOf({ left: 0, top: 0, width: 1000, height: 1000 });
@@ -284,18 +285,18 @@ function makeConnectionHarness(targetKind: "studio.workflow" | "studio.json" = "
     const card = canvas.createDiv({ cls: "ss-studio-node-card", attr: { "data-node-id": node.id } });
     card.getBoundingClientRect = () => rectOf({ left: node.position.x, top: node.position.y, width: 280, height: 164 });
     engine.registerNodeElement(node.id, card);
-    renderNodePorts({ nodeEl: card, node, definition: node.kind === "studio.workflow" ? workflowNode : jsonNode, graphInteraction: engine, interactionLocked: false });
+    renderNodePorts({ nodeEl: card, node, definition: node.kind === "studio.workflow" ? workflowNode : node.kind === "studio.image_generation" ? retiredImageGenerationNode : jsonNode, graphInteraction: engine, interactionLocked: false });
     for (const pin of card.querySelectorAll<HTMLButtonElement>(".ss-studio-port-pin")) {
       pin.getBoundingClientRect = () => rectOf({ left: node.position.x, top: node.position.y, width: 12, height: 12 });
     }
   }
   return { project, engine, commit, setError, canvas,
     sourcePin: engine.getPortElement("src", "out", "json") as HTMLButtonElement,
-    targetPin: engine.getPortElement("dst", "in", targetKind === "studio.workflow" ? "context" : "json") as HTMLButtonElement,
+    targetPin: engine.getPortElement("dst", "in", targetKind === "studio.workflow" ? "context" : targetKind === "studio.image_generation" ? "images" : "json") as HTMLButtonElement,
   };
 }
 
-describe("retired workflow connection enforcement", () => {
+describe("retired node connection enforcement", () => {
   let cleanup = () => {};
   afterEach(() => { cleanup(); jest.restoreAllMocks(); document.body.innerHTML = ""; });
 
@@ -304,12 +305,16 @@ describe("retired workflow connection enforcement", () => {
     ["disabled workflow card", "studio.workflow", true, "card"],
     ["stale enabled workflow pin", "studio.workflow", false, "pin"],
     ["stale enabled workflow card", "studio.workflow", false, "card"],
+    ["disabled image pin", "studio.image_generation", true, "pin"],
+    ["disabled image card", "studio.image_generation", true, "card"],
+    ["stale enabled image pin", "studio.image_generation", false, "pin"],
+    ["stale enabled image card", "studio.image_generation", false, "card"],
     ["disabled ordinary pin", "studio.json", true, "pin"],
     ["disabled ordinary card", "studio.json", true, "card"],
   ] as const)("excludes %s from incoming drags", (_label, kind, disabled, drop) => {
     const h = makeConnectionHarness(kind);
     cleanup = () => h.engine.clearRenderBindings();
-    expect(h.targetPin.disabled).toBe(kind === "studio.workflow");
+    expect(h.targetPin.disabled).toBe(kind !== "studio.json");
     h.targetPin.disabled = disabled;
     const before = JSON.stringify(h.project);
     const card = h.targetPin.closest<HTMLElement>(".ss-studio-node-card")!;
@@ -331,16 +336,19 @@ describe("retired workflow connection enforcement", () => {
     }
   });
 
-  it.each(["source", "target"])("rejects a retired workflow %s at commit even when the connection was already armed", endpoint => {
+  describe.each(["studio.workflow", "studio.image_generation"])("retired %s", kind => {
+  it.each(["source", "target"])("rejects a retired node %s at commit even when the connection was already armed", endpoint => {
     const h = makeConnectionHarness("studio.json");
     cleanup = () => h.engine.clearRenderBindings();
     h.engine.beginConnection("src", "json");
-    h.project.graph.nodes[endpoint === "source" ? 0 : 1].kind = "studio.workflow";
+    h.project.graph.nodes[endpoint === "source" ? 0 : 1].kind = kind;
     h.engine.completeConnection("dst", endpoint === "target" ? "context" : "json");
     expect(h.commit).not.toHaveBeenCalled();
     expect(h.project.graph.edges).toEqual([]);
     expect(h.engine.getPendingConnection()).toBeNull();
-    expect(h.setError).toHaveBeenCalledWith("Retired workflow notes cannot accept new connections.");
+    expect(h.setError).toHaveBeenCalledWith("Retired nodes cannot accept new connections.");
+  });
+
   });
 
   it("still connects ordinary nodes through the same production drag path", () => {

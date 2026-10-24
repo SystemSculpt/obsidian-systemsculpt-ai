@@ -25,7 +25,6 @@ function createContext(options: {
   config?: Record<string, StudioJsonValue>;
   inputs?: Record<string, StudioJsonValue>;
   generateTextMock?: jest.Mock;
-  generateImageMock?: jest.Mock;
   runCliMock?: jest.Mock;
   storeAssetMock?: jest.Mock;
   readAssetMock?: jest.Mock;
@@ -43,9 +42,7 @@ function createContext(options: {
       text: "ok",
       modelId: "openai/gpt-5-mini",
     }));
-  const generateImageMock =
-    options.generateImageMock ||
-    jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+
   const runCliMock =
     options.runCliMock || jest.fn(async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }));
   const storeAssetMock =
@@ -83,7 +80,6 @@ function createContext(options: {
       api: {
         estimateRunCredits: async () => ({ ok: true }),
         generateText: generateTextMock,
-        generateImage: generateImageMock,
         transcribeAudio: jest.fn(async () => ({ text: "" })),
       },
       secretStore: {
@@ -128,7 +124,7 @@ function captionBoardBaseSvgBytes(): ArrayBuffer {
   ).buffer;
 }
 
-describe("Studio built-in text/image node execution", () => {
+describe("Studio built-in text/media node execution", () => {
   const registry = new StudioNodeRegistry();
   registerBuiltInStudioNodes(registry);
 

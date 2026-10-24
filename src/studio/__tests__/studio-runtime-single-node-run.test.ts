@@ -3,6 +3,7 @@ import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import { StudioRuntime } from "../StudioRuntime";
+import { retiredImageGenerationNode } from "../nodes/retiredImageGenerationNode";
 import { workflowNode } from "../nodes/workflowNode";
 import type { StudioNodeDefinition, StudioProjectV1, StudioRunEvent } from "../types";
 
@@ -120,19 +121,20 @@ describe("running one node", () => {
     expect(entries.gen.outputs.image).toBe("image-for-one");
   });
 
-  it.each([true, false])("never executes saved workflow notes or their connections (desktop: %s)", async (isDesktopApp) => {
+  describe.each([workflowNode])("retired $kind", definition => {
+  it.each([true, false])("never executes saved retired cards or their connections (desktop: %s)", async (isDesktopApp) => {
     (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
     const { runtime, registry, executed } = harness({ gen: entry("gen", "test.generate", { image: "kept" }) });
-    const execute = jest.fn(workflowNode.execute);
-    registry.register({ ...workflowNode, execute });
+    const execute = jest.fn(definition.execute);
+    registry.register({ ...definition, execute });
     const snapshot = project();
     snapshot.graph.nodes.push({
-      id: "workflow", kind: "studio.workflow", version: "1.0.0", title: "Saved objective",
+      id: "workflow", kind: definition.kind, version: "1.0.0", title: "Saved objective",
       position: { x: 0, y: 200 }, config: { description: "Keep this draft", pendingRequest: { id: "old" } },
     });
     snapshot.graph.edges.push(
-      { id: "saved-input", fromNodeId: "seed", fromPortId: "text", toNodeId: "workflow", toPortId: "context" },
-      { id: "saved-output", fromNodeId: "workflow", fromPortId: "json", toNodeId: "clip", toPortId: "frame" },
+      { id: "saved-input", fromNodeId: "seed", fromPortId: "text", toNodeId: "workflow", toPortId: definition.inputPorts[0].id },
+      { id: "saved-output", fromNodeId: "workflow", fromPortId: definition.outputPorts[0].id, toNodeId: "clip", toPortId: "frame" },
     );
     const before = JSON.stringify(snapshot);
     const events: StudioRunEvent[] = [];
@@ -149,6 +151,62 @@ describe("running one node", () => {
     await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds: ["workflow"] })).rejects.toThrow("visual-only");
     expect(JSON.stringify(snapshot)).toBe(before);
     runtime.dispose();
+  });
+
+  });
+
+  describe.each([true, false])("retired image outputs (desktop: %s)", isDesktopApp => {
+    it.each(["cache", "history"])("feeds full and scoped runs from %s without regenerating", async source => {
+      (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
+      const images = [{ path: "saved.png", hash: "a".repeat(64), mimeType: "image/png", sizeBytes: 1 }];
+      const outputs = { images };
+      const { runtime, registry, executed, events } = harness(
+        source === "cache" ? { gen: entry("gen", "studio.image_generation", outputs) } : {},
+        source === "history" ? {
+          "runs/index.json": JSON.stringify([{ runId: "saved", status: "success", startedAt: "2026-09-01T00:00:00.000Z" }]),
+          "runs/saved/events.ndjson": JSON.stringify({ type: "node.output", runId: "saved", nodeId: "gen", outputs, at: "2026-09-01T00:00:00.000Z" }),
+        } : {},
+      );
+      const execute = jest.fn(retiredImageGenerationNode.execute);
+      registry.register({ ...retiredImageGenerationNode, execute });
+      const received: unknown[] = [];
+      registry.register({ ...registry.get("test.clip", "1.0.0")!, async execute(context) {
+        received.push(context.inputs.frame);
+        return { outputs: { video: "saved-frame-clip" } };
+      } });
+      const snapshot = project();
+      snapshot.graph.nodes[1].kind = "studio.image_generation";
+      snapshot.graph.edges[1].fromPortId = "images";
+      const before = JSON.stringify(snapshot);
+      for (const entryNodeIds of [undefined, ["clip"]]) {
+        const summary = await runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, {
+          entryNodeIds, onEvent: async event => { events.push(event); },
+        });
+        expect(summary.status).toBe("success");
+        expect(summary.executedNodeIds).not.toContain("gen");
+      }
+      expect(received).toEqual([images, images]);
+      expect(execute).not.toHaveBeenCalled();
+      expect(executed).not.toContain("gen");
+      expect(events.some(event => "nodeId" in event && event.nodeId === "gen")).toBe(false);
+      await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds: ["gen"] })).rejects.toThrow("visual-only");
+      expect(JSON.stringify(snapshot)).toBe(before);
+      runtime.dispose();
+    });
+
+    it("stops a connected consumer with no saved image instead of running without its frame", async () => {
+      (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
+      const { runtime, registry, executed } = harness();
+      registry.register(retiredImageGenerationNode);
+      const snapshot = project();
+      snapshot.graph.nodes[1].kind = "studio.image_generation";
+      snapshot.graph.edges[1].fromPortId = "images";
+      for (const entryNodeIds of [undefined, ["clip"]]) {
+        await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds })).rejects.toThrow("has no saved output. Connect an existing image file instead.");
+      }
+      expect(executed).not.toContain("clip");
+      runtime.dispose();
+    });
   });
 
   it("runs a cacheable node between the target and a never-cached boundary without crossing it", async () => {

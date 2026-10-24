@@ -404,7 +404,7 @@ describe("StudioRuntime session snapshot runs", () => {
     }
   });
 
-  it("propagates authored and edited minimal text through the real runtime into an image prompt", async () => {
+  it("propagates authored and edited minimal text through the real runtime into an video prompt", async () => {
     platform.isDesktopApp = false;
     const app = {
       vault: {
@@ -432,14 +432,14 @@ describe("StudioRuntime session snapshot runs", () => {
     registerBuiltInStudioNodes(registry);
     const receivedPrompts: string[] = [];
     const apiAdapter = {
-      generateImage: jest.fn(async (request: { buildPayload: () => Promise<{ prompt: string }> }) => {
+      generateVideo: jest.fn(async (request: { buildPayload: () => Promise<{ prompt: string }> }) => {
         const payload = await request.buildPayload();
         receivedPrompts.push(payload.prompt);
         return {
-          images: [],
+          videos: [],
           operation: {
-            capability: "image_generation",
-            operationId: `image-${receivedPrompts.length}`,
+            capability: "video_generation",
+            operationId: `video-${receivedPrompts.length}`,
           },
         };
       }),
@@ -479,13 +479,13 @@ describe("StudioRuntime session snapshot runs", () => {
         },
       },
       {
-        id: "image",
-        kind: "studio.image_generation",
+        id: "video",
+        kind: "studio.video_generation",
         version: "1.0.0",
-        title: "Image Generation",
+        title: "Video Generation",
         position: { x: 320, y: 0 },
         config: {
-          count: 1,
+          model: "video-model",
           aspectRatio: "1:1",
         },
       },
@@ -494,29 +494,29 @@ describe("StudioRuntime session snapshot runs", () => {
       id: "prompt-edge",
       fromNodeId: "prompt",
       fromPortId: "text",
-      toNodeId: "image",
+      toNodeId: "video",
       toPortId: "prompt",
     }];
     project.graph.entryNodeIds = ["prompt"];
 
     await expect(
       runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
-        entryNodeIds: ["image"],
+        entryNodeIds: ["video"],
       })
     ).resolves.toMatchObject({ status: "success" });
 
-    project.graph.nodes[0].config.value = "Edited prompt reaches the image node";
+    project.graph.nodes[0].config.value = "Edited prompt reaches the video node";
     await expect(
       runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
-        entryNodeIds: ["image"],
+        entryNodeIds: ["video"],
       })
     ).resolves.toMatchObject({ status: "success" });
 
     expect(receivedPrompts).toEqual([
       "Portrait of a fox in amber light",
-      "Edited prompt reaches the image node",
+      "Edited prompt reaches the video node",
     ]);
-    expect(apiAdapter.generateImage).toHaveBeenCalledTimes(2);
+    expect(apiAdapter.generateVideo).toHaveBeenCalledTimes(2);
     expect(projectStore.publishRun).toHaveBeenCalledTimes(2);
   });
 });

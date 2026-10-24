@@ -1,3 +1,4 @@
+import { isStudioRetiredNodeKind } from "../../../studio/StudioNodeKinds";
 import { Notice } from "obsidian";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import { randomId } from "../../../studio/utils";
@@ -245,9 +246,9 @@ export class StudioGraphConnectionEngine {
     const pending = this.portInteraction.getPendingConnectionSourceKey();
     if (!project || !pending) return;
     const [fromNodeId, , fromPortId] = pending.split(":");
-    if (project.graph.nodes.some(node => node.kind === "studio.workflow" && (node.id === fromNodeId || node.id === target.nodeId))) {
+    if (project.graph.nodes.some(node => isStudioRetiredNodeKind(node.kind) && (node.id === fromNodeId || node.id === target.nodeId))) {
       this.portInteraction.cancel();
-      this.host.setError("Retired workflow notes cannot accept new connections.");
+      this.host.setError("Retired nodes cannot accept new connections.");
       return;
     }
 

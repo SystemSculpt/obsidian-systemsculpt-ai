@@ -1,3 +1,4 @@
+import { isStudioRetiredNodeKind } from "../../../studio/StudioNodeKinds";
 import { Notice } from "obsidian";
 import type {
   ConnectionAutoCreateRequest,
@@ -428,11 +429,11 @@ export class StudioPortInteraction {
     const candidates: SnapCandidate[] = [];
     const compatible = new Set<string>();
     const incompatible = new Set<string>();
-    const retiredWorkflowNodeIds = new Set(this.host.getCurrentProject()?.graph.nodes
-      .filter(node => node.kind === "studio.workflow").map(node => node.id));
+    const retiredNodeIds = new Set(this.host.getCurrentProject()?.graph.nodes
+      .filter(node => isStudioRetiredNodeKind(node.kind)).map(node => node.id));
     for (const port of this.ports.values()) {
       // Saved anchors still render their edges, but cannot attract a new drag.
-      if (port.direction !== "in" || port.element.matches(":disabled") || retiredWorkflowNodeIds.has(port.nodeId)) continue;
+      if (port.direction !== "in" || port.element.matches(":disabled") || retiredNodeIds.has(port.nodeId)) continue;
       const portType = this.host.getPortType(port.nodeId, "in", port.portId) || "";
       const ok = sourceType && portType && this.host.portTypeCompatible(sourceType, portType);
       const key = portKey(port.nodeId, "in", port.portId);
