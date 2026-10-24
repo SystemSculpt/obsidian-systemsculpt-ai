@@ -61,6 +61,25 @@ async function expandHistoricalOverflow(
   await state?.hydration;
 }
 
+/**
+ * Waits until every requested live-Markdown revision has committed through
+ * the renderer's own stream throttle. That interval stretches to the previous
+ * parse's wall-clock duration, so a fixed sleep loses the race whenever a
+ * loaded machine stalls a parse.
+ */
+async function settleLiveMarkdown(renderer: AgentConversationRenderer): Promise<void> {
+  const liveMarkdown = (renderer as unknown as {
+    liveMarkdown: {
+      states: Map<HTMLElement, { revision: number }>;
+      waitForRevision(state: { revision: number }, revision: number): Promise<void>;
+    };
+  }).liveMarkdown;
+  await Promise.all(Array.from(
+    liveMarkdown.states.values(),
+    (state) => liveMarkdown.waitForRevision(state, state.revision),
+  ));
+}
+
 const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
 
 describe("AgentWorkspace", () => {
@@ -3260,14 +3279,11 @@ describe("AgentWorkspace", () => {
       expect(streamedTextNode?.nodeType).toBe(Node.TEXT_NODE);
       const markdownCallsBeforeSuffix = markdownRender.mock.calls.length;
       let expectedMarkdownCalls = markdownCallsBeforeSuffix;
-      const settleLiveMarkdown = async (): Promise<void> => {
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      };
       approvalButton.focus();
 
       currentSnapshot = snapshot("First token and second token");
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
 
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(tailStatus);
@@ -3301,7 +3317,7 @@ describe("AgentWorkspace", () => {
       selection.addRange(selectedToken);
       reasoningDetails.open = true;
       reasoningDetails.dispatchEvent(new Event("toggle"));
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
       approvalButton.focus();
       const burstRender = jest.spyOn(workspace.renderer, "renderActive");
@@ -3317,7 +3333,7 @@ describe("AgentWorkspace", () => {
           workspace.setAgentSnapshot(burstSnapshot)),
       );
       currentSnapshot = burstSnapshots[burstSnapshots.length - 1]!;
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
 
       expect(burstRender).toHaveBeenCalledTimes(1);
@@ -3364,7 +3380,7 @@ describe("AgentWorkspace", () => {
       ].join("\n");
       currentSnapshot = snapshot(formattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       // The completed leading blocks are parsed once on their own; the open
       // code fence is the only part later frames parse again.
       expectedMarkdownCalls += 2;
@@ -3388,7 +3404,7 @@ describe("AgentWorkspace", () => {
       );
       currentSnapshot = snapshot(correctedFormattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
       const correctedTextNode = textPart.firstChild;
       expect(correctedTextNode).toBe(streamedTextNode);
@@ -4178,7 +4194,7 @@ describe("AgentWorkspace", () => {
     )!;
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
     expect(markdownRender).toHaveBeenCalledTimes(1);
     let bodyText = body.firstChild!;
     expect(bodyText.nodeType).toBe(Node.TEXT_NODE);
@@ -4204,7 +4220,7 @@ describe("AgentWorkspace", () => {
       "```",
     ].join("\n");
     await workspace.setAgentSnapshot(snapshot(formattedSummary));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
 
     expect(parent.querySelector(".systemsculpt-agent-reasoning-details")).toBe(details);
     expect(parent.querySelector(".systemsculpt-agent-reasoning-header")).toBe(header);
@@ -4236,7 +4252,7 @@ describe("AgentWorkspace", () => {
 
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
     expect(markdownRender).toHaveBeenCalledTimes(5);
 
     await workspace.setAgentSnapshot(
