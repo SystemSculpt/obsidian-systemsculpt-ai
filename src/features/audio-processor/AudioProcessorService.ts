@@ -512,24 +512,32 @@ export class AudioProcessorService {
     operationId: string,
     options: ProcessAudioOptions,
   ): Promise<AudioProcessorJob> {
+    let retryAfterMs: number | undefined;
     const completed = await dispatchManagedJob({
       send: async () => {
+        retryAfterMs = undefined;
         try {
           return await this.api.completeUpload(jobId, parts, operationId, options.signal);
         } catch (error) {
           if (options.signal.aborted || !isRetryableManagedJobObservationError(error)) throw error;
           // A lost response may mean the server already advanced the job.
           // Reconcile before replaying, but never turn a permanent rejection
-          // into success or discard the completion error's Retry-After hint.
+          // into success or discard either request's Retry-After hint.
+          retryAfterMs = (error as Partial<AudioProcessorApiError> | null)?.retryAfterMs;
           try {
             const observed = await this.api.getJob(jobId, options.signal);
             if (observed.status !== "uploading") return observed;
           } catch (readError) {
             if (options.signal.aborted || !isRetryableManagedJobObservationError(readError)) throw readError;
+            const readRetryAfterMs = (readError as Partial<AudioProcessorApiError> | null)?.retryAfterMs;
+            if (readRetryAfterMs !== undefined) {
+              retryAfterMs = Math.max(retryAfterMs ?? 0, readRetryAfterMs);
+            }
           }
           throw error;
         }
       },
+      retryAfterMs: () => retryAfterMs,
       signal: options.signal,
       wait: async (milliseconds, signal) => {
         options.onProgress?.({

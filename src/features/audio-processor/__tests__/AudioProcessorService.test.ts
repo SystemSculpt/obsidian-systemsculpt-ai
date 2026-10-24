@@ -223,6 +223,26 @@ describe("AudioProcessorService", () => {
       expect(api.abortUpload).not.toHaveBeenCalled();
     });
 
+    it("cancels a retry wait without replaying the dispatch", async () => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Try later", 503, "temporarily_unavailable", 5_000));
+      api.getJob.mockReset().mockResolvedValue(job("uploading", "uploading", 0.35));
+      const controller = new AbortController();
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: controller.signal,
+      });
+      const finished = expect(running).rejects.toMatchObject({ name: "AbortError" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      controller.abort();
+      await finished;
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
     it("fails a 400 immediately without retry or completion reconciliation", async () => {
       jest.useFakeTimers();
       const { plugin } = createPlugin();
@@ -238,6 +258,36 @@ describe("AudioProcessorService", () => {
       expect(jest.getTimerCount()).toBe(0);
       await finished;
       expect(api.getJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("completion reconciliation cooldown", () => {
+    afterEach(() => jest.useRealTimers());
+
+    it.each([
+      [undefined, 60_000],
+      [5_000, 60_000],
+      [60_000, 5_000],
+    ])("honors both completion %s and readback %s Retry-After hints", async (completionHint, readHint) => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api.completeUpload.mockRejectedValueOnce(new AudioProcessorApiError("Try later", 503, "temporarily_unavailable", completionHint));
+      api.getJob.mockReset()
+        .mockRejectedValueOnce(new AudioProcessorApiError("Slow down", 429, "rate_limited", readHint))
+        .mockResolvedValue(job("succeeded", "complete", 1));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ jobId: "audio_job_123" });
+      await jest.advanceTimersByTimeAsync(59_999);
+      expect(api.completeUpload).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await jest.runAllTimersAsync();
+      await finished;
+      expect(api.completeUpload.mock.calls[1]).toEqual(api.completeUpload.mock.calls[0]);
+      expect(api.createAudioJob).toHaveBeenCalledTimes(1);
     });
   });
 

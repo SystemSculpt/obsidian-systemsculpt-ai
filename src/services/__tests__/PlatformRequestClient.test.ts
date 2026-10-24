@@ -8,6 +8,7 @@ import {
   PlatformRequestTimeoutError,
   platformTransferTimeoutMs,
 } from "../PlatformRequestClient";
+import { dispatchManagedJob } from "../managed/ManagedJobObservation";
 
 jest.mock("obsidian", () => ({
   ...jest.requireActual("obsidian"),
@@ -17,6 +18,39 @@ jest.mock("obsidian", () => ({
 describe("PlatformRequestClient", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("retries a native connection failure through the shared dispatch policy", async () => {
+    jest.useFakeTimers();
+    try {
+      const native = requestUrl as jest.Mock;
+      native.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_RESET"))
+        .mockResolvedValueOnce({ status: 200, text: "{}", json: {}, headers: {} });
+      const client = new PlatformRequestClient();
+      const running = dispatchManagedJob({
+        send: () => client.request({ url: "https://api.test/job", method: "POST", body: { job: "same-job" } }),
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ status: 200 });
+      await jest.advanceTimersByTimeAsync(999);
+      expect(native).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await finished;
+      expect(native).toHaveBeenCalledTimes(2);
+      expect(native.mock.calls[1]).toEqual(native.mock.calls[0]);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("does not turn a native abort or an HTTP rejection into a connection failure", async () => {
+    const client = new PlatformRequestClient();
+    const stopped = new DOMException("Stopped", "AbortError");
+    (requestUrl as jest.Mock).mockRejectedValueOnce(stopped);
+    await expect(client.request({ url: "https://api.test/job", method: "POST" })).rejects.toMatchObject({ name: "AbortError" });
+    (requestUrl as jest.Mock).mockResolvedValueOnce({ status: 400, text: "Invalid", headers: {} });
+    await expect(client.request({ url: "https://api.test/job", method: "POST" })).resolves.toMatchObject({ status: 400 });
   });
 
   it.each([
