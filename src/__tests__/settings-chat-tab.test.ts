@@ -3,6 +3,11 @@
 import { App } from "obsidian";
 import { displayChatTabContent } from "../settings/ChatTabContent";
 
+jest.mock("obsidian", () => ({
+  ...jest.requireActual("obsidian"),
+  Notice: jest.fn(),
+}));
+
 const createPluginStub = (app: App) => {
   const settingsManager = {
     updateSettings: jest.fn().mockResolvedValue(undefined),
@@ -16,7 +21,7 @@ const createPluginStub = (app: App) => {
       textExecutionBackend: "systemsculpt",
       settingsMode: "standard",
       defaultChatTag: "",
-      respectReducedMotion: true,
+      reduceChatMotion: false,
     },
     getSettingsManager: jest.fn(() => settingsManager),
   } as any;
@@ -90,6 +95,19 @@ describe("Chat tab native layout", () => {
     expect(container.textContent).toContain("Chat settings");
     expect(container.textContent).toContain("chat preferences and display choices");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
+  });
+
+  it("starts Reduce chat motion off and saves the explicit opt-in", async () => {
+    const { container, updateSettings } = await render();
+    document.body.append(container);
+    const row = Array.from(container.querySelectorAll(".setting-item"))
+      .find(el => el.querySelector(".setting-item-name")?.textContent === "Reduce chat motion")!;
+    const toggle = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    expect(updateSettings).toHaveBeenLastCalledWith({ reduceChatMotion: true });
+    toggle.click();
+    expect(updateSettings).toHaveBeenLastCalledWith({ reduceChatMotion: false });
   });
 
   it("coalesces typing and normalizes only the final chat tag", async () => {

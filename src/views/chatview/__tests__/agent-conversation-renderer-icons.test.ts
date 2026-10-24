@@ -2685,6 +2685,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
       onRetryFailedTurn: retryFailedTurn,
     });
@@ -2717,7 +2718,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
-    expect(copy.textContent).toBe("Copy report");
+    expect(copy.textContent).toBe("Copy report ID");
     retry.click();
     copy.click();
     await Promise.resolve();
@@ -2764,6 +2765,77 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
+  it("hides report IDs while saving, offers a save retry, then enables copying", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const prepare = jest.fn(() => new Promise<boolean>((resolve) => { finishSave = resolve; }));
+    const copy = jest.fn(async () => true);
+    const retryTurn = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: prepare,
+      onCopyIncidentReport: copy,
+      onRetryFailedTurn: retryTurn,
+    });
+    renderer.load();
+    const reportId = `report_${"d".repeat(32)}`;
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-report-save", content: "Submitted prompt",
+    }, {
+      role: "assistant", message_id: "failed-report-save", content: "",
+      terminalOutcome: "failed", terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    finishSave(false);
+    await Promise.resolve();
+    expect(parent.textContent).toContain("Report unavailable");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.retry-incident-report"]')!;
+    retry.click();
+    expect(prepare).toHaveBeenLastCalledWith(reportId, true);
+    expect(retryTurn).not.toHaveBeenCalled();
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.querySelector('[data-testid="chat.turn.retry-incident-report"]')).toBeNull();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.textContent).toContain(`Report ID: ${reportId}`);
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy-incident-report"]')!.click();
+    await Promise.resolve();
+    expect(copy).toHaveBeenCalledWith(reportId);
+    renderer.unload();
+  });
+
+  it("does not add report actions after the renderer unloads", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "chat.md", onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      onCopyIncidentReport: jest.fn(),
+      onPrepareIncidentReport: () => new Promise<boolean>((resolve) => { finishSave = resolve; }),
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-unload-report", content: "Prompt",
+    }, {
+      role: "assistant", message_id: "failure-unload-report", content: "",
+      terminalOutcome: "failed", terminalReportId: `report_${"f".repeat(32)}`,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    renderer.unload();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+  });
+
   it("shows a compact copying state and blocks duplicate report ID copies", async () => {
     const parent = document.body.createDiv();
     let resolveCopy!: (value: boolean) => void;
@@ -2777,6 +2849,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
     });
     renderer.load();
@@ -2799,7 +2872,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
-    expect(copy.textContent).toBe("Copy report");
+    expect(copy.textContent).toBe("Copy report ID");
     copy.click();
     expect(copy.disabled).toBe(true);
     expect(copy.getAttribute("aria-busy")).toBe("true");

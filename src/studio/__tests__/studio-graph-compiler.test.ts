@@ -27,6 +27,19 @@ describe("StudioGraphCompiler managed node graph", () => {
   registerBuiltInStudioNodes(registry);
   const compiler = new StudioGraphCompiler();
 
+  it.each([{ entries: [] }, { entries: ["missing"] }, { entries: ["text"] }])("derives run order from edges, not cached entry IDs $entries", ({ entries }) => {
+    const project = baseProject();
+    project.graph.nodes = [
+      { id: "input", kind: "studio.input", version: "1.0.0", title: "Input", position: { x: 0, y: 0 }, config: { value: "hello" } },
+      { id: "text", kind: "studio.text_generation", version: "1.0.0", title: "Text", position: { x: 220, y: 0 }, config: {} },
+    ];
+    project.graph.edges = [{ id: "e1", fromNodeId: "input", fromPortId: "text", toNodeId: "text", toPortId: "prompt" }];
+    project.graph.entryNodeIds = entries;
+    Object.freeze(project.graph.entryNodeIds);
+
+    expect(compiler.compileRun(project, registry).executionOrder).toEqual(["input", "text"]);
+  });
+
   it("compiles a valid managed text graph", () => {
     const project = baseProject();
     project.graph.nodes.push(

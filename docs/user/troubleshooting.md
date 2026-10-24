@@ -6,6 +6,14 @@
 - Chat runs through SystemSculpt automatically; there is no chat picker in the plugin.
 - If chat is unavailable, re-check your SystemSculpt license and credits first.
 
+## Browser sign-in did not finish
+
+- If the browser cannot return to Obsidian, paste its connection code into the
+  sign-in screen and choose **Complete sign-in**.
+- If sign-in reports that it is unavailable, choose **Start sign-in again**.
+  If Obsidian also reports that settings could not be saved, resolve the vault's
+  disk-space or write-permission problem first, then retry.
+
 ## Streaming issues
 
 - Retry once after confirming your license and credits are valid.
@@ -44,6 +52,11 @@
   reports; saving them to disk requires an Info or Debug log level, or debug
   mode. Recording diagnostics does not override the log level. Failed chat
   runs save incident reports whether or not recording is on.
+- Failed chat cards show `Preparing report…` while their local incident report
+  is saving. `Copy report ID` appears only once that report is saved. If saving
+  fails, `Report unavailable` and `Retry report` let you try saving it again
+  without rerunning the chat turn. Reopened chats check that the report is still
+  available on this device; an ID in chat history alone is not a saved report.
 - `Copy Resource Usage Report`
 - Advanced tab: `Copy diagnostics snapshot`
 - Advanced tab: `Open diagnostics folder`

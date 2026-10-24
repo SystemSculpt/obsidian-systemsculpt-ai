@@ -223,10 +223,10 @@ export interface SystemSculptSettings {
   chatFontSize: "small" | "medium" | "large";
 
   /**
-   * When enabled, SystemSculpt UI will honor the OS "reduced motion" preference
-   * by minimizing animations/transitions inside SystemSculpt views only.
+   * Minimize chat animations even when the OS does not request reduced motion.
+   * The OS preference is always honored independently through CSS.
    */
-  respectReducedMotion: boolean;
+  reduceChatMotion: boolean;
 
   /**
    * Studio project defaults.
@@ -332,7 +332,7 @@ Please:
   debugMode: false,
   defaultChatTag: "",
   chatFontSize: "medium",
-  respectReducedMotion: true,
+  reduceChatMotion: false,
 
   studioDefaultProjectsFolder: "SystemSculpt/Studio",
   studioRunRetentionMaxRuns: 100,

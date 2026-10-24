@@ -106,6 +106,7 @@
     "chat.turn.error-details",
     "chat.turn.retry",
     "chat.turn.retry-failed",
+    "chat.turn.retry-incident-report",
     "chat.turn.see-plans",
     "chat.turn.use-hosted",
     "credits.buy",

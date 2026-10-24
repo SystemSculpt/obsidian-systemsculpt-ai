@@ -54,7 +54,6 @@ function pluginStub(files: TFile[]) {
   };
   const plugin = {
     settings,
-    emitter: { emit: jest.fn() },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: { activeGeneration: undefined, metadata: undefined, getMetadata: jest.fn(), index: jest.fn() },
     })),
@@ -145,7 +144,6 @@ describe("EmbeddingsManager superseded generation pruning (#324)", () => {
       app: { vault: { adapter: null, getMarkdownFiles: () => files, getAbstractFileByPath: (path: string) => files.find((file) => file.path === path) ?? null } },
       plugin: {
         settings: { embeddingsEnabled: true, embeddingsPortableIndex: false, embeddingsExclusions: {} },
-        emitter: { emit: jest.fn() },
         getSettingsManager: () => ({ updateSettings: jest.fn(async () => undefined) }),
       },
       markPortableIndexChanged: jest.fn(),

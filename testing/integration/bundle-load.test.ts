@@ -190,16 +190,16 @@ describe("built bundle (main.js)", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
 
     expect(styles).toMatch(
-      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible;/s
+      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible(?:;|\})/s
     );
     expect(styles).toMatch(
-      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*calc\(var\(--ss-studio-port-size,\s*10px\)\s*\*\s*-0\.5\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible;/s
+      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*calc\(var\(--ss-studio-port-size,\s*10px\)\s*\*\s*-0?\.5\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible(?:;|\})/s
     );
     expect(styles).toMatch(
-      /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1;/s
+      /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1(?:;|\})/s
     );
     expect(styles).toMatch(
-      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\);/
+      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\)(?:;|\})/
     );
   });
 

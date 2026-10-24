@@ -92,13 +92,18 @@ describe("built bundle in Obsidian Mobile", () => {
 
   it("ships the final ChatView focus invariant after feature styles", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
-    const selector = ":is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible";
-    expect(styles).toContain(selector);
-    expect(styles.slice(styles.indexOf(selector))).toMatch(/^[^{]+\{\s*outline:\s*2px solid var\(--ss-ink-accent\);\s*outline-offset:\s*2px;\s*box-shadow:\s*var\(--ss-ring\);/);
-    expect(styles.indexOf(selector)).toBeGreaterThan(styles.lastIndexOf(".ss-studio-"));
+    const selector = /:is\(\.ss-surface\.systemsculpt-agent-workspace,\s*#ss-specificity-boost\) :focus-visible/;
+    const index = styles.search(selector);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(styles.slice(index)).toMatch(/^[^{]+\{\s*outline:\s*2px solid var\(--ss-ink-accent\);\s*outline-offset:\s*2px;\s*box-shadow:\s*var\(--ss-ring\)(?:;|\})/);
+    expect(index).toBeGreaterThan(styles.lastIndexOf(".ss-studio-"));
   });
 
-  it("onloads cleanly and opens Studio, Similar Notes, and Chat from the production mobile bundle", async () => {
+  it.each([
+    ["default settings", {}, false],
+    ["explicit reduced chat motion", { reduceChatMotion: true }, true],
+    ["legacy OS preference", { respectReducedMotion: true }, false],
+  ])("onloads and opens Studio, Similar Notes, and Chat with %s", async (_label, storedSettings, reducedMotion) => {
     for (const specifier of DESKTOP_NODE_MODULES) {
       jest.doMock(specifier, () => {
         throw new Error(`Desktop adapter was evaluated on mobile: ${specifier}`);
@@ -136,6 +141,7 @@ describe("built bundle in Obsidian Mobile", () => {
         return { unload: jest.fn() };
       });
       plugin = new PluginClass(app, manifest);
+      jest.spyOn(plugin, "loadData").mockResolvedValue(storedSettings);
       addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     });
 
@@ -213,6 +219,8 @@ describe("built bundle in Obsidian Mobile", () => {
     });
     expect(chatView.getViewType()).toBe(CHAT_VIEW_TYPE);
     expect(chatView.contentEl.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
+    expect(chatView.contentEl.querySelector(".systemsculpt-agent-workspace")
+      .classList.contains("is-reduced-motion")).toBe(reducedMotion);
     expect(
       chatView.contentEl.querySelector('.ss-surface[data-ss-surface="view"]'),
     ).not.toBeNull();

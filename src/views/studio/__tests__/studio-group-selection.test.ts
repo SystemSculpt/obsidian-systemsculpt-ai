@@ -13,7 +13,7 @@ function harness() {
   ],edges:[],groups:[{id:'group',name:'Automation',nodeIds:['inside'],color:'#8de8bc'}]}} as unknown as StudioProjectV1;
   const commit=jest.fn((_reason,mutator) => mutator(project) !== false), clearDiagramSelection=jest.fn();
   const engine=new StudioGraphInteractionEngine({getCurrentProject:()=>project,isBusy:()=>false,setError:jest.fn(),
-    recomputeEntryNodes:jest.fn(),requestRender:jest.fn(),commitProjectMutation:commit,clearDiagramSelection,
+    requestRender:jest.fn(),commitProjectMutation:commit,clearDiagramSelection,
     getPortType:()=>null,portTypeCompatible:()=>true});
   const viewport=document.body.createDiv(), canvas=viewport.createDiv();
   Object.defineProperties(viewport,{clientWidth:{value:1000},clientHeight:{value:800}});

@@ -245,6 +245,11 @@ export class StudioGraphConnectionEngine {
     const pending = this.portInteraction.getPendingConnectionSourceKey();
     if (!project || !pending) return;
     const [fromNodeId, , fromPortId] = pending.split(":");
+    if (project.graph.nodes.some(node => node.kind === "studio.workflow" && (node.id === fromNodeId || node.id === target.nodeId))) {
+      this.portInteraction.cancel();
+      this.host.setError("Retired workflow notes cannot accept new connections.");
+      return;
+    }
 
     const sourceType = this.host.getPortType(fromNodeId, "out", fromPortId);
     const targetType = this.host.getPortType(target.nodeId, "in", target.portId);
@@ -288,10 +293,6 @@ export class StudioGraphConnectionEngine {
     if (!changed) return;
 
     this.portInteraction.cancel();
-    const currentProject = this.host.getCurrentProject();
-    if (currentProject) {
-      this.host.recomputeEntryNodes(currentProject);
-    }
     this.host.requestRender();
   }
 
@@ -367,10 +368,6 @@ export class StudioGraphConnectionEngine {
       return true;
     });
     if (!changed) return;
-    const currentProject = this.host.getCurrentProject();
-    if (currentProject) {
-      this.host.recomputeEntryNodes(currentProject);
-    }
     this.host.requestRender();
   }
 

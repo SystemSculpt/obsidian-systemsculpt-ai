@@ -174,8 +174,8 @@ npm run check:compat
   strict console, randomized order, open-handle detection, seeded generative
   histories, and a global coverage floor over the critical ChatView modules
   (the small identity and tool-execution modules stay at 100%).
-- check:ci is the exact exhaustive PR gate. It adds strict-console randomized
-  mobile interactions, critical ChatView coverage, the partitioned unit
+- check:ci is the exact exhaustive PR gate. It adds the production file/dependency
+  Knip audit (check:knip), strict-console randomized mobile interactions, critical ChatView coverage, the partitioned unit
   remainder, embeddings, already-built integration, and open-handle detection.
   Each source suite runs exactly once: the mobile CI subset excludes
   critical-owned suites, and the unit remainder excludes both focused sets

@@ -454,10 +454,6 @@ export function isManagedOutputPlaceholderNode(node: StudioNodeInstance): boolea
 // nodes. Retiring an output must remove those references in the same mutation.
 function removeOutputPresentationReferences(project: StudioProjectV1, removed: Set<string>): void {
   removeStudioArrowsForItems(project, removed);
-  if (project.graph.layout?.pinnedNodeIds) {
-    project.graph.layout.pinnedNodeIds = project.graph.layout.pinnedNodeIds.filter(id => !removed.has(id));
-  }
-  project.graph.entryNodeIds = project.graph.entryNodeIds.filter(id => !removed.has(id));
   for (const node of project.graph.nodes) if (node.parentId && removed.has(node.parentId)) delete node.parentId;
 }
 

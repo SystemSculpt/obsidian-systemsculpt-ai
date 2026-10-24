@@ -391,6 +391,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     ) as HTMLButtonElement;
     deactivate.click();
     await flushSetupSectionRender();
+    expect(plugin.accountConnectService.cancelPending).toHaveBeenCalledTimes(1);
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({
       licenseKey: "",
       licenseValid: false,

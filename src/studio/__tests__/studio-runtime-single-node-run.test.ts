@@ -3,6 +3,7 @@ import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import { StudioRuntime } from "../StudioRuntime";
+import { workflowNode } from "../nodes/workflowNode";
 import type { StudioNodeDefinition, StudioProjectV1, StudioRunEvent } from "../types";
 
 function project(): StudioProjectV1 {
@@ -117,6 +118,37 @@ describe("running one node", () => {
     const entries = (published.cache as { entries: Record<string, { outputs: Record<string, unknown> }> }).entries;
     expect(Object.keys(entries).sort()).toEqual(["clip", "gen", "seed"]);
     expect(entries.gen.outputs.image).toBe("image-for-one");
+  });
+
+  it.each([true, false])("never executes saved workflow notes or their connections (desktop: %s)", async (isDesktopApp) => {
+    (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
+    const { runtime, registry, executed } = harness({ gen: entry("gen", "test.generate", { image: "kept" }) });
+    const execute = jest.fn(workflowNode.execute);
+    registry.register({ ...workflowNode, execute });
+    const snapshot = project();
+    snapshot.graph.nodes.push({
+      id: "workflow", kind: "studio.workflow", version: "1.0.0", title: "Saved objective",
+      position: { x: 0, y: 200 }, config: { description: "Keep this draft", pendingRequest: { id: "old" } },
+    });
+    snapshot.graph.edges.push(
+      { id: "saved-input", fromNodeId: "seed", fromPortId: "text", toNodeId: "workflow", toPortId: "context" },
+      { id: "saved-output", fromNodeId: "workflow", fromPortId: "json", toNodeId: "clip", toPortId: "frame" },
+    );
+    const before = JSON.stringify(snapshot);
+    const events: StudioRunEvent[] = [];
+    for (const entryNodeIds of [undefined, ["clip"]]) {
+      const summary = await runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, {
+        entryNodeIds, onEvent: async event => { events.push(event); },
+      });
+      expect(summary.status).toBe("success");
+      expect(summary.executedNodeIds).not.toContain("workflow");
+    }
+    expect(executed).not.toContain("workflow");
+    expect(execute).not.toHaveBeenCalled();
+    expect(events.some(event => "nodeId" in event && event.nodeId === "workflow")).toBe(false);
+    await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds: ["workflow"] })).rejects.toThrow("visual-only");
+    expect(JSON.stringify(snapshot)).toBe(before);
+    runtime.dispose();
   });
 
   it("runs a cacheable node between the target and a never-cached boundary without crossing it", async () => {

@@ -6,8 +6,8 @@ SystemSculpt can use tools during chat when the current flow needs them. There i
 
 Chat activity animations pause while the view is hidden or its window is
 unfocused; this does not stop the running task. **Settings → Chat → Reduce chat
-motion** minimizes chat animations even without a system reduced-motion
-preference. System reduced motion is always honored.
+motion** is off by default. Turn it on to minimize chat animations even without a
+system reduced-motion preference. System reduced motion is always honored.
 
 ## Approval behavior
 

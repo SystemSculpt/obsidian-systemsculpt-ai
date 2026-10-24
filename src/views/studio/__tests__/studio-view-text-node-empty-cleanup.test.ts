@@ -162,7 +162,6 @@ function createEditEndHarness(options: {
       selectOnlyNode: jest.fn(),
       setSelectedNodeIds: jest.fn(),
     },
-    recomputeEntryNodes: jest.fn(),
     clearTransientFieldErrorsForNode: jest.fn(),
     cloneJsonValue: jest.fn((value: unknown) => value),
     refreshNodeCardPreview: jest.fn(),

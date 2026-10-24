@@ -303,9 +303,9 @@ export class SettingsManager {
       migratedSettings.lastAutomaticBackup = DEFAULT_SETTINGS.lastAutomaticBackup;
     }
     
-    // Ensure respectReducedMotion is properly initialized (migration for existing users)
-    if (typeof migratedSettings.respectReducedMotion !== "boolean") {
-      migratedSettings.respectReducedMotion = DEFAULT_SETTINGS.respectReducedMotion;
+    // This is a new opt-in, not a rename of the legacy OS-preference default.
+    if (typeof migratedSettings.reduceChatMotion !== "boolean") {
+      migratedSettings.reduceChatMotion = DEFAULT_SETTINGS.reduceChatMotion;
     }
 
     if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {

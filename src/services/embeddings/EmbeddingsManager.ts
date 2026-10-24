@@ -323,14 +323,7 @@ export class EmbeddingsManager {
 
       const workClaims = await this.captureWorkClaims(files, "reconcile");
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
-      this.emit("embeddings:processing-start", { scope: "vault", total: files.length, reason: "managed" });
       const result = await this.processor.processFiles(files, this.app, (progress) => {
-        this.emit("embeddings:processing-progress", {
-          scope: "vault",
-          total: files.length,
-          current: progress.current,
-          batch: progress.batchProgress,
-        });
         this.refreshProgress(progress);
         onProgress?.(progress);
       }, {
@@ -383,18 +376,6 @@ export class EmbeddingsManager {
           : firstFailure
             ? { code: firstFailure.code, message: firstFailure.message }
             : null,
-      });
-      this.emit("embeddings:processing-complete", {
-        scope: "vault",
-        processed: result.completed,
-        failed: failedCount,
-        status: result.fatalError
-          ? "error"
-          : result.cancelled
-            ? "aborted"
-            : failedCount > 0
-              ? "partial"
-              : "success",
       });
 
       if (result.fatalError) {
@@ -1003,7 +984,6 @@ export class EmbeddingsManager {
         currentPath: files[0]?.path ?? null,
         lastError: null,
       });
-      this.emit("embeddings:processing-start", { scope: "queue", total: files.length, reason: "vault-change" });
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       const result = await this.processor.processFiles(files, this.app, (progress) => {
         this.refreshProgress(progress);
@@ -1047,18 +1027,6 @@ export class EmbeddingsManager {
           : firstFailure
             ? { code: firstFailure.code, message: firstFailure.message }
             : null,
-      });
-      this.emit("embeddings:processing-complete", {
-        scope: "queue",
-        processed: result.completed,
-        failed: failedPaths.length,
-        status: result.fatalError
-          ? "error"
-          : result.cancelled
-            ? "aborted"
-            : failedPaths.length > 0
-              ? "partial"
-              : "success",
       });
     });
     this.scheduleQueuedWork();
@@ -1998,9 +1966,5 @@ export class EmbeddingsManager {
       failed: this.failedFiles.size,
       ...patch,
     });
-  }
-
-  private emit(event: string, payload: Record<string, unknown>): void {
-    try { this.plugin.emitter?.emit(event, payload); } catch { /* observers are optional */ }
   }
 }

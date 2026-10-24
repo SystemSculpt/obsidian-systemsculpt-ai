@@ -95,7 +95,6 @@ async function harness(fileCount: number) {
   };
   manager.plugin = {
     settings,
-    emitter: { emit: jest.fn() },
     getSettingsManager: jest.fn(() => ({
       updateSettings: jest.fn(async (patch: Partial<typeof settings>) => Object.assign(settings, patch)),
     })),

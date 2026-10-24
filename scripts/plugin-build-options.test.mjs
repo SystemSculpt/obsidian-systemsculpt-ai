@@ -242,7 +242,11 @@ test("full driver and release bundles enforce the executable provenance boundary
     releaseBuild: true,
     testDriver: false,
     buildStamp: "release-6.3.1",
+    overrides: { metafile: true },
   }));
+  const runtimeImports = [...new Set(Object.values(releaseResult.metafile.outputs)
+    .flatMap((output) => output.imports.filter((entry) => entry.external).map((entry) => entry.path)))].sort();
+  assert.deepEqual(runtimeImports, createPluginBuildOptions().external.toSorted());
   const driverBundle = driverResult.outputFiles[0].text;
   const releaseBundle = releaseResult.outputFiles[0].text;
 

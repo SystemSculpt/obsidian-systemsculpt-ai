@@ -87,6 +87,18 @@ describe("Studio schema", () => {
     expect(reference).toContain('Running workflows retain their original definition');
   });
 
+  it("documents saved workflows only as retired notes, never as executable work", () => {
+    const reference = renderStudioAgentReferenceMarkdown();
+    const section = reference.split("### workflow\n")[1];
+    expect(section).toContain("Retired workflow note");
+    expect(section).toContain("visual only (never runs)");
+    expect(section).toContain("legacy: keep existing instances, never add new ones");
+    expect(section).not.toContain("executable");
+    expect(section).not.toContain("Config:");
+    expect(reference).not.toContain("Start workflow admits execution");
+    expect(reference).not.toContain("Workflow cards with `roleId` display instances");
+  });
+
   it("round-trips first-class node size, keeping width-only sizes", () => {
     const project = createEmptyStudioProject({
       name: "Sized",
