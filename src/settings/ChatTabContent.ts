@@ -1,5 +1,5 @@
 import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
-import { Notice, Setting } from "obsidian";
+import { Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { beginTextSettings } from "./TextSettings";
 
@@ -53,7 +53,6 @@ new Setting(containerEl)
             .onChange(async (value: string) => {
                 if (value !== "small" && value !== "medium" && value !== "large") return;
                 await plugin.getSettingsManager().updateSettings({ chatFontSize: value });
-                new Notice(`Default chat font size set to: ${value}`);
             });
 	    });
 
@@ -66,7 +65,6 @@ new Setting(containerEl)
             .setValue(plugin.settings.reduceChatMotion ?? false)
             .onChange(async (value) => {
                 await plugin.getSettingsManager().updateSettings({ reduceChatMotion: value });
-                new Notice(`Reduced motion ${value ? 'enabled' : 'disabled'}.`);
             });
     });
 }

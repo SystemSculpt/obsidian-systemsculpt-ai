@@ -384,7 +384,7 @@ describe("Recorder settings tab", () => {
       app.vault.getName(),
     )).toBe("popout");
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Popout microphone.");
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("keeps device-local mobile and desktop microphone preferences isolated", async () => {
@@ -418,7 +418,7 @@ describe("Recorder settings tab", () => {
 
     expect(getCurrentHostPreferredMicrophoneId(window, app.vault.getName())).toBe("headset");
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to USB headset.");
+    expect(mockedNotice).not.toHaveBeenCalled();
 
     Object.assign(Platform, {
       isDesktopApp: true,
@@ -499,7 +499,7 @@ describe("Recorder settings tab", () => {
 
     expect(select.value).toBe("");
     expect(select.selectedOptions[0]?.text).toBe("Default microphone");
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Default microphone.");
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("invalidates an older render before applying its device result", async () => {

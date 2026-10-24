@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App } from "obsidian";
+import { App, Notice } from "obsidian";
 import { displayChatTabContent } from "../settings/ChatTabContent";
 
 jest.mock("obsidian", () => ({
@@ -107,6 +107,9 @@ describe("Chat tab native layout", () => {
     expect(updateSettings).toHaveBeenLastCalledWith({ reduceChatMotion: true });
     toggle.click();
     expect(updateSettings).toHaveBeenLastCalledWith({ reduceChatMotion: false });
+    await Promise.resolve();
+    // The toggle itself shows the change.
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("coalesces typing and normalizes only the final chat tag", async () => {

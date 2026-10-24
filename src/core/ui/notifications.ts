@@ -1,6 +1,6 @@
 import { App, Notice } from "obsidian";
 import { showPrompt } from "./modals/PromptModal";
-import { createSurfaceFragment, resolveSurfaceDomContext } from "./surface";
+import { createSurfaceFragment, getSurfaceOwnerWindow, resolveSurfaceDomContext } from "./surface";
 
 interface NotificationOptions {
   duration?: number;
@@ -88,4 +88,25 @@ export function showActionNotice(
     notice.hide();
     action.onSelect();
   });
+}
+
+const BUTTON_RESULT_MS = 1_500;
+const buttonResults = new WeakMap<HTMLElement, { label: string; timer: number }>();
+
+/**
+ * Show a short result such as "Copied" on the text button that started an
+ * action, in place of a success notice, then restore the button's label.
+ */
+export function flashButtonResult(button: HTMLElement, result: string, durationMs = BUTTON_RESULT_MS): void {
+  const labelEl = button.querySelector<HTMLElement>(".ss-button__label") ?? button;
+  const ownerWindow = getSurfaceOwnerWindow(button);
+  const pending = buttonResults.get(button);
+  if (pending) ownerWindow.clearTimeout(pending.timer);
+  const label = pending?.label ?? labelEl.textContent ?? "";
+  labelEl.textContent = result;
+  const timer = ownerWindow.setTimeout(() => {
+    buttonResults.delete(button);
+    labelEl.textContent = label;
+  }, durationMs);
+  buttonResults.set(button, { label, timer });
 }

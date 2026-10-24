@@ -408,8 +408,10 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({ licenseKey: "skss-replacement" });
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith();
-    expect(mockedNotice).toHaveBeenCalledWith("Validating license key...", 0);
-    expect(mockedNotice).toHaveBeenCalledWith("License activated successfully.");
+    // The button's "Working..." state is the progress; the re-rendered
+    // account row is the result.
+    expect(mockedNotice).not.toHaveBeenCalled();
+    expect(tab.display).toHaveBeenCalledTimes(1);
   });
 
   it.each(["returns false", "throws"])(
@@ -473,6 +475,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
       lastValidated: 0,
     });
     expect(container.innerHTML).not.toContain("skss-saved-secret");
+    expect(tab.display).toHaveBeenCalledTimes(1);
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("uses bounded first-party copy when license validation throws", async () => {

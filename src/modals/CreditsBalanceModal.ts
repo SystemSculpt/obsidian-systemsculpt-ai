@@ -1,4 +1,4 @@
-import { App, Notice, setIcon } from "obsidian";
+import { App, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import {
   createUiAction,
@@ -118,7 +118,10 @@ export class CreditsBalanceModal extends StandardModal {
       onChange: (tab) => void this.onTabChanged(tab),
     });
 
-    this.statusEl = root.createDiv({ cls: "ss-credits-balance__status" });
+    this.statusEl = root.createDiv({
+      cls: "ss-credits-balance__status",
+      attr: { role: "status", "aria-live": "polite" },
+    });
 
     this.refreshButton = this.addActionButton(
       "credits.refresh",
@@ -298,7 +301,7 @@ export class CreditsBalanceModal extends StandardModal {
       );
       this.hintEl.addClass("is-warning");
     } else if (isOutOfCredits) {
-      this.hintEl.setText("You have no credits left. Buy credits to continue using chat and similar notes.");
+      this.hintEl.setText("No credits are available for hosted requests.");
       this.hintEl.addClass("is-warning");
     } else if (isUnavailable) {
       this.hintEl.setText(
@@ -306,10 +309,10 @@ export class CreditsBalanceModal extends StandardModal {
       );
       this.hintEl.addClass("is-warning");
     } else if (isLowBalance) {
-      this.hintEl.setText("You are running low on credits. Buying credits now helps avoid interrupted requests.");
+      this.hintEl.setText("Available credits are low.");
       this.hintEl.addClass("is-warning");
     } else {
-      this.hintEl.setText("Need more headroom? You can buy additional credits anytime.");
+      this.hintEl.empty();
       this.hintEl.removeClass("is-warning");
     }
   }
@@ -503,7 +506,6 @@ export class CreditsBalanceModal extends StandardModal {
       if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
       this.setStatusMessage(`Unable to refresh credits balance (${message}).`, "error");
-      new Notice("Unable to refresh credits balance.", 5000);
     } finally {
       if (task.isCurrent()) {
         this.isRefreshingBalance = false;
@@ -546,7 +548,6 @@ export class CreditsBalanceModal extends StandardModal {
       if (!task.isCurrent()) return;
       const message = error instanceof Error && error.message ? error.message : "Unknown error";
       this.setStatusMessage(`Unable to ${mode === "more" ? "load older" : "refresh"} usage (${message}).`, "error");
-      new Notice(mode === "more" ? "Unable to load older usage records." : "Unable to refresh usage history.", 5000);
     } finally {
       if (task.isCurrent()) {
         this.usageRequest = null;

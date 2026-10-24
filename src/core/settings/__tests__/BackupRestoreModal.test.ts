@@ -73,6 +73,74 @@ describe("BackupSelectionModal", () => {
   });
 });
 
+describe("BackupRestoreModal.open", () => {
+  let opened: BackupSelectionModal[] = [];
+  beforeEach(() => {
+    opened = [];
+    const onOpen = BackupSelectionModal.prototype.onOpen;
+    jest.spyOn(BackupSelectionModal.prototype, "onOpen").mockImplementation(function (this: BackupSelectionModal) {
+      opened.push(this);
+      onOpen.call(this);
+    });
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    document.body.empty();
+    (Notice as unknown as jest.Mock).mockClear();
+  });
+
+  function createPicker() {
+    const app = new App();
+    const writes = new Map<string, string>();
+    (app.vault.adapter.exists as jest.Mock).mockImplementation(async (path: string) =>
+      path === ".systemsculpt/settings-backups" && writes.size > 0);
+    (app.vault.adapter.list as jest.Mock).mockImplementation(async () => ({ files: [...writes.keys()], folders: [] }));
+    (app.vault.adapter.read as jest.Mock).mockImplementation(async (path: string) => writes.get(path) ?? "");
+    (app.vault.adapter.write as jest.Mock).mockImplementation(async (path: string, text: string) => {
+      writes.set(path, text);
+    });
+    const plugin: any = {
+      app,
+      getSettingsManager: () => ({ getSettings: () => ({ chatFontSize: "large", licenseKey: "secret" }) }),
+    };
+    return { picker: new BackupRestoreModal(app, plugin), writes };
+  }
+
+  const flush = async () => {
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  it("opens with an empty list and the manual backup form instead of a notice when no backups exist", async () => {
+    const { picker } = createPicker();
+
+    void picker.open();
+    await flush();
+
+    expect(opened).toHaveLength(1);
+    const modal = opened[0].modalEl;
+    expect(modal.querySelector(".ss-ui-state.is-empty")?.textContent).toContain("No backups found");
+    expect(modal.querySelector("[data-testid='settings.backup.create-manual']")).not.toBeNull();
+    expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it("creates the first manual backup without a notice and lists it in the reopened picker", async () => {
+    const { picker, writes } = createPicker();
+
+    void picker.open();
+    await flush();
+    opened[0].modalEl.querySelector<HTMLButtonElement>("[data-testid='settings.backup.create-manual']")!.click();
+    await flush();
+
+    expect(writes.size).toBe(1);
+    expect([...writes.values()][0]).not.toContain("secret");
+    expect(opened).toHaveLength(2);
+    expect(opened[1].modalEl.querySelector("[data-backup-path]")?.getAttribute("data-backup-path"))
+      .toBe([...writes.keys()][0]);
+    expect(Notice).not.toHaveBeenCalled();
+  });
+});
+
 describe("BackupRestoreModal.restoreFromBackup", () => {
   const path = ".systemsculpt/settings-backups/latest.json";
 
@@ -98,8 +166,11 @@ describe("BackupRestoreModal.restoreFromBackup", () => {
       chatFontSize: "small",
     }));
 
+    (Notice as unknown as jest.Mock).mockClear();
     await expect(restore.restoreFromBackup(path)).resolves.toBe(true);
 
+    // The caller re-renders settings; a restore that worked needs no notice.
+    expect(Notice).not.toHaveBeenCalled();
     expect(restoreFromExternalSettings).toHaveBeenCalledTimes(1);
     expect(restoreFromExternalSettings).toHaveBeenCalledWith(expect.objectContaining({
       licenseKey: "current-license",

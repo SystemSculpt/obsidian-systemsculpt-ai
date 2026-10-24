@@ -204,7 +204,7 @@ describe("LicenseManager", () => {
       expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
       expect(mockedNotice).toHaveBeenCalledWith(
-        "Your SystemSculpt license is no longer valid or failed to validate. Premium features may be unavailable.",
+        "Your SystemSculpt license could not be validated. Open account settings to check your access.",
         7000,
       );
     });

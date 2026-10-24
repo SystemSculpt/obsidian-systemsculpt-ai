@@ -71,7 +71,7 @@ export class LicenseManager {
         void this.validateLicenseKeyDetailed().then((result) => {
           if (hadValidLicense && !result.isValid) {
             new Notice(
-              "Your SystemSculpt license is no longer valid or failed to validate. Premium features may be unavailable.",
+              "Your SystemSculpt license could not be validated. Open account settings to check your access.",
               7000
             );
           }

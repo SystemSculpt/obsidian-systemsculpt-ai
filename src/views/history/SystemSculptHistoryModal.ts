@@ -1,4 +1,3 @@
-import { Notice } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
@@ -300,7 +299,6 @@ export class SystemSculptHistoryModal extends StandardModal {
       if (!task.isCurrent()) return;
       this.entries = [];
       const message = error instanceof Error ? error.message : String(error);
-      new Notice(`Failed to load history: ${message}`);
       this.combobox?.setItems([]);
       this.showState("error", "Couldn’t load history", message);
       return;

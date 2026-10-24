@@ -120,12 +120,9 @@ export class BackupRestoreModal {
 
   async open(): Promise<string | null> {
     try {
+      // With no backups the list shows its empty state above the manual
+      // backup form, so the first backup can be made from here.
       const backups = await this.getAvailableBackups();
-      if (backups.length === 0) {
-        new Notice("No settings backups found", 3000);
-        return null;
-      }
-
       const modal = new BackupSelectionModal(
         this.app,
         backups,
@@ -160,7 +157,6 @@ export class BackupRestoreModal {
       );
 
       await this.plugin.getSettingsManager().restoreFromExternalSettings(restoredSettings);
-      new Notice("Settings restored successfully", 3000);
       return true;
     } catch (error) {
       new Notice(`Error restoring settings: ${String(error)}`, 3000);
@@ -234,8 +230,6 @@ export class BackupRestoreModal {
         backupPath,
         JSON.stringify(backupData, null, 2)
       );
-
-      new Notice(`Manual backup "${backupName}" created successfully`, 3000);
     } catch (error) {
       new Notice(`Error saving backup: ${String(error)}`, 3000);
       throw error;

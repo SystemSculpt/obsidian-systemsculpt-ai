@@ -1,6 +1,9 @@
+import { Notice } from "obsidian";
 import { CreditsBalanceModal } from "../CreditsBalanceModal";
 import { JSDOM } from "jsdom";
 import { LICENSE_URL } from "../../types";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 (global as any).window = dom.window;
@@ -116,10 +119,112 @@ const spyOnAnchorClicks = () => {
   return { hrefs, spy };
 };
 
+const healthyBalance = {
+  includedRemaining: 2000,
+  addOnRemaining: 500,
+  totalRemaining: 2500,
+  includedPerMonth: 3000,
+  cycleEndsAt: "2026-03-01T00:00:00.000Z",
+  cycleStartedAt: "2026-02-01T00:00:00.000Z",
+  cycleAnchorAt: "2026-02-01T00:00:00.000Z",
+  turnInFlightUntil: null,
+  purchaseUrl: "https://systemsculpt.com/buy-credits",
+};
+
 describe("CreditsBalanceModal", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     (window as any).open = jest.fn();
+    (Notice as unknown as jest.Mock).mockClear();
+  });
+
+  it("states a healthy balance without a sales line, and a low one neutrally", async () => {
+    const low = { ...healthyBalance, includedRemaining: 20, addOnRemaining: 0, totalRemaining: 20 };
+    const loadBalance = jest.fn().mockResolvedValueOnce(healthyBalance).mockResolvedValueOnce(low);
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: healthyBalance,
+      loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+    const hint = modal.modalEl.querySelector(".ss-credits-balance__panel--balance > .ss-credits-balance__hint")!;
+    expect(hint.textContent).toBe("");
+    expect(modal.modalEl.textContent).not.toContain("headroom");
+
+    findButtonByText(modal.modalEl, "Refresh").click();
+    await flushPromises();
+    expect(hint.textContent).toBe("Available credits are low.");
+    expect(hint.classList.contains("is-warning")).toBe(true);
+  });
+
+  it("keeps the held-credit warning when every credit is reserved for in-flight work", async () => {
+    const held = { ...healthyBalance, heldInFlight: 2500, availableUnreserved: 0, usageClass: "customer" as const };
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: held,
+      loadBalance: jest.fn().mockResolvedValue(held),
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+
+    expect(modal.modalEl.textContent).toContain("No credits available");
+    const hint = modal.modalEl.querySelector(".ss-credits-balance__panel--balance > .ss-credits-balance__hint")!;
+    expect(hint.textContent).toBe(
+      "2,500 credits are held for in-flight work. Add credits or wait for that work to settle.",
+    );
+    expect(hint.classList.contains("is-warning")).toBe(true);
+  });
+
+  it("reports a failed balance refresh once, inline, and keeps the last balance", async () => {
+    const loadBalance = jest.fn()
+      .mockResolvedValueOnce(healthyBalance)
+      .mockRejectedValueOnce(new Error("offline"));
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: healthyBalance,
+      loadBalance,
+      loadUsage: jest.fn().mockResolvedValue({ items: [], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+    findButtonByText(modal.modalEl, "Refresh").click();
+    await flushPromises();
+
+    const status = modal.modalEl.querySelector(".ss-credits-balance__status")!;
+    expect(status.textContent).toBe("Unable to refresh credits balance (offline).");
+    expect(status.classList.contains("is-error")).toBe(true);
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(modal.modalEl.textContent).toContain("2,500 credits");
+    expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed usage refresh once, inline, without touching the balance", async () => {
+    const loadUsage = jest.fn().mockRejectedValue(new Error("timeout"));
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: healthyBalance,
+      loadBalance: jest.fn().mockResolvedValue(healthyBalance),
+      loadUsage,
+      onOpenSetup: jest.fn(),
+    });
+
+    modal.onOpen();
+    await flushPromises();
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+
+    expect(loadUsage).toHaveBeenCalledTimes(1);
+    const status = modal.modalEl.querySelector(".ss-credits-balance__status")!;
+    expect(status.textContent).toBe("Unable to refresh usage (timeout).");
+    expect(status.classList.contains("is-error")).toBe(true);
+    expect(modal.modalEl.textContent).toContain("2,500 credits");
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("renders credit details and supports buy/setup actions", async () => {
@@ -239,7 +344,7 @@ describe("CreditsBalanceModal", () => {
     expect(modal.modalEl.textContent).toContain("Out of credits");
     expect(modal.modalEl.textContent).toContain("0 credits");
     expect(modal.modalEl.textContent).toContain(
-      "You have no credits left. Buy credits to continue using chat and similar notes.",
+      "No credits are available for hosted requests.",
     );
     expect(findButtonByText(modal.modalEl, "Buy Credits").hidden).toBe(false);
   });
