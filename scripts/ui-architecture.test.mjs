@@ -201,9 +201,11 @@ test("continuous activity animations change only compositor properties", () => {
 test("hidden surfaces and reduced motion override feature animation specificity", () => {
   const surface = read("src/css/foundation/surface.css");
   assert.match(surface, /:is\(\.ss-motion-paused, #ss-specificity-boost\) \*::after\s*\{\s*animation-play-state:\s*paused;/);
-  assert.match(surface, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
+  // Studio pulse cleanup depends on animationend, even under reduced motion.
+  assert.match(surface, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation-duration:\s*0\.01ms;\s*animation-iteration-count:\s*1;/);
   const chat = read("src/css/views/agent-workspace/reasoning.css");
   assert.match(chat, /:is\(\.systemsculpt-agent-workspace\.is-reduced-motion, #ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
+  assert.match(chat, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
 });
 
 test("the shared surface owns adaptation and obsolete UI seams stay deleted", () => {

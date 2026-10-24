@@ -93,7 +93,8 @@
   :is(.ss-surface, #ss-specificity-boost) *,
   :is(.ss-surface, #ss-specificity-boost) *::before,
   :is(.ss-surface, #ss-specificity-boost) *::after {
-    animation: none;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
     scroll-behavior: auto;
     transition-duration: 0.01ms;
   }

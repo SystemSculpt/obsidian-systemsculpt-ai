@@ -313,7 +313,7 @@
   animation-play-state: paused;
 }
 
-/* foundation/surface.css disables every animation under reduced motion; the
+/* foundation/surface.css shortens every animation under reduced motion; the
  * resting frames below stay legible without movement. */
 @media (prefers-reduced-motion: reduce) {
   .ss-studio-node-card[data-activity="active"]::before,

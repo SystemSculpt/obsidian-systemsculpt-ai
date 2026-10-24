@@ -152,4 +152,10 @@
   transition-duration: 0.01ms;
 }
 
-/* The OS preference is enforced by the shared surface contract. */
+@media (prefers-reduced-motion: reduce) {
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *,
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::before,
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::after {
+    animation: none;
+  }
+}
