@@ -94,6 +94,18 @@ function fixture(result = indexedResult()) {
   };
 }
 
+/** Holds the next index request until the test releases it; `started` settles once it is in flight. */
+function holdNextIndex(index: ReturnType<typeof fixture>["index"]) {
+  let release!: (result: ManagedEmbeddingsIndexResult) => void;
+  const started = new Promise<void>((markStarted) => {
+    index.mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve;
+      markStarted();
+    }));
+  });
+  return { started, release: (result: ManagedEmbeddingsIndexResult) => release(result) };
+}
+
 describe("EmbeddingsProcessor server indexing", () => {
   it("sends one raw note request and atomically publishes all returned chunks", async () => {
     const state = fixture(indexedResult({ chunks: 2 }));
@@ -284,16 +296,15 @@ describe("EmbeddingsProcessor server indexing", () => {
 
   it("suppresses an already-dispatched result after local cancellation", async () => {
     const state = fixture();
-    let release!: (result: ManagedEmbeddingsIndexResult) => void;
-    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const held = holdNextIndex(state.index);
 
     const processing = state.processor.processFiles(
       [state.file] as never,
       state.app as never,
     );
-    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    await held.started;
     state.processor.cancel();
-    release(indexedResult());
+    held.release(indexedResult());
     const processed = await processing;
 
     expect(processed).toMatchObject({
@@ -307,8 +318,7 @@ describe("EmbeddingsProcessor server indexing", () => {
 
   it("rejects a stale source revision without publishing old vectors", async () => {
     const state = fixture();
-    let release!: (result: ManagedEmbeddingsIndexResult) => void;
-    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const held = holdNextIndex(state.index);
 
     const processing = state.processor.processFiles(
       [state.file] as never,
@@ -321,10 +331,10 @@ describe("EmbeddingsProcessor server indexing", () => {
         ]]),
       },
     );
-    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    await held.started;
     state.file.stat.mtime = 124;
     state.setContent("New content");
-    release(indexedResult());
+    held.release(indexedResult());
     const processed = await processing;
 
     expect(processed).toMatchObject({
@@ -459,45 +469,54 @@ describe("EmbeddingsProcessor server indexing", () => {
       basename: `Note-${index}`,
       stat: { mtime: index + 1 },
     }));
+    const concurrency = 3;
     let inFlight = 0;
     let peak = 0;
     const releases: Array<() => void> = [];
+    let onRequest = (): void => undefined;
     state.index.mockImplementation(async () => {
       inFlight += 1;
       peak = Math.max(peak, inFlight);
-      await new Promise<void>((resolve) => releases.push(resolve));
+      const released = new Promise<void>((resolve) => releases.push(resolve));
+      onRequest();
+      await released;
       inFlight -= 1;
       return indexedResult({ chunks: 1 });
     });
+    // Free a request only once every worker that can be busy is, and every note
+    // read so far is waiting on its request, so a worker past the bound shows in
+    // the peak. Hashing finishes on Node's thread pool: no tick count promises it.
+    const allBusy = (remaining: number) => new Promise<void>((resolve) => {
+      onRequest = () => {
+        const started = state.app.vault.read.mock.calls.length - (files.length - remaining);
+        if (releases.length >= Math.min(concurrency, remaining) && releases.length === started) resolve();
+      };
+      onRequest();
+    });
 
     const processing = state.processor.processFiles(files as never, state.app as never, undefined, {
-      concurrency: 3,
+      concurrency,
     });
-    while (true) {
-      for (let attempt = 0; attempt < 50 && releases.length === 0; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      const release = releases.shift();
-      if (!release) break;
-      release();
+    for (let remaining = files.length; remaining > 0; remaining -= 1) {
+      await allBusy(remaining);
+      releases.shift()?.();
     }
     const processed = await processing;
 
-    expect(peak).toBe(3);
+    expect(peak).toBe(concurrency);
     expect(state.index).toHaveBeenCalledTimes(7);
     expect(processed.completedPaths).toHaveLength(7);
   });
 
   it("discards a response when the note changed in flight without a new mtime", async () => {
     const state = fixture();
-    let release!: (result: ManagedEmbeddingsIndexResult) => void;
-    state.index.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const held = holdNextIndex(state.index);
 
     const processing = state.processor.processFiles([state.file] as never, state.app as never);
-    for (let attempt = 0; attempt < 50 && !release; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    await held.started;
     // Same reported mtime, different bytes: a coarse clock or a sync tool.
     state.setContent("# Heading\n\nEdited while the request was in flight");
-    release(indexedResult());
+    held.release(indexedResult());
     const processed = await processing;
 
     expect(processed).toMatchObject({
