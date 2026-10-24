@@ -16,6 +16,8 @@ export type AgentToolPresentation = Readonly<{
   displayState: AgentToolDisplayState;
   icon: string;
   summary: string | null;
+  /** The summary counts outcomes ("1 completed, 2 failed"), so it's always meta. */
+  summaryCountsOutcomes?: true;
   meta?: string;
   targetPath?: string;
   groupKind: string;
@@ -372,6 +374,20 @@ function limitToolDetails(details: readonly AgentToolDetail[]): readonly AgentTo
 }
 
 /**
+ * The muted text after a tool line (spec 3.4: counts, +a −b, exit code). A
+ * summary shows only when it adds something: never a repeat of the label
+ * ("Searched “x”  x") or one target of several ("Read 2 notes  A.md").
+ */
+export function presentToolLineMeta(presentation: AgentToolPresentation): string | undefined {
+  if (presentation.meta) return presentation.meta;
+  const summary = presentation.summary;
+  if (!summary) return undefined;
+  if (presentation.summaryCountsOutcomes) return summary;
+  if (presentation.groupCount > 1 || presentation.label.toLowerCase().includes(summary.toLowerCase())) return undefined;
+  return summary;
+}
+
+/**
  * Returns only known, useful tool details. It never exposes raw JSON, file
  * contents, edit text, unknown server input, or provider-owned output data.
  */
@@ -561,6 +577,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     displayState,
     icon: STATE_ICONS[displayState],
     summary,
+    ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
     ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : {}),
     ...(targetPath ? { targetPath } : {}),
     groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list" : presentedName,

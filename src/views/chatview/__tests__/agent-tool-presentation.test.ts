@@ -1,4 +1,5 @@
 import {
+  presentToolLineMeta,
   presentAgentTool,
   presentAgentToolDetails,
   presentAgentToolFailure,
@@ -538,5 +539,17 @@ describe("presentAgentTool", () => {
       summary: "1 completed, 1 failed",
     });
     expect(JSON.stringify(presentation)).not.toContain(PRIVATE_FAILURE_SENTINEL);
+  });
+});
+
+describe("tool line meta", () => {
+  const hosted = (name: string, input: unknown) => ({
+    kind: "tool" as const, id: "t", callId: "t", messageId: "m", order: 0, name, input, state: "succeeded" as const, location: "vault" as const,
+  });
+  it("doesn't repeat the label or name one of several targets", () => {
+    const meta = (name: string, input: unknown) => presentToolLineMeta(presentAgentTool(hosted(name, input)));
+    expect(meta("search", { patterns: ["milestone"], paths: ["Notes"] })).toBeUndefined();
+    expect(meta("read", { paths: ["Notes/A.md", "B.md"] })).toBeUndefined();
+    expect(meta("read", { paths: ["Research/One.md"] })).toBe("Research/One.md");
   });
 });

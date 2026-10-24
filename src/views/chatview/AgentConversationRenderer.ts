@@ -47,6 +47,7 @@ import {
   presentAgentTool,
   presentAgentToolDetails,
   presentAgentToolFailure,
+  presentToolLineMeta,
 } from "./AgentToolPresentation";
 import {
   presentChatMessage,
@@ -3295,7 +3296,7 @@ export class AgentConversationRenderer extends Component {
     }
     shell.toggleAttribute("hidden", Boolean(approvalRequired));
     if (existingApproval && !approvalRequired) (shell as HTMLDetailsElement).open = false;
-    const meta = presentation.meta ?? presentation.summary;
+    const meta = presentToolLineMeta(presentation);
     if (meta) {
       if (summary.textContent !== meta) summary.setText(meta);
       summary.toggleAttribute("hidden", false);
