@@ -61,19 +61,30 @@ detection, adversarial race cases, and a global coverage floor over the
 critical ChatView modules (the small identity and tool-execution modules stay
 at 100%). check:ci is the exact exhaustive PR contract and adds strict mobile
 interaction, unit, embeddings, and already-built integration suites.
-The unit CI remainder excludes focused mobile and ChatView paths already proven
-by earlier gates, keeping the exhaustive workflow broad without rerunning the
-same suites a third time.
+Source CI partitions are disjoint: the mobile CI subset excludes suites owned
+by the critical coverage gate, and the unit remainder excludes both focused
+sets and the embeddings service tree. Embeddings-named UI/tool suites outside
+that tree run as ordinary unit tests. Standalone mobile checks retain all their
+scenarios. Every Jest config shares the same transform and setup base.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
-already enforced by check:ci.
+or OS-independent ESLint already enforced by check:ci. All ESLint passes use
+separate local cache files, including lint:community.
 
-CI runs check:ci on Ubuntu/Node 22, then runs check:compat on Node 22.18,
-Node 24, macOS/Node 22, and Windows/Node 22. The merge queue runs the same
-workflow. A final `required` job fails unless every exhaustive and compatibility
-lane succeeds. All jobs are credential-free. The installed pre-push hook runs
-check:ci locally, while hosted CI and the repository rule requiring `required`
-remain authoritative.
+CI runs check:ci on Ubuntu/Node 22 and check:compat on Node 22.18,
+Node 24, macOS/Node 22, and Windows/Node 22. PRs, merge groups and manual dispatch
+always run all lanes. A main push reuses a successful run only when GitHub's
+completed job records prove the exact checked-out Git tree passed the exhaustive
+and all four compatibility lanes. Comparing the tree, not the PR head or merge
+message, preserves validation when another PR changes the base before merge.
+Missing proof, API errors and untested direct pushes fall back to full CI.
+The small main-push decision workflow remains; the duplicate full matrix does not.
+
+The final `required` job accepts either every lane succeeding or verified
+identical-tree reuse with both expensive jobs intentionally skipped. Release
+publication is independent: `release: published` rebuilds and attests exact tag
+bytes, and the local release command still requires check:ci. No provider
+credentials are used. The installed pre-push hook still runs check:ci locally.
 
 Each top-level hosted Jest gate records its replay seed and normalized child
 Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
