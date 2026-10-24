@@ -1,4 +1,5 @@
 import { App, Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
   createUiAction,
@@ -267,6 +268,9 @@ export class AgentWorkspace extends Component {
     const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
     const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
     const more = iconButton(headerActions, "chat.header.more", "More", "more-horizontal");
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    history.setAttribute("aria-keyshortcuts", `${modifier}+K`);
+    create.setAttribute("aria-keyshortcuts", `${modifier}+Shift+O`);
     more.setAttribute("aria-haspopup", "menu");
     for (const button of [history, create, more]) button.addClass("systemsculpt-agent-header-button");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());

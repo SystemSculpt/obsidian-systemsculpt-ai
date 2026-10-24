@@ -4,6 +4,12 @@ import { Menu } from "obsidian";
 import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "../AgentRunLine";
 import type { AgentChromeState } from "../AgentChatChrome";
 
+const host = { os: "macOS" };
+jest.mock("../../../platform/hostCapabilities", () => ({
+  ...jest.requireActual("../../../platform/hostCapabilities"),
+  getHostOperatingSystem: () => host.os,
+}));
+
 type MockMenu = Menu & {
   items: Array<{ title?: string; checked?: boolean | null; disabled?: boolean; isLabel?: boolean; separator?: boolean }>;
   shown: boolean;
@@ -85,6 +91,19 @@ describe("AgentRunLine", () => {
     expect(toolbar.querySelector(".systemsculpt-agent-run-wide")?.textContent).toBe(" on this Mac");
     expect(segment(parent, "mode").dataset.mode).toBe("auto");
     line.unload();
+  });
+
+  it.each([["macOS", "Meta"], ["Windows", "Control"], ["Linux", "Control"]])("advertises only available menu shortcuts with the %s modifier", (os, modifier) => {
+    host.os = os;
+    const { parent, line } = mount();
+    try {
+      line.render(state());
+      expect(segment(parent, "backend").getAttribute("aria-keyshortcuts")).toBe(`${modifier}+Shift+.`);
+      expect(segment(parent, "mode").getAttribute("aria-keyshortcuts")).toBe(`${modifier}+.`);
+      expect(segment(parent, "detail").hasAttribute("aria-keyshortcuts")).toBe(false);
+      line.render(state({ detecting: true }));
+      expect(parent.querySelector("[aria-keyshortcuts]")).toBeNull();
+    } finally { line.unload(); host.os = "macOS"; }
   });
 
   it("moves between segments with the arrow keys", () => {

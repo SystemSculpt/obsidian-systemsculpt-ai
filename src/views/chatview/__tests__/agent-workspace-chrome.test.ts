@@ -5,6 +5,12 @@ import { AgentWorkspace, type AgentWorkspaceOptions } from "../AgentWorkspace";
 import type { AgentChromeState } from "../AgentChatChrome";
 import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
 
+const host = { os: "macOS" };
+jest.mock("../../../platform/hostCapabilities", () => ({
+  ...jest.requireActual("../../../platform/hostCapabilities"),
+  getHostOperatingSystem: () => host.os,
+}));
+
 type MockMenu = Menu & { items: Array<{ title?: string; disabled?: boolean; isLabel?: boolean; separator?: boolean }>; shown: boolean; select: (title: string) => unknown };
 const menus = (): MockMenu[] => (Menu as unknown as { instances: MockMenu[] }).instances;
 
@@ -53,6 +59,15 @@ describe("AgentWorkspace chrome", () => {
   beforeEach(() => {
     document.body.empty();
     menus().length = 0;
+  });
+
+  it.each([["macOS", "Meta"], ["Windows", "Control"], ["Linux", "Control"]])("advertises the %s view shortcuts on header actions", (os, modifier) => {
+    host.os = os;
+    const { parent, workspace } = mount();
+    try {
+      expect(parent.querySelector('[data-testid="chat.header.history"]')?.getAttribute("aria-keyshortcuts")).toBe(`${modifier}+K`);
+      expect(parent.querySelector('[data-testid="chat.header.new"]')?.getAttribute("aria-keyshortcuts")).toBe(`${modifier}+Shift+O`);
+    } finally { workspace.unload(); host.os = "macOS"; }
   });
 
   it("has a title you rename in place and three icon buttons, with no credits pill", async () => {
