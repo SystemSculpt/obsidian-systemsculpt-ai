@@ -23,12 +23,32 @@ Source of truth:
 
 ## Chat and writing
 
-Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude Code backend. Choose the execution backend and model in the chat controls.
+Chat uses hosted SystemSculpt, on-machine Codex or on-machine Claude Code. Choose
+the backend, mode and model in the run line under the composer.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
 | Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
+| Chat: New chat |  | `chat-new-chat` | In the active or most recent chat; opens one if none |
+| Chat: Open chat history |  | `chat-open-history` | History inside the chat view |
+| Chat: Focus message box |  | `chat-focus-message-box` | |
+| Chat: Stop response |  | `chat-stop-response` | Only while a chat is working |
+| Chat: Change mode |  | `chat-change-mode` | Opens the run line's mode menu |
+| Chat: Change backend |  | `chat-change-backend` | Opens the run line's backend menu |
+| Chat: Review pending approval |  | `chat-review-pending-approval` | Focuses the oldest waiting approval card |
+
+### Keys inside the chat view
+
+These work only while focus is in a chat view, so they claim no global hotkey.
+
+| Key | Action |
+| --- | --- |
+| `Mod+K` | Open chat history (or focus its search) |
+| `Mod+Shift+O` | New chat |
+| `Mod+.` | Change mode |
+| `Mod+Shift+.` | Change backend |
+| `↑` / `↓`, `Enter`, `Mod+Enter`, `Esc` or `←` | In history: move, open, open in a new tab, return to the chat |
 
 ## Search and embeddings
 

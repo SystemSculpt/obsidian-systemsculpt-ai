@@ -427,7 +427,6 @@ test("the deep combobox interface owns interaction for dissimilar feature adapte
 
 test("radio interaction and DOM realm ownership stay behind shared surface seams", () => {
   const radioGroup = read("src/core/ui/surface/SurfaceRadioGroup.ts");
-  const chatSettings = read("src/modals/StandardChatSettingsModal.ts");
   const studioGroups = read("src/views/studio/StudioGraphGroupController.ts");
   const domContext = read("src/core/ui/surface/SurfaceDomContext.ts");
   const studioDomContext = read("src/views/studio/StudioDomContext.ts");
@@ -438,11 +437,10 @@ test("radio interaction and DOM realm ownership stay behind shared surface seams
   assert.match(radioGroup, /export function createUiRadioGroup/);
   assert.match(radioGroup, /group\.setAttribute\("role", "radiogroup"\)/);
   assert.match(radioGroup, /binding\.button\.setAttribute\("role", "radio"\)/);
-  assert.match(chatSettings, /createUiRadioGroup\(choices, bindings/);
   assert.match(studioGroups, /createUiRadioGroup\(paletteEl, bindings/);
-  for (const source of [chatSettings, studioGroups]) {
-    assert.doesNotMatch(source, /setAttribute\(["']role["'],\s*["']radio(?:group)?["']\)/);
-  }
+  assert.doesNotMatch(studioGroups, /setAttribute\(["']role["'],\s*["']radio(?:group)?["']\)/);
+  // Chat settings moved into the chat's run line and More menu (ChatView R4).
+  assert.equal(fs.existsSync(path.join(root, "src/modals/StandardChatSettingsModal.ts")), false);
 
   assert.match(domContext, /export function getSurfaceOwnerWindow/);
   assert.match(domContext, /export function resolveSurfaceDomContext/);

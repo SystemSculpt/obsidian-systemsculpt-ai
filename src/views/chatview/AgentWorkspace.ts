@@ -1,4 +1,4 @@
-import { App, Component, setIcon } from "obsidian";
+import { App, Component, Menu, setIcon } from "obsidian";
 import {
   applyPluginSurface,
   createUiAction,
@@ -9,7 +9,6 @@ import {
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import type { ChatMessage } from "../../types";
-import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
   AnchoredScroller,
@@ -23,11 +22,14 @@ import {
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
+import { presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
+import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
+import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
+import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
 import {
   AgentConversationRenderer,
   type AgentConversationRendererIncidentSnapshot,
@@ -68,14 +70,52 @@ export type AgentWorkspaceOptions = Readonly<{
   onCopyText?: (text: string) => boolean | Promise<boolean>;
   onNewChat: () => void | Promise<void>;
   onOpenHistory: () => void | Promise<void>;
-  onOpenSettings: () => void | Promise<void>;
+  /** Error actions in the conversation (spec 3.7): Detect again, Use SystemSculpt instead. */
+  onDetectAgain?: () => void | Promise<void>;
+  onUseHosted?: () => void | Promise<void>;
+  /** "Add credits" in an out-of-credits error: the credits modal. */
   onOpenCredits?: () => void | Promise<void>;
+  /** Who answers in this chat ("Claude Code", "Codex", "SystemSculpt"). */
+  backendName?: () => string;
+  /** Saves a title typed into the header. */
+  onRename?: (title: string) => void | Promise<void>;
+  /** Fills the header's More menu; the view adds the same items to its pane menu. */
+  buildMoreMenu?: (menu: Menu) => void;
   onViewPlans?: () => void | Promise<void>;
   showPlanOffer?: boolean;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
-  onApprovalModeChange?: (mode: ChatApprovalMode) => void;
+  runLine?: AgentRunLineOptions;
+  emptyState?: AgentEmptyStateOptions;
+  history?: ChatHistoryPanelOptions;
 }>;
+
+const NO_RUN_LINE: AgentRunLineOptions = {
+  onSelectBackend: () => undefined,
+  onSelectMode: () => undefined,
+  onModelChange: () => undefined,
+  onDetectAgain: () => undefined,
+  onOpenSettings: () => undefined,
+  onAction: () => undefined,
+};
+
+const NO_EMPTY_STATE: AgentEmptyStateOptions = {
+  onStarter: () => undefined,
+  onAction: () => undefined,
+};
+
+const NO_HISTORY: ChatHistoryPanelOptions = {
+  loadRows: async () => [],
+  loadSearchText: async () => "",
+  isCurrent: () => false,
+  isRunning: () => false,
+  onOpen: () => undefined,
+  onNewChat: () => undefined,
+  onClose: () => undefined,
+  onToggleFavorite: async () => undefined,
+  onRename: async () => undefined,
+  onDelete: async () => false,
+};
 
 function iconButton(parent: HTMLElement, testId: string, label: string, icon: string): HTMLButtonElement {
   const element = createUiAction(parent, {
@@ -90,14 +130,6 @@ function iconButton(parent: HTMLElement, testId: string, label: string, icon: st
 }
 
 let workspaceLabelSequence = 0;
-
-function formatCredits(value: number): string {
-  try {
-    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-  } catch {
-    return String(Math.round(value));
-  }
-}
 
 const PENDING_AGENT_SNAPSHOT: AgentConversationSnapshot = Object.freeze({
   runId: null,
@@ -155,10 +187,16 @@ export class AgentWorkspace extends Component {
   public readonly viewport: HTMLElement;
   public readonly renderer: AgentConversationRenderer;
   public readonly composer: AgentComposer;
+  public readonly runLine: AgentRunLine;
+  public readonly historyPanel: ChatHistoryPanel;
+  private readonly header: HTMLElement;
   private readonly titleElement: HTMLElement;
-  private readonly creditsButton: HTMLButtonElement | null;
-  private readonly emptyState: HTMLElement;
-  private readonly planOffer: HTMLElement;
+  private readonly titleButton: HTMLButtonElement;
+  private titleText = "New chat";
+  private readonly emptyState: AgentEmptyState;
+  private readonly liveRegion: HTMLElement;
+  private chromeKey = "";
+  private historyReturnFocus: HTMLElement | null = null;
   private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
@@ -207,36 +245,31 @@ export class AgentWorkspace extends Component {
     applyPluginSurface(this.element, "view");
     this.element.classList.toggle("is-reduced-motion", options.reducedMotion?.() === true);
 
-    const header = this.element.createDiv({ cls: "systemsculpt-agent-header" });
+    this.header = this.element.createDiv({ cls: "systemsculpt-agent-header" });
     const titleId = `systemsculpt-agent-title-${++workspaceLabelSequence}`;
-    this.titleElement = header.createDiv({
+    this.titleElement = this.header.createDiv({
       cls: "systemsculpt-agent-header-title",
-      text: "New chat",
       attr: { id: titleId, role: "heading", "aria-level": "2" },
     });
-    const headerActions = header.createDiv({ cls: "systemsculpt-agent-header-actions" });
-    this.creditsButton = options.onOpenCredits
-      ? createUiAction(headerActions, {
-          label: "Credits",
-          testId: "chat.header.credits",
-          size: "small",
-        })
-      : null;
-    if (this.creditsButton) {
-      this.creditsButton.addClass("systemsculpt-agent-credits");
-      this.creditsButton.setAttribute("aria-label", "Credits");
-      this.registerDomEvent(this.creditsButton, "click", () => void this.options.onOpenCredits?.());
-    }
+    this.titleButton = this.titleElement.createEl("button", {
+      cls: "systemsculpt-agent-title-button",
+      text: this.titleText,
+      attr: { type: "button", "data-testid": "chat.header.title", "aria-description": "Rename chat" },
+    });
+    this.titleButton.addEventListener("click", () => this.beginRename());
+    const headerActions = this.header.createDiv({ cls: "systemsculpt-agent-header-actions" });
     const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
     const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
-    const settings = iconButton(headerActions, "chat.header.settings", "Chat settings", "settings-2");
+    const more = iconButton(headerActions, "chat.header.more", "More", "more-horizontal");
+    more.setAttribute("aria-haspopup", "menu");
+    for (const button of [history, create, more]) button.addClass("systemsculpt-agent-header-button");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());
     this.registerDomEvent(create, "click", () => void this.options.onNewChat());
-    this.registerDomEvent(settings, "click", () => void this.options.onOpenSettings());
+    this.registerDomEvent(more, "click", () => this.showMoreMenu(more));
 
     this.banner = this.element.createDiv({
       cls: "systemsculpt-agent-banner",
-      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+      attr: { "aria-atomic": "true" },
     });
     this.banner.toggleAttribute("hidden", true);
 
@@ -244,20 +277,7 @@ export class AgentWorkspace extends Component {
       cls: "systemsculpt-agent-viewport",
       attr: { tabindex: "0" },
     });
-    this.emptyState = this.viewport.createDiv({ cls: "systemsculpt-agent-empty" });
-    this.emptyState.createEl("strong", { text: "What should we work on?" });
-    this.emptyState.createDiv({ text: "Ask about your notes or give SystemSculpt a task." });
-    this.planOffer = this.emptyState.createDiv({ cls: "systemsculpt-agent-plan-offer" });
-    this.setPlanOfferVisible(options.showPlanOffer === true);
-    if (options.onViewPlans) {
-      this.planOffer.createDiv({ text: "Explore hosted AI chat, semantic search, and transcription." });
-      const plans = createUiAction(this.planOffer, {
-        label: "View plans",
-        testId: "chat.empty.view-plans",
-        size: "small",
-      });
-      this.registerDomEvent(plans, "click", () => void this.options.onViewPlans?.());
-    }
+    this.emptyState = new AgentEmptyState(this.viewport, options.emptyState ?? NO_EMPTY_STATE);
 
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
@@ -324,7 +344,6 @@ export class AgentWorkspace extends Component {
       attr: {
         role: "list",
         "aria-label": "Queued follow-ups",
-        "aria-live": "polite",
       },
     });
     this.queueElement.toggleAttribute("hidden", true);
@@ -340,12 +359,142 @@ export class AgentWorkspace extends Component {
       attachmentLimits: options.attachmentLimits,
       onMic: options.onMic,
       onRemoveAttachment: options.onRemoveAttachment,
-      onApprovalModeChange: options.onApprovalModeChange,
+      announce: (message) => this.announce(message),
       onHeightChange: () => {
         if (!this.unloaded) this.scroller.notifyViewportGeometryChanged();
       },
     });
     this.addChild(this.composer);
+
+    this.runLine = new AgentRunLine(this.composer.footerSlot, options.runLine ?? NO_RUN_LINE);
+    this.addChild(this.runLine);
+
+    this.historyPanel = new ChatHistoryPanel(this.element, {
+      ...(options.history ?? NO_HISTORY),
+      announce: (message) => this.announce(message),
+    });
+    this.addChild(this.historyPanel);
+
+    // One polite live region per view (spec 6.3); streaming text is never announced.
+    this.liveRegion = this.element.createDiv({
+      cls: "systemsculpt-agent-sr-only",
+      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "chat.announcer" },
+    });
+  }
+
+  /**
+   * A one-time info line from the agent (Auto unavailable, session reset).
+   * R3 moves it into the conversation; until then it is the info banner.
+   */
+  public showNotice(text: string): void {
+    this.setBanner(text, "info");
+  }
+
+  /** A saved chat is loading; R3's conversation renderer draws the skeleton. */
+  public setLoading(loading: boolean): void {
+    this.element.classList.toggle("is-loading-chat", loading);
+  }
+
+  /** Polite announcement for screen readers. */
+  public announce(text: string): void {
+    // Clearing first makes a repeated message announce again.
+    this.liveRegion.setText("");
+    requestSurfaceAnimationFrame(this.liveRegion, () => this.liveRegion.setText(text));
+  }
+
+  /** Renders the run line and the empty state for the current chat. */
+  public setChrome(state: AgentChromeState): void {
+    // Snapshots arrive many times a second while a turn streams.
+    const key = JSON.stringify(state, (_key, value: unknown) => value instanceof Set ? [...value] : value);
+    if (key === this.chromeKey) return;
+    this.chromeKey = key;
+    this.runLine.render(state);
+    this.emptyState.render(presentEmptyState(state));
+  }
+
+  /** The header hides its title on mobile, where Obsidian's own header shows it. */
+  public isTitleVisible(): boolean {
+    return this.titleElement.getClientRects().length > 0;
+  }
+
+  public get isHistoryOpen(): boolean {
+    return this.historyPanel.isOpen;
+  }
+
+  /** History replaces the conversation and composer until it closes. */
+  public showHistory(): void {
+    if (this.historyPanel.isOpen) {
+      this.historyPanel.focusSearch();
+      return;
+    }
+    const active = this.element.ownerDocument.activeElement;
+    this.historyReturnFocus = active instanceof HTMLElement && this.element.contains(active) ? active : null;
+    this.element.classList.add("is-history-open");
+    this.historyPanel.open();
+  }
+
+  public hideHistory(restoreFocus = true): void {
+    if (!this.historyPanel.isOpen) return;
+    this.historyPanel.close();
+    this.element.classList.remove("is-history-open");
+    this.scroller.notifyViewportGeometryChanged();
+    const target = this.historyReturnFocus;
+    this.historyReturnFocus = null;
+    if (!restoreFocus) return;
+    if (target?.isConnected && !target.hasAttribute("disabled")) target.focus();
+    else this.composer.focus();
+  }
+
+  private showMoreMenu(anchor: HTMLElement): void {
+    // The same in-view menu style as the run line, whatever the native-menu setting.
+    const menu = new Menu().setUseNativeMenu(false);
+    this.options.buildMoreMenu?.(menu);
+    anchor.setAttribute("aria-expanded", "true");
+    menu.onHide(() => {
+      anchor.setAttribute("aria-expanded", "false");
+      returnFocusAfterMenu(this.element, () => this.titleElement.querySelector("input") ? null : anchor);
+    });
+    const rect = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.right, y: rect.bottom, left: true }, anchor.ownerDocument);
+  }
+
+  /** Edits the title in place: Enter or blur saves, Escape cancels. */
+  public beginRename(): void {
+    if (this.titleElement.querySelector("input")) return;
+    const input = this.titleElement.createEl("input", {
+      cls: "systemsculpt-agent-title-input",
+      attr: {
+        type: "text",
+        value: this.titleText,
+        "aria-label": "Chat title",
+        "data-testid": "chat.header.title-input",
+      },
+    });
+    this.titleButton.toggleAttribute("hidden", true);
+    let settled = false;
+    const finish = (save: boolean): void => {
+      if (settled) return;
+      settled = true;
+      const next = input.value.trim();
+      const focusTitle = this.titleElement.contains(input.ownerDocument.activeElement);
+      input.remove();
+      this.titleButton.toggleAttribute("hidden", false);
+      if (focusTitle) this.titleButton.focus();
+      if (save && next && next !== this.titleText) void this.options.onRename?.(next);
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
   }
 
   /** Returns a deeply frozen, content-free projection for a local incident report. */
@@ -421,82 +570,50 @@ export class AgentWorkspace extends Component {
   }
 
   public setTitle(title: string): void {
-    const normalized = title.trim() || "New chat";
-    this.titleElement.setText(normalized);
+    this.titleText = title.trim() || "New chat";
+    this.titleButton.setText(this.titleText);
+    // The tooltip shows a title the header had to truncate.
+    this.titleButton.setAttribute("aria-label", this.titleText);
   }
 
-  public setCreditsBalance(balance: CreditsBalanceSnapshot | null): void {
-    if (!this.creditsButton) return;
-    this.creditsButton.toggleAttribute("hidden", balance === null);
-    this.creditsButton.classList.toggle(
-      "is-internal-qa",
-      balance?.usageClass === "master_auth",
-    );
-    if (balance === null) {
-      this.creditsButton.classList.remove("is-low", "is-empty");
-      updateUiAction(this.creditsButton, {
-        label: "Credits",
-        title: "Credits",
-      });
-      this.creditsButton.setAttribute("aria-label", "Credits");
-      return;
-    }
-    if (balance.usageClass === "master_auth") {
-      this.creditsButton.classList.remove("is-low", "is-empty");
-      updateUiAction(this.creditsButton, {
-        label: "Internal QA",
-        title: "Internal testing mode",
-      });
-      this.creditsButton.setAttribute("aria-label", "Internal testing mode");
-      return;
-    }
-    const available = balance.availableUnreserved ?? balance.totalRemaining;
-    const held = balance.heldInFlight ?? 0;
-    const label = formatCredits(available);
-    const outOfCredits = balance.totalRemaining <= 0;
-    const unavailable = !outOfCredits && available <= 0;
-    this.creditsButton.classList.toggle("is-low", available <= 1000);
-    this.creditsButton.classList.toggle("is-empty", outOfCredits);
-    const availableTitle = held > 0
-      ? `${label} credits available; ${formatCredits(held)} held in flight; ${formatCredits(balance.totalRemaining)} total.`
-      : `Credits available: ${label}`;
-    updateUiAction(this.creditsButton, {
-      label: outOfCredits ? "Out of credits" : unavailable ? "0 available" : label,
-      title: outOfCredits
-        ? "You are out of credits. Add credits to continue."
-        : unavailable
-          ? `${availableTitle} Add credits or wait for in-flight work to settle.`
-          : availableTitle,
-    });
-    this.creditsButton.setAttribute(
-      "aria-label",
-      outOfCredits
-        ? "Out of credits. Add credits to continue."
-        : unavailable
-          ? "No credits are available. Add credits or wait for in-flight work to settle."
-          : availableTitle,
-    );
-  }
-
-  public setBanner(message: string | null, kind: "info" | "error" = "info", showPlanAction = false): void {
+  /**
+   * View-level state only: a read-only or corrupted saved chat, or a session
+   * that could not be restored. `action` true offers plans (T-36).
+   */
+  public setBanner(
+    message: string | null,
+    kind: "info" | "error" = "info",
+    action: boolean | Readonly<{ label: string; testId: string; onSelect: () => void }> = false,
+  ): void {
+    const previousMessage = this.banner.dataset.message;
+    this.banner.dataset.message = message ?? "";
     this.banner.toggleAttribute("hidden", !message);
     this.banner.classList.toggle("is-error", kind === "error");
-    this.banner.setAttribute("role", kind === "error" ? "alert" : "status");
-    this.banner.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+    if (kind === "error") this.banner.setAttribute("role", "alert");
+    else this.banner.removeAttribute("role");
     this.banner.setText(message ?? "");
-    if (message && showPlanAction && this.options.onViewPlans) {
+    if (message && message !== previousMessage && kind !== "error") this.announce(message);
+    if (!message) return;
+    if (action === true && this.options.onViewPlans) {
       const plans = createUiAction(this.banner, {
         label: "See plans",
         testId: "chat.banner.see-plans",
         size: "small",
       });
       plans.onclick = () => void this.options.onViewPlans?.();
+    } else if (action && action !== true) {
+      const button = createUiAction(this.banner, {
+        label: action.label,
+        testId: action.testId,
+        size: "small",
+      });
+      button.onclick = () => action.onSelect();
     }
   }
 
+  /** Whether out-of-credits turns offer plans (T-36); the empty state reads the account itself. */
   public setPlanOfferVisible(visible: boolean): void {
     this.showPlanOffer = visible;
-    this.planOffer.toggleAttribute("hidden", !visible || !this.options.onViewPlans);
   }
 
   public setAttachments(attachments: readonly AgentComposerAttachment[]): void {
@@ -863,10 +980,6 @@ export class AgentWorkspace extends Component {
     this.composer.setValue(value, options);
   }
 
-  public setApprovalMode(mode: ChatApprovalMode): void {
-    this.composer.setApprovalMode(mode);
-  }
-
   private syncRows(): void {
     const discovered = new Map<string, Readonly<{
       priority: number;
@@ -992,7 +1105,7 @@ export class AgentWorkspace extends Component {
   private syncEmpty(): void {
     const presentation = presentAgentConversation(this.snapshot, this.runPending);
     const hasActivePresentation = presentation.phase !== "idle";
-    this.emptyState.toggleAttribute(
+    this.emptyState.element.toggleAttribute(
       "hidden",
       this.history.length > 0 || hasActivePresentation,
     );

@@ -48,6 +48,7 @@
 @import 'views/agent-workspace/tools.css';
 @import 'views/agent-workspace/states.css';
 @import 'views/agent-workspace/composer.css';
+@import 'views/agent-workspace/history.css';
 @import 'views/settings.css';
 @import 'views/similar-notes.css';
 /* Studio canvas: ordered from surface foundations through floating overlays. */

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { generateDefaultChatTitle, sanitizeChatTitle } from "../titleUtils";
+import { chatTitleFromMessage, generateDefaultChatTitle, normalizeChatTitle, sanitizeChatTitle } from "../titleUtils";
 
 describe("titleUtils", () => {
   describe("generateDefaultChatTitle", () => {
@@ -24,6 +24,32 @@ describe("titleUtils", () => {
       // May be the same if called in the same second, but format should match
       expect(title1).toMatch(/Chat .+/);
       expect(title2).toMatch(/Chat .+/);
+    });
+  });
+
+  describe("chatTitleFromMessage", () => {
+    it("keeps paths and punctuation the person wrote", () => {
+      expect(chatTitleFromMessage("/Users/Shared/demo-vault/notes: what's in here?"))
+        .toBe("/Users/Shared/demo-vault/notes: what's in here?");
+    });
+
+    it("reads [[links]] as note names and keeps only the first line", () => {
+      expect(chatTitleFromMessage("Summarize [[Projects/Q4 launch.md|Q4 launch]]\nthen list risks"))
+        .toBe("Summarize Q4 launch");
+      expect(chatTitleFromMessage("## Draft [[Areas/Weekly review]]")).toBe("Draft Weekly review");
+    });
+
+    it("shortens long messages and falls back to a dated title", () => {
+      const title = chatTitleFromMessage("word ".repeat(30));
+      expect(title.length).toBeLessThanOrEqual(62);
+      expect(title.endsWith("…")).toBe(true);
+      expect(chatTitleFromMessage("   \n  ")).toMatch(/^Chat /);
+    });
+  });
+
+  describe("normalizeChatTitle", () => {
+    it("collapses whitespace onto one line without dropping characters", () => {
+      expect(normalizeChatTitle("  Q4 / Q1:\tplan \n")).toBe("Q4 / Q1: plan");
     });
   });
 

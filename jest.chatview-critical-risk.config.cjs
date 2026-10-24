@@ -12,6 +12,7 @@ const criticalRiskTests = [
 	"<rootDir>/src/views/chatview/storage/__tests__/ChatPersistenceTypes.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/ChatStorageService.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-admission.test.ts",
+	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-chrome.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-close-barrier.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-conversation-session-binding.test.ts",
 	"<rootDir>/src/views/chatview/__tests__/agent-chat-view-fork-retry-integration.test.ts",

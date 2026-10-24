@@ -72,6 +72,17 @@ export class UpgradePlanModal extends StandardModal {
     return modal;
   }
 
+  /** Opens straight into the browser sign-up or sign-in handoff, as the welcome's buttons do. */
+  static openConnect(
+    plugin: SystemSculptPlugin,
+    mode: AccountConnectMode,
+    options: UpgradePlanOptions = {},
+  ): UpgradePlanModal {
+    const modal = UpgradePlanModal.openOnce(plugin, options);
+    modal.beginConnect(mode);
+    return modal;
+  }
+
   /** Closes any open instance — used when the sign-in callback arrives. */
   static closeCurrent(): void {
     const current = UpgradePlanModal.current;

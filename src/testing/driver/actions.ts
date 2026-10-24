@@ -345,6 +345,8 @@ interface DevelopmentChatView {
     pendingDeliveries?: ReadonlyMap<string, unknown>;
   }>;
   chatId: string;
+  /** The hosted chat's vault-change mode, shown and changed in the run line. */
+  approvalMode: string;
   containerEl: HTMLElement;
   messages: readonly Readonly<ChatMessage>[];
   getChatHistoryFilePath(): string | null;
@@ -614,9 +616,47 @@ async function waitForSubmittedDevelopmentChatMarker(
 }
 
 function requireAskApprovalMode(ctx: ActionContext): void {
-  const approval = resolveTarget(ctx, "chat.composer.approval-mode");
-  if (!approval?.instanceOf(HTMLSelectElement) || approval.value !== "ask") {
+  const mode = resolveTarget(ctx, "chat.run.mode");
+  if (activeChatView(ctx)?.approvalMode !== "ask" || mode?.dataset.mode !== "ask") {
     throw new DriverActionError("Live development tests require Ask approval mode.");
+  }
+}
+
+const HOSTED_APPROVAL_MODE_LABELS: Readonly<Record<string, string>> = {
+  auto: "Auto",
+  ask: "Ask",
+  "full-access": "Full access",
+};
+
+/** Chooses a hosted mode the way a person does: the run line's mode menu. */
+async function selectHostedApprovalMode(
+  ctx: ActionContext,
+  view: DevelopmentChatView,
+  mode: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  if (view.approvalMode === mode) return;
+  if (!HOSTED_APPROVAL_MODE_LABELS[mode]) throw new DriverActionError("The required approval mode is unavailable.");
+  pointerSequence(requireTarget(ctx, "chat.run.mode"));
+  const ownerDocument = view.containerEl.ownerDocument;
+  const startedAt = Date.now();
+  for (;;) {
+    const item = ownerDocument.querySelector<HTMLElement>(`.menu [data-menu-item="mode.${mode}"]`)
+      ?.closest<HTMLElement>(".menu-item");
+    if (item) {
+      pointerSequence(item);
+      break;
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new DriverActionError("The run line's mode menu did not open.");
+    }
+    await sleep(20);
+  }
+  while (view.approvalMode !== mode) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new DriverActionError("The approval mode did not change.");
+    }
+    await sleep(20);
   }
 }
 
@@ -3589,7 +3629,7 @@ function chatSnapshot(
   const input = container.querySelector("textarea.systemsculpt-agent-prompt-input");
   const send = container.querySelector("button.systemsculpt-agent-send");
   const stop = container.querySelector("button.systemsculpt-agent-stop");
-  const approval = container.querySelector("select.systemsculpt-agent-approval-mode");
+  const approval = container.querySelector<HTMLElement>('[data-testid="chat.run.mode"]');
   const tailStatus = container.querySelector(".systemsculpt-agent-tail-status");
   const attachments: string[] = [];
   for (const item of container.querySelectorAll(".systemsculpt-agent-composer-attachments [role='listitem'], .systemsculpt-agent-composer-attachments > *")) {
@@ -3617,7 +3657,7 @@ function chatSnapshot(
       value: input?.instanceOf(HTMLTextAreaElement) ? input.value : "",
       sendDisabled: send?.instanceOf(HTMLButtonElement) ? send.disabled : null,
       stopVisible: stop?.instanceOf(HTMLElement) ? isVisible(stop) : false,
-      approvalMode: approval?.instanceOf(HTMLSelectElement) ? approval.value : null,
+      approvalMode: approval?.dataset.mode ?? null,
       attachments,
     },
   };
@@ -3713,13 +3753,13 @@ async function waitForBlankDevelopmentChat(
   ctx: ActionContext,
   newChatLoaded: () => boolean,
   timeoutMs = 10000,
-): Promise<HTMLSelectElement> {
+): Promise<void> {
   const startedAt = Date.now();
   for (;;) {
     const container = chatContainer(ctx.app);
     const input = resolveTarget(ctx, "chat.composer.input");
     const stop = resolveTarget(ctx, "chat.composer.stop");
-    const approval = resolveTarget(ctx, "chat.composer.approval-mode");
+    const mode = resolveTarget(ctx, "chat.run.mode");
     const blank = container !== null
       && newChatLoaded()
       && input !== null
@@ -3731,8 +3771,8 @@ async function waitForBlankDevelopmentChat(
         '[data-testid="chat.composer.attachment.remove"], '
           + '[data-testid="chat.composer.attachment.unpin"]',
       ) === null
-      && approval?.instanceOf(HTMLSelectElement);
-    if (blank && approval?.instanceOf(HTMLSelectElement)) return approval;
+      && mode !== null;
+    if (blank) return;
     if (Date.now() - startedAt >= timeoutMs) {
       throw new DriverActionError("New Chat did not establish a blank development-test chat.");
     }
@@ -3744,7 +3784,7 @@ async function openBlankDevelopmentChat(
   ctx: ActionContext,
   view: DevelopmentChatView,
   newChat: HTMLElement,
-): Promise<HTMLSelectElement> {
+): Promise<void> {
   let loaded = false;
   // The old composer can already look blank while New Chat is still awaiting
   // session replacement. Its lifecycle event follows the final draft reset.
@@ -3760,16 +3800,6 @@ async function openBlankDevelopmentChat(
   }
 }
 
-function selectValue(element: HTMLSelectElement, value: string): void {
-  const options = [...element.options].map((option) => option.value);
-  if (!options.includes(value)) {
-    throw new DriverActionError("The required approval mode is unavailable.");
-  }
-  element.focus();
-  element.value = value;
-  element.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 async function restoreDevelopmentChat(
   ctx: ActionContext,
   ownership: DevelopmentChatOwnership,
@@ -3779,10 +3809,8 @@ async function restoreDevelopmentChat(
     return;
   }
   const newChat = requireTarget(ctx, "chat.header.new");
-  const approval = await openBlankDevelopmentChat(ctx, ownership.view, newChat);
-  if (approval.value !== ownership.initialApprovalMode) {
-    selectValue(approval, ownership.initialApprovalMode);
-  }
+  await openBlankDevelopmentChat(ctx, ownership.view, newChat);
+  await selectHostedApprovalMode(ctx, ownership.view, ownership.initialApprovalMode);
 }
 
 async function beginDevelopmentChat(
@@ -3829,8 +3857,7 @@ async function beginDevelopmentChat(
       "Refusing to replace an unsaved chat that already contains messages.",
     );
   }
-  const currentApproval = resolveTarget(ctx, "chat.composer.approval-mode");
-  if (!currentApproval?.instanceOf(HTMLSelectElement)) {
+  if (!HOSTED_APPROVAL_MODE_LABELS[view.approvalMode]) {
     throw new DriverActionError("The current chat approval mode is unavailable.");
   }
 
@@ -3844,7 +3871,7 @@ async function beginDevelopmentChat(
     approvedMutationCount: 0,
     approvedTrashArtifacts: new Map(),
     cleanupProgress: null,
-    initialApprovalMode: currentApproval.value,
+    initialApprovalMode: view.approvalMode,
     marker,
     ownedChatId: null,
     previousChatId,
@@ -3856,8 +3883,8 @@ async function beginDevelopmentChat(
   };
   developmentChatOwners.set(ctx.app, ownership);
   try {
-    const approval = await openBlankDevelopmentChat(ctx, view, newChat);
-    if (approval.value !== "ask") selectValue(approval, "ask");
+    await openBlankDevelopmentChat(ctx, view, newChat);
+    await selectHostedApprovalMode(ctx, view, "ask");
     const ownedInput = requireTarget(ctx, "chat.composer.input");
     setNativeValue(ownedInput, marker, "replace");
     if (!toolLifecycleCaptures.has(ctx.app)) {
@@ -4361,11 +4388,7 @@ async function importDevelopmentOwnershipReceipt(
   ) {
     throw new DriverActionError("The reloaded development chat is not idle.");
   }
-  const approval = resolveTarget(ctx, "chat.composer.approval-mode");
-  if (
-    !approval?.instanceOf(HTMLSelectElement)
-    || ![...approval.options].some((option) => option.value === receipt.initialApprovalMode)
-  ) {
+  if (!HOSTED_APPROVAL_MODE_LABELS[receipt.initialApprovalMode] || !resolveTarget(ctx, "chat.run.mode")) {
     throw new DriverActionError("The prior approval mode cannot be restored safely.");
   }
   if (existing) {
