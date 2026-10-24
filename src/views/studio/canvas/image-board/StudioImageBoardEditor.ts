@@ -444,8 +444,9 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
     this.render();
     try {
       const rendered = await renderStudioImageBoardScene(await this.completeScene());
-      const copied = await tryCopyImageBytesToClipboard(rendered.bytes, rendered.mimeType, this.stage.element);
-      new Notice(copied ? "Image copied to clipboard." : "The image could not be copied to the clipboard.");
+      if (!await tryCopyImageBytesToClipboard(rendered.bytes, rendered.mimeType, this.stage.element)) {
+        new Notice("The image could not be copied to the clipboard.");
+      }
     } catch (error) {
       new Notice(`The image could not be copied. ${messageOf(error)}`);
     } finally {

@@ -19,6 +19,7 @@ import {
 } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { PromptModal } from "../../core/ui/modals/PromptModal";
+import { flashButtonResult } from "../../core/ui/notifications";
 import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { hasHostCapability, resolveElectronModule } from "../../platform/hostCapabilities";
@@ -189,24 +190,31 @@ import { observeLeafVisibility } from "../../core/ui/surface/LeafVisibility";
 import { StudioPresentation } from "./StudioPresentation";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
+function updateStudioMessage(root: HTMLElement, className: string, text: string | null): void {
+  const existing = root.querySelector<HTMLElement>(`:scope > .${className}`);
+  if (!text) {
+    existing?.remove();
+    return;
+  }
+  const element = existing ?? root.createDiv({ cls: className });
+  element.setText(text);
+  if (!existing) root.prepend(element);
+}
+
+/** The view's one error line; announced when it appears or changes. */
+function updateStudioError(root: HTMLElement, error: string | null): void {
+  updateStudioMessage(root, "ss-studio-error", error);
+  root.querySelector(":scope > .ss-studio-error")?.setAttribute("role", "alert");
+}
+
 function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null, recovery?: { reason: string; retrying: boolean; retry: () => void }): void {
-  const update = (className: string, text: string | null): void => {
-    const existing = root.querySelector<HTMLElement>(`:scope > .${className}`);
-    if (!text) {
-      existing?.remove();
-      return;
-    }
-    const element = existing ?? root.createDiv({ cls: className });
-    element.setText(text);
-    if (!existing) root.prepend(element);
-  };
-  update("ss-studio-warning", recovery?.reason ?? warning);
+  updateStudioMessage(root, "ss-studio-warning", recovery?.reason ?? warning);
   if (recovery) {
     const notice = root.querySelector<HTMLElement>(":scope > .ss-studio-warning")!;
     notice.setAttribute("role", "status");
     createStudioAction(notice, { label: "Try again", testId: "studio.migration.retry", disabled: recovery.retrying, onSelect: recovery.retry });
   }
-  update("ss-studio-error", error);
+  updateStudioError(root, error);
 }
 
 type SystemSculptStudioViewState = StudioProjectScopedViewState;
@@ -421,8 +429,8 @@ export class SystemSculptStudioView extends ItemView {
       finalizeCreatedNodes: (project, options) =>
         this.finalizeClipboardCreatedNodes(project, options),
       removeNodes: (nodeIds) => this.removeNodes(nodeIds),
-      insertVaultNoteNodes: (notePaths, anchor, source) =>
-        this.insertVaultNoteNodes(notePaths, anchor, { source }),
+      insertVaultNoteNodes: (notePaths, anchor) =>
+        this.insertVaultNoteNodes(notePaths, anchor),
       storeAsset: (projectPath, bytes, mimeType) =>
         this.plugin.getStudioService().storeAsset(projectPath, bytes, mimeType),
       setError: (error) => this.setError(error),
@@ -697,7 +705,6 @@ export class SystemSculptStudioView extends ItemView {
         return;
       }
       this.render();
-      new Notice("Text generation output unlocked.");
       return;
     }
 
@@ -727,7 +734,6 @@ export class SystemSculptStudioView extends ItemView {
       { message: "Output locked" }
     );
     this.render();
-    new Notice(snapshotText.trim() ? "Text generation output locked." : "Text output locked (currently empty).");
   }
 
   private async resolvePromptBundleSource(node: StudioNodeInstance): Promise<{
@@ -763,7 +769,7 @@ export class SystemSculptStudioView extends ItemView {
     });
   }
 
-  private async copyTextGenerationPromptBundle(nodeId: string): Promise<void> {
+  private async copyTextGenerationPromptBundle(nodeId: string, button: HTMLButtonElement): Promise<void> {
     if (!this.currentProject) {
       new Notice(`Open a ${STUDIO_DISPLAY_NAME} project first.`);
       return;
@@ -781,16 +787,8 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const copied = await tryCopyToClipboard(bundle.markdown);
-    if (!copied) {
-      new Notice("Unable to copy prompt bundle (clipboard unavailable).");
-      return;
-    }
-    new Notice(
-      bundle.sourceCount === 1
-        ? "Prompt bundle copied with 1 source."
-        : `Prompt bundle copied with ${bundle.sourceCount} sources.`
-    );
+    const copied = await tryCopyToClipboard(bundle.markdown, button);
+    flashButtonResult(button, copied ? "Copied" : "Couldn't copy");
   }
 
   /** Returns true when the key was consumed as a canvas shortcut. */
@@ -890,7 +888,6 @@ export class SystemSculptStudioView extends ItemView {
   private async insertVaultNoteNodes(
     notePaths: string[],
     anchor: { x: number; y: number },
-    options?: { source?: "paste" | "drop" }
   ): Promise<void> {
     if (!this.currentProject || !this.currentProjectPath) {
       return;
@@ -953,20 +950,6 @@ export class SystemSculptStudioView extends ItemView {
     }).then(() => {
       this.render();
     });
-
-    if (options?.source === "drop") {
-      new Notice(
-        createdNodeIds.length === 1
-          ? "Added 1 note as a Note node."
-          : `Added ${createdNodeIds.length} notes as Note nodes.`
-      );
-      return;
-    }
-    new Notice(
-      createdNodeIds.length === 1
-        ? "Pasted 1 note as a Note node."
-        : `Pasted ${createdNodeIds.length} notes as Note nodes.`
-    );
   }
 
   /** Bridges controller-owned creation flows back to private graph UI state. */
@@ -1045,8 +1028,9 @@ export class SystemSculptStudioView extends ItemView {
         projectPath: this.currentProjectPath,
       });
     }
-    const summary = this.summarizeMessageForNotice(message);
-    new Notice(`SystemSculpt Studio: ${summary}. See console for full details.`);
+    // The error line at the top of the view owns this; no toast on top.
+    const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
+    if (mountedRoot) updateStudioError(mountedRoot, message);
   }
 
   private logStudioConsoleError(label: string, details: Record<string, unknown>): void {
@@ -1949,12 +1933,9 @@ export class SystemSculptStudioView extends ItemView {
       new Notice("Unable to copy image to clipboard.");
       return;
     }
-    const copied = await tryCopyImageFileToClipboard(this.app, file, this.containerEl);
-    if (!copied) {
+    if (!await tryCopyImageFileToClipboard(this.app, file, this.containerEl)) {
       new Notice("Unable to copy image to clipboard.");
-      return;
     }
-    new Notice("Image copied to clipboard.");
   }
 
   /**
@@ -2146,21 +2127,8 @@ export class SystemSculptStudioView extends ItemView {
       const result = fromNodeId
         ? await studio.runProjectFromNode(this.currentProjectPath, fromNodeId)
         : await studio.runProject(this.currentProjectPath);
-      const executedCount = Array.isArray(result.executedNodeIds)
-        ? result.executedNodeIds.length
-        : 0;
-      const cachedCount = Array.isArray(result.cachedNodeIds)
-        ? result.cachedNodeIds.length
-        : 0;
-      const runStatsSuffix = ` (${executedCount} executed, ${cachedCount} cached)`;
-
-      if (result.status === "success") {
-        new Notice(
-          fromNodeId
-            ? `Studio run from node completed: ${result.runId}${runStatsSuffix}`
-            : `Studio run completed: ${result.runId}${runStatsSuffix}`
-        );
-      } else {
+      // A finished run shows on its nodes; only a failure needs saying.
+      if (result.status !== "success") {
         const rawRunError = String(result.error || result.runId || "");
         if (/license_required|license_rejected/i.test(rawRunError)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });
@@ -3227,8 +3195,8 @@ export class SystemSculptStudioView extends ItemView {
       onRunNode: (nodeId) => {
         void this.runGraph({ fromNodeId: nodeId });
       },
-      onCopyTextGenerationPromptBundle: (nodeId) => {
-        void this.copyTextGenerationPromptBundle(nodeId);
+      onCopyTextGenerationPromptBundle: (nodeId, button) => {
+        void this.copyTextGenerationPromptBundle(nodeId, button);
       },
       onToggleTextGenerationOutputLock: (nodeId) => {
         this.toggleTextGenerationOutputLock(nodeId);
