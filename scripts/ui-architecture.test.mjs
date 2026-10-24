@@ -313,6 +313,7 @@ test("desktop capabilities and mobile host chrome stay behind canonical adapters
   assert.match(mobileHostLayout, /const MOBILE_LAYOUT_CLASS = "ss-mobile-layout"/);
   assert.match(mobileHostLayout, /const MOBILE_NAV_VISIBLE_CLASS = "ss-mobile-navbar-visible"/);
   assert.match(mobileHostLayout, /const MOBILE_NAV_HIDDEN_CLASS = "ss-mobile-navbar-hidden"/);
+  assert.match(mobileHostLayout, /const MOBILE_NAV_SUPPRESSED_CLASS = "ss-mobile-navbar-suppressed"/);
   assert.match(pluginSurface, /ensureMobileHostLayoutState\(root\)/);
   assert.match(tokens, /--ss-safe-top:\s*clamp\(/);
   assert.match(
@@ -321,6 +322,16 @@ test("desktop capabilities and mobile host chrome stay behind canonical adapters
   );
   assert.match(allCss, /\.ss-mobile-layout/);
   assert.doesNotMatch(allCss, /\.is-mobile|\.mobile-navbar-action/);
+  // Tablets never show the floating navbar; only a phone's keyboard-suppressed
+  // navbar may collapse the conversation in landscape.
+  assert.doesNotMatch(
+    allCss,
+    /\.ss-mobile-navbar-hidden\s+\.systemsculpt-agent-(header|banner|transcript|queue)\b/,
+  );
+  assert.match(
+    allCss,
+    /\.ss-mobile-navbar-suppressed\s+\.systemsculpt-agent-transcript\b/,
+  );
 
   const productionFiles = listProductionTypeScript(path.join(root, "src"));
   for (const file of productionFiles) {
