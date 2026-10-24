@@ -165,6 +165,7 @@ type LiveMarkdownState = {
   lastFinishedAt: number;
   lastRenderDurationMs: number;
   timer: number | null;
+  timerWindow: Window | null;
   inFlight: Promise<RenderOutcome> | null;
   renderImmediatelyAfterFlight: boolean;
   finalRevision: number | null;
@@ -994,6 +995,8 @@ export class LiveMarkdownRenderer extends Component {
   private domCommitDepth = 0;
   private finishDomCommit: (() => void) | undefined;
   private acceptingRequests = true;
+  private visible = true;
+  private visibilityGeneration = 0;
 
   constructor(private readonly options: LiveMarkdownRendererOptions) {
     super();
@@ -1006,6 +1009,20 @@ export class LiveMarkdownRenderer extends Component {
 
   public override onload(): void {
     this.acceptingRequests = true;
+  }
+
+  public setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    this.visibilityGeneration += 1;
+    for (const state of this.states.values()) {
+      if (!visible) {
+        this.cancelTimer(state);
+        state.waiters.splice(0).forEach(waiter => waiter.resolve());
+      } else if (state.committedRevision < state.revision) {
+        this.schedule(state, false);
+      }
+    }
   }
 
   public stream(target: HTMLElement, markdown: string): void {
@@ -1022,6 +1039,7 @@ export class LiveMarkdownRenderer extends Component {
   public settle(target: HTMLElement, markdown: string): Promise<void> {
     if (!this.acceptingRequests) return Promise.resolve();
     const state = this.request(target, markdown, true);
+    if (!this.visible) return Promise.resolve();
     if (this.reuseCommittedMarkdown(state, true)) {
       this.cancelTimer(state);
       this.resolveWaiters(state);
@@ -1033,7 +1051,7 @@ export class LiveMarkdownRenderer extends Component {
   }
 
   public flush(target: HTMLElement): Promise<void> {
-    if (!this.acceptingRequests) return Promise.resolve();
+    if (!this.acceptingRequests || !this.visible) return Promise.resolve();
     const state = this.states.get(target);
     if (!state || state.disposed || state.committedRevision >= state.revision) {
       return Promise.resolve();
@@ -1088,6 +1106,7 @@ export class LiveMarkdownRenderer extends Component {
         lastFinishedAt: Number.NEGATIVE_INFINITY,
         lastRenderDurationMs: 0,
         timer: null,
+        timerWindow: null,
         inFlight: null,
         renderImmediatelyAfterFlight: false,
         finalRevision: null,
@@ -1131,7 +1150,7 @@ export class LiveMarkdownRenderer extends Component {
    * time instead of running back to back.
    */
   private schedule(state: LiveMarkdownState, immediate: boolean): void {
-    if (state.disposed) return;
+    if (state.disposed || !this.visible) return;
     if (state.inFlight) {
       state.renderImmediatelyAfterFlight ||= immediate;
       return;
@@ -1152,8 +1171,10 @@ export class LiveMarkdownRenderer extends Component {
       return;
     }
     const ownerWindow = getSurfaceOwnerWindow(state.target);
+    state.timerWindow = ownerWindow;
     state.timer = ownerWindow.setTimeout(() => {
       state.timer = null;
+      state.timerWindow = null;
       void this.startRender(state);
     }, delay);
   }
@@ -1178,7 +1199,9 @@ export class LiveMarkdownRenderer extends Component {
   }
 
   private async startRender(state: LiveMarkdownState): Promise<void> {
-    if (state.disposed || state.inFlight) return;
+    if (state.disposed || state.inFlight || !this.visible) return;
+    const visibilityGeneration = this.visibilityGeneration;
+    const isCurrent = () => !state.disposed && this.visible && visibilityGeneration === this.visibilityGeneration;
     const revision = state.revision;
     const plan = this.planRender(state);
     const markdown = plan.markdown;
@@ -1202,12 +1225,12 @@ export class LiveMarkdownRenderer extends Component {
             settling.staging,
             settling.lease,
           );
-          if (state.disposed) return { status: "stale" };
+          if (!isCurrent()) return { status: "stale", retry: true };
         }
         const tail = markdown.slice(plan.tailStart);
         await this.options.render(tail, staging, lease);
-        if (state.disposed) {
-          return { status: "stale" };
+        if (!isCurrent()) {
+          return { status: "stale", retry: true };
         }
         if (revision < state.committedRevision) {
           return { status: "stale" };
@@ -1334,6 +1357,7 @@ export class LiveMarkdownRenderer extends Component {
         });
         return { status: "committed" };
       } catch (error) {
+        if (!isCurrent()) return { status: "stale", retry: true };
         let failedRevision: number | null = null;
         if (!state.disposed && markdown === state.markdown) {
           failedRevision = state.revision;
@@ -1475,9 +1499,9 @@ export class LiveMarkdownRenderer extends Component {
 
   private cancelTimer(state: LiveMarkdownState): void {
     if (state.timer === null) return;
-    const ownerWindow = getSurfaceOwnerWindow(state.target);
-    ownerWindow.clearTimeout(state.timer);
+    state.timerWindow?.clearTimeout(state.timer);
     state.timer = null;
+    state.timerWindow = null;
   }
 
   private disposeSettled(state: LiveMarkdownState): void {

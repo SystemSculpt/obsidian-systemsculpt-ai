@@ -97,6 +97,51 @@ describe("LiveMarkdownRenderer", () => {
     document.body.empty();
   });
 
+  it("suppresses in-flight commits and hidden snapshots, then renders the newest text on show", async () => {
+    const gate = deferred();
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      await gate.promise;
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    live.stream(target, "Started before hide");
+    const pending = live.flush(target);
+    live.setVisible(false);
+    await pending;
+    live.stream(target, "Intermediate hidden text");
+    await live.settle(target, "Final hidden text");
+    gate.resolve();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(target.textContent).toBe("");
+    expect(render).toHaveBeenCalledTimes(1);
+    live.setVisible(true);
+    await live.flush(target);
+    expect(target.textContent).toBe("rendered:Final hidden text");
+    expect(render).toHaveBeenCalledTimes(2);
+    live.unload();
+  });
+
+  it("cancels the throttled render in its original window after a pop-out migration", async () => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => renderParagraph(markdown, staging));
+    const live = new LiveMarkdownRenderer({ render, throttleMs: 100 });
+    live.load();
+    await live.settle(target, "Visible");
+    live.stream(target, "Queued");
+    const clear = jest.spyOn(window, "clearTimeout");
+    const frame = document.body.createEl("iframe");
+    frame.contentDocument!.body.appendChild(target);
+    live.setVisible(false);
+    expect(clear).toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(target.textContent).toBe("rendered:Visible");
+    live.unload();
+    clear.mockRestore();
+  });
+
   it("keeps raw Markdown hidden until detached parsing commits", async () => {
     const gate = deferred();
     const target = document.body.createDiv();
