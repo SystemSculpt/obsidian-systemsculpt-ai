@@ -55,6 +55,36 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
+  it.each([
+    ["fine", false, true],
+    ["coarse", true, false],
+  ])("draws action icons on reveal for %s pointers", async (_kind, coarse, deferred) => {
+    const matchMedia = jest.fn(() => ({ matches: coarse }));
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: matchMedia });
+    try {
+      const { renderer, parent } = setup();
+      await renderer.renderHistory([{ role: "user", message_id: "turn", content: "Hello" },
+        { role: "assistant", message_id: "answer", content: "Welcome" }]);
+      const rows = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-turn")];
+      const icons = () => parent.querySelectorAll(".systemsculpt-agent-message-actions .ss-button__icon").length;
+      const buttons = parent.querySelectorAll(".systemsculpt-agent-message-actions button").length;
+      expect(buttons).toBeGreaterThan(0);
+      expect(icons()).toBe(deferred ? 0 : buttons);
+      // Every action keeps its accessible name before its icon is drawn.
+      for (const button of parent.querySelectorAll(".systemsculpt-agent-message-actions button")) {
+        expect(button.getAttribute("aria-label")).toBeTruthy();
+      }
+      rows[0].dispatchEvent(new Event("pointerover", { bubbles: true }));
+      parent.querySelector<HTMLButtonElement>(".is-assistant .systemsculpt-agent-message-actions button")!
+        .dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      expect(icons()).toBe(buttons);
+      expect(parent.querySelector("[data-pending-icon], [data-pending-icons]")).toBeNull();
+      renderer.unload();
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
+  });
+
   it("deduplicates a notice until another saved chat loads", () => {
     const { renderer, parent } = setup();
     renderer.showNotice("Auto is unavailable");
