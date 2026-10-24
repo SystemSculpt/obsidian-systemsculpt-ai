@@ -334,7 +334,7 @@ describe("DiagnosticsSessionLifecycle", () => {
     expect(cleanup).not.toHaveBeenCalled();
   });
 
-  it("removes expired and privacy-unsafe automatic files only", async () => {
+  it("prunes automatic archives using only root listing and stats, leaving legacy files and subtrees untouched", async () => {
     const old = NOW - 15 * DAY_MS;
     const recent = NOW - DAY_MS;
     const files: Record<string, TestFile> = {
@@ -352,9 +352,13 @@ describe("DiagnosticsSessionLifecycle", () => {
       },
       [`${DIAGNOSTICS_PATH}/session-latest.json`]: {
         contents: JSON.stringify({ obsidianConfigDir: ".private-config-canary" }),
-        mtime: recent,
-        size: 64,
+        mtime: old,
+        size: 1024 * 1024,
       },
+      [`${DIAGNOSTICS_PATH}/operations-latest.ndjson`]: { contents: "private operations", mtime: old, size: 18 },
+      [`${DIAGNOSTICS_PATH}/operations-20260729-160000.ndjson`]: { contents: "private operations", mtime: old, size: 18 },
+      [`${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-ui.json`]: { contents: "private chat", mtime: old, size: 12 },
+      [`${DIAGNOSTICS_PATH}/chat-debug/nested/systemsculpt-20260729-160000.log`]: { contents: "nested log", mtime: old, size: 10 },
       [`${DIAGNOSTICS_PATH}/systemsculpt-20260812-160000.log`]: { contents: "recent log", mtime: recent, size: 10 },
       [`${DIAGNOSTICS_PATH}/resource-metrics-20260812-160000.ndjson`]: { contents: "recent metrics", mtime: recent, size: 14 },
       [`${DIAGNOSTICS_PATH}/session-20260812-150000.json`]: {
@@ -375,206 +379,26 @@ describe("DiagnosticsSessionLifecycle", () => {
 
     await lifecycle.run(NOW);
 
-    expect(adapter.remove.mock.calls.map(([path]) => path).sort()).toEqual([
+    expect(adapter.list.mock.calls).toEqual([[DIAGNOSTICS_PATH]]);
+    expect(adapter.stat.mock.calls.map(([path]) => path)).toEqual([
+      `${DIAGNOSTICS_PATH}/resource-metrics-20260729-160000.ndjson`,
+      `${DIAGNOSTICS_PATH}/resource-metrics-20260812-160000.ndjson`,
+      `${DIAGNOSTICS_PATH}/session-20260729-155959.json`,
+      `${DIAGNOSTICS_PATH}/session-20260812-150000.json`,
+      `${DIAGNOSTICS_PATH}/session-20260812-160000.json`,
+      `${DIAGNOSTICS_PATH}/systemsculpt-20260729-160000.log`,
+      `${DIAGNOSTICS_PATH}/systemsculpt-20260812-160000.log`,
+    ]);
+    expect(adapter.remove.mock.calls.map(([path]) => path)).toEqual([
       `${DIAGNOSTICS_PATH}/resource-metrics-20260729-160000.ndjson`,
       `${DIAGNOSTICS_PATH}/session-20260729-155959.json`,
-      `${DIAGNOSTICS_PATH}/session-20260812-160000.json`,
-      `${DIAGNOSTICS_PATH}/session-latest.json`,
       `${DIAGNOSTICS_PATH}/systemsculpt-20260729-160000.log`,
     ]);
-    for (const preservedPath of [
-      `${DIAGNOSTICS_PATH}/diagnostics-20260701-120000-${"a".repeat(32)}.txt`,
-      `${DIAGNOSTICS_PATH}/resource-report-20260701-120000.txt`,
-      `${DIAGNOSTICS_PATH}/incident-report_123.json`,
-      `${DIAGNOSTICS_PATH}/systemsculpt-latest.log`,
-      `${DIAGNOSTICS_PATH}/resource-metrics-latest.ndjson`,
-    ]) {
-      expect(adapter.stat).not.toHaveBeenCalledWith(preservedPath);
-      expect(adapter.read).not.toHaveBeenCalledWith(preservedPath);
-      expect(adapter.remove).not.toHaveBeenCalledWith(preservedPath);
-    }
-  });
-
-  it.each([
-    "vaultName",
-    "vault_name",
-    "obsidianConfigDir",
-    "obsidian_config_dir",
-    "enabledPlugins",
-    "enabled_plugins",
-  ])("removes session metadata with the legacy private key %s", async (privateKey) => {
-    const path = `${DIAGNOSTICS_PATH}/session-20260812-160000.json`;
-    const contents = JSON.stringify({ [privateKey]: "PRIVATE_SESSION_VALUE" });
-    const adapter = makeDiagnosticsAdapter({
-      [path]: { contents, mtime: NOW - DAY_MS, size: contents.length },
-    });
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-
-    await makeLifecycle(app).run(NOW);
-
-    expect(adapter.remove.mock.calls).toEqual([[path]]);
-  });
-
-  it("removes only exact plugin-owned legacy operations and ChatView UI logs", async () => {
-    const exactChatIdentifier = "a".repeat(120);
-    const files: Record<string, TestFile> = {
-      [`${DIAGNOSTICS_PATH}/operations-latest.ndjson`]: { contents: "private operations", mtime: NOW, size: 18 },
-      [`${DIAGNOSTICS_PATH}/operations-20260812-160000.ndjson`]: { contents: "private operations", mtime: NOW, size: 18 },
-      [`${DIAGNOSTICS_PATH}/operations-manual-export.ndjson`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/operations-20260812-160000.ndjson.backup`]: { contents: "user backup", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/operations-20260812-160000.json`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/diagnostics-20260812-160000-${"b".repeat(32)}.txt`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-ui.json`]: { contents: "private chat", mtime: NOW, size: 12 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat-${exactChatIdentifier}-ui.json`]: { contents: "private chat", mtime: NOW, size: 12 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat---ui.json`]: { contents: "private chat", mtime: NOW, size: 12 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-stream.ndjson`]: { contents: "legacy stream", mtime: NOW, size: 13 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-ui-copy.json`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/export-chat-unsaved-chat-ui.json`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/chat-${"c".repeat(121)}-ui.json`]: { contents: "user export", mtime: NOW, size: 11 },
-      [`${DIAGNOSTICS_PATH}/chat-debug/nested/chat-private-ui.json`]: { contents: "nested user file", mtime: NOW, size: 16 },
-    };
-    const adapter = makeDiagnosticsAdapter(files);
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-
-    await lifecycle.run(NOW);
-
-    expect(adapter.remove.mock.calls.map(([path]) => path).sort()).toEqual([
-      `${DIAGNOSTICS_PATH}/chat-debug/chat---ui.json`,
-      `${DIAGNOSTICS_PATH}/chat-debug/chat-${exactChatIdentifier}-ui.json`,
-      `${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-ui.json`,
-      `${DIAGNOSTICS_PATH}/operations-20260812-160000.ndjson`,
-      `${DIAGNOSTICS_PATH}/operations-latest.ndjson`,
-    ]);
-    for (const preservedPath of [
-      `${DIAGNOSTICS_PATH}/operations-manual-export.ndjson`,
-      `${DIAGNOSTICS_PATH}/operations-20260812-160000.ndjson.backup`,
-      `${DIAGNOSTICS_PATH}/operations-20260812-160000.json`,
-      `${DIAGNOSTICS_PATH}/diagnostics-20260812-160000-${"b".repeat(32)}.txt`,
-      `${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-stream.ndjson`,
-      `${DIAGNOSTICS_PATH}/chat-debug/chat-unsaved-chat-ui-copy.json`,
-      `${DIAGNOSTICS_PATH}/chat-debug/export-chat-unsaved-chat-ui.json`,
-      `${DIAGNOSTICS_PATH}/chat-debug/chat-${"c".repeat(121)}-ui.json`,
-      `${DIAGNOSTICS_PATH}/chat-debug/nested/chat-private-ui.json`,
-    ]) {
-      expect(adapter.stat).not.toHaveBeenCalledWith(preservedPath);
-      expect(adapter.read).not.toHaveBeenCalledWith(preservedPath);
-      expect(adapter.remove).not.toHaveBeenCalledWith(preservedPath);
-    }
+    expect(adapter.read).not.toHaveBeenCalled();
     expect(adapter.rmdir).not.toHaveBeenCalled();
   });
 
-  it("removes an owned ChatView debug directory only after a confirmed empty relist", async () => {
-    const chatLogPath = `${DIAGNOSTICS_PATH}/chat-debug/chat-chat-1-ui.json`;
-    const adapter = makeDiagnosticsAdapter({
-      [chatLogPath]: { contents: "private chat", mtime: NOW, size: 12 },
-    });
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-
-    await lifecycle.run(NOW);
-
-    expect(adapter.remove).toHaveBeenCalledWith(chatLogPath);
-    expect(adapter.list.mock.calls.map(([path]) => path)).toEqual([
-      DIAGNOSTICS_PATH,
-      `${DIAGNOSTICS_PATH}/chat-debug`,
-      `${DIAGNOSTICS_PATH}/chat-debug`,
-    ]);
-    expect(adapter.rmdir).toHaveBeenCalledWith(`${DIAGNOSTICS_PATH}/chat-debug`, false);
-  });
-
-  it("leaves an empty owned ChatView debug directory when safe nonrecursive removal is unavailable", async () => {
-    const chatLogPath = `${DIAGNOSTICS_PATH}/chat-debug/chat-chat-1-ui.json`;
-    const adapter = makeDiagnosticsAdapter({
-      [chatLogPath]: { contents: "private chat", mtime: NOW, size: 12 },
-    });
-    (adapter as any).rmdir = undefined;
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-
-    await expect(lifecycle.run(NOW)).resolves.toBeUndefined();
-
-    expect(adapter.remove).toHaveBeenCalledWith(chatLogPath);
-  });
-
-  it("shares deterministic entry and candidate limits across huge root and ChatView directories", async () => {
-    const files: Record<string, TestFile> = {};
-    for (let index = 0; index < 900; index += 1) {
-      files[`${DIAGNOSTICS_PATH}/systemsculpt-20260813-${index.toString().padStart(6, "0")}.log`] = {
-        contents: "x",
-        mtime: NOW - index,
-        size: 1,
-      };
-      files[`${DIAGNOSTICS_PATH}/chat-debug/chat-${index.toString().padStart(6, "0")}-ui.json`] = {
-        contents: "private chat",
-        mtime: NOW - index,
-        size: 12,
-      };
-    }
-    const adapter = makeDiagnosticsAdapter(files);
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-    jest.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    await lifecycle.run(NOW);
-
-    expect(adapter.remove).toHaveBeenCalledTimes(128);
-    expect(adapter.remove.mock.calls.map(([path]) => path)).toEqual(
-      Array.from({ length: 128 }, (_, index) =>
-        `${DIAGNOSTICS_PATH}/chat-debug/chat-${index.toString().padStart(6, "0")}-ui.json`),
-    );
-    expect(adapter.stat).not.toHaveBeenCalled();
-    expect(adapter.rmdir).not.toHaveBeenCalled();
-  });
-
-  it("stops before deletion when the nested ChatView listing hangs", async () => {
-    jest.useFakeTimers();
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on("unhandledRejection", onUnhandled);
-    let rejectNestedListing: ((reason?: unknown) => void) | undefined;
-    const nestedListing = new Promise<never>((_resolve, reject) => {
-      rejectNestedListing = reject;
-    });
-    const operationsPath = `${DIAGNOSTICS_PATH}/operations-latest.ndjson`;
-    const chatLogPath = `${DIAGNOSTICS_PATH}/chat-debug/chat-chat-1-ui.json`;
-    const adapter = makeDiagnosticsAdapter({
-      [operationsPath]: { contents: "private operations", mtime: NOW, size: 18 },
-      [chatLogPath]: { contents: "private chat", mtime: NOW, size: 12 },
-    });
-    const normalList = adapter.list.getMockImplementation()!;
-    adapter.list.mockImplementation((path: string) => {
-      if (path === `${DIAGNOSTICS_PATH}/chat-debug`) return nestedListing;
-      return normalList(path);
-    });
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-
-    try {
-      const cleanup = lifecycle.run(NOW);
-      await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
-      await expect(cleanup).resolves.toBeUndefined();
-
-      expect(adapter.remove).not.toHaveBeenCalled();
-      expect(adapter.rmdir).not.toHaveBeenCalled();
-      rejectNestedListing?.(new Error("private-late-nested-list-failure"));
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(unhandled).toEqual([]);
-    } finally {
-      process.removeListener("unhandledRejection", onUnhandled);
-    }
-  });
-
-  it("retries a timed-out nested deletion on a later startup and consumes a late rejection", async () => {
+  it("retries a timed-out archive deletion on a later startup and consumes a late rejection", async () => {
     jest.useFakeTimers();
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
@@ -585,11 +409,10 @@ describe("DiagnosticsSessionLifecycle", () => {
     const firstRemoval = new Promise<void>((_resolve, reject) => {
       rejectFirstRemoval = reject;
     });
-    const chatLogPath = `${DIAGNOSTICS_PATH}/chat-debug/chat-chat-1-ui.json`;
+    const archivePath = `${DIAGNOSTICS_PATH}/systemsculpt-20260729-160000.log`;
     const adapter = makeDiagnosticsAdapter({
-      [chatLogPath]: { contents: "private chat", mtime: NOW, size: 12 },
+      [archivePath]: { contents: "old log", mtime: NOW - 15 * DAY_MS, size: 7 },
     });
-    const normalRemove = adapter.remove.getMockImplementation()!;
     adapter.remove.mockImplementationOnce(() => firstRemoval);
     const app = new App();
     (app.vault as any).adapter = adapter;
@@ -599,15 +422,13 @@ describe("DiagnosticsSessionLifecycle", () => {
       const firstCleanup = firstLifecycle.run(NOW);
       await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
       await expect(firstCleanup).resolves.toBeUndefined();
-      expect(adapter.rmdir).not.toHaveBeenCalled();
 
-      adapter.remove.mockImplementation(normalRemove);
       const nextStartupLifecycle = makeLifecycle(app);
       await expect(nextStartupLifecycle.run(NOW)).resolves.toBeUndefined();
 
-      expect(adapter.remove).toHaveBeenCalledTimes(2);
-      expect(adapter.rmdir).toHaveBeenCalledWith(`${DIAGNOSTICS_PATH}/chat-debug`, false);
-      rejectFirstRemoval?.(new Error("private-late-nested-remove-failure"));
+      expect(adapter.remove.mock.calls).toEqual([[archivePath], [archivePath]]);
+      expect(await adapter.stat(archivePath)).toBeNull();
+      rejectFirstRemoval?.(new Error("private-late-remove-failure"));
       await Promise.resolve();
       await Promise.resolve();
       expect(unhandled).toEqual([]);
@@ -659,20 +480,37 @@ describe("DiagnosticsSessionLifecycle", () => {
     expect(adapter.remove).toHaveBeenCalledWith(`${DIAGNOSTICS_PATH}/session-20260813-155957.json`);
   });
 
-  it("settles after a hung directory listing", async () => {
+  it("settles after a hung directory listing and consumes its later rejection", async () => {
     jest.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    let rejectListing: ((reason?: unknown) => void) | undefined;
+    const pendingListing = new Promise<never>((_resolve, reject) => {
+      rejectListing = reject;
+    });
     const adapter = makeDiagnosticsAdapter({});
-    adapter.list.mockReturnValue(new Promise(() => undefined));
+    adapter.list.mockReturnValue(pendingListing);
     const app = new App();
     (app.vault as any).adapter = adapter;
     const lifecycle = makeLifecycle(app);
 
-    const cleanup = lifecycle.run(NOW);
-    await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
-    await expect(cleanup).resolves.toBeUndefined();
+    try {
+      const cleanup = lifecycle.run(NOW);
+      await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
+      await expect(cleanup).resolves.toBeUndefined();
 
-    expect(adapter.stat).not.toHaveBeenCalled();
-    expect(adapter.remove).not.toHaveBeenCalled();
+      expect(adapter.stat).not.toHaveBeenCalled();
+      expect(adapter.remove).not.toHaveBeenCalled();
+      rejectListing?.(new Error("private-late-list-failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
   });
 
   it("uses a generic warning when cleanup collection fails", async () => {
@@ -706,25 +544,6 @@ describe("DiagnosticsSessionLifecycle", () => {
     await expect(cleanup).resolves.toBeUndefined();
 
     expect(adapter.stat).toHaveBeenCalledTimes(1);
-    expect(adapter.remove).not.toHaveBeenCalled();
-  });
-
-  it("settles after a hung session read without scheduling a removal", async () => {
-    jest.useFakeTimers();
-    const path = `${DIAGNOSTICS_PATH}/session-20260812-160000.json`;
-    const adapter = makeDiagnosticsAdapter({
-      [path]: { contents: "", mtime: NOW - DAY_MS, size: 64 },
-    });
-    adapter.read.mockReturnValue(new Promise(() => undefined));
-    const app = new App();
-    (app.vault as any).adapter = adapter;
-    const lifecycle = makeLifecycle(app);
-
-    const cleanup = lifecycle.run(NOW);
-    await jest.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS + 1);
-    await expect(cleanup).resolves.toBeUndefined();
-
-    expect(adapter.read).toHaveBeenCalledTimes(1);
     expect(adapter.remove).not.toHaveBeenCalled();
   });
 
@@ -777,11 +596,10 @@ describe("DiagnosticsSessionLifecycle", () => {
       "unrelated.txt",
     ];
     listedFiles.length = 5_000;
-    Object.defineProperty(listedFiles, 1_024, {
-      get: () => {
-        throw new Error("out-of-budget-entry-read");
-      },
+    const readOutOfBudgetEntry = jest.fn(() => {
+      throw new Error("out-of-budget-entry-read");
     });
+    Object.defineProperty(listedFiles, 1_024, { get: readOutOfBudgetEntry });
     const adapter = makeDiagnosticsAdapter(files);
     adapter.list.mockResolvedValue({ files: listedFiles, folders: [] });
     const app = new App();
@@ -792,26 +610,26 @@ describe("DiagnosticsSessionLifecycle", () => {
     await lifecycle.run(NOW);
 
     expect(adapter.stat.mock.calls.map(([path]) => path)).toEqual(automaticPaths.slice(0, 128));
+    expect(readOutOfBudgetEntry).not.toHaveBeenCalled();
     expect(adapter.stat).not.toHaveBeenCalledWith(`${DIAGNOSTICS_PATH}/nested/systemsculpt-20260813-999999.log`);
     expect(adapter.stat).not.toHaveBeenCalledWith(`${DIAGNOSTICS_PATH}/../systemsculpt-20260813-999998.log`);
   });
 
-  it("reads at most 512 KiB of session metadata", async () => {
+  it("retains session archives larger than the retired inspection budgets without reading contents", async () => {
     const files: Record<string, TestFile> = {};
     for (let index = 0; index < 10; index += 1) {
       const path = `${DIAGNOSTICS_PATH}/session-20260813-${index.toString().padStart(6, "0")}.json`;
-      files[path] = { contents: "{}", mtime: NOW - index, size: 64 * 1024 };
+      files[path] = { contents: "{}", mtime: NOW - index, size: 1024 * 1024 };
     }
     const adapter = makeDiagnosticsAdapter(files);
     const app = new App();
     (app.vault as any).adapter = adapter;
     const lifecycle = makeLifecycle(app);
-    jest.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await lifecycle.run(NOW);
 
     expect(adapter.stat).toHaveBeenCalledTimes(10);
-    expect(adapter.read).toHaveBeenCalledTimes(8);
+    expect(adapter.read).not.toHaveBeenCalled();
     expect(adapter.remove).not.toHaveBeenCalled();
   });
 

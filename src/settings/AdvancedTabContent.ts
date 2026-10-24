@@ -86,7 +86,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     new Setting(containerEl)
         .setName("Record diagnostics")
-        .setDesc("Save resource samples, long-frame reports, and chat lifecycle logs in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Failed chat runs still save incident reports.")
+        .setDesc("Save resource samples and long-frame reports in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Chat lifecycle logs follow the log level; failed chat runs still save incident reports.")
         .addToggle((toggle) => {
             toggle
                 .setValue(plugin.settings.showDiagnostics === true)
