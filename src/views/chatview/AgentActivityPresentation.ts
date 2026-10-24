@@ -13,13 +13,17 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       groups.set("reasoning", { count: (previous?.count ?? 0) + 1, label: "Thought" });
     } else if (part.kind === "tool") {
       const tool = presentAgentTool(part);
-      const previous = groups.get(tool.groupKind);
-      groups.set(tool.groupKind, { count: (previous?.count ?? 0) + tool.groupCount, label: tool.label.replace(/…$/u, "") });
-      if (["failed", "denied", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
+      // Denials are decisions, not failed executions or completed actions.
+      const denied = tool.displayState === "denied";
+      const kind = denied ? "denied" : tool.groupKind;
+      const previous = groups.get(kind);
+      groups.set(kind, { count: (previous?.count ?? 0) + (denied ? 1 : tool.groupCount), label: denied ? `${tool.label} · Denied` : tool.label.replace(/…$/u, "") });
+      if (["failed", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
     }
   }
   const labels = Array.from(groups, ([kind, group]) => {
     const count = group.count;
+    if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
     if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;

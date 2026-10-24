@@ -6130,7 +6130,12 @@ describe("AgentWorkspace", () => {
     ].map((element) => element.dataset.iconState);
     // Spec 3.4: denied `ban`, withdrawn/stopped `minus`, uncertain stays `x`.
     expect(stateIcons).toEqual(["ban", "minus", "x"]);
+    const groupLabel = parent.querySelector("details[data-agent-turn-fold] > summary")!.textContent!;
+    expect(groupLabel).toContain("Denied");
+    expect(groupLabel).toContain("1 failed"); // Only the uncertain outcome, not the denial.
+    expect(groupLabel).not.toContain("2 failed");
     const tools = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-tool")];
+    expect(tools[0].querySelector(".systemsculpt-agent-tool-label")?.textContent).not.toContain("Couldn't");
     expect(tools.map(tool => ["denied", "cancelled", "outcome-unknown"].find(state => tool.classList.contains(`is-${state}`))))
       .toEqual(["denied", "cancelled", "outcome-unknown"]);
     if (backend === "native") {
