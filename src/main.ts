@@ -45,7 +45,6 @@ import {
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { waitForIdle, yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
-import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { InboxTranscriptionService } from "./features/inbox-transcription/InboxTranscriptionService";
 import {
@@ -167,7 +166,6 @@ export default class SystemSculptPlugin extends Plugin {
   private failures: string[] = [];
   /** True once a fatal load failure has put the plugin into minimal recovery mode. */
   private safeMode = false;
-  emitter: EventEmitter | undefined;
   directoryManager: DirectoryManager | undefined;
   public resumeChatService: ResumeChatService | undefined;
   public storage: StorageManager | undefined;
@@ -341,22 +339,6 @@ export default class SystemSculptPlugin extends Plugin {
         // The upgrade/sign-in modal's browser handoff is superseded the
         // moment the deep link comes back — close it before the welcome.
         UpgradePlanModal.closeCurrent();
-        const email = this.settings.userEmail?.trim() ?? "";
-        if (!connect.hasPendingRequest() && email) {
-          // Polling already finished this sign-in; a late deep link should
-          // greet the signed-in user, not show an expired-request error.
-          new AccountConnectModal(
-            this.app,
-            () => Promise.resolve({
-              kind: "signed-in" as const,
-              name: this.settings.userName?.trim() || null,
-              email,
-              licenseValid: this.settings.licenseValid === true,
-            }),
-            defaultAccountConnectActions(this),
-          ).open();
-          return;
-        }
         new AccountConnectModal(
           this.app,
           () => connect.handleProtocolCallback(params),
@@ -1048,11 +1030,6 @@ export default class SystemSculptPlugin extends Plugin {
     const logger = this.getLogger();
 
     try {
-      this.emitter = new EventEmitter();
-      logger.debug("Event emitter ready for critical initialization", {
-        source: "SystemSculptPlugin",
-      });
-
       await this.initializeSettings();
 
       const parallelTasks = [

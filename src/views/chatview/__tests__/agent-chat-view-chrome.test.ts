@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { Scope, TFile } from "obsidian";
+import { Menu, Scope, TFile } from "obsidian";
 
 const host = { localCli: true };
 jest.mock("../../../platform/hostCapabilities", () => {
@@ -85,6 +85,30 @@ describe("AgentChatView chrome wiring", () => {
     host.localCli = true;
     confirm.confirmed = true;
     document.body.empty();
+  });
+
+  it("exports through the reachable chat menu using the real export service", async () => {
+    const view = harness({ messages: 1 });
+    view.chatVersion = 1;
+    view.transcript.snapshot = () => ({ messages: [{ id: "message-1", role: "user", content: "My retained conversation" }] });
+    view.transcript.chatPath = () => "Chats/chat-1.md";
+    view.contextManager.getPinnedFiles = () => new Set();
+    const exported = Object.assign(new TFile(), { path: "Notes/Plan the Q4 launch (export).md" });
+    view.app.fileManager.getNewFileParent = () => ({ path: "Notes" });
+    view.app.vault.create = jest.fn(async () => exported);
+    let finishOpen!: () => void;
+    const opened = new Promise<void>(resolve => { finishOpen = resolve; });
+    const openFile = jest.fn(async () => { finishOpen(); });
+    view.app.workspace.getLeaf = jest.fn(() => ({ openFile }));
+    const menu = new Menu();
+    (view as any).addChatMenuItems(menu);
+
+    (menu as any).select("Export chat");
+    await opened;
+
+    expect(view.app.vault.create).toHaveBeenCalledWith(exported.path, expect.stringContaining("My retained conversation"));
+    expect(openFile).toHaveBeenCalledWith(exported);
+    expect(view.app.workspace.getLeaf).toHaveBeenCalledWith("tab");
   });
 
   it("starts a new chat when the backend changes in a chat with messages, carrying the draft", async () => {

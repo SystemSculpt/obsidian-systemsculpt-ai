@@ -164,6 +164,10 @@ class FakeObjectStore {
     return this.index(name);
   }
 
+  deleteIndex(name: string): void {
+    if (!this.data.indexes.delete(name)) throw new Error(`Unknown index ${name}`);
+  }
+
   index(name: string): FakeIndex {
     const index = this.data.indexes.get(name);
     if (!index) throw new Error(`Unknown index ${name}`);

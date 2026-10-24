@@ -25,7 +25,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(
     packageJson.scripts["check:ci"],
-    "npm run check:plugin && npm run test:mobile:ci && npm run test:chatview:critical "
+    "npm run check:plugin && npm run check:knip && npm run test:mobile:ci && npm run test:chatview:critical "
       + "&& npm run test:unit:ci && npm run test:embeddings:ci "
       + "&& npm run test:integration:ci",
   );

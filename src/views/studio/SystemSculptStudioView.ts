@@ -35,7 +35,6 @@ import {
   type StudioRunEvent,
   type StudioShapeKind,
 } from "../../studio/types";
-import { isStudioVisualOnlyNodeKind } from "../../studio/StudioNodeKinds";
 import {
   resolveStudioCanvasToolShape,
   resolveStudioCanvasToolShortcut,
@@ -329,7 +328,6 @@ export class SystemSculptStudioView extends ItemView {
       isBusy: () => this.busy,
       getCurrentProject: () => this.currentProject,
       setError: (error) => this.setError(error),
-      recomputeEntryNodes: (project) => this.recomputeEntryNodes(project),
       commitProjectMutation: (reason, mutator, options) =>
         this.projectSessionController.commitMutation(reason, mutator, options),
       requestRender: () => this.render(),
@@ -608,7 +606,6 @@ export class SystemSculptStudioView extends ItemView {
     if (!currentProject) {
       return null;
     }
-    this.recomputeEntryNodes(currentProject);
     this.render();
     this.graphInteraction.setSelectedNodeIds(nextSelection);
     void this.commitCurrentProjectMutationAsync(
@@ -916,7 +913,6 @@ export class SystemSculptStudioView extends ItemView {
     const createdNodeIds = createdNodes.map((node) => node.id);
     this.graphInteraction.selectOnlyNode(createdNodeIds[createdNodeIds.length - 1]);
     this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(project);
     this.render();
     void this.vaultNotes.refresh(project, {
       onlyNodeIds: new Set(createdNodeIds),
@@ -962,7 +958,6 @@ export class SystemSculptStudioView extends ItemView {
       applySelection();
       this.graphInteraction.clearPendingConnection();
     }
-    this.recomputeEntryNodes(project);
     this.render();
     if (options.refreshNoteNodeIds && options.refreshNoteNodeIds.length > 0) {
       void this.vaultNotes.refresh(project, {
@@ -1166,7 +1161,6 @@ export class SystemSculptStudioView extends ItemView {
       { captureHistory: false }
     );
 
-    if (changed) this.recomputeEntryNodes(this.currentProject);
     return changed;
   }
 
@@ -1174,28 +1168,19 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    let changed = false;
-    changed =
-      this.commitCurrentProjectMutation(
-        "runtime.projector",
-        (project) =>
-          materializeManagedOutputNodesForNodeOutput({
-            project,
-            event,
-            measure: this.outputContainers.measure,
-            createNodeId: () => randomId("node"),
-            createEdgeId: () => randomId("edge"),
-          }),
-        { captureHistory: false }
-      ) || changed;
-
-    changed = this.removePendingManagedOutputPlaceholders({ sourceNodeId: event.nodeId, runId: event.runId }) || changed;
-
-    if (!changed) {
-      return;
-    }
-
-    this.recomputeEntryNodes(this.currentProject);
+    this.commitCurrentProjectMutation(
+      "runtime.projector",
+      (project) =>
+        materializeManagedOutputNodesForNodeOutput({
+          project,
+          event,
+          measure: this.outputContainers.measure,
+          createNodeId: () => randomId("node"),
+          createEdgeId: () => randomId("edge"),
+        }),
+      { captureHistory: false }
+    );
+    this.removePendingManagedOutputPlaceholders({ sourceNodeId: event.nodeId, runId: event.runId });
   }
 
   private materializeManagedOutputNodesFromCache(
@@ -1204,7 +1189,7 @@ export class SystemSculptStudioView extends ItemView {
     if (!this.currentProject) {
       return;
     }
-    const changed = this.commitCurrentProjectMutation(
+    this.commitCurrentProjectMutation(
       "runtime.projector",
       (project) =>
         materializeManagedOutputNodesFromCacheEntries({
@@ -1216,12 +1201,6 @@ export class SystemSculptStudioView extends ItemView {
         }),
       { captureHistory: false }
     );
-
-    if (!changed) {
-      return;
-    }
-
-    this.recomputeEntryNodes(this.currentProject);
   }
 
   private removePendingManagedOutputPlaceholders(options?: {
@@ -1256,7 +1235,6 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.onNodeRemoved(nodeId);
       this.textEdits.end(nodeId);
     }
-    this.recomputeEntryNodes(this.currentProject);
     return true;
   }
 
@@ -1785,7 +1763,6 @@ export class SystemSculptStudioView extends ItemView {
 
     this.graphInteraction.selectOnlyNode(createdImageGenerationNodeId);
     this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(this.currentProject);
     this.render();
     this.focusImageGenerationPrompt(createdImageGenerationNodeId);
   }
@@ -2172,26 +2149,6 @@ export class SystemSculptStudioView extends ItemView {
     return this.currentProject;
   }
 
-  private recomputeEntryNodes(project: StudioProjectV1): void {
-    const executableNodeIds = new Set(
-      project.graph.nodes
-        .filter((node) => !isStudioVisualOnlyNodeKind(node.kind))
-        .map((node) => node.id)
-    );
-    const inboundNodeIds = new Set(
-      project.graph.edges
-        .filter(
-          (edge) =>
-            executableNodeIds.has(edge.fromNodeId) &&
-            executableNodeIds.has(edge.toNodeId)
-        )
-        .map((edge) => edge.toNodeId)
-    );
-    project.graph.entryNodeIds = project.graph.nodes
-      .filter((node) => executableNodeIds.has(node.id) && !inboundNodeIds.has(node.id))
-      .map((node) => node.id);
-  }
-
   private findNode(project: StudioProjectV1, nodeId: string): StudioNodeInstance | null {
     return project.graph.nodes.find((node) => node.id === nodeId) || null;
   }
@@ -2450,7 +2407,6 @@ export class SystemSculptStudioView extends ItemView {
 
     this.graphInteraction.selectOnlyNode(createdNode.id);
     this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(this.currentProject);
     this.render();
     return true;
   }
@@ -2539,7 +2495,6 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.graphInteraction.selectOnlyNode(node.id);
     this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(project);
     this.render();
     return node;
   }
@@ -2898,7 +2853,6 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     this.graphInteraction.selectOnlyNode(normalizedNodeId);
     this.graphInteraction.clearPendingConnection();
-    this.recomputeEntryNodes(this.currentProject);
     this.render();
   }
 
@@ -2955,7 +2909,6 @@ export class SystemSculptStudioView extends ItemView {
       const previousCount = project.graph.nodes.length;
       project.graph.nodes = project.graph.nodes.filter((node) => !idsToRemove.has(node.id));
       for (const node of project.graph.nodes) if (node.parentId && idsToRemove.has(node.parentId)) delete node.parentId;
-      if (project.graph.layout?.pinnedNodeIds) project.graph.layout.pinnedNodeIds = project.graph.layout.pinnedNodeIds.filter((id) => !idsToRemove.has(id));
       if (project.graph.nodes.length === previousCount) {
         return false;
       }
@@ -2978,7 +2931,6 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
-    this.recomputeEntryNodes(this.currentProject);
     this.render();
     return true;
   }

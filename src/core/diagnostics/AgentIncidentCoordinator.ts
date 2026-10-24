@@ -93,6 +93,13 @@ type PendingSave = Readonly<{
   report: AgentIncidentReport;
 }>;
 
+type ReportPreparation = {
+  promise: Promise<boolean>;
+  finish: (available: boolean) => void;
+  settled: boolean;
+  report?: AgentIncidentReport;
+};
+
 type ProjectedFailureCapture = Readonly<{
   correlation: AgentIncidentCorrelationInput;
   event: AgentRunFailureCaptureEvent;
@@ -119,6 +126,8 @@ export class AgentIncidentCoordinator {
   private readonly settledCorrelations = new Map<string, true>();
   private readonly processingTasks = new Set<Promise<void>>();
   private readonly saveQueue: PendingSave[] = [];
+  // Failed saves retain their content-free report for an explicit session retry.
+  private readonly reportPreparations = new Map<string, ReportPreparation>();
   private readonly drainWaiters = new Set<() => void>();
   private initialization: Promise<void> | null = null;
   private initializationSettled = false;
@@ -166,6 +175,52 @@ export class AgentIncidentCoordinator {
       this.notifyDrainWaiters();
     }
     return this.initialization;
+  }
+
+  public isReportPersisted(reportId: string): Promise<boolean> {
+    return this.store.hasReport(reportId);
+  }
+
+  /** Wait for persistence; retry only when the user explicitly requests it. */
+  public prepareReport(reportId: string, retry = false): Promise<boolean> {
+    if (!isReportId(reportId)) return Promise.resolve(false);
+    const preparation = this.reportPreparations.get(reportId);
+    if (!preparation) return this.isReportPersisted(reportId);
+    if (!retry || !preparation.settled || !this.admissionOpen) return preparation.promise;
+    if (preparation.report) {
+      const next = this.beginReportPreparation(reportId);
+      this.enqueueSave(preparation.report);
+      return next.promise;
+    }
+    const state = [...this.pendingRuns.values()].find((run) => run.capture?.reportId === reportId);
+    if (!state) return this.isReportPersisted(reportId);
+    const next = this.beginReportPreparation(reportId);
+    void (state.processing ?? Promise.resolve()).then(() => {
+      if (!this.scheduleFinalize(state)) this.finishReportPreparation(reportId, false);
+    });
+    return next.promise;
+  }
+
+  private beginReportPreparation(reportId: string): ReportPreparation {
+    let finish!: (available: boolean) => void;
+    const promise = new Promise<boolean>((resolve) => { finish = resolve; });
+    const preparation = { promise, finish, settled: false };
+    this.reportPreparations.set(reportId, preparation);
+    return preparation;
+  }
+
+  private finishReportPreparation(
+    reportId: string | undefined,
+    available: boolean,
+    report?: AgentIncidentReport,
+  ): void {
+    if (!reportId) return;
+    const preparation = this.reportPreparations.get(reportId);
+    if (!preparation) return;
+    preparation.report = report;
+    preparation.settled = true;
+    preparation.finish(available);
+    if (available) this.reportPreparations.delete(reportId);
   }
 
   public recordLifecycle(event: SupportDiagnosticEvent): void {
@@ -252,6 +307,7 @@ export class AgentIncidentCoordinator {
         collectionFailures,
         evidenceAttached: false,
       };
+      if (reservedReportId) this.beginReportPreparation(reservedReportId);
       this.armFailureSurfaceWait(state);
       void this.scheduleFinalize(state);
       return receiptFor(reservedReportId);
@@ -282,7 +338,7 @@ export class AgentIncidentCoordinator {
       capture.failureSurfaceDomCommitted = true;
       if (event.milestone === "paint_opportunity_observed") {
         capture.failureSurfacePaintOpportunityObserved = true;
-        this.clearFailureSurfaceTimer(state);
+        if (state.terminalAccepted) this.clearFailureSurfaceTimer(state);
       }
       void this.scheduleFinalize(state);
     } catch {
@@ -332,9 +388,10 @@ export class AgentIncidentCoordinator {
         if (state.terminalAccepted && state.capture) {
           state.terminalSegmentWaitExpired = true;
           state.failureSurfaceWaitExpired = true;
-          this.clearTerminalSegmentTimer(state);
-          this.clearFailureSurfaceTimer(state);
         }
+        this.clearTerminalSegmentTimer(state);
+        this.clearFailureSurfaceTimer(state);
+        if (!state.terminalAccepted) this.finishReportPreparation(state.capture?.reportId, false);
         void this.scheduleFinalize(state);
       }
       await this.waitForStableWork();
@@ -344,6 +401,7 @@ export class AgentIncidentCoordinator {
       for (const [key, state] of [...this.pendingRuns.entries()]) {
         if (state.processing) continue;
         this.pendingRuns.delete(key);
+        this.finishReportPreparation(state.capture?.reportId, false, state.report);
         this.clearTerminalSegmentTimer(state);
         this.clearFailureSurfaceTimer(state);
       }
@@ -392,6 +450,7 @@ export class AgentIncidentCoordinator {
       const oldest = this.pendingRuns.get(oldestKey);
       this.pendingRuns.delete(oldestKey);
       if (oldest) {
+        this.finishReportPreparation(oldest.capture?.reportId, false, oldest.report);
         this.clearTerminalSegmentTimer(oldest);
         this.clearFailureSurfaceTimer(oldest);
       }
@@ -415,11 +474,15 @@ export class AgentIncidentCoordinator {
     const key = correlationKey(state.correlation);
     if (this.pendingRuns.get(key) !== state) return null;
     if (state.processing) return state.processing;
+    const reportId = state.capture.reportId;
+    if (reportId && this.reportPreparations.get(reportId)?.settled) {
+      this.beginReportPreparation(reportId);
+    }
     let task: Promise<void>;
     task = Promise.resolve().then(() => {
       this.processPendingRun(state);
     }).catch(() => {
-      // Finalization is best-effort diagnostics.
+      this.finishReportPreparation(state.capture?.reportId, false, state.report);
     }).then(() => {
       if (state.processing === task) state.processing = undefined;
       this.processingTasks.delete(task);
@@ -470,12 +533,16 @@ export class AgentIncidentCoordinator {
           state.correlation,
           capture.finalContext ?? capture.context,
         );
-        if (!report) return;
+        if (!report) {
+          this.finishReportPreparation(capture.reportId, false);
+          return;
+        }
         state.report = report;
         if (!capture.reportId && isReportId(report.report_id)) {
           capture.reportId = report.report_id;
         }
       } catch {
+        this.finishReportPreparation(capture.reportId, false);
         return;
       }
     }
@@ -483,6 +550,7 @@ export class AgentIncidentCoordinator {
       const serialized = this.store.serialize(state.report);
       if (typeof serialized !== "string") throw new Error("invalid serialization");
     } catch {
+      this.finishReportPreparation(capture.reportId, false);
       return;
     }
     this.pendingRuns.delete(key);
@@ -522,6 +590,8 @@ export class AgentIncidentCoordinator {
   }
 
   private enqueueSave(report: AgentIncidentReport): void {
+    const preparation = this.reportPreparations.get(report.report_id);
+    if (!preparation || preparation.settled) this.beginReportPreparation(report.report_id);
     const pending: PendingSave = Object.freeze({ report });
     if (!this.activeSave) {
       this.activeSave = pending;
@@ -531,7 +601,8 @@ export class AgentIncidentCoordinator {
     }
     while (this.saveQueue.length + 1 >= MAX_PENDING_SAVES) {
       if (this.saveQueue.length === 0) break;
-      this.saveQueue.shift();
+      const dropped = this.saveQueue.shift();
+      if (dropped) this.finishReportPreparation(dropped.report.report_id, false, dropped.report);
     }
     this.saveQueue.push(pending);
     this.notifyDrainWaiters();
@@ -545,13 +616,14 @@ export class AgentIncidentCoordinator {
       save = Promise.reject(new Error("incident save unavailable"));
     }
     void save.then(
-      () => this.completeActiveSave(pending),
-      () => this.completeActiveSave(pending),
+      () => this.completeActiveSave(pending, true),
+      () => this.completeActiveSave(pending, false),
     );
   }
 
-  private completeActiveSave(pending: PendingSave): void {
+  private completeActiveSave(pending: PendingSave, persisted: boolean): void {
     if (this.activeSave !== pending) return;
+    this.finishReportPreparation(pending.report.report_id, persisted, persisted ? undefined : pending.report);
     this.activeSave = null;
     const next = this.saveQueue.shift();
     if (next) {
@@ -606,6 +678,7 @@ export class AgentIncidentCoordinator {
     this.pendingRuns.delete(key);
     this.rememberSettledCorrelation(key);
     if (state) {
+      this.finishReportPreparation(state.capture?.reportId, false, state.report);
       this.clearTerminalSegmentTimer(state);
       this.clearFailureSurfaceTimer(state);
     }
@@ -628,6 +701,7 @@ export class AgentIncidentCoordinator {
     state.failureSurfaceTimer = window.setTimeout(() => {
       state.failureSurfaceTimer = undefined;
       state.failureSurfaceWaitExpired = true;
+      if (!state.terminalAccepted) this.finishReportPreparation(state.capture?.reportId, false);
       void this.scheduleFinalize(state);
       this.notifyDrainWaiters();
     }, this.failureSurfaceWaitMs);

@@ -32,7 +32,7 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.command_center": "Action panel for explicit run and focus commands targeting existing node IDs. Buttons reuse the target execution and permission path. It is visual-only and never runs from graph traversal.",
   "studio.run_collection": "Live collection of independent native run instances. Connect role JSON outputs to matching source-ID ports; these are observation links and never execute roles. Double-click a run for public activity, messages and controls.",
   "studio.collection": "Display a bounded record collection as a Kanban board, grouped by configured fields. Carries the same JSON downstream; the source owns record changes.",
-  "studio.workflow": "Inspect and explicitly start a revisioned workflow in the existing execution service. Native tasks survive closing Studio. The Run canvas action only inspects this node; Start workflow admits execution.",
+  "studio.workflow": "Retired workflow note. Preserve its saved title, configuration and connections; never add new instances. Its ports retain old connections only and never carry data during a run.",
   "studio.codex": "Run a prompt through the installed Codex app-server with the machine login, selected model/thinking/speed (default gpt-6-astra/high/Normal), native approvals and durable Codex history. Working directory is vault-relative by default; dot means the current vault. Set threadId to resume; leave it blank for a new task.",
   "studio.script": "Run an editable JavaScript module with typed ports in an approved Node process. Preferred for new custom actions.",
   "studio.json": "Provide, parse, or normalize JSON content for downstream nodes.",
@@ -218,7 +218,7 @@ Prefer script nodes for custom actions and json nodes for their input data. Put 
 
 ## Directory workspaces
 
-Reusable roles live in \`roles/*.yaml\` with shared instructions in \`prompts/*.md\`. Roles describe objectives, not permissions or singleton agents. Every role can have many native instances. Delegation records parent/child task and thread identities; results return to the originating thread. Workflow cards with \`roleId\` display instances of that role across runs.
+Reusable roles live in \`roles/*.yaml\` with shared instructions in \`prompts/*.md\`. Roles describe objectives, not permissions or singleton agents. Every role can have many native instances. Delegation records parent/child task and thread identities; results return to the originating thread. Saved workflow cards are retired notes: their role IDs and configuration are preserved, but they do not start or observe execution.
 
 An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection":"Name.studio/views/graph.systemsculpt"}\`. Keep its identity and link stable. The linked canvas uses the document format below. In a managed workspace, edit \`studio.json\`, \`workflows/*.yaml\`, \`prompts/*.md\` and source records through the owning companion service. It validates the file set, publishes an immutable definition revision, and updates the view. Running workflows retain their original definition. Canvas layout and user view preferences remain presentation data.
 

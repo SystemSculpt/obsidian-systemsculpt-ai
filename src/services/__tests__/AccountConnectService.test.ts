@@ -29,6 +29,7 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
   };
   const updateSettings = jest.fn(async (patch: Record<string, unknown>) => {
     Object.assign(settings, patch);
+    return true;
   });
   const validateLicenseKeyDetailed = jest.fn(async () => {
     settings.licenseValid = true;
@@ -259,6 +260,119 @@ describe("AccountConnectService browser sign-in", () => {
     expect(outcome).toEqual({ kind: "error", reason: "expired" });
   });
 
+  it("keeps the same handoff recoverable when the browser cannot open, including the owner window", async () => {
+    const { service, opener } = createService();
+    const ownerWindow = {} as Window;
+    opener.mockResolvedValueOnce(false);
+
+    await expect(service.begin("sign-up", ownerWindow)).resolves.toBe(false);
+    expect(service.hasPendingRequest()).toBe(true);
+    const url = opener.mock.calls[0][0];
+    expect(opener).toHaveBeenCalledWith(url, ownerWindow);
+    await expect(service.reopen(ownerWindow)).resolves.toBe(true);
+    expect(opener).toHaveBeenLastCalledWith(url, ownerWindow);
+  });
+
+  it("rejects callbacks with no pending request or no state without sending a code", async () => {
+    const { service } = createService();
+    await expect(service.handleProtocolCallback({})).resolves.toEqual({ kind: "error", reason: "expired" });
+    await service.begin("sign-in");
+    await expect(service.handleProtocolCallback({ code: "code" }))
+      .resolves.toEqual({ kind: "error", reason: "state-mismatch" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps sign-in open for missing or whitespace-only codes, then accepts a trimmed manual code", async () => {
+    const { service, openedUrls } = createService();
+    await service.begin("sign-in");
+    const { state } = parseConnectUrl(openedUrls[0]);
+    for (const outcome of [
+      await service.handleProtocolCallback({ state }),
+      await service.handleProtocolCallback({ state, code: " \n " }),
+      await service.submitManualCode(" \t "),
+    ]) {
+      expect(outcome).toEqual({ kind: "error", reason: "missing-code" });
+    }
+    expect(request).not.toHaveBeenCalled();
+    expect(service.hasPendingRequest()).toBe(true);
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(service.submitManualCode("  manual-code\n")).resolves.toMatchObject({ kind: "signed-in" });
+    expect(request.mock.calls[0][0].body.code).toBe("manual-code");
+  });
+
+  it.each([
+    [429, "rate-limited"],
+    [403, "unavailable"],
+    [503, "unavailable"],
+  ])("reports HTTP %s and allows the manual code to retry", async (status, reason) => {
+    const { service } = createService();
+    await service.begin("sign-in");
+    request.mockResolvedValueOnce(jsonResponse(status as number, { error: "failed" }));
+    await expect(service.submitManualCode("code")).resolves.toEqual({ kind: "error", reason });
+    expect(service.hasPendingRequest()).toBe(true);
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(service.submitManualCode("fresh-code")).resolves.toMatchObject({ kind: "signed-in" });
+  });
+
+  it.each(["", "   ", "{", "null", "[]", '"ok"', '{"status":"ok"}', '{"status":"ok","license_key":3}', '{"status":"ok","license_key":" "}', '{"status":"unknown"}'])(
+    "reports a malformed success without saving credentials: %j", async (body) => {
+      const { service, plugin } = createService();
+      await service.begin("sign-in");
+      request.mockResolvedValueOnce(new Response(body, { status: 200 }));
+      await expect(service.submitManualCode("code")).resolves.toEqual({ kind: "error", reason: "unavailable" });
+      expect(plugin.updateSettings).not.toHaveBeenCalled();
+      expect(service.hasPendingRequest()).toBe(true);
+    },
+  );
+
+  it.each([null, [], { email: 42, name: " " }])("accepts a license without optional profile fields: %j", async (account) => {
+    const { service, plugin } = createService();
+    await service.begin("sign-in");
+    request.mockResolvedValueOnce(jsonResponse(200, { ...successPayload, license_key: " skss-connected ", account }));
+    await expect(service.submitManualCode("code")).resolves.toEqual({
+      kind: "signed-in", name: null, email: null, licenseValid: true,
+    });
+    expect(plugin.updateSettings).toHaveBeenCalledWith({
+      licenseKey: "skss-connected", userEmail: "", userName: "", displayName: "",
+    });
+  });
+
+  it("clears a previous paid account when the new account has no license or profile", async () => {
+    const { service, plugin } = createService(createPlugin({ licenseKey: "old", licenseValid: true, subscriptionStatus: "active" }));
+    await service.begin("sign-in");
+    request.mockResolvedValueOnce(jsonResponse(200, { status: "no_license" }));
+    await expect(service.submitManualCode("code")).resolves.toEqual({ kind: "no-license", name: null, email: null });
+    expect(plugin.settings).toMatchObject({ licenseKey: "", licenseValid: false, subscriptionStatus: "", userEmail: "", displayName: "" });
+  });
+
+  it("trims the profile and exposes an unconfirmed license for the UI's validation guidance", async () => {
+    const { service, plugin } = createService();
+    plugin.validateLicenseKeyDetailed.mockResolvedValueOnce({ outcome: "unavailable", isValid: false });
+    await service.begin("sign-in");
+    request.mockResolvedValueOnce(jsonResponse(200, {
+      ...successPayload, account: { email: " user@example.com ", name: " User " },
+    }));
+    await expect(service.submitManualCode("code")).resolves.toEqual({
+      kind: "signed-in", name: "User", email: "user@example.com", licenseValid: false,
+    });
+  });
+
+  it.each(["sync", "async"])("does not let a %s settings redraw failure break browser handoff or sign-in", async (failure) => {
+    const plugin = createPlugin();
+    plugin.settingsTab = {
+      containerEl: { isConnected: true },
+      display: jest.fn(() => {
+        if (failure === "sync") throw new Error("detached settings");
+        return Promise.reject(new Error("detached settings"));
+      }),
+    };
+    const { service } = createService(plugin);
+    await expect(service.begin("sign-in")).resolves.toBe(true);
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "signed-in" });
+    expect(plugin.settingsTab.display).toHaveBeenCalledTimes(2);
+  });
+
   it("reopens the browser with the same state and challenge for the active request", async () => {
     const { service, openedUrls } = createService();
 
@@ -326,6 +440,115 @@ describe("AccountConnectService background polling", () => {
 
     await jest.advanceTimersByTimeAsync(14_000);
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["licensed account save", successPayload, "updateSettings"],
+    ["license validation", successPayload, "validateLicenseKeyDetailed"],
+    ["unlicensed account save", { status: "no_license" }, "updateSettings"],
+  ])("reports a failed %s to the background UI and permits a fresh sign-in", async (_label, payload, operation) => {
+    const { service, plugin, outcomes } = createPollingService();
+    plugin[operation as string].mockRejectedValueOnce(new Error("local completion failed"));
+    request.mockResolvedValueOnce(jsonResponse(200, payload));
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+
+    expect(outcomes).toEqual([{ kind: "error", reason: "unavailable" }]);
+    expect(service.hasPendingRequest()).toBe(false);
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([
+      { kind: "error", reason: "unavailable" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
+  });
+
+  it.each([successPayload, { status: "no_license" }])("does not announce a connection whose settings were not saved: %j", async (payload) => {
+    const { service, plugin, outcomes } = createPollingService();
+    plugin.updateSettings.mockResolvedValueOnce(false);
+    request.mockResolvedValueOnce(jsonResponse(200, payload));
+    await service.begin("sign-in");
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([{ kind: "error", reason: "unavailable" }]);
+    expect(plugin.validateLicenseKeyDetailed).not.toHaveBeenCalled();
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it.each([
+    [successPayload, true, "signed-in"],
+    [{ status: "no_license", account: successPayload.account }, true, "no-license"],
+    [successPayload, false, "error"],
+  ])("preserves the actual %s completion for a late callback (saved: %s)", async (payload, saved, kind) => {
+    const { service, plugin, outcomes, openedUrls } = createPollingService();
+    plugin.updateSettings.mockImplementationOnce(async (patch: Record<string, unknown>) => {
+      Object.assign(plugin.settings, patch);
+      return saved;
+    });
+    request.mockResolvedValueOnce(jsonResponse(200, payload));
+    await service.begin("sign-in");
+    const { state } = parseConnectUrl(openedUrls[0]);
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([expect.objectContaining({ kind })]);
+    await expect(service.handleProtocolCallback({ state, code: "already-consumed" })).resolves.toEqual(outcomes[0]);
+    await expect(service.handleProtocolCallback({ state: "unrelated", code: "old" }))
+      .resolves.toEqual({ kind: "error", reason: "expired" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
+    expect(outcomes).toHaveLength(1);
+    service.cancelPending();
+    await expect(service.handleProtocolCallback({ state, code: "cancelled" }))
+      .resolves.toEqual({ kind: "error", reason: "expired" });
+  });
+
+  it("returns a completion error to a waiting manual caller without also announcing it", async () => {
+    const { service, plugin, outcomes } = createPollingService();
+    plugin.updateSettings.mockRejectedValueOnce(new Error("disk full"));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await service.begin("sign-in");
+    await expect(service.submitManualCode("code")).resolves.toEqual({ kind: "error", reason: "unavailable" });
+    expect(outcomes).toEqual([]);
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("ignores late answers after cancellation and after a new sign-in supersedes them", async () => {
+    const { service, plugin, outcomes, openedUrls } = createPollingService();
+    let finishPoll!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishPoll = resolve; }));
+    await service.begin("sign-in");
+    const firstState = parseConnectUrl(openedUrls[0]).state;
+    await jest.advanceTimersByTimeAsync(3_500);
+    const signal = request.mock.calls[0][0].signal;
+    await service.begin("sign-up");
+    expect(signal.aborted).toBe(true);
+    finishPoll(jsonResponse(200, successPayload));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([]);
+    await expect(service.handleProtocolCallback({ state: firstState, code: "old" }))
+      .resolves.toEqual({ kind: "error", reason: "state-mismatch" });
+
+    let finishExchange!: (response: Response) => void;
+    request.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishExchange = resolve; }));
+    const manual = service.submitManualCode("code");
+    service.cancelPending();
+    finishExchange(jsonResponse(200, successPayload));
+    await expect(manual).resolves.toEqual({ kind: "error", reason: "expired" });
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([]);
+  });
+
+  it.each([429, 503])("resumes polling after HTTP %s from a manual exchange", async (status) => {
+    const { service, outcomes } = createPollingService();
+    request.mockResolvedValueOnce(jsonResponse(status, { error: "failed" }));
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await service.begin("sign-in");
+    await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "error" });
+    await jest.advanceTimersByTimeAsync(3_500);
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
   });
 
   it("keeps polling through network failures and error responses", async () => {
@@ -665,6 +888,7 @@ describe("AccountConnectService abandoned sign-in", () => {
 
   beforeEach(() => {
     jest.mocked(requireApiVersion).mockReturnValue(true);
+    documentEvents.hidden = false;
     jest.clearAllMocks();
     request.mockReset();
     jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
@@ -796,6 +1020,77 @@ describe("AccountConnectService abandoned sign-in", () => {
       expect(request).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    { state: "bad" },
+    { verifier: "bad" },
+    { mode: "unknown" },
+    { createdAt: "yesterday" },
+    { createdAt: Number.NaN },
+    { createdAt: Number.POSITIVE_INFINITY },
+    { createdAt: Date.now() + 60_000 },
+  ])("discards an otherwise valid stored request with invalid fields: %j", (invalid) => {
+    const plugin = createPlugin();
+    plugin.app = {
+      loadLocalStorage: () => ({ state: "a".repeat(43), verifier: "b".repeat(43), mode: "sign-in", createdAt: Date.now(), ...invalid }),
+      saveLocalStorage: jest.fn(),
+    };
+    expect(createService(plugin).service.hasPendingRequest()).toBe(false);
+    expect(plugin.app.saveLocalStorage).toHaveBeenCalledWith(expect.any(String), null);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps in-memory sign-in and cancellation working when device storage throws", async () => {
+    const plugin = createPlugin();
+    plugin.app = {
+      loadLocalStorage: jest.fn(() => { throw new Error("storage blocked"); }),
+      saveLocalStorage: jest.fn(() => { throw new Error("storage full"); }),
+    };
+    const { service } = createService(plugin);
+    expect(service.hasPendingRequest()).toBe(false);
+    await expect(service.begin("sign-in")).resolves.toBe(true);
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "signed-in" });
+    await service.begin("sign-in");
+    expect(() => service.cancelPending()).not.toThrow();
+    expect(service.hasPendingRequest()).toBe(false);
+  });
+
+  it("keeps older hosts functional without calling unavailable device storage APIs", async () => {
+    jest.mocked(requireApiVersion).mockReturnValue(false);
+    const plugin = createPlugin();
+    plugin.app = { loadLocalStorage: jest.fn(), saveLocalStorage: jest.fn() };
+    const { service } = createService(plugin);
+    await service.begin("sign-in");
+    request.mockResolvedValueOnce(jsonResponse(200, successPayload));
+    await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "signed-in" });
+    expect(plugin.app.loadLocalStorage).not.toHaveBeenCalled();
+    expect(plugin.app.saveLocalStorage).not.toHaveBeenCalled();
+    jest.mocked(requireApiVersion).mockReturnValue(true);
+  });
+
+  it("only polls a visible return, and detaches return listeners on cancellation", async () => {
+    const { service } = createService();
+    request.mockResolvedValue(jsonResponse(200, { status: "pending" }));
+    service.pollInBackground();
+    await service.begin("sign-in");
+    service.pollInBackground();
+    service.pollInBackground();
+    documentEvents.hidden = true;
+    window.dispatchEvent(new Event("focus"));
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).not.toHaveBeenCalled();
+    documentEvents.hidden = false;
+    window.dispatchEvent(new Event("focus"));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    service.cancelPending();
+    window.dispatchEvent(new Event("focus"));
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 
   it("keeps cancellation final across a restart", async () => {
     let stored: unknown;

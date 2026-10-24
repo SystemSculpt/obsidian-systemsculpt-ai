@@ -29,6 +29,96 @@ function record(namespace: string, path: string, chunkId: number, createdAt = 1)
   };
 }
 
+function openDatabase(
+  name: string,
+  version?: number,
+  upgrade?: (db: IDBDatabase) => void,
+): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    request.onupgradeneeded = () => upgrade?.(request.result);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function expectActiveIndexes(db: IDBDatabase): void {
+  const store = db.transaction("embeddings", "readonly").objectStore("embeddings");
+  expect(store.indexNames.length).toBe(2);
+  expect(store.indexNames.contains("by_path")).toBe(true);
+  expect(store.indexNames.contains("by_namespace")).toBe(true);
+  expect(store.indexNames.contains("by_mtime")).toBe(false);
+  expect(store.indexNames.contains("by_contentHash")).toBe(false);
+}
+
+describe("EmbeddingsStorage schema upgrades", () => {
+  let fake: ReturnType<typeof installFakeIndexedDb>;
+  beforeEach(() => { fake = installFakeIndexedDb(); });
+  afterEach(() => fake.restore());
+
+  it("removes unused v11 indexes without losing vectors, cached roots or semantic state", async () => {
+    const name = "SystemSculptEmbeddings::upgrade-v11";
+    const previous = await openDatabase(name, 11, (db) => {
+      const store = db.createObjectStore("embeddings", { keyPath: "id" });
+      store.createIndex("by_path", "path", { unique: false });
+      store.createIndex("by_namespace", "metadata.namespace", { unique: false });
+      store.createIndex("by_mtime", "metadata.mtime", { unique: false });
+      store.createIndex("by_contentHash", "metadata.contentHash", { unique: false });
+      db.createObjectStore("semantic_state");
+    });
+    const vectors = [record(V3, "A.md", 0), record(V3, "A.md", 1), record(V3, "B.md", 0)];
+    const state = { version: 1, namespace: V3, committedAt: 42 };
+    await new Promise<void>((resolve, reject) => {
+      const tx = previous.transaction(["embeddings", "semantic_state"], "readwrite");
+      for (const vector of vectors) tx.objectStore("embeddings").put(vector);
+      tx.objectStore("semantic_state").put(state, "semantic-committed-namespace-v1");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    previous.close();
+
+    const storage = new EmbeddingsStorage(name);
+    await storage.initialize();
+    await storage.loadEmbeddings();
+    const upgraded = await openDatabase(name);
+    try {
+      expect(upgraded.version).toBe(12);
+      expectActiveIndexes(upgraded);
+      expect(await storage.getAllVectors()).toEqual(vectors);
+      expect(await storage.countVectors()).toBe(3);
+      expect(await storage.readState("semantic-committed-namespace-v1")).toEqual(state);
+      expect([...storage.listRoots()]).toEqual(
+        vectors.filter((record) => record.chunkId === 0).map(({ vector: _vector, ...root }) => root),
+      );
+      expect(storage.getDistinctPaths()).toEqual(["A.md", "B.md"]);
+      expect(await storage.getVectorsByPath("A.md")).toEqual(vectors.slice(0, 2));
+      expect(await storage.listStoredNamespaces()).toEqual([V3]);
+
+      const replacement = record(V3, "A.md", 0, 2);
+      await storage.publishPath("A.md", V3, [replacement]);
+      expect(await storage.getVectorsByPath("A.md")).toEqual([replacement]);
+      expect(storage.getVectorSync(replacement.id)?.metadata.createdAt).toBe(2);
+      expect(await storage.countVectors()).toBe(2);
+    } finally {
+      upgraded.close();
+      await storage.reset();
+    }
+  });
+
+  it("creates fresh databases with only the path and namespace indexes", async () => {
+    const name = "SystemSculptEmbeddings::fresh-schema";
+    const storage = new EmbeddingsStorage(name);
+    await storage.initialize();
+    const db = await openDatabase(name);
+    try {
+      expectActiveIndexes(db);
+    } finally {
+      db.close();
+      await storage.reset();
+    }
+  });
+});
+
 describe("EmbeddingsStorage generation retention", () => {
   let fake: ReturnType<typeof installFakeIndexedDb>;
   beforeEach(() => { fake = installFakeIndexedDb(); });

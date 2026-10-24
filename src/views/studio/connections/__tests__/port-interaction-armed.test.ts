@@ -39,6 +39,7 @@ function makePin(cls: string, nodeId: string, portId: string, rect: Rect): HTMLE
 }
 function makeHost() {
   return {
+    getCurrentProject: () => null,
     isBusy: () => false,
     getGraphZoom: () => 1,
     getPortType: () => "text",

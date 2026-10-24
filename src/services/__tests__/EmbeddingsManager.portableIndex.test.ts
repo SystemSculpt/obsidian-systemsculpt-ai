@@ -77,7 +77,6 @@ function createPluginStub(settingsOverrides: Record<string, unknown> = {}) {
   return {
     app: { vault },
     settings,
-    emitter: { emit: jest.fn(), on: jest.fn(() => jest.fn()) },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: {
         activeGeneration: undefined,

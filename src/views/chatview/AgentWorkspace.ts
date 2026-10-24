@@ -63,6 +63,7 @@ export type AgentWorkspaceOptions = Readonly<{
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
+  onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
     reportId: string,
   ) => boolean | Promise<boolean>;
@@ -313,6 +314,7 @@ export class AgentWorkspace extends Component {
       showPlanOffer: () => this.showPlanOffer,
       onViewPlans: options.onViewPlans,
       onRetryFailedTurn: options.onRetryFailedTurn,
+      onPrepareIncidentReport: options.onPrepareIncidentReport,
       onCopyIncidentReport: options.onCopyIncidentReport,
       onRetryMessage: options.onRetryMessage,
       onResubmitMessage: options.onResubmitMessage,

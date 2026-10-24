@@ -4,7 +4,7 @@ import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
 import type { StudioLegacyOriginalCopy } from "../document/StudioProjectDocument";
 import { StudioProjectSession } from "../StudioProjectSession";
-import { serializeStudioProject } from "../schema";
+import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
 import { StudioService } from "../StudioService";
@@ -648,6 +648,61 @@ describe("single authored file", () => {
     expect(reopened.graph.groups?.[0].shapeIds).toEqual(["a", "b"]);
   });
 
+});
+
+describe("saved workflow notes", () => {
+  it.each(["v1", "v2"])("opens and saves %s workflows without losing their definition or relationships", async dialect => {
+    const { store, files, reopen } = createStore();
+    const path = "SystemSculpt/Studio/Saved workflow.systemsculpt";
+    const project = createEmptyStudioProject({
+      name: "Saved workflow", policyPath: deriveStudioPolicyPath(path),
+      minPluginVersion: "6.14.0", maxRuns: 100, maxArtifactsMb: 1024,
+    });
+    project.migrations.applied = [];
+    const workflow = {
+      id: "saved-workflow", kind: "studio.workflow", version: "1.0.0", title: "My saved objective",
+      parentId: "context", position: { x: 320, y: 140 }, size: { width: 440, height: 360 },
+      continueOnError: true, disabled: false,
+      config: {
+        workspaceId: "workspace", workflowId: "workflow", roleId: "reviewer", revision: "revision-1",
+        description: "Original objective\nWith a second line", input: { files: ["Notes/Research.md"] },
+        steps: { first: { title: "Inspect evidence", status: "waiting" } },
+        availability: { status: "unavailable" }, lastRunId: "saved-run", selectedTaskId: "saved-task",
+        pendingRequest: { requestId: "old-request", payload: { text: "Keep for reference" } },
+        futureField: { nested: [null, false, 42, "<script>saved text</script>"] },
+      },
+    };
+    project.graph.nodes = [
+      { id: "context", kind: "studio.json", version: "1.0.0", title: "Context", position: { x: 0, y: 0 }, config: { value: {} } },
+      workflow,
+      { id: "result", kind: "studio.json", version: "1.0.0", title: "Result", position: { x: 800, y: 0 }, config: { value: { evidence: "saved" } } },
+    ];
+    project.graph.edges = [
+      { id: "context.json->saved-workflow.context", fromNodeId: "context", fromPortId: "json", toNodeId: workflow.id, toPortId: "context" },
+      { id: "saved-workflow.json->result.json", fromNodeId: workflow.id, fromPortId: "json", toNodeId: "result", toPortId: "json" },
+    ];
+    project.graph.entryNodeIds = [workflow.id];
+    project.graph.groups = [{ id: "saved-group", name: "Saved work", nodeIds: [workflow.id, "result"] }];
+    files.set(path, dialect === "v1" ? JSON.stringify(project) : serializeStudioProject(project));
+
+    const opened = await store.loadProject(path);
+    expect(opened.projectId).toBe(project.projectId);
+    expect(opened.graph.nodes.find(node => node.id === workflow.id)).toEqual(workflow);
+    expect(opened.graph.edges).toEqual(project.graph.edges);
+    expect(opened.graph.groups).toEqual(project.graph.groups);
+    await store.saveProject(path, { ...opened, name: "Renamed project" });
+    await store.dispose();
+
+    const nextStore = reopen();
+    const reopened = await nextStore.loadProject(path);
+    expect(reopened.name).toBe("Renamed project");
+    expect(reopened.projectId).toBe(project.projectId);
+    expect(reopened.graph.nodes).toEqual(opened.graph.nodes);
+    expect(reopened.graph.edges).toEqual(project.graph.edges);
+    expect(reopened.graph.groups).toEqual(project.graph.groups);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    await nextStore.dispose();
+  });
 });
 
 describe("v1 projects with retired node kinds", () => {
