@@ -100,7 +100,8 @@ The default **Auto** mode uses Claude Code's native safety check, not bypass.
 You can choose **Ask before edits**, **Accept edits**, **Plan only**, or **Claude
 Code settings** instead. If Auto is unavailable, the chat uses **Accept edits**
 and shows **Auto unavailable** with an explanation; update Claude Code to use
-Auto. Approve or decline native permission requests in the plugin dialog. See
+Auto. Review native permission requests in inline cards in the conversation:
+Enter approves, Escape denies, and Alt+Up focuses a pending request. See
 [Tool use and modes in Chat](agent-mode.md) and
 [On-machine Claude Code](../studio-workspaces.md#on-machine-claude-code).
 
