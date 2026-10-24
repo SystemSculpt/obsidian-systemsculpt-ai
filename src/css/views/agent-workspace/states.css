@@ -83,7 +83,7 @@
   border-radius: var(--ss-radius-sm);
   background: linear-gradient(90deg, var(--ss-surface-2), var(--ss-surface-1), var(--ss-surface-2));
   background-size: 200% 100%;
-  animation: ss-chat-loading 1.2s linear infinite;
+  animation: ss-shimmer 1.2s linear infinite;
 }
 
 .systemsculpt-agent-loading-bar:nth-of-type(1) {
@@ -119,11 +119,10 @@
   overflow-wrap: anywhere;
 }
 
-@keyframes ss-chat-loading {
-  to { background-position: -200% 0; }
-}
-
 .is-reduced-motion .systemsculpt-agent-loading-bar { animation: none; }
+
+/* The plugin's reduced-motion setting: every spinner in the chat is a static icon (spec 6.3). */
+.systemsculpt-agent-workspace.is-reduced-motion .is-animated svg { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .systemsculpt-agent-loading-bar { animation: none; }
