@@ -739,7 +739,7 @@ describe("AgentConversationRenderer tail status", () => {
       const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
       const label = status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label")!;
       const text = label.firstChild;
-      expect(label.textContent).toBe("Working for 1s");
+      expect(label.textContent).toBe("Thinking · 1s");
       await render(pending);
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
       expect(label.firstChild).toBe(text);
@@ -754,7 +754,7 @@ describe("AgentConversationRenderer tail status", () => {
       expect(label.textContent).toBe("Waiting for your approval");
       for (const state of ["approved", "denied", "cancelled"] as const) {
         await render([{ ...pending[0], state: "approved" }, { ...pending[1], state }]);
-        expect(label.textContent).toMatch(/^Working for /);
+        expect(label.textContent).toMatch(/ · \d+s$/);
         expect(status.hasAttribute("data-agent-working-timer")).toBe(true);
         expect(label.firstChild).toBe(text);
       }
@@ -930,10 +930,10 @@ describe("AgentConversationRenderer tail status", () => {
       failed,
       presentation("failed", false, "Failed", failed),
     );
+    // With no error card to carry it, the failed status itself is the one alert.
     expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
-    expect(status.hasAttribute("role")).toBe(false);
-    expect(status.hasAttribute("aria-live")).toBe(false);
-    expect(status.hasAttribute("aria-atomic")).toBe(false);
+    expect(status.getAttribute("role")).toBe("alert");
+    expect(status.getAttribute("aria-live")).toBe("assertive");
     expect(onAnnounce).toHaveBeenCalledTimes(2);
 
     const failedWithCard: AgentConversationSnapshot = {
@@ -951,6 +951,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(error.getAttribute("role")).toBe("alert");
     expect(error.getAttribute("aria-live")).toBe("assertive");
     expect(error.textContent).not.toContain("private-failure-canary");
+    expect(parent.querySelectorAll('[role="alert"]')).toHaveLength(1);
     renderer.unload();
   });
 
@@ -3354,7 +3355,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(drawer.lastElementChild?.getAttribute("data-part-key"))
       .toBe("tool:call-overflow-three");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read Three.md + 2 other tool calls");
+      .toBe("Read 3 notes");
 
     drawer.insertBefore(drawer.lastElementChild!, drawer.firstElementChild);
     (renderer as unknown as {
@@ -3381,7 +3382,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await render([tools[0]!, finalReasoning]);
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Reasoned + 1 other tool call");
+      .toBe("Read One.md, thought");
     expect(overflow.querySelector<HTMLElement>(
       ".systemsculpt-agent-activity-overflow-icon",
     )?.dataset.iconName).toBe("sparkles");
@@ -3592,7 +3593,7 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
     expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Thought, read 1 note");
+      .toBe("Thought, read Plan.md");
     expect(worked.querySelector(".systemsculpt-agent-activity-duration")?.textContent)
       .toBe("1m 2s");
     const overflow = worked.querySelector<HTMLButtonElement>(
@@ -4545,7 +4546,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(preview.childElementCount).toBe(0);
     expect(shell.open).toBe(true);
     expect(shell.hidden).toBe(true);
-    expect(document.activeElement).toBe(approval);
+    expect(document.activeElement).toBe(approval.querySelector('[data-testid="chat.approval.allow-once"]'));
 
     const reordered = { ...approvalTool, order: 1 };
     const reorderedSnapshot = snapshot(reordered, "waiting");
@@ -4577,7 +4578,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(undefined, preview);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(shell.open).toBe(true);
-    expect(document.activeElement).toBe(approval);
+    expect(document.activeElement).toBe(approval.querySelector('[data-testid="chat.approval.allow-once"]'));
 
     const reviewedDiff = preview.querySelector(".systemsculpt-inline-diff");
     const resolved = snapshot({ ...approvalTool, state: "succeeded", approvalDecision: "approved" });

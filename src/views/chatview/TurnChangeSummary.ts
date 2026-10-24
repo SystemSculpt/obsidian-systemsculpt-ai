@@ -9,7 +9,11 @@ function record(value: unknown): Record<string, unknown> {
 }
 function rows(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.map(record) : []; }
 function paths(value: unknown): string[] { return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
-function name(path: string): string { return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path; }
+function name(path: string): string { return path.split(/[\\/]/u).filter(Boolean).pop() ?? path; }
+function nativePath(part: AgentToolPart, path: string): ReturnType<typeof nativeToolPath> {
+  const { workingDirectory, vaultRoot, vaultRootAlias, homeDirectory } = part.native!;
+  return nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias, homeDirectory);
+}
 
 /** A summary is a receipt, never a prediction from an approval or a failed input. */
 export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly TurnChange[] {
@@ -19,7 +23,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     const input = record(part.input);
     const output = record(part.output?.data);
     const add = (path: string, meta?: string, label = name(path), deleted = false) => {
-      const target = part.native ? nativeToolPath(path, part.native.workingDirectory) : { displayPath: path, vaultPath: path };
+      const target = part.native ? nativePath(part, path) : { displayPath: path, vaultPath: path };
       // External native changes aren't links into the user's vault.
       if (!target.vaultPath) return;
       changes.set(target.vaultPath, { path: target.vaultPath, label, ...(meta ? { meta } : {}), ...(deleted ? { deleted: true } : {}) });
@@ -38,7 +42,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
           const diff = typeof change.diff === "string" ? parseUnifiedDiff(change.diff) : null;
           const meta = operation === "add" ? "new" : operation === "delete" ? undefined
             : diff ? `+${diff.stats.additions} −${diff.stats.deletions}` : undefined;
-          if (destination) add(destination, undefined, `Moved ${name(path)} → ${nativeToolPath(destination, part.native.workingDirectory).displayPath}`);
+          if (destination) add(destination, undefined, `Moved ${name(path)} → ${nativePath(part, destination).displayPath}`);
           else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path), operation === "delete");
         }
       }

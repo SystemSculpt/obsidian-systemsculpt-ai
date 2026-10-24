@@ -20,7 +20,8 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   }
   const labels = Array.from(groups, ([kind, group]) => {
     const count = group.count;
-    if (kind === "read") return `Read ${count} note${count === 1 ? "" : "s"}`;
+    // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
+    if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
     if (kind === "command") return `Ran ${count} command${count === 1 ? "" : "s"}`;
     if (kind === "reasoning") return "Thought";

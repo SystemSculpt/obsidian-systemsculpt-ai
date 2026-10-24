@@ -64,7 +64,6 @@ import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 export type AgentConversationRendererOptions = Readonly<{
   app: App;
   sourcePath: () => string;
-  labelledBy?: string;
   beginLayoutMutation?: (
     disclosureControl?: HTMLElement,
     mutationTarget?: HTMLElement,
@@ -1252,6 +1251,8 @@ export class AgentConversationRenderer extends Component {
         const summary = summarizeAgentActivity(entry.items.flatMap(part => this.historicalAgentPart(part) ?? []));
         overflow.element.dataset.activitySummary = summary.label;
         overflow.element.dataset.failedCount = String(summary.failedCount);
+        // A finished turn folds completely; only a running one keeps its newest line.
+        overflow.element.dataset.activitySettled = "";
         this.setActivityOverflowItems(
           overflow.element,
           latestNode,
@@ -1650,7 +1651,10 @@ export class AgentConversationRenderer extends Component {
       });
     }
 
-    this.reconcileChildren(body, visibleLanes.map((lane) => lane.node));
+    // An unchanged receipt survives reconciliation, so a focused link keeps focus.
+    const receipt = presentation.busy ? null
+      : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
+    this.reconcileChildren(body, [...visibleLanes.map((lane) => lane.node), ...(receipt ? [receipt] : [])]);
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
         this.forgetMarkdown(node);
@@ -2049,7 +2053,8 @@ export class AgentConversationRenderer extends Component {
       ? [...visiblePrevious, state.latestNode]
       : [...visiblePrevious];
     this.reconcileChildren(state.body, desired);
-    state.body.toggleAttribute("hidden", !expanded && awaitingApproval.length === 0 && !state.latestNode);
+    const showsLatest = Boolean(state.latestNode) && element.dataset.activitySettled === undefined;
+    state.body.toggleAttribute("hidden", !expanded && awaitingApproval.length === 0 && !showsLatest);
   }
 
   private hasPendingApproval(node: HTMLElement): boolean {
@@ -2222,9 +2227,16 @@ export class AgentConversationRenderer extends Component {
       presentation.busy && presentation.phase !== "awaiting-approval",
     );
     // Error cards announce failures; all polite events use the workspace announcer.
-    status.removeAttribute("role");
-    status.removeAttribute("aria-live");
-    status.removeAttribute("aria-atomic");
+    // A failure without an error card still needs one alert (spec 6.3).
+    const unannouncedFailure = presentation.phase === "failed"
+      && !presentation.visibleParts.some((part) => part.kind === "error");
+    if (unannouncedFailure) {
+      status.setAttrs({ role: "alert", "aria-live": "assertive", "aria-atomic": "true" });
+    } else {
+      status.removeAttribute("role");
+      status.removeAttribute("aria-live");
+      status.removeAttribute("aria-atomic");
+    }
     return status;
   }
 
@@ -3227,7 +3239,7 @@ export class AgentConversationRenderer extends Component {
     if (label.textContent !== displayLabel) {
       label.setText(displayLabel);
       const target = presentation.targetPath;
-      const basename = target?.split("/").at(-1);
+      const basename = target?.split("/").pop();
       const index = basename ? displayLabel.indexOf(basename) : -1;
       if (target && basename && index >= 0) {
         label.setText(displayLabel.slice(0, index));
@@ -3282,7 +3294,8 @@ export class AgentConversationRenderer extends Component {
           } finally { finish?.(); }
         }).catch(() => { delete previewHost.dataset.hydrated; });
       });
-      if ((shell as HTMLDetailsElement).open) this.toolDetailHydrators.get(node)?.();
+      // A pending card hides the shell and shows its own preview; hydrate once it resolves.
+      if ((shell as HTMLDetailsElement).open && !approvalRequired) this.toolDetailHydrators.get(node)?.();
     } else {
       this.toolDetailHydrators.delete(node);
     }

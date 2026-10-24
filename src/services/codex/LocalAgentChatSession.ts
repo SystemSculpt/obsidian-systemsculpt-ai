@@ -9,6 +9,7 @@ import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
+import { desktopHost } from '../../platform/desktopOnly';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
 export type LocalAgentToolUpdate = Pick<AgentToolPart, 'callId' | 'state'> & Partial<Pick<AgentToolPart, 'name' | 'input' | 'inputText' | 'native' | 'output' | 'error'>>;
@@ -72,7 +73,7 @@ export class LocalAgentChatSession implements ChatSession {
   private async execute(input: AgentRunInput, controller: AbortController): Promise<AgentRunResult> {
     const name = this.agentName, working = `${name} is working`, messageId = `${input.turnId}_assistant`;
     let accepting = true, receivedText = '', activeTextId: string | undefined, persisted = false;
-    let vaultRoot: string | undefined, vaultRootAlias: string | undefined;
+    let vaultRoot: string | undefined, vaultRootAlias: string | undefined, homeDirectory: string | undefined;
     const nativeTerminalCalls = new Set<string>();
     const live = () => accepting && !controller.signal.aborted;
     const waiting = () => this.publish(this.approvals.size
@@ -92,7 +93,7 @@ export class LocalAgentChatSession implements ChatSession {
       const mergedInput = isRecord(previous?.input) && isRecord(update.input) ? { ...previous.input, ...update.input } : update.input ?? previous?.input ?? {};
       const next: AgentToolPart = { id: `${messageId}_tool_${update.callId}`, order: this.localSnapshot.parts.length, kind: 'tool', messageId, location: 'server', ...previous, ...update,
         name: update.state === 'approval-required' && previous?.name && previous.name !== 'tool' ? previous.name : update.name || previous?.name || 'tool', state, input: mergedInput,
-        native: update.native ? { ...previous?.native, ...update.native, vaultRoot, vaultRootAlias } : previous?.native };
+        native: update.native ? { ...previous?.native, ...update.native, vaultRoot, vaultRootAlias, homeDirectory } : previous?.native };
       if (!previous) activeTextId = undefined;
       this.publishParts(previous ? this.localSnapshot.parts.map(part => part.id === previous.id ? next : part) : [...this.localSnapshot.parts, next]);
     };
@@ -179,6 +180,7 @@ export class LocalAgentChatSession implements ChatSession {
       const adapter = this.app.vault?.adapter as { getBasePath?: () => string } | undefined;
       const hostRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, '.');
       vaultRootAlias = hostRoot && hostRoot !== cwd ? hostRoot : undefined;
+      homeDirectory = await desktopHost.os().then(os => os.homedir(), () => undefined);
       await input.buildBody?.(controller.signal);
       const images: string[] = [];
       const userText = input.message.parts.map(value => localAgentPromptText(value, images, name)).join('\n');

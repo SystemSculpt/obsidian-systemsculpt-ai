@@ -43,11 +43,19 @@ function strings(value: unknown): string[] {
 function command(input: Record<string, unknown>): string | undefined {
   return text(input.command) ?? (Array.isArray(input.command) ? strings(input.command).join(" ") : undefined);
 }
-function displayPath(part: AgentToolPart, path: string): string {
-  const { workingDirectory, vaultRoot, vaultRootAlias } = part.native!;
-  return nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias).displayPath;
+function resolvedPath(part: AgentToolPart, path: string): ReturnType<typeof nativeToolPath> {
+  const { workingDirectory, vaultRoot, vaultRootAlias, homeDirectory } = part.native!;
+  return nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias, homeDirectory);
 }
-function basename(path: string): string { return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path; }
+function displayPath(part: AgentToolPart, path: string): string {
+  return resolvedPath(part, path).displayPath;
+}
+/** Spec 3.5 meta: "in vault", or the vault-relative / ~-relative folder. */
+function cwdMeta(part: AgentToolPart, cwd: string | undefined): string {
+  const display = displayPath(part, cwd ?? part.native!.workingDirectory);
+  return `in ${display === "Vault root" ? "vault" : display}`;
+}
+function basename(path: string): string { return path.split(/[\\/]/u).filter(Boolean).pop() ?? path; }
 function kind(part: AgentToolPart): string {
   if (part.native?.agent === "claude") return part.name;
   const method = part.native?.requestMethod ?? "";
@@ -91,7 +99,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   const input = record(part.input);
   const agentName = part.native.agent === "claude" ? "Claude Code" : "Codex";
   const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; meta?: string } = {}): NativeToolPresentation => {
-    const path = options.path ? nativeToolPath(options.path, part.native!.workingDirectory) : undefined;
+    const path = options.path ? resolvedPath(part, options.path) : undefined;
     const title = `${verb} ${target}`;
     const description = realReason(part, path?.displayPath ?? target, title);
     const folder = path?.displayPath.includes("/") ? path.displayPath.slice(0, path.displayPath.lastIndexOf("/")) : undefined;
@@ -118,7 +126,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       if (input.kind === "writeStdin") return presentation("Send input to", "Sent input to", "Sending input to", "a running command", "terminal", "command");
       const cmd = command(input)?.replace(/\s+/gu, " ").trim() ?? "command";
       return presentation("Run", "Ran", "Running", cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd, "terminal", "command", {
-        approval: "run a command", meta: `in ${displayPath(part, text(input.cwd) ?? part.native.workingDirectory)}`,
+        approval: "run a command", meta: cwdMeta(part, text(input.cwd)),
       });
     }
     case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}` });
@@ -143,11 +151,13 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       const size = changeSize(input);
       const sourcePath = source ? displayPath(part, source) : "";
       const folder = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : undefined;
-      return { ...presentation(verb, completed, running, destination ? `${name} → ${basename(displayPath(part, destination))}` : name, icon, verb === "Create" ? "write" : verb === "Delete" ? "trash" : "edit", {
+      return { ...presentation(verb, completed, running, destination ? `${name} → ${displayPath(part, destination)}` : name, icon, verb === "Create" ? "write" : verb === "Delete" ? "trash" : "edit", {
         path: source, meta: [folder, size].filter(Boolean).join(" · ") || undefined,
       }), changeSize: size };
     }
-    case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission");
+    case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission", {
+      meta: cwdMeta(part, text(input.cwd)),
+    });
     case "questions":
     case "requestUserInput":
     case "AskUserQuestion": return presentation("Answer", "Answered", "Asking", "a question", "message-circle-question", "question");
@@ -176,16 +186,19 @@ function permissionDetails(part: AgentToolPart, value: unknown): Detail[] {
   if (network.enabled === false) details.push({ label: "Access", value: "Keep internet access disabled" });
   const files = record(permissions.fileSystem);
   for (const path of strings(files.read)) details.push({ label: "Access", value: `Read ${displayPath(part, path)}` });
-  const writeVerb = (value: unknown): string => {
+  // The verb already says the path leaves the vault, so the row doesn't repeat it.
+  const writeRow = (value: unknown, display: string): string => {
     const path = typeof value === "string" ? value : record(value).type === "path" ? text(record(value).path) : undefined;
-    if (!path) return "Read and change";
-    const target = nativeToolPath(path, part.native!.workingDirectory);
-    return target.vaultPath || target.displayPath === "Vault root" ? "Read and change" : "Write outside this vault:";
+    const target = path ? resolvedPath(part, path) : undefined;
+    return !target || target.vaultPath || target.displayPath === "Vault root" ? `Read and change ${display}`
+      : `Write outside this vault: ${display.replace(/ \(outside vault\)$/u, "")}`;
   };
-  for (const path of strings(files.write)) details.push({ label: "Access", value: `${writeVerb(path)} ${displayPath(part, path)}` });
+  for (const path of strings(files.write)) details.push({ label: "Access", value: writeRow(path, displayPath(part, path)) });
   for (const entry of records(files.entries)) {
-    const verb = entry.access === "read" ? "Read" : entry.access === "write" ? writeVerb(entry.path) : entry.access === "deny" ? "Block access to" : "Access";
-    details.push({ label: "Access", value: `${verb} ${permissionPath(part, entry.path)}` });
+    const display = permissionPath(part, entry.path);
+    const row = entry.access === "write" ? writeRow(entry.path, display)
+      : `${entry.access === "read" ? "Read" : entry.access === "deny" ? "Block access to" : "Access"} ${display}`;
+    details.push({ label: "Access", value: row });
   }
   if (!details.length && Object.keys(permissions).length) details.push({ label: "Access", value: "Additional access requested. Review Details for the full request." });
   return details;
@@ -203,7 +216,7 @@ function previewDetails(part: AgentToolPart): Detail[] {
   if (["WebSearch", "webSearch"].includes(toolKind)) add("Search for", input.query);
   if (["Read", "LS", "Glob", "Grep"].includes(toolKind)) {
     const path = text(input.file_path) ?? text(input.path);
-    if (path) details.push({ label: "File or folder", value: displayPath(part, path), path: nativeToolPath(path, part.native!.workingDirectory).vaultPath ?? undefined });
+    if (path) details.push({ label: "File or folder", value: displayPath(part, path), path: resolvedPath(part, path).vaultPath ?? undefined });
     add("Search for", input.pattern);
   }
   const network = record(input.networkApprovalContext);

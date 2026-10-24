@@ -71,6 +71,15 @@ describe("native tool paths", () => {
   ] as const)("separates target %s from request cwd %s and vault root %s", (path, cwd, root, alias, displayPath, vaultPath) => {
     expect(nativeToolPath(path, cwd, root, alias)).toEqual({ displayPath, vaultPath });
   });
+
+  it.each([
+    ["/Users/me/Downloads/report.md", "~/Downloads/report.md (outside vault)"],
+    ["/Users/me", "/Users/me (outside vault)"],
+    ["/Users/meow/Plan.md", "/Users/meow/Plan.md (outside vault)"],
+    ["/Users/me/Vault/Plan.md", "Plan.md"],
+  ])("shows %s relative to home only when it is outside the vault", (path, displayPath) => {
+    expect(nativeToolPath(path, "/Users/me/Vault", "/Users/me/Vault", undefined, "/Users/me/").displayPath).toBe(displayPath);
+  });
 });
 
 describe("native presentation metadata", () => {
@@ -98,6 +107,20 @@ describe("native presentation metadata", () => {
     });
     expect(nativeToolPresentation(edit({ description: "Add the launch checklist" }))?.meta).toBe("Notes · Add the launch checklist");
     expect(nativeToolPresentation(edit({ file_path: "/outside/Plan.md" }))?.targetPath).toBeUndefined();
+  });
+
+  it("keeps a nested request cwd relative to the vault root in titles, meta, links and details", async () => {
+    const nested = { agent: "claude" as const, workingDirectory: "/vault/Notes", vaultRoot: "/vault", vaultRootAlias: "/alias/vault" };
+    expect(nativeToolPresentation(part("Edit", { file_path: "Plan.md", old_string: "a", new_string: "b" }, { native: nested }))).toMatchObject({
+      title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md",
+    });
+    expect(nativeToolPresentation(part("Edit", { file_path: "/alias/vault/Notes/Plan.md" }, { native: nested }))?.targetPath).toBe("Notes/Plan.md");
+    expect(nativeToolPresentation(part("Read", { file_path: "/vault/Plan.md" }, { native: nested }))?.targetPath).toBe("Plan.md");
+    const host = document.createElement("div");
+    await renderNativeToolPreview(vault().app, host, part("Read", { file_path: "Daily/Today.md" }, { native: nested, state: "running" }));
+    const link = host.querySelector<HTMLAnchorElement>(".ss-agent-tool-details a.internal-link");
+    expect(link?.textContent).toBe("Notes/Daily/Today.md");
+    expect(link?.dataset.href).toBe("Notes/Daily/Today.md");
   });
 
   it("uses progressive verbs and only reports explicit native auto blocks", () => {
@@ -185,7 +208,7 @@ describe("real native edit previews", () => {
     const request = part("Edit", { file_path, old_string: "before", new_string: "after" }, {
       native: { agent: "claude", workingDirectory: `${canonical}/Notes`, vaultRoot: canonical, vaultRootAlias: root },
     });
-    expect(nativeToolPresentation(request)?.title).toBe("Edit Notes/Plan.md");
+    expect(nativeToolPresentation(request)).toMatchObject({ title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md" });
     expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ path: "Notes/Plan.md", status: "changed", oldContent: "before", newContent: "after" });
     expect(realpath.mock.calls).toEqual([[root]]);
     expect(getAbstractFileByPath.mock.calls).toEqual([["Notes/Plan.md"]]);
@@ -370,16 +393,20 @@ describe("native preview rendering", () => {
     });
     expect(nativeToolPresentation(request)?.title).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
     await renderNativeToolPreview(app, host, request);
-    expect(host.querySelector(".systemsculpt-inline-diff__summary")?.textContent).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
-    expect(host.querySelector(".systemsculpt-diff-filename")?.textContent).toBe("Plan.md");
+    // A one-file card names the file and destination once, in its title.
+    expect(host.querySelector(".systemsculpt-inline-diff__summary")).toBeNull();
+    expect(host.querySelector(".systemsculpt-diff-filename")).toBeNull();
+    expect(host.querySelector(".systemsculpt-diff-line-added")?.textContent).toContain("new");
     expect(read).not.toHaveBeenCalled();
     expect(getAbstractFileByPath).not.toHaveBeenCalled();
     expect(realpath).not.toHaveBeenCalled();
 
     await renderNativeToolPreview(app, host, { ...request, name: "permissions", input: { cwd: "/external", permissions: { fileSystem: { write: ["/external", "/vault/Notes"] } } },
       native: { ...request.native!, requestMethod: "item/permissions/requestApproval" } });
-    expect(host.textContent).toContain("Folder/external (outside vault)");
-    expect(host.textContent).toContain("Read and change /external (outside vault)");
+    expect(nativeToolPresentation({ ...request, name: "permissions", input: { cwd: "/external" },
+      native: { ...request.native!, requestMethod: "item/permissions/requestApproval" } })?.meta).toBe("in /external (outside vault)");
+    expect(host.textContent).toContain("Write outside this vault: /external");
+    expect(host.textContent).not.toContain("Write outside this vault: /external (outside vault)");
     expect(host.textContent).toContain("Read and change Notes");
     expect(host.textContent).not.toContain("Vault root");
   });
@@ -405,7 +432,7 @@ describe("native preview rendering", () => {
     } } }, "item/permissions/requestApproval");
     expect(nativeToolPresentation(request)?.title).toBe("Allow additional access");
     await renderNativeToolPreview(app, host, request);
-    expect(nativeToolPresentation(request)?.meta).toBe("Publish the notes");
+    expect(nativeToolPresentation(request)?.meta).toBe("in vault · Publish the notes");
     for (const expected of ["Network access", "Read Notes", "Write outside this vault: /outside/Export", "Read Reference", "Read and change project folders", "Block access to files matching **/.env"]) {
       expect(host.textContent).toContain(expected);
     }

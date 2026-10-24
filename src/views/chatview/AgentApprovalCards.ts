@@ -142,7 +142,7 @@ export class AgentApprovalCards extends Component {
     const heading = header.createEl("strong", { cls: "systemsculpt-agent-approval-copy", text: title, attr: { id: titleId } });
     const targetPath = native?.targetPath ?? tool.targetPath;
     if (targetPath && this.options.onOpenPath) {
-      const target = targetPath.split(/[\\/]/u).at(-1)!;
+      const target = targetPath.split(/[\\/]/u).pop()!;
       const offset = title.lastIndexOf(target);
       if (offset >= 0) {
         heading.empty(); heading.appendText(title.slice(0, offset));
