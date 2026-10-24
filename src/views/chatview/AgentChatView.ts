@@ -31,7 +31,8 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
-import { generateDefaultChatTitle, isGeneratedChatTitle, sanitizeChatTitle } from "../../utils/titleUtils";
+import { chatTitleFromMessage, generateDefaultChatTitle, isGeneratedChatTitle, normalizeChatTitle } from "../../utils/titleUtils";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import {
   ChatStorageService,
   resolveChatsDirectory,
@@ -266,17 +267,6 @@ function protocolId(prefix: "client" | "conversation"): string {
       .slice(0, 32);
   }
   return `${prefix}_${hex}`;
-}
-
-function titleFromMessage(text: string): string {
-  // A starter or mention writes [[Note]]; the title reads as plain words.
-  const readable = text.replace(
-    /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g,
-    (_link, target: string, alias?: string) => alias?.trim() || target.split("/").pop()!.replace(/\.md$/i, ""),
-  );
-  const firstLine = readable.replace(/^\s*#+\s*/, "").split("\n")[0].replace(/\s+/g, " ").trim();
-  const compact = firstLine.length > 64 ? `${firstLine.slice(0, 61).trimEnd()}…` : firstLine;
-  return sanitizeChatTitle(compact) || generateDefaultChatTitle();
 }
 
 function plainContent(message: ChatMessage): string {
@@ -1101,7 +1091,7 @@ export class AgentChatView extends ItemView {
   public getConversationOriginToken(): string { return this.conversationOriginToken; }
 
   public async setTitle(title: string, shouldSave = true): Promise<void> {
-    const normalized = sanitizeChatTitle(title.trim()) || generateDefaultChatTitle();
+    const normalized = normalizeChatTitle(title) || generateDefaultChatTitle();
     if (normalized === this.chatTitle) return;
     this.chatTitle = normalized;
     this.transcript.setTitle(normalized);
@@ -2459,7 +2449,7 @@ export class AgentChatView extends ItemView {
       throw new Error("This chat changed before the request was admitted.");
     }
     if (!this.chatId && this.transcript.snapshot().messages.length === 0 && !this.titleExplicit) {
-      this.chatTitle = titleFromMessage(plainContent(input.message));
+      this.chatTitle = chatTitleFromMessage(plainContent(input.message));
       this.transcript.setTitle(this.chatTitle);
     }
     const snapshot = await this.transcript.commitUser(input, conversationId);
@@ -3724,7 +3714,7 @@ export class AgentChatView extends ItemView {
       const repository = new AgentTranscriptRepository(this.chatStorage, () => saveOptions);
       const loaded = await repository.load(row.chatId);
       if (!loaded) throw new Error("This chat could not be loaded.");
-      const normalized = sanitizeChatTitle(title.trim()) || loaded.title;
+      const normalized = normalizeChatTitle(title) || loaded.title;
       saveOptions = {
         contextFiles: new Set(loaded.contextFiles),
         title: normalized,
@@ -3820,7 +3810,7 @@ export class AgentChatView extends ItemView {
     try {
       const { markdown } = await this.exportChat();
       const parent = this.app.fileManager.getNewFileParent("").path;
-      const base = sanitizeChatTitle(this.chatTitle).trim() || "Chat";
+      const base = toSafeVaultFileName(this.chatTitle, { fallback: "Chat" });
       let path = normalizePath(`${parent}/${base} (export).md`);
       for (let copy = 2; this.app.vault.getAbstractFileByPath(path); copy += 1) {
         path = normalizePath(`${parent}/${base} (export ${copy}).md`);
