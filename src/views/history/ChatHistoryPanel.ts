@@ -456,6 +456,7 @@ export class ChatHistoryPanel extends Component {
       });
     };
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.key === "Process") return;
       if (event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
