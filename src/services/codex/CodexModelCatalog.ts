@@ -5,10 +5,13 @@ export type CodexModel = { model: string; name: string; efforts: string[]; defau
 type Catalog = { models: CodexModel[]; permissions: string };
 type CatalogRead = { promise: Promise<Catalog>; controller: AbortController; consumers: number };
 const pending = new Map<string, CatalogRead>();
-let cached: { models: CodexModel[]; at: number } | undefined;
-/** Presentation cache only; the installed Codex supplies model availability and options. */
-export function readCodexCatalog(cwd: string, signal: AbortSignal): Promise<Catalog> {
+const cached = new Map<string, { catalog: Catalog; at: number }>();
+/** Presentation cache only; native execution still resolves its own permissions. */
+export function readCodexCatalog(cwd: string, signal: AbortSignal, refresh = false): Promise<Catalog> {
   if (signal.aborted) return Promise.reject(new Error('Codex catalog request canceled.'));
+  if (refresh) cached.delete(cwd);
+  const saved = cached.get(cwd);
+  if (saved && Date.now() - saved.at < 60_000) return Promise.resolve(saved.catalog);
   let read = pending.get(cwd);
   if (!read) {
     const controller = new AbortController();
@@ -33,13 +36,10 @@ export function readCodexCatalog(cwd: string, signal: AbortSignal): Promise<Cata
 }
 
 async function loadCodexCatalog(cwd: string, signal: AbortSignal): Promise<Catalog> {
-  // Only simultaneous readers share this request. Every later read refreshes native
-  // permissions, even while the independent model-list presentation cache is warm.
   const connection = await connectCodex(cwd, signal, { error: () => {}, notification: () => {}, request: () => Promise.reject(new Error('Unexpected model-catalog request.')) });
   try {
     const result = await connection.request('config/read', { cwd, includeLayers: false });
     const permissions = describeCodexPermissions(isRecord(result.config) ? result.config : {});
-    if (cached && Date.now() - cached.at < 60_000) return { models: cached.models, permissions };
     const models: CodexModel[] = []; let cursor: string | undefined;
     for (let page = 0; page < 5; page++) {
       const result = await connection.request('model/list', { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) });
@@ -58,6 +58,8 @@ async function loadCodexCatalog(cwd: string, signal: AbortSignal): Promise<Catal
       if (!cursor) break;
       if (page === 4) throw new Error('The native model catalog exceeds the supported page limit.');
     }
-    cached = { models, at: Date.now() }; return { models, permissions };
+    const catalog = { models, permissions };
+    if (!signal.aborted) cached.set(cwd, { catalog, at: Date.now() });
+    return catalog;
   } finally { connection.close(); }
 }
