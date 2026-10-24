@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { EventEmitter } from 'node:events';
+import { posix } from 'node:path';
 import { App } from 'obsidian';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { ClaudeChatSession } from '../../../services/claude/ClaudeChatSession';
@@ -58,9 +59,9 @@ function nativeHost(agent: string, code: string, partial: boolean, options: { st
     return true;
   });
   (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn: jest.fn(() => child) });
-  (desktopHost.fs as jest.Mock).mockResolvedValue({ stat: jest.fn(async () => ({ isDirectory: () => true })), readFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) });
-  (desktopHost.path as jest.Mock).mockResolvedValue({ isAbsolute: (path: string) => path.startsWith('/'), delimiter: ':', join: (...parts: string[]) => parts.join('/') });
-  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test' });
+  (desktopHost.fs as jest.Mock).mockResolvedValue({ readdir: jest.fn(async () => []), stat: jest.fn(async () => ({ isDirectory: () => true, isFile: () => false })), readFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) });
+  (desktopHost.path as jest.Mock).mockResolvedValue(posix);
+  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test', platform: () => 'darwin' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test' });
 }
 
