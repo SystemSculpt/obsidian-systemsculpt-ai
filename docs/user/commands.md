@@ -48,7 +48,24 @@ These work only while focus is in a chat view, so they claim no global hotkey.
 | `Mod+Shift+O` | New chat |
 | `Mod+.` | Change mode |
 | `Mod+Shift+.` | Change backend |
+| `Enter` / `Shift+Enter` | In the desktop message box: send / add a newline. While working, Enter queues a follow-up. On touch screens, Enter adds a newline; use Send to submit |
+| `Esc` | In the message box while working: stop the response, keeping partial output. An open menu or mention list closes first |
+| `↑` / `↓` | In an empty message box at its start/end: recall previous/next prompts |
+| `@` or `[[`, then `↑` / `↓` and `Enter` or `Tab` | Find and attach a vault note; Escape closes the suggestions |
+| `Enter` or `Mod+Enter` | Approve a focused inline request; Mod+Enter also works with Deny or Details focused |
+| `Esc` | Deny a focused inline request, or skip a focused question |
+| `Mod+Shift+Enter` | Use **Approve all in this chat** when the request offers a session-scoped grant |
+| `↑` / `↓` | Move between pending approval cards |
+| `Alt+↑` (also `Alt+↓`) | Focus the first pending approval card without discarding a draft |
+| `1`–`9`, or type and `Enter` | Answer a focused question with an option or your own text |
+| `Enter` or `Space` | Expand/collapse a focused tool line or activity group |
+| A printable character or `Esc` | From the conversation: return to the message box; typing keeps the character |
 | `↑` / `↓`, `Enter`, `Mod+Enter`, `Esc` or `←` | In history: move, open, open in a new tab, return to the chat |
+
+Use **Tab / Shift+Tab** to move through the controls. The run line is one Tab
+stop: **Left / Right** moves between its backend, mode and model/credits buttons.
+Menus use arrow keys, Enter and Escape. Closing a menu returns focus to its opener;
+closing history restores your draft.
 
 ## Search and embeddings
 

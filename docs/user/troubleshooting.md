@@ -2,9 +2,10 @@
 
 ## Chat setup or availability
 
-- `Account` should show license, credits, and support.
-- Chat runs through SystemSculpt automatically; there is no chat picker in the plugin.
-- If chat is unavailable, re-check your SystemSculpt license and credits first.
+- Check the run line below the message box: it names the backend, mode and model or hosted credits. Each part opens a menu.
+- On desktop, Claude Code and Codex use their own installed app and sign-in, not SystemSculpt credits. If an agent is missing or signed out, finish its native setup and choose **Detect again** in the backend menu.
+- For hosted SystemSculpt (including mobile), check your connection and credits in **Account**. A SystemSculpt account is not required to use your own desktop agents.
+- Saved chats keep their original backend. Switching backend starts a new chat while carrying your draft and attachments; use **Back** to return to the previous conversation.
 
 ## Browser sign-in did not finish
 
@@ -16,7 +17,7 @@
 
 ## Streaming issues
 
-- Retry once after confirming your license and credits are valid.
+- For hosted chat, check your connection and credits before retrying. For Claude Code or Codex, check that the native app is still signed in.
 - SystemSculpt may retry around upstream tool or image limitations automatically.
 - Transient upstream rate limits are retried automatically when no assistant output has started yet.
 - Check for notices/footnotes in chat that explain the failure.
