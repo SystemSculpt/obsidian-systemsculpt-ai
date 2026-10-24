@@ -45,6 +45,15 @@ runs the focused mobile interaction suite before opening settings, Chat,
 Similar Notes, and portable Studio from the artifact with desktop-only
 adapters unavailable. It does not launch Android or iOS.
 
+## Production reachability
+
+`npm run check:knip`, also run by `check:ci`, checks for unused production files
+and dependencies, plus unlisted and unresolved imports, starting at `src/main.ts`.
+It excludes test fixtures and development scripts, which are not plugin entry
+points. Named-export findings are outside this runtime-cleanup gate:
+`npx knip --production` additionally reports the existing unused-export and
+test-only-export backlog tracked in #402. That broader cleanup remains separate.
+
 ## Checkpoints
 
 ~~~bash
