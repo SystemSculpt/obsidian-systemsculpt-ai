@@ -89,8 +89,10 @@
 
 /* Chat includes native disclosures, links, a listbox and text fields. Keep
  * their keyboard focus visible even when local chrome has its own shadow.
- * The solid outline also survives forced-colors mode (shadows do not). */
-.ss-surface.systemsculpt-agent-workspace :focus-visible {
+ * The solid outline also survives forced-colors mode (shadows do not).
+ * Use the surface contract's specificity boost: icon variants use multiple
+ * :not() classes and must not erase the ring with their resting shadow. */
+:is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible {
   outline: 2px solid var(--ss-ink-accent);
   outline-offset: 2px;
   box-shadow: var(--ss-ring);

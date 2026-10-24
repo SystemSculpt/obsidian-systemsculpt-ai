@@ -107,10 +107,6 @@
   min-height: var(--ss-control-height);
 }
 
-.systemsculpt-agent-composer.is-history-editing {
-  opacity: 0.72;
-}
-
 .systemsculpt-agent-turn.is-assistant {
   width: 100%;
 }

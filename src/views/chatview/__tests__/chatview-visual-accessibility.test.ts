@@ -17,28 +17,32 @@ function declarations(css: string): Record<string, string> {
 
 function rule(css: string, selector: string): string {
   const block = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .find(([, selectors]) => selectors.split(",").some((item) => item.trim() === selector));
+    .find(([, selectors]) => selectors.trim() === selector
+      || selectors.split(",").some((item) => item.trim() === selector));
   if (!block) throw new Error(`Missing CSS rule: ${selector}`);
   return block[2];
 }
 
+// Obsidian 1.14.5 app.css default-theme inputs (no custom theme/accent):
+// color mappings and .theme-light/.theme-dark, lines 2939–3094. The HSL values
+// below resolve the host's 258 / 88% / 66% accent formulas without rounding.
 // Only host inputs are fixtures. Plugin colors, including all color-mix weights,
 // come from the production stylesheet so palette edits cannot bypass this gate.
 const themes: Record<string, Record<string, string>> = {
   light: {
     "--text-normal": "#222222", "--text-muted": "#5c5c5c", "--text-faint": "#ababab",
-    "--text-accent": "#7852ee", "--text-on-accent": "#ffffff",
+    "--text-accent": "hsl(258, 88%, 66%)", "--text-on-accent": "#ffffff",
     "--background-primary": "#ffffff", "--background-secondary": "#f6f6f6",
-    "--interactive-accent": "#7852ee", "--interactive-accent-hover": "#916ff0",
+    "--interactive-accent": "hsl(257, 88.88%, 70.95%)", "--interactive-accent-hover": "hsl(255, 89.76%, 75.9%)",
     "--color-green-rgb": "8, 185, 78", "--color-yellow-rgb": "224, 172, 0",
     "--color-red-rgb": "233, 49, 71", "--color-blue-rgb": "8, 109, 221",
   },
   dark: {
-    "--text-normal": "#dadada", "--text-muted": "#bababa", "--text-faint": "#666666",
-    "--text-accent": "#a88bfa", "--text-on-accent": "#ffffff",
-    "--background-primary": "#1e1e1e", "--background-secondary": "#262626",
-    "--interactive-accent": "#a88bfa", "--interactive-accent-hover": "#bda6fb",
-    "--color-green-rgb": "68, 207, 110", "--color-yellow-rgb": "233, 151, 63",
+    "--text-normal": "#dadada", "--text-muted": "#b3b3b3", "--text-faint": "#666666",
+    "--text-accent": "hsl(255, 89.76%, 75.9%)", "--text-on-accent": "#ffffff",
+    "--background-primary": "#1c1c1c", "--background-secondary": "#282828",
+    "--interactive-accent": "hsl(258, 88%, 66%)", "--interactive-accent-hover": "hsl(255, 89.76%, 75.9%)",
+    "--color-green-rgb": "68, 207, 110", "--color-yellow-rgb": "224, 222, 113",
     "--color-red-rgb": "251, 70, 76", "--color-blue-rgb": "2, 122, 255",
   },
 };
@@ -84,6 +88,14 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
 
   test.each(chatSheets)("%s does not use faint ink for text", (path) => {
     expect(readCss(path)).not.toMatch(/\bcolor\s*:\s*var\(--(?:ss-ink-faint|text-faint)\)/);
+  });
+
+  test("history-editing hints and placeholder text are not faded below their token contrast", () => {
+    const conversation = readCss("views/agent-workspace/conversation.css");
+    expect(conversation).not.toMatch(/\.systemsculpt-agent-composer\.is-history-editing\s*\{[^}]*opacity:/);
+    expect(conversation).not.toMatch(/\.systemsculpt-agent-code-copy\s*\{[^}]*opacity:/);
+    expect(readCss("views/agent-workspace/shell.css"))
+      .toMatch(/:is\(input, textarea\)::placeholder\s*\{\s*color:\s*var\(--ss-ink-muted\);\s*opacity:\s*1;/);
   });
 
   test("every ChatView text token has a contrast case", () => {
@@ -133,7 +145,9 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
 describe("ChatView keyboard focus rules", () => {
   test("the post-cascade focus ring covers every interactive element, not just buttons", () => {
     const css = readCss("index.css");
-    const selector = ".ss-surface.systemsculpt-agent-workspace :focus-visible";
+    // :is borrows ID specificity, beating resting icon-button shadows with
+    // multiple :not() classes as well as feature-specific focus rules.
+    const selector = ":is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible";
     const treatment = rule(css, selector);
     expect(treatment).toMatch(/outline:\s*2px solid var\(--ss-ink-accent\)/);
     expect(treatment).toMatch(/outline-offset:\s*2px/);
