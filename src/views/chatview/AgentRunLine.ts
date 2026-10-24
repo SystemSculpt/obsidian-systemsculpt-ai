@@ -45,7 +45,9 @@ export function containMenuEscape(menu: Menu, ownerDocument: Document): () => vo
   ownerDocument.addEventListener("keydown", onKeydown, true);
   // Menu.onHide replaces its callback; the owner composes cleanup with focus.
   return () => {
-    const current = ownerWindow?.event;
+    // Chromium sets `event` on the window whose code is running, so a pop-out's
+    // keymap Escape shows up on the main window, not the pop-out.
+    const current = ownerWindow?.event ?? (window as { event?: Event }).event;
     if (current?.type === "keydown" && (current as KeyboardEvent).key === "Escape") {
       closingEscape = current;
       return;
