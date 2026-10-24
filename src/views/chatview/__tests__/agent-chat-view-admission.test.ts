@@ -830,6 +830,32 @@ describe("AgentChatView composer admission", () => {
     expect(harness.agent.start).not.toHaveBeenCalled();
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
     expect(harness.workspace.setBanner).toHaveBeenCalledWith(expected, "error");
+    expect(harness.composer.getValue()).toBe("Do not read my pinned note");
+    expect(harness.composer.getMessageAttachments()).toEqual([ORIGINAL_ATTACHMENT]);
+    expect(harness.parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.send"]')!.disabled).toBe(false);
+    harness.composer.unload();
+  });
+
+  it("restores a deferred submission and attachments when the balance rejects it after a transition", async () => {
+    const harness = createHarness("before-start");
+    const transition = deferred();
+    harness.view.activeSubmissionOperation = { kind: "transition", finished: transition.promise };
+    harness.view.refreshCreditsBalance = jest.fn(async () => undefined);
+    harness.view.creditsBalance = { totalRemaining: 0, availableUnreserved: 0, usageClass: "customer" };
+    harness.composer.setValue("Original request");
+    harness.composer.restoreMessageAttachments([ORIGINAL_ATTACHMENT]);
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    expect(harness.composer.getValue()).toBe("");
+    harness.composer.setValue("Newer draft");
+    harness.composer.restoreMessageAttachments([NEWER_ATTACHMENT]);
+    harness.view.activeSubmissionOperation = null;
+    transition.resolve();
+    await transition.promise;
+
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(harness.composer.getValue()).toBe("Original request\n\nNewer draft");
+    expect(harness.composer.getMessageAttachments()).toEqual([ORIGINAL_ATTACHMENT, NEWER_ATTACHMENT]);
     harness.composer.unload();
   });
 

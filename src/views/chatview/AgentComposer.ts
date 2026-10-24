@@ -42,7 +42,8 @@ export type AgentComposerSubmit = Readonly<{
 }>;
 
 export type AgentComposerOptions = Readonly<{
-  onSubmit: (submission: AgentComposerSubmit) => void | Promise<void>;
+  /** Return false when admission rejects the submission, keeping the draft. */
+  onSubmit: (submission: AgentComposerSubmit) => void | false | Promise<void | false>;
   onStop: () => void | Promise<void>;
   /** Opens the picker that pins vault files for every message. */
   onAttach: () => void | Promise<void>;
@@ -1026,11 +1027,12 @@ export class AgentComposer extends Component {
     this.submitting = true;
     this.syncControls();
     try {
-      await this.options.onSubmit({
+      const accepted = await this.options.onSubmit({
         text,
         mode,
         ...(attachments.length > 0 ? { attachments } : {}),
       });
+      if (accepted === false) return;
       if (text && this.promptHistory[this.promptHistory.length - 1] !== text) {
         this.promptHistory = Object.freeze([...this.promptHistory, text]);
       }

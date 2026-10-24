@@ -22,6 +22,7 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
+  ManagedAgentError,
 } from "../../chat/ChatConversation";
 import {
   formatAgentActivityDuration,
@@ -82,7 +83,7 @@ export type AgentConversationRendererOptions = Readonly<{
   onDetectAgain?: () => boolean | void | Promise<boolean | void>;
   onUseHosted?: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
-  onViewPlans?: () => void | Promise<void>;
+  onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
@@ -2882,7 +2883,7 @@ export class AgentConversationRenderer extends Component {
             tone: "primary",
             size: "small",
           });
-          plans.onclick = () => void this.options.onViewPlans?.();
+          plans.onclick = () => void this.options.onViewPlans?.(part.error);
         }
         if (reportStatus && presented.reportId) {
           void this.prepareIncidentReport(reportStatus, actions, presented.reportId);

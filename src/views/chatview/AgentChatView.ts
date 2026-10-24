@@ -847,7 +847,13 @@ export class AgentChatView extends ItemView {
       onRename: (title) => this.renameFromHeader(title),
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
-      onViewPlans: () => this.viewPlans(),
+      onViewPlans: (error) => {
+        if (isPlanAccessError(error)) {
+          UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });
+          return;
+        }
+        return this.viewPlans();
+      },
       onCancelQueued: async (id) => { await this.cancelQueuedFollowUp(id); },
       onRunQueuedNow: (id) => this.runQueuedFollowUpNow(id),
       runLine: {
@@ -1863,7 +1869,7 @@ export class AgentChatView extends ItemView {
     expectedConversationOriginToken?: string,
     clearComposerAfterAdmission = false,
     clientStartedAtMonotonicMs = this.clientMonotonicNow(),
-  ): void {
+  ): void | false {
     if (this.blockReadOnlyHistoryAction()) return;
     const admissionOriginToken = expectedConversationOriginToken
       ?? this.conversationOriginToken;
@@ -1887,12 +1893,15 @@ export class AgentChatView extends ItemView {
           this.restoreDeferredSubmissionAfterTransitions(submission);
           return;
         }
-        this.acceptComposerSubmission(
+        const accepted = this.acceptComposerSubmission(
           submission,
           admissionOriginToken,
           clearComposerAfterAdmission,
           clientStartedAtMonotonicMs,
         );
+        if (accepted === false && !clearComposerAfterAdmission) {
+          this.restoreDeferredSubmissionAfterTransitions(submission);
+        }
       });
       return;
     }
@@ -1907,7 +1916,7 @@ export class AgentChatView extends ItemView {
     if (this.hasAuthoritativeUnavailableBalance()) {
       const error = this.unavailableBalanceAdmissionError();
       void this.handleError(error);
-      return;
+      return false;
     }
     const operation = this.beginSubmissionOperation(
       admissionOriginToken,
