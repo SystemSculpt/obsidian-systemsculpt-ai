@@ -8,14 +8,6 @@ export interface ErrorContext {
   metadata?: Record<string, unknown>;
 }
 
-interface ErrorLogEntry {
-  timestamp: string;
-  level: ErrorLevel;
-  message: string;
-  context?: ErrorContext;
-  error?: Record<string, unknown>;
-}
-
 const LEVEL_ORDER: Record<ErrorLevel, number> = {
   error: 0,
   warn: 1,
@@ -25,8 +17,6 @@ const LEVEL_ORDER: Record<ErrorLevel, number> = {
 
 class ErrorLogger {
   private static instance: ErrorLogger;
-  private history: ErrorLogEntry[] = [];
-  private readonly maxHistory = 500;
   private debugMode = false;
   private minimumLevel: ErrorLevel = 'warn';
 
@@ -46,30 +36,15 @@ class ErrorLogger {
   }
 
   log(level: ErrorLevel, message: string, error?: unknown, context?: ErrorContext): void {
-    const entry: ErrorLogEntry = {
-      timestamp: new Date().toISOString(),
-      level,
-      message,
-      context: context && Object.keys(context).length > 0 ? context : undefined,
-      error: this.serializeError(error)
-    };
-    if (!entry.error) delete entry.error;
-    this.history.push(entry);
-    if (this.history.length > this.maxHistory) {
-      this.history.shift();
-    }
-
     if (!this.shouldEmit(level)) {
       return;
     }
 
     const consoleArgs: unknown[] = [`[SystemSculpt][${level.toUpperCase()}] ${message}`];
-    if (entry.context) {
-      consoleArgs.push(entry.context);
+    if (context && Object.keys(context).length > 0) {
+      consoleArgs.push(context);
     }
-    if (error instanceof Error) {
-      consoleArgs.push(error);
-    } else if (typeof error !== 'undefined') {
+    if (typeof error !== 'undefined') {
       consoleArgs.push(error);
     }
 
@@ -97,22 +72,6 @@ class ErrorLogger {
     this.log('debug', message, undefined, context);
   }
 
-  getHistory(): ErrorLogEntry[] {
-    return [...this.history];
-  }
-
-  clearHistory(): void {
-    this.history = [];
-  }
-
-  exportLogs(): string {
-    try {
-      return JSON.stringify(this.history, null, 2);
-    } catch {
-      return '[]';
-    }
-  }
-
   private shouldEmit(level: ErrorLevel): boolean {
     if (this.debugMode) return true;
     return LEVEL_ORDER[level] <= LEVEL_ORDER[this.minimumLevel];
@@ -132,46 +91,6 @@ class ErrorLogger {
       default:
         return (...args) => console.debug(...args);
     }
-  }
-
-  private serializeError(error: unknown): Record<string, unknown> | undefined {
-    if (!error) return undefined;
-    if (error instanceof Error) {
-      const output: Record<string, unknown> = {
-        name: error.name,
-        message: error.message
-      };
-      if (typeof error.stack === 'string') {
-        output.stack = error.stack;
-      }
-      const extra = error as Error & {
-        code?: unknown;
-        status?: unknown;
-        retryInMs?: unknown;
-        details?: unknown;
-      };
-      if (typeof extra.code !== 'undefined') {
-        output.code = extra.code;
-      }
-      if (typeof extra.status !== 'undefined') {
-        output.status = extra.status;
-      }
-      if (typeof extra.retryInMs === 'number') {
-        output.retryInMs = extra.retryInMs;
-      }
-      if (typeof extra.details !== 'undefined') {
-        output.details = extra.details;
-      }
-      return output;
-    }
-    if (typeof error === 'object') {
-      try {
-        return Object.fromEntries(Object.entries(error));
-      } catch {
-        return { message: String(error) };
-      }
-    }
-    return { message: String(error) };
   }
 }
 

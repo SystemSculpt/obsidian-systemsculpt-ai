@@ -979,7 +979,7 @@ describe("RecordingSession streaming to disk", () => {
   });
 
   it("keeps later audio in order in memory after an append fails, then appends it before the move", async () => {
-    const logged = jest.spyOn(console, "debug").mockImplementation(() => undefined);
+    const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const harness = streamingHarness();
     const started = await harness.session.start();
     emitBytes([1]);
@@ -993,7 +993,11 @@ describe("RecordingSession streaming to disk", () => {
     await settleWrites();
     expect(harness.adapter.appendBinary).toHaveBeenCalledTimes(1);
     expect(harness.session.captureLimitBytes).toBe(MAX_ENCODED_CAPTURE_BYTES);
-    expect(logged).toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(
+      "[SystemSculpt][ERROR] RecordingSession: Streaming capture to disk failed; keeping the rest in memory",
+      { source: "RecordingSession" },
+      expect.objectContaining({ message: "Sync lock" }),
+    );
 
     const result = await harness.session.stop();
     expect(harness.adapter.appendBinary).toHaveBeenCalledTimes(2);
