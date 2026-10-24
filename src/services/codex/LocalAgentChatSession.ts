@@ -9,6 +9,7 @@ import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, LocalAgentUsageLimitError, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
+import { localAgentReplay } from './LocalAgentReplay';
 import { desktopHost } from '../../platform/desktopOnly';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
@@ -198,8 +199,9 @@ export class LocalAgentChatSession implements ChatSession {
         if (source.kind === 'image') { images.push(source.data_url); return `Attached image: ${source.path}`; }
         return source.kind === 'text' ? `File: ${source.path}\n${source.content}` : `Read the attached document from this vault path: ${source.path}`;
       }).join('\n\n');
-      const history = !threadId ? this.forkHistory() : [];
-      const prefix = history.length ? `Previous conversation before this edited message:\n${JSON.stringify(history)}\n\nCurrent message:\n` : '';
+      // A new native session after Retry or an edit gets the earlier chat as the person saw it.
+      const replay = threadId ? '' : localAgentReplay(this.forkHistory());
+      const prefix = replay ? `${replay}\n\nCurrent message:\n` : '';
       const prompt = `${prefix}${userText}${context ? `\n\nAttached vault context:\n${context}` : ''}`;
       if (prompt.length > 256_000) throw new Error(`This message and its attached context exceed the ${name} input limit.`);
       if (controller.signal.aborted) throw new Error(`${name} response canceled.`);
