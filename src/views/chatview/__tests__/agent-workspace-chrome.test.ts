@@ -3,6 +3,7 @@
 import { App, Menu } from "obsidian";
 import { AgentWorkspace, type AgentWorkspaceOptions } from "../AgentWorkspace";
 import type { AgentChromeState } from "../AgentChatChrome";
+import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
 
 type MockMenu = Menu & { items: Array<{ title?: string }>; shown: boolean; select: (title: string) => unknown };
 const menus = (): MockMenu[] => (Menu as unknown as { instances: MockMenu[] }).instances;
@@ -187,6 +188,100 @@ describe("AgentWorkspace chrome", () => {
       workspace.unload();
       jest.useRealTimers();
     }
+  });
+
+  it("announces working once, completion and stopped through the one region, never streamed text", async () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount({ backendName: () => "Codex" });
+    try {
+      const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      const announce = jest.spyOn(workspace, "announce");
+      const snapshot: AgentConversationSnapshot = { runId: "run", turnId: "turn", status: "running", messages: [],
+        parts: [{ kind: "text", id: "text", messageId: "answer", order: 0, markdown: "Hello", state: "streaming" }] };
+      const render = async (value: AgentConversationSnapshot) => {
+        const rendered = workspace.setAgentSnapshot(value);
+        await jest.advanceTimersByTimeAsync(20);
+        await rendered;
+        await jest.advanceTimersByTimeAsync(50);
+      };
+      await render(snapshot);
+      expect(region.textContent).toBe("Codex is working");
+      await render({ ...snapshot, parts: [{ ...snapshot.parts[0], kind: "text", messageId: "answer", markdown: "Hello again", state: "streaming" }] });
+      expect(announce.mock.calls).toEqual([["Codex is working"]]);
+      await render({ ...snapshot, status: "completed" });
+      expect(region.textContent).toBe("Codex replied");
+      await render({ ...snapshot, status: "completed" });
+      expect(announce.mock.calls).toEqual([["Codex is working"], ["Codex replied"]]);
+      await render({ ...snapshot, runId: "next", turnId: "next" });
+      await render({ ...snapshot, runId: "next", turnId: "next", status: "cancelled" });
+      expect(region.textContent).toBe("Stopped");
+      expect(parent.querySelectorAll('[aria-live="polite"], [role="status"]:not([aria-live="off"])')).toHaveLength(1);
+      workspace.setBanner("Cannot save this chat", "error");
+      expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role")).toBe("alert");
+    } finally { workspace.unload(); jest.useRealTimers(); }
+  });
+
+  it.each([true, false])("routes an approval card and its answer (%s) through the shared live region", async (approved) => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount({ backendName: () => "Claude Code", onApprove: jest.fn(() => true) });
+    try {
+      const part: AgentToolPart = { kind: "tool", id: "edit", callId: "edit", messageId: "answer", order: 0,
+        name: "Edit", input: { file_path: "/vault/Notes/Plan.md", old_string: "Draft", new_string: "Ready" },
+        native: { agent: "claude", workingDirectory: "/vault" }, state: "approval-required", approvalId: "approval", location: "vault" };
+      const rendered = workspace.setAgentSnapshot({ runId: "run", turnId: "turn", status: "running", messages: [], parts: [part] });
+      await jest.advanceTimersByTimeAsync(20);
+      await rendered;
+      await jest.advanceTimersByTimeAsync(50);
+      const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      expect(region.textContent).toContain("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
+      parent.querySelector<HTMLButtonElement>(`[data-testid="chat.approval.${approved ? "allow-once" : "deny"}"]`)!.click();
+      await jest.advanceTimersByTimeAsync(50);
+      expect(region.textContent).toBe(approved ? "Approved" : "Denied");
+      expect(parent.querySelectorAll('[aria-live="polite"], [role="status"]:not([aria-live="off"])')).toHaveLength(1);
+    } finally { workspace.unload(); jest.useRealTimers(); }
+  });
+
+  it("announces a queued follow-up and a Codex question through the shared region", async () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount({ backendName: () => "Codex", onSubmit: jest.fn(async () => undefined) });
+    try {
+      workspace.setRunPending(true);
+      workspace.setInputText("Next step");
+      parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.send"]')!.click();
+      await jest.advanceTimersByTimeAsync(70);
+      const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      expect(region.textContent).toContain("Message queued.");
+      workspace.setRunPending(false);
+      const part: AgentToolPart = { kind: "tool", id: "question", callId: "question", messageId: "answer", order: 0,
+        name: "request_user_input", input: { questions: [{ id: "scope", question: "Which notes?", options: [{ label: "All" }] }] },
+        native: { agent: "codex", workingDirectory: "/vault" }, state: "approval-required", approvalId: "question", location: "server" };
+      const rendered = workspace.setAgentSnapshot({ runId: "run", turnId: "turn", status: "running", messages: [], parts: [part] });
+      await jest.advanceTimersByTimeAsync(20);
+      await rendered;
+      await jest.advanceTimersByTimeAsync(50);
+      expect(region.textContent).toContain("Codex asks: Which notes?");
+      expect(parent.querySelectorAll('[aria-live="polite"], [role="status"]:not([aria-live="off"])')).toHaveLength(1);
+    } finally { workspace.unload(); jest.useRealTimers(); }
+  });
+
+  it("preserves announcements in order when multiple events arrive before the live-region flush", () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount();
+    try {
+      const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      workspace.announce("Codex is working");
+      workspace.announce("Codex replied");
+      jest.advanceTimersByTime(50);
+      expect(region.textContent).toBe("Codex is working Codex replied");
+      workspace.announce("Message queued.");
+      expect(region.textContent).toBe("");
+      jest.advanceTimersByTime(50);
+      expect(region.textContent).toBe("Message queued.");
+      workspace.announce("Message queued.");
+      expect(region.textContent).toBe("");
+      jest.advanceTimersByTime(50);
+      expect(region.textContent).toBe("Message queued.");
+    } finally { workspace.unload(); jest.useRealTimers(); }
   });
 
   it("keeps one polite live region for announcements", () => {

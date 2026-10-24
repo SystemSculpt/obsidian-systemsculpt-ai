@@ -76,6 +76,9 @@ describe("AgentRunLine", () => {
     expect(toolbar.getAttribute("aria-label")).toBe("Chat run settings");
     const buttons = Array.from(toolbar.querySelectorAll<HTMLButtonElement>("button"));
     expect(buttons.map((button) => button.textContent)).toEqual(["Claude Code on this Mac", "Auto", "Default"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      expect.stringContaining("Claude Code"), expect.stringContaining("Auto"), expect.stringContaining("Default"),
+    ]);
     expect(buttons.map((button) => button.tabIndex)).toEqual([0, -1, -1]);
     expect(buttons.every((button) => button.getAttribute("aria-haspopup") === "menu")).toBe(true);
     // The narrow form hides only the suffix (container query).

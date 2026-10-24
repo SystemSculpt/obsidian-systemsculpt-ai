@@ -124,6 +124,34 @@ describe("AgentChatView chrome wiring", () => {
     expect(view.workspace.announce).toHaveBeenCalledWith("Started a new chat with Codex");
   });
 
+  it.each(["claude", "codex", null] as const)("announces an explicit new chat with %s exactly once", async (agent) => {
+    const view = harness({ agent });
+    await view.newChat();
+    expect(view.startNewChat).toHaveBeenCalledWith(true);
+    expect(view.workspace.announce.mock.calls).toEqual([[`Started a new chat with ${agent === "claude" ? "Claude Code" : agent === "codex" ? "Codex" : "SystemSculpt"}`]]);
+  });
+
+  it("does not announce a new chat superseded by another conversation", async () => {
+    const view = harness();
+    let finish!: () => void;
+    view.startNewChat.mockImplementation(() => {
+      view.conversationOriginToken = "new-chat";
+      return new Promise<void>(resolve => { finish = resolve; });
+    });
+    const started = view.newChat();
+    view.conversationOriginToken = "restored-chat";
+    finish();
+    await started;
+    expect(view.workspace.announce).not.toHaveBeenCalled();
+  });
+
+  it("does not announce a new chat when creating it fails", async () => {
+    const view = harness();
+    view.startNewChat.mockRejectedValue(new Error("Could not save"));
+    await expect(view.newChat()).rejects.toThrow("Could not save");
+    expect(view.workspace.announce).not.toHaveBeenCalled();
+  });
+
   it("switches an empty chat in place and leaves a matching backend alone", async () => {
     const empty = harness();
     await (empty as any).selectBackend("systemsculpt");

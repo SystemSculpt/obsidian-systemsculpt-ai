@@ -199,6 +199,7 @@ export class AgentWorkspace extends Component {
   private readonly emptyState: AgentEmptyState;
   private readonly liveRegion: HTMLElement;
   private announceTimer: number | null = null;
+  private pendingAnnouncements: string[] = [];
   private chromeKey = "";
   private historyReturnFocus: HTMLElement | null = null;
   private moreMenu: Menu | null = null;
@@ -394,6 +395,7 @@ export class AgentWorkspace extends Component {
     this.register(() => {
       if (this.announceTimer !== null) getSurfaceOwnerWindow(this.liveRegion).clearTimeout(this.announceTimer);
       this.announceTimer = null;
+      this.pendingAnnouncements = [];
     });
   }
 
@@ -411,14 +413,17 @@ export class AgentWorkspace extends Component {
 
   /** Polite announcement for screen readers. */
   public announce(text: string): void {
-    // Clearing first makes a repeated message announce again.
-    // A timer, not a frame: announcements never take a slot in the render frame queue.
+    if (this.unloaded) return;
+    this.pendingAnnouncements.push(text);
+    if (this.announceTimer !== null) return;
+    // Clearing first makes a repeated message announce again. Preserve a burst
+    // in order rather than letting a fast reply overwrite its start or approval.
     this.liveRegion.setText("");
     const ownerWindow = getSurfaceOwnerWindow(this.liveRegion);
-    if (this.announceTimer !== null) ownerWindow.clearTimeout(this.announceTimer);
     this.announceTimer = ownerWindow.setTimeout(() => {
       this.announceTimer = null;
-      this.liveRegion.setText(text);
+      this.liveRegion.setText(this.pendingAnnouncements.join(" "));
+      this.pendingAnnouncements = [];
     }, 50);
   }
 

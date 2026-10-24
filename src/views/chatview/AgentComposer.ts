@@ -237,7 +237,7 @@ export class AgentComposer extends Component {
     this.stopButton = createButton(actions, "systemsculpt-agent-stop", "chat.composer.stop", "Stop response", "square");
     this.stopButton.setAttribute("aria-keyshortcuts", "Escape");
     this.sendButton = createButton(actions, "systemsculpt-agent-send", "chat.composer.send", "Send message", "arrow-up", "primary");
-    this.sendButton.setAttribute("aria-keyshortcuts", "Enter");
+    this.sendButton.setAttribute("aria-keyshortcuts", this.prefersTouchInput() ? "Meta+Enter Control+Enter" : "Enter Meta+Enter Control+Enter");
 
     this.footerSlot = this.element.createDiv({ cls: "systemsculpt-agent-composer-footer" });
     this.mentions = new AgentComposerMentionPopover(this.element, this.input, {

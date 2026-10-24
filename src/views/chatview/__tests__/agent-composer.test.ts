@@ -284,6 +284,7 @@ describe("AgentComposer", () => {
     try {
       const { composer, input, submissions, query } = mount();
       composer.setValue("Line one");
+      expect(query('[data-testid="chat.composer.send"]')!.getAttribute("aria-keyshortcuts")).toBe("Meta+Enter Control+Enter");
       expect(key(input, { key: "Enter" }).defaultPrevented).toBe(false);
       expect(submissions).toHaveLength(0);
       query('[data-testid="chat.composer.send"]')!.click();

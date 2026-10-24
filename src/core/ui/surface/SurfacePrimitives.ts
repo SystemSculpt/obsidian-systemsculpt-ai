@@ -1,4 +1,4 @@
-import { SearchComponent, setIcon } from "obsidian";
+import { SearchComponent, setIcon, setTooltip } from "obsidian";
 
 export type UiActionTone = "default" | "primary" | "danger" | "warning";
 export type UiActionSize = "default" | "small" | "icon";
@@ -112,19 +112,14 @@ export function updateUiAction(
 ): void {
   const iconOnly = button.dataset.ssAction === "icon";
   const tooltipEnabled = button.dataset.ssTooltip !== "off";
-  const previousLabel = iconOnly
-    ? button.getAttribute("aria-label") ?? ""
-    : button.querySelector<HTMLElement>(".ss-button__label")?.textContent ?? "";
-
   if (state.label !== undefined) {
     if (iconOnly) {
-      button.setAttribute("aria-label", state.label);
+      // Obsidian's tooltip is the accessible name, even without a native title.
+      setTooltip(button, state.label);
+      if (tooltipEnabled) button.title = state.label;
     } else {
       const label = button.querySelector<HTMLElement>(".ss-button__label");
       if (label) label.textContent = state.label;
-    }
-    if (tooltipEnabled && iconOnly && (!button.title || button.title === previousLabel)) {
-      button.title = state.label;
     }
   }
 
