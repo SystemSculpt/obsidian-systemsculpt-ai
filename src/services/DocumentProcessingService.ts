@@ -7,7 +7,7 @@ import type {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../utils/sha256";
+import { sha256HexFromArrayBuffer, sha256HexFromBytes, sha256HexFromBytesPortable } from "../utils/sha256";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
@@ -163,11 +163,12 @@ export class DocumentProcessingService {
         throwIfAborted(signal);
         return { filename: file.name, contentType, bytes };
       })();
+      let fingerprint: Promise<`sha256:${string}`> | undefined;
       // Conversions of one file take turns through their local commit, so a
       // second one of the same bytes commits the result the first delivered.
       const receipt = await this.adapter().processAndCommit({
         identity,
-        fingerprint: async () => `sha256:${await sha256HexFromArrayBuffer((await load()).bytes)}`,
+        fingerprint: () => fingerprint ??= load().then(async ({ bytes }) => `sha256:${await sha256HexFromArrayBuffer(bytes)}` as const),
         load,
       }, {
         signal,
@@ -246,7 +247,7 @@ export class DocumentProcessingService {
   ): Promise<DocumentProcessingReceipt> {
     await this.adapter().beginLocalCommit(remote.operationId, signal);
     throwIfAborted(signal);
-    const prepared = this.prepareLocalEffects(file, remote.result);
+    const prepared = await this.prepareLocalEffects(file, remote.result);
     throwIfAborted(signal);
     const metadata = await this.staging().stage(remote.operationId, prepared.artifacts, signal);
     throwIfAborted(signal);
@@ -306,7 +307,7 @@ export class DocumentProcessingService {
     return receipt;
   }
 
-  private prepareLocalEffects(file: TFile, result: ManagedDocumentDownloadResult): PreparedLocalEffects {
+  private async prepareLocalEffects(file: TFile, result: ManagedDocumentDownloadResult): Promise<PreparedLocalEffects> {
     const extractionFolder = this.plugin.settings.extractionsDirectory?.trim() ?? "";
     const baseName = this.sanitizeFilename(file.basename);
     const parentPath = extractionFolder ? `${extractionFolder}/${baseName}` : `${file.parent?.path || ""}/${baseName}`;
@@ -319,7 +320,7 @@ export class DocumentProcessingService {
 
     for (const [imageName, imageBase64] of Object.entries(rawImages)) {
       const bytes = this.base64ToArrayBuffer(imageBase64);
-      const contentHash = sha256HexFromBytesPortable(new Uint8Array(bytes));
+      const contentHash = await sha256HexFromArrayBuffer(bytes);
       const existing = contentPaths.get(contentHash);
       if (existing) {
         imagePathMap.set(imageName, existing.relativePath);
@@ -383,7 +384,8 @@ export class DocumentProcessingService {
     if (exists) {
       const current = await this.app.vault.adapter.readBinary(path);
       throwIfAborted(signal);
-      const currentHash = sha256HexFromBytesPortable(new Uint8Array(current));
+      const currentHash = await sha256HexFromArrayBuffer(current);
+      throwIfAborted(signal);
       if (current.byteLength !== metadata.byteLength || currentHash !== metadata.sha256) {
         throw new ManagedDocumentLocalEffectError(`Existing image conflicts with managed effect ${path}.`);
       }
@@ -407,7 +409,8 @@ export class DocumentProcessingService {
       const current = await this.app.vault.adapter.read(path);
       throwIfAborted(signal);
       const currentBytes = new TextEncoder().encode(current);
-      const currentHash = sha256HexFromBytesPortable(currentBytes);
+      const currentHash = await sha256HexFromBytes(currentBytes);
+      throwIfAborted(signal);
       if (currentBytes.byteLength !== metadata.byteLength || currentHash !== metadata.sha256) {
         throw new ManagedDocumentLocalEffectError(`Existing Markdown conflicts with managed effect ${path}.`);
       }

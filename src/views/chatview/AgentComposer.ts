@@ -16,7 +16,7 @@ import type { ChatMessage } from "../../types";
 import {
   CHAT_ATTACHMENT_PICKER_ACCEPT,
   ChatMessageAttachmentCollection,
-  restoreChatMessageDraft,
+  chatMessageDraftText,
   type ChatAttachmentDisplay,
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
@@ -389,7 +389,7 @@ export class AgentComposer extends Component {
     const prompts: string[] = [];
     for (const message of messages) {
       if (message.role !== "user") continue;
-      const text = restoreChatMessageDraft(message).text.trim();
+      const text = chatMessageDraftText(message).trim();
       if (text && prompts[prompts.length - 1] !== text) prompts.push(text);
     }
     const browsing = this.recallIndex === null ? null : this.promptHistory[this.recallIndex];

@@ -4,14 +4,15 @@ import type {
   ChatMessage,
   MultiPartContent,
 } from "../../../types";
-import { sha256HexFromBytesPortable } from "../../../utils/sha256";
+import { sha256HexFromBytes } from "../../../utils/sha256";
 import { replaceControlCharacters } from "../../../utils/characterValidation";
 import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
   type ThinAgentInputLimits,
 } from "../../../services/managed/ThinAgentInputLimits";
 import {
-  createImageAttachmentPart,
+  createHashedImageAttachmentPart,
+  hashAttachmentPart,
   createTextAttachmentPart,
   parseAttachedTextContent,
   parseImageDataUrl,
@@ -515,7 +516,17 @@ export class ChatMessageAttachmentCollection {
         issues.push(issue("empty", name, `${name} is empty.`));
         continue;
       }
-      const hash = sha256HexFromBytesPortable(bytes);
+      let imagePart: MultiPartContent | undefined;
+      let hash: string;
+      try {
+        imagePart = imageMime ? await createHashedImageAttachmentPart(imageMime, bytes) : undefined;
+        hash = imagePart ? (await hashAttachmentPart(imagePart)).sha256 : await sha256HexFromBytes(bytes);
+      } catch {
+        if (signal.aborted || generation !== this.generation) break;
+        issues.push(issue("read_failed", name, `${name} could not be fingerprinted. Try attaching it again.`));
+        continue;
+      }
+      if (signal.aborted || generation !== this.generation) break;
       const kind = pdf ? "document" as const : imageMime ? "image" as const : "text" as const;
       const id = `${kind}-${hash}`;
       if (this.entries.has(id)) {
@@ -564,9 +575,7 @@ export class ChatMessageAttachmentCollection {
           mimeType,
           byteLength: bytes.byteLength,
           kind,
-          contentPart: kind === "image"
-            ? createImageAttachmentPart(mimeType, bytes)
-            : createTextAttachmentPart(name, mimeType, bytes),
+          contentPart: imagePart ?? createTextAttachmentPart(name, mimeType, bytes),
         });
       }
       const validation = this.validateSubmission(userText, [...this.snapshot(), attachment]);
@@ -696,12 +705,13 @@ function attachmentFromMetadata(
   });
 }
 
-function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageAttachment | null {
+async function fallbackAttachment(part: MultiPartContent, index: number): Promise<ChatMessageAttachment | null> {
   if (part.type === "image_url") {
     const parsed = parseImageDataUrl(part.image_url.url);
     if (!parsed) return null;
     const { mimeType, bytes } = parsed;
-    const hash = sha256HexFromBytesPortable(bytes);
+    const contentPart = await createHashedImageAttachmentPart(mimeType, bytes);
+    const hash = (await hashAttachmentPart(contentPart)).sha256;
     return Object.freeze({
       status: "ready" as const,
       id: `image-${hash}`,
@@ -709,7 +719,7 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
       mimeType,
       byteLength: bytes.byteLength,
       kind: "image" as const,
-      contentPart: part,
+      contentPart,
     });
   }
   const parsed = parseAttachedTextContent(part.text);
@@ -718,7 +728,7 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
   const kind = parsed.mimeType.toLowerCase() === "application/pdf" ? "document" as const : "text" as const;
   return Object.freeze({
     status: "ready" as const,
-    id: `${kind}-${sha256HexFromBytesPortable(bytes)}`,
+    id: `${kind}-${await sha256HexFromBytes(bytes)}`,
     name: safeFileName(parsed.name),
     mimeType: parsed.mimeType,
     byteLength: bytes.byteLength,
@@ -727,12 +737,27 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
   });
 }
 
+/** Prompt recall needs only text, not image decoding or attachment hashing. */
+export function chatMessageDraftText(message: Readonly<ChatMessage>): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  const content = message.content;
+  const attached = new Set((message.attachmentMetadata ?? [])
+    .filter((metadata) => attachmentFromMetadata(metadata, content))
+    .map((metadata) => metadata.contentPartIndex));
+  return content.flatMap((part, index) => {
+    if (attached.has(index) || part.type !== "text") return [];
+    const parsed = parseAttachedTextContent(part.text);
+    return (parsed && !parsed.unavailable) || !part.text.trim() ? [] : [part.text];
+  }).join("\n\n");
+}
+
 /**
  * Rebuilds the editable composer draft from one durable user message. Modern
  * messages retain exact attachment identity; pre-metadata chats get a safe,
  * deterministic best-effort reconstruction from their stored content parts.
  */
-export function restoreChatMessageDraft(message: Readonly<ChatMessage>): RestoredChatMessageDraft {
+export async function restoreChatMessageDraft(message: Readonly<ChatMessage>): Promise<RestoredChatMessageDraft> {
   if (typeof message.content === "string") {
     return Object.freeze({ text: message.content, attachments: Object.freeze([]) });
   }
@@ -751,7 +776,7 @@ export function restoreChatMessageDraft(message: Readonly<ChatMessage>): Restore
   let imageIndex = 0;
   for (let index = 0; index < content.length; index += 1) {
     if (indexedAttachments.has(index)) continue;
-    const attachment = fallbackAttachment(content[index], imageIndex);
+    const attachment = await fallbackAttachment(content[index], imageIndex);
     if (!attachment) continue;
     indexedAttachments.set(index, attachment);
     if (attachment.kind === "image") imageIndex += 1;

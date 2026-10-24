@@ -1,6 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUploadSource } from "../../types";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 import {
   AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
   type AudioProcessorAudioSource,
@@ -88,7 +89,7 @@ export class AudioProcessorDeviceStaging {
     this.adapter = plugin.app.vault.adapter;
     this.root = `${pluginDirectory}/${STAGING_DIRECTORY}`;
     this.chunkSizeBytes = chunkSizeBytes;
-    this.digest = testSeam.digest ?? sha256;
+    this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
     this.now = testSeam.now ?? Date.now;
   }
 
@@ -503,9 +504,4 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
-}
-
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

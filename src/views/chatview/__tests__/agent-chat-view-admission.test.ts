@@ -736,6 +736,31 @@ function cachedExecutingToolHistory(): ChatMessage[] {
 }
 
 describe("AgentChatView composer admission", () => {
+  it.each(["prepareRetry", "retryFailedTurn"])("%s reports a legacy attachment digest failure without changing history", async (action) => {
+    const history: ChatMessage[] = [{
+      role: "user", message_id: "legacy-image",
+      content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AQID" } }],
+    }];
+    const { view, transcript, agent } = createHistoricalResubmitHarness(history, 0);
+    Object.assign(view, { messageEditGeneration: 0 });
+    const subtleDescriptor = Object.getOwnPropertyDescriptor(crypto, "subtle");
+    Object.defineProperty(crypto, "subtle", {
+      configurable: true, value: { digest: jest.fn().mockRejectedValue(new Error("native digest failed")) },
+    });
+    const notice = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      await expect((view as any)[action]("legacy-image")).resolves.toBeUndefined();
+      expect(notice).toHaveBeenCalledWith("Notice: This message's attachments could not be prepared. Try again.");
+      expect(transcript.commitUser).not.toHaveBeenCalled();
+      expect(agent.start).not.toHaveBeenCalled();
+      expect((view as any).pendingRetry).toBeNull();
+    } finally {
+      if (subtleDescriptor) Object.defineProperty(crypto, "subtle", subtleDescriptor);
+      else Reflect.deleteProperty(crypto, "subtle");
+      notice.mockRestore();
+    }
+  });
+
   afterEach(() => {
     document.body.empty();
   });
