@@ -63,9 +63,9 @@ new Setting(containerEl)
     .setDesc("Minimize chat animations even when your system does not request reduced motion. Your system preference is always honored.")
     .addToggle((toggle) => {
         toggle
-            .setValue(plugin.settings.respectReducedMotion ?? true)
+            .setValue(plugin.settings.reduceChatMotion ?? false)
             .onChange(async (value) => {
-                await plugin.getSettingsManager().updateSettings({ respectReducedMotion: value });
+                await plugin.getSettingsManager().updateSettings({ reduceChatMotion: value });
                 new Notice(`Reduced motion ${value ? 'enabled' : 'disabled'}.`);
             });
     });

@@ -123,6 +123,21 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.phoneCapturesMeetingsFolder).toBe("Meetings/Team");
   });
 
+  it.each([
+    ["defaults", {}, false],
+    ["legacy true", { respectReducedMotion: true }, false],
+    ["legacy false", { respectReducedMotion: false }, false],
+    ["explicit opt-in", { reduceChatMotion: true, respectReducedMotion: false }, true],
+    ["explicit opt-out", { reduceChatMotion: false, respectReducedMotion: true }, false],
+    ["invalid new value", { reduceChatMotion: "true", respectReducedMotion: true }, false],
+  ])("loads reduced chat motion as an independent opt-in: %s", async (_label, storedSettings, expected) => {
+    const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION, ...storedSettings });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings).toHaveProperty("reduceChatMotion", expected);
+    expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({ reduceChatMotion: expected }));
+  });
+
   it("persists one stable thin-agent installation client id across reloads", async () => {
     const plugin = createPlugin({
       schemaVersion: CURRENT_SCHEMA_VERSION,
