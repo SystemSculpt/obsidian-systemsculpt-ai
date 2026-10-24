@@ -1,5 +1,6 @@
 import {
   isMobileLayout,
+  isTabletLayout,
   resolveMobileLayoutDocument,
   type MobileLayoutOwner,
 } from "./mobileLayout";
@@ -8,6 +9,8 @@ const HOST_MOBILE_NAV_SELECTOR = ".mobile-navbar-action";
 const MOBILE_LAYOUT_CLASS = "ss-mobile-layout";
 const MOBILE_NAV_VISIBLE_CLASS = "ss-mobile-navbar-visible";
 const MOBILE_NAV_HIDDEN_CLASS = "ss-mobile-navbar-hidden";
+/** A phone's navbar that Obsidian hid for now, as it does while the software keyboard is open. */
+const MOBILE_NAV_SUPPRESSED_CLASS = "ss-mobile-navbar-suppressed";
 
 const NAVBAR_VISIBILITY_ATTRIBUTES = ["aria-hidden", "class", "hidden", "style"];
 
@@ -69,9 +72,13 @@ function readVisibleNavbar(document: Document): HTMLElement | null {
 function updateOwnedClasses(document: Document): void {
   const mobile = isMobileLayout(document);
   const navbarVisible = mobile && readVisibleNavbar(document) !== null;
+  // Tablets never show the floating navbar, so its absence there says
+  // nothing about the keyboard.
+  const navbarSuppressed = mobile && !navbarVisible && !isTabletLayout(document);
   document.body.classList.toggle(MOBILE_LAYOUT_CLASS, mobile);
   document.body.classList.toggle(MOBILE_NAV_VISIBLE_CLASS, navbarVisible);
   document.body.classList.toggle(MOBILE_NAV_HIDDEN_CLASS, mobile && !navbarVisible);
+  document.body.classList.toggle(MOBILE_NAV_SUPPRESSED_CLASS, navbarSuppressed);
 }
 
 function createController(document: Document): MobileHostLayoutController {
@@ -122,6 +129,7 @@ function createController(document: Document): MobileHostLayoutController {
         MOBILE_LAYOUT_CLASS,
         MOBILE_NAV_VISIBLE_CLASS,
         MOBILE_NAV_HIDDEN_CLASS,
+        MOBILE_NAV_SUPPRESSED_CLASS,
       );
       controllers.delete(document);
     },
@@ -282,4 +290,5 @@ export const MOBILE_HOST_LAYOUT_CLASSES = Object.freeze({
   layout: MOBILE_LAYOUT_CLASS,
   navbarVisible: MOBILE_NAV_VISIBLE_CLASS,
   navbarHidden: MOBILE_NAV_HIDDEN_CLASS,
+  navbarSuppressed: MOBILE_NAV_SUPPRESSED_CLASS,
 });

@@ -12,6 +12,7 @@ type MutablePlatform = typeof Platform & {
   isDesktopApp?: boolean;
   isMobile?: boolean;
   isMobileApp?: boolean;
+  isTablet?: boolean;
 };
 
 async function waitForOwnedClass(className: string, present: boolean): Promise<void> {
@@ -87,6 +88,38 @@ describe("mobile host layout adapter", () => {
 
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarSuppressed)).toBe(true);
+
+    navbar.hidden = false;
+    await waitForOwnedClass(MOBILE_HOST_LAYOUT_CLASSES.navbarSuppressed, false);
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(true);
+  });
+
+  it("never reports a tablet's absent navbar as suppressed by the keyboard", () => {
+    // Obsidian's tablet layout styles the floating navbar display: none for good.
+    document.body.classList.add("is-tablet");
+    document.body.appendChild(Object.assign(document.createElement("nav"), {
+      className: "mobile-navbar-action",
+      hidden: true,
+    }));
+
+    ensureMobileHostLayoutState(document);
+
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarSuppressed)).toBe(false);
+  });
+
+  it("recognizes a real tablet from the platform, not only the layout class", () => {
+    platform.isTablet = true;
+    try {
+      ensureMobileHostLayoutState(document);
+
+      expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(true);
+      expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarSuppressed)).toBe(false);
+    } finally {
+      delete platform.isTablet;
+    }
   });
 
   it("falls back to the platform instanceof check when the Obsidian helper is unavailable", async () => {
@@ -188,6 +221,7 @@ describe("mobile host layout adapter", () => {
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.layout)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarVisible)).toBe(false);
     expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarHidden)).toBe(false);
+    expect(document.body.classList.contains(MOBILE_HOST_LAYOUT_CLASSES.navbarSuppressed)).toBe(false);
   });
 });
 
