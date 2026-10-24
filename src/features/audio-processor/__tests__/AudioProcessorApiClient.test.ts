@@ -188,6 +188,19 @@ describe("AudioProcessorApiClient", () => {
     }));
   });
 
+  it.each(["5", "Sat, 24 Oct 2026 18:00:05 GMT"])("preserves signed upload Retry-After %s", async (retryAfter) => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-10-24T18:00:00Z"));
+    try {
+      const { client, requestClient } = setup();
+      requestClient.responses.push(new Response("Unavailable", { status: 503, headers: { "Retry-After": retryAfter } }));
+      await expect(client.uploadPart({
+        partNumber: 1, url: "https://objects.example.com/upload", headers: {}, expiresInSeconds: 900,
+      }, new Uint8Array([1]).buffer)).rejects.toMatchObject({ status: 503, retryAfterMs: 5_000 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("uses raw requestUrl transport for signed multipart uploads and preserves the ETag", async () => {
     const { client, requestClient } = setup();
     const bytes = new Uint8Array([1, 2, 3, 4]).buffer;

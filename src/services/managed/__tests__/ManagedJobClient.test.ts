@@ -130,6 +130,14 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.documents.download("doc-1")).rejects.toMatchObject({ code: "malformed_response" });
   });
 
+  it.each(["transcription", "documents"] as const)("preserves signed %s upload Retry-After", async (capability) => {
+    request.mockResolvedValueOnce(json({ part: {
+      part_number: 1, method: "PUT", url: "https://signed/part", url_expires_in_seconds: 900, expected_content_length_bytes: 1,
+    } })).mockResolvedValueOnce(new Response("Unavailable", { status: 503, headers: { "retry-after": "5" } }));
+    await expect(client[capability].uploadPart("job-1", 1, new Uint8Array([1]).buffer))
+      .rejects.toMatchObject({ status: 503, retryable: true, retryAfterMs: 5_000 });
+  });
+
   it("keeps Retry-After outside strict response bodies while exposing the server poll hint", async () => {
     request.mockResolvedValueOnce(json(
       { document: { id: "doc-1", status: "processing", error: null, progress: 0.5 } },

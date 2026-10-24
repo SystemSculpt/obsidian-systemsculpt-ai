@@ -5,6 +5,7 @@ import fixture from "../../../testing/fixtures/managed/managed-job-protocol-v1.j
 import { ManagedJobClient, ManagedJobError, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES } from "../managed/ManagedJobClient";
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../managed/ManagedJobRecoveryStore";
 import { ManagedDocumentProcessingAdapter } from "../managed/ManagedDocumentProcessingAdapter";
+import { waitForManagedJob } from "../managed/ManagedJobObservation";
 import { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 import { PlatformRequestClient } from "../PlatformRequestClient";
 import { createVaultFileSource } from "../../platform/fileSource";
@@ -52,7 +53,7 @@ const createRequest = {
   contentLengthBytes: 6,
 } as const;
 
-function managedHarness() {
+function managedHarness(wait = async (_milliseconds: number, _signal: AbortSignal) => undefined) {
   const events: string[] = [];
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
@@ -71,12 +72,53 @@ function managedHarness() {
     jobs,
     recovery,
     createOperationId: () => `document-op-${++operations}`,
-    wait: async () => undefined,
+    wait,
   });
   return { adapter, admission, events, jobs, recovery, storage };
 }
 
 describe("managed document processing adapter contract", () => {
+  describe.each(["create", "uploadPart", "complete", "start"] as const)("%s dispatch", (step) => {
+    afterEach(() => jest.useRealTimers());
+    const source = () => ({
+      identity: "vault:report.pdf", fingerprint: () => `sha256:${"a".repeat(64)}`,
+      load: async () => ({ filename: "report.pdf", contentType: "application/pdf", ...documentContent() }),
+    });
+
+    it.each([503, 429])("replays a %s with unchanged identity and bytes after Retry-After", async (status) => {
+      jest.useFakeTimers();
+      const h = managedHarness(waitForManagedJob);
+      const send = h.jobs[step];
+      const original = send.getMockImplementation()!;
+      send.mockImplementationOnce(async (...args) => {
+        await original(...args);
+        throw new ManagedJobError("temporarily_unavailable", "Try later", status, null, true, null, 5_000);
+      });
+      const running = h.adapter.process(source());
+      const finished = expect(running).resolves.toMatchObject({ documentId, result: downloaded });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(send).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await finished;
+      expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+      expect(new Set(h.jobs.create.mock.calls.map((call) => call[1]))).toEqual(new Set(["document-op-1"]));
+      expect(h.jobs.create).toHaveBeenCalledTimes(step === "create" ? 2 : 1);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      await expect(h.recovery.read("document_processing", "document-op-1")).resolves.toMatchObject({
+        jobId: documentId, phase: "result_ready", completedParts: [{ partNumber: 1, etag }, { partNumber: 2, etag }],
+      });
+    });
+
+    it("fails a 400 immediately without scheduling another dispatch", async () => {
+      jest.useFakeTimers();
+      const h = managedHarness(waitForManagedJob);
+      h.jobs[step].mockRejectedValueOnce(new ManagedJobError("invalid_request", "Invalid input", 400));
+      await expect(h.adapter.process(source())).rejects.toThrow("Invalid input");
+      expect(h.jobs[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
   it("rereads only the interrupted multipart range and preserves acknowledged ETags", async () => {
     const h = managedHarness();
     const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;

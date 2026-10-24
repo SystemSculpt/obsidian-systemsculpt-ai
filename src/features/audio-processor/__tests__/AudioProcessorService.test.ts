@@ -7,6 +7,7 @@ import type {
   AudioProcessorSignedPart,
 } from "../AudioProcessorApiClient";
 import { AudioProcessorService } from "../AudioProcessorService";
+import { AudioProcessorApiError } from "../AudioProcessorApiClient";
 import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import type {
   AudioProcessorAudioSource,
@@ -196,6 +197,50 @@ function createApi() {
 }
 
 describe("AudioProcessorService", () => {
+  describe.each(["getPartUrl", "uploadPart", "completeUpload"] as const)("%s dispatch", (step) => {
+    afterEach(() => jest.useRealTimers());
+
+    it.each([503, 429])("retries a %s after Retry-After with the same upload identity", async (status) => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Try later", status, "temporarily_unavailable", 5_000));
+      api.getJob.mockReset();
+      if (step === "completeUpload") api.getJob.mockResolvedValueOnce(job("uploading", "uploading", 0.35));
+      api.getJob.mockResolvedValue(job("succeeded", "complete", 1));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ jobId: "audio_job_123" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await jest.runAllTimersAsync();
+      await finished;
+      expect(api[step].mock.calls[1]).toEqual(api[step].mock.calls[0]);
+      expect(api.createAudioJob).toHaveBeenCalledTimes(1);
+      expect(api.abortUpload).not.toHaveBeenCalled();
+    });
+
+    it("fails a 400 immediately without retry or completion reconciliation", async () => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Invalid input", 400, "invalid_request"));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).rejects.toThrow("Invalid input");
+      await jest.advanceTimersByTimeAsync(0);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+      await finished;
+      expect(api.getJob).not.toHaveBeenCalled();
+    });
+  });
+
   it("saves a paid transcript during summary work without acknowledging and repairs its link on completion", async () => {
     const { plugin, contents } = createPlugin();
     const api = createApi();
@@ -548,7 +593,7 @@ describe("AudioProcessorService", () => {
   it("refreshes a signed part URL and retries a transient multipart failure", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
-    api.uploadPart.mockRejectedValueOnce(new Error("temporary object-store failure"));
+    api.uploadPart.mockRejectedValueOnce(new AudioProcessorApiError("temporary object-store failure", 503, "upload_failed"));
     const audio = createAudioSource(new Uint8Array(10));
     const service = new AudioProcessorService(plugin, {
       apiClient: api as unknown as AudioProcessorApiClient,
@@ -718,7 +763,7 @@ describe("AudioProcessorService", () => {
   it("recovers server state when the upload-completion response is lost", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
-    api.completeUpload.mockRejectedValueOnce(new Error("connection lost after request"));
+    api.completeUpload.mockRejectedValueOnce(new TypeError("connection lost after request"));
     api.getJob.mockReset()
       .mockResolvedValueOnce(job("processing", "transcribing", 0.62))
       .mockResolvedValueOnce(job("succeeded", "complete", 1));
@@ -743,7 +788,7 @@ describe("AudioProcessorService", () => {
     const { plugin } = createPlugin();
     const api = createApi();
     api.completeUpload
-      .mockRejectedValueOnce(new Error("temporary completion failure"))
+      .mockRejectedValueOnce(new AudioProcessorApiError("temporary completion failure", 503, "temporarily_unavailable"))
       .mockResolvedValueOnce(job("queued", "queued", 0.36));
     api.getJob.mockReset()
       .mockResolvedValueOnce(job("uploading", "uploading", 0.35))

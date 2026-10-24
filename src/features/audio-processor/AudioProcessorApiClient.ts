@@ -178,6 +178,7 @@ export class AudioProcessorApiClient {
         `Audio upload failed (${response.status}).`,
         response.status,
         "upload_failed",
+        retryAfterHeaderMs(response.headers.get("retry-after")),
       );
     }
     const etag = response.headers.get("etag")?.trim();

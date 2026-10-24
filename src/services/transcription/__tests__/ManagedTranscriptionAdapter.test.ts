@@ -1,5 +1,6 @@
 import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../../managed/ManagedJobRecoveryStore";
 import { ManagedJobError } from "../../managed/ManagedJobClient";
+import { waitForManagedJob } from "../../managed/ManagedJobObservation";
 import {
   ManagedTranscriptionAdapter,
   ManagedTranscriptionInterruptedError,
@@ -74,7 +75,7 @@ const source = (
 
 function harness(statuses: Array<{ job: { id: string; status: string }; transcript: string | null; progress: number }> = [
   { job: { id: jobId, status: "succeeded" }, transcript: "managed transcript", progress: 1 },
-]) {
+], wait = async (_milliseconds: number, _signal: AbortSignal) => undefined) {
   const events: string[] = [];
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
@@ -110,12 +111,50 @@ function harness(statuses: Array<{ job: { id: string; status: string }; transcri
     jobs,
     recovery,
     createOperationId: () => "transcription-op-1",
-    wait: async () => undefined,
+    wait,
   });
   return { adapter, admission, events, jobs, recovery, storage };
 }
 
 describe("ManagedTranscriptionAdapter", () => {
+  describe.each(["create", "uploadPart", "complete", "start"] as const)("%s dispatch", (step) => {
+    afterEach(() => jest.useRealTimers());
+
+    it.each([503, 429])("replays a %s with unchanged identity and bytes after Retry-After", async (status) => {
+      jest.useFakeTimers();
+      const h = harness(undefined, waitForManagedJob);
+      const send = h.jobs[step];
+      const original = send.getMockImplementation()!;
+      send.mockImplementationOnce(async (...args) => {
+        await original(...args);
+        throw new ManagedJobError("temporarily_unavailable", "Try later", status, null, true, null, 5_000);
+      });
+      const running = h.adapter.transcribe(source("a"));
+      const finished = expect(running).resolves.toMatchObject({ kind: "transcript", text: "managed transcript" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(send).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await finished;
+      expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+      // The create key remains the same even when its response was lost.
+      expect(new Set(h.jobs.create.mock.calls.map((call) => call[1]))).toEqual(new Set(["transcription-op-1"]));
+      expect(h.jobs.create).toHaveBeenCalledTimes(step === "create" ? 2 : 1);
+      expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
+      await expect(h.recovery.read("transcription", "transcription-op-1")).resolves.toMatchObject({
+        jobId, phase: "result_ready", completedParts: [{ partNumber: 1, etag }, { partNumber: 2, etag }],
+      });
+    });
+
+    it("fails a 400 immediately without scheduling another dispatch", async () => {
+      jest.useFakeTimers();
+      const h = harness(undefined, waitForManagedJob);
+      h.jobs[step].mockRejectedValueOnce(new ManagedJobError("invalid_request", "Invalid input", 400));
+      await expect(h.adapter.transcribe(source("b"))).rejects.toThrow("Invalid input");
+      expect(h.jobs[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
   it("admits and records recovery before reading audio, then executes the exact managed lifecycle", async () => {
     const { adapter, events, jobs, recovery, storage } = harness();
     const result = await adapter.transcribe({

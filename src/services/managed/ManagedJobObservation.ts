@@ -208,18 +208,18 @@ export type ManagedJobDispatchOptions<T> = Readonly<{
  * Sends one idempotent managed job request, retrying while the server says the
  * failure is transient.
  *
- * Polling already survives a blip because observeManagedJob retries; the
- * request that starts the work did not, so a lock wait during credit
- * reservation ended a whole Studio run. Every caller carries an idempotency
- * key, so a replay returns the original job instead of paying twice. Attempts
- * are bounded because, unlike polling, there is no server-side job yet to keep
- * waiting on.
+ * Creates, completion and start carry the original operation's idempotency
+ * key; a part replay replaces the same part with the same bytes. Keep recovery
+ * writes outside send so a local persistence failure never replays a request.
+ * Dispatch attempts are bounded; observing an acknowledged job is not.
  */
 export async function dispatchManagedJob<T>(
   options: ManagedJobDispatchOptions<T>,
 ): Promise<T> {
   const wait = options.wait ?? waitForManagedJob;
   const isRetryable = options.isRetryableError ?? isRetryableManagedJobObservationError;
+  const retryAfterMs = options.retryAfterMs
+    ?? ((error: unknown) => (error as { retryAfterMs?: number } | null)?.retryAfterMs);
   let backoffMs = TRANSIENT_RETRY_BASE_MS;
 
   for (let attempt = 1; ; attempt += 1) {
@@ -230,7 +230,7 @@ export async function dispatchManagedJob<T>(
       throwIfAborted(options.signal);
       if (attempt >= DISPATCH_MAX_ATTEMPTS || !isRetryable(error)) throw error;
       await wait(
-        normalizedPollAfterMs(options.retryAfterMs?.(error), backoffMs),
+        normalizedPollAfterMs(retryAfterMs(error), backoffMs),
         options.signal,
       );
       backoffMs = Math.min(TRANSIENT_RETRY_MAX_MS, backoffMs * 2);
