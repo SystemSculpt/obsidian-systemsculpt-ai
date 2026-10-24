@@ -72,7 +72,8 @@ export class FirstPartyToolService {
   }
 
   setVaultRoot(root: string | null, aliases: string[] = []): void {
-    this.vaultRoot = normalizeVaultRelativePath(root ?? "") || null;
+    // Tool mapping distinguishes an explicit vault root from disabled mapping.
+    this.vaultRoot = root ? normalizeVaultRelativePath(root) || "/" : null;
     this.vaultRootAliases = (Array.isArray(aliases) ? aliases : [])
       .map((alias) => normalizeVaultRelativePath(alias))
       .filter((alias) => alias.length > 0);
@@ -246,6 +247,6 @@ export class FirstPartyToolService {
       }
     }
     if (normalized === root || normalized.startsWith(`${root}/`)) return normalized;
-    return normalizeVaultRelativePath(`${root}/${normalized}`);
+    return normalizeVaultRelativePath(`${root}/${normalized}`) || "/";
   }
 }
