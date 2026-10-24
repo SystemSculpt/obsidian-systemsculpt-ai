@@ -3,6 +3,9 @@
  */
 
 import { DiffResult, DiffLine } from '../utils/diffUtils';
+import { createUiAction } from '../core/ui/surface';
+
+let diffContentSequence = 0;
 
 /**
  * Why a diff is empty. An empty diff has more than one cause and they are not
@@ -19,6 +22,8 @@ export interface DiffViewerOptions {
   showLineNumbers?: boolean; // Show line numbers (default false for compactness)
   emptyReason?: DiffEmptyReason; // Why there is nothing to show (default 'identical')
   emptyDetail?: string; // Extra context for the empty state, e.g. unmatched edit count
+  hideHeader?: boolean; // A single-file card already names the file and change size
+  maxVisibleLines?: number; // Disclose the complete diff instead of silently clipping it
 }
 
 export class DiffViewer {
@@ -29,6 +34,8 @@ export class DiffViewer {
   private showLineNumbers: boolean;
   private emptyReason: DiffEmptyReason;
   private emptyDetail: string | null;
+  private hideHeader: boolean;
+  private maxVisibleLines: number | undefined;
 
   constructor(options: DiffViewerOptions) {
     this.container = options.container;
@@ -38,14 +45,17 @@ export class DiffViewer {
     this.showLineNumbers = options.showLineNumbers ?? false;
     this.emptyReason = options.emptyReason ?? 'identical';
     this.emptyDetail = options.emptyDetail ?? null;
+    this.hideHeader = options.hideHeader ?? false;
+    this.maxVisibleLines = options.maxVisibleLines;
   }
 
   public render(): void {
     this.container.empty();
     this.container.classList.add('systemsculpt-diff-viewer');
+    this.container.classList.toggle('is-blocked', this.emptyReason !== 'identical');
 
-    // Create header with file info and stats
-    this.createHeader();
+    // A single-file approval already names the file above its preview.
+    if (!this.hideHeader) this.createHeader();
 
     // Create diff content with change hunks
     this.createChangeHunks();
@@ -138,8 +148,10 @@ export class DiffViewer {
 
   private createChangeHunks(): void {
     const content = this.container.createDiv({
-      cls: 'systemsculpt-diff-content'
+      cls: 'systemsculpt-diff-content',
+      attr: { tabindex: '0', 'aria-label': 'File changes' },
     });
+    content.classList.toggle('is-disclosed', this.maxVisibleLines !== undefined);
 
     // Group lines into change hunks (continuous groups of changes with context)
     const hunks = this.diffResult.hunks
@@ -157,14 +169,39 @@ export class DiffViewer {
       return;
     }
 
-    hunks.forEach((hunk, index) => {
-      this.createHunk(content, hunk, index);
-    });
-
-    if (this.diffResult.isTruncated) {
-      content.createDiv({
-        cls: 'systemsculpt-diff-truncated',
-        text: 'Preview shortened — open the file to review the full change.',
+    const totalLines = hunks.reduce((count, hunk) => count + hunk.length, 0);
+    const visibleLines = this.maxVisibleLines ?? totalLines;
+    const renderHunks = (expanded: boolean): void => {
+      content.empty();
+      let remaining = expanded ? totalLines : visibleLines;
+      for (const [index, hunk] of hunks.entries()) {
+        if (remaining <= 0) break;
+        this.createHunk(content, hunk.slice(0, remaining), index);
+        remaining -= hunk.length;
+      }
+      if (this.diffResult.isTruncated) {
+        content.createDiv({
+          cls: 'systemsculpt-diff-truncated',
+          text: 'Preview shortened — open the file to review the full change.',
+        });
+      }
+    };
+    renderHunks(false);
+    if (totalLines > visibleLines) {
+      content.id = `ss-diff-content-${++diffContentSequence}`;
+      const showAll = createUiAction(this.container, {
+        label: `Show full diff (${totalLines} lines)`,
+        testId: 'chat.diff.show-all',
+        size: 'small',
+      });
+      showAll.addClass('systemsculpt-diff-show-all');
+      showAll.setAttrs({ 'aria-expanded': 'false', 'aria-controls': content.id });
+      showAll.addEventListener('click', () => {
+        const expanded = showAll.getAttribute('aria-expanded') !== 'true';
+        renderHunks(expanded);
+        showAll.setAttribute('aria-expanded', String(expanded));
+        const label = showAll.querySelector('.ss-button__label');
+        if (label) label.textContent = expanded ? 'Show less' : `Show full diff (${totalLines} lines)`;
       });
     }
   }
@@ -274,7 +311,7 @@ export class DiffViewer {
         prefix.textContent = '+';
         break;
       case 'removed':
-        prefix.textContent = '-';
+        prefix.textContent = '−';
         break;
       case 'unchanged':
         prefix.textContent = '';
