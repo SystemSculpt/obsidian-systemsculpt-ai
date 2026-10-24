@@ -407,6 +407,14 @@ describe("FirstPartyToolService", () => {
     expect(mockReadFiles).toHaveBeenCalledWith({ paths: ["Projects/Demo/Notes/A.md"] });
   });
 
+  it("normalizes root and alias separators without mistaking a sibling for an alias", async () => {
+    server.setVaultRoot(" /Projects\\Demo// ", [" /workspace// "]);
+    await server.executeTool("read", { paths: ["workspace\\Notes//A.md", "workspace-extra/A.md", "Projects/Demo/B.md"] });
+    expect(mockReadFiles).toHaveBeenCalledWith({ paths: [
+      "Projects/Demo/Notes/A.md", "Projects/Demo/workspace-extra/A.md", "Projects/Demo/B.md",
+    ] });
+  });
+
   it("rejects pre-cancelled requests before local dispatch", async () => {
     const controller = new AbortController();
     controller.abort();

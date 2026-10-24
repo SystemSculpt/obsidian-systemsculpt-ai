@@ -18,6 +18,7 @@ import {
 import { SemanticMatrix } from "../search/SemanticMatrix";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import { toError } from "../../../utils/errors";
+import { normalizeVaultRelativePath } from "../../../utils/vaultPathUtils";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 /** A search matrix nobody has queried for this long is released. */
@@ -93,8 +94,8 @@ export class EmbeddingsStorage {
   }
 
   private normalizeDirPrefix(dir: string): string {
-    if (!dir) return "";
-    return dir.endsWith("/") ? dir : `${dir}/`;
+    const path = normalizeVaultRelativePath(dir, { trim: false, preserveCharacters: true });
+    return path ? `${path}/` : "";
   }
 
   private parseChunkIdFromId(id: string): number {

@@ -30,8 +30,17 @@ public operations and behavioral tests before following private helpers.
 | Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, settings presentation, and account connection respectively. |
 | Credential hygiene | `src/core/security/` | Keeps plain-text credential files that retired features left in the plugin folder out of Git, and tells the user how to clean them up. |
 | Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. |
-| Shared data primitives | `src/utils/sha256.ts`, `base64.ts` | Content hashing and byte encoding used across capabilities. These are independent of Studio and presentation. |
+| Shared data primitives | `src/utils/vaultPathUtils.ts`, `vaultFileName.ts`, `sha256.ts`, `base64.ts` | Vault-relative path normalization, generated filename sanitation, content hashing and byte encoding. These are independent of Studio and presentation. |
 | Desktop and window behavior | `src/platform/`, `src/core/ui/surface/` | Host capabilities, desktop adapters, mobile host chrome, owner-window DOM, and shared surface interaction. |
+
+Vault-relative separator and character normalization belongs to `normalizeVaultRelativePath`.
+Its options preserve literal on-disk names, opt tool inputs into URI decoding, and
+validate strict relative directories before repairing separators. It does not
+resolve dot segments or sanitize generated filenames; those remain separate
+validation and `vaultFileName.ts` policies. Callers retain domain errors, root
+mapping, project extensions and directory-prefix boundaries. Native filesystem
+paths (including Studio's desktop picker) must retain their absolute roots and
+must not use a vault-relative normalizer.
 
 `src/studio/` owns project semantics; `src/views/studio/` owns their presentation.
 Execution edges, diagram arrows, and parent links have distinct meanings even

@@ -105,6 +105,20 @@ function source(value: Uint8Array): AudioProcessorAudioSource {
 }
 
 describe("AudioProcessorDeviceStaging", () => {
+  it("writes beneath the literal installed directory without changing Unicode or spaces", async () => {
+    const adapter = new MemoryAdapter();
+    const plugin = installedPlugin(adapter);
+    const configDir = " café config ";
+    plugin.app.vault.configDir = configDir;
+    plugin.manifest.dir = `${configDir}/plugins/systemsculpt-ai`;
+    const staging = new AudioProcessorDeviceStaging(plugin);
+    await staging.stage("audio_literal_path", source(new Uint8Array([1, 2, 3])));
+    expect(adapter.files.size).toBeGreaterThan(0);
+    expect([...adapter.files.keys()].every((path) => path.startsWith(
+      `${configDir}/plugins/systemsculpt-ai/.audio-processor-staging/`,
+    ))).toBe(true);
+  });
+
   it("publishes verified bounded chunks and restores random-access reads after restart", async () => {
     const adapter = new MemoryAdapter();
     const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);

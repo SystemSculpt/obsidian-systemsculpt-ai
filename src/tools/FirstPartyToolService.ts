@@ -1,4 +1,5 @@
-import { normalizePath, type App } from "obsidian";
+import type { App } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../main";
 import { FileOperations } from "./vault/tools/FileOperations";
 import { DirectoryOperations } from "./vault/tools/DirectoryOperations";
@@ -71,9 +72,9 @@ export class FirstPartyToolService {
   }
 
   setVaultRoot(root: string | null, aliases: string[] = []): void {
-    this.vaultRoot = root ? normalizePath(root) : null;
+    this.vaultRoot = normalizeVaultRelativePath(root ?? "") || null;
     this.vaultRootAliases = (Array.isArray(aliases) ? aliases : [])
-      .map((alias) => normalizePath(String(alias ?? "")).replace(/^\/+/, ""))
+      .map((alias) => normalizeVaultRelativePath(alias))
       .filter((alias) => alias.length > 0);
   }
 
@@ -166,7 +167,7 @@ export class FirstPartyToolService {
       value && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>
         : {};
-    const mapPath = (path: string): string => this.normalizeVaultPath(path);
+    const mapPath = (path: string): string => this.mapVaultPathToRoot(path);
     const stringArray = (value: unknown): string[] => Array.isArray(value)
       ? value.map((entry) => String(entry ?? ""))
       : typeof value === "string" ? [value] : [];
@@ -231,12 +232,12 @@ export class FirstPartyToolService {
     }
   }
 
-  private normalizeVaultPath(path: string): string {
+  private mapVaultPathToRoot(path: string): string {
     const root = this.vaultRoot;
     const raw = String(path ?? "").trim();
     if (!root || !raw) return raw;
 
-    let normalized = normalizePath(raw).replace(/^\/+/, "");
+    let normalized = normalizeVaultRelativePath(raw);
     for (const alias of this.vaultRootAliases) {
       if (normalized === alias) return root;
       if (normalized.startsWith(`${alias}/`)) {
@@ -245,6 +246,6 @@ export class FirstPartyToolService {
       }
     }
     if (normalized === root || normalized.startsWith(`${root}/`)) return normalized;
-    return normalizePath(`${root}/${normalized}`);
+    return normalizeVaultRelativePath(`${root}/${normalized}`);
   }
 }
