@@ -52,6 +52,9 @@ describe("R3 conversation semantics", () => {
       { role: "assistant", message_id: "answer", content: "Welcome" }]);
     expect(renderer.element.getAttribute("aria-live")).toBe("off");
     expect([...parent.querySelectorAll('[role="article"] > h3')].map(e => e.textContent)).toEqual(["You", "Claude Code"]);
+    for (const article of parent.querySelectorAll('[role="article"]')) {
+      expect(document.getElementById(article.getAttribute("aria-labelledby")!)?.parentElement).toBe(article);
+    }
     renderer.unload();
   });
 

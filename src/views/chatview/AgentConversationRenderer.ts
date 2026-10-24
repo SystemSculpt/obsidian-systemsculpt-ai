@@ -457,6 +457,8 @@ function terminalToolPresentation(
 }
 
 /** Projects durable messages plus the active normalized agent run into native DOM. */
+let turnHeadingSequence = 0;
+
 // One formatter for every row; building one per message is measurable on 500-message chats.
 let cachedMessageTimeFormat: Intl.DateTimeFormat | null = null;
 function messageTimeFormat(): Intl.DateTimeFormat {
@@ -631,6 +633,8 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-sr-only",
       text: user ? "You" : this.options.backendName?.() ?? "SystemSculpt",
     });
+    heading.id = `systemsculpt-agent-turn-heading-${++turnHeadingSequence}`;
+    row.setAttribute("aria-labelledby", heading.id);
     row.prepend(heading);
   }
 
