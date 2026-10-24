@@ -226,6 +226,19 @@ body {
   --ss-agent-attachment-width: 240px;
 }
 
+/* Chat text must retain AA contrast on the tinted reading surfaces. Blend
+ * status/link ink toward normal text in either theme; keep the original tints
+ * and decorative accent. Primary actions need a separate, darkened fill for
+ * Obsidian's white text-on-accent, including the default dark theme. */
+.systemsculpt-agent-workspace {
+  --ss-ink-accent: color-mix(in srgb, var(--text-accent) 75%, var(--text-normal));
+  --ss-success: color-mix(in srgb, rgb(var(--color-green-rgb, 8, 185, 78)) 50%, var(--text-normal));
+  --ss-warning: color-mix(in srgb, rgb(var(--color-yellow-rgb, 224, 172, 0)) 50%, var(--text-normal));
+  --ss-danger: color-mix(in srgb, rgb(var(--color-red-rgb, 233, 49, 71)) 50%, var(--text-normal));
+  --ss-agent-action: color-mix(in srgb, var(--interactive-accent) 70%, black);
+  --ss-agent-action-hover: color-mix(in srgb, var(--interactive-accent-hover) 60%, black);
+}
+
 /* The host adapter owns navbar discovery. Feature sheets consume only this
  * token and the SystemSculpt-owned body state, never Obsidian's private DOM. */
 body.ss-mobile-layout.ss-mobile-navbar-hidden {

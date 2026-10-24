@@ -87,6 +87,15 @@
   box-shadow: var(--ss-ring);
 }
 
+/* Chat includes native disclosures, links, a listbox and text fields. Keep
+ * their keyboard focus visible even when local chrome has its own shadow.
+ * The solid outline also survives forced-colors mode (shadows do not). */
+.ss-surface.systemsculpt-agent-workspace :focus-visible {
+  outline: 2px solid var(--ss-ink-accent);
+  outline-offset: 2px;
+  box-shadow: var(--ss-ring);
+}
+
 /* Feature sheets may compact desktop chrome, but they must not shrink the
  * canonical action target back below a finger-sized hit area on touch input. */
 @media (pointer: coarse) {

@@ -93,14 +93,6 @@
   overflow-y: auto;
 }
 
-/* The card's border carries focus; the field itself draws no second ring. */
-.systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input:focus,
-.systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input:focus-visible {
-  border: 0;
-  outline: 0;
-  box-shadow: none;
-}
-
 .systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input::placeholder {
   color: var(--ss-ink-muted);
 }

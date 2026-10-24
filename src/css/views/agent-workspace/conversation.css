@@ -91,7 +91,7 @@
 }
 
 .systemsculpt-agent-message-editor-hint {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   line-height: var(--ss-leading-base);
 }
@@ -177,7 +177,7 @@
 }
 
 .systemsculpt-agent-message-attachment-copy span {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
 }
 
@@ -230,7 +230,6 @@
   background: var(--ss-surface-1);
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
-  opacity: 0.78;
 }
 
 .systemsculpt-agent-conversation .systemsculpt-agent-code-block:hover > .systemsculpt-agent-code-copy,

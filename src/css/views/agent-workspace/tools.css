@@ -102,7 +102,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-icon {
   flex-basis: 20px;
@@ -144,7 +144,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
   line-height: 20px;
   text-overflow: ellipsis;
@@ -170,11 +170,11 @@
   opacity: 1;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-succeeded .systemsculpt-agent-tool-icon {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-succeeded .systemsculpt-agent-tool-state-icon {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-part.is-tool.is-failed,
 .systemsculpt-agent-part.is-tool.is-cancelled,
@@ -215,7 +215,7 @@
   min-width: 0;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-detail-label {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-weight: 400;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-detail-value {
