@@ -200,18 +200,19 @@
   height: var(--ss-touch-target);
 }
 
-/* Android landscape leaves only a single control row beneath Obsidian's
+/* A landscape phone leaves only a single control row beneath Obsidian's
  * native header while the software keyboard is visible. The composer owns
- * that scarce row; secondary workspace chrome returns with the navbar. */
+ * that scarce row; secondary workspace chrome returns with the navbar.
+ * Tablets have no floating navbar and keep the whole workspace. */
 @media (orientation: landscape) {
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-workspace {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-workspace {
     padding-bottom: 0;
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-transcript,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-header,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-banner,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-transcript,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-queue {
     display: none;
   }
 }

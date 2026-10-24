@@ -355,24 +355,24 @@
   }
 }
 
-/* Android landscape with the keyboard open leaves one row: the message box
+/* A landscape phone with the keyboard open leaves one row: the message box
  * and its actions keep it; chips, tools, and the run line return with the
- * navbar. */
+ * navbar. Tablets keep the full composer. */
 @media (orientation: landscape) {
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-composer {
     width: 100%;
     padding: var(--ss-space-1) var(--ss-space-2);
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer-chips,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer-errors,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-composer-footer,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-tools,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-hint {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-composer-chips,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-composer-errors,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-composer-footer,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-prompt-tools,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-prompt-hint {
     display: none;
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-prompt {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -380,7 +380,7 @@
     border-radius: var(--ss-radius-md);
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden
+  .ss-mobile-layout.ss-mobile-navbar-suppressed
     .systemsculpt-agent-prompt
     > .systemsculpt-agent-prompt-input {
     grid-column: 1;
@@ -389,7 +389,7 @@
     padding: var(--ss-space-2) var(--ss-space-2);
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-prompt-toolbar {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-prompt-toolbar {
     grid-column: 2;
     padding: 0;
   }
