@@ -7,16 +7,39 @@
 export class StudioPresentation {
   private visible = true;
   private readonly bindings = new Set<{ start: () => void; stop: () => void }>();
+  private readonly deliveries = new Set<{ paint: () => void; resolve: () => void; reject: (error: unknown) => void }>();
+  private disposed = false;
 
   isVisible(): boolean { return this.visible; }
 
   setVisible(visible: boolean): void {
-    if (visible === this.visible) return;
+    if (this.disposed || visible === this.visible) return;
     this.visible = visible;
     for (const binding of this.bindings) {
       if (visible) binding.start();
       else binding.stop();
     }
+    if (visible) {
+      for (const delivery of this.deliveries) {
+        try { delivery.paint(); delivery.resolve(); } catch (error) { delivery.reject(error); }
+      }
+      this.deliveries.clear();
+    }
+  }
+
+  /** Deliver an asynchronous preview only when its leaf can present it. */
+  deliver(paint: () => void): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.visible) { paint(); return Promise.resolve(); }
+    return new Promise((resolve, reject) => { this.deliveries.add({ paint, resolve, reject }); });
+  }
+
+  dispose(): void {
+    this.setVisible(false);
+    this.disposed = true;
+    this.bindings.clear();
+    for (const delivery of this.deliveries) delivery.resolve();
+    this.deliveries.clear();
   }
 
   watch(paint: () => void, subscribe: (refresh: () => void) => () => void): { refresh: () => void; dispose: () => void } {

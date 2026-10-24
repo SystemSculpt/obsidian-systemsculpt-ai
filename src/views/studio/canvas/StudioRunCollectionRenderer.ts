@@ -69,13 +69,20 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
     }
     loadOlder();
   };
-  const observation = (options.presentation ?? new StudioPresentation()).watch(paint,
-    refresh => runs.subscribe(projectId => { if (projectId === options.projectId) { loadError = ''; refresh(); } }));
-  function render(): void { observation.refresh(); }
-  void runs.load(options.projectPath, options.projectId).then(render).catch(error => {
-    loadError = error instanceof Error ? error.message : 'Run history could not load.';
-    render();
+  const load = (): void => {
+    void runs.load(options.projectPath, options.projectId).then(() => { loadError = ''; render(); }).catch(error => {
+      loadError = error instanceof Error ? error.message : 'Run history could not load.';
+      render();
+    });
+  };
+  const observation = (options.presentation ?? new StudioPresentation()).watch(paint, refresh => {
+    // Another board may have recovered the shared history while unsubscribed.
+    // Read its current state now, and recheck a previous failed load on show.
+    if (loadError) { loadError = ''; load(); }
+    return runs.subscribe(projectId => { if (projectId === options.projectId) { loadError = ''; refresh(); } });
   });
+  function render(): void { observation.refresh(); }
+  load();
   return observation.dispose;
 }
 

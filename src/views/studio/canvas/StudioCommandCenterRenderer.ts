@@ -26,7 +26,7 @@ export function renderStudioCommandCenter(root: HTMLElement, options: {
   if (single) panel.addClass('is-single-button');
   try { actions = readStudioCommandActions(single ? (options.node.config.target ? [{ id: 'button', label: options.node.config.label, kind: options.node.config.action, target: options.node.config.target, section: 'Actions', description: options.node.config.description }] : []) : options.node.config.actions); }
   catch (error) { panel.createDiv({ text: error instanceof Error ? error.message : 'Invalid command configuration.' }); return () => {}; }
-  const execution = (root: HTMLElement) => renderStudioCommandExecution(root, { value: options.node.config.execution, app: options.runs?.app, onChange: options.onExecutionChange });
+  const execution = (root: HTMLElement) => renderStudioCommandExecution(root, { value: options.node.config.execution, app: options.runs?.app, onChange: options.onExecutionChange, presentation: options.presentation });
   const disposeExecution = single ? () => {} : options.runs && options.projectPath ? renderStudioOrchestrator(panel, { runs: options.runs, projectId: options.projectId, projectPath: options.projectPath, centerId: options.node.id, execution, presentation: options.presentation }) : execution(panel);
   if (!actions.length) panel.createDiv({ cls: 'ss-studio-command-intro', text: single ? 'Choose this button’s target in Source.' : 'Add actions in Source.' });
   if (!single && options.node.config.description) panel.createDiv({ cls: 'ss-studio-command-intro', text: String(options.node.config.description) });

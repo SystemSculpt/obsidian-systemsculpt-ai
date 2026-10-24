@@ -1,4 +1,5 @@
 import { StudioOutputContainerController } from "./StudioOutputContainerController";
+import { createSurfaceElement } from "../../core/ui/surface/SurfaceDomContext";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
 import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
@@ -459,6 +460,7 @@ export class SystemSculptStudioView extends ItemView {
   private detachLeafVisibility: (() => void) | null = null;
   private leafVisible = true;
   private readonly presentation = new StudioPresentation();
+  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, object>();
 
   private setLeafVisible(visible: boolean): void {
     if (this.closed || this.leafVisible === visible) return;
@@ -520,7 +522,7 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = null;
-    this.presentation.setVisible(false);
+    this.presentation.dispose();
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
@@ -1370,15 +1372,15 @@ export class SystemSculptStudioView extends ItemView {
     containerEl: HTMLElement
   ): Promise<void> {
     const content = String(markdown || "");
-    containerEl.empty();
-    if (!content.trim()) {
-      return;
-    }
-
+    const request = {};
+    this.markdownPreviewRequests.set(containerEl, request);
+    // The host renderer can finish asynchronously. Keep both success and fallback
+    // off the mounted card until the leaf can present them.
+    const staging = createSurfaceElement(containerEl, "div");
     const noteSourcePath = node.kind === "studio.note" ? normalizePath(readPrimaryStudioNotePath(node.config)) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
-      await MarkdownRenderer.render(this.app, content, containerEl, sourcePath, this);
+      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, this);
     } catch (error) {
       console.warn("[SystemSculpt Studio] Failed to render node markdown preview", {
         nodeId: node.id,
@@ -1386,9 +1388,13 @@ export class SystemSculptStudioView extends ItemView {
         sourcePath,
         error: error instanceof Error ? error.message : String(error),
       });
-      containerEl.empty();
-      containerEl.setText(content);
+      staging.setText(content);
     }
+    await this.presentation.deliver(() => {
+      if (!this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === request) {
+        containerEl.replaceChildren(...Array.from(staging.childNodes));
+      }
+    });
   }
 
   private readCurrentNodeDetailMode(): StudioNodeDetailMode {

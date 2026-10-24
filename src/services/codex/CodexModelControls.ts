@@ -6,6 +6,7 @@ type Options = {
   value: () => Required<CodexExecutionOptions>;
   onChange?: (patch: CodexExecutionOptions) => void | Promise<void>;
   enabled: () => boolean;
+  isVisible?: () => boolean;
   workingDirectory: () => string;
   onPermissions?: (description: string) => void;
 };
@@ -25,7 +26,7 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
   const controller = new AbortController(); let models: CodexModel[] = [], disposed = false, loading = false, loaded = false, activated = !command, error = '', actionError = '', pendingChanges = 0;
   const option = (select: HTMLSelectElement, value: string, label: string, disabled = false) => { select.createEl('option', { value, text: label }).disabled = disabled; };
   const render = () => {
-    if (disposed || pendingChanges) return;
+    if (disposed || pendingChanges || options.isVisible?.() === false) return;
     const enabled = options.enabled(), selected = options.value(), current = models.find(item => item.model === selected.model);
     model.empty(); effort.empty(); speed?.empty();
     for (const entry of models) option(model, entry.model, entry.name);
