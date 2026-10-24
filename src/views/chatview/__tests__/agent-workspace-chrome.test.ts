@@ -135,7 +135,10 @@ describe("AgentWorkspace chrome", () => {
     const { parent, workspace } = mount({ backendName: () => "Claude Code" });
     try {
       const region = parent.querySelector('[data-testid="chat.announcer"]')!;
+      const empty = parent.querySelector('[data-testid="chat.empty"]')!;
+      expect(empty.hasAttribute("hidden")).toBe(false);
       workspace.setLoading(true);
+      expect(empty.hasAttribute("hidden")).toBe(true);
       jest.advanceTimersByTime(299);
       expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
       jest.advanceTimersByTime(51);
@@ -143,6 +146,7 @@ describe("AgentWorkspace chrome", () => {
       expect(region.textContent).toBe("Loading chat");
       workspace.setLoading(false);
       expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
+      expect(empty.hasAttribute("hidden")).toBe(false);
       workspace.showNotice("Auto is unavailable.");
       expect(parent.querySelector('[data-testid="chat.notice"]')?.textContent).toContain("Auto is unavailable.");
       expect(parent.querySelector('.systemsculpt-agent-banner')?.hasAttribute('hidden')).toBe(true);

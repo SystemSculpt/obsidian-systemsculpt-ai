@@ -403,6 +403,7 @@ export class AgentWorkspace extends Component {
   public setLoading(loading: boolean): void {
     this.element.classList.toggle("is-loading-chat", loading);
     this.renderer.setLoading(loading);
+    this.syncEmpty();
   }
 
   /** Polite announcement for screen readers. */
@@ -1125,7 +1126,7 @@ export class AgentWorkspace extends Component {
     const hasActivePresentation = presentation.phase !== "idle";
     this.emptyState.element.toggleAttribute(
       "hidden",
-      this.history.length > 0 || hasActivePresentation,
+      this.element.classList.contains("is-loading-chat") || this.history.length > 0 || hasActivePresentation,
     );
   }
 

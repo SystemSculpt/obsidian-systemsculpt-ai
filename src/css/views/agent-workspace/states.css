@@ -50,10 +50,20 @@
 }
 
 .systemsculpt-agent-loading-bar {
+  position: relative;
   min-height: 3em;
+  overflow: hidden;
   border-radius: var(--ss-radius-sm);
-  background: linear-gradient(90deg, var(--ss-surface-2), var(--ss-surface-1), var(--ss-surface-2));
-  background-size: 200% 100%;
+  background: var(--ss-surface-2);
+}
+
+/* Move only a contained highlight, never the message-sized placeholder. */
+.systemsculpt-agent-loading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(100% / 3);
+  background: linear-gradient(90deg, transparent, var(--ss-surface-1), transparent);
   animation: ss-shimmer 1.2s linear infinite;
 }
 
@@ -90,11 +100,11 @@
   overflow-wrap: anywhere;
 }
 
-.is-reduced-motion .systemsculpt-agent-loading-bar { animation: none; }
+.is-reduced-motion .systemsculpt-agent-loading-bar::after { animation: none; }
 
 /* The plugin's reduced-motion setting: every spinner in the chat is a static icon (spec 6.3). */
 .systemsculpt-agent-workspace.is-reduced-motion .is-animated svg { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .systemsculpt-agent-loading-bar { animation: none; }
+  .systemsculpt-agent-loading-bar::after { animation: none; }
 }
