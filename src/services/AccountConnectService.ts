@@ -3,6 +3,7 @@ import SystemSculptPlugin from "../main";
 import { PLATFORM_REQUEST_TIMEOUT_MS, PlatformRequestClient } from "./PlatformRequestClient";
 import { openExternalUrl } from "../utils/externalUrl";
 import { bytesToBase64 } from "../utils/base64";
+import { sha256HexFromBytes } from "../utils/sha256";
 import { requireApiVersion } from "obsidian";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
@@ -220,7 +221,10 @@ export class AccountConnectService {
   }
 
   private async connectUrl(pending: PendingConnectRequest): Promise<string> {
-    const challenge = base64UrlEncode(await this.sha256(pending.verifier));
+    const hash = await sha256HexFromBytes(new TextEncoder().encode(pending.verifier));
+    const digest = Uint8Array.from({ length: hash.length / 2 }, (_, index) =>
+      Number.parseInt(hash.slice(index * 2, index * 2 + 2), 16));
+    const challenge = base64UrlEncode(digest);
     const origin = new URL(API_BASE_URL).origin;
     const path = pending.mode === "sign-up" ? "/sign-up" : "/sign-in";
     const redirect = `/plugin/connect?state=${pending.state}&challenge=${challenge}`;
@@ -539,11 +543,6 @@ export class AccountConnectService {
     const bytes = new Uint8Array(32);
     crypto.getRandomValues(bytes);
     return bytes;
-  }
-
-  private async sha256(value: string): Promise<Uint8Array> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return new Uint8Array(digest);
   }
 
   private async readJson(response: Response): Promise<unknown> {

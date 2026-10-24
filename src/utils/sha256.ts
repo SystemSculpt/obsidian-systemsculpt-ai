@@ -67,16 +67,19 @@ export function sha256HexFromBytesPortable(input: Uint8Array): string {
   return bytesToHex(digest);
 }
 
-export async function sha256HexFromArrayBuffer(arrayBuffer: ArrayBuffer): Promise<string> {
-  const bytes = new Uint8Array(arrayBuffer);
-  try {
-    if (window.crypto?.subtle) {
-      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
-      return bytesToHex(new Uint8Array(digest));
-    }
-  } catch {
-    // The portable implementation below is deterministic on every host.
-  }
+/** Hash binary payloads natively; never hide a native failure with synchronous work. */
+export async function sha256HexFromBytes(input: Uint8Array): Promise<string> {
+  const subtle = typeof crypto === "undefined" ? undefined : crypto?.subtle;
+  if (!subtle) return sha256HexFromBytesPortable(input);
+  // WebCrypto cannot accept shared memory. Ordinary views, including subarrays
+  // and views from pop-out windows, pass through without another input copy.
+  const bytes = Object.prototype.toString.call(input.buffer) === "[object SharedArrayBuffer]"
+    ? new Uint8Array(input)
+    : input as Uint8Array<ArrayBuffer>;
+  const digest = await subtle.digest("SHA-256", bytes);
+  return bytesToHex(new Uint8Array(digest));
+}
 
-  return sha256HexFromBytesPortable(bytes);
+export function sha256HexFromArrayBuffer(arrayBuffer: ArrayBuffer): Promise<string> {
+  return sha256HexFromBytes(new Uint8Array(arrayBuffer));
 }
