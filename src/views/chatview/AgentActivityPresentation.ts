@@ -1,4 +1,43 @@
 import type { AgentPart } from "../../chat/ChatConversation";
+import { presentAgentTool } from "./AgentToolPresentation";
+
+export type AgentActivitySummary = Readonly<{ label: string; failedCount: number }>;
+
+/** Count adjacent activity by action without repeating payloads or full paths. */
+export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
+  const groups = new Map<string, { count: number; label: string }>();
+  let failedCount = 0;
+  for (const part of parts) {
+    if (part.kind === "reasoning") {
+      const previous = groups.get("reasoning");
+      groups.set("reasoning", { count: (previous?.count ?? 0) + 1, label: "Thought" });
+    } else if (part.kind === "tool") {
+      const tool = presentAgentTool(part);
+      const previous = groups.get(tool.groupKind);
+      groups.set(tool.groupKind, { count: (previous?.count ?? 0) + tool.groupCount, label: tool.label.replace(/…$/u, "") });
+      if (["failed", "denied", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
+    }
+  }
+  const labels = Array.from(groups, ([kind, group]) => {
+    const count = group.count;
+    if (kind === "read") return `Read ${count} note${count === 1 ? "" : "s"}`;
+    if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
+    if (kind === "command") return `Ran ${count} command${count === 1 ? "" : "s"}`;
+    if (kind === "reasoning") return "Thought";
+    if (count > 1 && ["edit", "write", "trash", "list", "web-search"].includes(kind)) {
+      const [verb, noun] = kind === "edit" ? ["Edited", "notes"] : kind === "write" ? ["Created", "notes"]
+        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"] : ["Searched", "web queries"];
+      return `${verb} ${count} ${noun}`;
+    }
+    return group.label;
+  });
+  const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
+  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.count, 0);
+  return {
+    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
+    failedCount,
+  };
+}
 
 export type AgentActivitySequence<T> = Readonly<{
   kind: "activity";

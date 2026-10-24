@@ -29,6 +29,7 @@ export interface WriteEditPreview {
   appliedCount: number;
   skipped: SkippedEdit[];
   notice?: string;
+  isNewFile?: boolean;
 }
 
 export function isWriteOrEditTool(toolName: string): boolean {
@@ -121,7 +122,7 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   if (status === "changed" && newContent === oldContent) status = "identical";
 
   const diff = generateDiff(oldContent ?? "", newContent ?? "", 5);
-  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped };
+  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped, ...(base === "write" && !file ? { isNewFile: true } : {}) };
 }
 
 function nativeRecord(value: unknown): Record<string, unknown> {
@@ -208,7 +209,7 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
     if (typeof input.content !== "string") return result(original, original, "unavailable", 0, [], "The file content is not available yet.");
     const status = file && input.content === original ? "identical" : "changed";
     const preview = result(original, input.content, status);
-    if (!file) preview.notice = "Create a new file.";
+    if (!file) { preview.notice = "Create a new file."; preview.isNewFile = true; }
     else if (status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions) preview.notice = "Change the final line break.";
     return preview;
   }
@@ -259,11 +260,11 @@ export function applyEditsLocally(original: string, edits: ToolFileEdit[]): stri
  */
 export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLElement, toolCall: ToolCall): Promise<HTMLElement | null> {
   const previews = await prepareWriteEditPreviews(app, toolCall);
-  return renderPreparedWriteEditPreviews(hostElement, previews);
+  return renderPreparedWriteEditPreviews(hostElement, previews, { approval: true });
 }
 
 /** Shared appearance for native exact previews and hosted executor previews. */
-export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previews: readonly WriteEditPreview[]): HTMLElement | null {
+export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previews: readonly WriteEditPreview[], options: { approval?: boolean } = {}): HTMLElement | null {
   if (previews.length === 0) return null;
 
   // Remove any existing inline diff to avoid duplicates
@@ -273,14 +274,18 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
   const container = hostElement.createDiv({ cls: "systemsculpt-inline-diff" });
 
   if (previews.length > 1) renderInlineDiffSummary(container, previews);
+  if (options.approval) hostElement.dataset.changeSize = `+${previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0)} −${previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0)}`;
 
   for (const preview of previews) {
-    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
+    const section = options.approval && previews.length > 1 ? container.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : container;
+    if (section !== container) section.createEl("summary", { text: `${preview.path} · +${preview.diff.stats.additions} −${preview.diff.stats.deletions}` });
+    const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
     if (preview.status === "unavailable" || (preview.notice && preview.status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions)) {
-      body.createDiv({ cls: "systemsculpt-diff-filename", text: preview.path });
+      if (!options.approval || previews.length > 1) body.createDiv({ cls: "systemsculpt-diff-filename", text: preview.path });
       body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice ?? "The change preview is unavailable. Review Details before approving." });
       continue;
     }
+    if (preview.isNewFile) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (preview.notice) body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice });
     const viewer = new DiffViewer({
       container: body.createDiv(),
@@ -288,6 +293,8 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
       fileName: preview.path,
       maxContextLines: 3,
       showLineNumbers: true,
+      hideHeader: options.approval === true,
+      ...(options.approval ? { maxVisibleLines: 12 } : {}),
       emptyReason: preview.status === "changed" ? "identical" : preview.status,
       emptyDetail: preview.notice ? undefined : describeSkippedEdits(preview),
     });

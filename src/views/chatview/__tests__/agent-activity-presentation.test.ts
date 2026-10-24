@@ -1,4 +1,4 @@
-import type { AgentPart } from "../../../chat/ChatConversation";
+import type { AgentPart, AgentToolPart } from "../../../chat/ChatConversation";
 import {
   finalAgentAnswerPartIds,
   formatAgentActivityDuration,
@@ -6,9 +6,35 @@ import {
   groupAdjacentAgentActivity,
   isAgentActivityPart,
   splitPreviousAgentActivity,
+  summarizeAgentActivity,
 } from "../AgentActivityPresentation";
 
+function tool(name: string, input: unknown, overrides: Partial<AgentToolPart> = {}): AgentToolPart {
+  return { id: name, kind: "tool", order: 1, messageId: "message", callId: name, name, input, location: "vault", state: "succeeded", ...overrides };
+}
+
 describe("AgentActivityPresentation", () => {
+  it("joins counted clauses, keeps single edit targets and counts remaining activity", () => {
+    expect(summarizeAgentActivity([
+      tool("read", { paths: ["One.md", "Two.md"] }),
+      tool("Read", { file_path: "/vault/Three.md" }, { native: { agent: "claude", workingDirectory: "/vault" } }),
+      tool("search", { patterns: ["launch", "date"] }),
+      tool("edit", { path: "Notes/Plan.md" }),
+      tool("write", { path: "New.md" }),
+      tool("write", { path: "Other.md" }),
+    ])).toEqual({ label: "Read 3 notes, searched 2 patterns, edited Plan.md · 2 more", failedCount: 0 });
+  });
+
+  it("marks failed and denied work without exposing hosted server inputs", () => {
+    expect(summarizeAgentActivity([
+      tool("edit", { path: "Notes/Plan.md" }, { state: "failed" }),
+      tool("edit", { path: "Notes/Other.md" }, { state: "denied" }),
+    ])).toEqual({ label: "Edited 2 notes · 2 failed", failedCount: 2 });
+    const summary = summarizeAgentActivity([tool("private_provider_action", { paths: ["Secret.md"] }, { location: "server" })]);
+    expect(summary.label).toBe("Ran SystemSculpt action");
+    expect(JSON.stringify(summary)).not.toMatch(/private|Secret/u);
+  });
+
   it("groups adjacent reasoning and tools without crossing text or errors", () => {
     const items = ["reasoning", "tool", "text", "tool", "reasoning", "error", "tool"];
 

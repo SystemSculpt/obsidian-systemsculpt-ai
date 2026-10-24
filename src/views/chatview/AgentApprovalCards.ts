@@ -17,6 +17,8 @@ type ApprovalOptions = {
   composer?: () => HTMLElement | undefined;
   isVisible?: () => boolean;
   onHiddenApproval?: (part: AgentToolPart) => void;
+  onAnnounce?: (text: string) => void;
+  onOpenPath?: (path: string) => void | Promise<void>;
 };
 
 type Question = { id: string; header: string; question: string; isSecret: boolean; multiSelect: boolean; options: { label: string; description: string }[] };
@@ -51,7 +53,11 @@ function editable(element: Element | null): boolean {
 }
 
 function sessionScope(part: AgentToolPart): string {
-  if (!part.native) return "SystemSculpt won't ask again for this kind of vault action in this chat. Moving notes to trash still asks.";
+  if (!part.native) {
+    const kind = presentAgentTool(part).groupKind;
+    const scope = kind === "edit" || kind === "write" ? "edits" : kind === "move" ? "moves" : "this kind of vault action";
+    return `SystemSculpt won't ask again for ${scope} in this chat. Moving notes to trash still asks.`;
+  }
   if (part.native.agent === "claude") {
     const scopes = (part.native.permissionSuggestions ?? []).flatMap(update => {
       const rules = Array.isArray(update.rules) ? update.rules.map(rule => {
@@ -61,12 +67,12 @@ function sessionScope(part: AgentToolPart): string {
       return rules;
     });
     return part.native.permissionSuggestions?.length
-      ? `Claude Code will remember ${scopes.join("; ") || "the suggested permissions shown in Details"} for this open chat session. Other actions may still ask. Closing the chat or resetting the agent clears this permission.`
+      ? `Claude Code won't ask again for ${scopes.join("; ") || "the suggested permissions shown in Details"} in this chat. Other actions may still ask. Closing the chat or resetting the agent clears this permission.`
       : "Claude Code supplied no reusable permission suggestion. This approves only the current request.";
   }
   const method = part.native.requestMethod ?? "";
   const scope = method.includes("commandExecution") ? "this command" : method.includes("fileChange") ? "changes to these files" : "the requested access";
-  return `Codex will remember approval for ${scope} in this open chat session. Other actions may still ask. Closing the chat or resetting the agent clears this permission.`;
+  return `Codex won't ask again for ${scope} in this chat. Other actions may still ask. Closing the chat or resetting the agent clears this permission.`;
 }
 
 let approvalTitleSequence = 0;
@@ -78,20 +84,20 @@ export class AgentApprovalCards extends Component {
   private readonly answering = new Set<string>();
   private readonly announced = new Set<string>();
   private review: HTMLButtonElement | null = null;
-  private announcement: HTMLElement;
+  private announcement: HTMLElement | null;
   private composing = false;
   private composerEventTarget: HTMLElement | undefined;
 
   constructor(private readonly root: HTMLElement, private readonly options: ApprovalOptions) {
     super();
-    this.announcement = root.createDiv({
+    this.announcement = options.onAnnounce ? null : root.createDiv({
       cls: "systemsculpt-agent-approval-announcement",
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
     });
     this.registerDomEvent(root, "keydown", event => this.handleKey(event));
     this.registerDomEvent(root, "focusin", () => this.syncReviewVisibility());
     this.registerDomEvent(root, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
-    this.register(() => { this.review?.remove(); this.announcement.remove(); });
+    this.register(() => { this.review?.remove(); this.announcement?.remove(); });
   }
 
   onload(): void { this.bindComposerEvents(); }
@@ -125,24 +131,43 @@ export class AgentApprovalCards extends Component {
     card.setAttrs({ role: "group", tabindex: "0", "aria-labelledby": titleId, "data-focus-key": "tool-approval" });
     const native = nativeToolPresentation(part);
     const tool = presentAgentTool(part);
-    const actionTitle = native?.title ?? [tool.label, tool.summary].filter(Boolean).join(" · ");
-    const title = `${native?.agentName ?? "SystemSculpt"} wants to ${actionTitle.charAt(0).toLowerCase()}${actionTitle.slice(1)}`;
+    const plan = part.native?.agent === "claude" && part.name === "ExitPlanMode";
+    const questionList = questions(part);
+    const actionTitle = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    const agent = native?.agentName ?? "SystemSculpt";
+    const title = plan ? `${agent} has a plan` : questionList.length ? `${agent} asks: ${questionList.length === 1 ? questionList[0].question : "A few questions"}`
+      : `${agent} wants to ${actionTitle}`;
     const header = card.createDiv({ cls: "systemsculpt-agent-approval-header" });
     setIcon(header.createSpan({ cls: "systemsculpt-agent-approval-icon", attr: { "aria-hidden": "true" } }), native?.icon ?? tool.actionIcon);
-    header.createEl("strong", { cls: "systemsculpt-agent-approval-copy", text: title, attr: { id: titleId } });
+    const heading = header.createEl("strong", { cls: "systemsculpt-agent-approval-copy", text: title, attr: { id: titleId } });
+    const targetPath = native?.targetPath ?? tool.targetPath;
+    if (targetPath && this.options.onOpenPath) {
+      const target = targetPath.split(/[\\/]/u).at(-1)!;
+      const offset = title.lastIndexOf(target);
+      if (offset >= 0) {
+        heading.empty(); heading.appendText(title.slice(0, offset));
+        const link = heading.createEl("a", { text: target, cls: "internal-link", attr: { href: targetPath, "data-href": targetPath } });
+        link.onclick = event => { event.preventDefault(); void this.options.onOpenPath?.(targetPath); };
+        heading.appendText(title.slice(offset + target.length));
+      }
+    }
     header.createSpan({ cls: "systemsculpt-agent-approval-counter" });
+    const meta = native?.meta ?? (targetPath?.includes("/") ? targetPath.slice(0, targetPath.lastIndexOf("/")) : undefined);
+    if (meta) {
+      const metaId = `${titleId}-meta`;
+      card.createDiv({ cls: "systemsculpt-agent-approval-meta", text: meta, attr: { id: metaId } });
+      card.setAttribute("aria-describedby", metaId);
+    }
     card.createDiv({ cls: "systemsculpt-agent-approval-preview", attr: { hidden: "" } });
-
-    const questionList = questions(part);
     card.dataset.questionCount = String(questionList.length);
     const answers: Record<string, string[]> = {};
     for (const question of questionList) {
       const group = card.createEl("fieldset", { cls: "systemsculpt-agent-approval-question" });
-      group.createEl("legend", { text: question.question });
+      group.createEl("legend", { text: question.question, ...(questionList.length === 1 ? { cls: "systemsculpt-agent-approval-question-legend" } : {}) });
       const choices = group.createDiv({ cls: "systemsculpt-agent-approval-options" });
       const inputId = `${titleId}-${questionList.indexOf(question)}`;
       const label = group.createEl("label", { text: "Your answer", attr: { for: inputId } });
-      const input = group.createEl("input", { attr: { id: inputId, type: question.isSecret ? "password" : "text", autocomplete: "off", "data-testid": "chat.approval.answer" } });
+      const input = group.createEl("input", { attr: { id: inputId, type: question.isSecret ? "password" : "text", autocomplete: "off", placeholder: "Type an answer…", "data-testid": "chat.approval.answer" } });
       label.addClass("systemsculpt-agent-approval-answer-label");
       input.addEventListener("input", () => {
         answers[question.id] = input.value ? [input.value] : [];
@@ -155,7 +180,6 @@ export class AgentApprovalCards extends Component {
           const number = String(question.options.indexOf(option) + 1);
           choice.setAttribute("aria-keyshortcuts", number);
           choice.dataset.optionNumber = number;
-          choice.dataset.sendOnSelection = String(!question.multiSelect);
           choice.createEl("kbd", { text: number, attr: { "aria-hidden": "true" } });
         }
         if (option.description) choice.createSpan({ cls: "systemsculpt-agent-approval-option-description", text: option.description });
@@ -168,6 +192,7 @@ export class AgentApprovalCards extends Component {
           choices.querySelectorAll("button").forEach((button, index) => {
             button.setAttribute("aria-pressed", String(answers[question.id].includes(question.options[index].label)));
           });
+          if (questionList.length === 1 && !question.multiSelect) void this.answer(card, true, false, answers);
         };
       }
     }
@@ -184,13 +209,17 @@ export class AgentApprovalCards extends Component {
       const button = createUiAction(actions, { label, ...identity, size: "small", ...(approved && !remember ? { tone: "primary" as const } : {}), tooltip: remember, ...(remember ? { title: sessionScope(part) } : {}) });
       button.setAttrs({ "data-focus-key": focusKey, "aria-keyshortcuts": shortcut });
       button.createEl("kbd", { text: hint, attr: { "aria-hidden": "true" } });
-      button.onclick = () => void this.answer(card, approved, remember, questionList.length ? answers : undefined);
+      button.onclick = () => void this.answer(card, approved, remember, questionList.length ? approved ? answers : {} : undefined);
       return button;
     };
-    action(questionList.length ? "Send answer" : "Approve", "↵", { testId: "chat.approval.allow-once" }, "tool-allow-once", "Enter Meta+Enter Control+Enter", true);
-    action(questionList.length ? "Skip" : "Deny", "Esc", { testId: "chat.approval.deny" }, "tool-deny", "Escape", false);
-    // Keep the hosted trash policy: it always asks, even after chat trust.
-    if (!questionList.length && (part.native || canonicalName !== "trash")) {
+    action(plan ? "Start" : questionList.length ? "Send" : "Approve", "⏎", { testId: "chat.approval.allow-once" }, "tool-allow-once", "Enter Meta+Enter Control+Enter", true);
+    action(plan ? "Keep planning" : questionList.length ? "Skip" : "Deny", "esc", { testId: "chat.approval.deny" }, "tool-deny", "Escape", false);
+    // Neither deleting files nor approving a plan grants ongoing permission.
+    const deletesFiles = canonicalName === "trash" || (Array.isArray(record(part.input).changes) && (record(part.input).changes as unknown[]).some(change => {
+      const operation = record(change).kind;
+      return operation === "delete" || record(operation).type === "delete";
+    }));
+    if (!questionList.length && !plan && !deletesFiles) {
       const shortcut = getHostOperatingSystem() === "macOS" ? "⇧⌘↵" : "Ctrl+Shift+Enter";
       action("Approve all in this chat", shortcut, { testId: "chat.approval.allow-for-chat" }, "tool-allow-chat", "Shift+Meta+Enter Shift+Control+Enter", true, true);
     }
@@ -222,14 +251,19 @@ export class AgentApprovalCards extends Component {
     }
     // Grouping a newly resolved tool can reparent the next pending card and blur it.
     if (previouslyFocused && this.root.ownerDocument.activeElement === this.root.ownerDocument.body) {
-      this.cards().find(card => card.dataset.approvalId === previouslyFocused)?.focus({ preventScroll: true });
+      const retained = this.cards().find(card => card.dataset.approvalId === previouslyFocused);
+      if (retained) this.focusCard(retained);
     }
     if (!newParts.length) return;
     const first = newParts[0];
     const native = nativeToolPresentation(first);
     const tool = presentAgentTool(first);
-    const title = native?.title ?? [tool.label, tool.summary].filter(Boolean).join(" ");
-    this.announcement.setText(`${native?.agentName ?? "SystemSculpt"} wants to ${title.charAt(0).toLowerCase()}${title.slice(1)}`);
+    const title = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    const questionList = questions(first);
+    const announcement = first.name === "ExitPlanMode" ? `${native?.agentName ?? "Claude Code"} has a plan. Enter to start, Escape to keep planning.`
+      : questionList.length ? `${native?.agentName ?? "Codex"} asks: ${questionList[0].question}`
+        : `${native?.agentName ?? "SystemSculpt"} wants to ${title}. Enter to approve, Escape to deny.`;
+    this.announce(announcement);
     if (this.options.isVisible?.() === false) {
       this.options.onHiddenApproval?.(first);
       return;
@@ -243,6 +277,16 @@ export class AgentApprovalCards extends Component {
     if (ownsFocus && (!editable(active) || emptyComposer) && !this.captureFocus()) this.focusFirst();
   }
 
+  private announce(text: string): void {
+    if (this.options.onAnnounce) this.options.onAnnounce(text);
+    else this.announcement?.setText(text);
+  }
+
+  private focusCard(card: HTMLElement): void {
+    const primary = card.querySelector<HTMLElement>('[data-option-number="1"], [data-testid="chat.approval.answer"], [data-focus-key="tool-allow-once"]');
+    (primary ?? card).focus({ preventScroll: true });
+  }
+
   clear(): void {
     this.pending.clear();
     this.answering.clear();
@@ -253,7 +297,7 @@ export class AgentApprovalCards extends Component {
   focusFirst(): void {
     const card = this.cards()[0];
     if (card) {
-      card.focus({ preventScroll: true });
+      this.focusCard(card);
       card.scrollIntoView?.({ block: "nearest" });
     } else {
       this.options.composer?.()?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
@@ -265,7 +309,7 @@ export class AgentApprovalCards extends Component {
     const candidates = [...order.slice(index + 1), ...order.slice(0, index).reverse()];
     const cards = this.cards();
     const next = candidates.map(candidate => cards.find(card => card.dataset.approvalId === candidate)).find(Boolean);
-    if (next) { next.focus({ preventScroll: true }); next.scrollIntoView?.({ block: "nearest" }); }
+    if (next) { this.focusCard(next); next.scrollIntoView?.({ block: "nearest" }); }
     else this.focusFirst();
   }
 
@@ -323,10 +367,14 @@ export class AgentApprovalCards extends Component {
   }
 
   private handleKey(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.isComposing || event.repeat) return;
+    if (event.defaultPrevented || event.isComposing) return;
     const target = event.target as HTMLElement | null;
     const card = target?.closest<HTMLElement>(".systemsculpt-agent-approval[data-approval-id]");
     if (!card || !this.pending.has(card.dataset.approvalId!)) return;
+    if (event.repeat) {
+      if (["Enter", " ", "Escape"].includes(event.key) && !editable(target)) event.preventDefault();
+      return;
+    }
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !editable(target)) {
       const cards = this.cards();
       const index = cards.indexOf(card);
@@ -334,7 +382,7 @@ export class AgentApprovalCards extends Component {
       if (!next) return;
       event.preventDefault();
       event.stopPropagation();
-      next.focus();
+      this.focusCard(next);
       return;
     }
     const modified = event.metaKey || event.ctrlKey;
@@ -344,9 +392,6 @@ export class AgentApprovalCards extends Component {
         event.preventDefault();
         event.stopPropagation();
         option.click();
-        if (option.dataset.sendOnSelection === "true") {
-          card.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')?.click();
-        }
       }
       return;
     }
@@ -373,7 +418,7 @@ export class AgentApprovalCards extends Component {
           : await this.options.onApprove(id, approved);
       accepted = result !== false;
       if (accepted) {
-        this.announcement.setText(approved ? remember ? "Approved for this chat" : "Approved" : "Denied");
+        this.announce(answers ? approved ? "Answer sent" : "Skipped" : approved ? remember ? "Approved for this chat" : "Approved" : "Denied");
         this.focusAfter(id, order);
       }
     } catch {
