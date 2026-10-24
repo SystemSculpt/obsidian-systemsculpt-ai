@@ -28,6 +28,23 @@ const DEVICE_LOCAL_RECORDER_PREFERENCE_SCHEMA_VERSION = 10;
 const AUDIO_JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
+// Settings are JSON values; compare nested contents rather than object identity
+// or property insertion order. Validation constructs fresh arrays and objects.
+function settingsValueEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length
+    && keys.every(key => Object.prototype.hasOwnProperty.call(b, key) && settingsValueEqual(a[key], b[key]));
+}
+
+function snapshotSettings(settings: SystemSculptSettings): SystemSculptSettings {
+  return JSON.parse(JSON.stringify(settings)) as SystemSculptSettings;
+}
+
 function normalizeWorkflowEngineSettings(value: unknown): WorkflowEngineSettings {
   const defaults = createDefaultWorkflowEngineSettings();
   if (!value || typeof value !== "object" || Array.isArray(value)) return defaults;
@@ -186,6 +203,9 @@ export class SettingsManager {
   // updateSettings callers cannot interleave a read-modify-write across awaits
   // and drop keys. A rejected task never poisons the tail for the next caller.
   private persistenceQueue: Promise<void> = Promise.resolve();
+  // Detached baselines survive direct nested mutations and failed writes.
+  private persistedSettings: Partial<SystemSculptSettings> | null = null;
+  private notifiedSettings: SystemSculptSettings = snapshotSettings(DEFAULT_SETTINGS);
 
 
   constructor(plugin: SystemSculptPlugin) {
@@ -371,6 +391,7 @@ export class SettingsManager {
 
   private async loadSettingsNow(): Promise<void> {
     let raw = await this.readPersistedSettings();
+    this.persistedSettings = raw ? JSON.parse(JSON.stringify(raw)) as Partial<SystemSculptSettings> : null;
     if (raw === null) {
       // data.json is missing, unreadable, empty, or not an object. Consult the
       // backup BEFORE defaults: the save below persists whatever we load, so
@@ -381,6 +402,8 @@ export class SettingsManager {
     }
 
     this.settings = await this.migrateValidateWithRollback(raw);
+    // Validation freshness belongs to this running session, not synced data.json.
+    this.settings.lastValidated = 0;
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
     this.isInitialized = true;
     await this.saveSettingsNow();
@@ -884,16 +907,27 @@ export class SettingsManager {
     }
 
     try {
-      const oldSettings = { ...(this.plugin._internal_settings_systemsculpt_plugin || DEFAULT_SETTINGS) }; 
       // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
-      const persistedSettings = this.validateSettings({
-        ...this.plugin._internal_settings_systemsculpt_plugin,
-      });
-      this.settings = persistedSettings;
-      this.plugin._internal_settings_systemsculpt_plugin = { ...persistedSettings };
-      await this.plugin.saveData(this.plugin._internal_settings_systemsculpt_plugin);
-      this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, this.plugin._internal_settings_systemsculpt_plugin);
-      await this.backupSettings();
+      this.settings = this.validateSettings({ ...this.plugin._internal_settings_systemsculpt_plugin });
+      this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
+      const nextSettings = snapshotSettings(this.settings);
+      const oldSettings = this.notifiedSettings;
+      const keys = new Set([...Object.keys(oldSettings), ...Object.keys(nextSettings)] as (keyof SystemSculptSettings)[]);
+      const changedKeys = [...keys].filter(key => !settingsValueEqual(oldSettings[key], nextSettings[key]));
+      const durableSettings: Partial<SystemSculptSettings> = snapshotSettings(nextSettings);
+      delete durableSettings.lastValidated;
+      const needsWrite = !settingsValueEqual(this.persistedSettings, durableSettings);
+      if (needsWrite) {
+        await this.plugin.saveData(durableSettings);
+        this.persistedSettings = durableSettings;
+      }
+      // Advance only after a successful primary write, so an identical retry
+      // still persists and publishes changes after a disk/sync failure.
+      this.notifiedSettings = snapshotSettings(nextSettings);
+      if (changedKeys.length > 0) {
+        this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, nextSettings, changedKeys);
+      }
+      if (needsWrite) await this.backupSettings();
     } catch (error) {
       // Persistence failed (disk full, permissions, sync lock, …). Do NOT
       // swallow it: log + show a de-duplicated Notice so the loss is visible.
@@ -964,7 +998,7 @@ export class SettingsManager {
    */
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
     const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
-    await this.updateSettings(migrated);
+    await this.updateSettings({ ...migrated, lastValidated: 0 });
   }
 
   /**

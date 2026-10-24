@@ -17,6 +17,34 @@ function createView(readCreditsBalance: jest.Mock): AgentChatView & Record<strin
 describe("AgentChatView shared credits reads", () => {
   const balance = { usageClass: "customer", totalRemaining: 5, availableUnreserved: 5 };
 
+  it("refreshes credits only for an account-key change and chrome only for its own settings", async () => {
+    const view = createView(jest.fn(async () => balance));
+    const on = jest.fn();
+    Object.assign(view, {
+      app: { workspace: { on } },
+      registerEvent: jest.fn(),
+      syncChrome: jest.fn(),
+      refreshCreditsBalance: jest.fn(async () => undefined),
+    });
+    view.installWorkspaceBindings();
+    const listener = on.mock.calls.find(([event]) => event === "systemsculpt:settings-updated")![1];
+    const settings = view.plugin.settings;
+    for (const key of ["defaultChatTag", "lastValidated", "lastAutomaticBackup", "embeddingsExclusions", "pendingAudioProcessorUploads"]) {
+      listener(settings, settings, [key]);
+    }
+    expect(view.syncChrome).not.toHaveBeenCalled();
+    expect(view.refreshCreditsBalance).not.toHaveBeenCalled();
+    listener(settings, { ...settings, codexModel: "other" }, ["codexModel"]);
+    expect(view.syncChrome).toHaveBeenCalledTimes(1);
+    expect(view.refreshCreditsBalance).not.toHaveBeenCalled();
+    listener(settings, { ...settings, licenseKey: "new-account" }, ["licenseKey"]);
+    expect(view.refreshCreditsBalance).toHaveBeenCalledTimes(1);
+    listener(settings, { ...settings, licenseKey: "" }, ["licenseKey"]);
+    expect(view.refreshCreditsBalance).toHaveBeenCalledTimes(2);
+    listener(settings, { ...settings, licenseKey: ` ${settings.licenseKey} ` }, ["licenseKey"]);
+    expect(view.refreshCreditsBalance).toHaveBeenCalledTimes(2);
+  });
+
   it("reads the shared cached balance for view-open and settings refreshes", async () => {
     const readCreditsBalance = jest.fn(async () => balance);
     const view = createView(readCreditsBalance);

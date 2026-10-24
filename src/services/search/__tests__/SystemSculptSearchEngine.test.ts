@@ -160,6 +160,20 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(res.results).toEqual([]);
   });
 
+  it.each(["defaultChatTag", "lastValidated", "lastAutomaticBackup", "pendingAudioProcessorUploads", "licenseKey", "embeddingsEnabled"])("keeps the warm content index when %s changes", async (key) => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+    (app.vault.cachedRead as jest.Mock).mockClear();
+    const listener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")![1];
+    listener(plugin.settings, plugin.settings, [key]);
+    const result = await engine.search("orange juice", { mode: "lexical", limit: 10 });
+    expect(result.results.map(hit => hit.path)).toContain("notes/orange-juice.md");
+    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+    engine.destroy();
+  });
+
   it("clears the content index when search-affecting settings change", async () => {
     jest.useFakeTimers();
     const { app } = buildFixture();
@@ -171,7 +185,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
     const settingsListener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")?.[1];
     expect(settingsListener).toBeDefined();
-    settingsListener();
+    settingsListener(plugin.settings, plugin.settings, ["embeddingsExclusions"]);
 
     (app.vault.cachedRead as jest.Mock).mockClear();
     const res = await engine.search("fresh", { mode: "smart", limit: 10 });

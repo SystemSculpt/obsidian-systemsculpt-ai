@@ -77,6 +77,12 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
     void plugin.getSettingsManager().updateSettings({ textExecutionBackend: next, textExecutionBackendExplicit: true })
       .catch(cause => picker.showError(cause instanceof Error ? cause.message : 'Could not switch provider.')).finally(() => { changing = false; render(); });
   });
-  const updated = plugin.app.workspace.on('systemsculpt:settings-updated', render); render();
+  const updated = plugin.app.workspace.on('systemsculpt:settings-updated', (_oldSettings, _newSettings, changedKeys) => {
+    if (changedKeys.some(key => [
+      'textExecutionBackend', 'codexModel', 'codexThinkingLevel', 'codexServiceTier',
+      'codexApprovalMode', 'claudeModel', 'claudePermissionMode',
+    ].includes(key))) render();
+  });
+  render();
   return () => { if (disposed) return; disposed = true; picker.dispose(); claude.dispose(); plugin.app.workspace.offref(updated); root.remove(); detectionStatus?.remove(); detect?.remove(); };
 }

@@ -111,6 +111,21 @@ describe("EmbeddingsView", () => {
     jest.clearAllMocks();
   });
 
+  it("ignores unrelated settings events but refreshes for indexing configuration", async () => {
+    await view.onOpen();
+    const listener = mockPlugin.app.workspace.on.mock.calls.find(([event]: [string]) => event === "systemsculpt:settings-updated")![1];
+    const refresh = jest.spyOn(view as any, "debouncedCheckActiveFile").mockImplementation(() => undefined);
+    const settings = mockPlugin.settings;
+    listener(settings, settings, ["lastValidated"]);
+    listener(settings, settings, ["defaultChatTag"]);
+    expect(refresh).not.toHaveBeenCalled();
+    mockPlugin.settings = { ...settings, embeddingsEnabled: false };
+    listener(settings, mockPlugin.settings, ["embeddingsEnabled"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    refresh.mockRestore();
+    await view.onClose();
+  });
+
   describe("view basics", () => {
     it("returns correct view type", () => {
       expect(view.getViewType()).toBe(EMBEDDINGS_VIEW_TYPE);

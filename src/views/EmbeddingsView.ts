@@ -169,7 +169,8 @@ export class EmbeddingsView extends ItemView {
 
     // Refresh results when managed indexing settings change.
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: SystemSculptSettings) => {
+      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: SystemSculptSettings, changedKeys) => {
+        if (!changedKeys.some(key => ["embeddingsEnabled", "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory"].includes(key))) return;
         const nextKey = this.getEmbeddingsConfigKey(newSettings);
         if (nextKey === this.lastEmbeddingsConfigKey) {
           return;
