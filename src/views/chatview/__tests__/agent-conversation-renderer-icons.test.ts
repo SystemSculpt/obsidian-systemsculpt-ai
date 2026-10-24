@@ -29,10 +29,12 @@ function presentation(
 }
 
 describe("AgentConversationRenderer tail status", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    jest.useRealTimers();
+    // jsdom queues <details> toggle events as tasks; let them run before this file's window closes.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     document.body.empty();
     jest.clearAllMocks();
-    jest.useRealTimers();
   });
 
   it("maintains a frozen scalar-only incident snapshot without reading rendered content", async () => {
