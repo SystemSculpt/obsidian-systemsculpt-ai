@@ -23,9 +23,25 @@ const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 /** A search matrix nobody has queried for this long is released. */
 const SEARCH_MATRIX_IDLE_MS = 5 * 60_000;
 const SEARCH_MATRIX_PAGE_SIZE = 512;
-const DB_VERSION = 12;
+/**
+ * 6.14.0 and earlier never close their connection, so after an in-app update
+ * the unloaded instance keeps version 11 open and a higher version would wait
+ * behind it until Obsidian restarts. Raise this (to 12, deleting the unused
+ * by_mtime and by_contentHash indexes that existing databases still carry)
+ * only in a release after one that ships the closing in initialize() and close().
+ * Anyone updating straight from 6.14.0 then gets the restart message, not a hang.
+ */
+const DB_VERSION = 11;
 const STORE_NAME = 'embeddings';
 const STATE_STORE_NAME = "semantic_state";
+
+/** Another connection keeps an older schema open, so this open cannot upgrade it. */
+export class EmbeddingsStorageBlockedError extends Error {
+  constructor() {
+    super("Restart Obsidian to finish updating the semantic index.");
+    this.name = "EmbeddingsStorageBlockedError";
+  }
+}
 
 export class EmbeddingsStorage {
   public static buildDbName(vaultInstanceId: string): string {
@@ -40,6 +56,8 @@ export class EmbeddingsStorage {
   /** Root records without their vectors: every reader needs only metadata. */
   private cache: Map<string, EmbeddingRootRecord> = new Map();
   private initialized = false;
+  /** Closed for good: the plugin unloaded or another connection took over. */
+  private closed = false;
   // Root records only: enough for synchronous freshness and path statistics.
   private pathsSet: Set<string> = new Set();
   /**
@@ -121,12 +139,33 @@ export class EmbeddingsStorage {
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+    if (this.closed) throw new Error("Embeddings storage is closed.");
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const request = indexedDB.open(this.dbName, DB_VERSION);
-      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      request.onerror = () => fail(toError(request.error, "IndexedDB request failed."));
+      // Fired only while another connection refuses to close for an upgrade
+      // (a build without the versionchange handler below). That wait lasts
+      // until Obsidian restarts, so fail now and let the index status say so.
+      request.onblocked = () => fail(new EmbeddingsStorageBlockedError());
       request.onsuccess = () => {
-        this.db = request.result;
+        const db = request.result;
+        if (settled || this.closed) {
+          // The blocker let go after this open failed, or the plugin unloaded meanwhile.
+          db.close();
+          fail(new Error("Embeddings storage is closed."));
+          return;
+        }
+        // Step aside when a newer build (after an in-app update) upgrades or deletes the database.
+        db.onversionchange = () => this.close();
+        settled = true;
+        this.db = db;
         this.initialized = true;
         resolve();
       };
@@ -156,9 +195,8 @@ export class EmbeddingsStorage {
         if (!store.indexNames.contains("by_namespace")) {
           store.createIndex("by_namespace", "metadata.namespace", { unique: false });
         }
-        // Version 12 drops unused secondary indexes without rebuilding stored vectors.
-        if (store.indexNames.contains("by_mtime")) store.deleteIndex("by_mtime");
-        if (store.indexNames.contains("by_contentHash")) store.deleteIndex("by_contentHash");
+        // New databases skip the unused by_mtime and by_contentHash indexes;
+        // existing ones keep them until a later version deletes them (see DB_VERSION).
       };
     });
   }
@@ -794,6 +832,19 @@ export class EmbeddingsStorage {
 
       request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
     });
+  }
+
+  /**
+   * Close the connection for good, on plugin unload or when another connection
+   * needs to upgrade or delete the database. An open still pending closes as
+   * soon as it succeeds.
+   */
+  close(): void {
+    this.closed = true;
+    this.db?.close();
+    this.db = null;
+    this.initialized = false;
+    this.releaseSearchMatrices();
   }
 
   /**

@@ -319,7 +319,8 @@ async function buildStatusSummary(plugin: SystemSculptPlugin): Promise<string> {
 
   try {
     const snapshot = manager.getLifecycleSnapshot();
-    if (!snapshot.ready || snapshot.phase === "initializing") return "Starting…";
+    // An index that could not open reports its error instead of "Starting".
+    if (snapshot.phase === "initializing" || (!snapshot.ready && snapshot.phase !== "error")) return "Starting…";
     if (snapshot.phase === "paused") return snapshot.pending > 0
       ? `Paused · ${snapshot.pending} remaining`
       : "Paused";

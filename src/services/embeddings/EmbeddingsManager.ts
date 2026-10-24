@@ -19,8 +19,9 @@ import {
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
+import { readEmbeddingErrorMessage } from "./EmbeddingErrorMessage";
 import { toSearchResult } from "./search/VectorSearch";
-import { EmbeddingsStorage } from "./storage/EmbeddingsStorage";
+import { EmbeddingsStorage, EmbeddingsStorageBlockedError } from "./storage/EmbeddingsStorage";
 import { EmbeddingsIndexFile } from "./storage/EmbeddingsIndexFile";
 import {
   restoreEmbeddingsIndexIfEmpty,
@@ -216,7 +217,21 @@ export class EmbeddingsManager {
 
   async initialize(): Promise<void> {
     if (!this.initializationPromise) {
-      this.initializationPromise = this.initializeStorage();
+      this.initializationPromise = this.initializeStorage().catch((error: unknown) => {
+        // Otherwise every status surface would say "Starting" until Obsidian restarts.
+        this.lifecycle.update({
+          phase: "error",
+          ready: false,
+          currentPath: null,
+          lastError: error instanceof EmbeddingsStorageBlockedError
+            ? { code: "storage_blocked", message: error.message }
+            : {
+                code: "storage_unavailable",
+                message: readEmbeddingErrorMessage(error, "The semantic index could not open. Restart Obsidian."),
+              },
+        });
+        throw error;
+      });
     }
     await this.initializationPromise;
     if (this.plugin.settings.embeddingsEnabled) {
@@ -779,7 +794,8 @@ export class EmbeddingsManager {
     this.portableCheckpoint?.cancel();
     this.queryCache.clear();
     this.similarCache.clear();
-    if (typeof this.storage.releaseSearchMatrices === "function") this.storage.releaseSearchMatrices();
+    // Closing lets the next build an in-app update loads upgrade the database.
+    if (typeof this.storage.close === "function") this.storage.close();
     this.lifecycle.clearListeners();
   }
 

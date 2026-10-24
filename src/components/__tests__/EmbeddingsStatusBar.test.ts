@@ -87,6 +87,19 @@ describe("EmbeddingsStatusBar", () => {
     expect(element.title).toContain("Try again later");
   });
 
+  it("reports an index that could not open instead of Starting", () => {
+    listener?.(snapshot({
+      phase: "error",
+      ready: false,
+      lastError: { code: "storage_blocked", message: "Restart Obsidian to finish updating the semantic index." },
+    }));
+    expect(element.textContent).toBe("Error");
+    expect(element.title).toBe("Restart Obsidian to finish updating the semantic index. Open Similar notes.");
+
+    listener?.(snapshot({ phase: "paused", ready: false }));
+    expect(element.textContent).toBe("Starting");
+  });
+
   it("skips DOM writes for snapshots that change nothing it shows", () => {
     const indexing = snapshot({ phase: "reconciling", total: 20, completed: 7, pending: 13, currentPath: "A.md" });
     listener?.(indexing);
