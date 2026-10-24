@@ -863,7 +863,7 @@ export class AgentComposer extends Component {
 
   private handleInputKeydown(event: KeyboardEvent): void {
     // "Process" is what an IME reports for keys it is still composing.
-    if (event.isComposing || event.key === "Process") return;
+    if (event.defaultPrevented || event.isComposing || event.key === "Process") return;
     const modified = event.altKey || event.ctrlKey || event.metaKey;
     if (this.mentions.isOpen()) {
       if (event.key === "Tab" && !event.shiftKey && !modified) {

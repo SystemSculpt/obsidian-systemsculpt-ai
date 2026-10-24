@@ -79,7 +79,8 @@ describe("inline approval keyboard ownership", () => {
     expect(document.activeElement).toBe(ui.input);
     expect(ui.composer.querySelector('[data-testid="chat.approval.review"]')?.hasAttribute("hidden")).toBe(false);
     key(ui.input, "ArrowDown", { altKey: true });
-    expect(document.activeElement).toBe(ui.input);
+    expect(document.activeElement).toBe(card);
+    ui.input.focus();
     key(ui.input, "ArrowUp", { altKey: true });
     expect(document.activeElement).toBe(card);
     expect(ui.input.value).toBe("Still typing");
@@ -100,7 +101,7 @@ describe("inline approval keyboard ownership", () => {
     ui.cards.sync([part]);
     expect(document.activeElement).toBe(card);
     expect(pill()?.hidden).toBe(true);
-    expect(pill()?.getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowUp");
+    expect(pill()?.getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowUp Alt+ArrowDown");
     expect(pill()?.querySelector("kbd")?.getAttribute("aria-hidden")).toBe("true");
 
     // Back in the composer, typing brings the pill; clearing the text hides it.

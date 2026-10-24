@@ -84,8 +84,9 @@ permission. Native agents own the grant, and already-pending requests still need
 their own answer. Closing the live chat ends its native session grants.
 
 A new card does not interrupt typing. Use **Approval needed · Review** or
-**⌥/Alt+↑** to move from the composer to the pending card. Resolved cards retain
-their result, and focus moves to the next pending card or back to the composer.
+**⌥/Alt+↑** (also **⌥/Alt+↓**) anywhere in the chat view to focus the first pending
+card. With no card pending, these keys keep their normal behavior. Resolved cards
+retain their result, and focus moves to the next pending card or back to the composer.
 
 ## Where tools come from
 

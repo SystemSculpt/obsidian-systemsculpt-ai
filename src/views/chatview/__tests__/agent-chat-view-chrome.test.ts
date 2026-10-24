@@ -167,6 +167,28 @@ describe("AgentChatView chrome wiring", () => {
     expect(view.workspace.runLine.openModeMenu).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["Search chats", 0, { key: "k", metaKey: true }, "history"],
+    ["New chat", 1, { key: "O", metaKey: true, shiftKey: true }, "new"],
+    ["Change mode", 2, { key: ".", code: "Period", metaKey: true }, "mode"],
+    ["Change backend", 3, { key: ">", code: "Period", metaKey: true, shiftKey: true }, "backend"],
+  ] as const)("keyboard map 6.1: %s dispatches only its view action", (_label, index, event, action) => {
+    const view = harness();
+    const actions = {
+      history: jest.fn(), new: jest.fn(),
+      mode: view.workspace.runLine.openModeMenu,
+      backend: view.workspace.runLine.openBackendMenu,
+    };
+    view.openChatHistory = actions.history;
+    view.newChat = actions.new;
+    (view as any).registerViewKeys();
+    const keys = (view.scope as unknown as { keys: Array<{ func: (event: KeyboardEvent) => unknown }> }).keys;
+    expect(keys[index].func(new KeyboardEvent("keydown", event))).toBe(false);
+    for (const [name, callback] of Object.entries(actions)) {
+      expect(callback).toHaveBeenCalledTimes(name === action ? 1 : 0);
+    }
+  });
+
   it("makes a saved chat read-only where its agent cannot run, and writable again once it can", () => {
     host.localCli = false;
     const mobile = harness({ messages: 2 });

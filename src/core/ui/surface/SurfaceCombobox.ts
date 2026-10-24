@@ -120,7 +120,7 @@ export class SurfaceCombobox<T> {
   };
 
   private readonly handleKeydown = (event: KeyboardEvent): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || event.defaultPrevented || event.isComposing || event.key === "Process") return;
 
     if (event.key === "Escape") {
       if (!this.open) return;
