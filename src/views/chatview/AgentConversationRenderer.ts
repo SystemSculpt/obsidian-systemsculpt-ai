@@ -2783,7 +2783,6 @@ export class AgentConversationRenderer extends Component {
           ? copy.createDiv({
             cls: "systemsculpt-agent-error-report",
             text: "Preparing report…",
-            attr: { role: "status", "aria-live": "polite" },
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
           && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
@@ -3585,7 +3584,7 @@ export class AgentConversationRenderer extends Component {
     const actionTitle = (label: string): string => time ? `${label} · ${time}` : label;
     if (canRetryResponse) {
       const retry = createUiAction(actions, {
-        label: "Retry response", testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
+        label: actionTitle("Retry response"), testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
         title: actionTitle("Retry response"),
       });
       pending(retry, "rotate-ccw");
@@ -3601,7 +3600,7 @@ export class AgentConversationRenderer extends Component {
     if (canCopy) {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
-        label: `Copy ${subject}`,
+        label: actionTitle(`Copy ${subject}`),
         title: actionTitle(`Copy ${subject}`),
         testId: "chat.turn.copy",
         ...icon("copy"),
@@ -3609,12 +3608,11 @@ export class AgentConversationRenderer extends Component {
       });
       pending(copy, "copy");
       copy.addClass("systemsculpt-agent-message-copy");
-      copy.setAttrs({ "aria-label": `Copy ${subject}` });
       copy.onclick = () => void this.copyWithFeedback(copy, subject, () => this.options.onCopyText?.(text));
     }
     if (canRetry) {
       const retry = createUiAction(actions, {
-        label: "Edit and resubmit",
+        label: actionTitle("Edit and resubmit"),
         title: actionTitle("Edit and resubmit"),
         testId: "chat.turn.edit-resubmit",
         ...icon("pencil"),

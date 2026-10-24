@@ -80,7 +80,21 @@ describe("ChatHistoryPanel", () => {
     const rows = Array.from(parent.querySelectorAll<HTMLElement>('[data-testid="history.row"]'));
     expect(rows.map((option) => option.dataset.chatId)).toEqual(["weekly", "q4", "links", "meeting", "reading", "goals"]);
     expect(rows.every((option) => option.getAttribute("role") === "option")).toBe(true);
-    expect(parent.querySelector('[data-testid="history.list"]')?.getAttribute("role")).toBe("listbox");
+    const listbox = parent.querySelector<HTMLElement>('[data-testid="history.list"]')!;
+    expect(listbox.getAttribute("role")).toBe("listbox");
+    expect(listbox.getAttribute("aria-label")).toBe("Chats");
+    expect(search.getAttribute("role")).toBe("combobox");
+    expect(search.getAttribute("aria-label")).toBe("Search chats");
+    expect(search.getAttribute("aria-controls")).toBe(listbox.id);
+    expect(search.getAttribute("aria-expanded")).toBe("true");
+    for (const group of listbox.querySelectorAll('[role="group"]')) {
+      const heading = parent.ownerDocument.getElementById(group.getAttribute("aria-labelledby")!);
+      expect(group.contains(heading)).toBe(true);
+      expect(heading?.textContent).toBeTruthy();
+    }
+    expect(rows.map((option) => option.getAttribute("aria-selected")))
+      .toEqual(["false", "false", "true", "false", "false", "false"]);
+    expect(search.getAttribute("aria-activedescendant")).toBe(rows[2].id);
     expect(rows[1].querySelector(".systemsculpt-history-row-badge")?.textContent).toBe("Claude");
     expect(rows[2].querySelector(".systemsculpt-history-row-badge")?.textContent).toBe("Codex");
     expect(rows[0].querySelector(".systemsculpt-history-row-badge")?.textContent).toBe("SystemSculpt");
@@ -90,6 +104,39 @@ describe("ChatHistoryPanel", () => {
     expect(rows[2].classList.contains("is-current")).toBe(true);
     expect(rows[2].getAttribute("aria-current")).toBe("true");
     expect(rows[2].classList.contains("is-active")).toBe(true);
+    panel.unload();
+  });
+
+  it("keeps selection and the active descendant in sync through navigation and filtering", async () => {
+    const { parent, panel, search } = mount();
+    panel.open();
+    await flush();
+    const selected = () => parent.querySelectorAll('[data-testid="history.row"][aria-selected="true"]');
+    keydown(search, "ArrowDown");
+    const meeting = parent.querySelector<HTMLElement>('[data-chat-id="meeting"]')!;
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]).toBe(meeting);
+    expect(search.getAttribute("aria-activedescendant")).toBe(meeting.id);
+    expect(parent.querySelector('[data-chat-id="links"]')?.getAttribute("aria-selected")).toBe("false");
+    expect(document.activeElement).toBe(search);
+
+    typeQuery(search, "plan");
+    const match = parent.querySelector<HTMLElement>('[data-chat-id="q4"]')!;
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]).toBe(match);
+    expect(search.getAttribute("aria-activedescendant")).toBe(match.id);
+    typeQuery(search, "!");
+    expect(selected()).toHaveLength(0);
+    expect(search.hasAttribute("aria-activedescendant")).toBe(false);
+    panel.unload();
+  });
+
+  it("leaves every option unselected when no chat is current", async () => {
+    const { parent, panel, search } = mount({ isCurrent: () => false });
+    panel.open();
+    await flush();
+    expect(parent.querySelectorAll('[data-testid="history.row"][aria-selected="false"]')).toHaveLength(ROWS.length);
+    expect(search.hasAttribute("aria-activedescendant")).toBe(false);
     panel.unload();
   });
 
@@ -157,6 +204,43 @@ describe("ChatHistoryPanel", () => {
     await flush();
     expect(parent.querySelector(".systemsculpt-history-panel-status")?.textContent).toBe("No chats yet");
     panel.unload();
+  });
+
+  it.each(["standalone", "composed"] as const)("reports a load failure as an alert and restores %s status semantics after retry", async (mode) => {
+    const announce = jest.fn();
+    const loadRows = jest.fn<Promise<readonly ChatHistoryRow[]>, []>()
+      .mockRejectedValueOnce(new Error("Vault unavailable"))
+      .mockResolvedValue([]);
+    const { parent, panel, search } = mount({
+      loadRows,
+      announce: mode === "composed" ? announce : undefined,
+    });
+    const message = "Could not load chats. Close and reopen history to try again.";
+    try {
+      panel.open();
+      await flush();
+      const status = parent.querySelector<HTMLElement>(".systemsculpt-history-panel-status")!;
+      expect(status.getAttribute("role")).toBe("alert");
+      expect(status.hasAttribute("aria-live")).toBe(false);
+      expect(status.hidden).toBe(false);
+      expect(status.textContent).toBe(message);
+      expect(announce).not.toHaveBeenCalledWith(message);
+      expect(parent.querySelectorAll('[data-testid="history.row"]')).toHaveLength(0);
+      typeQuery(search, "plan");
+      expect(status.textContent).toBe(message);
+
+      typeQuery(search, "");
+      const retry = panel.reload();
+      expect(status.getAttribute("role")).toBe(mode === "standalone" ? "status" : null);
+      expect(status.getAttribute("aria-live")).toBe(mode === "standalone" ? "polite" : null);
+      await retry;
+      expect(status.textContent).toBe("No chats yet");
+      expect(status.getAttribute("role")).toBe(mode === "standalone" ? "status" : null);
+      expect(status.getAttribute("aria-live")).toBe(mode === "standalone" ? "polite" : null);
+      if (mode === "composed") expect(announce).toHaveBeenLastCalledWith("No chats yet");
+    } finally {
+      panel.unload();
+    }
   });
 
   it("offers favorite, rename, new tab and delete from the row menu and the keyboard", async () => {
