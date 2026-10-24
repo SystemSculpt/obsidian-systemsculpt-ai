@@ -472,7 +472,7 @@ function messageTimeFormat(): Intl.DateTimeFormat {
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
   private readonly historyRoot: HTMLElement;
-  private readonly activeRoot: HTMLElement;
+  public readonly activeRoot: HTMLElement;
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activeOverflowNodes = new Map<string, HTMLButtonElement>();
   private readonly activityOverflowStates = new WeakMap<HTMLButtonElement, {
@@ -510,6 +510,8 @@ export class AgentConversationRenderer extends Component {
   private activeCompletedFold: HTMLDetailsElement | null = null;
   private activeCompletedFoldBody: HTMLElement | null = null;
   private activeWorkingTimer: number | null = null;
+  private activeWorkingWindow: Window | null = null;
+  private visible = true;
   private activeElapsedBaseline: Readonly<{ elapsedMs: number; observedAt: number }> | null = null;
   private historyRows = new Map<string, HistoricalRowState>();
   private historyMessageIds: ReadonlySet<string> = new Set<string>();
@@ -538,10 +540,13 @@ export class AgentConversationRenderer extends Component {
   private incidentPendingHydrationCount = 0;
   private readonly toolDetailHydrators = new WeakMap<HTMLElement, () => void>();
   private loadingTimer: number | null = null;
+  private loadingTimerWindow: Window | null = null;
   private loadingSkeleton: HTMLElement | null = null;
   private readonly shownNotices = new Set<string>();
   private announcedTurnId: string | null = null;
   private announcedTerminalId: string | null = null;
+  private reportGeneration = 0;
+  private readonly deferredReportUpdates = new Map<HTMLElement, () => void>();
 
   constructor(parent: HTMLElement, private readonly options: AgentConversationRendererOptions) {
     super();
@@ -588,10 +593,16 @@ export class AgentConversationRenderer extends Component {
     this.addChild(this.approvals);
   }
 
+  /** The mounted live response; settlement transfers it to history and clears this reference. */
+  public get activeResponseElement(): HTMLElement | null {
+    return this.activeTurn;
+  }
+
   public setLoading(loading: boolean): void {
     const win = getSurfaceOwnerWindow(this.element);
-    if (this.loadingTimer !== null) win.clearTimeout(this.loadingTimer);
+    if (this.loadingTimer !== null) this.loadingTimerWindow?.clearTimeout(this.loadingTimer);
     this.loadingTimer = null;
+    this.loadingTimerWindow = null;
     this.loadingSkeleton?.remove();
     this.loadingSkeleton = null;
     this.element.toggleClass("is-loading-chat", loading);
@@ -600,9 +611,12 @@ export class AgentConversationRenderer extends Component {
     this.element.querySelectorAll(":scope > .systemsculpt-agent-notice").forEach(notice => notice.remove());
     this.announcedTurnId = null;
     this.announcedTerminalId = null;
+    this.loadingTimerWindow = win;
     this.loadingTimer = win.setTimeout(() => {
-      this.options.onAnnounce?.("Loading chat");
       this.loadingTimer = null;
+      this.loadingTimerWindow = null;
+      if (!this.visible) return;
+      this.options.onAnnounce?.("Loading chat");
       const skeleton = this.element.createDiv({
         cls: "systemsculpt-agent-loading",
         attr: { "data-testid": "chat.loading", "aria-label": "Loading chat" },
@@ -943,6 +957,10 @@ export class AgentConversationRenderer extends Component {
         }
         if (failedReceipt) {
           await this.renderDurableFailedTail(body, failedReceipt, turnId, adoptActive);
+          if (!isCurrent()) {
+            this.forgetMarkdown(nextHistory);
+            return;
+          }
         }
         this.renderTurnChanges(body, turnParts.flatMap((part) => part.type === "tool_call"
           ? [this.historicalToolPart(part.data)] : []));
@@ -1041,9 +1059,10 @@ export class AgentConversationRenderer extends Component {
    * This keeps Markdown, selection, focus, and disclosure identity intact.
    */
   public async settleHistory(messages: readonly ChatMessage[], turnId: string): Promise<void> {
+    const generation = this.lifecycleGeneration;
     if (!this.activeTurn || this.activeTurnId !== turnId) {
       await this.renderHistory(messages);
-      this.clearActive();
+      if (this.renderingEnabled && generation === this.lifecycleGeneration) this.clearActive();
       return;
     }
     this.adoptingTurnId = turnId;
@@ -1445,7 +1464,9 @@ export class AgentConversationRenderer extends Component {
       parts,
       finalAnswerPartIds,
     );
+    const generation = this.lifecycleGeneration;
     const work = await this.adoptHistoricalLanes(workParts, parent);
+    if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return false;
     const desired: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
     if (hasActivity) {
       if (!this.activeCompletedFold || !this.activeCompletedFoldBody) {
@@ -1469,6 +1490,7 @@ export class AgentConversationRenderer extends Component {
       desired.push(...work.map(({ key, node }) => ({ key, node })));
     }
     const final = await this.adoptHistoricalLanes(finalAnswers, parent);
+    if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return false;
     desired.push(...final.map(({ key, node }) => ({ key, node })));
     this.reconcileChildren(parent, desired.map(({ node }) => node));
     return hasActivity;
@@ -1478,12 +1500,15 @@ export class AgentConversationRenderer extends Component {
     parts: readonly MessagePart[],
     insertionParent: HTMLElement,
   ): Promise<Array<Readonly<{ key: string; node: HTMLElement; part: AgentPart }>>> {
+    const generation = this.lifecycleGeneration;
     const lanes: Array<Readonly<{ key: string; node: HTMLElement; part: AgentPart }>> = [];
     for (const messagePart of parts) {
+      if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return [];
       const part = this.historicalAgentPart(messagePart);
       if (!part) continue;
       const key = part.kind === "tool" ? toolPartKey(part.callId) : part.id;
       const node = await this.renderActivePart(part, key, false, insertionParent, false);
+      if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return [];
       if (messagePart.type === "content") {
         const content = presentMessageContent(messagePart.data);
         node.querySelectorAll(":scope > .systemsculpt-agent-message-attachments")
@@ -2279,8 +2304,9 @@ export class AgentConversationRenderer extends Component {
       elapsedMs: rebasedElapsedMs,
       observedAt,
     };
-    if (this.activeWorkingTimer !== null) return rebasedElapsedMs;
+    if (!this.visible || this.activeWorkingTimer !== null) return rebasedElapsedMs;
     const ownerWindow = getSurfaceOwnerWindow(status);
+    this.activeWorkingWindow = ownerWindow;
     this.activeWorkingTimer = ownerWindow.setInterval(() => {
       if (!status.isConnected || !this.activeElapsedBaseline) {
         this.stopWorkingTimer();
@@ -2300,7 +2326,10 @@ export class AgentConversationRenderer extends Component {
   }
 
   private monotonicNow(element: HTMLElement): number {
-    return getSurfaceOwnerWindow(element).performance?.now?.() ?? Date.now();
+    const performance = getSurfaceOwnerWindow(element).performance;
+    return performance
+      ? (Number.isFinite(performance.timeOrigin) ? performance.timeOrigin : 0) + performance.now()
+      : Date.now();
   }
 
   private setTextNode(element: HTMLElement | null, text: string): void {
@@ -2312,12 +2341,35 @@ export class AgentConversationRenderer extends Component {
     element.replaceChildren(element.ownerDocument.createTextNode(text));
   }
 
-  private stopWorkingTimer(): void {
+  private stopWorkingTimer(clearBaseline = true): void {
     if (this.activeWorkingTimer !== null) {
-      getSurfaceOwnerWindow(this.element).clearInterval(this.activeWorkingTimer);
+      this.activeWorkingWindow?.clearInterval(this.activeWorkingTimer);
       this.activeWorkingTimer = null;
+      this.activeWorkingWindow = null;
     }
-    this.activeElapsedBaseline = null;
+    if (clearBaseline) this.activeElapsedBaseline = null;
+  }
+
+  public setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
+    this.visible = visible;
+    this.renderingEnabled = visible;
+    this.lifecycleGeneration += 1;
+    this.liveMarkdown.setVisible(visible);
+    if (!visible) {
+      // Cached parts may own hydration invalidated by this visibility epoch.
+      // Revisit them on show without replacing their keyed DOM nodes.
+      this.activePartRefs.clear();
+      this.stopWorkingTimer(false);
+      if (this.loadingTimer !== null) this.loadingTimerWindow?.clearTimeout(this.loadingTimer);
+      this.loadingTimer = null;
+      this.loadingTimerWindow = null;
+    } else {
+      for (const [status, update] of this.deferredReportUpdates) {
+        if (this.element.contains(status)) update();
+      }
+      this.deferredReportUpdates.clear();
+    }
   }
 
   private reconcileChildren(parent: HTMLElement, desired: readonly HTMLElement[]): void {
@@ -2783,7 +2835,6 @@ export class AgentConversationRenderer extends Component {
           ? copy.createDiv({
             cls: "systemsculpt-agent-error-report",
             text: "Preparing report…",
-            attr: { role: "status", "aria-live": "polite" },
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
           && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
@@ -2844,6 +2895,8 @@ export class AgentConversationRenderer extends Component {
   }
 
   public override onunload(): void {
+    this.reportGeneration += 1;
+    this.deferredReportUpdates.clear();
     this.setLoading(false);
     this.renderingEnabled = false;
     this.lifecycleGeneration += 1;
@@ -2870,8 +2923,15 @@ export class AgentConversationRenderer extends Component {
   }
 
   public override onload(): void {
-    this.renderingEnabled = true;
+    this.renderingEnabled = this.visible;
     this.lifecycleGeneration += 1;
+    const detachMigration = this.element.onWindowMigrated?.(() => {
+      this.stopWorkingTimer(false);
+      if (this.visible && this.activeTailStatus && this.activeElapsedBaseline) {
+        this.startWorkingTimer(this.activeTailStatus, this.activeElapsedBaseline.elapsedMs);
+      }
+    });
+    if (detachMigration) this.register(detachMigration);
     // Action rows stay invisible until a turn is hovered or focused, so their
     // icons are drawn then rather than for every row of a long chat.
     const reveal = (event: Event) => this.drawPendingActionIcons(event.target);
@@ -3386,6 +3446,7 @@ export class AgentConversationRenderer extends Component {
       existing
       && existing.container === approval
       && existing.fingerprint === fingerprint
+      && existing.lifecycleGeneration === this.lifecycleGeneration
     ) {
       return;
     }
@@ -3585,7 +3646,7 @@ export class AgentConversationRenderer extends Component {
     const actionTitle = (label: string): string => time ? `${label} · ${time}` : label;
     if (canRetryResponse) {
       const retry = createUiAction(actions, {
-        label: "Retry response", testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
+        label: actionTitle("Retry response"), testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
         title: actionTitle("Retry response"),
       });
       pending(retry, "rotate-ccw");
@@ -3601,7 +3662,7 @@ export class AgentConversationRenderer extends Component {
     if (canCopy) {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
-        label: `Copy ${subject}`,
+        label: actionTitle(`Copy ${subject}`),
         title: actionTitle(`Copy ${subject}`),
         testId: "chat.turn.copy",
         ...icon("copy"),
@@ -3609,12 +3670,11 @@ export class AgentConversationRenderer extends Component {
       });
       pending(copy, "copy");
       copy.addClass("systemsculpt-agent-message-copy");
-      copy.setAttrs({ "aria-label": `Copy ${subject}` });
       copy.onclick = () => void this.copyWithFeedback(copy, subject, () => this.options.onCopyText?.(text));
     }
     if (canRetry) {
       const retry = createUiAction(actions, {
-        label: "Edit and resubmit",
+        label: actionTitle("Edit and resubmit"),
         title: actionTitle("Edit and resubmit"),
         testId: "chat.turn.edit-resubmit",
         ...icon("pencil"),
@@ -3787,7 +3847,7 @@ export class AgentConversationRenderer extends Component {
     reportId: string,
     retry = false,
   ): Promise<void> {
-    const generation = this.lifecycleGeneration;
+    const generation = this.reportGeneration;
     status.setText("Preparing report…");
     let available = !isLocalReportId(reportId);
     try {
@@ -3795,7 +3855,18 @@ export class AgentConversationRenderer extends Component {
     } catch {
       available = false;
     }
-    if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return;
+    if (generation !== this.reportGeneration) return;
+    const update = () => this.renderIncidentReport(status, actions, reportId, available);
+    if (!this.visible) this.deferredReportUpdates.set(status, update);
+    else update();
+  }
+
+  private renderIncidentReport(
+    status: HTMLElement,
+    actions: HTMLElement | null,
+    reportId: string,
+    available: boolean,
+  ): void {
     status.setText(available ? `Report ID: ${reportId}` : "Report unavailable");
     if (!actions) return;
     if (!available) {

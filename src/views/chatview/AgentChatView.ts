@@ -804,6 +804,7 @@ export class AgentChatView extends ItemView {
     this.contentEl.addClass("systemsculpt-agent-view");
     this.workspace = new AgentWorkspace(this.contentEl, {
       app: this.app,
+      visibilityRoot: this.containerEl,
       sourcePath: () => this.getExpectedChatHistoryFilePath() || "",
       reducedMotion: () => this.plugin.settings.reduceChatMotion === true,
       onSubmit: (submission) => {
@@ -3649,7 +3650,12 @@ export class AgentChatView extends ItemView {
   /** Starts a new chat in this view. */
   public async newChat(focus = true): Promise<void> {
     if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
-    await this.startNewChat(focus);
+    const started = this.startNewChat(focus);
+    const origin = this.conversationOriginToken;
+    await started;
+    if (origin === this.conversationOriginToken) {
+      this.workspace?.announce(`Started a new chat with ${agentName(backendOf(this.agent))}`);
+    }
   }
 
   public openChatHistory(): void {
@@ -4144,6 +4150,7 @@ export class AgentChatView extends ItemView {
     const rendering = workspace?.setAgentSnapshot(snapshot);
     if (rendering && workspace) {
       void rendering.then(() => {
+        if (workspace.isRenderingVisible?.() === false) return;
         if (
           this.workspace === workspace
           && this.agent === agent

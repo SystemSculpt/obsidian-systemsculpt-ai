@@ -70,6 +70,7 @@ export class ChatHistoryPanel extends Component {
   private readonly combobox: SurfaceCombobox<PanelItem>;
   private rows: readonly ChatHistoryRow[] = [];
   private loading = false;
+  private loadFailed = false;
   private loadGeneration = 0;
   private rowLimit = ROW_PAGE;
   private matchedCount = 0;
@@ -216,6 +217,7 @@ export class ChatHistoryPanel extends Component {
   /** Re-reads the rows, keeping the query and the active row. */
   public async reload(): Promise<void> {
     const generation = ++this.loadGeneration;
+    this.loadFailed = false;
     this.loading = this.rows.length === 0;
     if (this.loading) this.combobox.setBusy(true);
     this.syncStatus(this.rows.length === 0);
@@ -228,6 +230,7 @@ export class ChatHistoryPanel extends Component {
     } catch {
       if (generation !== this.loadGeneration) return;
       this.rows = [];
+      this.loadFailed = true;
     } finally {
       if (generation === this.loadGeneration) {
         this.loading = false;
@@ -552,19 +555,31 @@ export class ChatHistoryPanel extends Component {
 
   private syncStatus(empty: boolean): void {
     const searching = Boolean(this.query) && this.pendingContentQuery === this.query;
-    const text = this.loading
-      ? "Loading chats…"
-      : searching
-        ? "Searching chat text…"
-        : !empty
-          ? ""
-          : this.query
-            ? `No chats match "${this.search.input.value.trim()}"`
-            : "No chats yet";
-    if (text && text !== this.statusEl.textContent && this.isOpen) this.options.announce?.(text);
+    const text = this.loadFailed
+      ? "Could not load chats. Close and reopen history to try again."
+      : this.loading
+        ? "Loading chats…"
+        : searching
+          ? "Searching chat text…"
+          : !empty
+            ? ""
+            : this.query
+              ? `No chats match "${this.search.input.value.trim()}"`
+              : "No chats yet";
+    if (this.loadFailed) {
+      this.statusEl.setAttribute("role", "alert");
+      this.statusEl.removeAttribute("aria-live");
+    } else if (this.options.announce) {
+      this.statusEl.removeAttribute("role");
+      this.statusEl.removeAttribute("aria-live");
+    } else {
+      this.statusEl.setAttribute("role", "status");
+      this.statusEl.setAttribute("aria-live", "polite");
+    }
+    if (!this.loadFailed && text && text !== this.statusEl.textContent && this.isOpen) this.options.announce?.(text);
     this.statusEl.setText(text);
     this.statusEl.toggleAttribute("hidden", !text);
-    this.statusEl.classList.toggle("is-empty", empty && !this.loading && !searching);
+    this.statusEl.classList.toggle("is-empty", empty && !this.loadFailed && !this.loading && !searching);
   }
 }
 

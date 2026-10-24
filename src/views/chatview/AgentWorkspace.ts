@@ -1,4 +1,5 @@
 import { App, Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
   createUiAction,
@@ -10,6 +11,7 @@ import {
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
 import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
+import { observeLeafVisibility } from "../../core/ui/surface/LeafVisibility";
 import type { ChatMessage } from "../../types";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
@@ -47,6 +49,7 @@ export type AgentQueuedFollowUp = Readonly<{
 
 export type AgentWorkspaceOptions = Readonly<{
   app: App;
+  visibilityRoot?: HTMLElement;
   sourcePath: () => string;
   reducedMotion?: () => boolean;
   onSubmit: (submission: AgentComposerSubmit) => void | Promise<void>;
@@ -199,6 +202,9 @@ export class AgentWorkspace extends Component {
   private readonly emptyState: AgentEmptyState;
   private readonly liveRegion: HTMLElement;
   private announceTimer: number | null = null;
+  private announceTimerWindow: Window | null = null;
+  private loading = false;
+  private pendingAnnouncements: string[] = [];
   private chromeKey = "";
   private historyReturnFocus: HTMLElement | null = null;
   private moreMenu: Menu | null = null;
@@ -212,6 +218,7 @@ export class AgentWorkspace extends Component {
   private history: readonly ChatMessage[] = [];
   /** Frozen transcript messages compare by identity instead of by JSON. */
   private historyKeys: readonly unknown[] = [];
+  private historyNeedsRender = false;
   private snapshot: AgentConversationSnapshot | null = null;
   private runPending = false;
   private pendingTurnId: string | null = null;
@@ -231,6 +238,10 @@ export class AgentWorkspace extends Component {
     cancel: () => void;
   }> | null = null;
   private unloaded = false;
+  private visible = true;
+  private deferredChrome: AgentChromeState | null = null;
+  private deferredQueue: readonly AgentQueuedFollowUp[] | null = null;
+  private snapshotRenderWindow: Window | null = null;
   private lifecycleGeneration = 0;
   private incidentMetricsGeneration = 0;
   private incidentRenderPassCount = 0;
@@ -266,6 +277,9 @@ export class AgentWorkspace extends Component {
     const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
     const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
     const more = iconButton(headerActions, "chat.header.more", "More", "more-horizontal");
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    history.setAttribute("aria-keyshortcuts", `${modifier}+K`);
+    create.setAttribute("aria-keyshortcuts", `${modifier}+Shift+O`);
     more.setAttribute("aria-haspopup", "menu");
     for (const button of [history, create, more]) button.addClass("systemsculpt-agent-header-button");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());
@@ -278,7 +292,8 @@ export class AgentWorkspace extends Component {
     });
     this.banner.toggleAttribute("hidden", true);
 
-    this.viewport = this.element.createDiv({
+    const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
+    this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
       attr: { tabindex: "0" },
     });
@@ -329,7 +344,7 @@ export class AgentWorkspace extends Component {
     });
     this.addChild(this.renderer);
 
-    this.jumpButton = createUiAction(this.element, {
+    this.jumpButton = createUiAction(transcript, {
       label: "Latest",
       testId: "chat.jump-to-latest",
       icon: "arrow-down",
@@ -392,8 +407,10 @@ export class AgentWorkspace extends Component {
       attr: { role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "chat.announcer" },
     });
     this.register(() => {
-      if (this.announceTimer !== null) getSurfaceOwnerWindow(this.liveRegion).clearTimeout(this.announceTimer);
+      if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
       this.announceTimer = null;
+      this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
     });
   }
 
@@ -404,6 +421,8 @@ export class AgentWorkspace extends Component {
 
   /** A saved chat is loading; the conversation shows its skeleton after 300 ms. */
   public setLoading(loading: boolean): void {
+    this.loading = loading;
+    if (!this.visible) return;
     this.element.classList.toggle("is-loading-chat", loading);
     this.renderer.setLoading(loading);
     this.syncEmpty();
@@ -411,19 +430,25 @@ export class AgentWorkspace extends Component {
 
   /** Polite announcement for screen readers. */
   public announce(text: string): void {
-    // Clearing first makes a repeated message announce again.
-    // A timer, not a frame: announcements never take a slot in the render frame queue.
+    if (!this.isRenderingVisible()) return;
+    this.pendingAnnouncements.push(text);
+    if (this.announceTimer !== null) return;
+    // Clearing first makes a repeated message announce again. Preserve a burst
+    // in order rather than letting a fast reply overwrite its start or approval.
     this.liveRegion.setText("");
     const ownerWindow = getSurfaceOwnerWindow(this.liveRegion);
-    if (this.announceTimer !== null) ownerWindow.clearTimeout(this.announceTimer);
+    this.announceTimerWindow = ownerWindow;
     this.announceTimer = ownerWindow.setTimeout(() => {
       this.announceTimer = null;
-      this.liveRegion.setText(text);
+      this.announceTimerWindow = null;
+      this.liveRegion.setText(this.pendingAnnouncements.join(" "));
+      this.pendingAnnouncements = [];
     }, 50);
   }
 
   /** Renders the run line and the empty state for the current chat. */
   public setChrome(state: AgentChromeState): void {
+    if (!this.visible) { this.deferredChrome = state; return; }
     // Snapshots arrive many times a second while a turn streams.
     const key = JSON.stringify(state, (_key, value: unknown) => value instanceof Set ? [...value] : value);
     if (key === this.chromeKey) return;
@@ -470,10 +495,11 @@ export class AgentWorkspace extends Component {
     this.moreMenu?.hide();
     const menu = new Menu().setUseNativeMenu(false);
     this.moreMenu = menu;
-    containMenuEscape(menu, anchor.ownerDocument);
+    const releaseEscape = containMenuEscape(menu, anchor.ownerDocument);
     this.options.buildMoreMenu?.(menu);
     anchor.setAttribute("aria-expanded", "true");
     menu.onHide(() => {
+      releaseEscape();
       if (this.moreMenu !== menu) return;
       this.moreMenu = null;
       anchor.setAttribute("aria-expanded", "false");
@@ -682,6 +708,7 @@ export class AgentWorkspace extends Component {
   }
 
   public setQueue(queue: readonly AgentQueuedFollowUp[]): void {
+    if (!this.visible) { this.deferredQueue = queue; return; }
     const focusedElement = this.queueElement.contains(
       this.queueElement.ownerDocument.activeElement,
     )
@@ -785,6 +812,8 @@ export class AgentWorkspace extends Component {
   }
 
   public setHistory(messages: readonly ChatMessage[]): Promise<void> {
+    this.history = messages;
+    if (!this.visible) return Promise.resolve();
     if (
       this.submittedPromptTurnId
       && !messages.some((message) =>
@@ -794,7 +823,6 @@ export class AgentWorkspace extends Component {
       this.scroller.clearSubmittedPromptAnchor();
     }
     const keys = contentKeys(messages);
-    this.history = messages;
     this.composer.setPromptHistory(messages);
     if (sameContentKeys(keys, this.historyKeys)) return Promise.resolve();
     return this.renderHistoryPreservingAnchor().then(() => {
@@ -876,8 +904,9 @@ export class AgentWorkspace extends Component {
     retainedSnapshot: AgentConversationSnapshot | null,
     completedTurnId: string | null = null,
   ): Promise<void> {
-    this.flushPendingSnapshotRender();
     this.history = messages;
+    if (!this.visible) return Promise.resolve();
+    this.flushPendingSnapshotRender();
     const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
@@ -944,6 +973,10 @@ export class AgentWorkspace extends Component {
     }
     this.snapshot = snapshot;
     if (this.unloaded) return Promise.resolve();
+    if (!this.visible) {
+      this.notifyHiddenApproval();
+      return Promise.resolve();
+    }
     if (!snapshot && !this.runPending) {
       // Clearing to "no run" is authoritative and idempotent, so retire the
       // active turn immediately. The scheduled render can coalesce, delay, or
@@ -988,6 +1021,7 @@ export class AgentWorkspace extends Component {
     }
     this.runPending = pending;
     this.pendingTurnId = pending ? turnId ?? this.pendingTurnId : null;
+    if (!this.visible) return;
     this.composer.setRunning(presentAgentConversation(this.snapshot, pending).composerRunning);
     this.syncEmpty();
     if (!this.snapshot) {
@@ -1053,9 +1087,7 @@ export class AgentWorkspace extends Component {
         }
       }
     });
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const activeTurnId = activeResponse?.dataset.turnId?.trim();
     this.registeredActiveResponse = activeResponse && activeTurnId
       ? { turnId: activeTurnId, row: activeResponse }
@@ -1063,9 +1095,7 @@ export class AgentWorkspace extends Component {
   }
 
   private syncActiveResponseRow(): void {
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const turnId = activeResponse?.dataset.turnId?.trim();
     if (!activeResponse || !turnId) {
       if (this.registeredActiveResponse) this.syncRows();
@@ -1217,6 +1247,7 @@ export class AgentWorkspace extends Component {
   private ensureSnapshotRender(): void {
     if (
       this.unloaded
+      || !this.visible
       || this.snapshotRenderFrame !== null
       || this.snapshotRenderTaskCount > 0
       || typeof this.pendingSnapshotRender === "undefined"
@@ -1224,8 +1255,10 @@ export class AgentWorkspace extends Component {
       return;
     }
     const generation = this.lifecycleGeneration;
+    this.snapshotRenderWindow = getSurfaceOwnerWindow(this.element);
     this.snapshotRenderFrame = requestSurfaceAnimationFrame(this.element, () => {
       this.snapshotRenderFrame = null;
+      this.snapshotRenderWindow = null;
       if (!this.isLifecycleCurrent(generation)) return;
       this.queuePendingSnapshotRender(generation);
     });
@@ -1244,11 +1277,20 @@ export class AgentWorkspace extends Component {
       const presentation = presentAgentConversation(snapshot, this.runPending);
       this.composer.setRunning(presentation.composerRunning);
       this.syncEmpty();
-      const activeRun = this.renderer.element.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-active-run",
-      );
-      const finishLayoutMutation = this.scroller.beginLayoutMutation(activeRun ?? undefined);
+      const finishLayoutMutation = this.scroller.beginLayoutMutation(this.renderer.activeRoot);
       try {
+        if (this.historyNeedsRender) {
+          try {
+            await this.renderer.renderHistory(this.history);
+          } catch (error) {
+            if (this.isLifecycleCurrent(generation)) this.renderer.showCompletedRenderFallback();
+            throw error;
+          }
+          if (!this.isLifecycleCurrent(generation)) return;
+          this.historyNeedsRender = false;
+          this.historyKeys = contentKeys(this.history);
+          this.syncRows();
+        }
         if (snapshot) {
           await this.renderer.renderActive(snapshot, presentation);
           if (
@@ -1295,11 +1337,15 @@ export class AgentWorkspace extends Component {
     });
   }
 
+  private cancelSnapshotRenderFrame(): void {
+    if (this.snapshotRenderFrame === null) return;
+    cancelSurfaceAnimationFrame(this.snapshotRenderWindow?.document ?? this.element, this.snapshotRenderFrame);
+    this.snapshotRenderFrame = null;
+    this.snapshotRenderWindow = null;
+  }
+
   private flushPendingSnapshotRender(): void {
-    if (this.snapshotRenderFrame !== null) {
-      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
-      this.snapshotRenderFrame = null;
-    }
+    this.cancelSnapshotRenderFrame();
     if (typeof this.pendingSnapshotRender !== "undefined") {
       this.queuePendingSnapshotRender(this.lifecycleGeneration);
     }
@@ -1312,12 +1358,8 @@ export class AgentWorkspace extends Component {
       return;
     }
     if (this.followedTurnId === turnId) return;
-    const durableUserRow = Array.from(
-      this.renderer.element.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-history .systemsculpt-agent-turn.is-user[data-message-id]",
-      ),
-    ).find((row) => row.dataset.messageId === turnId);
-    if (!durableUserRow) return;
+    const durableUserRow = this.registeredRows.get(`message:${turnId}`);
+    if (!durableUserRow?.classList.contains("is-user")) return;
     const rowId = `response:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
     if (this.submittedPromptTurnId === turnId) {
@@ -1331,10 +1373,65 @@ export class AgentWorkspace extends Component {
     this.followedTurnId = turnId;
   }
 
+  public isRenderingVisible(): boolean {
+    return this.visible && !this.unloaded;
+  }
+
+  private notifyHiddenApproval(): void {
+    const approval = this.snapshot?.parts.find((part): part is AgentToolPart =>
+      part.kind === "tool" && part.state === "approval-required" && Boolean(part.approvalId)
+      && (part.location === "vault" || Boolean(part.native)));
+    if (approval) this.options.onHiddenApproval?.(approval);
+  }
+
+  private setVisible(visible: boolean): void {
+    if (this.visible === visible || this.unloaded) return;
+    this.visible = visible;
+    this.lifecycleGeneration += 1;
+    this.renderer.setVisible(visible);
+    if (!visible) {
+      if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+      this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
+      this.scroller.setStreaming(false);
+      this.cancelSnapshotRenderFrame();
+      this.pendingSnapshotRender = undefined;
+      // Rendering must never hold up transcript commits or queued turns.
+      for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+      for (const waiter of this.activeSnapshotRenderWaiters) waiter.resolve();
+      this.notifyHiddenApproval();
+      return;
+    }
+    this.setLoading(this.loading);
+    if (this.deferredChrome) this.setChrome(this.deferredChrome);
+    if (this.deferredQueue) this.setQueue(this.deferredQueue);
+    this.deferredChrome = null;
+    this.deferredQueue = null;
+    this.composer.setPromptHistory(this.history);
+    // Reconcile history and the latest snapshot together; a failed history
+    // render must keep the completion fallback instead of clearing the live row.
+    this.historyNeedsRender = true;
+    this.pendingSnapshotRender = this.snapshot;
+    this.ensureSnapshotRender();
+  }
+
   public override onload(): void {
     this.register(bindSurfaceActivity(this.element));
     this.unloaded = false;
     this.lifecycleGeneration += 1;
+    const detachMigration = this.element.onWindowMigrated?.(() => {
+      if (this.snapshotRenderFrame !== null) {
+        this.cancelSnapshotRenderFrame();
+        this.ensureSnapshotRender();
+      }
+    });
+    if (detachMigration) this.register(detachMigration);
+    this.register(observeLeafVisibility(
+      this.options.visibilityRoot ?? this.element.parentElement!,
+      this.options.app.workspace,
+      visible => this.setVisible(visible),
+    ));
   }
 
   public override onunload(): void {
@@ -1343,10 +1440,7 @@ export class AgentWorkspace extends Component {
     this.pendingDisclosureLayoutMutation?.cancel();
     this.unloaded = true;
     this.lifecycleGeneration += 1;
-    if (this.snapshotRenderFrame !== null) {
-      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
-      this.snapshotRenderFrame = null;
-    }
+    this.cancelSnapshotRenderFrame();
     this.pendingSnapshotRender = undefined;
     for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
     for (const waiter of this.activeSnapshotRenderWaiters) waiter.resolve();
@@ -1354,6 +1448,6 @@ export class AgentWorkspace extends Component {
   }
 
   private isLifecycleCurrent(generation: number): boolean {
-    return !this.unloaded && generation === this.lifecycleGeneration;
+    return this.isRenderingVisible() && generation === this.lifecycleGeneration;
   }
 }

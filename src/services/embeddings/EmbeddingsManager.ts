@@ -19,8 +19,9 @@ import {
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
+import { readEmbeddingErrorMessage } from "./EmbeddingErrorMessage";
 import { toSearchResult } from "./search/VectorSearch";
-import { EmbeddingsStorage } from "./storage/EmbeddingsStorage";
+import { EmbeddingsStorage, EmbeddingsStorageBlockedError } from "./storage/EmbeddingsStorage";
 import { EmbeddingsIndexFile } from "./storage/EmbeddingsIndexFile";
 import {
   restoreEmbeddingsIndexIfEmpty,
@@ -216,11 +217,40 @@ export class EmbeddingsManager {
 
   async initialize(): Promise<void> {
     if (!this.initializationPromise) {
-      this.initializationPromise = this.initializeStorage();
+      this.initializationPromise = this.initializeStorage().catch((error: unknown) => {
+        const blocked = error instanceof EmbeddingsStorageBlockedError;
+        // The older connection can still go away (garbage collection); the next caller tries again.
+        if (blocked) this.initializationPromise = null;
+        // Otherwise every status surface would say "Starting" until Obsidian restarts.
+        this.lifecycle.update({
+          phase: "error",
+          ready: false,
+          currentPath: null,
+          lastError: blocked
+            ? { code: "storage_blocked", message: error.message }
+            : {
+                code: "storage_unavailable",
+                message: readEmbeddingErrorMessage(error, "The semantic index could not open. Restart Obsidian."),
+              },
+        });
+        throw error;
+      });
     }
     await this.initializationPromise;
     if (this.plugin.settings.embeddingsEnabled) {
-      this.requestAutomaticProcessing();
+      // Stored root revisions are the local freshness snapshot. An unchanged
+      // vault needs neither a metadata request nor another indexing pass.
+      const storedPaths = new Set(this.storage.getDistinctPaths());
+      const needsReconciliation = this.eligibleFiles().some((file) => (
+        this.shouldProcessFile(file) || (this.isLocallyEmpty(file) && storedPaths.has(file.path))
+      ));
+      if (needsReconciliation) {
+        this.requestAutomaticProcessing();
+      } else {
+        await this.reconcilePortableIndexFormat();
+        // A persisted file event can be newer even when its mtime is unchanged.
+        if (this.workQueue.size > 0) this.scheduleQueuedWork();
+      }
     }
   }
 
@@ -281,10 +311,8 @@ export class EmbeddingsManager {
     if (this.processingSuspended) {
       return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
-    if (this.processingMutex.isLocked()) {
-      throw new Error("Embeddings processing is already in progress.");
-    }
-
+    // A file mutation can acquire the mutex while metadata is in flight.
+    // Serialize behind it rather than discarding the reconciliation request.
     return this.processingMutex.runExclusive(async () => {
       if (this.processingSuspended) {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
@@ -434,6 +462,13 @@ export class EmbeddingsManager {
       const indexedQuery = await this.gateway.query(prepared, signal);
       if (signal?.aborted) return [];
       queryVector = indexedQuery.vector;
+      // With no launch-time metadata request for an unchanged vault, managed
+      // use discovers generation changes. Keep serving a compatible committed
+      // index while the new generation is prepared; never mix vector spaces.
+      if (this.plugin.settings.embeddingsEnabled && indexedQuery.generation.indexNamespace !== namespace) {
+        this.gateway.activeGeneration = indexedQuery.generation;
+        this.requestAutomaticProcessing();
+      }
       // A newly-written namespace is not searchable until the full eligible
       // corpus has committed. An older schema remains queryable only when it
       // shares the exact generation id and vector dimensions.
@@ -779,28 +814,28 @@ export class EmbeddingsManager {
     this.portableCheckpoint?.cancel();
     this.queryCache.clear();
     this.similarCache.clear();
-    if (typeof this.storage.releaseSearchMatrices === "function") this.storage.releaseSearchMatrices();
+    // Closing lets the next build an in-app update loads upgrade the database.
+    if (typeof this.storage.close === "function") this.storage.close();
     this.lifecycle.clearListeners();
   }
 
   private requestAutomaticProcessing(): void {
-    if (
-      this.automaticRunQueued
-      || this.processingSuspended
-      || !this.initialized
-      || this.processingMutex.isLocked()
-    ) return;
+    if (this.automaticRunQueued || this.processingSuspended || !this.initialized) return;
     this.automaticRunQueued = true;
+    this.clearWorkTimer();
     this.refreshLifecycle({ phase: "initializing", currentPath: null, lastError: null });
-    queueMicrotask(() => {
-      if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended || this.processingMutex.isLocked()) {
+    void this.processingMutex.waitForUnlock()
+      .then(async () => {
+        if (!this.plugin.settings.embeddingsEnabled || this.processingSuspended) return;
+        await this.processVault();
+      })
+      .catch((error) => this.reportLifecycleFailure(error))
+      .finally(() => {
         this.automaticRunQueued = false;
-        return;
-      }
-      void this.processVault()
-        .catch((error) => this.reportLifecycleFailure(error))
-        .finally(() => { this.automaticRunQueued = false; });
-    });
+        // Drain file events after the vault pass, not while its metadata
+        // request is in flight and has not acquired the mutex yet.
+        this.scheduleQueuedWork();
+      });
   }
 
   private setupFileWatchers(): void {
@@ -895,7 +930,7 @@ export class EmbeddingsManager {
   }
 
   private scheduleQueuedWork(minimumDelayMs = 0): void {
-    if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
+    if (this.automaticRunQueued || this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
     const next = this.workQueue.snapshot()
       .filter((item) => !item.failure)
       .sort((left, right) => left.readyAt - right.readyAt)[0];
@@ -1029,7 +1064,14 @@ export class EmbeddingsManager {
             : null,
       });
     });
-    this.scheduleQueuedWork();
+    // Indexing a queued edit can discover a new server generation too. Rebuild
+    // the remaining corpus only after releasing the queue's processing mutex.
+    const namespace = this.gateway.activeGeneration?.indexNamespace;
+    if (namespace && namespace !== this.searchNamespace) {
+      this.requestAutomaticProcessing();
+    } else {
+      this.scheduleQueuedWork();
+    }
   }
 
   private async preflightCredits(): Promise<void> {

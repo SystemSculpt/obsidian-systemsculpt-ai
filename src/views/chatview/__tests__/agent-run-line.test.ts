@@ -4,6 +4,12 @@ import { Menu } from "obsidian";
 import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "../AgentRunLine";
 import type { AgentChromeState } from "../AgentChatChrome";
 
+const host = { os: "macOS" };
+jest.mock("../../../platform/hostCapabilities", () => ({
+  ...jest.requireActual("../../../platform/hostCapabilities"),
+  getHostOperatingSystem: () => host.os,
+}));
+
 type MockMenu = Menu & {
   items: Array<{ title?: string; checked?: boolean | null; disabled?: boolean; isLabel?: boolean; separator?: boolean }>;
   shown: boolean;
@@ -76,12 +82,28 @@ describe("AgentRunLine", () => {
     expect(toolbar.getAttribute("aria-label")).toBe("Chat run settings");
     const buttons = Array.from(toolbar.querySelectorAll<HTMLButtonElement>("button"));
     expect(buttons.map((button) => button.textContent)).toEqual(["Claude Code on this Mac", "Auto", "Default"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      expect.stringContaining("Claude Code"), expect.stringContaining("Auto"), expect.stringContaining("Default"),
+    ]);
     expect(buttons.map((button) => button.tabIndex)).toEqual([0, -1, -1]);
     expect(buttons.every((button) => button.getAttribute("aria-haspopup") === "menu")).toBe(true);
     // The narrow form hides only the suffix (container query).
     expect(toolbar.querySelector(".systemsculpt-agent-run-wide")?.textContent).toBe(" on this Mac");
     expect(segment(parent, "mode").dataset.mode).toBe("auto");
     line.unload();
+  });
+
+  it.each([["macOS", "Meta"], ["Windows", "Control"], ["Linux", "Control"]])("advertises only available menu shortcuts with the %s modifier", (os, modifier) => {
+    host.os = os;
+    const { parent, line } = mount();
+    try {
+      line.render(state());
+      expect(segment(parent, "backend").getAttribute("aria-keyshortcuts")).toBe(`${modifier}+Shift+.`);
+      expect(segment(parent, "mode").getAttribute("aria-keyshortcuts")).toBe(`${modifier}+.`);
+      expect(segment(parent, "detail").hasAttribute("aria-keyshortcuts")).toBe(false);
+      line.render(state({ detecting: true }));
+      expect(parent.querySelector("[aria-keyshortcuts]")).toBeNull();
+    } finally { line.unload(); host.os = "macOS"; }
   });
 
   it("moves between segments with the arrow keys", () => {
@@ -187,12 +209,29 @@ describe("AgentRunLine", () => {
     }
   });
 
-  it("releases the menu Escape listener after selection and disposal", () => {
+  it("models Obsidian's single replacing onHide callback", () => {
+    const menu = new Menu();
+    const replaced = jest.fn();
+    const current = jest.fn();
+    menu.onHide(replaced);
+    menu.onHide(current);
+    menu.showAtPosition({ x: 0, y: 0 });
+    menu.hide();
+    menu.hide();
+    expect(replaced).not.toHaveBeenCalled();
+    expect(current).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["backend", "CodexReady"],
+    ["mode", "Plan onlyReads and plans. Changes nothing until you approve the plan."],
+    ["detail", "Opus"],
+  ])("releases the %s menu Escape listener after selection and disposal", (kind, choice) => {
     const { parent, line } = mount();
     line.render(state());
-    const opener = segment(parent, "backend");
+    const opener = segment(parent, kind);
     opener.click();
-    menus().at(-1)!.select("CodexReady");
+    menus().at(-1)!.select(choice);
     const afterSelection = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     opener.dispatchEvent(afterSelection);
     expect(afterSelection.defaultPrevented).toBe(false);

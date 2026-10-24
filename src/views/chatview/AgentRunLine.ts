@@ -1,4 +1,5 @@
 import { Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   backendMenu,
   modeMenu,
@@ -23,8 +24,8 @@ export type AgentRunLineOptions = Readonly<{
 
 type MenuKind = "backend" | "mode" | "detail";
 
-/** Escape dismisses only this menu, not Obsidian's active non-navigation leaf. */
-export function containMenuEscape(menu: Menu, ownerDocument: Document): void {
+/** Escape dismisses only this menu. Dispose from its owner's sole onHide callback. */
+export function containMenuEscape(menu: Menu, ownerDocument: Document): () => void {
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape" || event.isComposing) return;
     event.preventDefault();
@@ -34,7 +35,8 @@ export function containMenuEscape(menu: Menu, ownerDocument: Document): void {
   // The host's bubbling Escape handler otherwise switches to the last note
   // after its menu scope hides the menu without consuming the event.
   ownerDocument.addEventListener("keydown", onKeydown, true);
-  menu.onHide(() => ownerDocument.removeEventListener("keydown", onKeydown, true));
+  // Menu.onHide replaces its callback; the owner composes cleanup with focus.
+  return () => ownerDocument.removeEventListener("keydown", onKeydown, true);
 }
 
 /**
@@ -153,6 +155,10 @@ export class AgentRunLine extends Component {
         ...(segment.menu ? { "aria-haspopup": "menu", "aria-expanded": "false" } : {}),
       },
     });
+    if (segment.menu && (segment.key === "backend" || segment.key === "mode")) {
+      const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+      button.setAttribute("aria-keyshortcuts", `${modifier}+${segment.key === "backend" ? "Shift+" : ""}.`);
+    }
     if (segment.tone) button.addClass(`is-${segment.tone}`);
     if (segment.key === "mode" && this.state) {
       button.dataset.mode = this.state.backend === "claude"
@@ -198,9 +204,10 @@ export class AgentRunLine extends Component {
     // a native macOS menu would flatten title and description into one string.
     const menu = new Menu().setUseNativeMenu(false);
     const ownerDocument = opener.ownerDocument;
-    containMenuEscape(menu, ownerDocument);
+    const releaseEscape = containMenuEscape(menu, ownerDocument);
     for (const entry of entries) this.addEntry(menu, kind, entry, (id) => this.select(kind, id));
     menu.onHide(() => {
+      releaseEscape();
       if (this.openMenu !== menu) return;
       this.openMenu = null;
       this.openMenuKind = null;

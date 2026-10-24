@@ -473,6 +473,10 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Add files and notes"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
+    const transcript = workspace.viewport.parentElement!;
+    expect(transcript.classList.contains("systemsculpt-agent-transcript")).toBe(true);
+    expect(parent.querySelector('[aria-label="Jump to latest"]')?.parentElement).toBe(transcript);
+    expect(transcript.contains(parent.querySelector(".systemsculpt-agent-composer"))).toBe(false);
     // Credits live in the run line now, and only for hosted chat (spec 4.2).
     expect(parent.querySelector(".systemsculpt-agent-credits")).toBeNull();
     for (const label of ["Chat history", "New chat", "More", "Add files and notes", "Jump to latest"]) {

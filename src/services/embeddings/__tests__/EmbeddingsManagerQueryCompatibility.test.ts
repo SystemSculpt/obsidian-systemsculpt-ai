@@ -29,6 +29,7 @@ function queryResult(
 function harness(result: ManagedEmbeddingsIndexQueryResult) {
   const manager = Object.create(EmbeddingsManager.prototype) as any;
   manager.initialized = true;
+  manager.plugin = { settings: { embeddingsEnabled: false } };
   manager.searchNamespace = committedNamespace;
   manager.queryCache = new Map();
   manager.gateway = {

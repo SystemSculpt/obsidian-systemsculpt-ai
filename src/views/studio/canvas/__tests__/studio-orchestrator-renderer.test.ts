@@ -1,15 +1,16 @@
 /** @jest-environment jsdom */
 import { renderStudioOrchestrator } from '../StudioOrchestratorRenderer';
+import { StudioPresentation } from '../../StudioPresentation';
 import { hasHostCapability } from '../../../../platform/hostCapabilities';
 import { createStudioWorkflow } from '../../../../services/codex/StudioWorkflow';
 jest.mock('../../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
 jest.mock('../StudioRunDetailModal', () => ({ StudioRunDetailModal: jest.fn(() => ({ open: jest.fn() })) }));
-function fixture() {
+function fixture(presentation?: StudioPresentation) {
   const record = { id: 'root', nodeId: 'center', title: 'Orchestrator', status: 'running', currentActivity: 'Planning', workflow: createStudioWorkflow('Verify a local branch') };
   let listener!: (id: string) => void;
   const runs: any = { list: () => [record], get: () => record, canControl: () => true, hasRequest: () => false, subscribe: (fn: any) => { listener = fn; return jest.fn(); }, load: async () => {}, startWorkflow: jest.fn(async () => record), send: jest.fn(async () => ({ status: 'delivered' })), stop: jest.fn() };
   const root = document.createElement('div');
-  const dispose = renderStudioOrchestrator(root, { runs, projectId: 'p', projectPath: 'p.systemsculpt', centerId: 'center', execution: () => () => {} });
+  const dispose = renderStudioOrchestrator(root, { runs, presentation, projectId: 'p', projectPath: 'p.systemsculpt', centerId: 'center', execution: () => () => {} });
   return { root, runs, record, update: () => listener('p'), dispose };
 }
 afterEach(() => { jest.mocked(hasHostCapability).mockReturnValue(true); document.body.replaceChildren(); });
@@ -25,6 +26,32 @@ it('launches only on explicit submission and keeps follow-up drafts during plan 
   expect(root.textContent).toContain('Read fixture'); expect(document.activeElement).toBe(followup); expect(root.querySelector('[aria-label="Steer this workflow"]')).toBe(followup); expect(followup.value).toBe('Use this fixture');
   root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.send"]')!.click(); await Promise.resolve();
   expect(runs.send).toHaveBeenCalledWith('root', 'Use this fixture'); dispose();
+});
+it('defers native action completion DOM until shown without stopping the native action', async () => {
+  const presentation = new StudioPresentation();
+  const { root, runs, record, dispose } = fixture(presentation);
+  let finishStart!: () => void, finishSend!: () => void;
+  runs.startWorkflow.mockImplementation(() => new Promise(resolve => { finishStart = () => resolve(record); }));
+  runs.send.mockImplementation(() => new Promise(resolve => { finishSend = () => resolve({ status: 'delivered' }); }));
+  try {
+    const prompt = root.querySelector<HTMLTextAreaElement>('[data-testid="studio.workflow.prompt"]')!;
+    const followup = root.querySelector<HTMLTextAreaElement>('[data-testid="studio.workflow.followup"]')!;
+    const start = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.start"]')!;
+    const send = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.send"]')!;
+    prompt.value = 'Finish the work'; followup.value = 'More context';
+    start.click(); send.click();
+    presentation.setVisible(false);
+    const before = root.innerHTML;
+    finishStart(); finishSend();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(root.innerHTML).toBe(before);
+    expect(prompt.value).toBe('Finish the work');
+    expect(followup.value).toBe('More context');
+    presentation.setVisible(true);
+    expect(prompt.value).toBe(''); expect(followup.value).toBe('');
+    expect(start.disabled).toBe(false); expect(send.disabled).toBe(false);
+    expect(runs.startWorkflow).toHaveBeenCalledTimes(1); expect(runs.send).toHaveBeenCalledTimes(1);
+  } finally { dispose(); }
 });
 it('shows saved plans on mobile without a desktop launch control', () => {
   jest.mocked(hasHostCapability).mockReturnValue(false); const { root, dispose } = fixture();

@@ -346,6 +346,10 @@
 }
 
 @media (pointer: coarse) {
+  .systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input {
+    min-height: var(--ss-touch-target);
+  }
+
   .systemsculpt-agent-mention-option {
     min-height: var(--ss-touch-target);
   }
