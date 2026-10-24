@@ -187,7 +187,16 @@ describe("AgentComposerVault", () => {
     await expect(vault.open(note)).rejects.toBe(error);
   });
 
-  it("accepts native single and multi-file drags, removing duplicates and unsupported entries", () => {
+  it("accepts a single native file without a multi-file payload", () => {
+    const note = file("Plan.md");
+    const { app, vault } = setup([note]);
+    Object.assign(app, { dragManager: { draggable: { file: note } } });
+
+    expect(vault.isDraggingVaultFiles()).toBe(true);
+    expect(vault.draggedFiles()).toEqual([note]);
+  });
+
+  it("combines native single and multi-file drags, removing duplicates and unsupported entries", () => {
     const note = file("Plan.md");
     const image = file("Diagram.png");
     const { app, vault } = setup([note, image]);
@@ -221,7 +230,7 @@ describe("AgentComposerVault", () => {
     const { vault } = setup([note, image]);
     const noteUrl = `obsidian://open?file=${encodeURIComponent(note.path.slice(0, -3))}`;
     const imageUrl = `obsidian://open?file=${encodeURIComponent(image.path)}`;
-    const urls = transfer(`  ${noteUrl} \r\n${imageUrl}`, `${noteUrl}\n${imageUrl}`);
+    const urls = transfer(`  ${noteUrl} \r\n${noteUrl}`, `${imageUrl}\n${imageUrl}`);
 
     expect(vault.draggedFiles(urls)).toEqual([note, image]);
     expect(urls.getData).toHaveBeenCalledWith("text/uri-list");
