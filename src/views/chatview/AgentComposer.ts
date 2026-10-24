@@ -384,6 +384,13 @@ export class AgentComposer extends Component {
     this.syncControls();
   }
 
+  /** Retire a prior turn's denial without changing the live draft or attachments. */
+  public clearSteeringPlaceholder(): void {
+    if (!this.steering) return;
+    this.steering = false;
+    this.syncControls();
+  }
+
   /** Earlier prompts in this chat, recalled with Up and Down in an empty box. */
   public setPromptHistory(messages: readonly ChatMessage[]): void {
     const prompts: string[] = [];

@@ -3200,6 +3200,9 @@ export class AgentChatView extends ItemView {
     const newChatOriginToken = this.conversationOriginToken;
     const transition = this.beginConversationTransition(newChatOriginToken);
     try {
+      // This origin now owns the view; a superseded load's finally cannot clear
+      // its skeleton, including when corrupt-history recovery starts this chat.
+      this.workspace?.setLoading?.(false);
       this.setLegacyHistoryViewOnly(false);
       this.pendingForkHistory = null;
       this.deferredRecoveredCompletion = null;
