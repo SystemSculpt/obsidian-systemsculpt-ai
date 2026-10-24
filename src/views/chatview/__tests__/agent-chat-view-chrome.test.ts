@@ -18,6 +18,7 @@ jest.mock("../../../core/ui/notifications", () => ({
 }));
 
 import { AgentChatView } from "../AgentChatView";
+import { UpgradePlanModal } from "../../../modals/UpgradePlanModal";
 import { LocalAgentChatSession } from "../../../services/codex/LocalAgentChatSession";
 import { CommandManager } from "../../../core/plugin/commands";
 
@@ -212,6 +213,29 @@ describe("AgentChatView chrome wiring", () => {
     await expect((view as any).deleteSavedChat(row)).resolves.toBe(true);
     expect(view.app.fileManager.trashFile).toHaveBeenCalledWith(file);
     expect(view.startNewChat).toHaveBeenCalledWith(false);
+  });
+
+  it("starts the welcome's own sign-up and sign-in handoffs from the empty state", () => {
+    const openConnect = jest.spyOn(UpgradePlanModal, "openConnect").mockImplementation(() => ({}) as UpgradePlanModal);
+    try {
+      const view = harness({ agent: null });
+      (view as any).handleEmptyStateAction("start-free");
+      (view as any).handleEmptyStateAction("sign-in");
+      expect(openConnect.mock.calls.map(([, mode]) => mode)).toEqual(["sign-up", "sign-in"]);
+      expect(openConnect).toHaveBeenCalledWith(view.plugin, "sign-up", { feature: "Chat" });
+    } finally {
+      openConnect.mockRestore();
+    }
+  });
+
+  it("goes back to the chat a backend switch left", async () => {
+    const view = harness();
+    view.switchedFrom = { chatId: "previous-chat" };
+    view.loadChatById = jest.fn(async () => undefined);
+    view.workspace.focus = jest.fn();
+    (view as any).handleEmptyStateAction("back-to-previous");
+    await Promise.resolve();
+    expect(view.loadChatById).toHaveBeenCalledWith("previous-chat");
   });
 
   it("renames an open chat through its view", async () => {
