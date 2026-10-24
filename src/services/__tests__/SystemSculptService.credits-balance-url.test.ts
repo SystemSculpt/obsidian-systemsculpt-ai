@@ -34,11 +34,11 @@ describe("decodeCreditsBalance", () => {
   });
 
   it.each([
-    ["negative credits", { included_remaining: -1 }],
-    ["fractional credits", { add_on_remaining: 0.5 }],
-    ["string credits", { total_remaining: "0" }],
+    ["negative credits", { included_per_month: -1 }],
+    ["fractional credits", { included_per_month: 0.5 }],
+    ["string credits", { included_per_month: "0" }],
     ["non-finite credits", { included_per_month: Infinity }],
-    ["unsafe credits", { included_remaining: Number.MAX_SAFE_INTEGER + 1 }],
+    ["unsafe credits", { included_per_month: Number.MAX_SAFE_INTEGER + 1 }],
     ["mismatched total", { total_remaining: 1 }],
     ["overflowed sum", { included_remaining: Number.MAX_SAFE_INTEGER, add_on_remaining: 1 }],
     ["non-string timestamp", { cycle_anchor_at: 0 }],
@@ -88,8 +88,17 @@ describe("decodeCreditsBalance", () => {
     { ...annualOffer, monthly_equivalent_annual_cents: 8000 },
     { ...annualOffer, checkout_path: "https://example.com/checkout" },
   ])("drops an invalid offer without discarding the usable balance (%j)", (offer) => {
-    expect(decodeCreditsBalance({ ...creditsBalancePayload, annual_upgrade_offer: offer })).toMatchObject({
-      totalRemaining: 0,
+    expect(decodeCreditsBalance({
+      ...creditsBalancePayload,
+      included_remaining: 10,
+      add_on_remaining: 5,
+      total_remaining: 15,
+      available_unreserved: 15,
+      annual_upgrade_offer: offer,
+    })).toMatchObject({
+      includedRemaining: 10,
+      addOnRemaining: 5,
+      totalRemaining: 15,
       annualUpgradeOffer: null,
     });
   });
