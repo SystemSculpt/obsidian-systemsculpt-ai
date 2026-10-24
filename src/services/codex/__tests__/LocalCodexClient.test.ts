@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
@@ -38,9 +38,9 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
     return true;
   });
   (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn: jest.fn(() => child) });
-  (desktopHost.fs as jest.Mock).mockResolvedValue({ stat: jest.fn(async () => ({ isDirectory: () => true })), readFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) });
-  (desktopHost.path as jest.Mock).mockResolvedValue({ isAbsolute: (path: string) => path.startsWith('/'), delimiter: ':', join: (...parts: string[]) => parts.join('/') });
-  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test' });
+  (desktopHost.fs as jest.Mock).mockResolvedValue({ readdir: jest.fn(async () => []), stat: jest.fn(async () => ({ isDirectory: () => true, isFile: () => false })), readFile: jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) });
+  (desktopHost.path as jest.Mock).mockResolvedValue(posix);
+  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test', platform: () => 'darwin' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test' });
   return { child, messages, send, finish };
 }
@@ -57,6 +57,22 @@ it('uses native login and astra/high, streams the answer and closes its transpor
   expect(messages.find(m => m.method === 'thread/start').params).toMatchObject({ model: 'gpt-6-astra' });
   expect(messages.find(m => m.method === 'turn/start').params).toMatchObject({ model: 'gpt-6-astra', effort: 'high' });
   expect(cb.text).toHaveBeenCalledWith('hello'); expect(child.kill).toHaveBeenCalled();
+});
+it.each(['/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin'])('launches an app-server and its node interpreter from %s with a bare GUI PATH', async folder => {
+  const { child } = host(), fs = await desktopHost.fs();
+  const files = new Set([`${folder}/codex`, `${folder}/node`]);
+  (fs.stat as jest.Mock).mockImplementation(async path => ({ isDirectory: () => !files.has(path), isFile: () => files.has(path), mode: 0o100755 }));
+  (fs.readdir as jest.Mock).mockImplementation(async path => path === '/home/test/.nvm/versions/node' && folder.includes('/.nvm/')
+    ? [{ name: 'v22.18.0', isDirectory: () => true }] : []);
+  const spawn = (await desktopHost.childProcess()).spawn as jest.Mock;
+  spawn.mockImplementationOnce((binary: string, _args: string[], options: { env: { PATH: string } }) => {
+    const resolve = (name: string) => options.env.PATH.split(':').map(path => `${path}/${name}`).find(path => files.has(path));
+    expect(resolve(binary)).toBe(`${folder}/codex`);
+    expect(resolve('node')).toBe(`${folder}/node`);
+    return child;
+  });
+  await expect(runLocalCodex(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'hello', status: 'completed' });
+  expect(spawn).toHaveBeenCalledTimes(1);
 });
 it('persists the native identity before admitting a resumed turn', async () => {
   const { messages } = host(); const cb = callbacks();
@@ -349,7 +365,7 @@ it.each([false, true])('resolves native Windows homes and preserves PATH entries
   host();
   const home = String.raw`C:\Users\tester`, nativePath = String.raw`C:\Windows\System32;C:\tools`;
   (desktopHost.path as jest.Mock).mockResolvedValue(win32);
-  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => home });
+  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => home, platform: () => 'win32' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: nativePath, CODEX_HOME: String.raw`C:\agent\shadow` });
   const fs = await desktopHost.fs();
   if (custom) (fs.readFile as jest.Mock).mockResolvedValue(JSON.stringify({ binary: '~/tools/codex.exe', home: '~/custom-codex' }));

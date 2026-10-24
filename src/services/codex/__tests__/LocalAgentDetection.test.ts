@@ -50,7 +50,7 @@ function machine(options: MachineOptions = {}) {
     }),
   };
   const execFile = jest.fn((binary: string, _args: string[], _config: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
-    const agent = binary.includes('claude') ? 'claude' : 'codex';
+    const agent = posix.basename(binary).includes('claude') ? 'claude' : 'codex';
     if (agent === options.hang) return;
     const loggedIn = (options.signedIn ?? ['claude', 'codex']).includes(agent);
     const status = options.status?.[agent];
@@ -231,6 +231,31 @@ it('does not block authenticated status on a stalled filesystem metadata probe',
   const result = detectLocalAgents();
   await jest.advanceTimersByTimeAsync(3000);
   expect((await result).preferred).toBe('claude');
+});
+
+it.each([
+  '/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin', '/home/test/.claude/local',
+])('detects and probes GUI-hidden agents in %s with node on the child PATH', async folder => {
+  const host = machine({ installed: [], environment: { PATH: '/usr/bin' } });
+  for (const name of ['claude', 'codex', 'node']) host.file(`${folder}/${name}`);
+  const result = await detectLocalAgents();
+  for (const agent of ['claude', 'codex'] as const) {
+    expect(result.agents[agent]).toMatchObject({ installed: true, signedIn: true });
+    expect(host.execFile).toHaveBeenCalledWith(`${folder}/${agent}`, expect.any(Array),
+      expect.objectContaining({ env: expect.objectContaining({ PATH: expect.stringContaining(folder) }), timeout: 3000 }), expect.any(Function));
+  }
+  expect(host.fs.readFile.mock.calls.every(([path]) => path.startsWith('/home/test/.config/systemsculpt/'))).toBe(true);
+});
+
+it('keeps the existing detection deadline when install-directory enumeration stalls', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: [] });
+  host.fs.readdir.mockImplementation(() => new Promise(() => {}));
+  const result = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).preferred).toBe('systemsculpt');
+  expect(host.execFile).not.toHaveBeenCalled();
+  expect(jest.getTimerCount()).toBe(0);
 });
 
 it('leaves mobile on hosted without loading filesystem or child-process adapters', async () => {
