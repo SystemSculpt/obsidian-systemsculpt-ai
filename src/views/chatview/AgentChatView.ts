@@ -3646,14 +3646,13 @@ export class AgentChatView extends ItemView {
     return true;
   }
 
-  /** Moves focus to the oldest pending approval in this chat, if any. */
+  /** Moves focus to the oldest pending approval card in this chat, if any. */
   public reviewPendingApproval(): boolean {
-    const action = this.workspace?.element.querySelector<HTMLButtonElement>(
-      ".systemsculpt-agent-part.is-approval-required button:not([disabled])",
-    );
-    if (!action) return false;
-    if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
-    action.focus();
+    const pending = this.agent.getSnapshot().parts.some((part) =>
+      part.kind === "tool" && part.state === "approval-required");
+    if (!pending || !this.workspace) return false;
+    if (this.workspace.isHistoryOpen) this.workspace.hideHistory(false);
+    this.workspace.renderer.focusPendingApproval();
     return true;
   }
 

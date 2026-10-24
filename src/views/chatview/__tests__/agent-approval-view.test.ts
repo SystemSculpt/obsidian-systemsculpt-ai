@@ -75,8 +75,9 @@ it("preserves a revealed approval's focus when Obsidian emits delayed leaf activ
   const focus = jest.fn();
   const handlers = new Map<string, (leaf: unknown) => void>();
   const leaf = {};
+  const syncChrome = jest.fn();
   const view = {
-    containerEl, leaf, workspace: { focus }, registerEvent: jest.fn(),
+    containerEl, leaf, workspace: { focus }, registerEvent: jest.fn(), syncChrome,
     app: { workspace: { on: (name: string, callback: (leaf: unknown) => void) => { handlers.set(name, callback); } } },
   };
   prototype.installWorkspaceBindings.call(view);
@@ -88,6 +89,8 @@ it("preserves a revealed approval's focus when Obsidian emits delayed leaf activ
   card.blur();
   handlers.get("active-leaf-change")!({});
   expect(focus).not.toHaveBeenCalled();
+  // Another leaf can open a note the empty chat's starters name.
+  expect(syncChrome).toHaveBeenCalledTimes(1);
   handlers.get("active-leaf-change")!(leaf);
   expect(focus).toHaveBeenCalledTimes(1);
   ownerFrame.remove();

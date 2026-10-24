@@ -239,8 +239,9 @@ manual mobile exploration is performed.
 - Agent detection is cached for the Obsidian session. Refresh with **Detect again**
   or after a native run fails because the agent is missing or signed out; do not
   poll. Usage detection may only list/stat native session-store names and timestamps,
-  never read file contents or credentials. Keep chat controls to a compact execution
-  summary with **Change** and, on desktop, **Detect again**.
+  never read file contents or credentials. Chat states what runs where in one run
+  line under the composer (backend, mode, model or hosted credits), each part a
+  one-click menu; **Detect again** lives in its backend menu on desktop.
 - New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
   safety checks, not permission bypass. Manual choices are **Ask before edits**
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude

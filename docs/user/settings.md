@@ -32,11 +32,12 @@ selection, SystemSculpt checks which agents are installed and signed in:
 3. If neither is ready, use hosted SystemSculpt.
 
 Detection is cached for the current Obsidian session, not polled in the background.
-Use **Detect again** beside the chat's compact execution summary after installing
-or signing in to an agent. A native run that fails because the agent is missing or
+Choose **Detect again** in the chat's backend menu (the first part of the run line
+under the composer), or in an empty chat's install hint, after installing or
+signing in to an agent. A native run that fails because the agent is missing or
 signed out also refreshes detection. Refreshing does not replace your explicit
-choice or switch an existing chat; it can update the default for the next new chat.
-Use **Change** to reveal controls and select a backend yourself.
+choice or switch a chat with messages; an empty chat that detection chose for you
+moves to the agent that became ready. Pick a backend from the same menu yourself.
 
 To rank recent use, detection only lists names and checks timestamps of primary
 session files in the native stores (normally `~/.claude/projects` and
@@ -62,9 +63,11 @@ readable. Hosted media features and Similar Notes still use SystemSculpt.
   **Full access** remain available. Saved modes are preserved; a missing or unknown
   saved mode uses Ask.
 
-Native mode and model changes apply to the next message. Switching execution
-backend from a chat opens a new chat and preserves the original conversation and
-draft. See [Tool use and modes in Chat](agent-mode.md) for each mode's behavior.
+Mode and model changes apply to the next message. Switching backend in a chat with
+messages starts a new chat in the same view: the draft, its attachments and pinned
+files come along, the original chat stays in history, and **Back to previous chat**
+returns to it. A saved chat always reopens on its own backend; when that agent
+isn't installed here (or on mobile), the chat opens read-only with **New chat**. See [Tool use and modes in Chat](agent-mode.md) for each mode's behavior.
 
 An explicitly selected backend also applies to Studio text generation, but chat
 automatic detection does not change Studio's backend default. **Codex chat modes do
