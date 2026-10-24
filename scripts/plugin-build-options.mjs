@@ -10,12 +10,6 @@ export const CANONICAL_API_BASE_URL = 'https://systemsculpt.com/api/plugin';
 export const STAGING_API_BASE_URL = 'https://staging.systemsculpt.com/api/plugin';
 export const LOCAL_AGENT_API_BASE_URL = 'http://127.0.0.1:8787/api/plugin';
 
-export const builtinExternals = [
-  'node:*',
-  'child_process', 'crypto', 'fs', 'fs/promises', 'http', 'https',
-  'os', 'path', 'process', 'stream', 'stream/web', 'url', 'util',
-];
-
 const BUILD_TARGETS = Object.freeze({
   development: Object.freeze({
     name: 'development',
@@ -238,15 +232,11 @@ export function createPluginBuildOptions({
     banner: { js: pluginBanner },
     entryPoints: [entryPoint],
     bundle: true,
-    alias: {
-      'onnxruntime-node': 'onnxruntime-web',
-    },
+    // Obsidian supplies these editor modules, including language-pack peers.
     external: [
-      'obsidian', 'electron', 'proper-lockfile', 'graceful-fs',
-      '@codemirror/autocomplete', '@codemirror/collab', '@codemirror/commands',
-      '@codemirror/language', '@codemirror/lint', '@codemirror/search',
+      'obsidian',
+      '@codemirror/autocomplete', '@codemirror/commands', '@codemirror/language',
       '@codemirror/state', '@codemirror/view', '@lezer/common', '@lezer/highlight', '@lezer/lr',
-      ...builtinExternals,
     ],
     format: 'cjs',
     target: 'es2018',

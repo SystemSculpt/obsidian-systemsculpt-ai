@@ -183,8 +183,16 @@ watcher afterwards. Staging and local-agent watchers always include the
 driver.
 
 Production-shaped builds are minified and retain class/function names for
-diagnostics. `npm run dev` keeps readable output and inline source maps for
-source-level debugging.
+diagnostics. esbuild bundles the CSS entry and minifies `styles.css` for these
+builds too, preserving import order and the entry's final cascade invariants.
+`npm run dev` keeps readable JavaScript/CSS output and inline JavaScript source
+maps for source-level debugging. CSS rebuilds publish atomically before vault
+sync; a failed development CSS build keeps the last complete stylesheet.
+
+Obsidian and its host-provided CodeMirror/Lezer modules are build-time
+`devDependencies` and remain external in the plugin bundle (some have runtime
+imports resolved by Obsidian). Bundled language packs stay in `dependencies`.
+The Obsidian API declarations are pinned to the tested version in the lockfile.
 
 Successful development syncs copy main.js, manifest.json, and styles.css. The
 synced manifest retains the release version used by server wire contracts and

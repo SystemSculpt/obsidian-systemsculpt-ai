@@ -317,8 +317,14 @@ export async function exerciseBuiltStandardChatIdentity(
     expect.objectContaining({ role: "assistant", content: "Managed agent bundle proof" }),
   ]));
 
+  const recoverySubscription = app.workspace.on.mock.calls.findLastIndex(
+    ([name]: [string]) => name === "active-leaf-change",
+  );
+  expect(recoverySubscription).toBeGreaterThanOrEqual(0);
+  const recoveryEvent = app.workspace.on.mock.results[recoverySubscription].value;
   await view.onClose();
   viewClosed = true;
+  expect(app.workspace.offref).toHaveBeenCalledWith(recoveryEvent);
   plugin.unload();
   pluginUnloaded = true;
   } finally {

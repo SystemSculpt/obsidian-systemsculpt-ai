@@ -647,6 +647,29 @@ export class AgentChatView extends ItemView {
       } }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
     }
     return new AgentChatSession({
+      recoveryEnvironment: {
+        ownerWindow: () => getSurfaceOwnerWindow(this.containerEl),
+        isVisible: () => this.containerEl.isShown(),
+        subscribe: (refresh) => {
+          let observer: IntersectionObserver | null = null;
+          const observe = () => {
+            observer?.disconnect();
+            const owner = this.containerEl.ownerDocument.defaultView;
+            observer = typeof owner?.IntersectionObserver === "function"
+              ? new owner.IntersectionObserver(refresh) : null;
+            observer?.observe(this.containerEl);
+            refresh();
+          };
+          observe();
+          const detachMigration = this.containerEl.onWindowMigrated?.(observe);
+          const leafEvent = this.app.workspace.on("active-leaf-change", refresh);
+          return () => {
+            observer?.disconnect();
+            detachMigration?.();
+            this.app.workspace.offref(leafEvent);
+          };
+        },
+      },
       baseUrl: this.agentBaseUrl,
       pluginVersion: this.plugin.manifest.version,
       licenseKey: () => this.plugin.settings.licenseKey,
@@ -3177,6 +3200,9 @@ export class AgentChatView extends ItemView {
     const newChatOriginToken = this.conversationOriginToken;
     const transition = this.beginConversationTransition(newChatOriginToken);
     try {
+      // This origin now owns the view; a superseded load's finally cannot clear
+      // its skeleton, including when corrupt-history recovery starts this chat.
+      this.workspace?.setLoading?.(false);
       this.setLegacyHistoryViewOnly(false);
       this.pendingForkHistory = null;
       this.deferredRecoveredCompletion = null;

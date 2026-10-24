@@ -1910,7 +1910,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("invites the person to steer after a denial with nothing else pending", async () => {
+  it("keeps denial steering until the next queued turn starts, without needing an idle gap", async () => {
     const parent = document.body.createDiv();
     const onApprove = jest.fn(async () => true);
     const workspace = new AgentWorkspace(parent, {
@@ -1959,6 +1959,31 @@ describe("AgentWorkspace", () => {
     deny("b");
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    workspace.setRunPending(true, "user-1");
+    const settled = {
+      runId: "run-1", turnId: "user-1", status: "completed" as const, phase: "complete" as const,
+      messages: [], parts: [],
+    };
+    // Same-turn updates and history settlement must not clear the invitation.
+    await workspace.setAgentSnapshot({ ...settled, status: "running", phase: "working" });
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(settled);
+    await workspace.settleCompletedRun([]);
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+
+    workspace.setInputText("Keep my unsent draft");
+    // Queue promotion claims the next turn before finishing the previous one.
+    // Only successful admission clears the old projection; a failed queue save
+    // never reaches this boundary and must leave steering/draft state alone.
+    workspace.setRunPending(true, "user-queued");
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(null);
+    expect(input.placeholder).toBe("Queue a follow-up…");
+    expect(workspace.getInputText()).toBe("Keep my unsent draft");
+    await workspace.setAgentSnapshot({ ...settled, runId: "run-queued", turnId: "user-queued" });
+    await workspace.settleCompletedRun([]);
+    workspace.setRunPending(false);
+    expect(input.placeholder).toBe("Ask Claude Code to work in your vault…");
     workspace.unload();
   });
 
@@ -2847,6 +2872,7 @@ describe("AgentWorkspace", () => {
       label: string,
       expectedActivity?: HTMLElement,
       animated = true,
+      expectedIcon = "loader-circle",
     ): Promise<HTMLElement> => {
       await workspace.setAgentSnapshot(value);
       const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
@@ -2858,8 +2884,7 @@ describe("AgentWorkspace", () => {
         .toBe(label);
       expect(statusIcon.classList.contains("is-animated"))
         .toBe(animated);
-      expect(statusIcon.dataset.iconState)
-        .toBe(animated ? "loader-circle" : "shield-question");
+      expect(statusIcon.dataset.iconState).toBe(expectedIcon);
       expect(parent.querySelectorAll(".systemsculpt-agent-tail-status")).toHaveLength(1);
       expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
       expect(parent.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
@@ -2903,9 +2928,9 @@ describe("AgentWorkspace", () => {
       state: "approval-required",
       approvalId: "approval-write",
       order: 0,
-    }), "Waiting for your approval", activity, false);
-    await assertPhase(snapshot("retrying", "Continuing"), "Continuing", activity);
-    await assertPhase(snapshot("retrying", "Reconnecting"), "Continuing", activity);
+    }), "Waiting for your approval", activity, false, "shield-question");
+    await assertPhase(snapshot("retrying", "Continuing"), "Continuing", activity, false);
+    await assertPhase(snapshot("retrying", "Reconnecting"), "Continuing", activity, false);
     await assertPhase(snapshot("settling", "Finishing"), "Finishing", activity);
     workspace.unload();
   });
@@ -4300,13 +4325,14 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("keeps recovered zero-part lifecycle status above the empty state", async () => {
+  it("keeps recovered zero-part status static and stoppable until an idle snapshot releases the composer", async () => {
     const parent = document.body.createDiv();
+    const onStop = jest.fn();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
       sourcePath: () => "SystemSculpt/Chats/chat.md",
       onSubmit: jest.fn(),
-      onStop: jest.fn(),
+      onStop,
       onAttach: jest.fn(),
       onRemoveAttachment: jest.fn(),
       onApprove: jest.fn(),
@@ -4324,6 +4350,7 @@ describe("AgentWorkspace", () => {
       status: "running",
       phase: "retrying",
       statusLabel: "Recovering",
+      elapsedMs: 5_000,
       messages: [],
       parts: [],
     });
@@ -4333,7 +4360,23 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
       .toBe("Continuing");
     expect(parent.querySelector(".systemsculpt-agent-tail-status-icon")?.classList)
-      .toContain("is-animated");
+      .not.toContain("is-animated");
+    expect(parent.querySelector("[data-agent-working-timer]")).toBeNull();
+    const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.stop"]')!;
+    expect(stop.hidden).toBe(false);
+    expect(stop.disabled).toBe(false);
+    stop.click();
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    // The snapshot, not an outer submission/stop promise, owns composer state.
+    workspace.setRunPending(true, "user-recovered");
+    await workspace.setAgentSnapshot({
+      runId: null, turnId: null, status: "idle", elapsedMs: 5_000, messages: [], parts: [],
+    });
+    expect(stop.hidden).toBe(true);
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList)
+      .not.toContain("is-running");
+    expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
     workspace.unload();
   });
 
