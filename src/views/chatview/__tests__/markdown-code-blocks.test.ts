@@ -28,6 +28,7 @@ describe("chat markdown code blocks", () => {
     expect(pre.querySelector(".systemsculpt-agent-code-copy")).toBe(nativeCopy);
     expect(nativeCopy.dataset.testid).toBe("chat.code.copy");
     expect(nativeCopy.getAttribute("aria-label")).toBe("Copy code");
+    expect(nativeCopy.hasAttribute("aria-live")).toBe(false);
     expect(pre.querySelector(".systemsculpt-agent-code-language")?.textContent).toBe("ts");
     expect(pre.tabIndex).toBe(0);
   });

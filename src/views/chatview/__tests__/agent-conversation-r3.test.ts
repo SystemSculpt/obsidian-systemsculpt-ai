@@ -18,7 +18,7 @@ function setup() {
   const parent = document.body.createDiv();
   const renderer = new AgentConversationRenderer(parent, { app: new App(), sourcePath: () => "",
     backendName: () => "Claude Code", onAnnounce, onRetryFailedTurn, onDetectAgain,
-    onUseHosted: jest.fn(), onOpenCredits: jest.fn(), onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn() });
+    onUseHosted: jest.fn(), onOpenCredits: jest.fn(), onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(), onCopyText: jest.fn() });
   renderer.load();
   return { renderer, parent, onAnnounce, onRetryFailedTurn, onDetectAgain };
 }
@@ -89,6 +89,40 @@ describe("R3 conversation semantics", () => {
     const details = parent.querySelector('[data-testid="chat.turn.error-details"]')!.closest('details')!;
     expect(details.open).toBe(false);
     expect(details.textContent).toContain("synthetic diagnostic");
+    renderer.unload();
+  });
+
+  it("keeps retry before detection in signed-out errors", async () => {
+    const { renderer, parent } = setup();
+    await render(renderer, snapshot([{ kind: "error", id: "signed-out", order: 0, retryable: true,
+      error: { code: "local_codex_failed", message: "Not signed in" } }], "failed"));
+    expect([...parent.querySelectorAll('.systemsculpt-agent-error-actions button')].map(button => button.textContent))
+      .toEqual(["Retry", "Detect again"]);
+    renderer.unload();
+  });
+
+  it("keeps receipt links and keyboard focus stable across terminal refreshes", async () => {
+    const { renderer, parent } = setup();
+    const completed = snapshot([tool({ name: "write", input: { path: "Notes/Plan.md", content: "Done" }, state: "succeeded" })], "completed");
+    await render(renderer, completed);
+    const link = parent.querySelector<HTMLAnchorElement>('[data-testid="chat.turn.change.open"]')!;
+    expect(link).not.toBeNull();
+    link.focus();
+    await render(renderer, { ...completed, elapsedMs: 3_000 });
+    expect(parent.querySelector('[data-testid="chat.turn.change.open"]')).toBe(link);
+    expect(document.activeElement).toBe(link);
+    renderer.unload();
+  });
+
+  it("includes a real stored timestamp in action tooltips without inventing one", async () => {
+    const { renderer, parent } = setup();
+    const timestamp = new Date("2026-10-23T14:14:00Z").getTime();
+    await renderer.renderHistory([{ role: "assistant", message_id: "answer", content: "Welcome",
+      messageParts: [{ type: "content", id: "text", timestamp, data: "Welcome" }] }]);
+    const time = new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy"]')!.title).toBe(`Copy response · ${time}`);
+    await renderer.renderHistory([{ role: "assistant", message_id: "untimed", content: "No timestamp" }]);
+    expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy"]')!.title).toBe("Copy response");
     renderer.unload();
   });
 
