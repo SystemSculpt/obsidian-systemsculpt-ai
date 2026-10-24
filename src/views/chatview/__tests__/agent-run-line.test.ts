@@ -190,12 +190,29 @@ describe("AgentRunLine", () => {
     }
   });
 
-  it("releases the menu Escape listener after selection and disposal", () => {
+  it("models Obsidian's single replacing onHide callback", () => {
+    const menu = new Menu();
+    const replaced = jest.fn();
+    const current = jest.fn();
+    menu.onHide(replaced);
+    menu.onHide(current);
+    menu.showAtPosition({ x: 0, y: 0 });
+    menu.hide();
+    menu.hide();
+    expect(replaced).not.toHaveBeenCalled();
+    expect(current).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["backend", "CodexReady"],
+    ["mode", "Plan onlyReads and plans. Changes nothing until you approve the plan."],
+    ["detail", "Opus"],
+  ])("releases the %s menu Escape listener after selection and disposal", (kind, choice) => {
     const { parent, line } = mount();
     line.render(state());
-    const opener = segment(parent, "backend");
+    const opener = segment(parent, kind);
     opener.click();
-    menus().at(-1)!.select("CodexReady");
+    menus().at(-1)!.select(choice);
     const afterSelection = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     opener.dispatchEvent(afterSelection);
     expect(afterSelection.defaultPrevented).toBe(false);

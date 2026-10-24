@@ -5,7 +5,7 @@ import { AgentWorkspace, type AgentWorkspaceOptions } from "../AgentWorkspace";
 import type { AgentChromeState } from "../AgentChatChrome";
 import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
 
-type MockMenu = Menu & { items: Array<{ title?: string }>; shown: boolean; select: (title: string) => unknown };
+type MockMenu = Menu & { items: Array<{ title?: string; disabled?: boolean; isLabel?: boolean; separator?: boolean }>; shown: boolean; select: (title: string) => unknown };
 const menus = (): MockMenu[] => (Menu as unknown as { instances: MockMenu[] }).instances;
 
 function mount(overrides: Partial<AgentWorkspaceOptions> = {}) {
@@ -125,6 +125,70 @@ describe("AgentWorkspace chrome", () => {
       jest.useRealTimers();
     }
   });
+
+  it.each(["chat.run.backend", "chat.run.mode", "chat.run.detail", "chat.header.more"])(
+    "releases %s Escape across repeated closes so history and rename still handle it",
+    (testId) => {
+      jest.useFakeTimers();
+      const onRename = jest.fn();
+      const { parent, workspace } = mount({
+        onRename,
+        buildMoreMenu: (menu) => menu.addItem((item) => item.setTitle("Keep chat").onClick(() => undefined)),
+        history: {
+          loadRows: async () => [], loadSearchText: async () => "",
+          isCurrent: () => false, isRunning: () => false,
+          onOpen: () => undefined, onNewChat: () => undefined,
+          onClose: () => workspace.hideHistory(),
+          onToggleFavorite: async () => undefined, onRename: async () => undefined,
+          onDelete: async () => false,
+        },
+      });
+      const escape = (target: HTMLElement): void => {
+        target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      };
+      try {
+        workspace.setTitle("Original title");
+        workspace.setChrome(chrome({ backend: "claude", localAgents: true }));
+        const opener = parent.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+        for (const close of ["escape", "selection", "replacement"]) {
+          opener.focus();
+          opener.click();
+          const menu = menus().at(-1)!;
+          if (close === "escape") escape(opener);
+          else if (close === "selection") {
+            const choice = menu.items.find((item) => item.title && !item.disabled && !item.isLabel && !item.separator)!;
+            menu.select(choice.title!);
+          } else {
+            opener.click();
+            expect(menu.shown).toBe(false);
+            menus().at(-1)!.hide();
+          }
+          expect(menus().at(-1)!.shown).toBe(false);
+          jest.runOnlyPendingTimers();
+
+          workspace.setInputText("Keep this draft");
+          workspace.focus();
+          const composer = document.activeElement;
+          workspace.showHistory();
+          escape(parent.querySelector<HTMLInputElement>('[data-testid="history.search"]')!);
+          expect(workspace.isHistoryOpen).toBe(false);
+          expect(document.activeElement).toBe(composer);
+          expect(workspace.getInputText()).toBe("Keep this draft");
+
+          workspace.beginRename();
+          const input = parent.querySelector<HTMLInputElement>('[data-testid="chat.header.title-input"]')!;
+          input.value = "Cancelled title";
+          escape(input);
+          expect(parent.querySelector('[data-testid="chat.header.title-input"]')).toBeNull();
+          expect(parent.querySelector('[data-testid="chat.header.title"]')?.textContent).toBe("Original title");
+          expect(onRename).not.toHaveBeenCalled();
+        }
+      } finally {
+        workspace.unload();
+        jest.useRealTimers();
+      }
+    },
+  );
 
   it("opens history in place of the conversation and restores focus and draft on close", () => {
     const { parent, workspace } = mount();
