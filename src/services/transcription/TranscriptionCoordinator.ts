@@ -2,7 +2,9 @@ import type { App, Editor } from "obsidian";
 import { TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { createVaultFileSource } from "../../platform/fileSource";
+import { createManagedFileSource } from "../managed/ManagedFileSource";
 import { DEFAULT_SETTINGS } from "../../types";
 import { MAX_FILE_SIZE, formatFileSize } from "../../utils/FileValidator";
 import { logError } from "../../utils/errorHandling";
@@ -36,11 +38,9 @@ const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   flac: "audio/flac",
 });
 
-// Obsidian exposes portable binary vault reads as whole ArrayBuffers. These
-// limits bound hashing + multipart-upload peak memory until host streaming is
-// available across both desktop and mobile.
-export const DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE = 128 * 1024 * 1024;
-export const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = 32 * 1024 * 1024;
+// Both hosts upload slices; only the managed service's input limit applies.
+export const DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
+export const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
 
 export function getTranscriptionMaxFileSize(): number {
   return getHostDeviceType() === "Mobile"
@@ -234,7 +234,7 @@ export class TranscriptionCoordinator {
     let retryOperationId = operationId;
     let remoteReady = false;
     this.assertTranscribableSize(file);
-    const source = this.createManagedSource(file, controller.signal, sourceIdentity);
+    const createSource = () => this.createManagedSource(file, controller.signal, sourceIdentity);
     const managedContext: ManagedTranscriptionContext = {
       timestamped: context.timestamped,
       language: context.language,
@@ -244,7 +244,7 @@ export class TranscriptionCoordinator {
     };
 
     try {
-      let remote = await this.adapter().transcribe(source, {
+      let remote = await this.adapter().transcribe(createSource(), {
         ...managedContext,
         operationId,
       });
@@ -267,7 +267,7 @@ export class TranscriptionCoordinator {
               await this.acknowledgeCompleted(remote.operationId);
               const replacementOperationId = createOperationId(this.ownerWindow);
               retryOperationId = replacementOperationId;
-              remote = await this.adapter().transcribe(source, {
+              remote = await this.adapter().transcribe(createSource(), {
                 ...managedContext,
                 operationId: replacementOperationId,
               });
@@ -279,7 +279,7 @@ export class TranscriptionCoordinator {
         }
         if (remote.kind === "local_receipt") {
           try {
-            remote = await this.adapter().resume(remote.operationId, source, {
+            remote = await this.adapter().resume(remote.operationId, createSource(), {
               ...managedContext,
               allowPendingLocalReceipt: false,
             });
@@ -290,7 +290,7 @@ export class TranscriptionCoordinator {
             ) {
               const replacementOperationId = createOperationId(this.ownerWindow);
               retryOperationId = replacementOperationId;
-              remote = await this.adapter().transcribe(source, {
+              remote = await this.adapter().transcribe(createSource(), {
                 ...managedContext,
                 operationId: replacementOperationId,
               });
@@ -374,7 +374,7 @@ export class TranscriptionCoordinator {
       report("preparing", 1, "Preparing audio…");
       const file = this.resolveAudioFile(request.filePath);
       this.assertTranscribableSize(file);
-      const source = this.createManagedSource(file, controller.signal, sourceIdentity);
+      const createSource = () => this.createManagedSource(file, controller.signal, sourceIdentity);
       const managedContext: ManagedTranscriptionContext = {
         timestamped: request.timestamped,
         language: request.language,
@@ -404,7 +404,7 @@ export class TranscriptionCoordinator {
         }
         if (recoveryAvailable) {
           try {
-            remote = await this.adapter().resume(request.resumeOperationId, source, managedContext);
+            remote = await this.adapter().resume(request.resumeOperationId, createSource(), managedContext);
           } catch (error) {
             if (
               isAbortError(error)
@@ -417,13 +417,13 @@ export class TranscriptionCoordinator {
           const replacementOperationId = createOperationId(this.ownerWindow);
           retryOperationId = replacementOperationId;
           await request.onOperationIdChange?.(replacementOperationId);
-          remote = await this.adapter().transcribe(source, {
+          remote = await this.adapter().transcribe(createSource(), {
             ...managedContext,
             operationId: replacementOperationId,
           });
         }
       } else {
-        remote = await this.adapter().transcribe(source, {
+        remote = await this.adapter().transcribe(createSource(), {
           ...managedContext,
           operationId,
         });
@@ -448,14 +448,14 @@ export class TranscriptionCoordinator {
             retryOperationId = replacementOperationId;
             await request.onOperationIdChange?.(replacementOperationId);
             await this.acknowledgeCompleted(remote.operationId);
-            remote = await this.adapter().transcribe(source, {
+            remote = await this.adapter().transcribe(createSource(), {
               ...managedContext,
               operationId: replacementOperationId,
             });
             recoveryWarning = "The previous transcript was changed or removed, so SystemSculpt preserved that local state and created a fresh transcript.";
           } else if (remote.recoveryPhase === "local_commit_pending") {
             try {
-              remote = await this.adapter().resume(remote.operationId, source, {
+              remote = await this.adapter().resume(remote.operationId, createSource(), {
                 ...managedContext,
                 allowPendingLocalReceipt: false,
               });
@@ -467,7 +467,7 @@ export class TranscriptionCoordinator {
                 const replacementOperationId = createOperationId(this.ownerWindow);
                 retryOperationId = replacementOperationId;
                 await request.onOperationIdChange?.(replacementOperationId);
-                remote = await this.adapter().transcribe(source, {
+                remote = await this.adapter().transcribe(createSource(), {
                   ...managedContext,
                   operationId: replacementOperationId,
                 });
@@ -904,31 +904,14 @@ export class TranscriptionCoordinator {
     signal: AbortSignal,
     sourceIdentity: string,
   ): ManagedTranscriptionSource {
-    let bytesPromise: Promise<ArrayBuffer> | null = null;
-    const loadBytes = (): Promise<ArrayBuffer> => {
-      bytesPromise ??= this.app.vault.readBinary(file);
-      return bytesPromise;
-    };
-    return {
-      identity: sourceIdentity,
-      fingerprint: async () => {
-        const bytes = await loadBytes();
-        throwIfAborted(signal);
-        return `sha256:${await sha256HexFromArrayBuffer(bytes)}`;
-      },
-      load: async () => {
-        const bytes = await loadBytes();
-        throwIfAborted(signal);
-        return {
-          filename: file.name,
-          contentType: MIME_TYPES[file.extension.toLowerCase()] ?? "application/octet-stream",
-          bytes,
-        };
-      },
-      release: () => {
-        bytesPromise = null;
-      },
-    };
+    return createManagedFileSource(sourceIdentity, () => {
+      throwIfAborted(signal);
+      return {
+        ...createVaultFileSource(this.app, file),
+        filename: file.name,
+        contentType: MIME_TYPES[file.extension.toLowerCase()] ?? "application/octet-stream",
+      };
+    });
   }
 
   private unwrapCommitResult<T>(value: TranscriptionCommitResult<T>): Readonly<{ value: T; receipt?: ManagedLocalCommitReceipt }> {

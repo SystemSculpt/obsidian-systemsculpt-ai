@@ -155,6 +155,54 @@ describe("AgentRunLine", () => {
     }
   });
 
+  it.each(["backend", "mode", "detail"])("contains %s menu Escape before the host can activate another note", (kind) => {
+    jest.useFakeTimers();
+    const { parent, line } = mount();
+    const note = document.body.createEl("textarea");
+    const hostEscape = jest.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) note.focus();
+    });
+    window.addEventListener("keydown", hostEscape);
+    try {
+      line.render(state());
+      const opener = segment(parent, kind);
+      opener.focus();
+      opener.click();
+      const menu = menus().at(-1)!;
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      opener.dispatchEvent(escape);
+      jest.runOnlyPendingTimers();
+      expect(menu.shown).toBe(false);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(hostEscape).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(opener);
+      expect(opener.getAttribute("aria-expanded")).toBe("false");
+      // Once closed, Escape belongs to the host again.
+      opener.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      expect(document.activeElement).toBe(note);
+    } finally {
+      line.unload();
+      window.removeEventListener("keydown", hostEscape);
+      jest.useRealTimers();
+    }
+  });
+
+  it("releases the menu Escape listener after selection and disposal", () => {
+    const { parent, line } = mount();
+    line.render(state());
+    const opener = segment(parent, "backend");
+    opener.click();
+    menus().at(-1)!.select("CodexReady");
+    const afterSelection = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    opener.dispatchEvent(afterSelection);
+    expect(afterSelection.defaultPrevented).toBe(false);
+    opener.click();
+    line.unload();
+    const afterDisposal = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    opener.dispatchEvent(afterDisposal);
+    expect(afterDisposal.defaultPrevented).toBe(false);
+  });
+
   it.each(["before hide", "after hide"])("does not steal focus moved to another pane or dialog %s", (timing) => {
     jest.useFakeTimers();
     try {

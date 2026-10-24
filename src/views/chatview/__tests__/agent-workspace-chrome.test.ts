@@ -96,6 +96,33 @@ describe("AgentWorkspace chrome", () => {
     expect(menus().at(-1)?.shown).toBe(true);
     expect(menus().at(-1)?.items.map((item) => item.title)).toEqual(["Rename chat"]);
     workspace.unload();
+    expect(menus().at(-1)?.shown).toBe(false);
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    parent.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+  });
+
+  it("contains More-menu Escape and returns focus to its opener", () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount();
+    const hostEscape = jest.fn();
+    window.addEventListener("keydown", hostEscape);
+    try {
+      const opener = parent.querySelector<HTMLButtonElement>('[data-testid="chat.header.more"]')!;
+      opener.focus();
+      opener.click();
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      opener.dispatchEvent(escape);
+      jest.runOnlyPendingTimers();
+      expect(menus().at(-1)?.shown).toBe(false);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(hostEscape).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      workspace.unload();
+      window.removeEventListener("keydown", hostEscape);
+      jest.useRealTimers();
+    }
   });
 
   it("opens history in place of the conversation and restores focus and draft on close", () => {

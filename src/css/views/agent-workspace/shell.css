@@ -208,7 +208,7 @@
 
 /* ── Run line: backend · mode · model or credits, under the composer ── */
 
-/* One line at every width: the model segment gives way first. */
+/* One row of controls: models may truncate; modes and balances stay readable. */
 .systemsculpt-agent-run-line {
   display: flex;
   flex-wrap: nowrap;
@@ -227,7 +227,8 @@
   gap: var(--ss-space-1);
   min-width: 0;
   max-width: 100%;
-  height: var(--ss-control-height-sm);
+  height: auto;
+  min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-1);
   border: 1px solid transparent;
   border-radius: var(--ss-radius-sm);
@@ -263,6 +264,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A permission mode must not become "A…", nor a balance lose its units.
+ * Allow labels to use the control's height, including larger interface fonts. */
+.systemsculpt-agent-run-segment.is-mode .systemsculpt-agent-run-label,
+.systemsculpt-agent-run-segment.is-detail:not([aria-haspopup]) .systemsculpt-agent-run-label {
+  overflow: visible;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-mode {
+  min-width: min-content;
+}
+
+.systemsculpt-agent-run-segment.is-detail:not([aria-haspopup]) .systemsculpt-agent-run-label {
+  overflow-wrap: anywhere;
 }
 
 .systemsculpt-agent-run-icon,
@@ -310,6 +328,10 @@
 /* Spec 4.1's narrow form ("Claude Code ▾", "gpt-6.1 ▾"), measured on the
  * view: a 380 px sidebar leaves the line about 350 px after padding. */
 @container ss-surface (max-width: 439px) {
+  .systemsculpt-agent-run-line {
+    column-gap: 0;
+  }
+
   .systemsculpt-agent-run-wide {
     display: none;
   }
@@ -317,7 +339,8 @@
 
 @media (pointer: coarse) {
   .systemsculpt-agent-run-line .systemsculpt-agent-run-segment {
-    height: var(--ss-touch-target);
+    min-width: var(--ss-touch-target);
+    min-height: var(--ss-touch-target);
   }
 }
 

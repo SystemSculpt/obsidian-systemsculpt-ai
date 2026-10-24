@@ -1,6 +1,6 @@
 import type { App, TFile } from "obsidian";
 import { isAudioFileExtension, normalizeFileExtension } from "../../constants/fileTypes";
-import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
+import { canReadVaultFileInParts, createDeviceFileSource, createVaultFileSource } from "../../platform/fileSource";
 import {
   AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
   type AudioProcessorAudioSource,
@@ -41,15 +41,12 @@ export function createDeviceAudioSource(file: File): AudioProcessorAudioSource {
   return {
     filename: file.name,
     contentType: AUDIO_MIME_TYPES[extension],
-    sizeBytes: file.size,
-    readSlice: async (start, end) => await file.slice(start, end).arrayBuffer(),
-    release: () => undefined,
+    ...createDeviceFileSource(file),
   };
 }
 
 export function canReadVaultAudioInParts(app: App): boolean {
-  const adapter = app.vault.adapter as { getFullPath?: (path: string) => string };
-  return hasNodeRuntime() && typeof adapter.getFullPath === "function";
+  return canReadVaultFileInParts(app);
 }
 
 export function createVaultAudioSource(
@@ -59,84 +56,13 @@ export function createVaultAudioSource(
   const sizeBytes = file.stat.size;
   const modifiedAt = file.stat.mtime;
   const extension = validateAudioMetadata(file.name, sizeBytes);
-  const adapter = app.vault.adapter as { getFullPath?: (path: string) => string };
-  if (canReadVaultAudioInParts(app)) {
-    return createDesktopVaultAudioSource(
-      adapter.getFullPath!(file.path),
-      file,
-      sizeBytes,
-      modifiedAt,
-      AUDIO_MIME_TYPES[extension],
-    );
+  if (!canReadVaultAudioInParts(app)) {
+    throw new Error("On mobile, choose this recording from Device so it can upload in small parts.");
   }
-  throw new Error(
-    "On mobile, choose this recording from Device so it can upload in small parts.",
-  );
-}
-
-function createDesktopVaultAudioSource(
-  absolutePath: string,
-  file: TFile,
-  sizeBytes: number,
-  modifiedAt: number,
-  contentType: string,
-): AudioProcessorAudioSource {
-  type DesktopFs = Awaited<ReturnType<typeof desktopHost.fs>>;
-  type DesktopFileHandle = Awaited<ReturnType<DesktopFs["open"]>>;
-  let handlePromise: Promise<DesktopFileHandle> | null = null;
-  let released = false;
-  const loadHandle = async (): Promise<DesktopFileHandle> => {
-    if (released) return Promise.reject(new Error("The selected vault audio was released."));
-    handlePromise ??= (async () => {
-      const fs = await desktopHost.fs();
-      if (released) throw new Error("The selected vault audio was released.");
-      return fs.open(absolutePath, "r");
-    })();
-    return handlePromise;
-  };
-
   return {
+    ...createVaultFileSource(app, file),
     filename: file.name,
-    contentType,
-    sizeBytes,
-    resumeDescriptor: {
-      kind: "vault",
-      filePath: file.path,
-      modifiedAt,
-    },
-    readSlice: async (start, end) => {
-      const handle = await loadHandle();
-      if (released) throw new Error("The selected vault audio was released.");
-      const stat = await handle.stat();
-      if (
-        stat.size !== sizeBytes
-        || Math.abs(stat.mtimeMs - modifiedAt) > 2
-        || file.stat.size !== sizeBytes
-        || file.stat.mtime !== modifiedAt
-      ) {
-        throw new Error("The selected vault audio changed while it was being read.");
-      }
-      const bytes = new Uint8Array(end - start);
-      let totalRead = 0;
-      while (totalRead < bytes.byteLength) {
-        const result = await handle.read(
-          bytes,
-          totalRead,
-          bytes.byteLength - totalRead,
-          start + totalRead,
-        );
-        if (result.bytesRead <= 0) {
-          throw new Error("The selected vault audio changed while it was being read.");
-        }
-        totalRead += result.bytesRead;
-      }
-      return bytes.buffer;
-    },
-    release: () => {
-      released = true;
-      const pending = handlePromise;
-      handlePromise = null;
-      if (pending) void pending.then((handle) => handle.close()).catch(() => undefined);
-    },
+    contentType: AUDIO_MIME_TYPES[extension],
+    resumeDescriptor: { kind: "vault", filePath: file.path, modifiedAt },
   };
 }
