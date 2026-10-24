@@ -925,6 +925,9 @@ export class AgentWorkspace extends Component {
   }
 
   public setAgentSnapshot(snapshot: AgentConversationSnapshot | null): Promise<void> {
+    // Explicit projection resets begin a new chat or admitted turn (including
+    // automatic queue promotion). Ordinary settlement keeps denial steering.
+    if (!snapshot) this.composer.clearSteeringPlaceholder();
     const currentTurnId = this.runPending
       ? this.pendingTurnId ?? this.snapshot?.turnId ?? null
       : this.snapshot?.turnId ?? null;

@@ -1910,7 +1910,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("invites the person to steer after a denial with nothing else pending", async () => {
+  it("keeps denial steering until the next queued turn starts, without needing an idle gap", async () => {
     const parent = document.body.createDiv();
     const onApprove = jest.fn(async () => true);
     const workspace = new AgentWorkspace(parent, {
@@ -1959,6 +1959,31 @@ describe("AgentWorkspace", () => {
     deny("b");
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    workspace.setRunPending(true, "user-1");
+    const settled = {
+      runId: "run-1", turnId: "user-1", status: "completed" as const, phase: "complete" as const,
+      messages: [], parts: [],
+    };
+    // Same-turn updates and history settlement must not clear the invitation.
+    await workspace.setAgentSnapshot({ ...settled, status: "running", phase: "working" });
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(settled);
+    await workspace.settleCompletedRun([]);
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+
+    workspace.setInputText("Keep my unsent draft");
+    // Queue promotion claims the next turn before finishing the previous one.
+    // Only successful admission clears the old projection; a failed queue save
+    // never reaches this boundary and must leave steering/draft state alone.
+    workspace.setRunPending(true, "user-queued");
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(null);
+    expect(input.placeholder).toBe("Queue a follow-up…");
+    expect(workspace.getInputText()).toBe("Keep my unsent draft");
+    await workspace.setAgentSnapshot({ ...settled, runId: "run-queued", turnId: "user-queued" });
+    await workspace.settleCompletedRun([]);
+    workspace.setRunPending(false);
+    expect(input.placeholder).toBe("Ask Claude Code to work in your vault…");
     workspace.unload();
   });
 
