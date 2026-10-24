@@ -79,6 +79,7 @@ describe("Studio visibility recovery", () => {
   afterEach(() => { host.setState = originalSetState; jest.useRealTimers(); jest.restoreAllMocks(); });
 
   it("presents recovered run history after hidden successful reload", async () => {
+    const notice = jest.spyOn(console, "log").mockImplementation(() => {});
     let rejectLoad!: (reason: Error) => void;
     const pending = new Promise<void>((_resolve, reject) => { rejectLoad = reject; });
     const f = await fixture(() => pending);
@@ -86,6 +87,7 @@ describe("Studio visibility recovery", () => {
       f.hide();
       rejectLoad(new Error("Temporary history failure"));
       await flush();
+      expect(notice).toHaveBeenCalledWith("Notice: Temporary history failure");
       // Another visible board recovers shared history while this board sleeps.
       f.runs.load.mockResolvedValue(undefined);
       f.records.push({ id: "recovered", projectId: "p", nodeId: "worker", title: "Recovered history", status: "completed", currentActivity: "Recovered result", messages: [], createdAt: AT, updatedAt: AT });
