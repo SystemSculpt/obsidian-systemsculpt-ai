@@ -268,7 +268,20 @@ export class AgentWorkspace extends Component {
         : disclosureControl
           ? this.scroller.beginDisclosureLayoutMutation(disclosureControl)
           : this.scroller.beginLayoutMutation(mutationTarget),
-      onApprove: options.onApprove,
+      onApprove: (approvalId, approved, rememberForSession, answers) => {
+        const answered = answers
+          ? options.onApprove(approvalId, approved, rememberForSession, answers)
+          : rememberForSession
+            ? options.onApprove(approvalId, approved, rememberForSession)
+            : options.onApprove(approvalId, approved);
+        return Promise.resolve(answered).then((result) => {
+          // After a denial with nothing else waiting, invite the person to steer.
+          if (!approved && !answers && result !== false && !this.hasPendingApprovalOtherThan(approvalId)) {
+            this.composer.showSteeringPlaceholder();
+          }
+          return result;
+        });
+      },
       approvalComposer: () => this.composer?.element,
       isApprovalVisible: options.isApprovalVisible,
       onHiddenApproval: options.onHiddenApproval,
@@ -400,6 +413,11 @@ export class AgentWorkspace extends Component {
     this.incidentFailureSurfacePaintOpportunityObserved = true;
     this.incidentFirstPaintOpportunityObserved = true;
     return true;
+  }
+
+  private hasPendingApprovalOtherThan(approvalId: string): boolean {
+    return (this.snapshot?.parts ?? []).some((part) =>
+      part.kind === "tool" && part.state === "approval-required" && part.approvalId !== approvalId);
   }
 
   public setTitle(title: string): void {

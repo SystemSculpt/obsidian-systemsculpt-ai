@@ -62,6 +62,47 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  it("shows the review pill only while the person types, and leaves Alt+Up alone with nothing pending", () => {
+    const ui = setup();
+    const pill = () => ui.composer.querySelector<HTMLButtonElement>('[data-testid="chat.approval.review"]');
+    ui.input.focus();
+    const idle = new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true, cancelable: true });
+    ui.input.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+
+    // An empty composer gives focus to the card; no pill is needed.
+    const part = tool("one");
+    const card = ui.add(part);
+    ui.cards.sync([part]);
+    expect(document.activeElement).toBe(card);
+    expect(pill()?.hidden).toBe(true);
+    expect(pill()?.getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowUp");
+    expect(pill()?.querySelector("kbd")?.getAttribute("aria-hidden")).toBe("true");
+
+    // Back in the composer, typing brings the pill; clearing the text hides it.
+    ui.input.focus();
+    expect(pill()?.hidden).toBe(true);
+    ui.input.value = "One more thing";
+    ui.input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(pill()?.hidden).toBe(false);
+    ui.input.value = "";
+    ui.input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(pill()?.hidden).toBe(true);
+    ui.input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    expect(pill()?.hidden).toBe(false);
+    ui.input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+
+    // Focus elsewhere in Obsidian: the pill waits for the person's return.
+    const editor = document.body.createEl("textarea");
+    editor.focus();
+    ui.cards.sync([part]);
+    expect(pill()?.hidden).toBe(false);
+
+    ui.cards.sync([]);
+    expect(pill()?.hidden).toBe(true);
+    ui.dispose();
+  });
+
   it("focuses a card from an empty composer but not during composition or outside the view", () => {
     const ui = setup();
     ui.input.focus();

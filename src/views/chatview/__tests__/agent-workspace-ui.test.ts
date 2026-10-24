@@ -2022,6 +2022,58 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("invites the person to steer after a denial with nothing else pending", async () => {
+    const parent = document.body.createDiv();
+    const onApprove = jest.fn(async () => true);
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      reducedMotion: () => true,
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove,
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+      onOpenSettings: jest.fn(),
+    });
+    workspace.load();
+    workspace.composer.setAgentName("Claude Code");
+    await workspace.setHistory([{ role: "user", content: "Tidy the plan", message_id: "user-1" }]);
+    const pending = (id: string, order: number): Extract<AgentPart, { kind: "tool" }> => ({
+      id: `tool-${id}`, kind: "tool", messageId: "assistant-1", callId: `call-${id}`, name: "edit",
+      location: "vault", input: { path: `${id}.md` }, state: "approval-required", approvalId: id, order,
+    });
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-a", "tool-b"] }],
+      parts: [pending("a", 0), pending("b", 1)],
+    });
+    const input = parent.querySelector<HTMLTextAreaElement>('[data-testid="chat.composer.input"]')!;
+    const deny = (id: string) => parent.querySelector<HTMLButtonElement>(
+      `.systemsculpt-agent-approval[data-approval-id="${id}"] [data-focus-key="tool-deny"]`,
+    )!.click();
+
+    deny("a");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(onApprove).toHaveBeenCalledWith("a", false);
+    // Another card still waits: no steering yet.
+    expect(input.placeholder).not.toContain("what to do instead");
+
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-b"] }],
+      parts: [pending("b", 1)],
+    });
+    deny("b");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    workspace.unload();
+  });
+
   it("keeps a pending approval visible when the tool drawer is collapsed", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
