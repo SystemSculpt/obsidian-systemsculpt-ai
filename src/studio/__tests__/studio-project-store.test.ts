@@ -662,7 +662,7 @@ describe("saved image generation cards", () => {
     const image = {
       id: "image", kind: "studio.image_generation", version: "1.0.0", title: "Saved illustration", continueOnError: false, disabled: false,
       position: { x: 320, y: 140 }, size: { width: 440, height: 360 },
-      config: { prompt: "A lighthouse", model: "saved-model", count: 1, aspectRatio: "16:9", futureField: { retained: true } },
+      config: { prompt: "A lighthouse", model: "saved-model", count: 8, aspectRatio: "16:9", imageSize: "2K", seed: 42, futureField: { retained: true } },
     };
     const output = {
       id: "output", kind: "studio.media_ingest", version: "1.0.0", title: "Saved output", parentId: "image", continueOnError: false, disabled: false,

@@ -271,8 +271,11 @@ Text execution can instead use the installed Codex app-server or Claude Code CLI
 Image generation and **Edit with AI** are retired. Existing image-generation
 cards open read-only with a retirement notice and Source inspection. Their
 configuration, connections, generated output cards, vault assets and run history
-are preserved. They are hidden from Insert and excluded from graph execution.
-Local image editing, copying and viewing remain available.
+are preserved. They are hidden from Insert and never execute. Existing connected
+consumers reuse their recorded outputs; if no saved output exists, the run stops
+rather than silently dropping the image input. Historical count, size and seed
+settings are retained; existing removal of obsolete provider routing and
+credentials still applies. Local image editing, copying and viewing remain available.
 
 ### Video model catalog, favorites, and per-model inputs
 
