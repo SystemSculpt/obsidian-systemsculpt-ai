@@ -64,12 +64,6 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   stop.onclick = () => { running = false; };
   container.append(stop);
 
-  const approval = document.createElement("select");
-  approval.dataset.testid = "chat.composer.approval-mode";
-  approval.append(new Option("Ask", "ask"), new Option("Full access", "full-access"));
-  approval.value = "full-access";
-  container.append(approval);
-
   const picker = document.createElement("input");
   picker.type = "file";
   picker.dataset.testid = "chat.composer.file-picker";
@@ -92,6 +86,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   };
   const view = {
     agent,
+    approvalMode: "full-access",
     containerEl: container,
     chatId: options.chatId ?? "",
     messages: [] as ChatMessage[],
@@ -105,6 +100,35 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
       for (const turn of container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
     }),
   };
+  // The run line's mode segment and its Obsidian menu (AgentRunLine).
+  const mode = document.createElement("button");
+  mode.dataset.testid = "chat.run.mode";
+  mode.dataset.mode = view.approvalMode;
+  mode.getBoundingClientRect = () => rect();
+  const setMode = (value: string): void => {
+    view.approvalMode = value;
+    mode.dataset.mode = value;
+  };
+  mode.onclick = () => {
+    const menu = document.createElement("div");
+    menu.className = "menu";
+    for (const value of ["auto", "ask", "full-access"]) {
+      const item = document.createElement("div");
+      item.className = "menu-item";
+      item.getBoundingClientRect = () => rect();
+      const title = document.createElement("span");
+      title.dataset.menuItem = `mode.${value}`;
+      item.append(title);
+      item.onclick = () => {
+        setMode(value);
+        menu.remove();
+      };
+      menu.append(item);
+    }
+    document.body.append(menu);
+  };
+  container.append(mode);
+
   const newChat = document.createElement("button");
   newChat.dataset.testid = "chat.header.new";
   newChat.scrollIntoView = jest.fn();
@@ -162,7 +186,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
     diagnostics: { recentErrorCount: () => 0 } as ActionContext["diagnostics"],
   };
   return {
-    ctx, container, input, send, stop, approval, view, agent, newChat,
+    ctx, container, input, send, stop, mode, setMode, view, agent, newChat,
     adapterExists, adapterRead, adapterRename, adapterRmdir,
     getAbstractFileByPath, trashFile, triggerChatLoaded,
     setRunning(value: boolean) { running = value; },
@@ -1216,7 +1240,7 @@ describe("guarded development driver actions", () => {
         // AgentChatView.startNewChat resets the composer after awaiting its
         // session replacement, even when the old composer was already blank.
         harness.input.value = "";
-        harness.approval.value = "ask";
+        harness.setMode("ask");
         harness.triggerChatLoaded("");
       }, 0);
     };
@@ -1247,9 +1271,9 @@ describe("guarded development driver actions", () => {
     turn.remove();
     await expect(runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker }))
       .resolves.toMatchObject({ owned: true });
-    expect(harness.approval.value).toBe("ask");
+    expect(harness.view.approvalMode).toBe("ask");
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
-    expect(harness.approval.value).toBe("full-access");
+    expect(harness.view.approvalMode).toBe("full-access");
   });
 
   it("refuses to reuse a pre-existing development marker root", async () => {
@@ -1288,7 +1312,7 @@ describe("guarded development driver actions", () => {
     harness.newChat.onclick = () => {
       harness.view.chatId = "";
       harness.input.value = "";
-      harness.approval.remove();
+      harness.mode.remove();
     };
     const now = jest.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(10000);
     try {
@@ -1299,7 +1323,7 @@ describe("guarded development driver actions", () => {
     }
     expect(harness.view.loadChatById).toHaveBeenCalledWith("private-chat");
 
-    harness.container.append(harness.approval);
+    harness.container.append(harness.mode);
     harness.newChat.onclick = originalNewChat;
     await expect(runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker }))
       .resolves.toMatchObject({ owned: true });

@@ -39,8 +39,8 @@ chooses the ready agent with more primary session files modified in the last 30
 days, then the newest session-file modification time; Claude Code wins an exact
 tie. If neither is ready, the new chat uses hosted SystemSculpt.
 
-Use **Change** to choose another backend or adjust native modes. Use **Detect again** after
-installing or signing in to an agent. Detection is cached for the Obsidian session
+Use the run line under the composer to choose another backend, mode or model. Its
+backend menu also has **Detect again** for after you install or sign in to an agent. Detection is cached for the Obsidian session
 and also refreshes after a native run fails because an agent is missing or signed
 out; there is no background polling. It lists session-store names and timestamps
 only, never file contents under `~/.claude` or `~/.codex`. See
@@ -63,14 +63,18 @@ For hosted chat, mobile chat, or other hosted features:
 - Desktop welcome: **Use my Claude Code or Codex** explicitly chooses an on-machine
   agent, using the same readiness and recent-use ranking. If neither is ready, it
   offers Claude Code setup guidance. No SystemSculpt account or license is needed.
-- The compact summary by the composer shows the backend and mode. **Auto** is the
-  default for new chats; **Change** reveals the controls. Saved chats keep their backend, and
-  saved hosted modes are preserved (missing or unknown modes use **Ask**).
+- The run line under the composer shows the backend, mode and model or credits;
+  each part is a menu. **Auto** is the default for new chats. Saved chats keep their
+  backend, and saved hosted modes are preserved (missing or unknown modes use **Ask**).
+- An empty chat suggests three starters for the note you have open; they fill the
+  message box without sending.
+- **History** in the chat header (or `Mod+K` in the chat) lists your chats in place,
+  grouped by date, with search across titles and message text.
 
 ## On-machine Codex (desktop)
 
-If Codex was not selected automatically, use **Change → Provider** by the composer
-or **Settings → SystemSculpt AI → Chat** to select **Codex**. Install the
+If Codex was not selected automatically, choose **Codex** in the run line's backend
+menu or in **Settings → SystemSculpt AI → Chat**. Install the
 Codex CLI and run `codex login` in a terminal once. Codex owns its authentication,
 tools and durable history; custom configurations that do not require an OpenAI
 login remain available through manual selection.
@@ -88,8 +92,8 @@ See [Studio workspaces and native execution](../studio-workspaces.md) for setup 
 
 ## On-machine Claude Code (desktop)
 
-If Claude Code was not selected automatically, use **Change → Provider** by the
-composer or **Settings → SystemSculpt AI → Chat** to select **Claude Code**. Install Claude Code, run `claude` in a terminal and type `/login` once.
+If Claude Code was not selected automatically, choose **Claude Code** in the run
+line's backend menu or in **Settings → SystemSculpt AI → Chat**. Install Claude Code, run `claude` in a terminal and type `/login` once.
 Chats run in your vault folder with Claude Code's own login and session history.
 
 The default **Auto** mode uses Claude Code's native safety check, not bypass.

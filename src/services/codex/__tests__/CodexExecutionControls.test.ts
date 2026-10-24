@@ -20,7 +20,6 @@ it('shows native models, model-specific thinking and Normal/Fast, and saves the 
   const model = parent.querySelector('[data-testid="codex.execution.model"]') as HTMLSelectElement;
   const thinking = parent.querySelector('[data-testid="codex.execution.thinking"]') as HTMLSelectElement;
   const speed = parent.querySelector('[data-testid="codex.execution.speed"]') as HTMLSelectElement;
-  expect(parent.classList.contains('ss-native-codex-composer')).toBe(true);
   expect(parent.querySelector('.ss-codex-permissions')?.textContent).toBe('Codex settings · Never ask · Full access');
   expect(model.disabled).toBe(false); expect(model.value).toBe('gpt-6-astra');
   expect([...thinking.options].map(option => option.value)).toEqual(['high', 'xhigh']);
@@ -31,44 +30,36 @@ it('shows native models, model-specific thinking and Normal/Fast, and saves the 
   model.value = 'other'; model.dispatchEvent(new Event('change')); await flush();
   expect(settings).toEqual({ codexModel: 'other', codexThinkingLevel: 'low', codexServiceTier: 'default' });
   expect([...speed.options].find(option => option.textContent === 'Fast (unavailable)')?.disabled).toBe(true);
-  dispose(); expect(parent.classList.contains('ss-native-codex-composer')).toBe(false); expect(offref).toHaveBeenCalled(); expect(parent.children).toHaveLength(0); parent.remove();
+  dispose(); expect(offref).toHaveBeenCalled(); expect(parent.children).toHaveLength(0); parent.remove();
 });
 
-it('summarizes the active backend, reveals controls, and re-detects without changing an explicit choice', async () => {
+it('re-detects from settings without changing an explicit choice', async () => {
   const parent = document.createElement('div'); document.body.append(parent);
   const settings = { textExecutionBackend: 'claude', textExecutionBackendExplicit: true, claudePermissionMode: 'auto' };
   const updateSettings = jest.fn();
   const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
-  let fallback = false;
-  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'claude', claudeAutoUnavailable: () => fallback });
-  const root = parent.querySelector('.ss-codex-controls') as HTMLElement;
-  expect(root.hidden).toBe(true);
-  expect(parent.querySelector('[data-testid="chat.execution.summary"]')?.textContent).toContain('Claude Code on this Mac · Auto ·');
-  expect(parent.querySelector('[data-testid="chat.execution.summary"]')?.getAttribute('aria-label')).toBe('Chat runs on Claude Code on this Mac, Auto mode. Change.');
-  (parent.querySelector('[data-testid="chat.execution.change"]') as HTMLButtonElement).click();
-  expect(root.hidden).toBe(false);
-  expect(document.activeElement).toBe(parent.querySelector('[data-testid="codex.execution.provider"]'));
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
+  // Chat switches backends from its run line; the summary row is gone.
+  expect(parent.querySelector('[data-testid="chat.execution.summary"]')).toBeNull();
+  expect((parent.querySelector('.ss-codex-controls') as HTMLElement).hidden).toBe(false);
   (parent.querySelector('[data-testid="chat.execution.detect"]') as HTMLButtonElement).click();
   expect(parent.textContent).toContain('Finding Claude Code or Codex…');
   await flush();
   expect(parent.textContent).toContain('Detected: Claude Code. Your choice is unchanged.');
   expect(updateSettings).not.toHaveBeenCalled();
-  fallback = true; parent.dispatchEvent(new Event('systemsculpt:approval-mode'));
-  expect(parent.querySelector('[data-testid="chat.execution.summary"]')?.textContent).toContain('Accept edits · Auto unavailable');
   dispose(); parent.remove();
 });
 
-it('saves a provider switch before opening a new tab and leaves this chat on its original provider', async () => {
+it('saves a provider switch from settings as the explicit default', async () => {
   const parent = document.createElement('div');
   const settings = { textExecutionBackend: 'systemsculpt', codexModel: 'gpt-6-astra' };
   const updateSettings = jest.fn(async patch => { Object.assign(settings, patch); });
-  const onProviderChange = jest.fn(async () => { expect(settings.textExecutionBackend).toBe('codex'); });
   const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
-  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt', onProviderChange });
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
   const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
   provider.value = 'codex'; provider.dispatchEvent(new Event('change')); await flush();
-  expect(onProviderChange).toHaveBeenCalledTimes(1); expect(provider.value).toBe('systemsculpt');
-  expect(parent.textContent).not.toContain('keeps this tab'); dispose();
+  expect(updateSettings).toHaveBeenCalledWith({ textExecutionBackend: 'codex', textExecutionBackendExplicit: true });
+  expect(provider.value).toBe('codex'); dispose();
 });
 
 it('shows portable API controls without starting Codex on a mobile host', async () => {
@@ -79,22 +70,22 @@ it('shows portable API controls without starting Codex on a mobile host', async 
   const updateSettings = jest.fn();
   const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
   (readCodexCatalog as jest.Mock).mockClear();
-  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt' }); await flush();
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {}); await flush();
   const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
   expect(provider.value).toBe('systemsculpt'); expect(provider.options[1].disabled).toBe(true);
   expect(parent.querySelector('[data-testid="codex.execution.model"]')?.parentElement?.hidden).toBe(true);
   expect(readCodexCatalog).not.toHaveBeenCalled(); expect(updateSettings).not.toHaveBeenCalled();
   expect(settings.textExecutionBackend).toBe('codex'); dispose(); hasHostCapability.mockReturnValue(true);
 });
-it('keeps a provider-switch failure visible while the current chat remains on the API', async () => {
+it('keeps a provider-switch failure visible', async () => {
   const parent = document.createElement('div');
   const settings = { textExecutionBackend: 'systemsculpt' };
-  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn(async patch => { Object.assign(settings, patch); }) }) };
-  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt', onProviderChange: async () => { throw new Error('Could not open the new chat'); } });
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn(async () => { throw new Error('Could not save settings'); }) }) };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
   const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
   provider.value = 'codex'; provider.dispatchEvent(new Event('change')); await flush();
-  expect(parent.querySelector('.ss-codex-controls-status')?.textContent).toBe('Could not open the new chat');
-  expect((parent.querySelector('.ss-codex-controls-status') as HTMLElement).hidden).toBe(false); dispose();
+  expect(parent.querySelector('.ss-codex-controls-status')?.textContent).toBe('Could not save settings');
+  expect(provider.value).toBe('systemsculpt'); dispose();
 });
 it('preserves independent field edits while earlier settings saves are queued', async () => {
   const parent = document.createElement('div');
@@ -138,7 +129,6 @@ it('offers on-machine Claude Code with its own model and permission choices', as
   const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
   expect([...provider.options].map(option => [option.value, option.textContent])).toEqual([['systemsculpt', 'SystemSculpt'], ['codex', 'Codex'], ['claude', 'Claude Code']]);
   expect(provider.value).toBe('claude'); expect(readCodexCatalog).not.toHaveBeenCalled();
-  expect(parent.classList.contains('ss-native-codex-composer')).toBe(true);
   expect(parent.querySelector('[data-testid="codex.execution.model"]')?.parentElement?.hidden).toBe(true);
   const model = parent.querySelector('[data-testid="claude.execution.model"]') as HTMLSelectElement;
   const permissions = parent.querySelector('[data-testid="claude.execution.permissions"]') as HTMLSelectElement;
@@ -154,7 +144,7 @@ it('marks Claude Code desktop only and hides its options on a mobile host', asyn
   hasHostCapability.mockReturnValue(false);
   const parent = document.createElement('div');
   const plugin = { settings: { textExecutionBackend: 'claude' }, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn() }) };
-  const dispose = mountCodexExecutionControls(parent, plugin as never, { backend: 'systemsculpt' }); await flush();
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {}); await flush();
   const claude = [...(parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement).options].find(option => option.value === 'claude')!;
   expect(claude.disabled).toBe(true); expect(claude.textContent).toBe('Claude Code · desktop only');
   expect(parent.querySelector('[data-testid="claude.execution.model"]')?.parentElement?.hidden).toBe(true);

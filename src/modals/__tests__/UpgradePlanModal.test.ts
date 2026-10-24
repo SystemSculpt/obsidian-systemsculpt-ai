@@ -234,6 +234,16 @@ describe("UpgradePlanModal", () => {
     expect(plugin.submitManualCode).toHaveBeenCalledWith("code-123");
   });
 
+  it("opens straight into the same sign-up handoff for the chat's Start free", async () => {
+    const plugin = createPlugin();
+    const modal = UpgradePlanModal.openConnect(plugin, "sign-up", { feature: "Chat" });
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
+    expect(modal.modalEl.textContent).toContain("Create your free SystemSculpt account.");
+    // A second press while the handoff is open reuses it.
+    expect(UpgradePlanModal.openConnect(plugin, "sign-in")).toBe(modal);
+  });
+
   it("lets the user reopen the sign-in page from the browser handoff", async () => {
     const plugin = createPlugin();
     const modal = new UpgradePlanModal(plugin);

@@ -1,37 +1,7 @@
 /**
- * Agent workspace state overlays: empty state, jump affordance, follow-up
- * queue, and run banners.
+ * Agent workspace state overlays: jump affordance, follow-up queue, and run
+ * banners. The empty state lives with the chrome in shell.css.
  */
-
-.systemsculpt-agent-empty {
-  position: absolute;
-  inset: 0;
-  z-index: var(--ss-z-raised);
-  display: grid;
-  place-content: center;
-  gap: var(--ss-space-2);
-  min-height: var(--ss-agent-empty-height);
-  color: var(--ss-ink-muted);
-  pointer-events: none;
-  text-align: center;
-}
-
-.systemsculpt-agent-empty strong {
-  color: var(--ss-ink);
-  font-size: var(--ss-text-xl);
-}
-
-.systemsculpt-agent-plan-offer {
-  display: grid;
-  justify-items: center;
-  gap: var(--ss-space-2);
-  max-width: 36ch;
-  margin: var(--ss-space-2) auto 0;
-}
-
-.systemsculpt-agent-plan-offer .ss-button {
-  pointer-events: auto;
-}
 
 .systemsculpt-agent-jump {
   position: absolute;
