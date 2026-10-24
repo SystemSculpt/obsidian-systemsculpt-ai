@@ -60,7 +60,7 @@ else process.stdout.write(JSON.stringify({ args, cwd: process.cwd(), home: proce
   afterAll(async () => { await closeChildren(); if (root) await fs.rm(root, { recursive: true, force: true }); });
 
   it('reproduces direct .cmd execFile failure and launches the same npm install through Node', async () => {
-    await expect(tracked(exec(path.join(prefix, 'claude.cmd'), ['auth', 'status', '--json'], { cwd, env: environment, shell: false }))).rejects.toThrow();
+    await expect(async () => tracked(exec(path.join(prefix, 'claude.cmd'), ['auth', 'status', '--json'], { cwd, env: environment, shell: false }))).rejects.toThrow(/EINVAL/);
     const args = ['auth', 'status', '--json', '', 'a "quote" \\', '%T545_EXPAND%', '!test!', 'a\nb', '& echo injected>marker', '| echo injected', '^caret', '(group)', '雪'];
     const command = await resolveLocalAgentCommand('claude', args, environment, cwd);
     expect(command.binary.toLowerCase()).toBe(process.execPath.toLowerCase());
