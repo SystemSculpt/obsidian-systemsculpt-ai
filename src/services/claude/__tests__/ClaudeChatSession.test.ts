@@ -72,6 +72,33 @@ it('uses the canonical chat root for native launch and persisted tool metadata',
     expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ native: expect.objectContaining({ workingDirectory: canonical, vaultRoot: canonical, vaultRootAlias: alias }) }) }),
   ]) }));
 });
+it.each([
+  { label: 'single choice', multiSelect: false, answer: ['Blue'] },
+  { label: 'multiple choices', multiSelect: true, answer: ['Blue', 'Green'] },
+  { label: 'typed answer', multiSelect: false, answer: ['A shade of turquoise'] },
+])('forwards a $label from the inline question without a modal or session grant', async ({ multiSelect, answer }) => {
+  const { session } = setup(false);
+  const questions = [{ question: 'Which color?', header: 'Color', multiSelect, options: [{ label: 'Blue' }, { label: 'Green' }] }];
+  let decision: unknown;
+  native.mockImplementation(async (_input, signal, callbacks) => {
+    expect(callbacks.supportsQuestions).toBe(true);
+    await callbacks.session(SESSION);
+    decision = await callbacks.permission({ toolName: 'AskUserQuestion', description: '', requestId: 'question', toolUseId: 'ask1', input: { questions } }, signal);
+    callbacks.tool({ id: 'ask1', state: 'succeeded', output: 'Answer received' });
+    return { text: 'Answer received', sessionId: SESSION };
+  });
+  const running = session.start(input());
+  await flush();
+  const pending = tools(session)[0];
+  expect(pending).toMatchObject({ name: 'AskUserQuestion', input: { questions }, state: 'approval-required' });
+  expect(session.respondToApproval(pending.approvalId!, true, 'manual', { answers: { 'Which color?': answer } })).toBe(true);
+  await expect(running).resolves.toMatchObject({ kind: 'completed' });
+  expect(decision).toEqual({ approved: true, answers: { 'Which color?': answer } });
+  expect(tools(session)[0]).toMatchObject({ state: 'succeeded', approvalScope: undefined });
+  expect(answerClaudePermission).not.toHaveBeenCalled();
+  await session.detach();
+});
+
 it('resumes the saved Claude Code session on a follow-up', async () => {
   const { session } = setup(); await session.start(input());
   await session.start(input('message_2'));
