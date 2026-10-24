@@ -755,7 +755,7 @@ describe("in-place image editor", () => {
 
     expect(tryCopyImageBytesToClipboard).toHaveBeenCalledTimes(1);
     expect(tryCopyImageBytesToClipboard).toHaveBeenCalledWith(encoded, "image/png", stage);
-    expect(Notice).toHaveBeenCalledWith("Image copied to clipboard.");
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("says so when the clipboard refuses the image", async () => {

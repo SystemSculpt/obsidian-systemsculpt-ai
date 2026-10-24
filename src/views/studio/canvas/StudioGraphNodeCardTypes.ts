@@ -90,7 +90,7 @@ export type RenderStudioGraphNodeCardOptions = {
     title: string;
   }) => void;
   onRunNode: (nodeId: string) => void;
-  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string, button: HTMLButtonElement) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;

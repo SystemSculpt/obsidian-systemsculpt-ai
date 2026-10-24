@@ -16,7 +16,7 @@ export function renderNodeHeader(options: {
   sourceToggle?: { isActive: () => boolean; onToggle: () => void };
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onRunNode: (nodeId: string) => void;
-  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string, button: HTMLButtonElement) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
 }): { sourceToggle: HTMLButtonElement | null } {
@@ -73,7 +73,7 @@ export function renderNodeHeader(options: {
       title: "Copy prompt bundle for handoff",
       size: "small",
       disabled: interactionLocked,
-      onSelect: () => onCopyTextGenerationPromptBundle(node.id),
+      onSelect: (event) => onCopyTextGenerationPromptBundle(node.id, event.currentTarget as HTMLButtonElement),
     });
 
     createStudioAction(header, {
