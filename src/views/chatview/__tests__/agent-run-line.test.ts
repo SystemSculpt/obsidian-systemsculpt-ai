@@ -209,6 +209,89 @@ describe("AgentRunLine", () => {
     }
   });
 
+  it.each(["backend", "mode", "detail"])("contains the %s menu Escape that Obsidian's keymap already used to close it", (kind) => {
+    jest.useFakeTimers();
+    const { parent, line } = mount();
+    const note = document.body.createEl("textarea");
+    // Obsidian's keymap listens at window capture and hides the open menu
+    // before any document listener runs, without consuming the event.
+    const keymap = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") menus().at(-1)?.hide();
+    };
+    const hostEscape = jest.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) note.focus();
+    });
+    window.addEventListener("keydown", keymap, true);
+    window.addEventListener("keydown", hostEscape);
+    try {
+      line.render(state());
+      const opener = segment(parent, kind);
+      opener.focus();
+      opener.click();
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      opener.dispatchEvent(escape);
+      jest.runOnlyPendingTimers();
+      expect(menus().at(-1)!.shown).toBe(false);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(hostEscape).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(opener);
+      // The next Escape belongs to the host again.
+      opener.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      expect(document.activeElement).toBe(note);
+    } finally {
+      line.unload();
+      window.removeEventListener("keydown", keymap, true);
+      window.removeEventListener("keydown", hostEscape);
+      jest.useRealTimers();
+    }
+  });
+
+  it("contains a pop-out's menu Escape when the keymap closes the menu on a forwarded copy", () => {
+    jest.useFakeTimers();
+    const { parent, line } = mount();
+    const note = document.body.createEl("textarea");
+    // For pop-outs, Obsidian's keymap forwards a copy of the keydown to the
+    // main window and hides the menu while handling that copy.
+    const copies = new WeakSet<Event>();
+    const keymap = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      if (copies.has(event)) {
+        menus().at(-1)?.hide();
+        return;
+      }
+      const copy = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+      copies.add(copy);
+      window.dispatchEvent(copy);
+    };
+    // The pop-out's own bubbling Escape handler; the main window's handling of
+    // the copy is the host's business.
+    const hostEscape = jest.fn((event: KeyboardEvent) => {
+      if (event.key === "Escape" && !copies.has(event) && !event.defaultPrevented) note.focus();
+    });
+    window.addEventListener("keydown", keymap, true);
+    window.addEventListener("keydown", hostEscape);
+    try {
+      line.render(state());
+      const opener = segment(parent, "backend");
+      opener.focus();
+      opener.click();
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      opener.dispatchEvent(escape);
+      jest.runOnlyPendingTimers();
+      expect(menus().at(-1)!.shown).toBe(false);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(hostEscape.mock.calls.some(([event]) => event === escape)).toBe(false);
+      expect(document.activeElement).toBe(opener);
+      opener.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      expect(document.activeElement).toBe(note);
+    } finally {
+      line.unload();
+      window.removeEventListener("keydown", keymap, true);
+      window.removeEventListener("keydown", hostEscape);
+      jest.useRealTimers();
+    }
+  });
+
   it("models Obsidian's single replacing onHide callback", () => {
     const menu = new Menu();
     const replaced = jest.fn();
