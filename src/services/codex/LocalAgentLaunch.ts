@@ -91,15 +91,19 @@ export async function readLocalAgentLaunchConfig(name: LocalAgentId, label: stri
 
 /** Resolves the same machine-local binary and PATH a native run uses. Never starts it. */
 export async function resolveLocalAgentBinary(agent: LocalAgentId, launch?: LocalAgentLaunchConfig, workingDirectory?: string): Promise<string | null> {
-  const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
   const { setting, environment, home } = launch ?? await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
-  const binary = setting('binary', agent), windows = os.platform() === 'win32';
   // Codex starts its app-server from home; Claude Code starts in the task's cwd.
-  const cwd = agent === 'codex' ? home : workingDirectory;
+  return resolveBinary(setting('binary', agent), environment, agent === 'codex' ? home : workingDirectory);
+}
+
+async function resolveBinary(binary: string, environment: Record<string, string | undefined>, cwd?: string): Promise<string | null> {
+  const [fs, os, path] = await Promise.all([desktopHost.fs(), desktopHost.os(), desktopHost.path()]);
+  const windows = os.platform() === 'win32';
   const relativePath = !path.isAbsolute(binary) && (binary.includes('/') || (windows && binary.includes('\\')));
   if (relativePath && (!cwd || !path.isAbsolute(cwd))) return null;
   const command = relativePath ? path.resolve(cwd!, binary) : binary;
-  const extensions = windows ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
+  // npm also writes an extensionless POSIX shell companion; Windows must prefer .cmd.
+  const extensions = windows && !path.extname(command) ? [...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), ''] : [''];
   const folders = path.isAbsolute(command) ? [''] : (environment.PATH || '').split(path.delimiter).filter(Boolean);
   for (const folder of folders) for (const extension of extensions) {
     if (folder && !path.isAbsolute(folder) && (!cwd || !path.isAbsolute(cwd))) continue;
@@ -109,6 +113,40 @@ export async function resolveLocalAgentBinary(agent: LocalAgentId, launch?: Loca
     if (stat?.isFile() && (windows || (stat.mode & 0o111) !== 0)) return candidate;
   }
   return null;
+}
+
+// Recognize complete npm shims, not a command fragment in an arbitrary batch file.
+// Extra setup, interpreter flags, or commands must not silently lose their semantics.
+const NPM_SHIM_HEADER = ['@ECHO off', 'GOTO start', ':find_dp0', 'SET dp0=%~dp0', 'EXIT /b', ':start', 'SETLOCAL', 'CALL :find_dp0', ''].join('\n');
+const NPM_NODE_SHIM_HEADER = NPM_SHIM_HEADER + [
+  '', 'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ') ELSE (', '  SET "_prog=node"',
+  '  SET PATHEXT=%PATHEXT:;.JS;=;%', ')', '', '',
+].join('\n');
+
+/** Prepare native argv without a shell. npm .cmd shims run their installed script through Node. */
+export async function resolveLocalAgentCommand(binary: string, args: string[], environment: Record<string, string | undefined>, cwd: string): Promise<{ binary: string; args: string[] }> {
+  const os = await desktopHost.os();
+  if (os.platform() !== 'win32') return { binary, args };
+  const resolved = await resolveBinary(binary, environment, cwd) ?? binary;
+  if (!/\.(cmd|bat)$/i.test(resolved)) return { binary: resolved, args };
+  const [fs, path] = await Promise.all([desktopHost.fs(), desktopHost.path()]);
+  const source = (await fs.readFile(resolved, 'utf8')).replace(/\r\n/g, '\n').trim();
+  const nodeTarget = source.startsWith(NPM_NODE_SHIM_HEADER)
+    ? /^endLocal & goto #_undefined_# 2>NUL \|\| title %COMSPEC% & "%_prog%" {2}"%dp0%\\([^"\r\n\0]+)" %\*$/.exec(source.slice(NPM_NODE_SHIM_HEADER.length))?.[1] : undefined;
+  // Newer Claude npm installs expose a native .exe through npm's no-shebang shim.
+  const nativeTarget = source.startsWith(NPM_SHIM_HEADER) ? /^"%dp0%\\([^"\r\n\0]+)" {3}%\*$/.exec(source.slice(NPM_SHIM_HEADER.length))?.[1] : undefined;
+  const target = nodeTarget ?? nativeTarget;
+  if (!target) {
+    throw new Error(`Cannot launch ${resolved}: not a standard npm CLI shim. Reinstall the CLI with npm or set its native executable as the SystemSculpt launch binary.`);
+  }
+  const directory = path.dirname(resolved), script = path.resolve(directory, target);
+  if (!(await fs.stat(script).catch(() => null))?.isFile()) throw new Error(`Cannot find the npm CLI target at ${script}. Reinstall the CLI with npm.`);
+  if (nativeTarget) return { binary: script, args };
+  const localNode = path.join(directory, 'node.exe');
+  const node = (await fs.stat(localNode).catch(() => null))?.isFile() ? localNode : await resolveBinary('node.exe', environment, cwd);
+  if (!node) throw new Error(`Cannot find node.exe for ${resolved}. Install Node.js or add it to PATH.`);
+  // Absolute script path prevents Node option injection. No quoting, interpolation, or cmd.exe.
+  return { binary: node, args: [script, ...args] };
 }
 
 export async function isLocalAgentInstalled(agent: LocalAgentId): Promise<boolean> {
